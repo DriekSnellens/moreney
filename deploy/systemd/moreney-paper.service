@@ -1,0 +1,29 @@
+[Unit]
+Description=Moreney Paper Trading API
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=moreney
+Group=moreney
+WorkingDirectory=/opt/moreney
+EnvironmentFile=/opt/moreney/.env
+Environment=PYTHONPATH=/opt/moreney
+ExecStart=/opt/moreney/.venv/bin/python -m uvicorn bot.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# Hard safety defaults at service layer too.
+Environment=EXECUTION_MODE=paper
+Environment=PAPER_TRADING_ENABLED=true
+
+# Basic hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

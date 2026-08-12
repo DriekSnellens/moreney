@@ -1,0 +1,26 @@
+[Unit]
+Description=Moreney Shared Market Data Publisher
+After=network-online.target redis-server.service
+Wants=network-online.target redis-server.service
+
+[Service]
+Type=simple
+User=moreney
+Group=moreney
+WorkingDirectory=/opt/moreney
+EnvironmentFile=-/opt/moreney/.env
+Environment=PYTHONPATH=/opt/moreney
+Environment=MARKET_DATA_MODE=publisher
+Environment=MARKET_DATA_CACHE_INTERVAL_MS=100
+ExecStart=/opt/moreney/.venv/bin/python -m bot.market_data.publisher
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

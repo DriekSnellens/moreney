@@ -1,0 +1,30 @@
+[Unit]
+Description=Moreney Paper Trading API (instance %i)
+After=network.target moreney-marketdata.service redis-server.service
+Wants=network-online.target moreney-marketdata.service redis-server.service
+
+[Service]
+Type=simple
+User=moreney
+Group=moreney
+WorkingDirectory=/opt/moreney
+EnvironmentFile=-/opt/moreney/.env
+EnvironmentFile=/opt/moreney/env/paper-%i.env
+Environment=PYTHONPATH=/opt/moreney
+Environment=EXECUTION_MODE=paper
+Environment=PAPER_TRADING_ENABLED=true
+Environment=MARKET_DATA_MODE=shared
+Environment=MARKET_DATA_REDIS_POLL_MS=200
+# Expand API_PORT from EnvironmentFile into uvicorn --port.
+ExecStart=/bin/bash -c 'exec /opt/moreney/.venv/bin/python -m uvicorn bot.main:app --host 0.0.0.0 --port "${API_PORT}"'
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
