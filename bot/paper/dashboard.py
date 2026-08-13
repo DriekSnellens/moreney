@@ -74,8 +74,16 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     wins = perf.get("winning_trades", 0)
     losses = perf.get("losing_trades", 0)
     forecast = status.get("live_forecast") or {}
-    forecast_hour = _fmt_money(forecast.get("projected_per_hour_eur", 0))
-    forecast_day = _fmt_money(forecast.get("projected_per_day_eur", 0))
+    forecast_hour = (
+        _fmt_money(forecast.get("projected_per_hour_eur", 0))
+        if forecast.get("projection_ready", True)
+        else "n.v.t."
+    )
+    forecast_day = (
+        _fmt_money(forecast.get("projected_per_day_eur", 0))
+        if forecast.get("projection_ready", True)
+        else "n.v.t."
+    )
     forecast_note = _esc(forecast.get("note") or "Live-conservatief model.")
     confidence = str(forecast.get("confidence") or "very_low")
     confidence_label = {
@@ -289,7 +297,11 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
     pnl_word = _pnl_word(perf.get("net_pnl", 0))
 
     forecast = status.get("live_forecast") or {}
-    forecast_day = _fmt_money(forecast.get("projected_per_day_eur", 0))
+    forecast_day = (
+        _fmt_money(forecast.get("projected_per_day_eur", 0))
+        if forecast.get("projection_ready", True)
+        else "n.v.t."
+    )
     confidence = str(forecast.get("confidence") or "very_low")
     confidence_label = {
         "very_low": "Nog onzeker",

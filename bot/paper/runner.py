@@ -482,13 +482,21 @@ class PaperRunner:
             note = "Nog weinig data; richtinggevende live-inschatting."
         else:
             confidence = "very_low"
-            note = "Te vroeg voor een stabiele voorspelling; model is wel live-conservatief."
+            note = (
+                "Te vroeg om te extrapoleren. Getoonde winst is wel live-conservatief "
+                "(trade-through + one-leg taker exits)."
+            )
+            # Do not annualize a handful of fills into a fake daily forecast.
+            per_hour = Decimal("0")
+            per_day = Decimal("0")
+            day_ret = Decimal("0")
         return {
             "label": "Live-inschatting (haalbaar met echt geld)",
             "realized_live_eur": _dec_str(net),
             "projected_per_hour_eur": _dec_str(per_hour),
             "projected_per_day_eur": _dec_str(per_day),
             "projected_day_return_pct": _dec_str(day_ret),
+            "projection_ready": confidence in {"low", "medium", "high"},
             "confidence": confidence,
             "note": note,
             "runtime_seconds": runtime,
