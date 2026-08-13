@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     market_data_mode: Literal["local", "shared", "publisher"] = "local"
     market_data_redis_poll_ms: float = Field(default=100.0, ge=20.0)
     market_data_exchanges: str = "binance,kraken,coinbase,bitvavo,okx,bybit"
-    market_data_symbols: str = "BTCEUR,ETHEUR,BTCUSDT"
+    market_data_symbols: str = "BTCEUR,ETHEUR,BTCUSDT,EURUSDT"
     market_data_recording_enabled: bool = False
     market_data_recording_path: str = "./data/market_data"
     market_data_ws_reconnect_base_ms: float = Field(default=500.0, gt=0)
