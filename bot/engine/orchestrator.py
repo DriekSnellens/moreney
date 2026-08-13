@@ -116,8 +116,12 @@ class TradingEngine:
         else:
             opportunities = await self._strategy.evaluate(primary)
         result.opportunities = opportunities
+        processed: list[TradeOpportunity] = []
 
         for opportunity in opportunities:
+            if self._should_skip_maker_quote(opportunity):
+                continue
+            processed.append(opportunity)
             # Keep mark prices fresh for unrealized PnL when using paper portfolio.
             paper = self.paper_portfolio
             if paper is not None and opportunity.market is not None:
@@ -125,8 +129,14 @@ class TradingEngine:
 
             profitability = await self._profitability.evaluate(
                 opportunity,
-                buy_fee_rate=_fee_rate(opportunity.metadata, "buy_taker_fee_rate"),
-                sell_fee_rate=_fee_rate(opportunity.metadata, "sell_taker_fee_rate"),
+                buy_fee_rate=_fee_rate(
+                    opportunity.metadata,
+                    "buy_maker_fee_rate" if self._is_maker_quote(opportunity) else "buy_taker_fee_rate",
+                ),
+                sell_fee_rate=_fee_rate(
+                    opportunity.metadata,
+                    "sell_maker_fee_rate" if self._is_maker_quote(opportunity) else "sell_taker_fee_rate",
+                ),
             )
             result.profitability.append(profitability)
 
@@ -155,6 +165,7 @@ class TradingEngine:
             # Refresh portfolio snapshot after fills for subsequent risk checks.
             portfolio = await self._portfolio.get_snapshot()
 
+        result.opportunities = processed
         if self.paper_portfolio is not None:
             result.portfolio_equity = self.paper_portfolio.state.total_equity
         return result
@@ -291,6 +302,15 @@ class TradingEngine:
         cycle_result: TradeCycleResult | None = None,
     ) -> ExecutionResult:
         qty = decision.max_allowed_quantity or decision.position_size_allowed or opportunity.quantity
+        if self._is_maker_quote(opportunity):
+            return await self._execute_maker_quote(
+                opportunity,
+                qty,
+                snapshot_book=snapshot_book,
+                order_book=order_book,
+                venue_snapshots=venue_snapshots or [],
+                cycle_result=cycle_result,
+            )
         is_arb = opportunity.strategy_name == "cross_exchange_arbitrage"
         buy_order = OrderRequest(
             opportunity_id=opportunity.id,
@@ -353,6 +373,135 @@ class TradingEngine:
             return False
         return bool(opportunity.metadata.get("sell_exchange"))
 
+    @staticmethod
+    def _is_maker_quote(opportunity: TradeOpportunity) -> bool:
+        if opportunity.strategy_name == "maker_inventory":
+            return True
+        return bool((opportunity.metadata or {}).get("post_only"))
+
+    def _should_skip_maker_quote(self, opportunity: TradeOpportunity) -> bool:
+        if not self._is_maker_quote(opportunity):
+            return False
+        if self._maker_slot_taken(opportunity):
+            return True
+        max_open = 4
+        settings = self._executor_settings()
+        if settings is not None:
+            max_open = int(getattr(settings, "paper_maker_max_open_quotes", 4) or 4)
+        return self._open_maker_quote_count() >= max_open
+
+    def _executor_settings(self) -> Any:
+        return getattr(self._executor, "_settings", None) or getattr(
+            self._portfolio, "_settings", None
+        )
+
+    def _open_maker_orders(self) -> list[Order]:
+        manager = getattr(self._executor, "order_manager", None)
+        if manager is None or not hasattr(manager, "open_orders"):
+            return []
+        return [
+            o
+            for o in manager.open_orders()
+            if (o.metadata or {}).get("post_only")
+        ]
+
+    def _open_maker_quote_count(self) -> int:
+        return len({o.opportunity_id for o in self._open_maker_orders() if o.opportunity_id})
+
+    def _maker_slot_taken(self, opportunity: TradeOpportunity) -> bool:
+        buy = str((opportunity.metadata or {}).get("buy_exchange") or "")
+        sell = str((opportunity.metadata or {}).get("sell_exchange") or "")
+        venues = {buy, sell} - {""}
+        symbol = opportunity.symbol
+        for order in self._open_maker_orders():
+            if order.symbol != symbol:
+                continue
+            venue = str((order.metadata or {}).get("venue") or "")
+            if venue in venues:
+                return True
+        return False
+
+    async def _execute_maker_quote(
+        self,
+        opportunity: TradeOpportunity,
+        qty: Decimal,
+        *,
+        snapshot_book: Any,
+        order_book: Any,
+        venue_snapshots: list[Any],
+        cycle_result: TradeCycleResult | None,
+    ) -> ExecutionResult:
+        buy_venue = str(opportunity.metadata.get("buy_exchange") or "")
+        sell_venue = str(opportunity.metadata.get("sell_exchange") or "")
+        buy_order = OrderRequest(
+            opportunity_id=opportunity.id,
+            symbol=opportunity.symbol,
+            side=OpportunitySide.BUY,
+            quantity=qty,
+            limit_price=opportunity.entry_price,
+            metadata={
+                "strategy": opportunity.strategy_name,
+                "real_exchange_order": False,
+                "leg": "buy",
+                "post_only": True,
+                "fee_role": "maker",
+                "venue": buy_venue,
+            },
+        )
+        sell_price = opportunity.expected_exit_price
+        if sell_price is None:
+            raw = opportunity.metadata.get("sell_vwap")
+            sell_price = Decimal(str(raw)) if raw is not None else opportunity.entry_price
+        sell_order = OrderRequest(
+            opportunity_id=opportunity.id,
+            symbol=opportunity.symbol,
+            side=OpportunitySide.SELL,
+            quantity=qty,
+            limit_price=sell_price,
+            metadata={
+                "strategy": opportunity.strategy_name,
+                "real_exchange_order": False,
+                "leg": "sell",
+                "post_only": True,
+                "fee_role": "maker",
+                "venue": sell_venue,
+            },
+        )
+        buy_book = order_book
+        if buy_book is None:
+            buy_book = self._resolve_execution_book(
+                opportunity, venue_snapshots, snapshot_book, exchange_key="buy_exchange"
+            )
+        sell_book = self._resolve_execution_book(
+            opportunity, venue_snapshots, snapshot_book, exchange_key="sell_exchange"
+        )
+        buy_result = await self._execute_limit(buy_order, buy_book, opportunity.strategy_name)
+        sell_result = await self._execute_limit(sell_order, sell_book, opportunity.strategy_name)
+        buy_result.metadata["sell_leg"] = {
+            "order_id": str(sell_result.order_id),
+            "status": sell_result.status.value,
+            "filled_quantity": str(sell_result.filled_quantity),
+        }
+        if cycle_result is not None:
+            cycle_result.executions.append(sell_result)
+            self._collect_order_fill(cycle_result, sell_result)
+        return buy_result
+
+    async def _execute_limit(
+        self,
+        request: OrderRequest,
+        book: Any,
+        strategy: str,
+    ) -> ExecutionResult:
+        if isinstance(self._executor, (PaperExecutor, ExecutionService)):
+            return await self._executor.execute(
+                request,
+                order_book=book,
+                strategy=strategy,
+                order_type=OrderType.LIMIT,
+            )
+        return await self._executor.execute(request)
+
     async def _execute_arb_sell_leg(
         self,
         opportunity: TradeOpportunity,
@@ -390,14 +539,9 @@ class TradingEngine:
             exchange_key="sell_exchange",
         )
         sell_book = _apply_second_leg_adverse(sell_book, self._second_leg_adverse_bps())
-        if isinstance(self._executor, (PaperExecutor, ExecutionService)):
-            return await self._executor.execute(
-                sell_order,
-                order_book=sell_book,
-                strategy=opportunity.strategy_name,
-                order_type=OrderType.LIMIT,
-            )
-        return await self._executor.execute(sell_order)
+        return await self._execute_limit(
+            sell_order, sell_book, opportunity.strategy_name
+        )
 
     def _second_leg_adverse_bps(self) -> Decimal:
         settings = getattr(self._executor, "_settings", None) or getattr(

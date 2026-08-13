@@ -94,7 +94,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Oefenhandel · zo echt mogelijk gesimuleerd</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Winst na echte beurskosten, saldo per beurs (geen teleport), tweede been na latency. Alleen afgeronde koop én verkoop.</p>
+        <p class="sub">Maker: bied- en laatprijs vangen (post-only). Winst na maker-kosten, saldo per beurs, alleen afgeronde koop én verkoop. De vier inleg-accounts blijven vergelijkbaar.</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
@@ -413,7 +413,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Alle oefenrekeningen</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · winst alsof echt geld</p>
+        <p class="sub">{online}/{configured} online · winst alsof echt geld · vergelijk per inleg</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
@@ -847,6 +847,9 @@ def _strategy_label(name: Any) -> str:
     return {
         "arbitrage": "Koop goedkoop, verkoop duurder",
         "crossexchangearbitragestrategy": "Koop goedkoop, verkoop duurder",
+        "cross_exchange_arbitrage": "Koop goedkoop, verkoop duurder",
+        "maker_inventory": "Maker: bied/laat vangen",
+        "makerinventorystrategy": "Maker: bied/laat vangen",
         "momentum": "Meegaan met de beweging",
         "mean_reversion": "Terug naar het gemiddelde",
         "dca": "Periodiek bijkopen",

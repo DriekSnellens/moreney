@@ -46,6 +46,7 @@ def _paper_settings(tmp_path: Path) -> Settings:
         paper_simulated_latency_ms=0.0,
         paper_venue_inventory=False,
         paper_second_leg_adverse_bps=0.0,
+        paper_maker_enabled=False,
         paper_fee_rate=0.0001,
         paper_slippage_mode="order_book",
         market_data_exchanges="binance,kraken",
@@ -366,6 +367,68 @@ def test_performance_tracker_incomplete_arb_not_counted_as_trade() -> None:
     assert tracked.status == OpportunityLifecycleStatus.EXECUTED
     assert tracked.realized_net_profit is None
     assert tracker.snapshot().trade_count == 0
+
+
+def test_performance_tracker_open_then_later_fills_complete_round_trip() -> None:
+    tracker = PerformanceTracker(starting_equity=Decimal("200"))
+    opp_id = uuid4()
+    opp = TradeOpportunity(
+        id=opp_id,
+        strategy_name="maker_inventory",
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("0.01"),
+        entry_price=Decimal("100000"),
+        metadata={"buy_exchange": "binance", "sell_exchange": "kraken"},
+    )
+    tracker.record_detected(opp, None)
+    tracker.record_risk(
+        opp_id,
+        RiskDecision(opportunity_id=opp_id, status=RiskDecisionStatus.APPROVED),
+    )
+    from bot.core.enums import OrderSide
+
+    resting = ExecutionResult(
+        order_id=uuid4(),
+        opportunity_id=opp_id,
+        status=OrderStatus.OPEN,
+        filled_quantity=Decimal("0"),
+    )
+    tracker.record_execution(opp_id, resting, fills=[])
+    assert tracker.snapshot().executed_opportunities == 1
+    assert tracker.snapshot().trade_count == 0
+
+    buy_fill = Fill(
+        order_id=resting.order_id,
+        symbol="BTCEUR",
+        side=OrderSide.BUY,
+        quantity=Decimal("0.01"),
+        price=Decimal("100000"),
+        fee=Decimal("1"),
+    )
+    sell_fill = Fill(
+        order_id=uuid4(),
+        symbol="BTCEUR",
+        side=OrderSide.SELL,
+        quantity=Decimal("0.01"),
+        price=Decimal("100500"),
+        fee=Decimal("1.2"),
+    )
+    filled = ExecutionResult(
+        order_id=resting.order_id,
+        opportunity_id=opp_id,
+        status=OrderStatus.FILLED,
+        filled_quantity=Decimal("0.01"),
+        average_price=Decimal("100000"),
+        fees_usd=Decimal("1"),
+    )
+    tracker.record_execution(opp_id, filled, fills=[buy_fill, sell_fill])
+    snap = tracker.snapshot()
+    assert snap.executed_opportunities == 1
+    assert snap.trade_count == 1
+    # sell 1005 - fee 1.2 - buy 1000 - fee 1 = 2.8
+    assert tracker.opportunities()[0].realized_net_profit == Decimal("2.8")
+    assert snap.net_pnl == Decimal("2.8")
 
 
 @pytest.mark.asyncio

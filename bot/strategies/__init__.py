@@ -6,11 +6,13 @@ They must never import or call exchange clients / APIs.
 
 from bot.strategies.arbitrage import CrossExchangeArbitrageStrategy, walk_book
 from bot.strategies.base import BaseStrategy
+from bot.strategies.maker_inventory import MakerInventoryStrategy
 from bot.strategies.stub import StubStrategy
 
 __all__ = [
     "BaseStrategy",
     "CrossExchangeArbitrageStrategy",
+    "MakerInventoryStrategy",
     "StubStrategy",
     "walk_book",
 ]

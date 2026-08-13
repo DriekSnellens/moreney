@@ -11,7 +11,16 @@ from bot.execution.paper_executor import PaperExecutor
 from bot.portfolio.models import AssetBalance
 from bot.portfolio.portfolio import PaperPortfolio
 from bot.portfolio.venue_ledger import VenueLedger, infer_base_asset
+from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
 from tests.execution.conftest import make_book
+
+
+def test_venue_maker_fee_is_below_or_equal_taker() -> None:
+    assert venue_maker_fee("okx") == Decimal("0.0008")
+    assert venue_maker_fee("kraken") == Decimal("0.0016")
+    assert venue_taker_fee("kraken") == Decimal("0.0026")
+    assert venue_maker_fee("kraken") < venue_taker_fee("kraken")
+    assert venue_maker_fee("unknown") == Decimal("0.001")
 
 
 def test_infer_base_and_quote() -> None:

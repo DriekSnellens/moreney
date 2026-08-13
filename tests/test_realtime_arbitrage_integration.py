@@ -52,6 +52,7 @@ def _integration_settings() -> Settings:
         paper_simulated_latency_ms=0.0,
         paper_venue_inventory=False,
         paper_second_leg_adverse_bps=0.0,
+        paper_maker_enabled=False,
         risk_max_position_usd=100_000.0,
         max_position_percent=80.0,
         max_total_exposure_percent=90.0,

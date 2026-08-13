@@ -34,6 +34,7 @@ from bot.portfolio.portfolio import PaperPortfolio
 from bot.profitability.engine import DefaultProfitabilityEngine
 from bot.risk.risk_engine import RiskEngine
 from bot.strategies.arbitrage import CrossExchangeArbitrageStrategy
+from bot.strategies.maker_inventory import MakerInventoryStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class PaperRunner:
         self._configure_venue_inventory()
 
         self._executor = PaperExecutor(settings, portfolio=self._portfolio)
-        self._strategy = CrossExchangeArbitrageStrategy(settings)
+        self._strategy = self._build_strategy()
         self._profitability = DefaultProfitabilityEngine(settings)
         self._provider = RealtimeMarketDataProvider(market_data)
         self._engine = TradingEngine(
@@ -102,6 +103,11 @@ class PaperRunner:
             if s.strip()
         ]
         self._interval = max(0.05, settings.paper_cycle_interval_ms / 1000.0)
+
+    def _build_strategy(self) -> CrossExchangeArbitrageStrategy | MakerInventoryStrategy:
+        if self._settings.paper_maker_enabled:
+            return MakerInventoryStrategy(self._settings)
+        return CrossExchangeArbitrageStrategy(self._settings)
 
     def _configure_venue_inventory(self) -> None:
         if not self._settings.paper_venue_inventory:
@@ -218,6 +224,7 @@ class PaperRunner:
         self._tracker = PerformanceTracker(starting_equity=starting)
         self._configure_venue_inventory()
         self._executor = PaperExecutor(self._settings, portfolio=self._portfolio)
+        self._strategy = self._build_strategy()
         self._engine = TradingEngine(
             market_data=self._provider,
             strategy=self._strategy,
@@ -286,6 +293,8 @@ class PaperRunner:
                 "market_data": self._market_data.status(),
             }
             return
+
+        await self._match_and_expire_quotes()
 
         cycle_results: list[dict[str, Any]] = []
         for symbol in self._symbols:
@@ -438,4 +447,74 @@ class PaperRunner:
             "leverage": 0,
             "market_data": self._market_data.status(),
             "last_cycle": self._last_cycle,
+            "open_maker_quotes": self._open_maker_quote_count(),
+            "strategy": getattr(self._strategy, "name", ""),
         }
+
+    def _open_maker_quote_count(self) -> int:
+        manager = self._executor.order_manager
+        ids = {
+            o.opportunity_id
+            for o in manager.open_orders()
+            if (o.metadata or {}).get("post_only") and o.opportunity_id is not None
+        }
+        return len(ids)
+
+    def _collect_books(self) -> dict[str, dict[str, Any]]:
+        books: dict[str, dict[str, Any]] = {}
+        exchanges = [
+            part.strip()
+            for part in self._settings.market_data_exchanges.split(",")
+            if part.strip()
+        ]
+        for symbol in self._symbols:
+            for exchange in exchanges:
+                book = self._provider.get_order_book(exchange, symbol)
+                if book is not None:
+                    books.setdefault(exchange, {})[symbol] = book
+        return books
+
+    async def _match_and_expire_quotes(self) -> None:
+        books = self._collect_books()
+        fills = self._executor.match_resting(books)
+        if fills:
+            self._ingest_delayed_fills(fills)
+        await self._cancel_stale_quotes()
+
+    def _ingest_delayed_fills(self, executions: list[Any]) -> None:
+        by_opp: dict[UUID, list[Any]] = {}
+        for execution in executions:
+            by_opp.setdefault(execution.opportunity_id, []).append(execution)
+        manager = self._executor.order_manager
+        for opp_id, execs in by_opp.items():
+            orders = [o for o in manager.list_orders() if o.opportunity_id == opp_id]
+            fills = [fill for order in orders for fill in order.fills]
+            execution = execs[-1]
+            for candidate in execs:
+                if candidate.filled_quantity > 0:
+                    execution = candidate
+            for order in orders:
+                self._store.save_order(order)
+            for fill in fills:
+                self._store.save_fill(fill)
+            self._tracker.record_execution(
+                opp_id,
+                execution,
+                orders=orders or None,
+                fills=fills,
+            )
+        self._tracker.sync_portfolio(self._portfolio)
+        self._store.save_portfolio(self._portfolio)
+
+    async def _cancel_stale_quotes(self) -> None:
+        max_age = float(getattr(self._settings, "paper_maker_max_age_ms", 0) or 0)
+        if max_age <= 0:
+            return
+        now_ms = int(time.time() * 1000)
+        for order in list(self._executor.order_manager.open_orders()):
+            if not (order.metadata or {}).get("post_only"):
+                continue
+            placed = float((order.metadata or {}).get("placed_ms") or now_ms)
+            if now_ms - placed < max_age:
+                continue
+            await self._executor.cancel(order.id, reason="maker_quote_expired")

@@ -24,6 +24,7 @@ def exec_settings() -> Settings:
         paper_simulated_latency_ms=0.0,
         paper_venue_inventory=False,
         paper_second_leg_adverse_bps=0.0,
+        paper_maker_enabled=False,
     )
 
 

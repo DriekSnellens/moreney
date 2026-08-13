@@ -62,6 +62,25 @@ class VenueLedger:
         self._add(venue, base, -quantity)
         self._add(venue, self.quote, quote_received)
 
+    def lock(self, venue: str, asset: str, amount: Decimal) -> bool:
+        """Deduct ``amount`` so a resting order cannot spend the same balance twice."""
+        if amount <= 0:
+            return True
+        if self.available(venue, asset) < amount:
+            return False
+        self._add(venue, asset, -amount)
+        return True
+
+    def unlock(self, venue: str, asset: str, amount: Decimal) -> None:
+        if amount <= 0:
+            return
+        self._add(venue, asset, amount)
+
+    def credit(self, venue: str, asset: str, amount: Decimal) -> None:
+        if amount <= 0:
+            return
+        self._add(venue, asset, amount)
+
     def seed_asset(self, asset: str, *, price: Decimal, pct: Decimal) -> list[tuple[str, Decimal, Decimal]]:
         """Convert ``pct`` of each venue's quote into ``asset``. Returns (venue, qty, cost)."""
         asset = asset.upper()

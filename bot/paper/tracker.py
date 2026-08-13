@@ -76,6 +76,7 @@ class PerformanceTracker:
         self._depth_edges_found = 0
         self._scan_rejections = 0
         self._reject_counts: dict[str, int] = {}
+        self._counted_fill_ids: set[UUID] = set()
 
     # ------------------------------------------------------------------
     # Opportunity lifecycle
@@ -177,33 +178,53 @@ class PerformanceTracker:
         if tracked is None:
             return None
 
+        first = tracked.execution_result is None
         tracked.execution_result = execution.status.value
         tracked.order_id = execution.order_id
-        self._executed += 1
-        self._strategy(tracked.strategy).executions += 1
         pair = self._pair(tracked.buy_exchange, tracked.sell_exchange)
-        pair.executed += 1
+        if first:
+            self._executed += 1
+            self._strategy(tracked.strategy).executions += 1
+            pair.executed += 1
 
         failed = execution.status in {
             OrderStatus.REJECTED,
             OrderStatus.FAILED,
-            OrderStatus.CANCELLED,
         }
-        if failed or execution.filled_quantity <= 0:
+        cancelled_empty = (
+            execution.status == OrderStatus.CANCELLED and execution.filled_quantity <= 0
+        )
+        if failed or cancelled_empty:
             tracked.status = OpportunityLifecycleStatus.EXECUTED
-            if failed:
+            if failed and first:
                 self._execution_failures += 1
                 pair.execution_failures += 1
             return tracked
 
+        if execution.status == OrderStatus.OPEN and execution.filled_quantity <= 0:
+            tracked.status = OpportunityLifecycleStatus.EXECUTED
+            return tracked
+
+        if (not fills) and execution.filled_quantity <= 0:
+            tracked.status = OpportunityLifecycleStatus.EXECUTED
+            return tracked
+
+        if tracked.realized_net_profit is not None:
+            return tracked
+
         tracked.status = OpportunityLifecycleStatus.EXECUTED
-        fill_fees = sum((f.fee for f in (fills or [])), _ZERO)
-        fill_slip = sum((f.slippage for f in (fills or [])), _ZERO)
-        fill_volume = sum((f.gross_value for f in (fills or [])), _ZERO)
-        if fill_fees > 0:
-            tracked.fees = fill_fees
-        if fill_slip > 0:
-            tracked.slippage = fill_slip
+        new_fills = []
+        for fill in fills or []:
+            if fill.id in self._counted_fill_ids:
+                continue
+            self._counted_fill_ids.add(fill.id)
+            new_fills.append(fill)
+        fill_fees = sum((f.fee for f in new_fills), _ZERO)
+        fill_slip = sum((f.slippage for f in new_fills), _ZERO)
+        fill_volume = sum((f.gross_value for f in new_fills), _ZERO)
+        if fills:
+            tracked.fees = sum((f.fee for f in fills), _ZERO)
+            tracked.slippage = sum((f.slippage for f in fills), _ZERO)
 
         self._fees += fill_fees
         self._slippage += fill_slip
@@ -494,6 +515,7 @@ class PerformanceTracker:
             "depth_edges_found": self._depth_edges_found,
             "scan_rejections": self._scan_rejections,
             "reject_counts": dict(self._reject_counts),
+            "counted_fill_ids": [str(fid) for fid in self._counted_fill_ids],
             "opportunities": [o.model_dump(mode="json") for o in self._opportunities],
             "trades": list(self._trades),
             "strategies": {k: v.model_dump(mode="json") for k, v in self._strategies.items()},
@@ -529,6 +551,9 @@ class PerformanceTracker:
             if isinstance(raw_counts, dict)
             else {}
         )
+        self._counted_fill_ids = {
+            UUID(str(fid)) for fid in data.get("counted_fill_ids", []) if fid
+        }
         self._opportunities = [
             TrackedOpportunity.model_validate(o) for o in data.get("opportunities", [])
         ]

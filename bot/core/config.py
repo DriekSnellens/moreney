@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     paper_seed_inventory_pct: float = Field(default=0.0, ge=0, le=90)
     # Extra adverse move applied to the sell book after the buy lands (basis points).
     paper_second_leg_adverse_bps: float = Field(default=0.0, ge=0)
+    # Maker (post-only) quoting: capture bid/ask instead of paying taker-taker.
+    paper_maker_enabled: bool = True
+    paper_maker_rest_ms: float = Field(default=400.0, ge=0)
+    paper_maker_queue_fill_pct: float = Field(default=0.25, ge=0, le=1)
+    paper_maker_max_age_ms: float = Field(default=12000.0, ge=0)
+    paper_maker_min_spread_bps: float = Field(default=2.0, ge=0)
+    paper_maker_min_profit_eur: float = Field(default=0.02, ge=0)
+    paper_maker_same_venue: bool = True
+    paper_maker_max_open_quotes: int = Field(default=4, ge=1, le=20)
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
         "http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004"
