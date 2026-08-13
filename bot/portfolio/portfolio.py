@@ -156,11 +156,9 @@ class PaperPortfolio:
         return result
 
     def base_asset_for(self, symbol: str) -> str:
-        sym = symbol.upper().replace("/", "").replace("-", "")
-        q = self._quote
-        if sym.endswith(q) and len(sym) > len(q):
-            return sym[: -len(q)]
-        return sym
+        from bot.portfolio.accounting import _infer_base
+
+        return _infer_base(symbol, self._quote)
 
     def _update_unrealized(self) -> None:
         unrealized = _ZERO

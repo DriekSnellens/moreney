@@ -152,9 +152,15 @@ class AccountingEngine:
         )
 
 
+_COMMON_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "BTC")
+
+
 def _infer_base(symbol: str, quote: str) -> str:
     sym = symbol.upper().replace("/", "").replace("-", "")
     q = quote.upper()
     if sym.endswith(q) and len(sym) > len(q):
         return sym[: -len(q)]
+    for suffix in _COMMON_QUOTE_SUFFIXES:
+        if sym.endswith(suffix) and len(sym) > len(suffix):
+            return sym[: -len(suffix)]
     return sym

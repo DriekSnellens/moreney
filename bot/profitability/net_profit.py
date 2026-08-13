@@ -43,12 +43,19 @@ class NetProfitCalculator:
         opportunity: TradeOpportunity,
         *,
         order_book: OrderBook | None = None,
+        buy_fee_rate: Decimal | None = None,
+        sell_fee_rate: Decimal | None = None,
     ) -> ProfitEstimate:
         exit_price = self._resolve_exit_price(opportunity)
         entry_notional = opportunity.quantity * opportunity.entry_price
 
         gross = self._gross_profit(opportunity, exit_price)
-        fees = self._fees.calculate(opportunity, exit_price=exit_price)
+        fees = self._fees.calculate(
+            opportunity,
+            exit_price=exit_price,
+            buy_fee_rate=buy_fee_rate,
+            sell_fee_rate=sell_fee_rate,
+        )
         slip = self._slippage.estimate(
             opportunity,
             exit_price=exit_price,

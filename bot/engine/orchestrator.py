@@ -85,17 +85,23 @@ class TradingEngine:
         """Run a single evaluation cycle for ``symbol``."""
         result = TradeCycleResult(symbol=symbol.upper())
         venue_snapshots, primary = await self._load_snapshots(symbol)
+        portfolio = await self._portfolio.get_snapshot()
+        portfolio_equity = portfolio.equity_usd
+
         if venue_snapshots:
             evaluate_markets = getattr(self._strategy, "evaluate_markets", None)
             if callable(evaluate_markets):
-                opportunities = await evaluate_markets(venue_snapshots)
+                try:
+                    opportunities = await evaluate_markets(
+                        venue_snapshots, equity=portfolio_equity
+                    )
+                except TypeError:
+                    opportunities = await evaluate_markets(venue_snapshots)
             else:
                 opportunities = await self._strategy.evaluate(primary)
         else:
             opportunities = await self._strategy.evaluate(primary)
         result.opportunities = opportunities
-
-        portfolio = await self._portfolio.get_snapshot()
 
         for opportunity in opportunities:
             # Keep mark prices fresh for unrealized PnL when using paper portfolio.
@@ -103,7 +109,11 @@ class TradingEngine:
             if paper is not None and opportunity.market is not None:
                 paper.set_mark_price(opportunity.symbol, opportunity.market.last)
 
-            profitability = await self._profitability.evaluate(opportunity)
+            profitability = await self._profitability.evaluate(
+                opportunity,
+                buy_fee_rate=_fee_rate(opportunity.metadata, "buy_taker_fee_rate"),
+                sell_fee_rate=_fee_rate(opportunity.metadata, "sell_taker_fee_rate"),
+            )
             result.profitability.append(profitability)
 
             opportunity, risk_context = self._enrich_for_risk(opportunity, venue_snapshots)
@@ -387,3 +397,12 @@ class TradingEngine:
     @staticmethod
     def notional_usd(opportunity: TradeOpportunity) -> Decimal:
         return opportunity.quantity * opportunity.entry_price
+
+
+def _fee_rate(metadata: dict[str, Any] | None, key: str) -> Decimal | None:
+    if not metadata or key not in metadata:
+        return None
+    try:
+        return Decimal(str(metadata[key]))
+    except Exception:
+        return None

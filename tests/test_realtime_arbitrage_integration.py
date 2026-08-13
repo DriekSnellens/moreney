@@ -30,10 +30,11 @@ def _integration_settings() -> Settings:
         market_data_exchanges="binance,kraken",
         market_data_symbols="BTCEUR",
         max_market_data_age_ms=5000.0,
-        arbitrage_min_profit_eur=1.0,
+        arbitrage_min_profit_eur=0.01,
         arbitrage_min_profit_pct=0.0001,
         arbitrage_min_liquidity_base=0.01,
         arbitrage_max_quantity=0.5,
+        arbitrage_position_pct=0.0,
         arbitrage_max_latency_ms=5000.0,
         arbitrage_max_book_age_ms=5000.0,
         profitability_fee_rate=0.0001,
@@ -85,8 +86,8 @@ async def test_cross_exchange_paper_pipeline_binance_kraken() -> None:
     service.inject_snapshot(
         "kraken",
         "BTCEUR",
-        bid=Decimal("100150"),
-        ask=Decimal("100250"),
+        bid=Decimal("100500"),
+        ask=Decimal("100600"),
         bid_size=Decimal("2"),
         ask_size=Decimal("2"),
         sequence=1,
@@ -176,8 +177,8 @@ async def test_cross_exchange_paper_pipeline_binance_kraken() -> None:
     app_service.inject_snapshot(
         "kraken",
         "BTCEUR",
-        bid=Decimal("100150"),
-        ask=Decimal("100250"),
+        bid=Decimal("100500"),
+        ask=Decimal("100600"),
         sequence=1,
     )
     set_last_paper_cycle(cycle_payload)

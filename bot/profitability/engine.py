@@ -31,8 +31,15 @@ class DefaultProfitabilityEngine:
         opportunity: TradeOpportunity,
         *,
         order_book: OrderBook | None = None,
+        buy_fee_rate: Decimal | None = None,
+        sell_fee_rate: Decimal | None = None,
     ) -> ProfitabilityResult:
-        estimate = self._calculator.estimate(opportunity, order_book=order_book)
+        estimate = self._calculator.estimate(
+            opportunity,
+            order_book=order_book,
+            buy_fee_rate=buy_fee_rate,
+            sell_fee_rate=sell_fee_rate,
+        )
         return ProfitabilityResult(
             opportunity_id=opportunity.id,
             gross_profit_usd=estimate.gross_profit,

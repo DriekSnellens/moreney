@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     arbitrage_min_profit_pct: float = Field(default=0.001, ge=0)
     arbitrage_min_liquidity_base: float = Field(default=0.01, gt=0)
     arbitrage_max_quantity: float = Field(default=1.0, gt=0)
+    # Size each leg as a % of current equity (0 = use max_quantity only).
+    arbitrage_position_pct: float = Field(default=8.0, ge=0, le=100)
+    # Minimum seconds between repeat emissions for the same directed pair.
+    arbitrage_opportunity_cooldown_ms: float = Field(default=3000.0, ge=0)
+    # Emit only the top-N NET edges per symbol per cycle (reduces spam / exposure churn).
+    arbitrage_max_emits_per_cycle: int = Field(default=2, ge=1, le=20)
     arbitrage_max_latency_ms: float = Field(default=500.0, gt=0)
     arbitrage_max_book_age_ms: float = Field(default=1000.0, gt=0)
 

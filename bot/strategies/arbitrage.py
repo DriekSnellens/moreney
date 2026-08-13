@@ -8,6 +8,7 @@ emits ``TradeOpportunity`` objects only. Never places trades.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +25,14 @@ from bot.strategies.base import BaseStrategy
 logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
+
+# Typical retail taker fee rates (used for NET gating — conservative).
+_VENUE_TAKER_FEE: dict[str, Decimal] = {
+    "binance": Decimal("0.001"),
+    "kraken": Decimal("0.0026"),
+    "coinbase": Decimal("0.006"),
+    "bitvavo": Decimal("0.0025"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +90,9 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         self._min_profit_pct = Decimal(str(settings.arbitrage_min_profit_pct))
         self._min_liquidity = Decimal(str(settings.arbitrage_min_liquidity_base))
         self._max_quantity = Decimal(str(settings.arbitrage_max_quantity))
+        self._position_pct = Decimal(str(settings.arbitrage_position_pct))
+        self._cooldown_ms = float(settings.arbitrage_opportunity_cooldown_ms)
+        self._max_emits = int(settings.arbitrage_max_emits_per_cycle)
         self._max_latency_ms = settings.arbitrage_max_latency_ms
         self._max_book_age_ms = settings.arbitrage_max_book_age_ms
         self._profitability = profitability or self._build_profitability_engine(settings)
@@ -89,6 +101,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         self._scan_rejections = 0
         self._opportunities_emitted = 0
         self._reject_counts: dict[str, int] = {}
+        self._last_emit_monotonic: dict[str, float] = {}
 
     @staticmethod
     def _build_profitability_engine(settings: Settings) -> DefaultProfitabilityEngine:
@@ -114,6 +127,8 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
     async def evaluate_markets(
         self,
         snapshots: Sequence[MarketSnapshot],
+        *,
+        equity: Decimal | None = None,
     ) -> list[TradeOpportunity]:
         by_symbol = self._group_valid_snapshots(snapshots)
         opportunities: list[TradeOpportunity] = []
@@ -126,7 +141,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                     f"Need at least 2 exchange books, got {len(venues)}",
                 )
                 continue
-            opportunities.extend(await self._evaluate_symbol(symbol, venues))
+            opportunities.extend(await self._evaluate_symbol(symbol, venues, equity=equity))
 
         return opportunities
 
@@ -134,22 +149,62 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         self,
         symbol: str,
         venues: list[MarketSnapshot],
+        *,
+        equity: Decimal | None = None,
     ) -> list[TradeOpportunity]:
-        opportunities: list[TradeOpportunity] = []
+        ranked: list[TradeOpportunity] = []
         for buy_snap in venues:
             for sell_snap in venues:
                 if buy_snap.exchange == sell_snap.exchange:
                     continue
                 self._pairs_evaluated += 1
-                candidate = self._build_candidate(buy_snap, sell_snap)
+                candidate = self._build_candidate(buy_snap, sell_snap, equity=equity)
                 if candidate is None:
                     continue
                 self._depth_edges_found += 1
                 opportunity = await self._gate_candidate(candidate)
-                if opportunity is not None:
-                    self._opportunities_emitted += 1
-                    opportunities.append(opportunity)
-        return opportunities
+                if opportunity is None:
+                    continue
+                if self._in_cooldown(opportunity):
+                    self._reject(
+                        symbol,
+                        "cooldown",
+                        "Pair recently traded; waiting for cooldown",
+                        buy_exchange=candidate.buy_exchange,
+                        sell_exchange=candidate.sell_exchange,
+                    )
+                    continue
+                ranked.append(opportunity)
+
+        ranked.sort(
+            key=lambda o: Decimal(str(o.metadata.get("net_profit_eur", "0"))),
+            reverse=True,
+        )
+        selected = ranked[: self._max_emits]
+        for opp in selected:
+            self._opportunities_emitted += 1
+            self._mark_emitted(opp)
+        return selected
+
+    def _in_cooldown(self, opportunity: TradeOpportunity) -> bool:
+        if self._cooldown_ms <= 0:
+            return False
+        key = self._pair_key(opportunity)
+        last = self._last_emit_monotonic.get(key)
+        if last is None:
+            return False
+        return (time.monotonic() - last) * 1000.0 < self._cooldown_ms
+
+    def _mark_emitted(self, opportunity: TradeOpportunity) -> None:
+        self._last_emit_monotonic[self._pair_key(opportunity)] = time.monotonic()
+
+    @staticmethod
+    def _pair_key(opportunity: TradeOpportunity) -> str:
+        meta = opportunity.metadata or {}
+        return (
+            f"{opportunity.symbol.upper()}|{meta.get('buy_exchange')}|"
+            f"{meta.get('sell_exchange')}"
+        )
 
     def _group_valid_snapshots(
         self,
@@ -211,6 +266,8 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         self,
         buy_snap: MarketSnapshot,
         sell_snap: MarketSnapshot,
+        *,
+        equity: Decimal | None = None,
     ) -> ArbitrageCandidate | None:
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
@@ -219,7 +276,14 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
         buy_depth = _side_depth(buy_snap.order_book.asks)
         sell_depth = _side_depth(sell_snap.order_book.bids)
-        quantity = min(buy_depth, sell_depth, self._max_quantity)
+        quantity_cap = self._max_quantity
+        if equity is not None and equity > 0 and self._position_pct > 0:
+            # Scale trade size with equity while respecting the hard max quantity cap.
+            max_notional = equity * (self._position_pct / Decimal("100"))
+            ref_ask = buy_snap.order_book.asks[0].price if buy_snap.order_book.asks else _ZERO
+            if ref_ask > 0:
+                quantity_cap = min(quantity_cap, max_notional / ref_ask)
+        quantity = min(buy_depth, sell_depth, quantity_cap)
         if quantity < self._min_liquidity:
             self._reject(
                 buy_snap.symbol,
@@ -308,13 +372,23 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 "sell_vwap": str(candidate.sell_vwap),
                 "buy_depth": str(candidate.buy_depth),
                 "sell_depth": str(candidate.sell_depth),
+                "buy_taker_fee_rate": str(
+                    _VENUE_TAKER_FEE.get(candidate.buy_exchange, Decimal("0.001"))
+                ),
+                "sell_taker_fee_rate": str(
+                    _VENUE_TAKER_FEE.get(candidate.sell_exchange, Decimal("0.001"))
+                ),
                 "pricing": "order_book_depth_vwap",
                 "quote_currency": "EUR",
+                "round_trip": True,
             },
         )
 
-        # Depth already priced into VWAP — avoid double-counting book impact.
-        result = await self._profitability.evaluate(opportunity)
+        result = await self._profitability.evaluate(
+            opportunity,
+            buy_fee_rate=_VENUE_TAKER_FEE.get(candidate.buy_exchange),
+            sell_fee_rate=_VENUE_TAKER_FEE.get(candidate.sell_exchange),
+        )
         net = result.net_profit_usd
         net_return = result.net_return
 

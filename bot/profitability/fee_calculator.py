@@ -71,6 +71,8 @@ class FeeCalculator:
         opportunity: TradeOpportunity,
         *,
         exit_price: Decimal,
+        buy_fee_rate: Decimal | None = None,
+        sell_fee_rate: Decimal | None = None,
     ) -> FeeBreakdown:
         """Calculate buy/sell fees for the round-trip implied by the opportunity."""
         entry_notional = opportunity.quantity * opportunity.entry_price
@@ -84,8 +86,8 @@ class FeeCalculator:
             exit_role=opportunity.exit_fee_role,
         )
 
-        buy_rate = self.rate_for(buy_role)
-        sell_rate = self.rate_for(sell_role)
+        buy_rate = buy_fee_rate if buy_fee_rate is not None else self.rate_for(buy_role)
+        sell_rate = sell_fee_rate if sell_fee_rate is not None else self.rate_for(sell_role)
         return FeeBreakdown(
             buy_fee=buy_notional * buy_rate,
             sell_fee=sell_notional * sell_rate,
