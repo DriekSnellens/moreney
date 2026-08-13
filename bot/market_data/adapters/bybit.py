@@ -65,7 +65,9 @@ class BybitPublicAdapter(PublicMarketDataAdapter):
         parts = topic.split(".")
         symbol = self.normalize_symbol(parts[-1] if parts else "")
         msg_type = str(data.get("type") or "snapshot").lower()
-        is_snapshot = msg_type != "delta"
+        # Bybit orderbook topics are safest as replace-snapshots for our book
+        # model: delta sequencing is easy to desync under load and floods unhealthy.
+        is_snapshot = True
         return [self._parse_book(payload, symbol=symbol, is_snapshot=is_snapshot)]
 
     def _parse_book(
@@ -85,19 +87,24 @@ class BybitPublicAdapter(PublicMarketDataAdapter):
             for level in item.get("a") or []
             if isinstance(level, list) and len(level) >= 2
         ]
-        ts_ms = item.get("ts") or item.get("u")
-        timestamp = (
-            datetime.fromtimestamp(int(ts_ms) / 1000, tz=UTC)
-            if ts_ms is not None and str(ts_ms).isdigit() and int(ts_ms) > 10_000_000_000
-            else datetime.now(UTC)
-        )
-        seq = item.get("seq") or item.get("u")
+        # Prefer exchange event time when present; fall back to now.
+        ts_ms = item.get("ts")
+        if ts_ms is None and isinstance(item.get("cts"), (int, str)):
+            ts_ms = item.get("cts")
+        timestamp = datetime.now(UTC)
+        try:
+            if ts_ms is not None:
+                ts_i = int(ts_ms)
+                if ts_i > 10_000_000_000:
+                    timestamp = datetime.fromtimestamp(ts_i / 1000, tz=UTC)
+        except (TypeError, ValueError, OSError):
+            timestamp = datetime.now(UTC)
         event = self.book_event(
             symbol=symbol,
             bids=bids,
             asks=asks,
             is_snapshot=is_snapshot,
-            sequence=int(seq) if seq is not None else None,
+            sequence=None,  # avoid gap-desync; snapshots replace the book
             timestamp=timestamp,
         )
         if bids and asks:
