@@ -19,22 +19,13 @@ from bot.core.enums import FeeRole, OpportunitySide
 from bot.core.exchange_types import OrderBook, OrderBookLevel
 from bot.core.interfaces import ProfitabilityEngine
 from bot.core.models import MarketSnapshot, TradeOpportunity
+from bot.core.venue_fees import venue_taker_fee
 from bot.profitability.engine import DefaultProfitabilityEngine
 from bot.strategies.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
-
-# Typical retail taker fee rates (used for NET gating — conservative).
-_VENUE_TAKER_FEE: dict[str, Decimal] = {
-    "binance": Decimal("0.001"),
-    "kraken": Decimal("0.0026"),
-    "coinbase": Decimal("0.006"),
-    "bitvavo": Decimal("0.0025"),
-    "okx": Decimal("0.001"),
-    "bybit": Decimal("0.001"),
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,12 +365,8 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 "sell_vwap": str(candidate.sell_vwap),
                 "buy_depth": str(candidate.buy_depth),
                 "sell_depth": str(candidate.sell_depth),
-                "buy_taker_fee_rate": str(
-                    _VENUE_TAKER_FEE.get(candidate.buy_exchange, Decimal("0.001"))
-                ),
-                "sell_taker_fee_rate": str(
-                    _VENUE_TAKER_FEE.get(candidate.sell_exchange, Decimal("0.001"))
-                ),
+                "buy_taker_fee_rate": str(venue_taker_fee(candidate.buy_exchange)),
+                "sell_taker_fee_rate": str(venue_taker_fee(candidate.sell_exchange)),
                 "pricing": "order_book_depth_vwap",
                 "quote_currency": "EUR",
                 "round_trip": True,
@@ -388,8 +375,8 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
         result = await self._profitability.evaluate(
             opportunity,
-            buy_fee_rate=_VENUE_TAKER_FEE.get(candidate.buy_exchange),
-            sell_fee_rate=_VENUE_TAKER_FEE.get(candidate.sell_exchange),
+            buy_fee_rate=venue_taker_fee(candidate.buy_exchange),
+            sell_fee_rate=venue_taker_fee(candidate.sell_exchange),
         )
         net = result.net_profit_usd
         net_return = result.net_return

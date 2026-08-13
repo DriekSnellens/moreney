@@ -92,9 +92,9 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · geen echt geld</p>
+        <p class="eyebrow">Oefenhandel · winst alsof het echt geld is</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Overzicht van winst, verlies en transacties</p>
+        <p class="sub">Echte beurskosten, alleen afgeronde koop én verkoop. Voorraad telt niet als winst.</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
@@ -123,12 +123,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
           <span class="label">Startkapitaal</span>
           <span class="value">{m('starting_equity')}</span>
         </article>
-        <article class="metric-card">
-          <span class="label">Huidig vermogen</span>
-          <span class="value">{m('current_equity')}</span>
-        </article>
         <article class="metric-card {pnl_cls}">
-          <span class="label">{pnl_word}</span>
+          <span class="label">{pnl_word} (alsof echt geld)</span>
           <span class="value">{m('net_pnl')}</span>
         </article>
         <article class="metric-card">
@@ -136,8 +132,12 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
           <span class="value">{p('return_pct')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Terugval nu</span>
-          <span class="value">{p('current_drawdown')}</span>
+          <span class="label">Oefenvermogen (incl. voorraad)</span>
+          <span class="value">{m('current_equity')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Paper-verschil</span>
+          <span class="value">{m('paper_equity_pnl')}</span>
         </article>
         <article class="metric-card">
           <span class="label">Grootste terugval</span>
@@ -280,7 +280,7 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero hero-lite">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Mobiel overzicht</p>
+        <p class="eyebrow">Mobiel · alsof echt geld</p>
         <h1 class="brand">Moreney</h1>
       </div>
       <span class="badge {status_cls}">{status_label}</span>
@@ -289,9 +289,9 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
 
   <main class="container lite-container">
     <section class="panel hero-metric {pnl_cls}">
-      <span class="label">{pnl_word}</span>
+      <span class="label">{pnl_word} (alsof echt geld)</span>
       <span class="value-xl">{_fmt_money(perf.get('net_pnl', 0))}</span>
-      <span class="sub-metric">Vermogen {_fmt_money(perf.get('current_equity', 0))}</span>
+      <span class="sub-metric">Oefenvermogen {_fmt_money(perf.get('current_equity', 0))}</span>
     </section>
 
     <section class="panel">
@@ -382,7 +382,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
               </header>
               <div class="metric-grid compact">
                 <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(row.get('equity'), 'money')}</span></article>
-                <article class="metric-card {pnl_cls}"><span class="label">{_pnl_word(row.get('net_pnl'))}</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
+                <article class="metric-card {pnl_cls}"><span class="label">{_pnl_word(row.get('net_pnl'))} (echt)</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
                 <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(row.get('trade_count'), 'count')}</span></article>
                 <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
               </div>
@@ -413,7 +413,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Alle oefenrekeningen</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · geen echte orders</p>
+        <p class="sub">{online}/{configured} online · winst alsof echt geld</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>

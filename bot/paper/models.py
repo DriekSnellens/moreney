@@ -163,6 +163,7 @@ class PerformanceSnapshot(BaseModel):
     current_equity: Decimal = _ZERO
     realized_pnl: Decimal = _ZERO
     unrealized_pnl: Decimal = _ZERO
+    paper_equity_pnl: Decimal = _ZERO
     gross_pnl: Decimal = _ZERO
     fees: Decimal = _ZERO
     slippage: Decimal = _ZERO

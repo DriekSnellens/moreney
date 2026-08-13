@@ -51,6 +51,38 @@ async def test_full_fill(execution: ExecutionService) -> None:
 
 
 @pytest.mark.asyncio
+async def test_venue_taker_fee_used_when_order_has_venue(
+    exec_settings, portfolio: PaperPortfolio
+) -> None:
+    from bot.execution.paper_executor import PaperExecutor
+
+    executor = PaperExecutor(exec_settings, portfolio=portfolio)
+    req = _buy("0.5", "100")
+    req.metadata["venue"] = "kraken"
+    result = await executor.execute(req, order_book=make_book())
+    assert result.status == OrderStatus.FILLED
+    assert result.fees_usd == Decimal("0.5") * Decimal("100") * Decimal("0.0026")
+
+
+@pytest.mark.asyncio
+async def test_adverse_slippage_rejected_as_untradeable_live(
+    exec_settings, portfolio: PaperPortfolio
+) -> None:
+    settings = exec_settings.model_copy(update={"max_slippage_percent": 0.25})
+    from bot.execution.paper_executor import PaperExecutor
+
+    executor = PaperExecutor(settings, portfolio=portfolio)
+    bought = await executor.execute(_buy("0.5", "100"), order_book=make_book())
+    assert bought.status == OrderStatus.FILLED
+    book = make_book(bid_price="50")
+    result = await executor.execute(
+        _sell("0.5", "99"), order_book=book, order_type=OrderType.MARKET
+    )
+    assert result.status == OrderStatus.REJECTED
+    assert result.metadata["rejection_reason"] == "EXCESSIVE_SLIPPAGE"
+
+
+@pytest.mark.asyncio
 async def test_partial_fill_on_thin_book(execution: ExecutionService) -> None:
     book = make_book(ask_qty="0.2")
     result = await execution.execute(_buy("1.0", "100"), order_book=book)

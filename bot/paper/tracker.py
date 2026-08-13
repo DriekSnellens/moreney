@@ -239,6 +239,11 @@ class PerformanceTracker:
         sell_fills = [f for f in fills if f.side == OrderSide.SELL]
 
         if buy_fills and sell_fills:
+            buy_qty = sum((f.quantity for f in buy_fills), _ZERO)
+            sell_qty = sum((f.quantity for f in sell_fills), _ZERO)
+            matched_qty = min(buy_qty, sell_qty)
+            if matched_qty <= 0:
+                return None
             buy_cost = sum(
                 (f.quantity * f.price + f.fee + f.slippage for f in buy_fills),
                 _ZERO,
@@ -247,12 +252,11 @@ class PerformanceTracker:
                 (f.quantity * f.price - f.fee - f.slippage for f in sell_fills),
                 _ZERO,
             )
-            matched_qty = min(
-                sum((f.quantity for f in buy_fills), _ZERO),
-                sum((f.quantity for f in sell_fills), _ZERO),
-            )
-            if matched_qty <= 0:
-                return None
+            # Scale to matched size: leftover coins are inventory, not a locked loss.
+            if buy_qty > 0:
+                buy_cost = buy_cost * (matched_qty / buy_qty)
+            if sell_qty > 0:
+                sell_proceeds = sell_proceeds * (matched_qty / sell_qty)
             return sell_proceeds - buy_cost
 
         # Cross-exchange arb without a sell fill is not a completed trade.
@@ -336,8 +340,6 @@ class PerformanceTracker:
             self._fees = state.stats.fees_paid
         if state.stats.total_trading_volume > self._trading_volume:
             self._trading_volume = state.stats.total_trading_volume
-        if state.stats.realized_pnl != _ZERO and not self._trade_pnls:
-            self._realized_pnl = state.stats.realized_pnl
 
         if equity > self._peak_equity:
             self._peak_equity = equity
@@ -400,7 +402,9 @@ class PerformanceTracker:
         else:
             profit_factor = gross_wins / gross_losses
 
-        net_pnl = self._current_equity - self._starting_equity
+        paper_equity_pnl = self._current_equity - self._starting_equity
+        # Live-equivalent: completed round-trips after fill fees, not mark-to-market inventory.
+        net_pnl = self._realized_pnl
         return_pct = (
             (net_pnl / self._starting_equity) * _HUNDRED
             if self._starting_equity > 0
@@ -411,6 +415,7 @@ class PerformanceTracker:
             current_equity=self._current_equity,
             realized_pnl=self._realized_pnl,
             unrealized_pnl=self._unrealized_pnl,
+            paper_equity_pnl=paper_equity_pnl,
             gross_pnl=self._gross_pnl if self._gross_pnl else (net_pnl + self._fees + self._slippage),
             fees=self._fees,
             slippage=self._slippage,

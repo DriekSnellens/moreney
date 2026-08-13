@@ -223,6 +223,85 @@ def test_performance_tracker_profitable_fill() -> None:
     assert snap.executed_opportunities == 1
     assert snap.trade_count == 1
     assert snap.approved_opportunities == 1
+    assert snap.net_pnl == tracked.realized_net_profit
+    assert snap.net_pnl != Decimal("9")  # equity delta is not live-equivalent winst
+
+
+def test_performance_tracker_partial_sell_does_not_dump_buy_as_loss() -> None:
+    tracker = PerformanceTracker(starting_equity=Decimal("200"))
+    opp_id = uuid4()
+    opp = TradeOpportunity(
+        id=opp_id,
+        strategy_name="cross_exchange_arbitrage",
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("0.01"),
+        entry_price=Decimal("100000"),
+        metadata={"buy_exchange": "binance", "sell_exchange": "kraken"},
+    )
+    tracker.record_detected(opp, None)
+    tracker.record_risk(
+        opp_id,
+        RiskDecision(opportunity_id=opp_id, status=RiskDecisionStatus.APPROVED),
+    )
+    from bot.core.enums import OrderSide
+
+    buy_order = Order(
+        id=uuid4(),
+        strategy="cross_exchange_arbitrage",
+        symbol="BTCEUR",
+        side=OrderSide.BUY,
+        requested_quantity=Decimal("0.01"),
+        opportunity_id=opp_id,
+    )
+    sell_order = Order(
+        id=uuid4(),
+        strategy="cross_exchange_arbitrage",
+        symbol="BTCEUR",
+        side=OrderSide.SELL,
+        requested_quantity=Decimal("0.001"),
+        opportunity_id=opp_id,
+    )
+    buy_fill = Fill(
+        order_id=buy_order.id,
+        symbol="BTCEUR",
+        side=OrderSide.BUY,
+        quantity=Decimal("0.01"),
+        price=Decimal("100000"),
+        fee=Decimal("1"),
+        slippage=Decimal("0"),
+    )
+    sell_fill = Fill(
+        order_id=sell_order.id,
+        symbol="BTCEUR",
+        side=OrderSide.SELL,
+        quantity=Decimal("0.001"),
+        price=Decimal("101000"),
+        fee=Decimal("0.1"),
+        slippage=Decimal("0"),
+    )
+    execution = ExecutionResult(
+        order_id=buy_order.id,
+        opportunity_id=opp_id,
+        status=OrderStatus.FILLED,
+        filled_quantity=Decimal("0.01"),
+        average_price=Decimal("100000"),
+        fees_usd=Decimal("1"),
+    )
+    tracker.record_execution(
+        opp_id,
+        execution,
+        orders=[buy_order, sell_order],
+        fills=[buy_fill, sell_fill],
+        equity_before=Decimal("200"),
+        equity_after=Decimal("50"),
+    )
+    tracked = tracker.opportunities()[0]
+    # Matched 0.001 BTC: buy cost 100.1, sell proceeds 100.9 → small profit.
+    # Must not treat the unsold 0.009 as a ~€900 realized loss.
+    assert tracked.realized_net_profit == Decimal("0.8")
+    assert tracker.snapshot().net_pnl == Decimal("0.8")
+    assert tracker.snapshot().paper_equity_pnl == Decimal("0")
 
 
 def test_performance_tracker_incomplete_arb_not_counted_as_trade() -> None:
@@ -591,7 +670,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
         ],
     }
     html = render_dashboard(payload).body.decode()
-    assert "Winst en verlies" in html
+    assert "alsof echt geld" in html
     assert "Koop goedkoop, verkoop duurder" in html
     assert "Binance" in html
     assert "polyline" in html

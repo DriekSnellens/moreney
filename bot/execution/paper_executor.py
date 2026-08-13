@@ -19,6 +19,7 @@ from bot.core.config import Settings
 from bot.core.enums import OpportunitySide, OrderSide, OrderStatus, OrderType
 from bot.core.exchange_types import OrderBook, OrderBookLevel
 from bot.core.models import ExecutionResult, OrderRequest
+from bot.core.venue_fees import venue_taker_fee
 from bot.execution.base import BaseExecutor
 from bot.execution.fill_tracker import FillTracker
 from bot.execution.order_manager import OrderManager
@@ -60,6 +61,7 @@ class PaperExecutor(BaseExecutor):
         self._orders = order_manager or OrderManager()
         self._fills = fill_tracker or FillTracker(portfolio)
         self._fee_rate = Decimal(str(settings.paper_fee_rate))
+        self._max_slippage = Decimal(str(settings.max_slippage_percent)) / _HUNDRED
         self._slippage_mode = settings.paper_slippage_mode
         self._fixed_slippage_pct = Decimal(str(settings.paper_fixed_slippage_pct))
         self._partial_ok = settings.paper_partial_fills_on_thin_book
@@ -166,8 +168,17 @@ class PaperExecutor(BaseExecutor):
                 reason="INSUFFICIENT_LIQUIDITY",
                 message="No liquidity available to fill",
             )
+        if self._is_adverse_slippage(order, vwap):
+            self._portfolio.release_reservation(reserve_asset, reserve_amount)
+            return self._reject(
+                order,
+                order_request,
+                reason="EXCESSIVE_SLIPPAGE",
+                message="Fill price worse than live slippage limit",
+            )
 
-        fee = filled_qty * vwap * self._fee_rate
+        fee_rate = self._fee_rate_for(order)
+        fee = filled_qty * vwap * fee_rate
         # Adjust reservation: release unused, keep used portion for accounting.
         self._adjust_reservation_after_fill(
             order, reserve_asset, reserve_amount, filled_qty, vwap, fee
@@ -182,8 +193,12 @@ class PaperExecutor(BaseExecutor):
             fee=fee,
             fee_asset=self._quote,
             slippage=slippage_cost,
-            exchange="paper",
-            metadata={"levels_consumed": levels, "slippage_mode": self._slippage_mode},
+            exchange=str((order.metadata or {}).get("venue") or "paper"),
+            metadata={
+                "levels_consumed": levels,
+                "slippage_mode": self._slippage_mode,
+                "fee_rate": str(fee_rate),
+            },
         )
         self._orders.attach_fill(order.id, fill)
         self._fills.apply(order, fill)
@@ -233,7 +248,7 @@ class PaperExecutor(BaseExecutor):
         if remaining > 0:
             if order.side == OrderSide.BUY:
                 price = order.requested_price or order.average_fill_price or _ZERO
-                est = remaining * price * (Decimal("1") + self._fee_rate)
+                est = remaining * price * (Decimal("1") + self._fee_rate_for(order))
                 self._portfolio.release_reservation(self._quote, est)
             else:
                 base = self._portfolio.base_asset_for(order.symbol)
@@ -289,7 +304,7 @@ class PaperExecutor(BaseExecutor):
             if price <= 0:
                 # Allow open without hard reserve when price unknown; reject later
                 return True, self._quote, _ZERO
-            amount = order.requested_quantity * price * (Decimal("1") + self._fee_rate)
+            amount = order.requested_quantity * price * (Decimal("1") + self._fee_rate_for(order))
             ok = self._portfolio.available(self._quote) >= amount
             return ok, self._quote, amount if ok else amount
         base = self._portfolio.base_asset_for(order.symbol)
@@ -419,6 +434,21 @@ class PaperExecutor(BaseExecutor):
         if ref is not None and ref > 0:
             slip_cost = abs(vwap - ref) * filled
         return consumed, filled, vwap, slip_cost
+
+    def _fee_rate_for(self, order: Order) -> Decimal:
+        venue = str((order.metadata or {}).get("venue") or "")
+        return venue_taker_fee(venue, fallback=self._fee_rate)
+
+    def _is_adverse_slippage(self, order: Order, vwap: Decimal) -> bool:
+        """Reject order-book fills that would be untradeable live due to price impact."""
+        if self._slippage_mode != "order_book":
+            return False
+        ref = order.requested_price
+        if ref is None or ref <= 0 or vwap <= 0 or self._max_slippage <= 0:
+            return False
+        if order.side == OrderSide.BUY:
+            return vwap > ref * (Decimal("1") + self._max_slippage)
+        return vwap < ref * (Decimal("1") - self._max_slippage)
 
 
 def _to_order_side(side: OpportunitySide | OrderSide) -> OrderSide:
