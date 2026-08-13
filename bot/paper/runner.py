@@ -35,6 +35,10 @@ from bot.profitability.engine import DefaultProfitabilityEngine
 from bot.risk.risk_engine import RiskEngine
 from bot.strategies.arbitrage import CrossExchangeArbitrageStrategy
 from bot.strategies.maker_inventory import MakerInventoryStrategy
+from bot.strategies.triangle_bridge import CompositeDeskStrategy, TriangleBridgeStrategy
+from bot.paper.markout import MarkoutTracker
+from bot.core.venue_fees import set_fee_tier
+from bot.portfolio.venue_ledger import infer_quote_asset
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +111,19 @@ class PaperRunner:
             if s.strip()
         ]
         self._interval = max(0.05, settings.paper_cycle_interval_ms / 1000.0)
+        self._markout = MarkoutTracker()
+        set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
 
-    def _build_strategy(self) -> CrossExchangeArbitrageStrategy | MakerInventoryStrategy:
+    def _build_strategy(self):
         if self._settings.paper_maker_enabled:
-            return MakerInventoryStrategy(self._settings)
+            maker = MakerInventoryStrategy(self._settings)
+            if getattr(self._settings, "paper_triangle_enabled", False):
+                return CompositeDeskStrategy(
+                    self._settings,
+                    maker=maker,
+                    triangle=TriangleBridgeStrategy(self._settings),
+                )
+            return maker
         return CrossExchangeArbitrageStrategy(self._settings)
 
     def _gate_settings(self) -> Settings:
@@ -537,6 +550,8 @@ class PaperRunner:
             "last_cycle": self._last_cycle,
             "open_maker_quotes": self._open_maker_quote_count(),
             "strategy": getattr(self._strategy, "name", ""),
+            "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
+            "fee_tier": getattr(self._settings, "paper_fee_tier", "retail"),
             "live_forecast": self._live_forecast(snap),
         }
 
@@ -625,7 +640,185 @@ class PaperRunner:
         fills = self._executor.match_resting(books)
         if fills:
             self._ingest_delayed_fills(fills)
+            self._record_markouts(fills, books)
+        self._update_markouts(books)
+        await self._hybrid_hedge_if_needed(books)
         await self._cancel_stale_quotes()
+        self._maybe_rebalance_venues()
+        self._maybe_seed_usdt(books)
+        self._apply_markout_adverse()
+
+    def _record_markouts(self, executions: list[Any], books: dict[str, dict[str, Any]]) -> None:
+        if not getattr(self._settings, "paper_markout_enabled", True):
+            return
+        from bot.core.enums import OrderSide
+
+        manager = self._executor.order_manager
+        for execution in executions:
+            if execution.filled_quantity <= 0:
+                continue
+            order = next(
+                (o for o in manager.list_orders() if o.id == execution.order_id),
+                None,
+            )
+            if order is None:
+                continue
+            venue = str((order.metadata or {}).get("venue") or "")
+            book = (books.get(venue) or {}).get(order.symbol)
+            mid = None
+            if book is not None and book.bids and book.asks:
+                mid = (book.bids[0].price + book.asks[0].price) / Decimal("2")
+            side = "buy" if order.side == OrderSide.BUY else "sell"
+            px = execution.average_price or order.average_fill_price or order.requested_price
+            if px is None:
+                continue
+            self._markout.record_fill(
+                fill_id=str(execution.order_id),
+                opportunity_id=execution.opportunity_id,
+                symbol=order.symbol,
+                side=side,
+                fill_price=Decimal(str(px)),
+                mid=mid,
+            )
+
+    def _update_markouts(self, books: dict[str, dict[str, Any]]) -> None:
+        if not getattr(self._settings, "paper_markout_enabled", True):
+            return
+        mids: dict[str, Decimal] = {}
+        for venue_books in books.values():
+            for symbol, book in venue_books.items():
+                if book is None or not book.bids or not book.asks:
+                    continue
+                mid = (book.bids[0].price + book.asks[0].price) / Decimal("2")
+                prev = mids.get(symbol)
+                mids[symbol] = mid if prev is None else (prev + mid) / Decimal("2")
+        self._markout.update(mids)
+
+    def _apply_markout_adverse(self) -> None:
+        if not getattr(self._settings, "paper_markout_enabled", True):
+            return
+        floor = Decimal(str(getattr(self._settings, "paper_markout_floor_bps", 2) or 2))
+        ceiling = Decimal(str(getattr(self._settings, "paper_markout_ceiling_bps", 15) or 15))
+        suggested = self._markout.suggested_adverse_bps(floor=floor, ceiling=ceiling)
+        try:
+            self._settings.paper_maker_adverse_bps = float(suggested)
+        except Exception:
+            object.__setattr__(self._settings, "paper_maker_adverse_bps", float(suggested))
+        # Keep live strategy haircuts in sync.
+        for strat in (self._strategy,):
+            if hasattr(strat, "_adverse"):
+                strat._adverse = suggested  # type: ignore[attr-defined]
+            for child_name in ("_maker", "_triangle"):
+                child = getattr(strat, child_name, None)
+                if child is not None and hasattr(child, "_adverse"):
+                    child._adverse = suggested
+
+    async def _hybrid_hedge_if_needed(self, books: dict[str, dict[str, Any]]) -> None:
+        if not getattr(self._settings, "paper_hybrid_hedge", True):
+            return
+        from bot.core.enums import OrderSide
+
+        threshold = Decimal(str(getattr(self._settings, "paper_hybrid_adverse_bps", 8) or 8))
+        manager = self._executor.order_manager
+        by_opp: dict[UUID, list[Any]] = {}
+        for order in manager.list_orders():
+            if order.opportunity_id is None or not (order.metadata or {}).get("post_only"):
+                continue
+            by_opp.setdefault(order.opportunity_id, []).append(order)
+        for opp_id, orders in by_opp.items():
+            open_legs = [o for o in orders if str(o.status.value) == "open"]
+            filled_legs = [o for o in orders if o.filled_quantity > 0]
+            if not open_legs or not filled_legs:
+                continue
+            for resting in open_legs:
+                venue = str((resting.metadata or {}).get("venue") or "")
+                book = (books.get(venue) or {}).get(resting.symbol)
+                if book is None or resting.requested_price is None:
+                    continue
+                if resting.side == OrderSide.SELL:
+                    if not book.bids:
+                        continue
+                    move = (
+                        (resting.requested_price - book.bids[0].price)
+                        / resting.requested_price
+                        * Decimal("10000")
+                    )
+                else:
+                    if not book.asks:
+                        continue
+                    move = (
+                        (book.asks[0].price - resting.requested_price)
+                        / resting.requested_price
+                        * Decimal("10000")
+                    )
+                if move < threshold:
+                    continue
+                await self._executor.cancel(resting.id, reason="hybrid_hedge_adverse")
+                await self._close_orphaned_maker_legs(opp_id)
+                break
+
+    def _maybe_rebalance_venues(self) -> None:
+        if not getattr(self._settings, "paper_rebalance_enabled", True):
+            return
+        every = int(getattr(self._settings, "paper_rebalance_every_cycles", 120) or 120)
+        if self._cycle_count <= 0 or self._cycle_count % every != 0:
+            return
+        ledger = self._portfolio.venue_ledger
+        if ledger is None:
+            return
+        fee = Decimal(str(getattr(self._settings, "paper_rebalance_fee_bps", 5) or 5))
+        moves = ledger.rebalance_quote(fee_bps=fee)
+        if moves:
+            logger.info("PAPER_VENUE_REBALANCE moves=%s", moves)
+
+    def _maybe_seed_usdt(self, books: dict[str, dict[str, Any]]) -> None:
+        pct = Decimal(str(getattr(self._settings, "paper_seed_usdt_pct", 0) or 0))
+        if pct <= 0:
+            return
+        ledger = self._portfolio.venue_ledger
+        if ledger is None or "USDT" in ledger.seeded_assets:
+            return
+        fx = str(getattr(self._settings, "paper_maker_fx_symbol", "EURUSDT") or "EURUSDT")
+        fx_mid = None
+        for venue_books in books.values():
+            book = venue_books.get(fx)
+            if book is not None and book.bids and book.asks:
+                fx_mid = (book.bids[0].price + book.asks[0].price) / Decimal("2")
+                break
+        if fx_mid is None or fx_mid <= 0:
+            return
+        start_each = ledger.start_quote_each
+        if start_each <= 0:
+            return
+        budget = start_each * (pct / Decimal("100"))
+        moved = []
+        for venue in ledger.venues:
+            take = min(budget, ledger.available(venue, ledger.quote))
+            if take <= 0:
+                continue
+            qty = take * fx_mid
+            ledger._add(venue, ledger.quote, -take)
+            ledger.credit(venue, "USDT", qty)
+            moved.append((venue, qty, take))
+        if not moved:
+            return
+        ledger.seeded_assets.add("USDT")
+        total_cost = sum((c for _, _, c in moved), Decimal("0"))
+        total_qty = sum((q for _, q, _ in moved), Decimal("0"))
+        from bot.portfolio.models import AssetBalance
+        eur = self._portfolio.state.balances.setdefault(
+            "EUR", AssetBalance(asset="EUR", available=Decimal("0"), reserved=Decimal("0"))
+        )
+        take = min(total_cost, eur.available)
+        eur.available -= take
+        usdt = self._portfolio.state.balances.setdefault(
+            "USDT", AssetBalance(asset="USDT", available=Decimal("0"), reserved=Decimal("0"))
+        )
+        usdt.available += total_qty
+        logger.info(
+            "PAPER_USDT_SEEDED venues=%s usdt=%s eur_spent=%s fx=%s",
+            len(moved), total_qty, total_cost, fx_mid,
+        )
 
     def _ingest_delayed_fills(self, executions: list[Any]) -> None:
         by_opp: dict[UUID, list[Any]] = {}

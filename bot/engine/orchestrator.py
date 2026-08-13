@@ -279,17 +279,23 @@ class TradingEngine:
         primary: Any,
         *,
         exchange_key: str = "buy_exchange",
+        symbol_override: str | None = None,
     ) -> Any:
         """Resolve synchronized order book for a venue (buy or sell leg)."""
         venue = opportunity.metadata.get(exchange_key)
+        symbol = str(symbol_override or opportunity.symbol).upper()
         if venue:
             getter = getattr(self._market_data, "get_order_book", None)
             if callable(getter):
-                book = getter(str(venue), opportunity.symbol)
+                book = getter(str(venue), symbol)
                 if book is not None:
                     return book
             for snap in venue_snapshots:
-                if getattr(snap, "exchange", None) == venue and snap.order_book:
+                if (
+                    getattr(snap, "exchange", None) == venue
+                    and str(getattr(snap, "symbol", "")).upper() == symbol
+                    and snap.order_book
+                ):
                     return snap.order_book
         if exchange_key == "buy_exchange":
             if opportunity.market is not None and opportunity.market.order_book is not None:
@@ -403,7 +409,11 @@ class TradingEngine:
 
     @staticmethod
     def _is_maker_quote(opportunity: TradeOpportunity) -> bool:
-        if opportunity.strategy_name == "maker_inventory":
+        if opportunity.strategy_name in {
+            "maker_inventory",
+            "triangle_bridge",
+            "desk_composite",
+        }:
             return True
         return bool((opportunity.metadata or {}).get("post_only"))
 
@@ -461,12 +471,28 @@ class TradingEngine:
     ) -> ExecutionResult:
         buy_venue = str(opportunity.metadata.get("buy_exchange") or "")
         sell_venue = str(opportunity.metadata.get("sell_exchange") or "")
+        buy_symbol = str(
+            opportunity.metadata.get("buy_symbol") or opportunity.symbol
+        ).upper()
+        sell_symbol = str(
+            opportunity.metadata.get("sell_symbol") or opportunity.symbol
+        ).upper()
+        # Triangle quotes use native leg prices; EUR-normalized entry/exit for PnL gate.
+        buy_limit = opportunity.entry_price
+        sell_limit = opportunity.expected_exit_price
+        if opportunity.metadata.get("triangle"):
+            raw_buy = opportunity.metadata.get("buy_vwap")
+            raw_sell = opportunity.metadata.get("sell_vwap")
+            if raw_buy is not None:
+                buy_limit = Decimal(str(raw_buy))
+            if raw_sell is not None:
+                sell_limit = Decimal(str(raw_sell))
         buy_order = OrderRequest(
             opportunity_id=opportunity.id,
-            symbol=opportunity.symbol,
+            symbol=buy_symbol,
             side=OpportunitySide.BUY,
             quantity=qty,
-            limit_price=opportunity.entry_price,
+            limit_price=buy_limit,
             metadata={
                 "strategy": opportunity.strategy_name,
                 "real_exchange_order": False,
@@ -474,15 +500,17 @@ class TradingEngine:
                 "post_only": True,
                 "fee_role": "maker",
                 "venue": buy_venue,
+                "triangle": bool(opportunity.metadata.get("triangle")),
+                "hybrid_hedge": bool(opportunity.metadata.get("hybrid_hedge")),
             },
         )
-        sell_price = opportunity.expected_exit_price
+        sell_price = sell_limit
         if sell_price is None:
             raw = opportunity.metadata.get("sell_vwap")
             sell_price = Decimal(str(raw)) if raw is not None else opportunity.entry_price
         sell_order = OrderRequest(
             opportunity_id=opportunity.id,
-            symbol=opportunity.symbol,
+            symbol=sell_symbol,
             side=OpportunitySide.SELL,
             quantity=qty,
             limit_price=sell_price,
@@ -493,15 +521,25 @@ class TradingEngine:
                 "post_only": True,
                 "fee_role": "maker",
                 "venue": sell_venue,
+                "triangle": bool(opportunity.metadata.get("triangle")),
+                "hybrid_hedge": bool(opportunity.metadata.get("hybrid_hedge")),
             },
         )
         buy_book = order_book
-        if buy_book is None:
+        if buy_book is None or buy_symbol != opportunity.symbol:
             buy_book = self._resolve_execution_book(
-                opportunity, venue_snapshots, snapshot_book, exchange_key="buy_exchange"
+                opportunity,
+                venue_snapshots,
+                snapshot_book,
+                exchange_key="buy_exchange",
+                symbol_override=buy_symbol,
             )
         sell_book = self._resolve_execution_book(
-            opportunity, venue_snapshots, snapshot_book, exchange_key="sell_exchange"
+            opportunity,
+            venue_snapshots,
+            snapshot_book,
+            exchange_key="sell_exchange",
+            symbol_override=sell_symbol,
         )
         buy_result = await self._execute_limit(buy_order, buy_book, opportunity.strategy_name)
         sell_result = await self._execute_limit(sell_order, sell_book, opportunity.strategy_name)

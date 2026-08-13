@@ -26,6 +26,7 @@ from bot.execution.fill_tracker import FillTracker
 from bot.execution.order_manager import OrderManager
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
+from bot.portfolio.venue_ledger import infer_base_asset, infer_quote_asset
 
 logger = logging.getLogger(__name__)
 
@@ -556,7 +557,7 @@ class PaperExecutor(BaseExecutor):
         if order.side == OrderSide.BUY:
             price = order.requested_price or order.average_fill_price or _ZERO
             amount = remaining_qty * price * (Decimal("1") + self._fee_rate_for(order))
-            ledger.unlock(venue, self._quote, amount)
+            ledger.unlock(venue, self._quote_asset_for(order), amount)
         else:
             base = self._portfolio.base_asset_for(order.symbol)
             ledger.unlock(venue, base, remaining_qty)
@@ -595,10 +596,15 @@ class PaperExecutor(BaseExecutor):
         )
         return result
 
+
+    def _quote_asset_for(self, order: Order) -> str:
+        return infer_quote_asset(order.symbol, self._quote)
+
     def _reservation_needed(
         self, order: Order
     ) -> tuple[bool, str, Decimal]:
         if order.side == OrderSide.BUY:
+            quote = self._quote_asset_for(order)
             price = order.requested_price
             if price is None or price <= 0:
                 # Market buy: estimate with mark or require price
@@ -606,11 +612,11 @@ class PaperExecutor(BaseExecutor):
                 price = mark or Decimal("0")
             if price <= 0:
                 # Allow open without hard reserve when price unknown; reject later
-                return True, self._quote, _ZERO
+                return True, quote, _ZERO
             amount = order.requested_quantity * price * (Decimal("1") + self._fee_rate_for(order))
-            ok = self._portfolio.available(self._quote) >= amount
+            ok = self._portfolio.available(quote) >= amount
             ok = ok and self._venue_can_buy(order, amount)
-            return ok, self._quote, amount if ok else amount
+            return ok, quote, amount if ok else amount
         base = self._portfolio.base_asset_for(order.symbol)
         amount = order.requested_quantity
         ok = self._portfolio.available(base) >= amount
@@ -755,7 +761,7 @@ class PaperExecutor(BaseExecutor):
         venue = str((order.metadata or {}).get("venue") or "")
         if ledger is None or not venue:
             return True
-        return ledger.available(venue, self._quote) >= quote_needed
+        return ledger.available(venue, self._quote_asset_for(order)) >= quote_needed
 
     def _venue_can_sell(self, order: Order, base: str, quantity: Decimal) -> bool:
         ledger = getattr(self._portfolio, "venue_ledger", None)
@@ -777,23 +783,31 @@ class PaperExecutor(BaseExecutor):
         venue = str((order.metadata or {}).get("venue") or "")
         if ledger is None or not venue:
             return
-        from bot.portfolio.venue_ledger import infer_base_asset
 
-        base = infer_base_asset(order.symbol, self._quote)
+        quote = self._quote_asset_for(order)
+        base = infer_base_asset(order.symbol, quote)
         if inventory_locked:
             # Resting post-only already deducted the reserved asset.
             if order.side == OrderSide.BUY:
                 ledger.credit(venue, base, filled_qty)
             else:
-                ledger.credit(venue, self._quote, filled_qty * vwap - fee)
+                ledger.credit(venue, quote, filled_qty * vwap - fee)
             return
         if order.side == OrderSide.BUY:
             ledger.apply_buy(
-                venue, base=base, quantity=filled_qty, quote_spent=filled_qty * vwap + fee
+                venue,
+                base=base,
+                quantity=filled_qty,
+                quote_spent=filled_qty * vwap + fee,
+                quote_asset=quote,
             )
         else:
             ledger.apply_sell(
-                venue, base=base, quantity=filled_qty, quote_received=filled_qty * vwap - fee
+                venue,
+                base=base,
+                quantity=filled_qty,
+                quote_received=filled_qty * vwap - fee,
+                quote_asset=quote,
             )
 
     def _is_adverse_slippage(self, order: Order, vwap: Decimal) -> bool:

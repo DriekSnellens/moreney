@@ -56,13 +56,31 @@ class VenueLedger:
     def can_sell(self, venue: str, base: str, quantity: Decimal) -> bool:
         return self.available(venue, base) >= quantity and quantity > 0
 
-    def apply_buy(self, venue: str, *, base: str, quantity: Decimal, quote_spent: Decimal) -> None:
-        self._add(venue, self.quote, -quote_spent)
+    def apply_buy(
+        self,
+        venue: str,
+        *,
+        base: str,
+        quantity: Decimal,
+        quote_spent: Decimal,
+        quote_asset: str | None = None,
+    ) -> None:
+        q = (quote_asset or self.quote).upper()
+        self._add(venue, q, -quote_spent)
         self._add(venue, base, quantity)
 
-    def apply_sell(self, venue: str, *, base: str, quantity: Decimal, quote_received: Decimal) -> None:
+    def apply_sell(
+        self,
+        venue: str,
+        *,
+        base: str,
+        quantity: Decimal,
+        quote_received: Decimal,
+        quote_asset: str | None = None,
+    ) -> None:
+        q = (quote_asset or self.quote).upper()
         self._add(venue, base, -quantity)
-        self._add(venue, self.quote, quote_received)
+        self._add(venue, q, quote_received)
 
     def lock(self, venue: str, asset: str, amount: Decimal) -> bool:
         """Deduct ``amount`` so a resting order cannot spend the same balance twice."""
@@ -82,6 +100,95 @@ class VenueLedger:
         if amount <= 0:
             return
         self._add(venue, asset, amount)
+
+    def transfer(
+        self,
+        *,
+        from_venue: str,
+        to_venue: str,
+        asset: str,
+        amount: Decimal,
+        fee_bps: Decimal = Decimal("0"),
+    ) -> tuple[Decimal, Decimal] | None:
+        """Move ``amount`` of ``asset`` between venues; fee taken from amount.
+
+        Returns ``(received, fee)`` or ``None`` if insufficient balance.
+        Paper model of withdraw+deposit (no teleport without cost/time elsewhere).
+        """
+        if amount <= 0:
+            return None
+        src = str(from_venue).strip().lower()
+        dst = str(to_venue).strip().lower()
+        asset_key = asset.upper()
+        if src == dst:
+            return None
+        if self.available(src, asset_key) < amount:
+            return None
+        fee = amount * (fee_bps / Decimal("10000"))
+        received = amount - fee
+        if received <= 0:
+            return None
+        self._add(src, asset_key, -amount)
+        self._add(dst, asset_key, received)
+        return received, fee
+
+    def rebalance_quote(
+        self,
+        *,
+        target_each: Decimal | None = None,
+        fee_bps: Decimal = Decimal("5"),
+    ) -> list[dict[str, str]]:
+        """Push quote cash toward equal (or ``target_each``) across venues."""
+        if not self.venues:
+            return []
+        bals = {v: self.available(v, self.quote) for v in self.venues}
+        total = sum(bals.values(), _ZERO)
+        if total <= 0:
+            return []
+        target = target_each if target_each is not None else total / Decimal(len(self.venues))
+        rich = sorted(
+            ((v, bal - target) for v, bal in bals.items() if bal > target),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        poor = sorted(
+            ((v, target - bal) for v, bal in bals.items() if bal < target),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        moves: list[dict[str, str]] = []
+        i = j = 0
+        while i < len(rich) and j < len(poor):
+            src, surplus = rich[i]
+            dst, need = poor[j]
+            qty = min(surplus, need)
+            if qty <= 0:
+                break
+            result = self.transfer(
+                from_venue=src, to_venue=dst, asset=self.quote, amount=qty, fee_bps=fee_bps
+            )
+            if result is None:
+                break
+            received, fee = result
+            moves.append(
+                {
+                    "from": src,
+                    "to": dst,
+                    "asset": self.quote,
+                    "sent": str(qty),
+                    "received": str(received),
+                    "fee": str(fee),
+                }
+            )
+            surplus -= qty
+            need -= qty
+            rich[i] = (src, surplus)
+            poor[j] = (dst, need)
+            if surplus <= 0:
+                i += 1
+            if need <= 0:
+                j += 1
+        return moves
 
     def seed_asset(
         self,

@@ -338,6 +338,21 @@ class MakerInventoryStrategy(BaseStrategy):
         buy_touch = buy_snap.order_book.bids[0].amount
         sell_touch = sell_snap.order_book.asks[0].amount
 
+        level = int(getattr(self._settings, "paper_maker_book_level", 0) or 0)
+        if level > 0:
+            buy_lvl = min(level, len(buy_snap.order_book.bids) - 1)
+            sell_lvl = min(level, len(sell_snap.order_book.asks) - 1)
+            buy_price = buy_snap.order_book.bids[buy_lvl].price
+            sell_price = sell_snap.order_book.asks[sell_lvl].price
+            buy_touch = sum(
+                (lvl.amount for lvl in buy_snap.order_book.bids[: buy_lvl + 1]),
+                _ZERO,
+            )
+            sell_touch = sum(
+                (lvl.amount for lvl in sell_snap.order_book.asks[: sell_lvl + 1]),
+                _ZERO,
+            )
+
         if sell_price <= buy_price:
             self._reject(
                 buy_snap.symbol,

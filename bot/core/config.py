@@ -121,9 +121,9 @@ class Settings(BaseSettings):
     paper_maker_same_venue: bool = True
     paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=20)
     # Only quote/inventory on these venues. Empty = all market-data venues.
-    paper_maker_venues: str = "okx,binance,bitvavo"
+    paper_maker_venues: str = "okx,binance,bitvavo,kraken"
     # Skip pairs whose combined maker fees exceed this (bps).
-    paper_maker_max_fee_bps: float = Field(default=28.0, ge=0)
+    paper_maker_max_fee_bps: float = Field(default=35.0, ge=0)
     # Extra life for the unfilled leg after its sibling fills (ms).
     paper_maker_sibling_grace_ms: float = Field(default=8000.0, ge=0)
     # When one maker leg fills and the quote expires, exit leftover inventory as taker.
@@ -135,6 +135,26 @@ class Settings(BaseSettings):
     paper_maker_fair_value: bool = True
     # FX symbol for USDT-per-EUR (Binance/OKX style).
     paper_maker_fx_symbol: str = "EURUSDT"
+    # Book level for maker quotes (0=touch, 1=2nd level, ...).
+    paper_maker_book_level: int = Field(default=0, ge=0, le=10)
+    # Early taker hedge when one maker leg fills and mid moves against the rest.
+    paper_hybrid_hedge: bool = True
+    paper_hybrid_adverse_bps: float = Field(default=8.0, ge=0)
+    # EUR↔USDT triangle bridge strategy.
+    paper_triangle_enabled: bool = True
+    paper_triangle_bases: str = "BTC,ETH,ATOM,DOT,XRP"
+    # Percent of starting capital converted to USDT float on maker venues.
+    paper_seed_usdt_pct: float = Field(default=20.0, ge=0, le=50)
+    # Paper venue rebalance of quote cash (simulates withdraw/deposit).
+    paper_rebalance_enabled: bool = True
+    paper_rebalance_every_cycles: int = Field(default=120, ge=1)
+    paper_rebalance_fee_bps: float = Field(default=5.0, ge=0)
+    # Fee tier: retail | vip1 | vip2 | vip3 | rebate
+    paper_fee_tier: str = "retail"
+    # Markout-adaptive adverse haircut.
+    paper_markout_enabled: bool = True
+    paper_markout_floor_bps: float = Field(default=2.0, ge=0)
+    paper_markout_ceiling_bps: float = Field(default=15.0, ge=0)
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
         "http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004"

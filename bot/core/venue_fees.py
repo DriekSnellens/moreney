@@ -1,9 +1,4 @@
-"""Retail maker/taker fees used for both gating and paper fills.
-
-Paper execution must charge the same venue rates the strategy already uses
-to decide whether a route is NET-profitable. Otherwise the dashboard shows
-cheap paper wins that would not exist with real money.
-"""
+"""Venue fee tables with optional VIP / rebate tiers."""
 
 from __future__ import annotations
 
@@ -29,20 +24,54 @@ VENUE_MAKER_FEE: dict[str, Decimal] = {
     "bybit": Decimal("0.001"),
 }
 
+# Multipliers vs retail. vip3 ≈ high-volume; rebate = negative maker (rare retail).
+FEE_TIER_MULTIPLIER: dict[str, Decimal] = {
+    "retail": Decimal("1.0"),
+    "vip1": Decimal("0.85"),
+    "vip2": Decimal("0.70"),
+    "vip3": Decimal("0.55"),
+    "rebate": Decimal("0.0"),  # zero maker (optimistic floor; never negative in paper)
+}
+
 _DEFAULT = Decimal("0.001")
+_ACTIVE_TIER = "retail"
 
 
-def venue_taker_fee(exchange: str | None, *, fallback: Decimal | None = None) -> Decimal:
-    """Return the retail taker rate for ``exchange``, or ``fallback`` / 0.1%."""
+def set_fee_tier(tier: str | None) -> None:
+    """Process-wide fee tier used by venue_*_fee helpers."""
+    global _ACTIVE_TIER
+    key = str(tier or "retail").strip().lower()
+    _ACTIVE_TIER = key if key in FEE_TIER_MULTIPLIER else "retail"
+
+
+def get_fee_tier() -> str:
+    return _ACTIVE_TIER
+
+
+def _tier_mult(tier: str | None = None) -> Decimal:
+    key = str(tier or _ACTIVE_TIER).strip().lower()
+    return FEE_TIER_MULTIPLIER.get(key, Decimal("1.0"))
+
+
+def venue_taker_fee(
+    exchange: str | None,
+    *,
+    fallback: Decimal | None = None,
+    tier: str | None = None,
+) -> Decimal:
+    """Return the taker rate for ``exchange`` after fee-tier multiplier."""
     key = str(exchange or "").strip().lower()
-    if key in VENUE_TAKER_FEE:
-        return VENUE_TAKER_FEE[key]
-    return fallback if fallback is not None else _DEFAULT
+    base = VENUE_TAKER_FEE.get(key, fallback if fallback is not None else _DEFAULT)
+    return base * _tier_mult(tier)
 
 
-def venue_maker_fee(exchange: str | None, *, fallback: Decimal | None = None) -> Decimal:
-    """Return the retail maker rate for ``exchange``, or ``fallback`` / 0.1%."""
+def venue_maker_fee(
+    exchange: str | None,
+    *,
+    fallback: Decimal | None = None,
+    tier: str | None = None,
+) -> Decimal:
+    """Return the maker rate for ``exchange`` after fee-tier multiplier."""
     key = str(exchange or "").strip().lower()
-    if key in VENUE_MAKER_FEE:
-        return VENUE_MAKER_FEE[key]
-    return fallback if fallback is not None else _DEFAULT
+    base = VENUE_MAKER_FEE.get(key, fallback if fallback is not None else _DEFAULT)
+    return base * _tier_mult(tier)

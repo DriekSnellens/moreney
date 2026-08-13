@@ -247,9 +247,10 @@ class PaperPortfolio:
         return result
 
     def base_asset_for(self, symbol: str) -> str:
-        from bot.portfolio.accounting import _infer_base
+        from bot.portfolio.venue_ledger import infer_base_asset, infer_quote_asset
 
-        return _infer_base(symbol, self._quote)
+        quote = infer_quote_asset(symbol, self._quote)
+        return infer_base_asset(symbol, quote)
 
     def _update_unrealized(self) -> None:
         unrealized = _ZERO

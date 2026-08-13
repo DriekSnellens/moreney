@@ -117,7 +117,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Oefenhandel · live-inschatting</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Universe-scan + USDT fair-value filter, fee-first OKX/Binance/Bitvavo, adverse-selection in de gate. Winst = live-inschatting.</p>
+        <p class="sub">Desk-modus: maker + EUR↔USDT-bridge, markout, hybrid hedge, venue-rebalance. Winst = live-inschatting.</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
@@ -916,6 +916,8 @@ def _strategy_label(name: Any) -> str:
         "cross_exchange_arbitrage": "Koop goedkoop, verkoop duurder",
         "maker_inventory": "Maker: bied/laat vangen",
         "makerinventorystrategy": "Maker: bied/laat vangen",
+        "triangle_bridge": "EUR↔USDT bridge",
+        "desk_composite": "Desk (maker + triangle)",
         "momentum": "Meegaan met de beweging",
         "mean_reversion": "Terug naar het gemiddelde",
         "dca": "Periodiek bijkopen",
