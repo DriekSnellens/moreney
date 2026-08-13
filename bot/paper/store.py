@@ -153,6 +153,7 @@ class PaperTradingStore:
             )
             processed = {str(x) for x in (pdata.get("processed_fill_ids") or [])}
             portfolio.load_state(state, processed_fill_ids=processed)
+            portfolio.load_venue_ledger(pdata.get("venue_ledger"))
 
         starting = Decimal(str((raw.get("tracker") or {}).get("starting_equity", cfg.paper_starting_eur)))
         tracker = PerformanceTracker(starting_equity=starting)
@@ -209,7 +210,10 @@ def _portfolio_dict(portfolio: PaperPortfolio) -> dict[str, Any]:
         },
         "stats": state.stats.model_dump(mode="json"),
         "mark_prices": {k: str(v) for k, v in state.mark_prices.items()},
-        "processed_fill_ids": sorted(portfolio.accounting.processed_fill_ids),
+            "processed_fill_ids": sorted(portfolio.accounting.processed_fill_ids),
+            "venue_ledger": (
+                portfolio.venue_ledger.export() if portfolio.venue_ledger is not None else None
+            ),
     }
 
 

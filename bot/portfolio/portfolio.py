@@ -18,6 +18,7 @@ from bot.portfolio.models import (
     PortfolioStats,
     PositionState,
 )
+from bot.portfolio.venue_ledger import VenueLedger, infer_base_asset
 
 _ZERO = Decimal("0")
 
@@ -56,6 +57,7 @@ class PaperPortfolio:
             mark_prices={},
         )
         self._update_drawdown()
+        self.venue_ledger: VenueLedger | None = None
 
     @property
     def accounting(self) -> AccountingEngine:
@@ -107,6 +109,56 @@ class PaperPortfolio:
             open_position_count=len(positions),
             as_of=datetime.now(UTC),
         )
+
+    def init_venue_ledger(self, venues: list[str], *, starting_quote: Decimal | None = None) -> None:
+        start = starting_quote if starting_quote is not None else Decimal(str(self._settings.paper_starting_eur))
+        self.venue_ledger = VenueLedger(venues, quote=self._quote, starting_quote=start)
+
+    def load_venue_ledger(self, data: dict | None) -> None:
+        if not data:
+            self.venue_ledger = None
+            return
+        self.venue_ledger = VenueLedger.from_export(
+            data,
+            fallback_quote=self._quote,
+            fallback_start=Decimal(str(self._settings.paper_starting_eur)),
+        )
+
+    def maybe_seed_inventory(self, symbol: str, price: Decimal) -> None:
+        """Pre-fund base asset on every venue from quote cash (arb-desk inventory)."""
+        ledger = self.venue_ledger
+        if ledger is None or price <= 0:
+            return
+        pct = Decimal(str(getattr(self._settings, "paper_seed_inventory_pct", 0) or 0))
+        if pct <= 0:
+            return
+        base = infer_base_asset(symbol, self._quote)
+        quote = symbol.upper()
+        if not quote.endswith(self._quote):
+            return
+        moved = ledger.seed_asset(base, price=price, pct=pct)
+        if not moved:
+            return
+        total_qty = sum((qty for _, qty, _ in moved), _ZERO)
+        total_cost = sum((cost for _, _, cost in moved), _ZERO)
+        eur = self._state.balances.setdefault(
+            self._quote, AssetBalance(asset=self._quote, available=_ZERO, reserved=_ZERO)
+        )
+        take = min(total_cost, eur.available)
+        eur.available -= take
+        crypto = self._state.balances.setdefault(
+            base, AssetBalance(asset=base, available=_ZERO, reserved=_ZERO)
+        )
+        crypto.available += total_qty
+        pos = self._state.positions.setdefault(
+            symbol.upper(),
+            PositionState(symbol=symbol.upper(), quantity=_ZERO, average_entry_price=price),
+        )
+        pos.quantity += total_qty
+        pos.average_entry_price = price
+        self._state.mark_prices[symbol.upper()] = price
+        self._update_unrealized()
+        self._update_drawdown()
 
     def set_mark_price(self, symbol: str, price: Decimal) -> None:
         self._state.mark_prices[symbol.upper()] = price

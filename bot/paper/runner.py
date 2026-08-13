@@ -76,6 +76,8 @@ class PaperRunner:
             self._errors = []
             self._accumulated_runtime = 0.0
 
+        self._configure_venue_inventory()
+
         self._executor = PaperExecutor(settings, portfolio=self._portfolio)
         self._strategy = CrossExchangeArbitrageStrategy(settings)
         self._profitability = DefaultProfitabilityEngine(settings)
@@ -100,6 +102,21 @@ class PaperRunner:
             if s.strip()
         ]
         self._interval = max(0.05, settings.paper_cycle_interval_ms / 1000.0)
+
+    def _configure_venue_inventory(self) -> None:
+        if not self._settings.paper_venue_inventory:
+            return
+        if self._portfolio.venue_ledger is not None:
+            return
+        venues = [
+            part.strip()
+            for part in self._settings.market_data_exchanges.split(",")
+            if part.strip()
+        ]
+        self._portfolio.init_venue_ledger(
+            venues,
+            starting_quote=Decimal(str(self._settings.paper_starting_eur)),
+        )
 
     # ------------------------------------------------------------------
     # Properties
@@ -199,6 +216,7 @@ class PaperRunner:
         self._store.clear()
         self._portfolio = PaperPortfolio(self._settings, starting_eur=starting)
         self._tracker = PerformanceTracker(starting_equity=starting)
+        self._configure_venue_inventory()
         self._executor = PaperExecutor(self._settings, portfolio=self._portfolio)
         self._engine = TradingEngine(
             market_data=self._provider,

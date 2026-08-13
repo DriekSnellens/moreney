@@ -85,18 +85,32 @@ class TradingEngine:
         """Run a single evaluation cycle for ``symbol``."""
         result = TradeCycleResult(symbol=symbol.upper())
         venue_snapshots, primary = await self._load_snapshots(symbol)
+        paper = self.paper_portfolio
+        if paper is not None:
+            for snap in venue_snapshots or ([primary] if primary is not None else []):
+                px = getattr(snap, "last", None) or getattr(snap, "bid", None) or getattr(snap, "ask", None)
+                if px:
+                    paper.maybe_seed_inventory(getattr(snap, "symbol", symbol), px)
+                    paper.set_mark_price(getattr(snap, "symbol", symbol), px)
         portfolio = await self._portfolio.get_snapshot()
         portfolio_equity = portfolio.equity_usd
 
         if venue_snapshots:
             evaluate_markets = getattr(self._strategy, "evaluate_markets", None)
             if callable(evaluate_markets):
+                kwargs: dict[str, Any] = {"equity": portfolio_equity}
+                paper = self.paper_portfolio
+                if paper is not None and paper.venue_ledger is not None:
+                    kwargs["inventory"] = paper.venue_ledger
                 try:
-                    opportunities = await evaluate_markets(
-                        venue_snapshots, equity=portfolio_equity
-                    )
+                    opportunities = await evaluate_markets(venue_snapshots, **kwargs)
                 except TypeError:
-                    opportunities = await evaluate_markets(venue_snapshots)
+                    try:
+                        opportunities = await evaluate_markets(
+                            venue_snapshots, equity=portfolio_equity
+                        )
+                    except TypeError:
+                        opportunities = await evaluate_markets(venue_snapshots)
             else:
                 opportunities = await self._strategy.evaluate(primary)
         else:
@@ -277,6 +291,7 @@ class TradingEngine:
         cycle_result: TradeCycleResult | None = None,
     ) -> ExecutionResult:
         qty = decision.max_allowed_quantity or decision.position_size_allowed or opportunity.quantity
+        is_arb = opportunity.strategy_name == "cross_exchange_arbitrage"
         buy_order = OrderRequest(
             opportunity_id=opportunity.id,
             symbol=opportunity.symbol,
@@ -287,6 +302,7 @@ class TradingEngine:
                 "strategy": opportunity.strategy_name,
                 "real_exchange_order": False,
                 "leg": "buy",
+                "arb_leg": is_arb,
                 "venue": str(opportunity.metadata.get("buy_exchange") or ""),
             },
         )
@@ -345,7 +361,7 @@ class TradingEngine:
         venue_snapshots: list[Any],
         snapshot_book: Any = None,
     ) -> ExecutionResult:
-        """Simulate the sell leg on the sell venue using synchronized bids."""
+        """Simulate the sell leg on the sell venue using a post-latency book."""
         sell_exchange = str(opportunity.metadata.get("sell_exchange") or "")
         sell_price = opportunity.expected_exit_price
         if sell_price is None:
@@ -362,6 +378,7 @@ class TradingEngine:
                 "strategy": opportunity.strategy_name,
                 "real_exchange_order": False,
                 "leg": "sell",
+                "arb_leg": True,
                 "venue": sell_exchange,
                 "buy_order_id": str(buy_result.order_id),
             },
@@ -372,6 +389,7 @@ class TradingEngine:
             snapshot_book,
             exchange_key="sell_exchange",
         )
+        sell_book = _apply_second_leg_adverse(sell_book, self._second_leg_adverse_bps())
         if isinstance(self._executor, (PaperExecutor, ExecutionService)):
             return await self._executor.execute(
                 sell_order,
@@ -380,6 +398,14 @@ class TradingEngine:
                 order_type=OrderType.LIMIT,
             )
         return await self._executor.execute(sell_order)
+
+    def _second_leg_adverse_bps(self) -> Decimal:
+        settings = getattr(self._executor, "_settings", None) or getattr(
+            self._portfolio, "_settings", None
+        )
+        if settings is None:
+            return Decimal("0")
+        return Decimal(str(getattr(settings, "paper_second_leg_adverse_bps", 0) or 0))
 
     def _collect_order_fill(self, result: TradeCycleResult, execution: ExecutionResult) -> None:
         executor = self._executor
@@ -406,3 +432,19 @@ def _fee_rate(metadata: dict[str, Any] | None, key: str) -> Decimal | None:
         return Decimal(str(metadata[key]))
     except Exception:
         return None
+
+
+def _apply_second_leg_adverse(book: Any, bps: Decimal) -> Any:
+    """Worsen sell-side bids to model the book moving during order latency."""
+    if book is None or bps <= 0:
+        return book
+    frac = Decimal("1") - (bps / Decimal("10000"))
+    if frac <= 0:
+        return book
+    bids = getattr(book, "bids", None)
+    if not bids:
+        return book
+    shifted = []
+    for level in bids:
+        shifted.append(level.model_copy(update={"price": level.price * frac}))
+    return book.model_copy(update={"bids": shifted})

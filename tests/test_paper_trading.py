@@ -44,6 +44,8 @@ def _paper_settings(tmp_path: Path) -> Settings:
         paper_persist_path=str(tmp_path / "paper_state.json"),
         paper_cycle_interval_ms=50.0,
         paper_simulated_latency_ms=0.0,
+        paper_venue_inventory=False,
+        paper_second_leg_adverse_bps=0.0,
         paper_fee_rate=0.0001,
         paper_slippage_mode="order_book",
         market_data_exchanges="binance,kraken",

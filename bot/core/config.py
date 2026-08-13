@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     paper_quote_asset: str = "EUR"
     paper_cycle_interval_ms: float = Field(default=1000.0, gt=0)
     paper_persist_path: str = "./data/paper_state.json"
+    # Track cash/crypto per exchange so paper arb cannot teleport coins.
+    paper_venue_inventory: bool = False
+    # Convert this % of each venue's quote into BTC/ETH at first mark (arb-desk float).
+    paper_seed_inventory_pct: float = Field(default=0.0, ge=0, le=90)
+    # Extra adverse move applied to the sell book after the buy lands (basis points).
+    paper_second_leg_adverse_bps: float = Field(default=0.0, ge=0)
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
         "http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004"

@@ -92,9 +92,9 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · winst alsof het echt geld is</p>
+        <p class="eyebrow">Oefenhandel · zo echt mogelijk gesimuleerd</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Echte beurskosten, alleen afgeronde koop én verkoop. Voorraad telt niet als winst.</p>
+        <p class="sub">Winst na echte beurskosten, saldo per beurs (geen teleport), tweede been na latency. Alleen afgeronde koop én verkoop.</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>

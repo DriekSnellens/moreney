@@ -134,6 +134,14 @@ class PaperExecutor(BaseExecutor):
         # Limit price check for limit buys/sells against book/top
         if order.order_type == OrderType.LIMIT and order.requested_price is not None:
             if not self._limit_is_marketable(order, order_book):
+                if (order.metadata or {}).get("arb_leg"):
+                    self._portfolio.release_reservation(reserve_asset, reserve_amount)
+                    return self._reject(
+                        order,
+                        order_request,
+                        reason="NOT_MARKETABLE",
+                        message="Arb leg missed — book moved before the order landed",
+                    )
                 # Leave resting as OPEN (paper: no matching engine loop) —
                 # treat as accepted but unfilled until cancel or later fill.
                 result = ExecutionResult(
@@ -202,6 +210,7 @@ class PaperExecutor(BaseExecutor):
         )
         self._orders.attach_fill(order.id, fill)
         self._fills.apply(order, fill)
+        self._apply_venue_ledger(order, filled_qty, vwap, fee)
 
         # Mark price for unrealized PnL
         self._portfolio.set_mark_price(order.symbol, vwap)
@@ -306,10 +315,12 @@ class PaperExecutor(BaseExecutor):
                 return True, self._quote, _ZERO
             amount = order.requested_quantity * price * (Decimal("1") + self._fee_rate_for(order))
             ok = self._portfolio.available(self._quote) >= amount
+            ok = ok and self._venue_can_buy(order, amount)
             return ok, self._quote, amount if ok else amount
         base = self._portfolio.base_asset_for(order.symbol)
         amount = order.requested_quantity
         ok = self._portfolio.available(base) >= amount
+        ok = ok and self._venue_can_sell(order, base, amount)
         return ok, base, amount if ok else amount
 
     def _adjust_reservation_after_fill(
@@ -424,6 +435,8 @@ class PaperExecutor(BaseExecutor):
             return None
 
         if remaining > 0:
+            if (order.metadata or {}).get("arb_leg"):
+                return None
             if self._reject_thin and not self._partial_ok:
                 return None
             if not self._partial_ok:
@@ -438,6 +451,39 @@ class PaperExecutor(BaseExecutor):
     def _fee_rate_for(self, order: Order) -> Decimal:
         venue = str((order.metadata or {}).get("venue") or "")
         return venue_taker_fee(venue, fallback=self._fee_rate)
+
+    def _venue_can_buy(self, order: Order, quote_needed: Decimal) -> bool:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return True
+        return ledger.available(venue, self._quote) >= quote_needed
+
+    def _venue_can_sell(self, order: Order, base: str, quantity: Decimal) -> bool:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return True
+        return ledger.can_sell(venue, base, quantity)
+
+    def _apply_venue_ledger(
+        self, order: Order, filled_qty: Decimal, vwap: Decimal, fee: Decimal
+    ) -> None:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return
+        from bot.portfolio.venue_ledger import infer_base_asset
+
+        base = infer_base_asset(order.symbol, self._quote)
+        if order.side == OrderSide.BUY:
+            ledger.apply_buy(
+                venue, base=base, quantity=filled_qty, quote_spent=filled_qty * vwap + fee
+            )
+        else:
+            ledger.apply_sell(
+                venue, base=base, quantity=filled_qty, quote_received=filled_qty * vwap - fee
+            )
 
     def _is_adverse_slippage(self, order: Order, vwap: Decimal) -> bool:
         """Reject order-book fills that would be untradeable live due to price impact."""

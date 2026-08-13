@@ -20,6 +20,7 @@ from bot.core.exchange_types import OrderBook, OrderBookLevel
 from bot.core.interfaces import ProfitabilityEngine
 from bot.core.models import MarketSnapshot, TradeOpportunity
 from bot.core.venue_fees import venue_taker_fee
+from bot.portfolio.venue_ledger import infer_base_asset
 from bot.profitability.engine import DefaultProfitabilityEngine
 from bot.strategies.base import BaseStrategy
 
@@ -122,6 +123,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         snapshots: Sequence[MarketSnapshot],
         *,
         equity: Decimal | None = None,
+        inventory: object = None,
     ) -> list[TradeOpportunity]:
         by_symbol = self._group_valid_snapshots(snapshots)
         opportunities: list[TradeOpportunity] = []
@@ -134,7 +136,11 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                     f"Need at least 2 exchange books, got {len(venues)}",
                 )
                 continue
-            opportunities.extend(await self._evaluate_symbol(symbol, venues, equity=equity))
+            opportunities.extend(
+                await self._evaluate_symbol(
+                    symbol, venues, equity=equity, inventory=inventory
+                )
+            )
 
         return opportunities
 
@@ -144,6 +150,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         venues: list[MarketSnapshot],
         *,
         equity: Decimal | None = None,
+        inventory: object = None,
     ) -> list[TradeOpportunity]:
         ranked: list[TradeOpportunity] = []
         for buy_snap in venues:
@@ -151,7 +158,9 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 if buy_snap.exchange == sell_snap.exchange:
                     continue
                 self._pairs_evaluated += 1
-                candidate = self._build_candidate(buy_snap, sell_snap, equity=equity)
+                candidate = self._build_candidate(
+                    buy_snap, sell_snap, equity=equity, inventory=inventory
+                )
                 if candidate is None:
                     continue
                 self._depth_edges_found += 1
@@ -261,6 +270,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         sell_snap: MarketSnapshot,
         *,
         equity: Decimal | None = None,
+        inventory: object = None,
     ) -> ArbitrageCandidate | None:
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
@@ -277,6 +287,12 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             if ref_ask > 0:
                 quantity_cap = min(quantity_cap, max_notional / ref_ask)
         quantity = min(buy_depth, sell_depth, quantity_cap)
+        quantity = self._cap_to_inventory(
+            quantity,
+            buy_snap=buy_snap,
+            sell_snap=sell_snap,
+            inventory=inventory,
+        )
         if quantity < self._min_liquidity:
             self._reject(
                 buy_snap.symbol,
@@ -334,6 +350,41 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             buy_snapshot=buy_snap,
             sell_snapshot=sell_snap,
         )
+
+    def _cap_to_inventory(
+        self,
+        quantity: Decimal,
+        *,
+        buy_snap: MarketSnapshot,
+        sell_snap: MarketSnapshot,
+        inventory: object,
+    ) -> Decimal:
+        if inventory is None or quantity <= 0:
+            return quantity
+        available = getattr(inventory, "available", None)
+        if not callable(available):
+            return quantity
+        quote = self._settings.paper_quote_asset.upper()
+        base = infer_base_asset(buy_snap.symbol, quote)
+        ask = buy_snap.order_book.asks[0].price if buy_snap.order_book and buy_snap.order_book.asks else _ZERO
+        buy_fee = Decimal("1") + venue_taker_fee(buy_snap.exchange)
+        quote_cash = available(buy_snap.exchange, quote)
+        sell_coins = available(sell_snap.exchange, base)
+        max_buy = quote_cash / (ask * buy_fee) if ask > 0 else _ZERO
+        capped = min(quantity, max_buy, sell_coins)
+        if capped < quantity:
+            self._reject(
+                buy_snap.symbol,
+                "venue_inventory",
+                (
+                    f"Size capped by per-exchange balances "
+                    f"(buy_{quote}={quote_cash} on {buy_snap.exchange}, "
+                    f"sell_{base}={sell_coins} on {sell_snap.exchange})"
+                ),
+                buy_exchange=buy_snap.exchange,
+                sell_exchange=sell_snap.exchange,
+            )
+        return capped
 
     async def _gate_candidate(
         self,
