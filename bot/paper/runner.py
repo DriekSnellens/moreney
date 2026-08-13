@@ -467,6 +467,16 @@ class PaperRunner:
                 "Gebaseerd op trade-through fills, maker-fees, max 30 bps edge, "
                 "eenzijdige fills afgesloten als taker. Geen garantie."
             )
+        elif snap.trade_count == 0 and runtime >= 120:
+            confidence = "medium"
+            note = (
+                "Geen live-haalbare maker-deals gevonden: retail-fees (≈16–30 bps "
+                "heen-en-weer) eten de echte edges op publieke EUR-boeken. "
+                "Verwachte winst met echt geld ≈ €0 tot licht negatief."
+            )
+            per_hour = Decimal("0")
+            per_day = Decimal("0")
+            day_ret = Decimal("0")
         elif snap.trade_count >= 5 and runtime >= 600:
             confidence = "low"
             note = "Nog weinig data; richtinggevende live-inschatting."
@@ -490,15 +500,6 @@ class PaperRunner:
                 "Eén been gevuld → tegengestelde exit met taker + 6 bps adverse",
             ],
         }
-
-
-def _dec_str(value: Decimal) -> str:
-    """Stable decimal string for dashboards (no 0E+30 surprises)."""
-    quantized = value.quantize(Decimal("0.0001"))
-    text = format(quantized, "f")
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return text or "0"
 
     def _open_maker_quote_count(self) -> int:
         manager = self._executor.order_manager
@@ -631,3 +632,12 @@ def _dec_str(value: Decimal) -> str:
                 exits.append(result)
         if exits:
             self._ingest_delayed_fills(exits)
+
+
+def _dec_str(value: Decimal) -> str:
+    """Stable decimal string for dashboards (no 0E+30 surprises)."""
+    quantized = value.quantize(Decimal("0.0001"))
+    text = format(quantized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
