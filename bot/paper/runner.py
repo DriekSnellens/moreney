@@ -475,10 +475,10 @@ class PaperRunner:
             note = "Te vroeg voor een stabiele voorspelling; model is wel live-conservatief."
         return {
             "label": "Live-inschatting (haalbaar met echt geld)",
-            "realized_live_eur": str(net),
-            "projected_per_hour_eur": str(per_hour),
-            "projected_per_day_eur": str(per_day),
-            "projected_day_return_pct": str(day_ret),
+            "realized_live_eur": _dec_str(net),
+            "projected_per_hour_eur": _dec_str(per_hour),
+            "projected_per_day_eur": _dec_str(per_day),
+            "projected_day_return_pct": _dec_str(day_ret),
             "confidence": confidence,
             "note": note,
             "runtime_seconds": runtime,
@@ -490,6 +490,15 @@ class PaperRunner:
                 "Eén been gevuld → tegengestelde exit met taker + 6 bps adverse",
             ],
         }
+
+
+def _dec_str(value: Decimal) -> str:
+    """Stable decimal string for dashboards (no 0E+30 surprises)."""
+    quantized = value.quantize(Decimal("0.0001"))
+    text = format(quantized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
 
     def _open_maker_quote_count(self) -> int:
         manager = self._executor.order_manager
