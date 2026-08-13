@@ -99,9 +99,9 @@ class Settings(BaseSettings):
     # Total % of starting capital reserved for ALL seeded base inventory combined.
     paper_seed_inventory_pct: float = Field(default=0.0, ge=0, le=90)
     # Cap how many bases get pre-funded (scan can still cover more symbols).
-    paper_seed_max_assets: int = Field(default=5, ge=0, le=50)
+    paper_seed_max_assets: int = Field(default=3, ge=0, le=50)
     # Optional allowlist of symbols to seed (empty = first max_assets from market data).
-    paper_seed_symbols: str = "ATOMEUR,DOTEUR,SOLEUR,XRPEUR,ADAEUR"
+    paper_seed_symbols: str = "ATOMEUR,DOTEUR,XRPEUR"
     # Extra adverse move applied to the sell book after the buy lands (basis points).
     paper_second_leg_adverse_bps: float = Field(default=0.0, ge=0)
     # Maker (post-only) quoting: capture bid/ask instead of paying taker-taker.
@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     paper_maker_min_spread_bps: float = Field(default=3.0, ge=0)
     # Gross edge above this is treated as stale/public-feed dislocation, not tradable.
     paper_maker_max_edge_bps: float = Field(default=30.0, ge=0)
-    paper_maker_min_profit_eur: float = Field(default=0.01, ge=0)
+    paper_maker_min_profit_eur: float = Field(default=0.001, ge=0)
     # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
     paper_maker_same_venue: bool = True
     paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=20)
