@@ -20,6 +20,7 @@ import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from bot.core.config import Settings
 from bot.core.enums import ExecutionMode, KillSwitchState, OrderStatus
@@ -314,13 +315,19 @@ class PaperRunner:
         # Map profitability / risk by opportunity id
         profit_by_id = {p.opportunity_id: p for p in result.profitability}
         risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
-        exec_by_opp = {e.opportunity_id: e for e in result.executions}
+        exec_by_opp: dict[UUID, list[ExecutionResult]] = {}
+        for execution in result.executions:
+            exec_by_opp.setdefault(execution.opportunity_id, []).append(execution)
         orders_by_opp = {
             o.opportunity_id: o for o in result.orders if o.opportunity_id is not None
         }
-        fills_by_order = {}
-        for fill in result.fills:
-            fills_by_order.setdefault(fill.order_id, []).append(fill)
+        fills_by_opp: dict[UUID, list] = {}
+        for order in result.orders:
+            if order.opportunity_id is None:
+                continue
+            for fill in result.fills:
+                if fill.order_id == order.id:
+                    fills_by_opp.setdefault(order.opportunity_id, []).append(fill)
 
         for opportunity in result.opportunities:
             profit = profit_by_id.get(opportunity.id)
@@ -328,11 +335,15 @@ class PaperRunner:
             decision = risk_by_id.get(opportunity.id)
             if decision is not None:
                 self._tracker.record_risk(opportunity.id, decision)
-            execution = exec_by_opp.get(opportunity.id)
-            if execution is not None:
-                order = orders_by_opp.get(opportunity.id)
-                fills = fills_by_order.get(execution.order_id, [])
-                if order is not None:
+            executions = exec_by_opp.get(opportunity.id) or []
+            if executions:
+                # Primary execution is the buy leg (first); all legs share opportunity fills.
+                execution = executions[0]
+                opp_orders = [
+                    o for o in result.orders if o.opportunity_id == opportunity.id
+                ]
+                fills = fills_by_opp.get(opportunity.id, [])
+                for order in opp_orders:
                     self._store.save_order(order)
                 for fill in fills:
                     self._store.save_fill(fill)
@@ -340,7 +351,7 @@ class PaperRunner:
                 self._tracker.record_execution(
                     opportunity.id,
                     execution,
-                    orders=[order] if order else None,
+                    orders=opp_orders or None,
                     fills=fills,
                     equity_before=equity_before,
                     equity_after=equity_after,

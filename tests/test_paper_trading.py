@@ -164,7 +164,7 @@ def test_performance_tracker_profitable_fill() -> None:
     )
     from bot.core.enums import OrderSide
 
-    order = Order(
+    buy_order = Order(
         id=uuid4(),
         strategy="cross_exchange_arbitrage",
         symbol="BTCEUR",
@@ -172,8 +172,16 @@ def test_performance_tracker_profitable_fill() -> None:
         requested_quantity=Decimal("0.01"),
         opportunity_id=opp_id,
     )
-    fill = Fill(
-        order_id=order.id,
+    sell_order = Order(
+        id=uuid4(),
+        strategy="cross_exchange_arbitrage",
+        symbol="BTCEUR",
+        side=OrderSide.SELL,
+        requested_quantity=Decimal("0.01"),
+        opportunity_id=opp_id,
+    )
+    buy_fill = Fill(
+        order_id=buy_order.id,
         symbol="BTCEUR",
         side=OrderSide.BUY,
         quantity=Decimal("0.01"),
@@ -181,8 +189,17 @@ def test_performance_tracker_profitable_fill() -> None:
         fee=Decimal("0.1"),
         slippage=Decimal("0.05"),
     )
+    sell_fill = Fill(
+        order_id=sell_order.id,
+        symbol="BTCEUR",
+        side=OrderSide.SELL,
+        quantity=Decimal("0.01"),
+        price=Decimal("101000"),
+        fee=Decimal("0.1"),
+        slippage=Decimal("0.05"),
+    )
     execution = ExecutionResult(
-        order_id=order.id,
+        order_id=buy_order.id,
         opportunity_id=opp_id,
         status=OrderStatus.FILLED,
         filled_quantity=Decimal("0.01"),
@@ -192,22 +209,81 @@ def test_performance_tracker_profitable_fill() -> None:
     tracker.record_execution(
         opp_id,
         execution,
-        orders=[order],
-        fills=[fill],
+        orders=[buy_order, sell_order],
+        fills=[buy_fill, sell_fill],
         equity_before=Decimal("200"),
         equity_after=Decimal("209"),
     )
     tracked = tracker.opportunities()[0]
-    assert tracked.status in {
-        OpportunityLifecycleStatus.PROFITABLE,
-        OpportunityLifecycleStatus.UNPROFITABLE,
-        OpportunityLifecycleStatus.FILLED,
-    }
+    assert tracked.status == OpportunityLifecycleStatus.PROFITABLE
     assert tracked.realized_net_profit is not None
+    assert tracked.realized_net_profit > 0
     snap = tracker.snapshot()
     assert snap.executed_opportunities == 1
     assert snap.trade_count == 1
     assert snap.approved_opportunities == 1
+
+
+def test_performance_tracker_incomplete_arb_not_counted_as_trade() -> None:
+    tracker = PerformanceTracker(starting_equity=Decimal("200"))
+    opp_id = uuid4()
+    opp = TradeOpportunity(
+        id=opp_id,
+        strategy_name="cross_exchange_arbitrage",
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("0.01"),
+        entry_price=Decimal("100000"),
+        metadata={
+            "buy_exchange": "binance",
+            "sell_exchange": "kraken",
+            "sell_vwap": "101000",
+        },
+    )
+    tracker.record_detected(opp, None)
+    tracker.record_risk(
+        opp_id,
+        RiskDecision(opportunity_id=opp_id, status=RiskDecisionStatus.APPROVED),
+    )
+    from bot.core.enums import OrderSide
+
+    buy_order = Order(
+        id=uuid4(),
+        strategy="cross_exchange_arbitrage",
+        symbol="BTCEUR",
+        side=OrderSide.BUY,
+        requested_quantity=Decimal("0.01"),
+        opportunity_id=opp_id,
+    )
+    buy_fill = Fill(
+        order_id=buy_order.id,
+        symbol="BTCEUR",
+        side=OrderSide.BUY,
+        quantity=Decimal("0.01"),
+        price=Decimal("100000"),
+        fee=Decimal("0.1"),
+        slippage=Decimal("0.05"),
+    )
+    execution = ExecutionResult(
+        order_id=buy_order.id,
+        opportunity_id=opp_id,
+        status=OrderStatus.FILLED,
+        filled_quantity=Decimal("0.01"),
+        average_price=Decimal("100000"),
+        fees_usd=Decimal("0.1"),
+    )
+    tracker.record_execution(
+        opp_id,
+        execution,
+        orders=[buy_order],
+        fills=[buy_fill],
+        equity_before=Decimal("200"),
+        equity_after=Decimal("199"),
+    )
+    tracked = tracker.opportunities()[0]
+    assert tracked.status == OpportunityLifecycleStatus.EXECUTED
+    assert tracked.realized_net_profit is None
+    assert tracker.snapshot().trade_count == 0
 
 
 @pytest.mark.asyncio

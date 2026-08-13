@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from bot.core.enums import OpportunityLifecycleStatus, OrderStatus
+from bot.core.enums import OpportunityLifecycleStatus, OrderSide, OrderStatus
 from bot.core.models import (
     ExecutionResult,
     ProfitabilityResult,
@@ -209,15 +209,20 @@ class PerformanceTracker:
         self._slippage += fill_slip
         self._trading_volume += fill_volume
 
-        # Paper realized estimate for arb: use fill cost vs sell VWAP when present.
+        # Realized PnL requires a completed round-trip (buy + sell fills).
         realized = self._estimate_realized(tracked, execution, fills or [])
         if equity_before is not None and equity_after is not None and realized is None:
-            realized = equity_after - equity_before
+            # Only use equity delta when not cross-exchange arb (no sell leg expected).
+            if not tracked.sell_exchange:
+                realized = equity_after - equity_before
 
         tracked.status = OpportunityLifecycleStatus.FILLED
         if realized is not None:
             tracked.realized_net_profit = realized
             self._register_trade(tracked, realized)
+        elif tracked.sell_exchange:
+            # Buy leg filled but round-trip incomplete — inventory risk, not locked profit.
+            tracked.status = OpportunityLifecycleStatus.EXECUTED
 
         return tracked
 
@@ -227,21 +232,43 @@ class PerformanceTracker:
         execution: ExecutionResult,
         fills: list[Fill],
     ) -> Decimal | None:
-        sell_vwap = tracked.metadata.get("sell_vwap") or tracked.metadata.get("sell_price")
-        if sell_vwap is None or not fills:
-            if tracked.expected_net_profit != 0 and execution.status == OrderStatus.FILLED:
-                # Conservative: attribute expected NET only when fully filled and no better
-                # mark is available — still derived from profitability, not fabricated.
+        if not fills:
+            return None
+
+        buy_fills = [f for f in fills if f.side == OrderSide.BUY]
+        sell_fills = [f for f in fills if f.side == OrderSide.SELL]
+
+        if buy_fills and sell_fills:
+            buy_cost = sum(
+                (f.quantity * f.price + f.fee + f.slippage for f in buy_fills),
+                _ZERO,
+            )
+            sell_proceeds = sum(
+                (f.quantity * f.price - f.fee - f.slippage for f in sell_fills),
+                _ZERO,
+            )
+            matched_qty = min(
+                sum((f.quantity for f in buy_fills), _ZERO),
+                sum((f.quantity for f in sell_fills), _ZERO),
+            )
+            if matched_qty <= 0:
                 return None
+            return sell_proceeds - buy_cost
+
+        # Cross-exchange arb without a sell fill is not a completed trade.
+        if tracked.sell_exchange:
+            return None
+
+        # Non-arb strategies: single-leg realized from equity or expected path.
+        sell_vwap = tracked.metadata.get("sell_vwap") or tracked.metadata.get("sell_price")
+        if sell_vwap is None:
             return None
         qty = sum((f.quantity for f in fills), _ZERO)
         if qty <= 0:
             return None
-        buy_cost = sum((f.quantity * f.price for f in fills), _ZERO)
-        fees = sum((f.fee for f in fills), _ZERO)
-        slip = sum((f.slippage for f in fills), _ZERO)
+        buy_cost = sum((f.quantity * f.price + f.fee + f.slippage for f in fills), _ZERO)
         sell_proceeds = _d(sell_vwap) * qty
-        return sell_proceeds - buy_cost - fees - slip
+        return sell_proceeds - buy_cost
 
     def _register_trade(self, tracked: TrackedOpportunity, realized: Decimal) -> None:
         self._trade_pnls.append(realized)

@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bot.core.config import Settings
-from bot.core.enums import ExecutionMode, OrderStatus
+from bot.core.enums import ExecutionMode, OrderSide, OrderStatus
 from bot.engine.orchestrator import TradingEngine
 from bot.execution.paper_executor import PaperExecutor
 from bot.main import app, get_market_data_service, reset_risk_singletons, set_last_paper_cycle
@@ -135,15 +135,20 @@ async def test_cross_exchange_paper_pipeline_binance_kraken() -> None:
     assert len(result.risk_decisions) >= 1
     assert result.risk_decisions[0].approved is True
 
-    assert len(result.executions) >= 1
+    assert len(result.executions) >= 2
     assert result.executions[0].status == OrderStatus.FILLED
     assert result.executions[0].metadata.get("real_exchange_order") is False
-    assert len(result.fills) >= 1
-    assert len(result.orders) >= 1
+    assert result.executions[1].status == OrderStatus.FILLED
+    assert len(result.fills) >= 2
+    assert any(f.side == OrderSide.BUY for f in result.fills)
+    assert any(f.side == OrderSide.SELL for f in result.fills)
+    assert len(result.orders) >= 2
 
-    assert portfolio.available("BTC") > starting_btc
-    assert portfolio.available("EUR") < starting_eur
+    # Round-trip arb: BTC inventory returns to start; EUR rises net of fees.
+    assert portfolio.available("BTC") == starting_btc
+    assert portfolio.available("EUR") > starting_eur
     assert result.portfolio_equity is not None
+    assert result.portfolio_equity > Decimal("200000")
 
     # 9: expose through API
     cycle_payload = {

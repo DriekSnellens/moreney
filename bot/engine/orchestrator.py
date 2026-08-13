@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from bot.core.enums import OrderStatus, OrderType, RiskDecisionStatus
+from bot.core.enums import OpportunitySide, OrderStatus, OrderType, RiskDecisionStatus
 from bot.core.exceptions import RiskRejectedError
 from bot.core.interfaces import (
     Executor,
@@ -118,7 +118,12 @@ class TradingEngine:
 
             buy_book = self._resolve_execution_book(opportunity, venue_snapshots, primary)
             execution = await self._execute_opportunity(
-                opportunity, decision, snapshot_book=primary, order_book=buy_book
+                opportunity,
+                decision,
+                snapshot_book=primary,
+                order_book=buy_book,
+                venue_snapshots=venue_snapshots,
+                cycle_result=result,
             )
             result.executions.append(execution)
             self._collect_order_fill(result, execution)
@@ -209,21 +214,25 @@ class TradingEngine:
         opportunity: TradeOpportunity,
         venue_snapshots: list[Any],
         primary: Any,
+        *,
+        exchange_key: str = "buy_exchange",
     ) -> Any:
-        """Prefer buy-venue synchronized book for paper fills (real liquidity)."""
-        buy_ex = opportunity.metadata.get("buy_exchange")
-        if buy_ex:
+        """Resolve synchronized order book for a venue (buy or sell leg)."""
+        venue = opportunity.metadata.get(exchange_key)
+        if venue:
             getter = getattr(self._market_data, "get_order_book", None)
             if callable(getter):
-                book = getter(str(buy_ex), opportunity.symbol)
+                book = getter(str(venue), opportunity.symbol)
                 if book is not None:
                     return book
             for snap in venue_snapshots:
-                if getattr(snap, "exchange", None) == buy_ex and snap.order_book:
+                if getattr(snap, "exchange", None) == venue and snap.order_book:
                     return snap.order_book
-        if opportunity.market is not None and opportunity.market.order_book is not None:
-            return opportunity.market.order_book
-        return getattr(primary, "order_book", None)
+        if exchange_key == "buy_exchange":
+            if opportunity.market is not None and opportunity.market.order_book is not None:
+                return opportunity.market.order_book
+            return getattr(primary, "order_book", None)
+        return None
 
     async def execute_approved(
         self,
@@ -239,7 +248,13 @@ class TradingEngine:
             raise RiskRejectedError("Risk decision does not match opportunity")
 
         book = opportunity.market.order_book if opportunity.market else None
-        return await self._execute_opportunity(opportunity, decision, snapshot_book=None, order_book=book)
+        return await self._execute_opportunity(
+            opportunity,
+            decision,
+            snapshot_book=None,
+            order_book=book,
+            venue_snapshots=[],
+        )
 
     async def _execute_opportunity(
         self,
@@ -248,9 +263,11 @@ class TradingEngine:
         *,
         snapshot_book: Any = None,
         order_book: Any = None,
+        venue_snapshots: list[Any] | None = None,
+        cycle_result: TradeCycleResult | None = None,
     ) -> ExecutionResult:
         qty = decision.max_allowed_quantity or decision.position_size_allowed or opportunity.quantity
-        order = OrderRequest(
+        buy_order = OrderRequest(
             opportunity_id=opportunity.id,
             symbol=opportunity.symbol,
             side=opportunity.side,
@@ -259,6 +276,8 @@ class TradingEngine:
             metadata={
                 "strategy": opportunity.strategy_name,
                 "real_exchange_order": False,
+                "leg": "buy",
+                "venue": str(opportunity.metadata.get("buy_exchange") or ""),
             },
         )
         book = order_book
@@ -268,13 +287,89 @@ class TradingEngine:
             book = getattr(snapshot_book, "order_book", None)
 
         if isinstance(self._executor, (PaperExecutor, ExecutionService)):
-            return await self._executor.execute(
-                order,
+            buy_result = await self._executor.execute(
+                buy_order,
                 order_book=book,
                 strategy=opportunity.strategy_name,
                 order_type=OrderType.LIMIT,
             )
-        return await self._executor.execute(order)
+        else:
+            buy_result = await self._executor.execute(buy_order)
+
+        if self._should_execute_arb_sell_leg(opportunity, buy_result):
+            sell_result = await self._execute_arb_sell_leg(
+                opportunity,
+                buy_result,
+                venue_snapshots=venue_snapshots or [],
+                snapshot_book=snapshot_book,
+            )
+            buy_result.metadata["sell_leg"] = {
+                "order_id": str(sell_result.order_id),
+                "status": sell_result.status.value,
+                "filled_quantity": str(sell_result.filled_quantity),
+            }
+            if cycle_result is not None:
+                cycle_result.executions.append(sell_result)
+                self._collect_order_fill(cycle_result, sell_result)
+
+        return buy_result
+
+    @staticmethod
+    def _should_execute_arb_sell_leg(
+        opportunity: TradeOpportunity,
+        buy_result: ExecutionResult,
+    ) -> bool:
+        if opportunity.strategy_name != "cross_exchange_arbitrage":
+            return False
+        if buy_result.filled_quantity <= 0:
+            return False
+        if buy_result.status not in {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}:
+            return False
+        return bool(opportunity.metadata.get("sell_exchange"))
+
+    async def _execute_arb_sell_leg(
+        self,
+        opportunity: TradeOpportunity,
+        buy_result: ExecutionResult,
+        *,
+        venue_snapshots: list[Any],
+        snapshot_book: Any = None,
+    ) -> ExecutionResult:
+        """Simulate the sell leg on the sell venue using synchronized bids."""
+        sell_exchange = str(opportunity.metadata.get("sell_exchange") or "")
+        sell_price = opportunity.expected_exit_price
+        if sell_price is None:
+            raw = opportunity.metadata.get("sell_vwap")
+            sell_price = Decimal(str(raw)) if raw is not None else None
+
+        sell_order = OrderRequest(
+            opportunity_id=opportunity.id,
+            symbol=opportunity.symbol,
+            side=OpportunitySide.SELL,
+            quantity=buy_result.filled_quantity,
+            limit_price=sell_price,
+            metadata={
+                "strategy": opportunity.strategy_name,
+                "real_exchange_order": False,
+                "leg": "sell",
+                "venue": sell_exchange,
+                "buy_order_id": str(buy_result.order_id),
+            },
+        )
+        sell_book = self._resolve_execution_book(
+            opportunity,
+            venue_snapshots,
+            snapshot_book,
+            exchange_key="sell_exchange",
+        )
+        if isinstance(self._executor, (PaperExecutor, ExecutionService)):
+            return await self._executor.execute(
+                sell_order,
+                order_book=sell_book,
+                strategy=opportunity.strategy_name,
+                order_type=OrderType.LIMIT,
+            )
+        return await self._executor.execute(sell_order)
 
     def _collect_order_fill(self, result: TradeCycleResult, execution: ExecutionResult) -> None:
         executor = self._executor
