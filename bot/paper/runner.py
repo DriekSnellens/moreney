@@ -449,6 +449,46 @@ class PaperRunner:
             "last_cycle": self._last_cycle,
             "open_maker_quotes": self._open_maker_quote_count(),
             "strategy": getattr(self._strategy, "name", ""),
+            "live_forecast": self._live_forecast(snap),
+        }
+
+    def _live_forecast(self, snap: Any) -> dict[str, Any]:
+        """Project live-equivalent PnL from the conservative paper model."""
+        runtime = max(self.runtime_seconds(), 1.0)
+        hours = Decimal(str(runtime)) / Decimal("3600")
+        net = snap.net_pnl
+        per_hour = net / hours if hours > 0 else Decimal("0")
+        per_day = per_hour * Decimal("24")
+        start = snap.starting_equity
+        day_ret = (per_day / start * Decimal("100")) if start > 0 else Decimal("0")
+        if snap.trade_count >= 20 and runtime >= 1800:
+            confidence = "medium"
+            note = (
+                "Gebaseerd op trade-through fills, maker-fees, max 30 bps edge, "
+                "eenzijdige fills afgesloten als taker. Geen garantie."
+            )
+        elif snap.trade_count >= 5 and runtime >= 600:
+            confidence = "low"
+            note = "Nog weinig data; richtinggevende live-inschatting."
+        else:
+            confidence = "very_low"
+            note = "Te vroeg voor een stabiele voorspelling; model is wel live-conservatief."
+        return {
+            "label": "Live-inschatting (haalbaar met echt geld)",
+            "realized_live_eur": str(net),
+            "projected_per_hour_eur": str(per_hour),
+            "projected_per_day_eur": str(per_day),
+            "projected_day_return_pct": str(day_ret),
+            "confidence": confidence,
+            "note": note,
+            "runtime_seconds": runtime,
+            "assumptions": [
+                "Alleen maker-fills als de markt door je prijs heen handelt",
+                "Geen at-touch queue fills",
+                "Edges > 30 bps afgewezen als stale feed",
+                "Geen same-venue MM op publieke L2",
+                "Eén been gevuld → tegengestelde exit met taker + 6 bps adverse",
+            ],
         }
 
     def _open_maker_quote_count(self) -> int:
@@ -511,6 +551,7 @@ class PaperRunner:
         if max_age <= 0:
             return
         now_ms = int(time.time() * 1000)
+        expired_opps: set[UUID] = set()
         for order in list(self._executor.order_manager.open_orders()):
             if not (order.metadata or {}).get("post_only"):
                 continue
@@ -518,3 +559,66 @@ class PaperRunner:
             if now_ms - placed < max_age:
                 continue
             await self._executor.cancel(order.id, reason="maker_quote_expired")
+            if order.opportunity_id is not None:
+                expired_opps.add(order.opportunity_id)
+        for opp_id in expired_opps:
+            await self._close_orphaned_maker_legs(opp_id)
+
+    async def _close_orphaned_maker_legs(self, opportunity_id: UUID) -> None:
+        """If only one maker leg filled, exit leftover inventory as taker (live risk)."""
+        if not getattr(self._settings, "paper_maker_one_leg_exit", True):
+            return
+        from bot.core.enums import OrderSide
+
+        manager = self._executor.order_manager
+        orders = [o for o in manager.list_orders() if o.opportunity_id == opportunity_id]
+        buy_filled = sum(
+            (o.filled_quantity for o in orders if o.side == OrderSide.BUY),
+            Decimal("0"),
+        )
+        sell_filled = sum(
+            (o.filled_quantity for o in orders if o.side == OrderSide.SELL),
+            Decimal("0"),
+        )
+        matched = min(buy_filled, sell_filled)
+        buy_left = buy_filled - matched
+        sell_left = sell_filled - matched
+        if buy_left <= 0 and sell_left <= 0:
+            return
+
+        exits: list[Any] = []
+        books = self._collect_books()
+        if buy_left > 0:
+            buy_order = next((o for o in orders if o.side == OrderSide.BUY), None)
+            venue = str((buy_order.metadata or {}).get("venue") or "") if buy_order else ""
+            symbol = buy_order.symbol if buy_order else ""
+            book = (books.get(venue) or {}).get(symbol)
+            result = await self._executor.close_one_leg(
+                opportunity_id=opportunity_id,
+                symbol=symbol,
+                side=OrderSide.SELL,
+                quantity=buy_left,
+                venue=venue,
+                order_book=book,
+                reason="one_leg_exit_buy_filled",
+            )
+            if result is not None:
+                exits.append(result)
+        if sell_left > 0:
+            sell_order = next((o for o in orders if o.side == OrderSide.SELL), None)
+            venue = str((sell_order.metadata or {}).get("venue") or "") if sell_order else ""
+            symbol = sell_order.symbol if sell_order else ""
+            book = (books.get(venue) or {}).get(symbol)
+            result = await self._executor.close_one_leg(
+                opportunity_id=opportunity_id,
+                symbol=symbol,
+                side=OrderSide.BUY,
+                quantity=sell_left,
+                venue=venue,
+                order_book=book,
+                reason="one_leg_exit_sell_filled",
+            )
+            if result is not None:
+                exits.append(result)
+        if exits:
+            self._ingest_delayed_fills(exits)

@@ -101,14 +101,24 @@ class Settings(BaseSettings):
     # Extra adverse move applied to the sell book after the buy lands (basis points).
     paper_second_leg_adverse_bps: float = Field(default=0.0, ge=0)
     # Maker (post-only) quoting: capture bid/ask instead of paying taker-taker.
+    # Defaults are live-conservative: trade-through fills only, stale edges rejected.
     paper_maker_enabled: bool = True
-    paper_maker_rest_ms: float = Field(default=400.0, ge=0)
-    paper_maker_queue_fill_pct: float = Field(default=0.25, ge=0, le=1)
-    paper_maker_max_age_ms: float = Field(default=12000.0, ge=0)
-    paper_maker_min_spread_bps: float = Field(default=2.0, ge=0)
+    paper_maker_rest_ms: float = Field(default=0.0, ge=0)
+    # At-touch queue fills (0 = disabled; live makers rarely get full touch size).
+    paper_maker_queue_fill_pct: float = Field(default=0.0, ge=0, le=1)
+    # Fraction of remaining size filled when the book trades through the quote.
+    paper_maker_trade_through_fill_pct: float = Field(default=0.20, ge=0, le=1)
+    paper_maker_max_age_ms: float = Field(default=2500.0, ge=0)
+    paper_maker_min_spread_bps: float = Field(default=3.0, ge=0)
+    # Gross edge above this is treated as stale/public-feed dislocation, not tradable.
+    paper_maker_max_edge_bps: float = Field(default=30.0, ge=0)
     paper_maker_min_profit_eur: float = Field(default=0.02, ge=0)
-    paper_maker_same_venue: bool = True
-    paper_maker_max_open_quotes: int = Field(default=4, ge=1, le=20)
+    # Same-venue MM on public L2 is usually stale-spread noise; off by default for live parity.
+    paper_maker_same_venue: bool = False
+    paper_maker_max_open_quotes: int = Field(default=2, ge=1, le=20)
+    # When one maker leg fills and the quote expires, exit leftover inventory as taker.
+    paper_maker_one_leg_exit: bool = True
+    paper_maker_one_leg_adverse_bps: float = Field(default=6.0, ge=0)
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
         "http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004"

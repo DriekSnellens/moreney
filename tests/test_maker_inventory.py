@@ -17,6 +17,7 @@ def _maker_settings(**overrides: object) -> Settings:
         "paper_maker_enabled": True,
         "paper_maker_min_profit_eur": 0.02,
         "paper_maker_min_spread_bps": 2.0,
+        "paper_maker_max_edge_bps": 200.0,
         "paper_maker_same_venue": True,
         "arbitrage_min_profit_pct": 0.0001,
         "arbitrage_min_liquidity_base": 0.01,
@@ -65,7 +66,21 @@ async def test_maker_emits_when_ask_minus_bid_clears_fees() -> None:
 
 
 @pytest.mark.asyncio
-async def test_maker_skips_when_fees_eat_the_spread() -> None:
+async def test_maker_rejects_stale_wide_edge() -> None:
+    strategy = MakerInventoryStrategy(
+        _maker_settings(paper_maker_max_edge_bps=30, paper_maker_same_venue=False)
+    )
+    snaps = [
+        top_of_book_snapshot(
+            exchange="binance", symbol="BTCEUR", order_book=_book("100", "100.05")
+        ),
+        top_of_book_snapshot(
+            exchange="bitvavo", symbol="BTCEUR", order_book=_book("102", "103")
+        ),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps == []
+    assert strategy.scan_stats()["reject_counts"].get("stale_edge", 0) > 0  # type: ignore[union-attr]
     strategy = MakerInventoryStrategy(
         _maker_settings(paper_maker_min_profit_eur=1.0, paper_maker_same_venue=True)
     )
@@ -136,7 +151,8 @@ async def test_orchestrator_places_post_only_legs_without_taker_hedge() -> None:
         paper_starting_eur=10_000.0,
         paper_simulated_latency_ms=0.0,
         paper_maker_rest_ms=0.0,
-        paper_maker_queue_fill_pct=1.0,
+        paper_maker_queue_fill_pct=0.0,
+        paper_maker_trade_through_fill_pct=1.0,
         paper_fee_rate=0.001,
         paper_slippage_mode="order_book",
         risk_max_position_usd=50_000.0,
@@ -189,8 +205,12 @@ async def test_orchestrator_places_post_only_legs_without_taker_hedge() -> None:
     assert all((o.metadata or {}).get("post_only") for o in result.orders)
 
     books = {
-        "binance": {"BTCEUR": binance.order_book},
-        "kraken": {"BTCEUR": kraken.order_book},
+        "binance": {
+            "BTCEUR": _book("99.5", "100.20")  # bid traded through buy @ 100
+        },
+        "kraken": {
+            "BTCEUR": _book("100.80", "101.50")  # ask traded through sell @ 101.20
+        },
     }
     fills = executor.match_resting(books)
     assert len(fills) == 2

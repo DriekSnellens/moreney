@@ -73,6 +73,21 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     pnl_word = _pnl_word(net_pnl)
     wins = perf.get("winning_trades", 0)
     losses = perf.get("losing_trades", 0)
+    forecast = status.get("live_forecast") or {}
+    forecast_hour = _fmt_money(forecast.get("projected_per_hour_eur", 0))
+    forecast_day = _fmt_money(forecast.get("projected_per_day_eur", 0))
+    forecast_note = _esc(forecast.get("note") or "Live-conservatief model.")
+    confidence = str(forecast.get("confidence") or "very_low")
+    confidence_label = {
+        "very_low": "Nog onzeker",
+        "low": "Voorzichtig",
+        "medium": "Redelijk",
+        "high": "Stabiel",
+    }.get(confidence, confidence)
+    assumptions = forecast.get("assumptions") or []
+    assumption_lis = "".join(f"<li>{_esc(a)}</li>" for a in assumptions) or (
+        "<li>Trade-through maker fills, fees, stale-edge caps</li>"
+    )
 
     profit_chart = _svg_cumulative_profit(trades)
     hourly_chart = _svg_hourly_bars(hourly)
@@ -92,9 +107,9 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · zo echt mogelijk gesimuleerd</p>
+        <p class="eyebrow">Oefenhandel · live-inschatting</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Maker: bied- en laatprijs vangen (post-only). Winst na maker-kosten, saldo per beurs, alleen afgeronde koop én verkoop. De vier inleg-accounts blijven vergelijkbaar.</p>
+        <p class="sub">Dit getal is de winst die we haalbaar achten met echt geld: maker only, trade-through fills, fees, geen stale Bitvavo-spreads. Geen echte orders.</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
@@ -117,6 +132,30 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel highlight">
+      <h2>Live-inschatting (echt geld)</h2>
+      <div class="metric-grid">
+        <article class="metric-card {pnl_cls}">
+          <span class="label">{pnl_word} haalbaar met echt geld</span>
+          <span class="value">{m('net_pnl')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Tempo / uur</span>
+          <span class="value">{forecast_hour}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Voorspelling / dag</span>
+          <span class="value">{forecast_day}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Zekerheid</span>
+          <span class="value">{confidence_label}</span>
+        </article>
+      </div>
+      <p class="forecast-note">{forecast_note}</p>
+      <ul class="forecast-assumptions">{assumption_lis}</ul>
+    </section>
+
+    <section class="panel">
       <h2>Geld</h2>
       <div class="metric-grid">
         <article class="metric-card">
@@ -124,7 +163,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
           <span class="value">{m('starting_equity')}</span>
         </article>
         <article class="metric-card {pnl_cls}">
-          <span class="label">{pnl_word} (alsof echt geld)</span>
+          <span class="label">{pnl_word} (live-equivalent)</span>
           <span class="value">{m('net_pnl')}</span>
         </article>
         <article class="metric-card">
@@ -136,7 +175,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
           <span class="value">{m('current_equity')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Paper-verschil</span>
+          <span class="label">Paper-verschil (niet live)</span>
           <span class="value">{m('paper_equity_pnl')}</span>
         </article>
         <article class="metric-card">
@@ -249,6 +288,16 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
     pnl_cls = _pnl_class(perf.get("net_pnl", 0))
     pnl_word = _pnl_word(perf.get("net_pnl", 0))
 
+    forecast = status.get("live_forecast") or {}
+    forecast_day = _fmt_money(forecast.get("projected_per_day_eur", 0))
+    confidence = str(forecast.get("confidence") or "very_low")
+    confidence_label = {
+        "very_low": "Nog onzeker",
+        "low": "Voorzichtig",
+        "medium": "Redelijk",
+        "high": "Stabiel",
+    }.get(confidence, confidence)
+
     recent = "".join(
         f"<article class='opp-card'>"
         f"<div class='opp-top'>"
@@ -280,7 +329,7 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero hero-lite">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Mobiel · alsof echt geld</p>
+        <p class="eyebrow">Mobiel · live-inschatting</p>
         <h1 class="brand">Moreney</h1>
       </div>
       <span class="badge {status_cls}">{status_label}</span>
@@ -289,8 +338,9 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
 
   <main class="container lite-container">
     <section class="panel hero-metric {pnl_cls}">
-      <span class="label">{pnl_word} (alsof echt geld)</span>
+      <span class="label">{pnl_word} haalbaar met echt geld</span>
       <span class="value-xl">{_fmt_money(perf.get('net_pnl', 0))}</span>
+      <span class="sub-metric">Voorspelling / dag {forecast_day} · {confidence_label}</span>
       <span class="sub-metric">Oefenvermogen {_fmt_money(perf.get('current_equity', 0))}</span>
     </section>
 
@@ -413,7 +463,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Alle oefenrekeningen</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · winst alsof echt geld · vergelijk per inleg</p>
+        <p class="sub">{online}/{configured} online · live-inschatting per inleg</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
@@ -534,6 +584,10 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
       letter-spacing: -0.03em;
     }}
     .sub {{ margin: .35rem 0 0; color: var(--muted); font-size: .9rem; max-width: 42ch; }}
+    .forecast-note {{ margin: .85rem 0 .35rem; color: var(--muted); font-size: .9rem; }}
+    .forecast-assumptions {{
+      margin: 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; line-height: 1.45;
+    }}
     .hero-badges {{ display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }}
     .badge {{
       display: inline-flex;

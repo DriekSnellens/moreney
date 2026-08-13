@@ -285,7 +285,8 @@ class PaperExecutor(BaseExecutor):
         """Fill post-only quotes that were traded through or aged at the touch."""
         now_ms = int(time.time() * 1000)
         rest_ms = float(getattr(self._settings, "paper_maker_rest_ms", 0) or 0)
-        fill_pct = Decimal(str(getattr(self._settings, "paper_maker_queue_fill_pct", 1) or 1))
+        raw_queue = getattr(self._settings, "paper_maker_queue_fill_pct", 0)
+        fill_pct = Decimal(str(0 if raw_queue is None else raw_queue))
         filled: list[ExecutionResult] = []
         for order in self._orders.open_orders():
             if not (order.metadata or {}).get("post_only"):
@@ -382,34 +383,104 @@ class PaperExecutor(BaseExecutor):
             return _ZERO
         placed_ms = int(float((order.metadata or {}).get("placed_ms") or now_ms))
         aged = now_ms - placed_ms
+        through_raw = getattr(self._settings, "paper_maker_trade_through_fill_pct", 1)
+        through_pct = Decimal(str(1 if through_raw is None else through_raw))
 
         if order.side == OrderSide.BUY:
             if not book.bids:
-                return remaining
+                return _ZERO
             best = book.bids[0].price
             displayed = book.bids[0].amount
+            # Live-conservative: only fill when the market trades through our bid.
             if best < limit:
-                return remaining
+                if through_pct <= 0:
+                    return _ZERO
+                take = remaining if through_pct >= 1 else remaining * through_pct
+                return min(remaining, take)
             if best > limit:
                 return _ZERO
         else:
             if not book.asks:
-                return remaining
+                return _ZERO
             best = book.asks[0].price
             displayed = book.asks[0].amount
             if best > limit:
-                return remaining
+                if through_pct <= 0:
+                    return _ZERO
+                take = remaining if through_pct >= 1 else remaining * through_pct
+                return min(remaining, take)
             if best < limit:
                 return _ZERO
 
-        if aged < rest_ms:
+        # At-touch queue fills are optional and off by default (too optimistic live).
+        if fill_pct <= 0 or aged < rest_ms:
             return _ZERO
-        if fill_pct <= 0:
-            return remaining
         queued = displayed * fill_pct
         if queued <= 0:
             return _ZERO
         return min(remaining, queued)
+
+    async def close_one_leg(
+        self,
+        *,
+        opportunity_id: UUID,
+        symbol: str,
+        side: OrderSide,
+        quantity: Decimal,
+        venue: str,
+        order_book: OrderBook | None,
+        strategy: str = "maker_inventory",
+        reason: str = "one_leg_exit",
+    ) -> ExecutionResult | None:
+        """Close leftover inventory after a one-sided maker fill (live-equivalent)."""
+        if quantity <= 0:
+            return None
+        adverse_bps = Decimal(
+            str(getattr(self._settings, "paper_maker_one_leg_adverse_bps", 0) or 0)
+        )
+        from bot.core.enums import OpportunitySide
+        from bot.core.models import OrderRequest
+
+        if side == OrderSide.BUY:
+            # Need to buy back after an unhedged sell fill.
+            if not order_book or not order_book.asks:
+                return None
+            px = order_book.asks[0].price * (
+                Decimal("1") + adverse_bps / Decimal("10000")
+            )
+            opp_side = OpportunitySide.BUY
+        else:
+            if not order_book or not order_book.bids:
+                return None
+            px = order_book.bids[0].price * (
+                Decimal("1") - adverse_bps / Decimal("10000")
+            )
+            if px <= 0:
+                return None
+            opp_side = OpportunitySide.SELL
+
+        request = OrderRequest(
+            opportunity_id=opportunity_id,
+            symbol=symbol,
+            side=opp_side,
+            quantity=quantity,
+            limit_price=px,
+            metadata={
+                "venue": venue,
+                "arb_leg": True,
+                "fee_role": "taker",
+                "one_leg_exit": True,
+                "exit_reason": reason,
+                "strategy": strategy,
+                "real_exchange_order": False,
+            },
+        )
+        return await self.execute(
+            request,
+            order_book=order_book,
+            strategy=strategy,
+            order_type=OrderType.LIMIT,
+        )
 
     def _fill_resting(self, order: Order, filled_qty: Decimal) -> ExecutionResult | None:
         vwap = order.requested_price

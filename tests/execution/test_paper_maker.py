@@ -74,7 +74,9 @@ async def test_post_only_rejects_if_it_would_take(
 async def test_match_resting_fills_traded_through(
     exec_settings, portfolio: PaperPortfolio
 ) -> None:
-    settings = exec_settings.model_copy(update={"paper_maker_rest_ms": 10_000})
+    settings = exec_settings.model_copy(
+        update={"paper_maker_rest_ms": 10_000, "paper_maker_trade_through_fill_pct": 1.0}
+    )
     executor = PaperExecutor(settings, portfolio=portfolio)
     rest_book = make_book(ask_price="100", bid_price="99")
     placed = await executor.execute(_maker_buy("0.1", "99"), order_book=rest_book)
@@ -104,6 +106,25 @@ async def test_match_resting_fills_at_touch_after_rest(
     assert len(fills) == 1
     assert fills[0].status == OrderStatus.FILLED
     assert fills[0].average_price == Decimal("99")
+
+
+@pytest.mark.asyncio
+async def test_at_touch_does_not_fill_when_queue_pct_zero(
+    exec_settings, portfolio: PaperPortfolio
+) -> None:
+    settings = exec_settings.model_copy(
+        update={
+            "paper_maker_rest_ms": 0,
+            "paper_maker_queue_fill_pct": 0.0,
+            "paper_maker_trade_through_fill_pct": 0.2,
+        }
+    )
+    executor = PaperExecutor(settings, portfolio=portfolio)
+    book = make_book(ask_price="100", bid_price="99", bid_qty="5")
+    placed = await executor.execute(_maker_buy("0.1", "99"), order_book=book)
+    assert placed.status == OrderStatus.OPEN
+    fills = executor.match_resting({"binance": {"BTCEUR": book}})
+    assert fills == []
 
 
 @pytest.mark.asyncio

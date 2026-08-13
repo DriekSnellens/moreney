@@ -70,6 +70,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._max_latency_ms = settings.arbitrage_max_latency_ms
         self._max_book_age_ms = settings.arbitrage_max_book_age_ms
         self._min_spread_bps = Decimal(str(settings.paper_maker_min_spread_bps))
+        self._max_edge_bps = Decimal(str(settings.paper_maker_max_edge_bps))
         self._same_venue = bool(settings.paper_maker_same_venue)
         self._quote = settings.paper_quote_asset.upper()
         self._profitability = profitability or self._build_profitability_engine(settings)
@@ -284,6 +285,18 @@ class MakerInventoryStrategy(BaseStrategy):
                 buy_snap.symbol,
                 "tight_spread",
                 f"Same-venue spread {spread_bps} bps below min {self._min_spread_bps}",
+                buy_exchange=buy_snap.exchange,
+                sell_exchange=sell_snap.exchange,
+            )
+            return None
+        if self._max_edge_bps > 0 and spread_bps > self._max_edge_bps:
+            self._reject(
+                buy_snap.symbol,
+                "stale_edge",
+                (
+                    f"Gross edge {spread_bps} bps above live max {self._max_edge_bps} bps "
+                    f"(public books this wide are usually stale, not maker-fillable)"
+                ),
                 buy_exchange=buy_snap.exchange,
                 sell_exchange=sell_snap.exchange,
             )

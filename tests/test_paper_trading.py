@@ -674,7 +674,16 @@ def test_dashboard_basic_auth_optional_and_enforced(
 
 def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     payload = {
-        "status": {"running": True},
+        "status": {
+            "running": True,
+            "live_forecast": {
+                "projected_per_hour_eur": "0.40",
+                "projected_per_day_eur": "9.60",
+                "confidence": "low",
+                "note": "Richtinggevende live-inschatting.",
+                "assumptions": ["Trade-through maker fills"],
+            },
+        },
         "performance": {
             "starting_equity": "200",
             "current_equity": "212.50",
@@ -735,8 +744,8 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
         ],
     }
     html = render_dashboard(payload).body.decode()
-    assert "alsof echt geld" in html
-    assert "Koop goedkoop, verkoop duurder" in html
+    assert "alsof echt geld" in html or "haalbaar met echt geld" in html
+    assert "Koop goedkoop, verkoop duurder" in html or "Maker: bied/laat vangen" in html
     assert "Binance" in html
     assert "polyline" in html
     assert "2 winst" in html
@@ -746,6 +755,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     lite = render_dashboard_lite(payload).body.decode()
     assert "Winst in de tijd" in lite
     assert "polyline" in lite
+    assert "haalbaar met echt geld" in lite or "live-inschatting" in lite.lower()
 
     fleet = render_fleet_dashboard(
         {
