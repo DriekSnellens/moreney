@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 from bot.core.enums import OpportunitySide, OrderStatus, OrderType, RiskDecisionStatus
-from bot.core.exceptions import RiskRejectedError
+from bot.core.exceptions import ExchangeError, RiskRejectedError
 from bot.core.interfaces import (
     Executor,
     MarketDataProvider,
@@ -85,6 +85,8 @@ class TradingEngine:
         """Run a single evaluation cycle for ``symbol``."""
         result = TradeCycleResult(symbol=symbol.upper())
         venue_snapshots, primary = await self._load_snapshots(symbol)
+        if not venue_snapshots and primary is None:
+            return result
         paper = self.paper_portfolio
         if paper is not None:
             for snap in venue_snapshots or ([primary] if primary is not None else []):
@@ -177,7 +179,13 @@ class TradingEngine:
             venues = list(await venue_getter(symbol))
             if venues:
                 return venues, venues[0]
-        primary = await self._market_data.get_snapshot(symbol)
+        getter = getattr(self._market_data, "get_snapshot", None)
+        if not callable(getter):
+            return [], None
+        try:
+            primary = await getter(symbol)
+        except ExchangeError:
+            return [], None
         return [], primary
 
     def _enrich_for_risk(
