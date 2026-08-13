@@ -19,8 +19,10 @@ from bot.core.models import MarketSnapshot
 from bot.market_data.adapters.base import PublicMarketDataAdapter
 from bot.market_data.adapters.binance import BinancePublicAdapter
 from bot.market_data.adapters.bitvavo import BitvavoPublicAdapter
+from bot.market_data.adapters.bybit import BybitPublicAdapter
 from bot.market_data.adapters.coinbase import CoinbasePublicAdapter
 from bot.market_data.adapters.kraken import KrakenPublicAdapter
+from bot.market_data.adapters.okx import OkxPublicAdapter
 from bot.market_data.cache import MarketDataCache
 from bot.market_data.local_order_book import LocalOrderBook
 from bot.market_data.models import (
@@ -41,6 +43,8 @@ _ADAPTERS: dict[str, type[PublicMarketDataAdapter]] = {
     "kraken": KrakenPublicAdapter,
     "coinbase": CoinbasePublicAdapter,
     "bitvavo": BitvavoPublicAdapter,
+    "okx": OkxPublicAdapter,
+    "bybit": BybitPublicAdapter,
 }
 
 

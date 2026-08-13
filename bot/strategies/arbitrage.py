@@ -32,6 +32,8 @@ _VENUE_TAKER_FEE: dict[str, Decimal] = {
     "kraken": Decimal("0.0026"),
     "coinbase": Decimal("0.006"),
     "bitvavo": Decimal("0.0025"),
+    "okx": Decimal("0.001"),
+    "bybit": Decimal("0.001"),
 }
 
 
