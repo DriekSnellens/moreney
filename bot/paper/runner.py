@@ -81,7 +81,11 @@ class PaperRunner:
 
         self._executor = PaperExecutor(settings, portfolio=self._portfolio)
         self._strategy = self._build_strategy()
-        self._profitability = DefaultProfitabilityEngine(settings)
+        gate = self._gate_settings()
+        self._profitability = DefaultProfitabilityEngine(gate)
+        if settings.paper_maker_enabled:
+            # Align risk absolute floor with maker NET threshold (not taker-arb defaults).
+            self._risk = RiskEngine(gate, kill_switch=risk_engine.kill_switch)
         self._provider = RealtimeMarketDataProvider(market_data)
         self._engine = TradingEngine(
             market_data=self._provider,
@@ -108,6 +112,23 @@ class PaperRunner:
         if self._settings.paper_maker_enabled:
             return MakerInventoryStrategy(self._settings)
         return CrossExchangeArbitrageStrategy(self._settings)
+
+    def _gate_settings(self) -> Settings:
+        """Profitability/risk thresholds used after strategy emit (must match maker gate)."""
+        settings = self._settings
+        if not settings.paper_maker_enabled:
+            return settings
+        return settings.model_copy(
+            update={
+                "profitability_min_net_profit_usd": settings.paper_maker_min_profit_eur,
+                "profitability_min_net_return": settings.arbitrage_min_profit_pct,
+                "profitability_apply_funding": False,
+                "profitability_slippage_bps": 0.0,
+                "profitability_thin_book_penalty_bps": 0.0,
+                "profitability_execution_buffer_bps": 1.0,
+                "risk_min_net_profit_usd": settings.paper_maker_min_profit_eur,
+            }
+        )
 
     def _configure_venue_inventory(self) -> None:
         if not self._settings.paper_venue_inventory:
@@ -230,6 +251,10 @@ class PaperRunner:
         self._configure_venue_inventory()
         self._executor = PaperExecutor(self._settings, portfolio=self._portfolio)
         self._strategy = self._build_strategy()
+        gate = self._gate_settings()
+        self._profitability = DefaultProfitabilityEngine(gate)
+        if self._settings.paper_maker_enabled:
+            self._risk = RiskEngine(gate, kill_switch=self._risk.kill_switch)
         self._engine = TradingEngine(
             market_data=self._provider,
             strategy=self._strategy,
