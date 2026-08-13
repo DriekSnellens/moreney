@@ -416,6 +416,7 @@ async def test_paper_runner_reset_requires_confirm(tmp_path: Path) -> None:
 def test_paper_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PAPER_PERSIST_PATH", str(tmp_path / "api_paper.json"))
     monkeypatch.setenv("PAPER_AUTO_START", "false")
+    monkeypatch.setenv("DASHBOARD_BASIC_AUTH_ENABLED", "false")
     get_settings.cache_clear()
     reset_risk_singletons()
 
@@ -454,7 +455,7 @@ def test_paper_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         dash = client.get("/paper/dashboard")
         assert dash.status_code == 200
         assert "Moreney" in dash.text
-        assert "REAL ORDERS = 0" in dash.text
+        assert "Real orders 0" in dash.text
         lite = client.get("/paper/dashboard-lite")
         assert lite.status_code == 200
         assert "Moreney Lite" in lite.text
