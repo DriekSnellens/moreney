@@ -247,6 +247,42 @@ class PerformanceTracker:
 
         return tracked
 
+    def finalize_triangle_pnl(
+        self,
+        tracked: TrackedOpportunity,
+        fills: list[Fill],
+        *,
+        fx_refill_cost_eur: Decimal = _ZERO,
+    ) -> Decimal | None:
+        """Lock EUR PnL after FX refill (or skipped refill with zero cost)."""
+        if tracked.realized_net_profit is not None:
+            return tracked.realized_net_profit
+        meta = dict(tracked.metadata or {})
+        meta["fx_refilled"] = True
+        meta["fx_refill_cost_eur"] = str(fx_refill_cost_eur)
+        tracked.metadata = meta
+        from bot.core.models import ExecutionResult as _ER
+
+        order_id = tracked.order_id
+        if order_id is None and fills:
+            order_id = fills[0].order_id
+        if order_id is None:
+            order_id = tracked.id
+        dummy = _ER(
+            order_id=order_id,
+            opportunity_id=tracked.id,
+            status=OrderStatus.FILLED,
+            filled_quantity=sum((f.quantity for f in fills), _ZERO),
+            average_price=fills[0].price if fills else None,
+            fees_usd=_ZERO,
+            message="fx_refill_finalize",
+        )
+        realized = self._estimate_realized(tracked, dummy, fills)
+        if realized is not None:
+            tracked.realized_net_profit = realized
+            self._register_trade(tracked, realized)
+        return realized
+
     def _estimate_realized(
         self,
         tracked: TrackedOpportunity,
@@ -265,20 +301,24 @@ class PerformanceTracker:
             matched_qty = min(buy_qty, sell_qty)
             if matched_qty <= 0:
                 return None
-            buy_cost = sum(
-                (f.quantity * f.price + f.fee + f.slippage for f in buy_fills),
-                _ZERO,
-            )
-            sell_proceeds = sum(
-                (f.quantity * f.price - f.fee - f.slippage for f in sell_fills),
-                _ZERO,
-            )
+            # Triangle / cross-quote: convert USDT legs to EUR via stored FX mid.
+            if bool((tracked.metadata or {}).get("triangle")) and not bool(
+                (tracked.metadata or {}).get("fx_refilled")
+            ):
+                # Wait for FX refill so EUR PnL includes conversion cost.
+                return None
+            buy_cost = self._fills_notional_eur(tracked, buy_fills, leg="buy")
+            sell_proceeds = self._fills_notional_eur(tracked, sell_fills, leg="sell")
             # Scale to matched size: leftover coins are inventory, not a locked loss.
             if buy_qty > 0:
                 buy_cost = buy_cost * (matched_qty / buy_qty)
             if sell_qty > 0:
                 sell_proceeds = sell_proceeds * (matched_qty / sell_qty)
-            return sell_proceeds - buy_cost
+            # Optional FX refill cost recorded on the opportunity metadata.
+            fx_cost = _d((tracked.metadata or {}).get("fx_refill_cost_eur", 0))
+            if buy_cost <= 0 or sell_proceeds <= 0:
+                return None
+            return sell_proceeds - buy_cost - fx_cost
 
         # Cross-exchange arb without a sell fill is not a completed trade.
         if tracked.sell_exchange:
@@ -291,9 +331,41 @@ class PerformanceTracker:
         qty = sum((f.quantity for f in fills), _ZERO)
         if qty <= 0:
             return None
-        buy_cost = sum((f.quantity * f.price + f.fee + f.slippage for f in fills), _ZERO)
+        buy_cost = self._fills_notional_eur(tracked, fills, leg="buy")
         sell_proceeds = _d(sell_vwap) * qty
         return sell_proceeds - buy_cost
+
+    def _fills_notional_eur(
+        self,
+        tracked: TrackedOpportunity,
+        fills: list[Fill],
+        *,
+        leg: str,
+    ) -> Decimal:
+        """Sum fill cashflows in EUR (convert USDT via opportunity FX mid)."""
+        meta = tracked.metadata or {}
+        fx_mid = _d(meta.get("fx_mid") or 0)
+        total = _ZERO
+        for fill in fills:
+            quote = str(getattr(fill, "fee_asset", "") or "").upper()
+            # Infer quote from order symbol when fee_asset is missing/EUR default.
+            symbol = str(getattr(fill, "symbol", "") or tracked.symbol).upper()
+            if symbol.endswith("USDT"):
+                quote = "USDT"
+            elif symbol.endswith("EUR"):
+                quote = "EUR"
+            gross = fill.quantity * fill.price
+            if leg == "buy":
+                cash = gross + fill.fee + fill.slippage
+            else:
+                cash = gross - fill.fee - fill.slippage
+            if quote == "USDT":
+                if fx_mid <= 0:
+                    # Without FX we cannot lock EUR PnL yet.
+                    continue
+                cash = cash / fx_mid
+            total += cash
+        return total
 
     def _register_trade(self, tracked: TrackedOpportunity, realized: Decimal) -> None:
         self._trade_pnls.append(realized)

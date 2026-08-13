@@ -112,6 +112,8 @@ class PaperRunner:
         ]
         self._interval = max(0.05, settings.paper_cycle_interval_ms / 1000.0)
         self._markout = MarkoutTracker()
+        self._fx_refilled: set[UUID] = set()
+        self._last_markout_bps: float | None = None
         set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
 
     def _build_strategy(self):
@@ -280,6 +282,9 @@ class PaperRunner:
         self._last_cycle = None
         self._cycle_count = 0
         self._errors = []
+        self._fx_refilled = set()
+        self._markout = MarkoutTracker()
+        self._last_markout_bps = None
         self._accumulated_runtime = 0.0
         self._session_started_at = None
         self._persist()
@@ -513,6 +518,20 @@ class PaperRunner:
             runtime_seconds=self.runtime_seconds(),
         )
 
+
+    def _inventory_snapshot(self) -> dict[str, Any]:
+        ledger = self._portfolio.venue_ledger
+        if ledger is None:
+            return {"venues": {}, "seeded_assets": []}
+        return {
+            "venues": {
+                venue: {asset: str(amount) for asset, amount in assets.items()}
+                for venue, assets in (ledger.export().get("balances") or {}).items()
+            },
+            "seeded_assets": list(ledger.export().get("seeded_assets") or []),
+            "fx_refilled": len(getattr(self, "_fx_refilled", set())),
+        }
+
     def status(self) -> dict[str, Any]:
         snap = self._tracker.snapshot()
         ks = None
@@ -551,6 +570,10 @@ class PaperRunner:
             "open_maker_quotes": self._open_maker_quote_count(),
             "strategy": getattr(self._strategy, "name", ""),
             "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
+            "inventory": self._inventory_snapshot(),
+            "desk_scan": (
+                (self._last_cycle or {}).get("scan") or {}
+            ),
             "fee_tier": getattr(self._settings, "paper_fee_tier", "retail"),
             "live_forecast": self._live_forecast(snap),
         }
@@ -641,12 +664,176 @@ class PaperRunner:
         if fills:
             self._ingest_delayed_fills(fills)
             self._record_markouts(fills, books)
+            self._fx_refill_completed_triangles(books)
         self._update_markouts(books)
         await self._hybrid_hedge_if_needed(books)
         await self._cancel_stale_quotes()
         self._maybe_rebalance_venues()
         self._maybe_seed_usdt(books)
         self._apply_markout_adverse()
+
+
+    def _mark_triangle_fx(self, opp_id: UUID, tracked: Any | None, fx_cost_eur: Decimal) -> None:
+        """Always mark FX handled so triangle PnL can lock (even on skip/zero take)."""
+        self._fx_refilled.add(opp_id)
+        if tracked is None:
+            return
+        meta = dict(tracked.metadata or {})
+        meta["fx_refilled"] = True
+        meta["fx_refill_cost_eur"] = str(fx_cost_eur)
+        tracked.metadata = meta
+
+    def _finalize_triangle_pnl(
+        self,
+        tracked: Any | None,
+        orders: list[Any],
+        *,
+        fx_cost_eur: Decimal,
+    ) -> None:
+        if tracked is None:
+            return
+        fills = [f for o in orders for f in (getattr(o, "fills", None) or [])]
+        if not fills:
+            return
+        self._tracker.finalize_triangle_pnl(
+            tracked, fills, fx_refill_cost_eur=fx_cost_eur
+        )
+
+    def _fx_refill_completed_triangles(self, books: dict[str, dict[str, Any]]) -> None:
+        """After both triangle legs fill, convert leftover quote via EURUSDT taker.
+
+        Always marks ``fx_refilled`` once both legs have fills so EUR PnL can lock,
+        even when inventory is too thin to actually convert.
+        """
+        from bot.core.enums import OrderSide
+        from bot.core.venue_fees import venue_taker_fee
+        from bot.portfolio.models import AssetBalance
+
+        ledger = self._portfolio.venue_ledger
+        if ledger is None:
+            return
+        fx_symbol = str(getattr(self._settings, "paper_maker_fx_symbol", "EURUSDT") or "EURUSDT")
+        manager = self._executor.order_manager
+        by_opp: dict[UUID, list[Any]] = {}
+        for order in manager.list_orders():
+            if order.opportunity_id is None:
+                continue
+            if not (order.metadata or {}).get("triangle"):
+                continue
+            by_opp.setdefault(order.opportunity_id, []).append(order)
+
+        for opp_id, orders in by_opp.items():
+            if opp_id in self._fx_refilled:
+                continue
+            buy_orders = [o for o in orders if o.side == OrderSide.BUY and o.filled_quantity > 0]
+            sell_orders = [o for o in orders if o.side == OrderSide.SELL and o.filled_quantity > 0]
+            if not buy_orders or not sell_orders:
+                continue
+            tracked = self._tracker._by_id.get(opp_id)  # noqa: SLF001
+            meta = dict((tracked.metadata if tracked else None) or (buy_orders[0].metadata or {}))
+            direction = str(meta.get("direction") or "")
+            fx_mid = Decimal(str(meta.get("fx_mid") or "0"))
+            fx_bid = fx_ask = None
+            for venue_books in books.values():
+                book = venue_books.get(fx_symbol)
+                if book is not None and book.bids and book.asks:
+                    fx_bid = book.bids[0].price
+                    fx_ask = book.asks[0].price
+                    break
+            if fx_bid is None or fx_ask is None:
+                if fx_mid <= 0:
+                    # No FX yet — retry next cycle; do not mark.
+                    continue
+                fx_bid = fx_ask = fx_mid
+
+            buy = buy_orders[0]
+            sell = sell_orders[0]
+            matched = min(buy.filled_quantity, sell.filled_quantity)
+            if matched <= 0:
+                continue
+            buy_venue = str((buy.metadata or {}).get("venue") or "")
+            sell_venue = str((sell.metadata or {}).get("venue") or "")
+            fx_cost_eur = Decimal("0")
+            skipped = False
+
+            if direction == "usdt_to_eur":
+                # Spent USDT on buy venue; refill USDT from EUR (sell EURUSDT @ bid).
+                usdt_spent = matched * (buy.average_fill_price or buy.requested_price or Decimal("0"))
+                if usdt_spent <= 0 or not buy_venue:
+                    skipped = True
+                else:
+                    eur_needed = usdt_spent / fx_bid
+                    fee_rate = venue_taker_fee(buy_venue)
+                    eur_needed *= Decimal("1") + fee_rate
+                    take = min(eur_needed, ledger.available(buy_venue, "EUR"))
+                    if take <= 0:
+                        skipped = True
+                    else:
+                        usdt_got = (take / (Decimal("1") + fee_rate)) * fx_bid
+                        fee_eur = take - (take / (Decimal("1") + fee_rate))
+                        ledger._add(buy_venue, "EUR", -take)
+                        ledger.credit(buy_venue, "USDT", usdt_got)
+                        fx_cost_eur = fee_eur
+                        eur_bal = self._portfolio.state.balances.setdefault(
+                            "EUR",
+                            AssetBalance(
+                                asset="EUR", available=Decimal("0"), reserved=Decimal("0")
+                            ),
+                        )
+                        usdt_bal = self._portfolio.state.balances.setdefault(
+                            "USDT",
+                            AssetBalance(
+                                asset="USDT", available=Decimal("0"), reserved=Decimal("0")
+                            ),
+                        )
+                        moved = min(take, eur_bal.available)
+                        eur_bal.available -= moved
+                        usdt_bal.available += usdt_got
+            elif direction == "eur_to_usdt":
+                # Received USDT on sell venue; convert to EUR (buy EURUSDT @ ask).
+                usdt_got = matched * (
+                    sell.average_fill_price or sell.requested_price or Decimal("0")
+                )
+                if usdt_got <= 0 or not sell_venue:
+                    skipped = True
+                else:
+                    take = min(usdt_got, ledger.available(sell_venue, "USDT"))
+                    if take <= 0:
+                        skipped = True
+                    else:
+                        fee_rate = venue_taker_fee(sell_venue)
+                        eur_got = (take / fx_ask) * (Decimal("1") - fee_rate)
+                        fee_eur = (take / fx_ask) - eur_got
+                        ledger._add(sell_venue, "USDT", -take)
+                        ledger.credit(sell_venue, "EUR", eur_got)
+                        fx_cost_eur = fee_eur
+                        eur_bal = self._portfolio.state.balances.setdefault(
+                            "EUR",
+                            AssetBalance(
+                                asset="EUR", available=Decimal("0"), reserved=Decimal("0")
+                            ),
+                        )
+                        usdt_bal = self._portfolio.state.balances.setdefault(
+                            "USDT",
+                            AssetBalance(
+                                asset="USDT", available=Decimal("0"), reserved=Decimal("0")
+                            ),
+                        )
+                        moved = min(take, usdt_bal.available)
+                        usdt_bal.available -= moved
+                        eur_bal.available += eur_got
+            else:
+                skipped = True
+
+            self._mark_triangle_fx(opp_id, tracked, fx_cost_eur)
+            self._finalize_triangle_pnl(tracked, orders, fx_cost_eur=fx_cost_eur)
+            logger.info(
+                "TRIANGLE_FX_REFILL opp=%s direction=%s fx_cost_eur=%s skipped=%s",
+                opp_id,
+                direction,
+                fx_cost_eur,
+                skipped,
+            )
 
     def _record_markouts(self, executions: list[Any], books: dict[str, dict[str, Any]]) -> None:
         if not getattr(self._settings, "paper_markout_enabled", True):
@@ -700,18 +887,29 @@ class PaperRunner:
         floor = Decimal(str(getattr(self._settings, "paper_markout_floor_bps", 2) or 2))
         ceiling = Decimal(str(getattr(self._settings, "paper_markout_ceiling_bps", 15) or 15))
         suggested = self._markout.suggested_adverse_bps(floor=floor, ceiling=ceiling)
+        suggested_f = float(suggested)
+        if self._last_markout_bps is not None and abs(self._last_markout_bps - suggested_f) < 0.05:
+            return
+        self._last_markout_bps = suggested_f
         try:
-            self._settings.paper_maker_adverse_bps = float(suggested)
+            self._settings.paper_maker_adverse_bps = suggested_f
         except Exception:
-            object.__setattr__(self._settings, "paper_maker_adverse_bps", float(suggested))
-        # Keep live strategy haircuts in sync.
-        for strat in (self._strategy,):
-            if hasattr(strat, "_adverse"):
-                strat._adverse = suggested  # type: ignore[attr-defined]
-            for child_name in ("_maker", "_triangle"):
-                child = getattr(strat, child_name, None)
-                if child is not None and hasattr(child, "_adverse"):
-                    child._adverse = suggested
+            object.__setattr__(self._settings, "paper_maker_adverse_bps", suggested_f)
+        # Rebuild strategy + engine gates so markout is hard in approval path.
+        if hasattr(self._strategy, "update_adverse_bps"):
+            self._strategy.update_adverse_bps(suggested)  # type: ignore[attr-defined]
+        gate = self._gate_settings()
+        self._profitability = DefaultProfitabilityEngine(gate)
+        self._risk = RiskEngine(gate, kill_switch=self._risk.kill_switch)
+        self._engine = TradingEngine(
+            market_data=self._provider,
+            strategy=self._strategy,
+            profitability=self._profitability,
+            risk=self._risk,
+            portfolio=self._portfolio,
+            executor=self._executor,
+        )
+        logger.info("MARKOUT_GATE_REBUILT adverse_bps=%s", suggested)
 
     async def _hybrid_hedge_if_needed(self, books: dict[str, dict[str, Any]]) -> None:
         if not getattr(self._settings, "paper_hybrid_hedge", True):

@@ -97,6 +97,22 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "<li>Trade-through maker fills, fees, stale-edge caps</li>"
     )
 
+    markout = status.get("markout") or {}
+    desk_scan = status.get("desk_scan") or {}
+    maker_scan = desk_scan.get("maker") or {}
+    tri_scan = desk_scan.get("triangle") or {}
+    inventory = status.get("inventory") or {}
+    desk_strategy = _esc(str(status.get("strategy") or "—"))
+    desk_tier = _esc(str(status.get("fee_tier") or "retail"))
+    markout_5s = f"{_esc(str(markout.get('avg_adverse_bps_5s') or '0'))} bps"
+    markout_suggested = f"{_esc(str(markout.get('suggested_adverse_bps') or '0'))} bps"
+    tri_pairs = _fmt_count(tri_scan.get("pairs_evaluated", 0))
+    tri_emits = _fmt_count(tri_scan.get("opportunities_emitted", 0))
+    maker_emits = _fmt_count(maker_scan.get("opportunities_emitted", 0))
+    fx_refills = _fmt_count(inventory.get("fx_refilled", 0))
+    seeded_assets = _esc(", ".join(inventory.get("seeded_assets") or []) or "—")
+    inventory_rows = _inventory_rows(inventory.get("venues") or {})
+
     profit_chart = _svg_cumulative_profit(trades)
     hourly_chart = _svg_hourly_bars(hourly)
     winloss_chart = _svg_win_loss(wins, losses)
@@ -161,6 +177,27 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </div>
       <p class="forecast-note">{forecast_note}</p>
       <ul class="forecast-assumptions">{assumption_lis}</ul>
+    </section>
+
+    <section class="panel">
+      <h2>Desk-monitor</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Strategie</span><span class="value">{desk_strategy}</span></article>
+        <article class="metric-card"><span class="label">Fee-tier</span><span class="value">{desk_tier}</span></article>
+        <article class="metric-card"><span class="label">Markout 5s</span><span class="value">{markout_5s}</span></article>
+        <article class="metric-card"><span class="label">Adverse (gate)</span><span class="value">{markout_suggested}</span></article>
+        <article class="metric-card"><span class="label">Triangle gescand</span><span class="value">{tri_pairs}</span></article>
+        <article class="metric-card"><span class="label">Triangle emits</span><span class="value">{tri_emits}</span></article>
+        <article class="metric-card"><span class="label">Maker emits</span><span class="value">{maker_emits}</span></article>
+        <article class="metric-card"><span class="label">FX refills</span><span class="value">{fx_refills}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Venue</th><th>EUR</th><th>USDT</th><th>Overig</th></tr></thead>
+          <tbody>{inventory_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Seeded: {seeded_assets}</p>
     </section>
 
     <section class="panel">
@@ -875,6 +912,31 @@ def _short_ts(value: Any) -> str:
     if "." in text:
         text = text.split(".", 1)[0]
     return text[-16:] if len(text) > 16 else text
+
+
+def _inventory_rows(venues: dict[str, Any]) -> str:
+    if not venues:
+        return "<tr><td colspan='4' class='empty'>Nog geen venue-voorraad</td></tr>"
+    rows: list[str] = []
+    for venue, assets in sorted(venues.items()):
+        if not isinstance(assets, dict):
+            continue
+        eur = assets.get("EUR", "0")
+        usdt = assets.get("USDT", "0")
+        other = ", ".join(
+            f"{k}={v}"
+            for k, v in sorted(assets.items())
+            if k not in {"EUR", "USDT"} and _to_decimal(v) not in {None, Decimal("0")}
+        ) or "—"
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(_venue_label(venue))}</td>"
+            f"<td class='num'>{_esc(eur)}</td>"
+            f"<td class='num'>{_esc(usdt)}</td>"
+            f"<td>{_esc(other)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='4' class='empty'>Nog geen venue-voorraad</td></tr>"
 
 
 def _esc(value: Any) -> str:

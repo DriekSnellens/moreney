@@ -93,6 +93,15 @@ class MakerInventoryStrategy(BaseStrategy):
         self._last_emit_monotonic: dict[str, float] = {}
         self._fair_values: dict[str, Decimal] = {}
 
+    def update_adverse_bps(self, adverse_bps: Decimal) -> None:
+        """Rebuild NET gate with a new adverse-selection haircut."""
+        self._adverse_bps = Decimal(str(adverse_bps))
+        updated = self._settings.model_copy(
+            update={"paper_maker_adverse_bps": float(self._adverse_bps)}
+        )
+        self._settings = updated
+        self._profitability = self._build_profitability_engine(updated)
+
     @staticmethod
     def _build_profitability_engine(settings: Settings) -> DefaultProfitabilityEngine:
         adverse = float(getattr(settings, "paper_maker_adverse_bps", 0) or 0)

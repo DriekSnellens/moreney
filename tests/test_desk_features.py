@@ -117,3 +117,83 @@ async def test_triangle_emits_usdt_to_eur_when_edge_clears_fees() -> None:
         assert opps[0].metadata.get("sell_symbol") == "ATOMEUR"
     else:
         assert stats["reject_counts"]  # type: ignore[index]
+
+
+def test_triangle_pnl_waits_for_fx_refill_then_locks() -> None:
+    from uuid import uuid4
+
+    from bot.core.enums import OrderSide, OrderStatus
+    from bot.core.models import ExecutionResult
+    from bot.paper.models import TrackedOpportunity
+    from bot.paper.tracker import PerformanceTracker
+    from bot.portfolio.models import Fill
+
+    tracker = PerformanceTracker(starting_equity=Decimal("1000"))
+    opp_id = uuid4()
+    buy_oid = uuid4()
+    sell_oid = uuid4()
+    tracked = TrackedOpportunity(
+        id=opp_id,
+        strategy="triangle_bridge",
+        symbol="ATOMUSDT",
+        buy_exchange="okx",
+        sell_exchange="binance",
+        quantity=Decimal("1"),
+        gross_profit=Decimal("0.01"),
+        expected_net_profit=Decimal("0.01"),
+        metadata={
+            "triangle": True,
+            "direction": "usdt_to_eur",
+            "fx_mid": "1000",
+        },
+    )
+    tracker._by_id[opp_id] = tracked  # noqa: SLF001
+    tracker._opportunities.append(tracked)  # noqa: SLF001
+
+    buy_fill = Fill(
+        order_id=buy_oid,
+        symbol="ATOMUSDT",
+        side=OrderSide.BUY,
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        fee=Decimal("0.1"),
+        fee_asset="USDT",
+    )
+    sell_fill = Fill(
+        order_id=sell_oid,
+        symbol="ATOMEUR",
+        side=OrderSide.SELL,
+        quantity=Decimal("1"),
+        price=Decimal("0.1005"),
+        fee=Decimal("0.0001"),
+        fee_asset="EUR",
+    )
+    execution = ExecutionResult(
+        order_id=buy_oid,
+        opportunity_id=opp_id,
+        status=OrderStatus.FILLED,
+        filled_quantity=Decimal("1"),
+        average_price=Decimal("100"),
+    )
+    # Before FX refill: no locked PnL.
+    tracker.record_execution(opp_id, execution, fills=[buy_fill, sell_fill])
+    assert tracked.realized_net_profit is None
+
+    realized = tracker.finalize_triangle_pnl(
+        tracked, [buy_fill, sell_fill], fx_refill_cost_eur=Decimal("0.001")
+    )
+    assert realized is not None
+    # buy_eur ≈ (100+0.1)/1000 = 0.1001; sell ≈ 0.1005-0.0001=0.1004; -fx 0.001
+    assert tracked.metadata.get("fx_refilled") is True
+    assert tracked.realized_net_profit == realized
+
+
+def test_dashboard_inventory_rows_render() -> None:
+    from bot.paper.dashboard import _inventory_rows
+
+    html = _inventory_rows(
+        {"okx": {"EUR": "40", "USDT": "12.5", "ATOM": "3"}, "binance": {"EUR": "50"}}
+    )
+    assert "okx" in html.lower() or "OKX" in html or "Okx" in html
+    assert "USDT" in html or "12.5" in html
+    assert "ATOM=3" in html

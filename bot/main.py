@@ -321,6 +321,11 @@ async def paper_overview() -> dict[str, Any]:
                 for k, v in portfolio.positions.items()
                 if v.quantity != 0
             },
+            "venue_ledger": (
+                runner.portfolio.venue_ledger.export()
+                if runner.portfolio.venue_ledger is not None
+                else None
+            ),
         },
         "performance": performance.model_dump(mode="json"),
     }

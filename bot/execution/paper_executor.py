@@ -211,7 +211,7 @@ class PaperExecutor(BaseExecutor):
             quantity=filled_qty,
             price=vwap,
             fee=fee,
-            fee_asset=self._quote,
+            fee_asset=self._quote_asset_for(order),
             slippage=slippage_cost,
             exchange=str((order.metadata or {}).get("venue") or "paper"),
             metadata={
@@ -496,7 +496,7 @@ class PaperExecutor(BaseExecutor):
             quantity=filled_qty,
             price=vwap,
             fee=fee,
-            fee_asset=self._quote,
+            fee_asset=self._quote_asset_for(order),
             slippage=_ZERO,
             exchange=str((order.metadata or {}).get("venue") or "paper"),
             metadata={

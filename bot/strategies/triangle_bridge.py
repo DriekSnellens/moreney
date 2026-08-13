@@ -103,6 +103,25 @@ class TriangleBridgeStrategy(BaseStrategy):
         self._last_emit: dict[str, float] = {}
         self._cooldown_ms = float(settings.arbitrage_opportunity_cooldown_ms)
 
+    def update_adverse_bps(self, adverse_bps: Decimal) -> None:
+        self._adverse = Decimal(str(adverse_bps))
+        updated = self._settings.model_copy(
+            update={"paper_maker_adverse_bps": float(self._adverse)}
+        )
+        self._settings = updated
+        self._profitability = DefaultProfitabilityEngine(
+            updated.model_copy(
+                update={
+                    "profitability_min_net_profit_usd": float(self._min_profit),
+                    "profitability_min_net_return": float(self._min_return),
+                    "profitability_apply_funding": False,
+                    "profitability_slippage_bps": 0.0,
+                    "profitability_thin_book_penalty_bps": 0.0,
+                    "profitability_execution_buffer_bps": 1.0 + float(self._adverse),
+                }
+            )
+        )
+
     async def evaluate(self, snapshot: MarketSnapshot) -> list[TradeOpportunity]:
         return []
 
@@ -477,6 +496,12 @@ class CompositeDeskStrategy(BaseStrategy):
         self._maker = maker
         self._triangle = triangle
         self._max_emits = int(settings.arbitrage_max_emits_per_cycle)
+
+    def update_adverse_bps(self, adverse_bps: Decimal) -> None:
+        if hasattr(self._maker, "update_adverse_bps"):
+            self._maker.update_adverse_bps(adverse_bps)  # type: ignore[attr-defined]
+        if hasattr(self._triangle, "update_adverse_bps"):
+            self._triangle.update_adverse_bps(adverse_bps)  # type: ignore[attr-defined]
 
     async def evaluate(self, snapshot: MarketSnapshot) -> list[TradeOpportunity]:
         return []
