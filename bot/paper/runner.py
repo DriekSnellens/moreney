@@ -114,11 +114,16 @@ class PaperRunner:
             return
         if self._portfolio.venue_ledger is not None:
             return
-        venues = [
-            part.strip()
-            for part in self._settings.market_data_exchanges.split(",")
-            if part.strip()
-        ]
+        raw_maker = str(getattr(self._settings, "paper_maker_venues", "") or "")
+        maker_venues = [part.strip() for part in raw_maker.split(",") if part.strip()]
+        if maker_venues and self._settings.paper_maker_enabled:
+            venues = maker_venues
+        else:
+            venues = [
+                part.strip()
+                for part in self._settings.market_data_exchanges.split(",")
+                if part.strip()
+            ]
         self._portfolio.init_venue_ledger(
             venues,
             starting_quote=Decimal(str(self._settings.paper_starting_eur)),
@@ -570,11 +575,22 @@ class PaperRunner:
             return
         now_ms = int(time.time() * 1000)
         expired_opps: set[UUID] = set()
+        grace_ms = float(getattr(self._settings, "paper_maker_sibling_grace_ms", 0) or 0)
         for order in list(self._executor.order_manager.open_orders()):
             if not (order.metadata or {}).get("post_only"):
                 continue
             placed = float((order.metadata or {}).get("placed_ms") or now_ms)
-            if now_ms - placed < max_age:
+            age = now_ms - placed
+            limit = max_age
+            if grace_ms > 0 and order.opportunity_id is not None:
+                siblings = [
+                    o
+                    for o in self._executor.order_manager.list_orders()
+                    if o.opportunity_id == order.opportunity_id and o.id != order.id
+                ]
+                if any(s.filled_quantity > 0 for s in siblings):
+                    limit = max_age + grace_ms
+            if age < limit:
                 continue
             await self._executor.cancel(order.id, reason="maker_quote_expired")
             if order.opportunity_id is not None:

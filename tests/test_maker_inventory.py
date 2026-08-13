@@ -18,6 +18,8 @@ def _maker_settings(**overrides: object) -> Settings:
         "paper_maker_min_profit_eur": 0.02,
         "paper_maker_min_spread_bps": 2.0,
         "paper_maker_max_edge_bps": 200.0,
+        "paper_maker_max_fee_bps": 40.0,
+        "paper_maker_venues": "okx,binance,bitvavo",
         "paper_maker_same_venue": True,
         "arbitrage_min_profit_pct": 0.0001,
         "arbitrage_min_liquidity_base": 0.01,
@@ -47,10 +49,10 @@ async def test_maker_emits_when_ask_minus_bid_clears_fees() -> None:
     strategy = MakerInventoryStrategy(_maker_settings())
     snaps = [
         top_of_book_snapshot(
-            exchange="binance", symbol="BTCEUR", order_book=_book("100", "100.20")
+            exchange="okx", symbol="BTCEUR", order_book=_book("100", "100.20")
         ),
         top_of_book_snapshot(
-            exchange="kraken", symbol="BTCEUR", order_book=_book("100.80", "101.20")
+            exchange="binance", symbol="BTCEUR", order_book=_book("100.80", "101.20")
         ),
     ]
     opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
@@ -96,19 +98,75 @@ async def test_maker_rejects_stale_wide_edge() -> None:
 
 
 @pytest.mark.asyncio
+async def test_maker_rejects_when_fees_eat_edge() -> None:
+    strategy = MakerInventoryStrategy(
+        _maker_settings(paper_maker_max_edge_bps=40, paper_maker_same_venue=True)
+    )
+    # Bitvavo maker RT ≈ 30 bps; 12 bps spread leaves no NET room.
+    snaps = [
+        top_of_book_snapshot(
+            exchange="bitvavo", symbol="BTCEUR", order_book=_book("100", "100.12")
+        ),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps == []
+    assert strategy.scan_stats()["reject_counts"].get("fees_eat_edge", 0) > 0  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_maker_rejects_expensive_venue_pair() -> None:
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_venues="okx,binance,bitvavo,kraken",
+            paper_maker_max_fee_bps=20,
+            paper_maker_same_venue=False,
+            paper_maker_max_edge_bps=80,
+        )
+    )
+    snaps = [
+        top_of_book_snapshot(
+            exchange="binance", symbol="BTCEUR", order_book=_book("100", "100.10")
+        ),
+        top_of_book_snapshot(
+            exchange="kraken", symbol="BTCEUR", order_book=_book("100.40", "100.50")
+        ),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps == []
+    assert strategy.scan_stats()["reject_counts"].get("fee_too_high", 0) > 0  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_maker_ignores_venues_outside_allowlist() -> None:
+    strategy = MakerInventoryStrategy(
+        _maker_settings(paper_maker_venues="okx,binance", paper_maker_same_venue=False)
+    )
+    snaps = [
+        top_of_book_snapshot(
+            exchange="kraken", symbol="BTCEUR", order_book=_book("100", "100.05")
+        ),
+        top_of_book_snapshot(
+            exchange="bitvavo", symbol="BTCEUR", order_book=_book("100.40", "100.50")
+        ),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps == []
+
+
+@pytest.mark.asyncio
 async def test_maker_same_venue_when_spread_is_wide() -> None:
     strategy = MakerInventoryStrategy(
         _maker_settings(paper_maker_min_profit_eur=0.01, paper_maker_min_spread_bps=2)
     )
     snaps = [
         top_of_book_snapshot(
-            exchange="binance", symbol="BTCEUR", order_book=_book("100", "101")
+            exchange="okx", symbol="BTCEUR", order_book=_book("100", "100.40")
         ),
     ]
     opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
     assert len(opps) == 1
-    assert opps[0].metadata["buy_exchange"] == "binance"
-    assert opps[0].metadata["sell_exchange"] == "binance"
+    assert opps[0].metadata["buy_exchange"] == "okx"
+    assert opps[0].metadata["sell_exchange"] == "okx"
 
 
 @pytest.mark.asyncio
@@ -125,7 +183,7 @@ async def test_maker_skips_usdt_pairs_on_eur_account() -> None:
             ),
         ),
         top_of_book_snapshot(
-            exchange="kraken",
+            exchange="okx",
             symbol="BTCUSDT",
             order_book=OrderBook(
                 symbol="BTCUSDT",
@@ -162,25 +220,25 @@ async def test_orchestrator_places_post_only_legs_without_taker_hedge() -> None:
         profitability_min_net_profit_usd=0.02,
         paper_maker_min_profit_eur=0.02,
     )
-    binance = top_of_book_snapshot(
-        exchange="binance", symbol="BTCEUR", order_book=_book("100", "100.20")
+    okx = top_of_book_snapshot(
+        exchange="okx", symbol="BTCEUR", order_book=_book("100", "100.20")
     )
-    kraken = top_of_book_snapshot(
-        exchange="kraken", symbol="BTCEUR", order_book=_book("100.80", "101.20")
+    binance = top_of_book_snapshot(
+        exchange="binance", symbol="BTCEUR", order_book=_book("100.80", "101.20")
     )
 
     class VenueProvider:
         async def get_venue_snapshots(self, symbol: str):
-            return [binance, kraken]
+            return [okx, binance]
 
         async def get_snapshot(self, symbol: str):
-            return binance
+            return okx
 
         def get_order_book(self, exchange: str, symbol: str):
+            if exchange == "okx":
+                return okx.order_book
             if exchange == "binance":
                 return binance.order_book
-            if exchange == "kraken":
-                return kraken.order_book
             return None
 
     portfolio = PaperPortfolio(settings, starting_eur=Decimal("10000"))
@@ -205,10 +263,10 @@ async def test_orchestrator_places_post_only_legs_without_taker_hedge() -> None:
     assert all((o.metadata or {}).get("post_only") for o in result.orders)
 
     books = {
-        "binance": {
+        "okx": {
             "BTCEUR": _book("99.5", "100.20")  # bid traded through buy @ 100
         },
-        "kraken": {
+        "binance": {
             "BTCEUR": _book("100.80", "101.50")  # ask traded through sell @ 101.20
         },
     }

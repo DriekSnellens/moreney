@@ -71,8 +71,14 @@ class MakerInventoryStrategy(BaseStrategy):
         self._max_book_age_ms = settings.arbitrage_max_book_age_ms
         self._min_spread_bps = Decimal(str(settings.paper_maker_min_spread_bps))
         self._max_edge_bps = Decimal(str(settings.paper_maker_max_edge_bps))
+        self._max_fee_bps = Decimal(str(settings.paper_maker_max_fee_bps))
         self._same_venue = bool(settings.paper_maker_same_venue)
         self._quote = settings.paper_quote_asset.upper()
+        self._maker_venues = {
+            part.strip().lower()
+            for part in str(getattr(settings, "paper_maker_venues", "") or "").split(",")
+            if part.strip()
+        }
         self._profitability = profitability or self._build_profitability_engine(settings)
         self._pairs_evaluated = 0
         self._depth_edges_found = 0
@@ -90,7 +96,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,
-                "profitability_execution_buffer_bps": 2.0,
+                "profitability_execution_buffer_bps": 1.0,
             }
         )
         return DefaultProfitabilityEngine(maker_settings)
@@ -139,7 +145,11 @@ class MakerInventoryStrategy(BaseStrategy):
 
         ranked: list[TradeOpportunity] = []
         for buy_snap in venues:
+            if not self._venue_allowed(buy_snap.exchange):
+                continue
             for sell_snap in venues:
+                if not self._venue_allowed(sell_snap.exchange):
+                    continue
                 same = buy_snap.exchange == sell_snap.exchange
                 if same and not self._same_venue:
                     continue
@@ -173,6 +183,11 @@ class MakerInventoryStrategy(BaseStrategy):
             self._opportunities_emitted += 1
             self._mark_emitted(opp)
         return selected
+
+    def _venue_allowed(self, exchange: str | None) -> bool:
+        if not self._maker_venues:
+            return True
+        return str(exchange or "").strip().lower() in self._maker_venues
 
     def _in_cooldown(self, opportunity: TradeOpportunity) -> bool:
         if self._cooldown_ms <= 0:
@@ -296,6 +311,34 @@ class MakerInventoryStrategy(BaseStrategy):
                 (
                     f"Gross edge {spread_bps} bps above live max {self._max_edge_bps} bps "
                     f"(public books this wide are usually stale, not maker-fillable)"
+                ),
+                buy_exchange=buy_snap.exchange,
+                sell_exchange=sell_snap.exchange,
+            )
+            return None
+
+        fee_bps = (
+            venue_maker_fee(buy_snap.exchange) + venue_maker_fee(sell_snap.exchange)
+        ) * _BPS
+        if self._max_fee_bps > 0 and fee_bps > self._max_fee_bps:
+            self._reject(
+                buy_snap.symbol,
+                "fee_too_high",
+                (
+                    f"Combined maker fees {fee_bps} bps exceed max {self._max_fee_bps} bps "
+                    f"({buy_snap.exchange}->{sell_snap.exchange})"
+                ),
+                buy_exchange=buy_snap.exchange,
+                sell_exchange=sell_snap.exchange,
+            )
+            return None
+        if fee_bps + Decimal("1") >= spread_bps:
+            self._reject(
+                buy_snap.symbol,
+                "fees_eat_edge",
+                (
+                    f"Maker fees {fee_bps} bps (+1 bps buffer) leave no NET room in "
+                    f"{spread_bps} bps gross edge"
                 ),
                 buy_exchange=buy_snap.exchange,
                 sell_exchange=sell_snap.exchange,

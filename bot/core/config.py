@@ -112,10 +112,16 @@ class Settings(BaseSettings):
     paper_maker_min_spread_bps: float = Field(default=3.0, ge=0)
     # Gross edge above this is treated as stale/public-feed dislocation, not tradable.
     paper_maker_max_edge_bps: float = Field(default=30.0, ge=0)
-    paper_maker_min_profit_eur: float = Field(default=0.02, ge=0)
-    # Same-venue MM on public L2 is usually stale-spread noise; off by default for live parity.
-    paper_maker_same_venue: bool = False
-    paper_maker_max_open_quotes: int = Field(default=2, ge=1, le=20)
+    paper_maker_min_profit_eur: float = Field(default=0.01, ge=0)
+    # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
+    paper_maker_same_venue: bool = True
+    paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=20)
+    # Only quote/inventory on these venues. Empty = all market-data venues.
+    paper_maker_venues: str = "okx,binance,bitvavo"
+    # Skip pairs whose combined maker fees exceed this (bps).
+    paper_maker_max_fee_bps: float = Field(default=28.0, ge=0)
+    # Extra life for the unfilled leg after its sibling fills (ms).
+    paper_maker_sibling_grace_ms: float = Field(default=8000.0, ge=0)
     # When one maker leg fills and the quote expires, exit leftover inventory as taker.
     paper_maker_one_leg_exit: bool = True
     paper_maker_one_leg_adverse_bps: float = Field(default=6.0, ge=0)
