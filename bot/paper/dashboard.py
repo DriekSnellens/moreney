@@ -117,7 +117,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Oefenhandel · live-inschatting</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Fee-first maker op OKX/Binance/Bitvavo, meer EUR-crypto’s, voorraad geconcentreerd. Winst = live-inschatting (trade-through, fees, geen stale gaps).</p>
+        <p class="sub">Scant veel EUR-crypto’s; inventory geconcentreerd op OKX/Binance/Bitvavo (fee-first). Winst = live-inschatting (trade-through, fees, geen stale gaps).</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>

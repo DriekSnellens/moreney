@@ -37,8 +37,10 @@ class VenueLedger:
         self.venues = [v.strip().lower() for v in venues if v.strip()]
         self._balances: dict[str, dict[str, Decimal]] = {v: {} for v in self.venues}
         self.seeded_assets: set[str] = set()
+        self.start_quote_each = _ZERO
         if self.venues and starting_quote > 0:
             each = starting_quote / Decimal(len(self.venues))
+            self.start_quote_each = each
             for venue in self.venues:
                 self._balances[venue][self.quote] = each
 
@@ -81,15 +83,30 @@ class VenueLedger:
             return
         self._add(venue, asset, amount)
 
-    def seed_asset(self, asset: str, *, price: Decimal, pct: Decimal) -> list[tuple[str, Decimal, Decimal]]:
-        """Convert ``pct`` of each venue's quote into ``asset``. Returns (venue, qty, cost)."""
+    def seed_asset(
+        self,
+        asset: str,
+        *,
+        price: Decimal,
+        quote_budget: Decimal | None = None,
+        pct: Decimal | None = None,
+    ) -> list[tuple[str, Decimal, Decimal]]:
+        """Convert quote into ``asset`` on each venue.
+
+        Prefer ``quote_budget`` (absolute EUR per venue). ``pct`` is legacy and means
+        percent of *remaining* quote — avoid with many symbols (compounds to dust).
+        """
         asset = asset.upper()
-        if asset in self.seeded_assets or price <= 0 or pct <= 0:
+        if asset in self.seeded_assets or price <= 0:
             return []
         moved: list[tuple[str, Decimal, Decimal]] = []
-        frac = pct / Decimal("100")
         for venue in self.venues:
-            quote_amt = self.available(venue, self.quote) * frac
+            if quote_budget is not None:
+                quote_amt = min(quote_budget, self.available(venue, self.quote))
+            elif pct is not None and pct > 0:
+                quote_amt = self.available(venue, self.quote) * (pct / Decimal("100"))
+            else:
+                continue
             if quote_amt <= 0:
                 continue
             qty = quote_amt / price
@@ -105,6 +122,7 @@ class VenueLedger:
             "quote": self.quote,
             "venues": list(self.venues),
             "seeded_assets": sorted(self.seeded_assets),
+            "start_quote_each": str(self.start_quote_each),
             "balances": {
                 venue: {asset: str(amount) for asset, amount in assets.items()}
                 for venue, assets in self._balances.items()
@@ -131,6 +149,11 @@ class VenueLedger:
             for asset, amount in (assets or {}).items():
                 ledger._balances[key][str(asset).upper()] = Decimal(str(amount))
         ledger.seeded_assets = {str(a).upper() for a in (data.get("seeded_assets") or [])}
+        raw_start = data.get("start_quote_each")
+        if raw_start is not None:
+            ledger.start_quote_each = Decimal(str(raw_start))
+        elif ledger.venues and fallback_start > 0:
+            ledger.start_quote_each = fallback_start / Decimal(len(ledger.venues))
         if not ledger.venues and fallback_start > 0:
             return cls([], quote=fallback_quote, starting_quote=fallback_start)
         return ledger

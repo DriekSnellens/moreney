@@ -125,7 +125,12 @@ class PaperPortfolio:
         )
 
     def maybe_seed_inventory(self, symbol: str, price: Decimal) -> None:
-        """Pre-fund base asset on every venue from quote cash (arb-desk inventory)."""
+        """Pre-fund base asset on maker venues from a shared inventory budget.
+
+        ``paper_seed_inventory_pct`` is the *total* share of starting capital used for
+        all seeded coins combined (not per-coin). Only ``paper_seed_max_assets`` coins
+        are funded so sizes stay tradeable; other symbols are still scanned.
+        """
         ledger = self.venue_ledger
         if ledger is None or price <= 0:
             return
@@ -136,7 +141,26 @@ class PaperPortfolio:
         quote = symbol.upper()
         if not quote.endswith(self._quote):
             return
-        moved = ledger.seed_asset(base, price=price, pct=pct)
+        allow = {
+            part.strip().upper().replace("-", "").replace("/", "")
+            for part in str(getattr(self._settings, "paper_seed_symbols", "") or "").split(",")
+            if part.strip()
+        }
+        if allow and quote not in allow:
+            return
+        max_assets = int(getattr(self._settings, "paper_seed_max_assets", 0) or 0)
+        if max_assets > 0 and base not in ledger.seeded_assets:
+            if len(ledger.seeded_assets) >= max_assets:
+                return
+        asset_slots = max_assets if max_assets > 0 else self._seed_asset_slot_count()
+        asset_slots = max(1, asset_slots)
+        start_each = ledger.start_quote_each
+        if start_each <= 0:
+            start_each = Decimal(str(self._settings.paper_starting_eur)) / Decimal(
+                max(1, len(ledger.venues))
+            )
+        quote_budget = start_each * (pct / Decimal("100")) / Decimal(asset_slots)
+        moved = ledger.seed_asset(base, price=price, quote_budget=quote_budget)
         if not moved:
             return
         total_qty = sum((qty for _, qty, _ in moved), _ZERO)
@@ -159,6 +183,21 @@ class PaperPortfolio:
         self._state.mark_prices[symbol.upper()] = price
         self._update_unrealized()
         self._update_drawdown()
+
+    def _seed_asset_slot_count(self) -> int:
+        allow = [
+            part.strip()
+            for part in str(getattr(self._settings, "paper_seed_symbols", "") or "").split(",")
+            if part.strip()
+        ]
+        if allow:
+            return len(allow)
+        symbols = [
+            part.strip()
+            for part in str(getattr(self._settings, "market_data_symbols", "") or "").split(",")
+            if part.strip() and part.strip().upper().endswith(self._quote)
+        ]
+        return max(1, len(symbols))
 
     def set_mark_price(self, symbol: str, price: Decimal) -> None:
         self._state.mark_prices[symbol.upper()] = price

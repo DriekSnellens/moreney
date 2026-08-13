@@ -96,8 +96,12 @@ class Settings(BaseSettings):
     paper_persist_path: str = "./data/paper_state.json"
     # Track cash/crypto per exchange so paper arb cannot teleport coins.
     paper_venue_inventory: bool = False
-    # Convert this % of each venue's quote into BTC/ETH at first mark (arb-desk float).
+    # Total % of starting capital reserved for ALL seeded base inventory combined.
     paper_seed_inventory_pct: float = Field(default=0.0, ge=0, le=90)
+    # Cap how many bases get pre-funded (scan can still cover more symbols).
+    paper_seed_max_assets: int = Field(default=5, ge=0, le=50)
+    # Optional allowlist of symbols to seed (empty = first max_assets from market data).
+    paper_seed_symbols: str = "ATOMEUR,DOTEUR,SOLEUR,XRPEUR,ADAEUR"
     # Extra adverse move applied to the sell book after the buy lands (basis points).
     paper_second_leg_adverse_bps: float = Field(default=0.0, ge=0)
     # Maker (post-only) quoting: capture bid/ask instead of paying taker-taker.
