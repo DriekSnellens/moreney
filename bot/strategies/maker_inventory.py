@@ -417,14 +417,15 @@ class MakerInventoryStrategy(BaseStrategy):
                 sell_exchange=sell_snap.exchange,
             )
             return None
-        cost_bps = fee_bps + Decimal("1") + self._adverse_bps
+        cost_bps = fee_bps + Decimal("1")
         if cost_bps >= spread_bps:
             self._reject(
                 buy_snap.symbol,
                 "fees_eat_edge",
                 (
-                    f"Maker fees {fee_bps} bps +1 buffer +{self._adverse_bps} adverse "
-                    f"leave no NET room in {spread_bps} bps gross edge"
+                    f"Maker fees {fee_bps} bps (+1 bps buffer) leave no NET room in "
+                    f"{spread_bps} bps gross edge "
+                    f"(adverse {self._adverse_bps} bps applied later in NET gate)"
                 ),
                 buy_exchange=buy_snap.exchange,
                 sell_exchange=sell_snap.exchange,
