@@ -73,6 +73,11 @@ class MakerInventoryStrategy(BaseStrategy):
         self._max_edge_bps = Decimal(str(settings.paper_maker_max_edge_bps))
         self._max_fee_bps = Decimal(str(settings.paper_maker_max_fee_bps))
         self._same_venue = bool(settings.paper_maker_same_venue)
+        self._adverse_bps = Decimal(str(getattr(settings, "paper_maker_adverse_bps", 0) or 0))
+        self._fair_value_enabled = bool(getattr(settings, "paper_maker_fair_value", True))
+        self._fx_symbol = str(
+            getattr(settings, "paper_maker_fx_symbol", "EURUSDT") or "EURUSDT"
+        ).upper()
         self._quote = settings.paper_quote_asset.upper()
         self._maker_venues = {
             part.strip().lower()
@@ -86,9 +91,11 @@ class MakerInventoryStrategy(BaseStrategy):
         self._opportunities_emitted = 0
         self._reject_counts: dict[str, int] = {}
         self._last_emit_monotonic: dict[str, float] = {}
+        self._fair_values: dict[str, Decimal] = {}
 
     @staticmethod
     def _build_profitability_engine(settings: Settings) -> DefaultProfitabilityEngine:
+        adverse = float(getattr(settings, "paper_maker_adverse_bps", 0) or 0)
         maker_settings = settings.model_copy(
             update={
                 "profitability_min_net_profit_usd": settings.paper_maker_min_profit_eur,
@@ -96,7 +103,8 @@ class MakerInventoryStrategy(BaseStrategy):
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,
-                "profitability_execution_buffer_bps": 1.0,
+                # 1 bp exec buffer + expected adverse selection when hit.
+                "profitability_execution_buffer_bps": 1.0 + adverse,
             }
         )
         return DefaultProfitabilityEngine(maker_settings)
@@ -118,14 +126,23 @@ class MakerInventoryStrategy(BaseStrategy):
         inventory: object = None,
     ) -> list[TradeOpportunity]:
         by_symbol = self._group_valid_snapshots(snapshots)
+        self._fair_values = self._build_fair_values(by_symbol)
         opportunities: list[TradeOpportunity] = []
         for symbol, venues in by_symbol.items():
+            if infer_quote_asset(symbol, self._quote) != self._quote:
+                # USDT/FX books are reference-only for fair value, not quote legs.
+                continue
             opportunities.extend(
                 await self._evaluate_symbol(
                     symbol, venues, equity=equity, inventory=inventory
                 )
             )
-        return opportunities
+        opportunities.sort(key=self._rank_opportunity, reverse=True)
+        selected = opportunities[: self._max_emits]
+        for opp in selected:
+            self._opportunities_emitted += 1
+            self._mark_emitted(opp)
+        return selected
 
     async def _evaluate_symbol(
         self,
@@ -144,6 +161,7 @@ class MakerInventoryStrategy(BaseStrategy):
             return []
 
         ranked: list[TradeOpportunity] = []
+        fair_value = self._fair_values.get(infer_base_asset(symbol, self._quote))
         for buy_snap in venues:
             if not self._venue_allowed(buy_snap.exchange):
                 continue
@@ -155,12 +173,16 @@ class MakerInventoryStrategy(BaseStrategy):
                     continue
                 self._pairs_evaluated += 1
                 candidate = self._build_candidate(
-                    buy_snap, sell_snap, equity=equity, inventory=inventory
+                    buy_snap,
+                    sell_snap,
+                    equity=equity,
+                    inventory=inventory,
+                    fair_value=fair_value,
                 )
                 if candidate is None:
                     continue
                 self._depth_edges_found += 1
-                opportunity = await self._gate_candidate(candidate)
+                opportunity = await self._gate_candidate(candidate, inventory=inventory)
                 if opportunity is None:
                     continue
                 if self._in_cooldown(opportunity):
@@ -174,15 +196,49 @@ class MakerInventoryStrategy(BaseStrategy):
                     continue
                 ranked.append(opportunity)
 
-        ranked.sort(
-            key=lambda o: Decimal(str(o.metadata.get("net_profit_eur", "0"))),
-            reverse=True,
-        )
-        selected = ranked[: self._max_emits]
-        for opp in selected:
-            self._opportunities_emitted += 1
-            self._mark_emitted(opp)
-        return selected
+        return ranked
+
+    def _rank_opportunity(self, opportunity: TradeOpportunity) -> Decimal:
+        meta = opportunity.metadata or {}
+        net = Decimal(str(meta.get("net_profit_eur", "0")))
+        skew = Decimal(str(meta.get("inventory_skew_score", "0")))
+        fv_bonus = Decimal("1") if meta.get("fair_value_aligned") else Decimal("0")
+        return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001"))
+
+    def _build_fair_values(
+        self, by_symbol: dict[str, list[MarketSnapshot]]
+    ) -> dict[str, Decimal]:
+        if not self._fair_value_enabled:
+            return {}
+        fx_mid = self._median_mid(by_symbol.get(self._fx_symbol) or [])
+        if fx_mid is None or fx_mid <= 0:
+            return {}
+        values: dict[str, Decimal] = {}
+        for symbol, snaps in by_symbol.items():
+            if not symbol.endswith("USDT") or symbol == self._fx_symbol:
+                continue
+            base = symbol[: -len("USDT")]
+            if not base:
+                continue
+            usdt_mid = self._median_mid(snaps)
+            if usdt_mid is None or usdt_mid <= 0:
+                continue
+            # EURUSDT = USDT per 1 EUR ⇒ BASEEUR fair = BASEUSDT / EURUSDT.
+            values[base] = usdt_mid / fx_mid
+        return values
+
+    @staticmethod
+    def _median_mid(snaps: list[MarketSnapshot]) -> Decimal | None:
+        mids: list[Decimal] = []
+        for snap in snaps:
+            book = snap.order_book
+            if book is None or not book.bids or not book.asks:
+                continue
+            mids.append((book.bids[0].price + book.asks[0].price) / Decimal("2"))
+        if not mids:
+            return None
+        mids.sort()
+        return mids[len(mids) // 2]
 
     def _venue_allowed(self, exchange: str | None) -> bool:
         if not self._maker_venues:
@@ -270,6 +326,7 @@ class MakerInventoryStrategy(BaseStrategy):
         *,
         equity: Decimal | None = None,
         inventory: object = None,
+        fair_value: Decimal | None = None,
     ) -> MakerCandidate | None:
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
@@ -317,6 +374,34 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
 
+        if fair_value is not None and fair_value > 0:
+            # Require buy below fair value and sell above it — otherwise the
+            # "edge" is a one-sided stale book vs global USDT fair value.
+            if buy_price > fair_value:
+                self._reject(
+                    buy_snap.symbol,
+                    "toxic_buy_vs_fv",
+                    (
+                        f"Buy bid {buy_price} is above USDT fair value {fair_value} "
+                        f"({self._fx_symbol} bridge)"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=sell_snap.exchange,
+                )
+                return None
+            if sell_price < fair_value:
+                self._reject(
+                    buy_snap.symbol,
+                    "toxic_sell_vs_fv",
+                    (
+                        f"Sell ask {sell_price} is below USDT fair value {fair_value} "
+                        f"({self._fx_symbol} bridge)"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=sell_snap.exchange,
+                )
+                return None
+
         fee_bps = (
             venue_maker_fee(buy_snap.exchange) + venue_maker_fee(sell_snap.exchange)
         ) * _BPS
@@ -332,13 +417,14 @@ class MakerInventoryStrategy(BaseStrategy):
                 sell_exchange=sell_snap.exchange,
             )
             return None
-        if fee_bps + Decimal("1") >= spread_bps:
+        cost_bps = fee_bps + Decimal("1") + self._adverse_bps
+        if cost_bps >= spread_bps:
             self._reject(
                 buy_snap.symbol,
                 "fees_eat_edge",
                 (
-                    f"Maker fees {fee_bps} bps (+1 bps buffer) leave no NET room in "
-                    f"{spread_bps} bps gross edge"
+                    f"Maker fees {fee_bps} bps +1 buffer +{self._adverse_bps} adverse "
+                    f"leave no NET room in {spread_bps} bps gross edge"
                 ),
                 buy_exchange=buy_snap.exchange,
                 sell_exchange=sell_snap.exchange,
@@ -417,7 +503,22 @@ class MakerInventoryStrategy(BaseStrategy):
             )
         return capped
 
-    async def _gate_candidate(self, candidate: MakerCandidate) -> TradeOpportunity | None:
+    async def _gate_candidate(
+        self,
+        candidate: MakerCandidate,
+        *,
+        inventory: object = None,
+    ) -> TradeOpportunity | None:
+        base = infer_base_asset(candidate.symbol, self._quote)
+        fair_value = self._fair_values.get(base)
+        fair_aligned = bool(
+            fair_value is not None
+            and fair_value > 0
+            and candidate.buy_price < fair_value < candidate.sell_price
+        )
+        skew = self._inventory_skew_score(
+            candidate, inventory=inventory, base=base
+        )
         opportunity = TradeOpportunity(
             strategy_name=self.name,
             symbol=candidate.symbol,
@@ -430,6 +531,11 @@ class MakerInventoryStrategy(BaseStrategy):
                 f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
                 f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
                 f"{candidate.sell_price}"
+                + (
+                    f"; fair_value_eur={fair_value}"
+                    if fair_value is not None
+                    else ""
+                )
             ),
             market=candidate.buy_snapshot.model_copy(update={"order_book": None}),
             entry_fee_role=FeeRole.MAKER,
@@ -446,6 +552,10 @@ class MakerInventoryStrategy(BaseStrategy):
                 "quote_currency": self._quote,
                 "round_trip": True,
                 "post_only": True,
+                "fair_value_eur": str(fair_value) if fair_value is not None else None,
+                "fair_value_aligned": fair_aligned,
+                "inventory_skew_score": str(skew),
+                "adverse_bps": str(self._adverse_bps),
             },
         )
         result = await self._profitability.evaluate(
@@ -493,13 +603,15 @@ class MakerInventoryStrategy(BaseStrategy):
             return None
         logger.info(
             "maker quote accepted symbol=%s buy=%s sell=%s qty=%s "
-            "net_profit_eur=%s net_return=%s",
+            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s",
             candidate.symbol,
             candidate.buy_exchange,
             candidate.sell_exchange,
             candidate.quantity,
             net,
             net_return,
+            fair_value,
+            skew,
         )
         return opportunity.model_copy(
             update={
@@ -512,6 +624,23 @@ class MakerInventoryStrategy(BaseStrategy):
                 },
             }
         )
+
+    def _inventory_skew_score(
+        self,
+        candidate: MakerCandidate,
+        *,
+        inventory: object,
+        base: str,
+    ) -> Decimal:
+        if inventory is None:
+            return _ZERO
+        available = getattr(inventory, "available", None)
+        if not callable(available):
+            return _ZERO
+        sell_coins = available(candidate.sell_exchange, base)
+        buy_cash = available(candidate.buy_exchange, self._quote)
+        # Prefer quotes that unload heavy inventory into scarce quote cash.
+        return sell_coins * candidate.sell_price + buy_cash
 
     def _reject(self, symbol: str, code: str, reason: str, **context: object) -> None:
         self._scan_rejections += 1

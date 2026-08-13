@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     # When one maker leg fills and the quote expires, exit leftover inventory as taker.
     paper_maker_one_leg_exit: bool = True
     paper_maker_one_leg_adverse_bps: float = Field(default=6.0, ge=0)
+    # Expected adverse selection vs mid/fair value when a maker quote is hit (bps).
+    paper_maker_adverse_bps: float = Field(default=4.0, ge=0)
+    # Use BASEUSDT × EURUSDT as fair-value filter (skip toxic one-sided dislocations).
+    paper_maker_fair_value: bool = True
+    # FX symbol for USDT-per-EUR (Binance/OKX style).
+    paper_maker_fx_symbol: str = "EURUSDT"
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
         "http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004"

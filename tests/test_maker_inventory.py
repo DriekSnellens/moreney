@@ -19,6 +19,8 @@ def _maker_settings(**overrides: object) -> Settings:
         "paper_maker_min_spread_bps": 2.0,
         "paper_maker_max_edge_bps": 200.0,
         "paper_maker_max_fee_bps": 40.0,
+        "paper_maker_adverse_bps": 0.0,
+        "paper_maker_fair_value": False,
         "paper_maker_venues": "okx,binance,bitvavo",
         "paper_maker_same_venue": True,
         "arbitrage_min_profit_pct": 0.0001,
@@ -273,3 +275,82 @@ async def test_orchestrator_places_post_only_legs_without_taker_hedge() -> None:
     fills = executor.match_resting(books)
     assert len(fills) == 2
     assert {f.status for f in fills} == {OrderStatus.FILLED}
+
+
+@pytest.mark.asyncio
+async def test_maker_rejects_toxic_buy_above_usdt_fair_value() -> None:
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_fair_value=True,
+            paper_maker_adverse_bps=0.0,
+            paper_maker_same_venue=True,
+            paper_maker_max_edge_bps=80,
+        )
+    )
+    # EUR book: bid 102 / ask 102.30. USDT fair = 100000/1000 = 100 EUR.
+    snaps = [
+        top_of_book_snapshot(
+            exchange="okx", symbol="BTCEUR", order_book=_book("102", "102.30")
+        ),
+        top_of_book_snapshot(
+            exchange="binance",
+            symbol="BTCUSDT",
+            order_book=OrderBook(
+                symbol="BTCUSDT",
+                bids=[OrderBookLevel(price=Decimal("99900"), amount=Decimal("2"))],
+                asks=[OrderBookLevel(price=Decimal("100100"), amount=Decimal("2"))],
+            ),
+        ),
+        top_of_book_snapshot(
+            exchange="binance",
+            symbol="EURUSDT",
+            order_book=OrderBook(
+                symbol="EURUSDT",
+                bids=[OrderBookLevel(price=Decimal("999"), amount=Decimal("100"))],
+                asks=[OrderBookLevel(price=Decimal("1001"), amount=Decimal("100"))],
+            ),
+        ),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps == []
+    assert strategy.scan_stats()["reject_counts"].get("toxic_buy_vs_fv", 0) > 0  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_maker_emits_when_eur_book_brackets_usdt_fair_value() -> None:
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_fair_value=True,
+            paper_maker_adverse_bps=0.0,
+            paper_maker_same_venue=True,
+            paper_maker_min_profit_eur=0.01,
+            paper_maker_max_edge_bps=80,
+        )
+    )
+    # Fair value ≈ 100. EUR bid 99.80 / ask 100.40 brackets FV.
+    snaps = [
+        top_of_book_snapshot(
+            exchange="okx", symbol="BTCEUR", order_book=_book("99.80", "100.40")
+        ),
+        top_of_book_snapshot(
+            exchange="binance",
+            symbol="BTCUSDT",
+            order_book=OrderBook(
+                symbol="BTCUSDT",
+                bids=[OrderBookLevel(price=Decimal("99900"), amount=Decimal("2"))],
+                asks=[OrderBookLevel(price=Decimal("100100"), amount=Decimal("2"))],
+            ),
+        ),
+        top_of_book_snapshot(
+            exchange="binance",
+            symbol="EURUSDT",
+            order_book=OrderBook(
+                symbol="EURUSDT",
+                bids=[OrderBookLevel(price=Decimal("999"), amount=Decimal("100"))],
+                asks=[OrderBookLevel(price=Decimal("1001"), amount=Decimal("100"))],
+            ),
+        ),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps
+    assert opps[0].metadata.get("fair_value_aligned") is True

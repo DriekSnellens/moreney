@@ -83,8 +83,28 @@ class TradingEngine:
 
     async def run_once(self, symbol: str) -> TradeCycleResult:
         """Run a single evaluation cycle for ``symbol``."""
-        result = TradeCycleResult(symbol=symbol.upper())
-        venue_snapshots, primary = await self._load_snapshots(symbol)
+        return await self._run_cycle(symbols=[symbol.upper()])
+
+    async def run_universe(self, symbols: list[str]) -> TradeCycleResult:
+        """Evaluate all ``symbols`` in one cycle (EUR maker + USDT fair value)."""
+        cleaned = [s.strip().upper().replace("-", "").replace("/", "") for s in symbols if s.strip()]
+        return await self._run_cycle(symbols=cleaned or ["BTCEUR"])
+
+    async def _run_cycle(self, *, symbols: list[str]) -> TradeCycleResult:
+        primary_symbol = symbols[0]
+        result = TradeCycleResult(symbol=primary_symbol)
+        venue_snapshots: list[Any] = []
+        primary: Any = None
+        for symbol in symbols:
+            snaps, snap_primary = await self._load_snapshots(symbol)
+            if snaps:
+                venue_snapshots.extend(snaps)
+                if primary is None:
+                    primary = snaps[0]
+            elif snap_primary is not None:
+                venue_snapshots.append(snap_primary)
+                if primary is None:
+                    primary = snap_primary
         if not venue_snapshots and primary is None:
             return result
         paper = self.paper_portfolio
@@ -92,8 +112,8 @@ class TradingEngine:
             for snap in venue_snapshots or ([primary] if primary is not None else []):
                 px = getattr(snap, "last", None) or getattr(snap, "bid", None) or getattr(snap, "ask", None)
                 if px:
-                    paper.maybe_seed_inventory(getattr(snap, "symbol", symbol), px)
-                    paper.set_mark_price(getattr(snap, "symbol", symbol), px)
+                    paper.maybe_seed_inventory(getattr(snap, "symbol", primary_symbol), px)
+                    paper.set_mark_price(getattr(snap, "symbol", primary_symbol), px)
         portfolio = await self._portfolio.get_snapshot()
         portfolio_equity = portfolio.equity_usd
 

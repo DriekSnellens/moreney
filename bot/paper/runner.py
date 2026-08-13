@@ -125,7 +125,8 @@ class PaperRunner:
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,
-                "profitability_execution_buffer_bps": 1.0,
+                "profitability_execution_buffer_bps": 1.0
+                + float(getattr(settings, "paper_maker_adverse_bps", 0) or 0),
                 "risk_min_net_profit_usd": settings.paper_maker_min_profit_eur,
             }
         )
@@ -326,12 +327,68 @@ class PaperRunner:
 
         await self._match_and_expire_quotes()
 
-        cycle_results: list[dict[str, Any]] = []
-        for symbol in self._symbols:
-            equity_before = self._portfolio.state.total_equity
-            result = await self._engine.run_once(symbol)
-            self._ingest_cycle(result, equity_before=equity_before)
-            cycle_results.append(self._summarize_cycle(result))
+        equity_before = self._portfolio.state.total_equity
+        result = await self._engine.run_universe(self._symbols)
+        self._ingest_cycle(result, equity_before=equity_before)
+
+        risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
+        by_symbol: dict[str, dict[str, Any]] = {
+            symbol: {
+                "symbol": symbol,
+                "opportunities": 0,
+                "approved": 0,
+                "rejected": 0,
+                "executions": 0,
+                "fills": 0,
+                "equity": str(self._portfolio.state.total_equity),
+            }
+            for symbol in self._symbols
+        }
+        for opp in result.opportunities:
+            row = by_symbol.setdefault(
+                opp.symbol,
+                {
+                    "symbol": opp.symbol,
+                    "opportunities": 0,
+                    "approved": 0,
+                    "rejected": 0,
+                    "executions": 0,
+                    "fills": 0,
+                    "equity": str(self._portfolio.state.total_equity),
+                },
+            )
+            row["opportunities"] += 1
+            decision = risk_by_id.get(opp.id)
+            if decision is not None and decision.approved:
+                row["approved"] += 1
+            elif decision is not None:
+                row["rejected"] += 1
+        for execution in result.executions:
+            symbol = next(
+                (
+                    o.symbol
+                    for o in result.opportunities
+                    if o.id == execution.opportunity_id
+                ),
+                result.symbol,
+            )
+            row = by_symbol.setdefault(
+                symbol,
+                {
+                    "symbol": symbol,
+                    "opportunities": 0,
+                    "approved": 0,
+                    "rejected": 0,
+                    "executions": 0,
+                    "fills": 0,
+                    "equity": str(self._portfolio.state.total_equity),
+                },
+            )
+            row["executions"] += 1
+        cycle_results = [by_symbol[s] for s in self._symbols if s in by_symbol]
+        for symbol, row in by_symbol.items():
+            if symbol not in self._symbols:
+                cycle_results.append(row)
 
         scan = {}
         if hasattr(self._strategy, "scan_stats"):
@@ -348,6 +405,7 @@ class PaperRunner:
             "scan": scan,
             "real_exchange_order": False,
             "execution_mode": ExecutionMode.PAPER.value,
+            "universe_scan": True,
         }
         if self._cycle_count % 5 == 0:
             self._persist()
