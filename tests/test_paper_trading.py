@@ -24,6 +24,7 @@ from bot.core.models import (
     TradeOpportunity,
 )
 from bot.main import app, get_paper_runner, reset_risk_singletons
+from bot.paper.dashboard import render_dashboard, render_dashboard_lite, render_fleet_dashboard
 from bot.market_data.service import MarketDataService
 from bot.paper.runner import PaperRunner
 from bot.paper.store import PaperTradingStore
@@ -455,10 +456,12 @@ def test_paper_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         dash = client.get("/paper/dashboard")
         assert dash.status_code == 200
         assert "Moreney" in dash.text
-        assert "Real orders 0" in dash.text
+        assert "Geen echte orders" in dash.text
+        assert "Winst" in dash.text
+        assert "Grafieken" in dash.text
         lite = client.get("/paper/dashboard-lite")
         assert lite.status_code == 200
-        assert "Moreney Lite" in lite.text
+        assert "Moreney — Winst" in lite.text
 
         root = client.get("/").json()
         assert root["paper_dashboard"] == "/paper/dashboard"
@@ -523,3 +526,123 @@ def test_dashboard_basic_auth_optional_and_enforced(
         assert client.get("/paper/dashboard-lite").status_code == 401
         assert client.get("/paper/dashboard", auth=("alice", "secret")).status_code == 200
         assert client.get("/paper/dashboard-lite", auth=("alice", "secret")).status_code == 200
+
+
+def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
+    payload = {
+        "status": {"running": True},
+        "performance": {
+            "starting_equity": "200",
+            "current_equity": "212.50",
+            "net_pnl": "12.50",
+            "return_pct": "6.25",
+            "current_drawdown": "0",
+            "maximum_drawdown": "1.10",
+            "pairs_evaluated": 40,
+            "depth_edges_found": 8,
+            "scan_rejections": 5,
+            "approved_opportunities": 3,
+            "executed_opportunities": 3,
+            "trade_count": 3,
+            "win_rate": "0.67",
+            "winning_trades": 2,
+            "losing_trades": 1,
+            "fees": "1.20",
+            "slippage": "0.40",
+            "trading_volume": "900",
+        },
+        "strategies": [
+            {
+                "strategy": "arbitrage",
+                "net_pnl": "12.50",
+                "opportunities": 8,
+                "trades": 3,
+                "win_rate": "0.67",
+            }
+        ],
+        "exchanges": [
+            {
+                "buy_exchange": "binance",
+                "sell_exchange": "kraken",
+                "net_pnl": "12.50",
+                "trades": 3,
+                "win_rate": "0.67",
+            }
+        ],
+        "opportunities": [
+            {
+                "timestamp": "2026-08-13T10:15:00+00:00",
+                "symbol": "BTCEUR",
+                "buy_exchange": "binance",
+                "sell_exchange": "kraken",
+                "expected_net_profit": "4.00",
+                "realized_net_profit": "5.00",
+                "status": "profitable",
+            }
+        ],
+        "hourly": [
+            {"hour": h, "net_pnl": "5" if h == 10 else "0", "trades": 1 if h == 10 else 0}
+            for h in range(24)
+        ],
+        "trades": [
+            {"realized_net_profit": "5.00"},
+            {"realized_net_profit": "-2.00"},
+            {"realized_net_profit": "9.50"},
+        ],
+    }
+    html = render_dashboard(payload).body.decode()
+    assert "Winst en verlies" in html
+    assert "Koop goedkoop, verkoop duurder" in html
+    assert "Binance" in html
+    assert "polyline" in html
+    assert "2 winst" in html
+    assert "1 verlies" in html
+    assert "<rect" in html
+
+    lite = render_dashboard_lite(payload).body.decode()
+    assert "Winst in de tijd" in lite
+    assert "polyline" in lite
+
+    fleet = render_fleet_dashboard(
+        {
+            "online_count": 2,
+            "configured_count": 2,
+            "totals": {
+                "equity": "700",
+                "net_pnl": "12.50",
+                "trade_count": 3,
+                "running_count": 2,
+            },
+            "instances": [
+                {
+                    "ok": True,
+                    "label": "€200",
+                    "net_pnl": "4.00",
+                    "equity": "204",
+                    "trade_count": 1,
+                    "win_rate": "1",
+                    "running": True,
+                    "starting_capital": "200",
+                    "dashboard_url": "/a",
+                    "dashboard_lite_url": "/a-lite",
+                    "market_data": {},
+                },
+                {
+                    "ok": True,
+                    "label": "€500",
+                    "net_pnl": "8.50",
+                    "equity": "508.50",
+                    "trade_count": 2,
+                    "win_rate": "0.5",
+                    "running": True,
+                    "starting_capital": "500",
+                    "dashboard_url": "/b",
+                    "dashboard_lite_url": "/b-lite",
+                    "market_data": {},
+                },
+            ],
+        }
+    ).body.decode()
+    assert "Winst per rekening" in fleet
+    assert "€200" in fleet
+    assert "<rect" in fleet

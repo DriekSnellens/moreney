@@ -476,6 +476,8 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
         item["win_rate"] = str(p.win_rate)
         exchanges.append(item)
     opportunities = [o.model_dump(mode="json") for o in runner.tracker.opportunities(limit=25)]
+    hourly = [h.model_dump(mode="json") for h in runner.tracker.hourly_stats()]
+    trades = runner.tracker.trades(limit=100)
     return render_dashboard(
         {
             "status": runner.status(),
@@ -483,6 +485,8 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
             "strategies": strategies,
             "exchanges": exchanges,
             "opportunities": opportunities,
+            "hourly": hourly,
+            "trades": trades,
         }
     )
 
@@ -497,6 +501,8 @@ async def paper_dashboard_lite(_: None = Depends(require_dashboard_access)) -> H
             "status": runner.status(),
             "performance": snap.model_dump(mode="json"),
             "opportunities": opportunities,
+            "hourly": [h.model_dump(mode="json") for h in runner.tracker.hourly_stats()],
+            "trades": runner.tracker.trades(limit=50),
         }
     )
 

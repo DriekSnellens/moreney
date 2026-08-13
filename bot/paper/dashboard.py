@@ -18,6 +18,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     strategies = payload.get("strategies") or []
     pairs = payload.get("exchanges") or []
     opportunities = payload.get("opportunities") or []
+    hourly = payload.get("hourly") or []
+    trades = payload.get("trades") or []
 
     def m(key: str, default: str = "0") -> str:
         return _fmt_money(perf.get(key, default))
@@ -30,67 +32,73 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     strategy_rows = "".join(
         f"<tr>"
-        f"<td>{_esc(s.get('strategy'))}</td>"
+        f"<td>{_esc(_strategy_label(s.get('strategy')))}</td>"
         f"<td class='num {_pnl_class(s.get('net_pnl'))}'>{_esc_fmt(s.get('net_pnl'), 'money')}</td>"
         f"<td class='num'>{_esc_fmt(s.get('opportunities'), 'count')}</td>"
         f"<td class='num'>{_esc_fmt(s.get('trades'), 'count')}</td>"
         f"<td class='num'>{_esc_fmt(s.get('win_rate'), 'pct')}</td>"
         f"</tr>"
         for s in strategies
-    ) or "<tr><td colspan='5' class='empty'>No strategy data yet</td></tr>"
+    ) or "<tr><td colspan='5' class='empty'>Nog geen resultaten</td></tr>"
 
     pair_rows = "".join(
         f"<tr>"
-        f"<td>{_esc(p.get('buy_exchange'))} → {_esc(p.get('sell_exchange'))}</td>"
+        f"<td>{_esc(_venue_label(p.get('buy_exchange')))} → {_esc(_venue_label(p.get('sell_exchange')))}</td>"
         f"<td class='num {_pnl_class(p.get('net_pnl'))}'>{_esc_fmt(p.get('net_pnl'), 'money')}</td>"
-        f"<td class='num'>{_esc_fmt(p.get('opportunities'), 'count')}</td>"
-        f"<td class='num'>{_esc_fmt(p.get('executed'), 'count')}</td>"
+        f"<td class='num'>{_esc_fmt(p.get('trades'), 'count')}</td>"
         f"<td class='num'>{_esc_fmt(p.get('win_rate'), 'pct')}</td>"
         f"</tr>"
         for p in pairs
-    ) or "<tr><td colspan='5' class='empty'>No exchange-pair data yet</td></tr>"
+    ) or "<tr><td colspan='4' class='empty'>Nog geen beursresultaten</td></tr>"
 
     opp_rows = "".join(
         f"<tr>"
         f"<td class='ts'>{_esc(_short_ts(o.get('timestamp')))}</td>"
         f"<td><strong>{_esc(o.get('symbol'))}</strong></td>"
-        f"<td>{_esc(o.get('buy_exchange'))}</td>"
-        f"<td>{_esc(o.get('sell_exchange'))}</td>"
+        f"<td>{_esc(_venue_label(o.get('buy_exchange')))}</td>"
+        f"<td>{_esc(_venue_label(o.get('sell_exchange')))}</td>"
         f"<td class='num'>{_esc_fmt(o.get('expected_net_profit'), 'money')}</td>"
         f"<td class='num {_pnl_class(o.get('realized_net_profit'))}'>"
         f"{_esc_fmt(o.get('realized_net_profit'), 'money')}</td>"
-        f"<td><span class='pill'>{_esc(o.get('status'))}</span></td>"
+        f"<td><span class='pill'>{_esc(_status_label(o.get('status')))}</span></td>"
         f"</tr>"
         for o in opportunities[:25]
-    ) or "<tr><td colspan='7' class='empty'>No opportunities recorded</td></tr>"
+    ) or "<tr><td colspan='7' class='empty'>Nog geen transacties</td></tr>"
 
     running = status.get("running")
-    status_label = "Running" if running else "Stopped"
+    status_label = "Actief" if running else "Gestopt"
     status_cls = "ok" if running else "warn"
     net_pnl = perf.get("net_pnl", 0)
     pnl_cls = _pnl_class(net_pnl)
+    pnl_word = _pnl_word(net_pnl)
+    wins = perf.get("winning_trades", 0)
+    losses = perf.get("losing_trades", 0)
+
+    profit_chart = _svg_cumulative_profit(trades)
+    hourly_chart = _svg_hourly_bars(hourly)
+    winloss_chart = _svg_win_loss(wins, losses)
 
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <meta name="theme-color" content="#0b0f14"/>
   <meta http-equiv="refresh" content="5"/>
-  <title>Moreney Paper Trading</title>
+  <title>Moreney — Winst en verlies</title>
   <style>{_shared_css()}</style>
 </head>
 <body>
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Paper trading · no live orders</p>
+        <p class="eyebrow">Oefenhandel · geen echt geld</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Public market data only · execution mode PAPER</p>
+        <p class="sub">Overzicht van winst, verlies en transacties</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
-        <span class="badge muted">Real orders 0</span>
+        <span class="badge muted">Geen echte orders</span>
       </div>
     </div>
   </header>
@@ -98,99 +106,116 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <main class="container">
     <section class="panel">
       <div class="panel-head">
-        <h2>Controls</h2>
-        <a class="link-lite" href="/paper/dashboard-lite">Mobile view</a>
+        <h2>Bediening</h2>
+        <a class="link-lite" href="/paper/dashboard-lite">Mobiel</a>
       </div>
       <div class="controls">
         <button type="button" class="btn" onclick="post('/paper/start')">Start</button>
         <button type="button" class="btn" onclick="post('/paper/stop')">Stop</button>
-        <button type="button" class="btn btn-danger" onclick="resetPaper()">Reset</button>
+        <button type="button" class="btn btn-danger" onclick="resetPaper()">Opnieuw beginnen</button>
       </div>
     </section>
 
     <section class="panel highlight">
-      <h2>Portfolio</h2>
+      <h2>Geld</h2>
       <div class="metric-grid">
         <article class="metric-card">
-          <span class="label">Starting capital</span>
+          <span class="label">Startkapitaal</span>
           <span class="value">{m('starting_equity')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Current equity</span>
+          <span class="label">Huidig vermogen</span>
           <span class="value">{m('current_equity')}</span>
         </article>
         <article class="metric-card {pnl_cls}">
-          <span class="label">Net PnL</span>
+          <span class="label">{pnl_word}</span>
           <span class="value">{m('net_pnl')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Return</span>
+          <span class="label">Rendement</span>
           <span class="value">{p('return_pct')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Drawdown</span>
+          <span class="label">Terugval nu</span>
           <span class="value">{p('current_drawdown')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Max drawdown</span>
+          <span class="label">Grootste terugval</span>
           <span class="value">{p('maximum_drawdown')}</span>
         </article>
       </div>
     </section>
 
     <section class="panel">
-      <h2>Trading activity</h2>
-      <div class="metric-grid compact">
-        <article class="metric-card"><span class="label">Pairs evaluated</span><span class="value">{c('pairs_evaluated')}</span></article>
-        <article class="metric-card"><span class="label">Edges found</span><span class="value">{c('depth_edges_found')}</span></article>
-        <article class="metric-card"><span class="label">Scan rejects</span><span class="value">{c('scan_rejections')}</span></article>
-        <article class="metric-card"><span class="label">Passed gates</span><span class="value">{c('total_opportunities')}</span></article>
-        <article class="metric-card"><span class="label">Approved</span><span class="value">{c('approved_opportunities')}</span></article>
-        <article class="metric-card"><span class="label">Risk rejected</span><span class="value">{c('rejected_opportunities')}</span></article>
-        <article class="metric-card"><span class="label">Executed</span><span class="value">{c('executed_opportunities')}</span></article>
-        <article class="metric-card"><span class="label">Trades</span><span class="value">{c('trade_count')}</span></article>
-        <article class="metric-card"><span class="label">Win rate</span><span class="value">{p('win_rate')}</span></article>
-        <article class="metric-card"><span class="label">Profit factor</span><span class="value">{_esc_fmt(perf.get('profit_factor'), 'ratio')}</span></article>
+      <h2>Grafieken</h2>
+      <div class="charts">
+        <figure class="chart-card">
+          <figcaption>Winst in de tijd</figcaption>
+          {profit_chart}
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Winst per uur</figcaption>
+          {hourly_chart}
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Winst vs verlies</figcaption>
+          {winloss_chart}
+        </figure>
       </div>
     </section>
 
     <section class="panel">
-      <h2>Costs</h2>
+      <h2>Activiteit</h2>
       <div class="metric-grid compact">
-        <article class="metric-card"><span class="label">Fees</span><span class="value">{m('fees')}</span></article>
-        <article class="metric-card"><span class="label">Slippage</span><span class="value">{m('slippage')}</span></article>
-        <article class="metric-card"><span class="label">Volume</span><span class="value">{m('trading_volume')}</span></article>
+        <article class="metric-card"><span class="label">Markten bekeken</span><span class="value">{c('pairs_evaluated')}</span></article>
+        <article class="metric-card"><span class="label">Koopkansen</span><span class="value">{c('depth_edges_found')}</span></article>
+        <article class="metric-card"><span class="label">Afgewezen</span><span class="value">{c('scan_rejections')}</span></article>
+        <article class="metric-card"><span class="label">Goedgekeurd</span><span class="value">{c('approved_opportunities')}</span></article>
+        <article class="metric-card"><span class="label">Uitgevoerd</span><span class="value">{c('executed_opportunities')}</span></article>
+        <article class="metric-card"><span class="label">Transacties</span><span class="value">{c('trade_count')}</span></article>
+        <article class="metric-card"><span class="label">Winstkans</span><span class="value">{p('win_rate')}</span></article>
+        <article class="metric-card"><span class="label">Winstende deals</span><span class="value">{c('winning_trades')}</span></article>
+        <article class="metric-card"><span class="label">Verliezende deals</span><span class="value">{c('losing_trades')}</span></article>
       </div>
     </section>
 
     <section class="panel">
-      <h2>Strategy performance</h2>
+      <h2>Kosten</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Beurskosten</span><span class="value">{m('fees')}</span></article>
+        <article class="metric-card"><span class="label">Prijsverschil</span><span class="value">{m('slippage')}</span></article>
+        <article class="metric-card"><span class="label">Omzet</span><span class="value">{m('trading_volume')}</span></article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Per aanpak</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Strategy</th><th>Net PnL</th><th>Opps</th><th>Trades</th><th>Win rate</th></tr></thead>
+          <thead><tr><th>Aanpak</th><th>Winst</th><th>Kansen</th><th>Transacties</th><th>Winstkans</th></tr></thead>
           <tbody>{strategy_rows}</tbody>
         </table>
       </div>
     </section>
 
     <section class="panel">
-      <h2>Exchange performance</h2>
+      <h2>Per beurs</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Pair</th><th>Net PnL</th><th>Opps</th><th>Executed</th><th>Win rate</th></tr></thead>
+          <thead><tr><th>Route</th><th>Winst</th><th>Transacties</th><th>Winstkans</th></tr></thead>
           <tbody>{pair_rows}</tbody>
         </table>
       </div>
     </section>
 
     <section class="panel">
-      <h2>Recent opportunities</h2>
+      <h2>Recente transacties</h2>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Time</th><th>Symbol</th><th>Buy</th><th>Sell</th>
-              <th>Expected</th><th>Realized</th><th>Status</th>
+              <th>Tijd</th><th>Munt</th><th>Koop</th><th>Verkoop</th>
+              <th>Verwacht</th><th>Echte winst</th><th>Uitslag</th>
             </tr>
           </thead>
           <tbody>{opp_rows}</tbody>
@@ -200,8 +225,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   </main>
 
   <footer class="footer">
-    Paper only · no withdrawals · no leverage · refreshes every 5s ·
-    <a href="/logout">Logout</a>
+    Oefenhandel · geen opnames · geen hefboom · vernieuwt elke 5s ·
+    <a href="/logout">Uitloggen</a>
   </footer>
 
   <script>{_shared_js()}</script>
@@ -215,44 +240,47 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
     perf = payload.get("performance") or {}
     status = payload.get("status") or {}
     opportunities = payload.get("opportunities") or []
+    hourly = payload.get("hourly") or []
+    trades = payload.get("trades") or []
 
     running = status.get("running")
-    status_label = "Running" if running else "Stopped"
+    status_label = "Actief" if running else "Gestopt"
     status_cls = "ok" if running else "warn"
     pnl_cls = _pnl_class(perf.get("net_pnl", 0))
+    pnl_word = _pnl_word(perf.get("net_pnl", 0))
 
     recent = "".join(
         f"<article class='opp-card'>"
         f"<div class='opp-top'>"
         f"<strong>{_esc(o.get('symbol'))}</strong>"
-        f"<span class='pill'>{_esc(o.get('status'))}</span>"
+        f"<span class='pill'>{_esc(_status_label(o.get('status')))}</span>"
         f"</div>"
-        f"<div class='opp-route'>{_esc(o.get('buy_exchange'))} → {_esc(o.get('sell_exchange'))}</div>"
+        f"<div class='opp-route'>{_esc(_venue_label(o.get('buy_exchange')))} → {_esc(_venue_label(o.get('sell_exchange')))}</div>"
         f"<div class='opp-pnl'>"
-        f"<span>Exp {_esc_fmt(o.get('expected_net_profit'), 'money')}</span>"
+        f"<span>Verwacht {_esc_fmt(o.get('expected_net_profit'), 'money')}</span>"
         f"<span class='{_pnl_class(o.get('realized_net_profit'))}'>"
-        f"Real {_esc_fmt(o.get('realized_net_profit'), 'money')}</span>"
+        f"{_status_label(o.get('status'))} {_esc_fmt(o.get('realized_net_profit'), 'money')}</span>"
         f"</div>"
         f"<div class='opp-ts'>{_esc(_short_ts(o.get('timestamp')))}</div>"
         f"</article>"
         for o in opportunities[:12]
-    ) or "<p class='empty'>No opportunities recorded</p>"
+    ) or "<p class='empty'>Nog geen transacties</p>"
 
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <meta name="theme-color" content="#0b0f14"/>
   <meta http-equiv="refresh" content="5"/>
-  <title>Moreney Lite</title>
+  <title>Moreney — Winst</title>
   <style>{_shared_css(lite=True)}</style>
 </head>
 <body class="lite">
   <header class="hero hero-lite">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Mobile dashboard</p>
+        <p class="eyebrow">Mobiel overzicht</p>
         <h1 class="brand">Moreney</h1>
       </div>
       <span class="badge {status_cls}">{status_label}</span>
@@ -261,29 +289,39 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
 
   <main class="container lite-container">
     <section class="panel hero-metric {pnl_cls}">
-      <span class="label">Net PnL</span>
+      <span class="label">{pnl_word}</span>
       <span class="value-xl">{_fmt_money(perf.get('net_pnl', 0))}</span>
-      <span class="sub-metric">Equity {_fmt_money(perf.get('current_equity', 0))}</span>
+      <span class="sub-metric">Vermogen {_fmt_money(perf.get('current_equity', 0))}</span>
+    </section>
+
+    <section class="panel">
+      <h2>Winst in de tijd</h2>
+      {_svg_cumulative_profit(trades)}
     </section>
 
     <section class="panel">
       <div class="metric-grid lite-grid">
-        <article class="metric-card"><span class="label">Return</span><span class="value">{_fmt_pct(perf.get('return_pct', 0))}</span></article>
-        <article class="metric-card"><span class="label">Trades</span><span class="value">{_fmt_count(perf.get('trade_count', 0))}</span></article>
-        <article class="metric-card"><span class="label">Win rate</span><span class="value">{_fmt_pct(perf.get('win_rate', 0))}</span></article>
-        <article class="metric-card"><span class="label">Max DD</span><span class="value">{_fmt_pct(perf.get('maximum_drawdown', 0))}</span></article>
-        <article class="metric-card"><span class="label">Opportunities</span><span class="value">{_fmt_count(perf.get('total_opportunities', 0))}</span></article>
-        <article class="metric-card"><span class="label">Executed</span><span class="value">{_fmt_count(perf.get('executed_opportunities', 0))}</span></article>
+        <article class="metric-card"><span class="label">Rendement</span><span class="value">{_fmt_pct(perf.get('return_pct', 0))}</span></article>
+        <article class="metric-card"><span class="label">Transacties</span><span class="value">{_fmt_count(perf.get('trade_count', 0))}</span></article>
+        <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_fmt_pct(perf.get('win_rate', 0))}</span></article>
+        <article class="metric-card"><span class="label">Terugval</span><span class="value">{_fmt_pct(perf.get('maximum_drawdown', 0))}</span></article>
+        <article class="metric-card"><span class="label">Winstende deals</span><span class="value">{_fmt_count(perf.get('winning_trades', 0))}</span></article>
+        <article class="metric-card"><span class="label">Verliezende deals</span><span class="value">{_fmt_count(perf.get('losing_trades', 0))}</span></article>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>Winst per uur</h2>
+      {_svg_hourly_bars(hourly)}
     </section>
 
     <section class="panel">
       <div class="controls">
         <button type="button" class="btn" onclick="post('/paper/start')">Start</button>
         <button type="button" class="btn" onclick="post('/paper/stop')">Stop</button>
-        <button type="button" class="btn btn-danger" onclick="resetPaper()">Reset</button>
+        <button type="button" class="btn btn-danger" onclick="resetPaper()">Opnieuw</button>
       </div>
-      <p class="foot-lite"><a href="/paper/dashboard">Full dashboard</a> · Paper only · 5s refresh</p>
+      <p class="foot-lite"><a href="/paper/dashboard">Volledig overzicht</a> · Oefenhandel · 5s</p>
     </section>
 
     <section class="panel">
@@ -321,7 +359,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             )
             continue
         running = row.get("running")
-        status_label = "Running" if running else "Stopped"
+        status_label = "Actief" if running else "Gestopt"
         badge_cls = "ok" if running else "warn"
         pnl_cls = _pnl_class(row.get("net_pnl"))
         md = row.get("market_data") or {}
@@ -330,65 +368,70 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             if not isinstance(health, dict):
                 continue
             state = "ok" if health.get("synchronized") and not health.get("stale") else "warn"
-            md_bits.append(f"<span class='feed {state}'>{_esc(exchange)}</span>")
-        md_html = " ".join(md_bits) or "<span class='muted'>No feeds</span>"
+            md_bits.append(f"<span class='feed {state}'>{_esc(_venue_label(exchange))}</span>")
+        md_html = " ".join(md_bits) or "<span class='muted'>Geen koersen</span>"
         cards.append(
             f"""
             <article class="fleet-card">
               <header class="fleet-head">
                 <div>
                   <h3>{_esc(row.get('label'))}</h3>
-                  <p class="card-sub">Start {_esc_fmt(row.get('starting_capital'), 'money')} · cycles {_esc_fmt(row.get('cycle_count'), 'count')}</p>
+                  <p class="card-sub">Start {_esc_fmt(row.get('starting_capital'), 'money')}</p>
                 </div>
                 <span class="badge {badge_cls}">{status_label}</span>
               </header>
               <div class="metric-grid compact">
-                <article class="metric-card"><span class="label">Equity</span><span class="value">{_esc_fmt(row.get('equity'), 'money')}</span></article>
-                <article class="metric-card {pnl_cls}"><span class="label">Net PnL</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
-                <article class="metric-card"><span class="label">Trades</span><span class="value">{_esc_fmt(row.get('trade_count'), 'count')}</span></article>
-                <article class="metric-card"><span class="label">Win rate</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
-                <article class="metric-card"><span class="label">Passed gates</span><span class="value">{_esc_fmt(row.get('total_opportunities'), 'count')}</span></article>
-                <article class="metric-card"><span class="label">Edges</span><span class="value">{_esc_fmt(row.get('depth_edges_found'), 'count')}</span></article>
+                <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(row.get('equity'), 'money')}</span></article>
+                <article class="metric-card {pnl_cls}"><span class="label">{_pnl_word(row.get('net_pnl'))}</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
+                <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(row.get('trade_count'), 'count')}</span></article>
+                <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
               </div>
               <div class="feeds">{md_html}</div>
               <div class="card-links">
-                <a href="{_esc(row.get('dashboard_url'))}">Dashboard</a>
-                <a href="{_esc(row.get('dashboard_lite_url'))}">Mobile</a>
+                <a href="{_esc(row.get('dashboard_url'))}">Overzicht</a>
+                <a href="{_esc(row.get('dashboard_lite_url'))}">Mobiel</a>
               </div>
             </article>
             """
         )
 
-    cards_html = "\n".join(cards) or "<p class='empty'>No fleet instances configured.</p>"
+    cards_html = "\n".join(cards) or "<p class='empty'>Geen rekeningen ingesteld.</p>"
+    fleet_chart = _svg_fleet_bars(instances)
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <meta name="theme-color" content="#0b0f14"/>
   <meta http-equiv="refresh" content="5"/>
-  <title>Moreney Fleet</title>
+  <title>Moreney — Alle rekeningen</title>
   <style>{_shared_css(fleet=True)}</style>
 </head>
 <body>
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Fleet overview</p>
-        <h1 class="brand">Moreney Fleet</h1>
-        <p class="sub">{online}/{configured} online · paper only · real orders 0</p>
+        <p class="eyebrow">Alle oefenrekeningen</p>
+        <h1 class="brand">Moreney</h1>
+        <p class="sub">{online}/{configured} online · geen echte orders</p>
       </div>
-      <a class="link-lite" href="/logout">Logout</a>
+      <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
     <div class="container totals-bar">
-      <article class="metric-card"><span class="label">Total equity</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
-      <article class="metric-card {_pnl_class(totals.get('net_pnl'))}"><span class="label">Total net PnL</span><span class="value">{_esc_fmt(totals.get('net_pnl'), 'money')}</span></article>
-      <article class="metric-card"><span class="label">Passed gates</span><span class="value">{_esc_fmt(totals.get('total_opportunities'), 'count')}</span></article>
-      <article class="metric-card"><span class="label">Running</span><span class="value">{_esc_fmt(totals.get('running_count'), 'count')}/{configured}</span></article>
+      <article class="metric-card"><span class="label">Totaal vermogen</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
+      <article class="metric-card {_pnl_class(totals.get('net_pnl'))}"><span class="label">{_pnl_word(totals.get('net_pnl'))}</span><span class="value">{_esc_fmt(totals.get('net_pnl'), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(totals.get('trade_count'), 'count')}</span></article>
+      <article class="metric-card"><span class="label">Actief</span><span class="value">{_esc_fmt(totals.get('running_count'), 'count')}/{configured}</span></article>
     </div>
   </header>
-  <main class="container fleet-grid">{cards_html}</main>
-  <footer class="footer">Paper mode only · no withdrawals · no leverage</footer>
+  <main class="container">
+    <section class="panel">
+      <h2>Winst per rekening</h2>
+      {fleet_chart}
+    </section>
+    <div class="fleet-grid">{cards_html}</div>
+  </main>
+  <footer class="footer">Oefenhandel · geen opnames · geen hefboom</footer>
 </body>
 </html>"""
     return HTMLResponse(content=html)
@@ -607,6 +650,43 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
       white-space: nowrap;
     }}
     .empty {{ color: var(--muted); text-align: center; padding: .75rem 0; }}
+    .charts {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .85rem;
+    }}
+    .chart-card {{
+      margin: 0;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: .85rem;
+      min-width: 0;
+    }}
+    .chart-card figcaption {{
+      margin: 0 0 .65rem;
+      font-size: .72rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    .chart-card svg,
+    .panel svg {{
+      width: 100%;
+      height: auto;
+      display: block;
+    }}
+    .chart-empty {{
+      color: var(--muted);
+      text-align: center;
+      padding: 1.4rem .5rem;
+      font-size: .9rem;
+      margin: 0;
+    }}
+    @media (max-width: 720px) {{
+      .charts {{ grid-template-columns: 1fr; }}
+    }}
     .footer {{
       text-align: center;
       color: var(--muted);
@@ -626,9 +706,9 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
 
 def _shared_js(*, lite: bool = False) -> str:
     confirm_msg = (
-        "Reset paper portfolio?"
+        "Oefenrekening opnieuw beginnen?"
         if lite
-        else "Reset paper portfolio to starting capital? This never affects real exchange accounts."
+        else "Oefenrekening terugzetten naar startkapitaal? Dit raakt geen echte beursrekeningen."
     )
     return f"""
     async function post(url, body) {{
@@ -739,3 +819,193 @@ def _esc(value: Any) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    d = _to_decimal(value)
+    if d is None:
+        return default
+    return float(d)
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    d = _to_decimal(value)
+    if d is None:
+        return default
+    return int(d)
+
+
+def _pnl_word(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None or d == 0:
+        return "Winst / verlies"
+    return "Winst" if d > 0 else "Verlies"
+
+
+def _strategy_label(name: Any) -> str:
+    key = str(name or "").strip().lower()
+    return {
+        "arbitrage": "Koop goedkoop, verkoop duurder",
+        "crossexchangearbitragestrategy": "Koop goedkoop, verkoop duurder",
+        "momentum": "Meegaan met de beweging",
+        "mean_reversion": "Terug naar het gemiddelde",
+        "dca": "Periodiek bijkopen",
+        "grid": "Grid-handel",
+    }.get(key, str(name or "—").replace("_", " ").title())
+
+
+def _venue_label(exchange: Any) -> str:
+    key = str(exchange or "").strip().lower()
+    return {
+        "binance": "Binance",
+        "kraken": "Kraken",
+        "coinbase": "Coinbase",
+        "bitvavo": "Bitvavo",
+        "okx": "OKX",
+        "bybit": "Bybit",
+    }.get(key, str(exchange or "—").title())
+
+
+def _status_label(status: Any) -> str:
+    key = str(status or "").strip().lower()
+    return {
+        "detected": "Gezien",
+        "rejected": "Afgewezen",
+        "approved": "Goedgekeurd",
+        "executed": "Uitgevoerd",
+        "filled": "Gevuld",
+        "profitable": "Winst",
+        "unprofitable": "Verlies",
+        "breakeven": "Gelijk",
+        "running": "Actief",
+        "stopped": "Gestopt",
+        "idle": "Wacht",
+        "error": "Fout",
+    }.get(key, str(status or "—"))
+
+
+def _svg_cumulative_profit(trades: list[dict], starting: Any = 0) -> str:
+    if not trades:
+        return (
+            '<p class="chart-empty">Nog geen afgeronde transacties — '
+            "de lijn verschijnt na de eerste verkoop.</p>"
+        )
+    chronological = list(reversed(trades))
+    running = _as_float(starting, 0.0)
+    values = [running]
+    for trade in chronological:
+        pnl = trade.get("realized_net_profit", trade.get("pnl"))
+        running += _as_float(pnl, 0.0)
+        values.append(running)
+    return _svg_line(values)
+
+
+def _svg_hourly_bars(hourly: list[dict]) -> str:
+    if not hourly:
+        return (
+            '<p class="chart-empty">Nog geen uurdata. '
+            "Na de eerste transacties zie je hier winst per uur.</p>"
+        )
+    values = [_as_float(row.get("net_pnl", row.get("pnl"))) for row in hourly]
+    has_activity = any(
+        value != 0 or _as_int(row.get("trades")) > 0
+        for row, value in zip(hourly, values)
+    )
+    if not has_activity:
+        return (
+            '<p class="chart-empty">Nog geen uurdata. '
+            "Na de eerste transacties zie je hier winst per uur.</p>"
+        )
+    labels = []
+    for row in hourly:
+        if row.get("hour") is not None:
+            labels.append(f"{_as_int(row.get('hour')):02d}")
+        else:
+            labels.append(str(row.get("label") or "")[-5:] or "?")
+    return _svg_bars(values, labels)
+
+
+def _svg_win_loss(wins: Any, losses: Any) -> str:
+    win_n = max(_as_int(wins), 0)
+    loss_n = max(_as_int(losses), 0)
+    total = win_n + loss_n
+    if total == 0:
+        return '<p class="chart-empty">Nog geen winst- of verliestransacties.</p>'
+    win_w = 300.0 * win_n / total
+    loss_w = 300.0 * loss_n / total
+    return f"""
+    <svg viewBox="0 0 320 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winst versus verlies">
+      <rect x="10" y="8" width="{win_w:.1f}" height="22" rx="6" fill="#34d399"/>
+      <rect x="{10 + win_w:.1f}" y="8" width="{loss_w:.1f}" height="22" rx="6" fill="#f87171"/>
+      <text x="10" y="50" fill="#34d399" font-size="13" font-weight="700">{win_n} winst</text>
+      <text x="310" y="50" fill="#f87171" font-size="13" font-weight="700" text-anchor="end">{loss_n} verlies</text>
+    </svg>
+    """
+
+
+def _svg_fleet_bars(instances: list[dict]) -> str:
+    rows = [row for row in instances if row.get("ok")]
+    if not rows:
+        return '<p class="chart-empty">Nog geen online rekeningen om te vergelijken.</p>'
+    values = [_as_float(row.get("net_pnl", row.get("pnl"))) for row in rows]
+    labels = [str(row.get("label") or row.get("name") or row.get("id") or "?") for row in rows]
+    return _svg_bars(values, labels)
+
+
+def _svg_line(values: list[float]) -> str:
+    width, height, pad = 640, 180, 22
+    lo = min(values + [0.0])
+    hi = max(values + [0.0])
+    span = hi - lo or 1.0
+    pts: list[str] = []
+    for i, value in enumerate(values):
+        x = pad + (width - 2 * pad) * (i / max(len(values) - 1, 1))
+        y = height - pad - (height - 2 * pad) * ((value - lo) / span)
+        pts.append(f"{x:.1f},{y:.1f}")
+    last = values[-1]
+    color = "#34d399" if last >= 0 else "#f87171"
+    zero_y = height - pad - (height - 2 * pad) * ((0 - lo) / span)
+    return f"""
+    <svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winst in de tijd">
+      <line x1="{pad}" y1="{zero_y:.1f}" x2="{width - pad}" y2="{zero_y:.1f}" stroke="#243041" stroke-dasharray="4 4"/>
+      <polyline fill="none" stroke="{color}" stroke-width="3" stroke-linejoin="round" points="{" ".join(pts)}"/>
+      <text x="{width - pad}" y="16" fill="{color}" font-size="13" font-weight="700" text-anchor="end">{_fmt_money(last)}</text>
+    </svg>
+    """
+
+
+def _svg_bars(values: list[float], labels: list[str]) -> str:
+    if not values:
+        return '<p class="chart-empty">Geen data.</p>'
+    n = len(values)
+    width = max(320, 28 * n + 40)
+    height, pad = 180, 24
+    lo = min(values + [0.0])
+    hi = max(values + [0.0])
+    span = hi - lo or 1.0
+    zero_y = height - pad - (height - 2 * pad) * ((0 - lo) / span)
+    gap = 6
+    bar_w = max(8.0, (width - 2 * pad) / n - gap)
+    bars: list[str] = []
+    texts: list[str] = []
+    for i, (value, label) in enumerate(zip(values, labels)):
+        x = pad + i * ((width - 2 * pad) / n)
+        y_val = height - pad - (height - 2 * pad) * ((value - lo) / span)
+        top = min(y_val, zero_y)
+        h = max(abs(y_val - zero_y), 1.5)
+        color = "#34d399" if value >= 0 else "#f87171"
+        bars.append(
+            f'<rect x="{x:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="4" fill="{color}"/>'
+        )
+        texts.append(
+            f'<text x="{x + bar_w / 2:.1f}" y="{height - 6}" fill="#8fa0b8" font-size="9" '
+            f'text-anchor="middle">{_esc(label[:8])}</text>'
+        )
+    return f"""
+    <svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winst per periode">
+      <line x1="{pad}" y1="{zero_y:.1f}" x2="{width - pad}" y2="{zero_y:.1f}" stroke="#243041" stroke-dasharray="4 4"/>
+      {"".join(bars)}
+      {"".join(texts)}
+    </svg>
+    """
+
