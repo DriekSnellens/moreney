@@ -534,7 +534,7 @@ class PaperRunner:
                 "Alleen maker-fills als de markt door je prijs heen handelt",
                 "Geen at-touch queue fills",
                 "Edges > 30 bps afgewezen als stale feed",
-                "Geen same-venue MM op publieke L2",
+                "Same-venue MM alleen als spread fees + buffer cleart",
                 "Eén been gevuld → tegengestelde exit met taker + 6 bps adverse",
             ],
         }
