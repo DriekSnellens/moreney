@@ -6,6 +6,7 @@ import pytest
 
 from bot.core.config import Settings
 from bot.core.enums import FeeRole, OrderStatus
+from bot.core.venue_fees import set_fee_tier
 from bot.strategies.arbitrage import top_of_book_snapshot
 from bot.strategies.maker_inventory import MakerInventoryStrategy
 from bot.core.exchange_types import OrderBook, OrderBookLevel
@@ -97,6 +98,62 @@ async def test_maker_rejects_stale_wide_edge() -> None:
     assert opps == []
     stats = strategy.scan_stats()
     assert int(stats["scan_rejections"]) > 0  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_maker_does_not_stale_reject_retail_width_alts() -> None:
+    """A 32 bps Bitvavo book is the retail fee hurdle, not a stale BTC dislocation."""
+    set_fee_tier("retail")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_max_edge_bps=30,
+            paper_maker_same_venue=True,
+            paper_maker_min_profit_eur=0.0001,
+            paper_fee_tier="retail",
+        )
+    )
+    snaps = [
+        top_of_book_snapshot(
+            exchange="bitvavo", symbol="BNBEUR", order_book=_book("100", "100.32")
+        ),
+    ]
+    await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    counts = strategy.scan_stats()["reject_counts"]
+    assert counts.get("stale_edge", 0) == 0  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_maker_level1_quotes_when_touch_fees_eat_edge() -> None:
+    set_fee_tier("retail")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_book_level=1,
+            paper_maker_max_edge_bps=80,
+            paper_maker_same_venue=True,
+            paper_maker_min_spread_bps=2,
+            paper_maker_min_profit_eur=0.0001,
+            paper_maker_adverse_bps=0,
+            paper_fee_tier="retail",
+        )
+    )
+    deep = OrderBook(
+        symbol="ADAEUR",
+        bids=[
+            OrderBookLevel(price=Decimal("1.0000"), amount=Decimal("10")),
+            OrderBookLevel(price=Decimal("0.9970"), amount=Decimal("10")),
+        ],
+        asks=[
+            OrderBookLevel(price=Decimal("1.0012"), amount=Decimal("10")),
+            OrderBookLevel(price=Decimal("1.0032"), amount=Decimal("10")),
+        ],
+    )
+    snaps = [
+        top_of_book_snapshot(exchange="okx", symbol="ADAEUR", order_book=deep),
+    ]
+    opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
+    assert opps
+    assert opps[0].entry_price == Decimal("0.9970")
+    assert opps[0].expected_exit_price == Decimal("1.0032")
 
 
 @pytest.mark.asyncio

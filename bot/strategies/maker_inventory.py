@@ -388,18 +388,6 @@ class MakerInventoryStrategy(BaseStrategy):
                 sell_exchange=sell_snap.exchange,
             )
             return None
-        if self._max_edge_bps > 0 and spread_bps > self._max_edge_bps:
-            self._reject(
-                buy_snap.symbol,
-                "stale_edge",
-                (
-                    f"Gross edge {spread_bps} bps above live max {self._max_edge_bps} bps "
-                    f"(public books this wide are usually stale, not maker-fillable)"
-                ),
-                buy_exchange=buy_snap.exchange,
-                sell_exchange=sell_snap.exchange,
-            )
-            return None
 
         if fair_value is not None and fair_value > 0:
             # Require buy below fair value and sell above it — otherwise the
@@ -453,6 +441,25 @@ class MakerInventoryStrategy(BaseStrategy):
                     f"Maker fees {fee_bps} bps (+{self._spread_fee_buffer_bps} bps buffer) leave no NET room in "
                     f"{spread_bps} bps gross edge "
                     f"(adverse {self._adverse_bps} bps applied later in NET gate)"
+                ),
+                buy_exchange=buy_snap.exchange,
+                sell_exchange=sell_snap.exchange,
+            )
+            return None
+
+        # Retail alt books often need 20–40 bps just to clear maker fees. A flat
+        # 30 bps "stale" cap (calibrated to tight BTC books) would reject the
+        # only Realistic-viable quotes. Never mark stale below 2× round-trip fees.
+        stale_cap = self._max_edge_bps
+        if fee_bps > 0:
+            stale_cap = max(stale_cap, fee_bps * Decimal("2"))
+        if stale_cap > 0 and spread_bps > stale_cap:
+            self._reject(
+                buy_snap.symbol,
+                "stale_edge",
+                (
+                    f"Gross edge {spread_bps} bps above stale cap {stale_cap} bps "
+                    f"(max_edge={self._max_edge_bps}, 2x_fees={fee_bps * Decimal('2')})"
                 ),
                 buy_exchange=buy_snap.exchange,
                 sell_exchange=sell_snap.exchange,
