@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     paper_maker_min_profit_eur: float = Field(default=0.001, ge=0)
     # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
     paper_maker_same_venue: bool = True
-    paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=20)
+    paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=30)
     # Only quote/inventory on these venues. Empty = all market-data venues.
     paper_maker_venues: str = "okx,binance,bitvavo,kraken"
     # Skip pairs whose combined maker fees exceed this (bps).
@@ -192,7 +192,7 @@ class Settings(BaseSettings):
     opportunity_default_loss_pct: float = Field(default=0.002, ge=0)
     opportunity_min_expected_value: float = Field(default=0.0, ge=0)
     opportunity_min_score: float = Field(default=0.0, ge=0)
-    opportunity_max_executions_per_cycle: int = Field(default=3, ge=1, le=20)
+    opportunity_max_executions_per_cycle: int = Field(default=3, ge=1, le=30)
     opportunity_max_candidates_per_cycle: int = Field(default=20, ge=1, le=100)
     opportunity_decay_ms: int = Field(default=5000, ge=0)
     risk_allow_partial_sizing: bool = True
