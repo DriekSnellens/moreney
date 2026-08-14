@@ -47,6 +47,26 @@ def _book(bid: str, ask: str, qty: str = "2") -> OrderBook:
     )
 
 
+def _retail_level1_atom(*, depth: str = "500") -> OrderBook:
+    """Same-venue ATOM book whose *level-1* quote clears retail maker fees.
+
+    Touch (~30 bps) is eaten by Binance 20 bps RT + buffers. Level 1 is ~68 bps,
+    under the 80 bps stale cap used on Realistic.
+    """
+    qty = Decimal(depth)
+    return OrderBook(
+        symbol="ATOMEUR",
+        bids=[
+            OrderBookLevel(price=Decimal("1.330"), amount=Decimal("80")),
+            OrderBookLevel(price=Decimal("1.326"), amount=qty),
+        ],
+        asks=[
+            OrderBookLevel(price=Decimal("1.334"), amount=Decimal("80")),
+            OrderBookLevel(price=Decimal("1.335"), amount=qty),
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_maker_emits_when_ask_minus_bid_clears_fees() -> None:
     strategy = MakerInventoryStrategy(_maker_settings())
@@ -411,3 +431,117 @@ async def test_maker_emits_when_eur_book_brackets_usdt_fair_value() -> None:
     opps = await strategy.evaluate_markets(snaps, equity=Decimal("10000"))
     assert opps
     assert opps[0].metadata.get("fair_value_aligned") is True
+
+
+@pytest.mark.asyncio
+async def test_realistic_dust_max_quantity_cannot_clear_min_profit() -> None:
+    """€25k Realistic was capped at 0.02 coins → every alt quote died in profitability."""
+    set_fee_tier("retail")
+    deep = _retail_level1_atom()
+    snaps = [top_of_book_snapshot(exchange="binance", symbol="ATOMEUR", order_book=deep)]
+    dust = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_book_level=1,
+            paper_maker_max_edge_bps=80,
+            paper_maker_min_profit_eur=0.001,
+            paper_maker_adverse_bps=4,
+            paper_fee_tier="retail",
+            arbitrage_max_quantity=0.02,
+            arbitrage_position_pct=8,
+            arbitrage_min_liquidity_base=0.0001,
+        )
+    )
+    assert await dust.evaluate_markets(snaps, equity=Decimal("25000")) == []
+    rejects = dust.scan_stats()["reject_counts"]  # type: ignore[index]
+    assert int(rejects.get("min_profit_eur", 0)) + int(rejects.get("profitability", 0)) > 0
+
+    sized = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_book_level=1,
+            paper_maker_max_edge_bps=80,
+            paper_maker_min_profit_eur=0.001,
+            paper_maker_adverse_bps=4,
+            paper_fee_tier="retail",
+            arbitrage_max_quantity=10000,
+            arbitrage_position_pct=8,
+            arbitrage_min_liquidity_base=0.0001,
+        )
+    )
+    opps = await sized.evaluate_markets(snaps, equity=Decimal("25000"))
+    assert opps
+    assert opps[0].quantity > Decimal("1")
+    assert Decimal(str(opps[0].metadata["net_profit_eur"])) >= Decimal("0.001")
+
+
+@pytest.mark.asyncio
+async def test_retail_same_venue_roundtrip_is_net_positive_after_trade_through() -> None:
+    """When size is tradeable, a same-venue maker roundtrip beats retail fees."""
+    from bot.execution.paper_executor import PaperExecutor
+    from bot.portfolio.models import AssetBalance
+    from bot.portfolio.portfolio import PaperPortfolio
+
+    set_fee_tier("retail")
+    settings = _maker_settings(
+        paper_starting_eur=25_000.0,
+        paper_simulated_latency_ms=0.0,
+        paper_maker_queue_fill_pct=0.0,
+        paper_maker_trade_through_fill_pct=1.0,
+        paper_maker_book_level=1,
+        paper_maker_max_edge_bps=80,
+        paper_maker_min_profit_eur=0.001,
+        paper_maker_adverse_bps=4,
+        paper_fee_tier="retail",
+        paper_fee_rate=0.001,
+        arbitrage_max_quantity=10000,
+        arbitrage_position_pct=8,
+        arbitrage_min_liquidity_base=0.0001,
+        paper_venue_inventory=False,
+    )
+    deep = _retail_level1_atom()
+    snap = top_of_book_snapshot(exchange="binance", symbol="ATOMEUR", order_book=deep)
+    strategy = MakerInventoryStrategy(settings)
+    opps = await strategy.evaluate_markets([snap], equity=Decimal("25000"))
+    assert opps
+    opp = opps[0]
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("25000"))
+    portfolio.state.balances["ATOM"] = AssetBalance(
+        asset="ATOM", available=Decimal("5000"), reserved=Decimal("0")
+    )
+    executor = PaperExecutor(settings, portfolio=portfolio)
+    from bot.core.models import OrderRequest
+    from bot.core.enums import OpportunitySide
+
+    buy_req = OrderRequest(
+        opportunity_id=opp.id,
+        symbol="ATOMEUR",
+        side=OpportunitySide.BUY,
+        quantity=opp.quantity,
+        limit_price=opp.entry_price,
+        metadata={"venue": "binance", "post_only": True, "fee_role": "maker"},
+    )
+    sell_req = OrderRequest(
+        opportunity_id=opp.id,
+        symbol="ATOMEUR",
+        side=OpportunitySide.SELL,
+        quantity=opp.quantity,
+        limit_price=opp.expected_exit_price,
+        metadata={"venue": "binance", "post_only": True, "fee_role": "maker"},
+    )
+    buy_ex = await executor.execute(buy_req, order_book=deep, strategy="maker_inventory")
+    sell_ex = await executor.execute(sell_req, order_book=deep, strategy="maker_inventory")
+    assert buy_ex.status == OrderStatus.OPEN
+    assert sell_ex.status == OrderStatus.OPEN
+
+    through = OrderBook(
+        symbol="ATOMEUR",
+        bids=[OrderBookLevel(price=Decimal("1.320"), amount=Decimal("500"))],
+        asks=[OrderBookLevel(price=Decimal("1.345"), amount=Decimal("500"))],
+    )
+    fills = executor.match_resting({"binance": {"ATOMEUR": through}})
+    assert len(fills) == 2
+    fees = sum((f.fees_usd for f in fills), Decimal("0"))
+    buy_px = opp.entry_price
+    sell_px = opp.expected_exit_price
+    gross = (sell_px - buy_px) * opp.quantity
+    assert gross - fees > 0
+

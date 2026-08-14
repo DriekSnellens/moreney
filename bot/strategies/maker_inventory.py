@@ -215,7 +215,10 @@ class MakerInventoryStrategy(BaseStrategy):
         net = Decimal(str(meta.get("net_profit_eur", "0")))
         skew = Decimal(str(meta.get("inventory_skew_score", "0")))
         fv_bonus = Decimal("1") if meta.get("fair_value_aligned") else Decimal("0")
-        return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001"))
+        same_venue = str(meta.get("buy_exchange") or "") == str(meta.get("sell_exchange") or "")
+        # Same-venue can complete without a transfer; prefer it when NET is close.
+        venue_bonus = Decimal("0.05") if same_venue else _ZERO
+        return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001")) + venue_bonus
 
     def _build_fair_values(
         self, by_symbol: dict[str, list[MarketSnapshot]]
