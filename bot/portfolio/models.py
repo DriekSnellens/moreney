@@ -191,38 +191,80 @@ class PortfolioState(BaseModel):
                 return self.cash_to_quote("USDT", amount * usdt_px)
         return None
 
+    def asset_to_quote(self, asset: str, amount: Decimal) -> Decimal | None:
+        """Value ``amount`` of ``asset`` in the portfolio quote currency."""
+        converted = self.cash_to_quote(asset, amount)
+        if converted is not None:
+            return converted
+        asset = (asset or "").upper()
+        quote = (self.quote_asset or "EUR").upper()
+        if amount == 0 or asset == quote:
+            return converted
+        for symbol, position in self.positions.items():
+            if _infer_base_symbol(symbol, quote) != asset:
+                continue
+            mark = self.mark_prices.get(symbol, position.average_entry_price)
+            if mark <= 0:
+                continue
+            notional = amount * mark
+            pos_quote = _infer_quote_suffix(symbol, quote)
+            if pos_quote == quote:
+                return notional
+            via_quote = self.cash_to_quote(pos_quote, notional)
+            if via_quote is not None:
+                return via_quote
+        return None
+
+    def cap_positions_to_balances(self) -> None:
+        """Drop lots that were sold on another quote pair (phantom inventory).
+
+        Positions are keyed by symbol (XRPEUR vs XRPUSDT). A sell on USDT used to
+        leave the EUR lot untouched, so vermogen counted coins that were already
+        sold. Holdings in ``balances`` are the source of truth.
+        """
+        quote = (self.quote_asset or "EUR").upper()
+        held: dict[str, Decimal] = {
+            balance.asset.upper(): balance.total for balance in self.balances.values()
+        }
+        by_base: dict[str, list[PositionState]] = {}
+        for position in self.positions.values():
+            base = _infer_base_symbol(position.symbol, quote)
+            by_base.setdefault(base, []).append(position)
+        for base, lots in by_base.items():
+            if base == quote:
+                continue
+            target = held.get(base, _ZERO)
+            total_qty = sum((lot.quantity for lot in lots), _ZERO)
+            if total_qty <= target:
+                continue
+            overflow = total_qty - target
+            ordered = sorted(
+                lots,
+                key=lambda lot: (
+                    _infer_quote_suffix(lot.symbol, quote) == quote,
+                    -lot.quantity,
+                ),
+            )
+            for lot in ordered:
+                if overflow <= 0:
+                    break
+                take = min(lot.quantity, overflow)
+                lot.quantity -= take
+                overflow -= take
+                if lot.quantity <= 0:
+                    lot.quantity = _ZERO
+                    lot.average_entry_price = _ZERO
+
     @property
     def total_equity(self) -> Decimal:
-        quote = (self.quote_asset or "EUR").upper()
-        positioned: set[str] = set()
-        for symbol, position in self.positions.items():
-            if position.quantity == 0:
-                continue
-            positioned.add(_infer_base_symbol(symbol, quote))
-
+        """Mark-to-market of cash + coins actually held, not stale symbol lots."""
         equity = _ZERO
         for balance in self.balances.values():
             if balance.total == 0:
                 continue
-            asset = balance.asset.upper()
-            # Inventory that already lives in a position is valued via marks below.
-            if asset in positioned:
-                continue
-            converted = self.cash_to_quote(asset, balance.total)
+            converted = self.asset_to_quote(balance.asset, balance.total)
             if converted is not None:
                 equity += converted
-
-        for symbol, position in self.positions.items():
-            if position.quantity == 0:
-                continue
-            mark = self.mark_prices.get(symbol, position.average_entry_price)
-            notional = position.quantity * mark
-            pos_quote = _infer_quote_suffix(symbol, quote)
-            if pos_quote == quote:
-                equity += notional
-                continue
-            converted = self.cash_to_quote(pos_quote, notional)
-            equity += converted if converted is not None else notional
         return equity
 
 

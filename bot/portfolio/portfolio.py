@@ -74,6 +74,7 @@ class PaperPortfolio:
         self._state = state.model_copy(deep=True)
         if processed_fill_ids:
             self._accounting.load_processed_ids(processed_fill_ids)
+        self._update_unrealized()
         self._update_drawdown()
 
     async def get_snapshot(self) -> PortfolioSnapshot:
@@ -253,6 +254,7 @@ class PaperPortfolio:
         return infer_base_asset(symbol, quote)
 
     def _update_unrealized(self) -> None:
+        self._state.cap_positions_to_balances()
         unrealized = _ZERO
         for symbol, pos in self._state.positions.items():
             if pos.quantity == 0:

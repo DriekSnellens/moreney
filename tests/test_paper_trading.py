@@ -808,6 +808,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     assert "Alle bots" in fleet
     assert "Vergelijking" in fleet
     assert "Winst per rekening" in fleet
+    assert "afgeronde transacties" in fleet
     assert "€200" in fleet or "200" in fleet
     assert "Transacties" in fleet
     assert "Quotes" in fleet

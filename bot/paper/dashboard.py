@@ -515,6 +515,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
       <article class="metric-card"><span class="label">Open quotes</span><span class="value">{_esc_fmt(totals.get('open_maker_quotes'), 'count')}</span></article>
     </div>
+    <p class="sub totals-note">PnL is winst op afgeronde transacties. Vermogen is cash plus voorraad tegen de markt — geen extra inleg.</p>
   </header>
   <main class="container">
     <section class="glance-grid">{glance_html}</section>
@@ -641,6 +642,7 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
     if fleet:
         extra += """
     .totals-bar { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .65rem; padding: 0 1rem 1rem; max-width: 1100px; margin: 0 auto; }
+    .totals-note { max-width: 1100px; margin: 0 auto; padding: 0 1rem 1.1rem; }
     .glance-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 1.25rem; }
     .glance-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .85rem 1rem; display: grid; gap: .3rem; text-decoration: none; color: inherit; min-height: 7.5rem; }
     .glance-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
