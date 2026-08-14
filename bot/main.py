@@ -27,7 +27,7 @@ from bot.paper.dashboard import (
     render_dashboard_lite,
     render_fleet_dashboard,
 )
-from bot.paper.fleet import collect_fleet_overview
+from bot.paper.fleet import collect_fleet_overview, publicize_instance_urls
 from bot.paper.auth import (
     clear_session_cookie,
     credentials_valid,
@@ -466,10 +466,17 @@ async def logout() -> Response:
     return response
 
 
+@app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/fleet", response_class=HTMLResponse)
-async def fleet_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+async def fleet_dashboard(
+    request: Request, _: None = Depends(require_dashboard_access)
+) -> HTMLResponse:
     """One page covering all configured paper instances."""
-    payload = await collect_fleet_overview(get_settings())
+    payload = publicize_instance_urls(
+        await collect_fleet_overview(get_settings()),
+        hostname=request.url.hostname or request.headers.get("host", ""),
+        scheme=request.url.scheme,
+    )
     return render_fleet_dashboard(payload)
 
 
@@ -569,6 +576,7 @@ async def root() -> JSONResponse:
             "paper_dashboard": "/paper/dashboard",
             "paper_dashboard_lite": "/paper/dashboard-lite",
             "fleet_dashboard": "/fleet",
+            "all_bots_dashboard": "/dashboard",
             "dashboard_basic_auth_enabled": _dashboard_auth_enabled(),
             "execution_mode": "paper",
             "live_trading_enabled": False,

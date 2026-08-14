@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from bot.core.config import get_settings
 from bot.main import require_dashboard_access
 from bot.paper.dashboard import render_fleet_dashboard
-from bot.paper.fleet import collect_fleet_overview
+from bot.paper.fleet import collect_fleet_overview, publicize_instance_urls
 
 app = FastAPI(
     title="Moreney Fleet Dashboard",
@@ -31,9 +31,16 @@ async def fleet_api(_: None = Depends(require_dashboard_access)) -> dict[str, An
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/fleet", response_class=HTMLResponse)
-async def fleet_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    payload = await collect_fleet_overview(get_settings())
+async def fleet_dashboard(
+    request: Request, _: None = Depends(require_dashboard_access)
+) -> HTMLResponse:
+    payload = publicize_instance_urls(
+        await collect_fleet_overview(get_settings()),
+        hostname=request.url.hostname or request.headers.get("host", ""),
+        scheme=request.url.scheme,
+    )
     return render_fleet_dashboard(payload)
 
 

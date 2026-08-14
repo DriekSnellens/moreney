@@ -610,6 +610,8 @@ def test_paper_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         root = client.get("/").json()
         assert root["paper_dashboard"] == "/paper/dashboard"
         assert root["paper_dashboard_lite"] == "/paper/dashboard-lite"
+        assert root["fleet_dashboard"] == "/fleet"
+        assert root["all_bots_dashboard"] == "/dashboard"
         assert root["live_trading_enabled"] is False
 
 
@@ -752,11 +754,13 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     assert "1 verlies" in html
     assert "<rect" in html
     assert "Ultra-profiel" not in html
+    assert 'href="/fleet"' in html
 
     lite = render_dashboard_lite(payload).body.decode()
     assert "Winst in de tijd" in lite
     assert "polyline" in lite
     assert "Paper MTM" in lite or "Up-day" in lite or "live-inschatting" in lite.lower()
+    assert 'href="/fleet"' in lite
 
     fleet = render_fleet_dashboard(
         {
@@ -767,6 +771,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
                 "net_pnl": "12.50",
                 "trade_count": 3,
                 "running_count": 2,
+                "open_maker_quotes": 4,
             },
             "instances": [
                 {
@@ -778,6 +783,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
                     "win_rate": "1",
                     "running": True,
                     "starting_capital": "200",
+                    "open_maker_quotes": 2,
                     "dashboard_url": "/a",
                     "dashboard_lite_url": "/a-lite",
                     "market_data": {},
@@ -791,6 +797,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
                     "win_rate": "0.5",
                     "running": True,
                     "starting_capital": "500",
+                    "open_maker_quotes": 2,
                     "dashboard_url": "/b",
                     "dashboard_lite_url": "/b-lite",
                     "market_data": {},
@@ -798,10 +805,36 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
             ],
         }
     ).body.decode()
+    assert "Alle bots" in fleet
+    assert "Vergelijking" in fleet
     assert "Winst per rekening" in fleet
     assert "€200" in fleet or "200" in fleet
     assert "Transacties" in fleet
+    assert "Quotes" in fleet
+    assert "<table" in fleet
     assert "<rect" in fleet
     assert "Ultra transacties" not in fleet
     assert "Ultra PnL" not in fleet
     assert "Ultra =" not in fleet
+
+
+def test_publicize_instance_urls_uses_browser_host() -> None:
+    from bot.paper.fleet import publicize_instance_urls
+
+    out = publicize_instance_urls(
+        {
+            "instances": [
+                {
+                    "label": "200 EUR",
+                    "base_url": "http://127.0.0.1:8007",
+                    "dashboard_url": "http://127.0.0.1:8007/paper/dashboard",
+                    "dashboard_lite_url": "http://127.0.0.1:8007/paper/dashboard-lite",
+                }
+            ]
+        },
+        hostname="example.test:8006",
+        scheme="https",
+    )
+    row = out["instances"][0]
+    assert row["dashboard_url"] == "https://example.test:8007/paper/dashboard"
+    assert row["dashboard_lite_url"] == "https://example.test:8007/paper/dashboard-lite"

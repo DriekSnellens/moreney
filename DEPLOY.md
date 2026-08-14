@@ -79,8 +79,9 @@ curl -s http://127.0.0.1:8000/paper/overview
 
 Dashboard:
 
-- `http://<server>:8000/paper/dashboard`
-- `http://<server>:8000/paper/dashboard-lite`
+- `http://<server>:8006/fleet` — all paper bots in one view
+- `http://<server>:8006/paper/dashboard` — single instance
+- `http://<server>:8006/paper/dashboard-lite`
 
 Optional dashboard auth (recommended for public exposure), add in `.env`:
 

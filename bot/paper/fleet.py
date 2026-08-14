@@ -88,6 +88,7 @@ async def _fetch_one(
             "win_rate": performance.get("win_rate"),
             "maximum_drawdown": performance.get("maximum_drawdown"),
             "runtime_seconds": status.get("runtime_seconds"),
+            "open_maker_quotes": status.get("open_maker_quotes") or 0,
             "fee_tier": status.get("fee_tier") or "retail",
             "strategy": status.get("strategy"),
             "market_data": market_data,
@@ -151,7 +152,34 @@ def _totals(online: list[dict[str, Any]]) -> dict[str, str]:
         "depth_edges_found": str(edges),
         "scan_rejections": str(scan_rej),
         "running_count": str(sum(1 for row in online if row.get("running"))),
+        "open_maker_quotes": str(
+            sum(int(_as_float(row.get("open_maker_quotes"))) for row in online)
+        ),
     }
+
+
+def publicize_instance_urls(
+    payload: dict[str, Any],
+    *,
+    hostname: str,
+    scheme: str,
+) -> dict[str, Any]:
+    """Rewrite per-bot dashboard links to the hostname the browser used."""
+    host = (hostname or "").split(":")[0].strip() or "127.0.0.1"
+    scheme = (scheme or "http").split(":")[0]
+    instances: list[dict[str, Any]] = []
+    for row in payload.get("instances") or []:
+        item = dict(row)
+        parsed = urlparse(str(item.get("base_url") or ""))
+        port = parsed.port
+        if port:
+            public = f"{scheme}://{host}:{port}"
+            item["dashboard_url"] = f"{public}/paper/dashboard"
+            item["dashboard_lite_url"] = f"{public}/paper/dashboard-lite"
+        instances.append(item)
+    out = dict(payload)
+    out["instances"] = instances
+    return out
 
 
 def _as_float(value: Any) -> float:

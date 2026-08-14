@@ -148,6 +148,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="sub">{realism_note}</p>
       </div>
       <div class="hero-badges">
+        <a class="link-lite" href="/fleet">Alle bots</a>
         <span class="badge {status_cls}">{status_label}</span>
         <span class="badge muted">Geen echte orders</span>
       </div>
@@ -158,7 +159,11 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     <section class="panel">
       <div class="panel-head">
         <h2>Bediening</h2>
-        <a class="link-lite" href="/paper/dashboard-lite">Mobiel</a>
+        <span>
+          <a class="link-lite" href="/fleet">Alle bots</a>
+          ·
+          <a class="link-lite" href="/paper/dashboard-lite">Mobiel</a>
+        </span>
       </div>
       <div class="controls">
         <button type="button" class="btn" onclick="post('/paper/start')">Start</button>
@@ -458,7 +463,7 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
         <button type="button" class="btn" onclick="post('/paper/stop')">Stop</button>
         <button type="button" class="btn btn-danger" onclick="resetPaper()">Opnieuw</button>
       </div>
-      <p class="foot-lite"><a href="/paper/dashboard">Volledig overzicht</a> · Oefenhandel · 5s</p>
+      <p class="foot-lite"><a href="/fleet">Alle bots</a> · <a href="/paper/dashboard">Volledig overzicht</a> · Oefenhandel · 5s</p>
     </section>
 
     <section class="panel">
@@ -479,11 +484,10 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     online = payload.get("online_count", 0)
     configured = payload.get("configured_count", 0)
 
-    groups = _group_fleet_instances(instances)
-    groups_html = "".join(_render_capital_group(capital, rows) for capital, rows in groups)
-    if not groups_html:
-        groups_html = "<p class='empty'>Geen rekeningen ingesteld.</p>"
-
+    glance_html = "".join(_render_glance_card(row) for row in instances)
+    if not glance_html:
+        glance_html = "<p class='empty'>Geen rekeningen ingesteld.</p>"
+    table_html = _render_fleet_table(instances)
     fleet_chart = _svg_fleet_bars(instances)
     html = f"""<!DOCTYPE html>
 <html lang="nl">
@@ -492,16 +496,16 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <meta name="theme-color" content="#0b0f14"/>
   <meta http-equiv="refresh" content="5"/>
-  <title>Moreney — Alle rekeningen</title>
+  <title>Moreney — Alle bots</title>
   <style>{_shared_css(fleet=True)}</style>
 </head>
 <body>
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · per inleg</p>
-        <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · retail fees</p>
+        <p class="eyebrow">Oefenhandel · alle rekeningen</p>
+        <h1 class="brand">Alle bots</h1>
+        <p class="sub">{online}/{configured} online · retail fees · ververst elke 5s</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
@@ -509,11 +513,15 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(totals.get('trade_count'), 'count')}</span></article>
       <article class="metric-card {_pnl_class(totals.get('net_pnl'))}"><span class="label">PnL</span><span class="value">{_esc_fmt(totals.get('net_pnl'), 'money')}</span></article>
       <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
-      <article class="metric-card"><span class="label">Actief</span><span class="value">{_esc_fmt(totals.get('running_count'), 'count')}</span></article>
+      <article class="metric-card"><span class="label">Open quotes</span><span class="value">{_esc_fmt(totals.get('open_maker_quotes'), 'count')}</span></article>
     </div>
   </header>
   <main class="container">
-    {groups_html}
+    <section class="glance-grid">{glance_html}</section>
+    <section class="panel">
+      <h2>Vergelijking</h2>
+      <div class="table-wrap">{table_html}</div>
+    </section>
     <section class="panel">
       <h2>Winst per rekening</h2>
       {fleet_chart}
@@ -525,73 +533,89 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     return HTMLResponse(content=html)
 
 
-def _group_fleet_instances(instances: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
-    """Group cards by starting capital, preserving URL order."""
-    ordered: list[str] = []
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in instances:
-        capital = str(row.get("starting_capital") or row.get("label") or "?")
-        if capital not in grouped:
-            ordered.append(capital)
-            grouped[capital] = []
-        grouped[capital].append(row)
-    return [(k, grouped[k]) for k in ordered]
+def _return_fraction(row: dict[str, Any]) -> Any:
+    start = _as_float(row.get("starting_capital"))
+    pnl = _as_float(row.get("net_pnl"))
+    if start == 0:
+        return None
+    return pnl / start
 
 
-def _render_capital_group(capital: str, rows: list[dict[str, Any]]) -> str:
-    cards = [_render_fleet_card(row) for row in rows]
-    if not cards:
-        return ""
-    return f"""
-    <section class="capital-group">
-      <h2>Inleg {_esc_fmt(capital, 'money')}</h2>
-      <div class="pair-grid">{''.join(cards)}</div>
-    </section>
-    """
-
-
-def _render_fleet_card(row: dict[str, Any]) -> str:
+def _render_glance_card(row: dict[str, Any]) -> str:
+    href = _esc(row.get("dashboard_url") or "#")
     if not row.get("ok"):
         return f"""
-        <article class="fleet-card offline">
-          <header class="fleet-head">
-            <h3>{_esc(row.get('label'))}</h3>
-            <span class="badge warn">Offline</span>
-          </header>
-          <p class="error">{_esc(row.get('error'))}</p>
-        </article>
+        <a class="glance-card offline" href="{href}">
+          <span class="glance-label">{_esc(row.get('label'))}</span>
+          <span class="badge warn">Offline</span>
+          <span class="glance-error">{_esc(row.get('error'))}</span>
+        </a>
         """
     running = row.get("running")
     status_label = "Actief" if running else "Gestopt"
     badge_cls = "ok" if running else "warn"
-    trades = _esc_fmt(row.get("trade_count") if row.get("trade_count") is not None else 0, "count")
-    executed = _esc_fmt(
-        row.get("executed_opportunities") if row.get("executed_opportunities") is not None else 0,
-        "count",
-    )
-    scanned = _esc_fmt(row.get("pairs_evaluated") or 0, "count")
     return f"""
-    <article class="fleet-card">
-      <header class="fleet-head">
-        <div>
-          <h3>{_esc(row.get('label'))}</h3>
-          <p class="card-sub">Fee {_esc(row.get('fee_tier') or '—')}</p>
-        </div>
-        <span class="badge {badge_cls}">{status_label}</span>
-      </header>
-      <div class="metric-grid compact">
-        <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(row.get('equity'), 'money')}</span></article>
-        <article class="metric-card {_pnl_class(row.get('net_pnl'))}"><span class="label">{_pnl_word(row.get('net_pnl'))}</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
-        <article class="metric-card highlight-metric"><span class="label">Transacties</span><span class="value">{trades}</span></article>
-        <article class="metric-card"><span class="label">Uitgevoerd</span><span class="value">{executed}</span></article>
-        <article class="metric-card"><span class="label">Gescand</span><span class="value">{scanned}</span></article>
-        <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
-      </div>
-      <div class="card-links">
-        <a href="{_esc(row.get('dashboard_url'))}">Overzicht</a>
-        <a href="{_esc(row.get('dashboard_lite_url'))}">Mobiel</a>
-      </div>
-    </article>
+    <a class="glance-card" href="{href}">
+      <span class="glance-label">{_esc(row.get('label'))}</span>
+      <span class="glance-pnl {_pnl_class(row.get('net_pnl'))}">{_esc_fmt(row.get('net_pnl'), 'money')}</span>
+      <span class="glance-sub">{_esc_fmt(_return_fraction(row), 'pct')} · {_esc_fmt(row.get('equity'), 'money')}</span>
+      <span class="badge {badge_cls}">{status_label}</span>
+    </a>
+    """
+
+
+def _render_fleet_table(instances: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for row in instances:
+        if not row.get("ok"):
+            rows.append(
+                "<tr class='offline'>"
+                f"<td>{_esc(row.get('label'))}</td>"
+                "<td><span class='badge warn'>Offline</span></td>"
+                "<td colspan='7' class='error'>"
+                f"{_esc(row.get('error'))}</td>"
+                f"<td><a href='{_esc(row.get('dashboard_url'))}'>Open</a></td>"
+                "</tr>"
+            )
+            continue
+        running = row.get("running")
+        status_label = "Actief" if running else "Gestopt"
+        badge_cls = "ok" if running else "warn"
+        dash = _esc(row.get("dashboard_url"))
+        lite = _esc(row.get("dashboard_lite_url"))
+        rows.append(
+            "<tr>"
+            f"<td><strong>{_esc(row.get('label'))}</strong></td>"
+            f"<td><span class='badge {badge_cls}'>{status_label}</span></td>"
+            f"<td class='num'>{_esc_fmt(row.get('starting_capital'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('equity'), 'money')}</td>"
+            f"<td class='num {_pnl_class(row.get('net_pnl'))}'>{_esc_fmt(row.get('net_pnl'), 'money')}</td>"
+            f"<td class='num {_pnl_class(row.get('net_pnl'))}'>{_esc_fmt(_return_fraction(row), 'pct')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('trade_count') if row.get('trade_count') is not None else 0, 'count')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('open_maker_quotes') if row.get('open_maker_quotes') is not None else 0, 'count')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('win_rate'), 'pct')}</td>"
+            f"<td><a href='{dash}'>Overzicht</a> · <a href='{lite}'>Mobiel</a></td>"
+            "</tr>"
+        )
+    body = "".join(rows) or "<tr><td colspan='10' class='empty'>Geen rekeningen ingesteld.</td></tr>"
+    return f"""
+    <table class="fleet-table">
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Status</th>
+          <th>Inleg</th>
+          <th>Vermogen</th>
+          <th>PnL</th>
+          <th>%</th>
+          <th>Transacties</th>
+          <th>Quotes</th>
+          <th>Winstkans</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table>
     """
 
 
@@ -617,21 +641,20 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
     if fleet:
         extra += """
     .totals-bar { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .65rem; padding: 0 1rem 1rem; max-width: 1100px; margin: 0 auto; }
-    .capital-group { max-width: 1100px; margin: 0 auto 1.25rem; }
-    .capital-group h2 { margin: 0 0 .65rem; font-size: 1.05rem; color: var(--muted); font-weight: 600; }
-    .pair-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
-    .fleet-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; display: grid; gap: .75rem; }
-    .fleet-card.offline { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
-    .fleet-head { display: flex; justify-content: space-between; gap: .75rem; align-items: start; }
-    .fleet-head h3 { margin: 0; font-size: 1rem; }
-    .card-sub { margin: .25rem 0 0; color: var(--muted); font-size: .8rem; }
-    .highlight-metric .value { font-size: 1.15rem; }
-    .card-links { display: flex; gap: .75rem; font-size: .85rem; }
-    .card-links a, .text-link { color: var(--accent); text-decoration: none; }
+    .glance-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 1.25rem; }
+    .glance-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .85rem 1rem; display: grid; gap: .3rem; text-decoration: none; color: inherit; min-height: 7.5rem; }
+    .glance-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .glance-card.offline { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+    .glance-label { font-size: .82rem; color: var(--muted); font-weight: 600; }
+    .glance-pnl { font-family: var(--mono); font-size: 1.35rem; font-weight: 700; }
+    .glance-sub { color: var(--muted); font-size: .8rem; }
+    .glance-error { color: var(--bad); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; }
+    .fleet-table { width: 100%; border-collapse: collapse; }
+    .fleet-table th { text-align: left; color: var(--muted); font-size: .75rem; font-weight: 600; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+    .fleet-table td { padding: .55rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
     .error { color: var(--bad); font-size: .85rem; margin: 0; }
     @media (min-width: 720px) {
       .totals-bar { grid-template-columns: repeat(4, minmax(0,1fr)); }
-      .pair-grid { grid-template-columns: 1fr 1fr; }
     }
         """
     return f"""
