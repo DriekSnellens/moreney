@@ -751,6 +751,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     assert "2 winst" in html
     assert "1 verlies" in html
     assert "<rect" in html
+    assert "Ultra-profiel" not in html
 
     lite = render_dashboard_lite(payload).body.decode()
     assert "Winst in de tijd" in lite

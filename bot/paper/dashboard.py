@@ -103,11 +103,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     inventory = status.get("inventory") or {}
     desk_strategy = _esc(str(status.get("strategy") or "—"))
     desk_tier = _esc(str(status.get("fee_tier") or "retail"))
-    realism_note = (
-        "Realistic-profiel: retail fees, 20% trade-through, fair-value aan. Dichtst bij echt geld."
-        if str(status.get("fee_tier") or "retail").lower() == "retail"
-        else "Ultra-profiel: rebate fees en hoge fill-%. Niet gelijk aan retail live-P&amp;L."
-    )
+    realism_note = "Retail fees, fair-value aan, queue-fills uit. Dichtst bij echt geld."
     markout_5s = f"{_esc(str(markout.get('avg_adverse_bps_5s') or '0'))} bps"
     markout_suggested = f"{_esc(str(markout.get('suggested_adverse_bps') or '0'))} bps"
     tri_pairs = _fmt_count(tri_scan.get("pairs_evaluated", 0))
