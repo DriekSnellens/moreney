@@ -505,6 +505,16 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             state = "ok" if health.get("synchronized") and not health.get("stale") else "warn"
             md_bits.append(f"<span class='feed {state}'>{_esc(_venue_label(exchange))}</span>")
         md_html = " ".join(md_bits) or "<span class='muted'>Geen koersen</span>"
+        trades = row.get("trade_count")
+        scan_note = ""
+        if not trades or str(trades) in {"0", "0.0"}:
+            scanned = row.get("pairs_evaluated") or 0
+            scan_note = (
+                f"<p class='card-sub'>Nog geen fills · {_esc_fmt(scanned, 'count')} scans "
+                f"(retail wacht op NET edge)</p>"
+                if str(row.get("fee_tier") or "").lower() == "retail"
+                else f"<p class='card-sub'>Nog geen fills · {_esc_fmt(scanned, 'count')} scans</p>"
+            )
         cards.append(
             f"""
             <article class="fleet-card">
@@ -522,6 +532,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
                 <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
               </div>
               <div class="feeds">{md_html}</div>
+              {scan_note}
               <div class="card-links">
                 <a href="{_esc(row.get('dashboard_url'))}">Overzicht</a>
                 <a href="{_esc(row.get('dashboard_lite_url'))}">Mobiel</a>
