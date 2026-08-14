@@ -113,10 +113,12 @@ class PositionLimitCalculator:
         open positions.
         """
         meta = opportunity.metadata or {}
-        if (
-            opportunity.strategy_name == "cross_exchange_arbitrage"
-            and meta.get("sell_exchange")
-        ):
+        round_trip = opportunity.strategy_name in {
+            "cross_exchange_arbitrage",
+            "maker_inventory",
+            "triangle_bridge",
+        } or (meta.get("post_only") and meta.get("round_trip"))
+        if round_trip and (meta.get("sell_exchange") or meta.get("post_only")):
             if not portfolio.positions:
                 return _ZERO
             notionals = [

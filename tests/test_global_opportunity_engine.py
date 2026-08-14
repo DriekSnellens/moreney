@@ -424,3 +424,67 @@ async def test_walk_forward_validator() -> None:
     ]
     result = await wf.run(snaps)
     assert result.windows >= 1
+
+
+def test_ev_maker_unfilled_quote_is_not_a_20bp_loss() -> None:
+    """Live Realistic rejected NET-positive ADA quotes because miss = 20 bps loss."""
+    from uuid import uuid4
+
+    from bot.core.models import ProfitabilityResult
+
+    settings = _settings(
+        paper_maker_trade_through_fill_pct=0.20,
+        paper_maker_queue_fill_pct=0.0,
+    )
+    ev = ExpectedValueEngine(settings)
+    oid = uuid4()
+    opp = TradeOpportunity(
+        id=oid,
+        strategy_name="maker_inventory",
+        symbol="ADAEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("3200"),
+        entry_price=Decimal("0.1552"),
+        expected_exit_price=Decimal("0.1556"),
+        confidence=0.45,
+        metadata={
+            "post_only": True,
+            "round_trip": True,
+            "adverse_bps": "4",
+            "buy_exchange": "okx",
+            "sell_exchange": "okx",
+        },
+    )
+    prof = ProfitabilityResult(
+        opportunity_id=oid,
+        gross_profit_usd=Decimal("1.28"),
+        fees_usd=Decimal("0.99"),
+        slippage_usd=Decimal("0"),
+        funding_usd=Decimal("0"),
+        execution_buffer_usd=Decimal("0"),
+        net_profit_usd=Decimal("0.33"),
+        net_return=Decimal("0.00067"),
+        is_profitable=True,
+        trade_allowed=True,
+    )
+    data = ev.enrich(opp, prof)
+    assert data["expected_value"] > 0
+    assert abs(Decimal(str(data["expected_value"])) - Decimal("0.066")) < Decimal("0.001")
+
+
+def test_transfer_cost_skips_prefunded_maker() -> None:
+    settings = _settings(global_transfer_fee_bps=10, global_transfer_latency_bps=5)
+    tc = CrossExchangeTransferCost(settings)
+    opp = TradeOpportunity(
+        strategy_name="maker_inventory",
+        symbol="DOTEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("2000"),
+        entry_price=Decimal("0.65"),
+        metadata={
+            "post_only": True,
+            "buy_exchange": "okx",
+            "sell_exchange": "binance",
+        },
+    )
+    assert tc.estimate(opp) == 0

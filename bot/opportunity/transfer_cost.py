@@ -25,12 +25,15 @@ class CrossExchangeTransferCost:
         sell = str(meta.get("sell_exchange") or "")
         if not buy or not sell or buy == sell:
             return Decimal("0")
+        # Maker inventory is pre-funded per venue; a resting bid/ask does not
+        # withdraw coins. Taker-style arb still pays the bridge.
+        if opportunity.strategy_name == "maker_inventory" or meta.get("post_only"):
+            return Decimal("0")
         cross_venue_strategies = {
             "cross_exchange_arbitrage",
             "triangle_bridge",
             "desk_composite",
             "global_composite",
-            "maker_inventory",
         }
         if opportunity.strategy_name not in cross_venue_strategies:
             return Decimal("0")

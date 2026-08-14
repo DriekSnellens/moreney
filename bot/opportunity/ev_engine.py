@@ -38,22 +38,42 @@ class ExpectedValueEngine:
             }
 
         p_win = self._resolve_probability(opportunity, profitability)
-        p_loss = 1.0 - p_win
+        meta = opportunity.metadata or {}
+        post_only = bool(meta.get("post_only"))
 
         gain = max(net, _ZERO)
         loss = abs(min(net, _ZERO))
-        if loss <= 0 and net > 0:
-            loss = notional * Decimal(str(getattr(self._settings, "opportunity_default_loss_pct", 0.002)))
-
-        adverse_bps = Decimal(str(opportunity.metadata.get("adverse_bps", 0) or 0))
-        if adverse_bps > 0:
-            loss = max(loss, notional * adverse_bps / Decimal("10000"))
-
-        ev = (
-            Decimal(str(p_win)) * gain
-            - Decimal(str(p_loss)) * loss
-            - transfer_cost
-        ) * regime_weight
+        adverse_bps = Decimal(str(meta.get("adverse_bps", 0) or 0))
+        if post_only:
+            # Resting maker: unfilled quotes expire at 0, they do not take a
+            # 20 bp inventory shock. Adverse is already inside NET.
+            through = Decimal(
+                str(getattr(self._settings, "paper_maker_trade_through_fill_pct", 0) or 0)
+            )
+            queue = Decimal(
+                str(getattr(self._settings, "paper_maker_queue_fill_pct", 0) or 0)
+            )
+            p_fill = max(through, queue)
+            if p_fill <= 0:
+                p_fill = Decimal(str(p_win))
+            p_win = float(p_fill)
+            loss = (
+                notional * adverse_bps / Decimal("10000") if adverse_bps > 0 else _ZERO
+            )
+            ev = (p_fill * gain - transfer_cost) * regime_weight
+        else:
+            if loss <= 0 and net > 0:
+                loss = notional * Decimal(
+                    str(getattr(self._settings, "opportunity_default_loss_pct", 0.002))
+                )
+            if adverse_bps > 0:
+                loss = max(loss, notional * adverse_bps / Decimal("10000"))
+            p_loss = 1.0 - p_win
+            ev = (
+                Decimal(str(p_win)) * gain
+                - Decimal(str(p_loss)) * loss
+                - transfer_cost
+            ) * regime_weight
 
         rr = gain / loss if loss > 0 else gain
 

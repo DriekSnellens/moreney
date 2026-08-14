@@ -61,6 +61,58 @@ def test_arb_exposure_uses_max_notional_not_sum() -> None:
     assert result.remaining_exposure_capacity > Decimal("0")
 
 
+def test_maker_exposure_uses_max_notional_not_sum_of_seed() -> None:
+    """50% seeded inventory must not consume a 50% exposure cap for MM quotes."""
+    settings = Settings(
+        app_env="development",
+        execution_mode="paper",
+        max_position_percent=10.0,
+        max_total_exposure_percent=50.0,
+        risk_max_position_usd=100_000.0,
+    )
+    calc = PositionLimitCalculator(settings)
+    portfolio = PortfolioSnapshot(
+        equity_usd=Decimal("25000"),
+        positions=[
+            Position(
+                symbol="ATOM",
+                quantity=Decimal("2000"),
+                average_entry_price=Decimal("2.5"),
+                side=OpportunitySide.BUY,
+            ),
+            Position(
+                symbol="DOT",
+                quantity=Decimal("4000"),
+                average_entry_price=Decimal("0.65"),
+                side=OpportunitySide.BUY,
+            ),
+            Position(
+                symbol="ADA",
+                quantity=Decimal("15000"),
+                average_entry_price=Decimal("0.15"),
+                side=OpportunitySide.BUY,
+            ),
+        ],
+        open_position_count=3,
+    )
+    opp = TradeOpportunity(
+        strategy_name="maker_inventory",
+        symbol="DOTEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("2000"),
+        entry_price=Decimal("0.65"),
+        metadata={
+            "post_only": True,
+            "round_trip": True,
+            "buy_exchange": "binance",
+            "sell_exchange": "binance",
+        },
+    )
+    result = calc.evaluate(opp, portfolio)
+    assert "MAX_TOTAL_EXPOSURE" not in result.breached_codes
+    assert result.remaining_exposure_capacity > Decimal("0")
+
+
 @pytest.mark.asyncio
 async def test_dynamic_sizing_scales_with_equity() -> None:
     settings = _arb_settings(
