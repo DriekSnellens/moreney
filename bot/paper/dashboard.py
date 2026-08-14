@@ -104,6 +104,11 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     inventory = status.get("inventory") or {}
     desk_strategy = _esc(str(status.get("strategy") or "—"))
     desk_tier = _esc(str(status.get("fee_tier") or "retail"))
+    realism_note = (
+        "Live-conservatief: retail fees, 20% trade-through, fair-value aan. Dichtst bij echt geld."
+        if str(status.get("fee_tier") or "retail").lower() == "retail"
+        else "Ultra-profiel: rebate fees en hoge fill-%. Niet gelijk aan retail live-P&amp;L."
+    )
     markout_5s = f"{_esc(str(markout.get('avg_adverse_bps_5s') or '0'))} bps"
     markout_suggested = f"{_esc(str(markout.get('suggested_adverse_bps') or '0'))} bps"
     tri_pairs = _fmt_count(tri_scan.get("pairs_evaluated", 0))
@@ -144,7 +149,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Oefenhandel · live-inschatting</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Global composite: maker + triangle + funding, EV-ranking, regime &amp; portfolio-gate. Winst = live-inschatting.</p>
+        <p class="sub">{realism_note}</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
@@ -506,7 +511,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
               <header class="fleet-head">
                 <div>
                   <h3>{_esc(row.get('label'))}</h3>
-                  <p class="card-sub">Start {_esc_fmt(row.get('starting_capital'), 'money')}</p>
+                  <p class="card-sub">Start {_esc_fmt(row.get('starting_capital'), 'money')} · {_esc(row.get('fee_tier') or 'retail')}</p>
                 </div>
                 <span class="badge {badge_cls}">{status_label}</span>
               </header>
@@ -543,7 +548,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Alle oefenrekeningen</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · live-inschatting per inleg</p>
+        <p class="sub">{online}/{configured} online · ultra vs live-conservatief (retail fees)</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>

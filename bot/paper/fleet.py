@@ -88,6 +88,8 @@ async def _fetch_one(
             "win_rate": performance.get("win_rate"),
             "maximum_drawdown": performance.get("maximum_drawdown"),
             "runtime_seconds": status.get("runtime_seconds"),
+            "fee_tier": status.get("fee_tier") or "retail",
+            "strategy": status.get("strategy"),
             "market_data": market_data,
             "error": None,
         }

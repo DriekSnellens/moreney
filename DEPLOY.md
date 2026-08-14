@@ -63,7 +63,7 @@ sudo cp deploy/systemd/moreney-marketdata.service /etc/systemd/system/
 sudo cp deploy/systemd/moreney-paper@.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now moreney-marketdata
-sudo systemctl enable --now moreney-paper@200 moreney-paper@500 moreney-paper@1000 moreney-paper@5000 moreney-paper@25000
+sudo systemctl enable --now moreney-paper@200 moreney-paper@500 moreney-paper@1000 moreney-paper@5000 moreney-paper@25000 moreney-paper@25000live
 ```
 
 Legacy single-instance unit `moreney-paper.service` remains available for local mode.
