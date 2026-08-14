@@ -80,13 +80,14 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         else "n.v.t."
     )
     paper_day = _fmt_money(forecast.get("paper_run_rate_per_day_eur", 0))
-    certainty = forecast.get("high_certainty") or {}
-    required_cap = _fmt_money(certainty.get("required_capital_eur", 0))
-    forecast_note = _esc(forecast.get("note") or "Hoogzeker coupon-model.")
+    vol = forecast.get("vol_capture") or {}
+    band_pct = _esc(str(vol.get("equity_move_pct") or forecast.get("projected_day_return_pct") or "—"))
+    mtm = _fmt_money(forecast.get("paper_equity_pnl") or perf.get("paper_equity_pnl") or 0)
+    forecast_note = _esc(forecast.get("note") or "Hoogste-kans 24u: alt-beta + maker.")
     confidence = str(forecast.get("confidence") or "very_low")
     confidence_label = {
         "very_low": "Nog onzeker",
-        "low": "Voorzichtig",
+        "low": "Hoogste kans (geen garantie)",
         "medium": "Redelijk",
         "high": "Hoog (coupon)",
     }.get(confidence, confidence)
@@ -146,7 +147,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · geen gegarandeerd live-inkomen</p>
+        <p class="eyebrow">Oefenhandel · hoogste kans 2–5%/24u</p>
         <h1 class="brand">Moreney</h1>
         <p class="sub">{realism_note}</p>
       </div>
@@ -171,22 +172,22 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel highlight">
-      <h2>Hoogzeker daginkomen</h2>
+      <h2>Hoogste kans 2–5% / 24u</h2>
       <div class="metric-grid">
         <article class="metric-card {pnl_cls}">
-          <span class="label">Paper winst/verlies</span>
-          <span class="value">{m('net_pnl')}</span>
+          <span class="label">Paper MTM</span>
+          <span class="value">{mtm}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Zeker / dag (3% APY)</span>
+          <span class="label">Up-day in de band</span>
           <span class="value">{forecast_day}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Kapitaal voor €300/dag</span>
-          <span class="value">{required_cap}</span>
+          <span class="label">Verwacht % (up-day)</span>
+          <span class="value">{band_pct}%</span>
         </article>
         <article class="metric-card">
-          <span class="label">Paper-tempo / dag</span>
+          <span class="label">Maker-tempo / dag</span>
           <span class="value">{paper_day}</span>
         </article>
       </div>
@@ -428,9 +429,9 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
 
   <main class="container lite-container">
     <section class="panel hero-metric {pnl_cls}">
-      <span class="label">Paper winst/verlies</span>
-      <span class="value-xl">{_fmt_money(perf.get('net_pnl', 0))}</span>
-      <span class="sub-metric">Zeker / dag {forecast_day} · {confidence_label}</span>
+      <span class="label">Paper MTM</span>
+      <span class="value-xl">{_fmt_money(perf.get('paper_equity_pnl', perf.get('net_pnl', 0)))}</span>
+      <span class="sub-metric">Up-day band {forecast_day} · {confidence_label}</span>
       <span class="sub-metric">Oefenvermogen {_fmt_money(perf.get('current_equity', 0))}</span>
     </section>
 

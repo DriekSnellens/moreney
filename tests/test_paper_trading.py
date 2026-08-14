@@ -744,7 +744,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
         ],
     }
     html = render_dashboard(payload).body.decode()
-    assert "Paper winst" in html or "Hoogzeker" in html
+    assert "Hoogste kans" in html or "Paper MTM" in html
     assert "Koop goedkoop, verkoop duurder" in html or "Maker: bied/laat vangen" in html
     assert "Binance" in html
     assert "polyline" in html
@@ -755,7 +755,7 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     lite = render_dashboard_lite(payload).body.decode()
     assert "Winst in de tijd" in lite
     assert "polyline" in lite
-    assert "Paper winst" in lite or "live-inschatting" in lite.lower() or "Zeker / dag" in lite
+    assert "Paper MTM" in lite or "Up-day" in lite or "live-inschatting" in lite.lower()
 
     fleet = render_fleet_dashboard(
         {

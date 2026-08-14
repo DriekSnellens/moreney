@@ -45,8 +45,9 @@ class RegimeDetector:
         weights: dict[str, dict[MarketRegime, Decimal]] = {
             "maker_inventory": {
                 MarketRegime.RANGE_BOUND: Decimal("1.2"),
-                MarketRegime.LOW_VOLATILITY: Decimal("1.1"),
-                MarketRegime.HIGH_VOLATILITY: Decimal("0.6"),
+                MarketRegime.LOW_VOLATILITY: Decimal("0.8"),
+                MarketRegime.HIGH_VOLATILITY: Decimal("1.3"),
+                MarketRegime.MOMENTUM: Decimal("1.2"),
                 MarketRegime.LIQUIDITY_STRESSED: Decimal("0.3"),
                 MarketRegime.NORMAL: Decimal("1.0"),
             },

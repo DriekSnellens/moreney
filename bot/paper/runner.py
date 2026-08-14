@@ -689,41 +689,43 @@ class PaperRunner:
         return {}
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
-        """High-certainty coupon from capital. Paper run-rate is not live income."""
+        """Highest-odds 24h band: alt-beta inventory, maker as overlay."""
         from bot.paper.capacity import project_daily_pnl
-        from bot.paper.certainty import snapshot as certainty_snapshot
+        from bot.paper.odds import snapshot as odds_snapshot
 
         runtime = max(self.runtime_seconds(), 1.0)
         net = snap.net_pnl
         start = snap.starting_equity
-        certain = certainty_snapshot(start)
-        certain_day = Decimal(str(certain["certain_daily_eur"]))
+        inv_pct = Decimal(str(getattr(self._settings, "paper_seed_inventory_pct", 75) or 75))
+        odds = odds_snapshot(start, inventory_pct=inv_pct)
+        band_eur = Decimal(str(odds["euro_on_capital"]))
+        band_pct = Decimal(str(odds["equity_move_pct"]))
         paper_day = (
             project_daily_pnl(net, runtime)
             if snap.trade_count >= 2 and runtime >= 120
             else Decimal("0")
         )
-        per_hour = certain_day / Decimal("24")
-        day_ret = (
-            (certain_day / start * Decimal("100")) if start > 0 else Decimal("0")
-        )
+        mtm = getattr(snap, "paper_equity_pnl", None)
+        if mtm is None:
+            mtm = getattr(snap, "current_equity", start) - start
         return {
-            "label": "Hoogzeker daginkomen (cash/T-bill-band)",
+            "label": "Hoogste-kans 24u (alt-beta + maker)",
             "realized_live_eur": _dec_str(net),
-            "projected_per_hour_eur": _dec_str(per_hour),
-            "projected_per_day_eur": _dec_str(certain_day),
-            "projected_day_return_pct": _dec_str(day_ret),
+            "projected_per_hour_eur": _dec_str(band_eur / Decimal("24")),
+            "projected_per_day_eur": _dec_str(band_eur),
+            "projected_day_return_pct": _dec_str(band_pct),
             "paper_run_rate_per_day_eur": _dec_str(paper_day),
+            "paper_equity_pnl": _dec_str(Decimal(str(mtm or 0))),
             "projection_ready": True,
-            "confidence": "high",
-            "note": str(certain["note"]),
+            "confidence": "low",
+            "note": str(odds["note"]),
             "runtime_seconds": runtime,
-            "high_certainty": certain,
+            "vol_capture": odds,
             "assumptions": [
-                "Hoge zekerheid = cash / T-bills / insured deposits (~2–4% APY)",
-                "€300/dag op die band vraagt miljoenen euro inleg, niet €10k–€25k",
-                "Paper maker-PnL is geen gegarandeerd live-inkomen",
-                "Retail trading-alpha op deze inleg heeft geen hoge zekerheid",
+                "2–5%/24u = coin-move op inventory, geen coupon en geen rebate-fees",
+                "75% liquide EUR-alts (ADA/ATOM/NEAR/DOT/XRP); maker oogst bps eromheen",
+                "Hoogste kans op een up-day in die band; down-days en vlakke sessies missen",
+                "Retail fees, geen queue-fills, fair-value blijft aan",
             ],
         }
 
