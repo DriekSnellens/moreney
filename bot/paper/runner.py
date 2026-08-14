@@ -350,6 +350,10 @@ class PaperRunner:
         self._strategy = self._build_strategy()
         gate = self._gate_settings()
         self._profitability = DefaultProfitabilityEngine(gate)
+        # Paper reset must clear the shared kill switch (stale drawdown from a
+        # prior session would otherwise block all new quotes forever).
+        if hasattr(self._risk, "kill_switch"):
+            await self._risk.kill_switch.recover(force=True)
         if self._settings.paper_maker_enabled:
             self._risk = RiskEngine(gate, kill_switch=self._risk.kill_switch)
         self._engine = TradingEngine(
