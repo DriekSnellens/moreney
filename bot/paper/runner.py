@@ -41,6 +41,11 @@ from bot.strategies.funding_basis import FundingBasisStrategy
 from bot.strategies.fx_relative_value import FxRelativeValueStrategy
 from bot.strategies.equity_mean_reversion import EquityMeanReversionStrategy
 from bot.paper.markout import MarkoutTracker
+from bot.paper.capital_policy import (
+    HoldingTimeController,
+    portfolio_base_balances,
+    portfolio_entry_prices,
+)
 from bot.core.venue_fees import set_fee_tier
 from bot.portfolio.venue_ledger import infer_quote_asset
 from bot.opportunity.engine import GlobalOpportunityEngine
@@ -126,6 +131,11 @@ class PaperRunner:
         self._markout = MarkoutTracker()
         self._fx_refilled: set[UUID] = set()
         self._last_markout_bps: float | None = None
+        self._holding = HoldingTimeController(
+            max_holding_sec=float(
+                getattr(settings, "paper_max_holding_sec", 7200.0) or 7200.0
+            )
+        )
         self._instrument_registry = InstrumentRegistry(settings)
         self._market_calendar = MarketCalendarService()
         self._regime = RegimeDetector()
@@ -214,7 +224,14 @@ class PaperRunner:
         return settings.model_copy(
             update={
                 "profitability_min_net_profit_usd": settings.paper_maker_min_profit_eur,
-                "profitability_min_net_return": settings.arbitrage_min_profit_pct,
+                "profitability_min_net_return": float(
+                    getattr(
+                        settings,
+                        "paper_maker_min_net_return",
+                        settings.arbitrage_min_profit_pct,
+                    )
+                    or settings.arbitrage_min_profit_pct
+                ),
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,
@@ -794,10 +811,124 @@ class PaperRunner:
             self._fx_refill_completed_triangles(books)
         self._update_markouts(books)
         await self._hybrid_hedge_if_needed(books)
+        await self._cancel_buys_on_dump()
         await self._cancel_stale_quotes()
+        await self._recycle_overdue_inventory(books)
         self._maybe_rebalance_venues()
         self._maybe_seed_usdt(books)
         self._apply_markout_adverse()
+
+    def _maker_strategy(self) -> MakerInventoryStrategy | None:
+        strategy = self._strategy
+        if isinstance(strategy, MakerInventoryStrategy):
+            return strategy
+        if isinstance(strategy, CompositeDeskStrategy):
+            maker = getattr(strategy, "_maker", None)
+            return maker if isinstance(maker, MakerInventoryStrategy) else None
+        if isinstance(strategy, GlobalCompositeStrategy):
+            for child in getattr(strategy, "_children", []) or []:
+                if isinstance(child, MakerInventoryStrategy):
+                    return child
+        return None
+
+    async def _cancel_buys_on_dump(self) -> None:
+        """Pull resting BUY quotes when dump guard or inventory overweight fires."""
+        from bot.core.enums import OrderSide
+
+        maker = self._maker_strategy()
+        if maker is None:
+            return
+        dump = {s.upper() for s in maker.dump_symbols()}
+        skew = maker.active_skew
+        cancel_all_buys = bool(skew is not None and skew.sell_only)
+        if not dump and not cancel_all_buys:
+            return
+        for order in list(self._executor.order_manager.open_orders()):
+            if order.side != OrderSide.BUY:
+                continue
+            if not (order.metadata or {}).get("post_only"):
+                continue
+            if not cancel_all_buys and order.symbol.upper() not in dump:
+                continue
+            reason = (
+                "inventory_overweight_cancel_buys"
+                if cancel_all_buys
+                else "vol_dump_cancel_buys"
+            )
+            await self._executor.cancel(order.id, reason=reason)
+
+    async def _recycle_overdue_inventory(
+        self, books: dict[str, dict[str, Any]]
+    ) -> None:
+        """Break-even / flat ALT→EUR recycle after max holding time."""
+        from bot.core.enums import OrderSide
+        from uuid import uuid4
+
+        state = self._portfolio.state
+        balances = portfolio_base_balances(state)
+        self._holding.note_balances(balances)
+        overdue = self._holding.overdue(
+            balances,
+            mark_prices=state.mark_prices,
+            entry_prices=portfolio_entry_prices(state),
+            quote=state.quote_asset,
+        )
+        if not overdue:
+            return
+        ledger = self._portfolio.venue_ledger
+        quote = (state.quote_asset or "EUR").upper()
+        exits: list[Any] = []
+        for base, qty in overdue:
+            if qty <= 0:
+                continue
+            # Gradual: free ~25% of the tranche each cycle (capital velocity).
+            portion = min(qty, qty * Decimal("0.25"))
+            if portion <= 0:
+                continue
+            symbol = f"{base}{quote}"
+            venue = ""
+            available_qty = portion
+            if ledger is not None:
+                best_venue = ""
+                best_qty = Decimal("0")
+                for vname in ledger.venues:
+                    have = ledger.available(vname, base)
+                    if have > best_qty:
+                        best_qty = have
+                        best_venue = vname
+                venue = best_venue
+                available_qty = min(portion, best_qty) if best_qty > 0 else Decimal("0")
+            if available_qty <= 0:
+                continue
+            book = (books.get(venue) or {}).get(symbol) if venue else None
+            if book is None:
+                for vname, venue_books in books.items():
+                    if symbol in venue_books:
+                        book = venue_books[symbol]
+                        venue = venue or vname
+                        break
+            if book is None:
+                continue
+            result = await self._executor.close_one_leg(
+                opportunity_id=uuid4(),
+                symbol=symbol,
+                side=OrderSide.SELL,
+                quantity=available_qty,
+                venue=venue,
+                order_book=book,
+                reason="holding_time_recycle",
+            )
+            if result is not None:
+                exits.append(result)
+                logger.info(
+                    "holding_time_recycle base=%s qty=%s venue=%s symbol=%s",
+                    base,
+                    available_qty,
+                    venue,
+                    symbol,
+                )
+        if exits:
+            self._ingest_delayed_fills(exits)
 
 
     def _mark_triangle_fx(self, opp_id: UUID, tracked: Any | None, fx_cost_eur: Decimal) -> None:

@@ -23,6 +23,13 @@ from bot.core.enums import FeeRole, OpportunitySide
 from bot.core.interfaces import ProfitabilityEngine
 from bot.core.models import MarketSnapshot, TradeOpportunity
 from bot.core.venue_fees import venue_maker_fee
+from bot.paper.capital_policy import (
+    InventorySkewPolicy,
+    NetProfitDustFilter,
+    QuoteSkew,
+    VolatilityDumpGuard,
+)
+from bot.portfolio.models import PortfolioState
 from bot.portfolio.venue_ledger import infer_base_asset, infer_quote_asset
 from bot.profitability.engine import DefaultProfitabilityEngine
 from bot.strategies.arbitrage import _book_age_ms, _side_depth
@@ -70,7 +77,38 @@ class MakerInventoryStrategy(BaseStrategy):
         self._replace_improve_frac = Decimal(
             str(getattr(settings, "paper_maker_replace_improve_frac", 0.25) or 0)
         )
-        self._min_profit_pct = Decimal(str(settings.arbitrage_min_profit_pct))
+        self._min_profit_pct = Decimal(
+            str(
+                getattr(settings, "paper_maker_min_net_return", None)
+                or settings.arbitrage_min_profit_pct
+            )
+        )
+        self._dust = NetProfitDustFilter(
+            min_net_profit_eur=self._min_profit_eur,
+            min_net_return=self._min_profit_pct,
+            min_notional_eur=Decimal(
+                str(getattr(settings, "paper_maker_min_notional_eur", 10) or 0)
+            ),
+        )
+        self._skew_policy = InventorySkewPolicy(
+            max_alt_pct=Decimal(
+                str(getattr(settings, "paper_max_alt_inventory_pct", 30) or 30)
+            ),
+            min_alt_pct=Decimal(
+                str(getattr(settings, "paper_min_alt_inventory_pct", 10) or 10)
+            ),
+            overweight_ask_improve_bps=Decimal(
+                str(getattr(settings, "paper_inventory_ask_improve_bps", 4) or 0)
+            ),
+            underweight_buy_extra_bps=Decimal(
+                str(getattr(settings, "paper_inventory_buy_dip_bps", 8) or 0)
+            ),
+        )
+        self._vol_guard = VolatilityDumpGuard(
+            move_pct=Decimal(str(getattr(settings, "paper_vol_move_pct", 1.5) or 0)),
+            window_sec=float(getattr(settings, "paper_vol_window_sec", 300) or 300),
+            cool_down_sec=float(getattr(settings, "paper_vol_cooldown_sec", 120) or 0),
+        )
         self._min_liquidity = Decimal(str(settings.arbitrage_min_liquidity_base))
         self._max_quantity = Decimal(str(settings.arbitrage_max_quantity))
         self._position_pct = Decimal(str(settings.arbitrage_position_pct))
@@ -104,6 +142,20 @@ class MakerInventoryStrategy(BaseStrategy):
         self._reject_counts: dict[str, int] = {}
         self._last_emit: dict[str, tuple[float, Decimal]] = {}
         self._fair_values: dict[str, Decimal] = {}
+        self._active_skew: QuoteSkew | None = None
+        self._portfolio_state: PortfolioState | None = None
+
+    @property
+    def active_skew(self) -> QuoteSkew | None:
+        return self._active_skew
+
+    @property
+    def vol_guard(self) -> VolatilityDumpGuard:
+        return self._vol_guard
+
+    def dump_symbols(self) -> list[str]:
+        """Symbols currently in dump cool-off (bids must be pulled)."""
+        return self._vol_guard.active_symbols()
 
     def update_adverse_bps(self, adverse_bps: Decimal) -> None:
         """Rebuild NET gate with a new adverse-selection haircut."""
@@ -120,7 +172,14 @@ class MakerInventoryStrategy(BaseStrategy):
         maker_settings = settings.model_copy(
             update={
                 "profitability_min_net_profit_usd": settings.paper_maker_min_profit_eur,
-                "profitability_min_net_return": settings.arbitrage_min_profit_pct,
+                "profitability_min_net_return": float(
+                    getattr(
+                        settings,
+                        "paper_maker_min_net_return",
+                        settings.arbitrage_min_profit_pct,
+                    )
+                    or settings.arbitrage_min_profit_pct
+                ),
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,
@@ -145,9 +204,22 @@ class MakerInventoryStrategy(BaseStrategy):
         *,
         equity: Decimal | None = None,
         inventory: object = None,
+        portfolio_state: PortfolioState | None = None,
     ) -> list[TradeOpportunity]:
+        self._portfolio_state = portfolio_state
+        if portfolio_state is not None:
+            self._active_skew = self._skew_policy.skew(portfolio_state)
+        else:
+            self._active_skew = None
+
         by_symbol = self._group_valid_snapshots(snapshots)
         self._fair_values = self._build_fair_values(by_symbol)
+        # Feed mid history for dump detection before quoting.
+        for symbol, venues in by_symbol.items():
+            mid = self._median_mid(venues)
+            if mid is not None:
+                self._vol_guard.observe(symbol, mid)
+
         opportunities: list[TradeOpportunity] = []
         for symbol, venues in by_symbol.items():
             if infer_quote_asset(symbol, self._quote) != self._quote:
@@ -155,7 +227,10 @@ class MakerInventoryStrategy(BaseStrategy):
                 continue
             opportunities.extend(
                 await self._evaluate_symbol(
-                    symbol, venues, equity=equity, inventory=inventory
+                    symbol,
+                    venues,
+                    equity=equity,
+                    inventory=inventory,
                 )
             )
         opportunities.sort(key=self._rank_opportunity, reverse=True)
@@ -165,6 +240,13 @@ class MakerInventoryStrategy(BaseStrategy):
             self._opportunities_emitted += 1
             self._mark_emitted(opp)
         return selected
+
+    def _symbol_sell_only(self, symbol: str) -> bool:
+        """True when inventory cap or dump guard forbids new BUY exposure."""
+        skew = self._active_skew
+        if skew is not None and skew.sell_only:
+            return True
+        return self._vol_guard.is_dump(symbol)
 
     async def _evaluate_symbol(
         self,
@@ -181,6 +263,14 @@ class MakerInventoryStrategy(BaseStrategy):
                 f"Skip {symbol}: quote is not {self._quote}",
             )
             return []
+
+        sell_only = self._symbol_sell_only(symbol)
+        if sell_only and self._vol_guard.is_dump(symbol):
+            self._reject(
+                symbol,
+                "vol_dump_sell_only",
+                "Mid dumped faster than vol guard threshold; bids pulled",
+            )
 
         ranked: list[TradeOpportunity] = []
         fair_value = self._fair_values.get(infer_base_asset(symbol, self._quote))
@@ -200,12 +290,16 @@ class MakerInventoryStrategy(BaseStrategy):
                     equity=equity,
                     inventory=inventory,
                     fair_value=fair_value,
+                    sell_only=sell_only,
                 )
                 if candidate is None:
                     continue
                 self._depth_edges_found += 1
                 opportunity = await self._gate_candidate(
-                    candidate, inventory=inventory, equity=equity
+                    candidate,
+                    inventory=inventory,
+                    equity=equity,
+                    sell_only=sell_only,
                 )
                 if opportunity is None:
                     continue
@@ -386,6 +480,7 @@ class MakerInventoryStrategy(BaseStrategy):
         equity: Decimal | None = None,
         inventory: object = None,
         fair_value: Decimal | None = None,
+        sell_only: bool = False,
     ) -> MakerCandidate | None:
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
@@ -416,6 +511,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 equity=equity,
                 inventory=inventory,
                 fair_value=fair_value,
+                sell_only=sell_only,
             )
             if candidate is None:
                 continue
@@ -456,7 +552,21 @@ class MakerInventoryStrategy(BaseStrategy):
         equity: Decimal | None = None,
         inventory: object = None,
         fair_value: Decimal | None = None,
+        sell_only: bool = False,
     ) -> MakerCandidate | None:
+        assert buy_snap.order_book is not None
+        assert sell_snap.order_book is not None
+
+        skew = self._active_skew
+        if skew is not None:
+            buy_price, sell_price = self._skew_policy.apply_prices(
+                buy_price=buy_price,
+                sell_price=sell_price,
+                skew=skew,
+                best_bid=buy_snap.order_book.bids[0].price,
+                best_ask=sell_snap.order_book.asks[0].price,
+            )
+
         if sell_price <= buy_price:
             self._reject(
                 buy_snap.symbol,
@@ -481,16 +591,26 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
 
-        if fair_value is not None and fair_value > 0:
+        if fair_value is not None and fair_value > 0 and not sell_only:
             # Require buy below fair value and sell above it — otherwise the
             # "edge" is a one-sided stale book vs global USDT fair value.
-            if buy_price > fair_value:
+            max_buy = fair_value
+            if skew is not None:
+                dipped = self._skew_policy.max_buy_vs_fair(fair_value, skew)
+                if dipped is not None:
+                    max_buy = dipped
+            if buy_price > max_buy:
                 self._reject(
                     buy_snap.symbol,
-                    "toxic_buy_vs_fv",
+                    "toxic_buy_vs_fv" if max_buy == fair_value else "selective_buy_dip",
                     (
-                        f"Buy bid {buy_price} is above USDT fair value {fair_value} "
-                        f"({self._fx_symbol} bridge)"
+                        f"Buy bid {buy_price} is above max allowed {max_buy} "
+                        f"(fair={fair_value}, underweight dip gate)"
+                        if max_buy != fair_value
+                        else (
+                            f"Buy bid {buy_price} is above USDT fair value {fair_value} "
+                            f"({self._fx_symbol} bridge)"
+                        )
                     ),
                     buy_exchange=buy_snap.exchange,
                     sell_exchange=sell_snap.exchange,
@@ -503,6 +623,19 @@ class MakerInventoryStrategy(BaseStrategy):
                     (
                         f"Sell ask {sell_price} is below USDT fair value {fair_value} "
                         f"({self._fx_symbol} bridge)"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=sell_snap.exchange,
+                )
+                return None
+        elif fair_value is not None and fair_value > 0 and sell_only:
+            # Recycle sells may sit at/through fair value; still refuse absurd asks.
+            if sell_price < fair_value * Decimal("0.97"):
+                self._reject(
+                    buy_snap.symbol,
+                    "toxic_sell_vs_fv",
+                    (
+                        f"Sell-only ask {sell_price} far below fair value {fair_value}"
                     ),
                     buy_exchange=buy_snap.exchange,
                     sell_exchange=sell_snap.exchange,
@@ -525,7 +658,8 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         cost_bps = fee_bps + self._spread_fee_buffer_bps
-        if cost_bps >= spread_bps:
+        # Sell-only recycle: allow thinner edge so capital velocity wins.
+        if not sell_only and cost_bps >= spread_bps:
             self._reject(
                 buy_snap.symbol,
                 "fees_eat_edge",
@@ -570,6 +704,7 @@ class MakerInventoryStrategy(BaseStrategy):
             sell_snap=sell_snap,
             buy_price=buy_price,
             inventory=inventory,
+            sell_only=sell_only,
         )
         if quantity < self._min_liquidity:
             self._reject(
@@ -604,6 +739,7 @@ class MakerInventoryStrategy(BaseStrategy):
         sell_snap: MarketSnapshot,
         buy_price: Decimal,
         inventory: object,
+        sell_only: bool = False,
     ) -> Decimal:
         if inventory is None or quantity <= 0:
             return quantity
@@ -611,9 +747,23 @@ class MakerInventoryStrategy(BaseStrategy):
         if not callable(available):
             return quantity
         base = infer_base_asset(buy_snap.symbol, self._quote)
+        sell_coins = available(sell_snap.exchange, base)
+        if sell_only:
+            capped = min(quantity, sell_coins)
+            if capped < quantity:
+                self._reject(
+                    buy_snap.symbol,
+                    "venue_inventory",
+                    (
+                        f"Sell-only size capped by {base} on {sell_snap.exchange} "
+                        f"(have={sell_coins})"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=sell_snap.exchange,
+                )
+            return capped
         buy_fee = Decimal("1") + venue_maker_fee(buy_snap.exchange)
         quote_cash = available(buy_snap.exchange, self._quote)
-        sell_coins = available(sell_snap.exchange, base)
         max_buy = quote_cash / (buy_price * buy_fee) if buy_price > 0 else _ZERO
         capped = min(quantity, max_buy, sell_coins)
         if capped < quantity:
@@ -636,6 +786,7 @@ class MakerInventoryStrategy(BaseStrategy):
         *,
         inventory: object = None,
         equity: Decimal | None = None,
+        sell_only: bool = False,
     ) -> TradeOpportunity | None:
         base = infer_base_asset(candidate.symbol, self._quote)
         fair_value = self._fair_values.get(base)
@@ -647,18 +798,26 @@ class MakerInventoryStrategy(BaseStrategy):
         skew = self._inventory_skew_score(
             candidate, inventory=inventory, base=base
         )
+        skew_meta = self._active_skew
         opportunity = TradeOpportunity(
             strategy_name=self.name,
             symbol=candidate.symbol,
-            side=OpportunitySide.BUY,
+            side=OpportunitySide.SELL if sell_only else OpportunitySide.BUY,
             quantity=candidate.quantity,
             entry_price=candidate.buy_price,
             expected_exit_price=candidate.sell_price,
             confidence=0.55,
             rationale=(
-                f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
-                f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
-                f"{candidate.sell_price}"
+                (
+                    f"Sell-only recycle {candidate.quantity} on {candidate.sell_exchange} "
+                    f"@ ask {candidate.sell_price}"
+                    if sell_only
+                    else (
+                        f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
+                        f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
+                        f"{candidate.sell_price}"
+                    )
+                )
                 + (
                     f"; fair_value_eur={fair_value}"
                     if fair_value is not None
@@ -678,11 +837,18 @@ class MakerInventoryStrategy(BaseStrategy):
                 "sell_maker_fee_rate": str(venue_maker_fee(candidate.sell_exchange)),
                 "pricing": "maker_touch",
                 "quote_currency": self._quote,
-                "round_trip": True,
+                "round_trip": not sell_only,
                 "post_only": True,
+                "sell_only": sell_only,
                 "fair_value_eur": str(fair_value) if fair_value is not None else None,
                 "fair_value_aligned": fair_aligned,
                 "inventory_skew_score": str(skew),
+                "inventory_mode": skew_meta.mode if skew_meta is not None else "unknown",
+                "alt_inventory_pct": (
+                    str(skew_meta.alt_fraction * Decimal("100"))
+                    if skew_meta is not None
+                    else None
+                ),
                 "adverse_bps": str(self._adverse_bps),
             },
         )
@@ -693,7 +859,25 @@ class MakerInventoryStrategy(BaseStrategy):
         )
         net = result.net_profit_usd
         net_return = result.net_return
-        if not result.trade_allowed:
+        # Hard dust / NET floors (stofjes + thin margins).
+        dust_reason = self._dust.reject_reason(
+            quantity=candidate.quantity,
+            buy_price=candidate.buy_price,
+            net_profit_eur=net,
+            net_return=net_return,
+        )
+        if dust_reason is not None and not sell_only:
+            self._reject(
+                candidate.symbol,
+                "dust_or_net_floor",
+                dust_reason,
+                buy_exchange=candidate.buy_exchange,
+                sell_exchange=candidate.sell_exchange,
+                net_profit_eur=str(net),
+                net_return=str(net_return),
+            )
+            return None
+        if not result.trade_allowed and not sell_only:
             reasons = (
                 result.estimate.disallow_reasons
                 if result.estimate is not None
@@ -710,7 +894,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         min_eur = self._effective_min_profit(equity)
-        if net < min_eur:
+        if not sell_only and net < min_eur:
             self._reject(
                 candidate.symbol,
                 "min_profit_eur",
@@ -720,7 +904,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_profit_eur=str(net),
             )
             return None
-        if net_return < self._min_profit_pct:
+        if not sell_only and net_return < self._min_profit_pct:
             self._reject(
                 candidate.symbol,
                 "min_profit_pct",
@@ -730,9 +914,27 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
+        # Sell-only still needs a positive notional (no stofjes) even if edge is thin.
+        if sell_only:
+            notional = candidate.quantity * candidate.sell_price
+            if (
+                self._dust.min_notional_eur > 0
+                and notional < self._dust.min_notional_eur
+            ):
+                self._reject(
+                    candidate.symbol,
+                    "dust_or_net_floor",
+                    (
+                        f"sell-only notional {notional} EUR below dust floor "
+                        f"{self._dust.min_notional_eur} EUR"
+                    ),
+                    buy_exchange=candidate.buy_exchange,
+                    sell_exchange=candidate.sell_exchange,
+                )
+                return None
         logger.info(
             "maker quote accepted symbol=%s buy=%s sell=%s qty=%s "
-            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s",
+            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s",
             candidate.symbol,
             candidate.buy_exchange,
             candidate.sell_exchange,
@@ -741,6 +943,7 @@ class MakerInventoryStrategy(BaseStrategy):
             net_return,
             fair_value,
             skew,
+            sell_only,
         )
         return opportunity.model_copy(
             update={
@@ -786,10 +989,16 @@ class MakerInventoryStrategy(BaseStrategy):
         )
 
     def scan_stats(self) -> dict[str, object]:
+        skew = self._active_skew
         return {
             "pairs_evaluated": self._pairs_evaluated,
             "depth_edges_found": self._depth_edges_found,
             "scan_rejections": self._scan_rejections,
             "opportunities_emitted": self._opportunities_emitted,
             "reject_counts": dict(sorted(self._reject_counts.items())),
+            "inventory_mode": skew.mode if skew is not None else None,
+            "alt_inventory_pct": (
+                float(skew.alt_fraction * Decimal("100")) if skew is not None else None
+            ),
+            "dump_symbols": self.dump_symbols(),
         }

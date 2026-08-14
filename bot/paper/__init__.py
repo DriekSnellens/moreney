@@ -8,7 +8,6 @@ from bot.paper.models import (
     StrategyStats,
     TrackedOpportunity,
 )
-from bot.paper.runner import PaperRunner
 from bot.paper.store import PaperTradingStore
 from bot.paper.tracker import PerformanceTracker
 
@@ -23,3 +22,12 @@ __all__ = [
     "StrategyStats",
     "TrackedOpportunity",
 ]
+
+
+def __getattr__(name: str):
+    # Lazy: avoid circular import with strategies → capital_policy → paper.
+    if name == "PaperRunner":
+        from bot.paper.runner import PaperRunner
+
+        return PaperRunner
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

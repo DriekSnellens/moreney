@@ -17,6 +17,8 @@ def _maker_settings(**overrides: object) -> Settings:
         "execution_mode": "paper",
         "paper_maker_enabled": True,
         "paper_maker_min_profit_eur": 0.02,
+        "paper_maker_min_net_return": 0.0001,
+        "paper_maker_min_notional_eur": 0.5,
         "paper_maker_min_spread_bps": 2.0,
         "paper_maker_max_edge_bps": 200.0,
         "paper_maker_max_fee_bps": 40.0,
@@ -453,7 +455,11 @@ async def test_realistic_dust_max_quantity_cannot_clear_min_profit() -> None:
     )
     assert await dust.evaluate_markets(snaps, equity=Decimal("25000")) == []
     rejects = dust.scan_stats()["reject_counts"]  # type: ignore[index]
-    assert int(rejects.get("min_profit_eur", 0)) + int(rejects.get("profitability", 0)) > 0
+    assert (
+        int(rejects.get("min_profit_eur", 0))
+        + int(rejects.get("profitability", 0))
+        + int(rejects.get("dust_or_net_floor", 0))
+    ) > 0
 
     sized = MakerInventoryStrategy(
         _maker_settings(
@@ -636,7 +642,11 @@ async def test_equity_bps_floor_rejects_dust_on_large_book() -> None:
         equity=Decimal("25000"),
     )
     assert opps == []
-    assert int(strategy.scan_stats()["reject_counts"].get("min_profit_eur", 0)) > 0  # type: ignore[union-attr]
+    rejects = strategy.scan_stats()["reject_counts"]  # type: ignore[index]
+    assert (
+        int(rejects.get("min_profit_eur", 0))
+        + int(rejects.get("dust_or_net_floor", 0))
+    ) > 0
 
 
 @pytest.mark.asyncio
@@ -693,4 +703,82 @@ async def test_cooldown_replaces_quote_when_net_improves() -> None:
     assert Decimal(str(second[0].metadata["net_profit_eur"])) > Decimal(
         str(first[0].metadata["net_profit_eur"])
     )
+
+
+@pytest.mark.asyncio
+async def test_overweight_inventory_emits_sell_only() -> None:
+    from bot.portfolio.models import AssetBalance, PortfolioState, PositionState
+
+    set_fee_tier("retail")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_max_edge_bps=200,
+            paper_maker_venues="okx",
+            paper_maker_min_notional_eur=1,
+            paper_maker_min_profit_eur=0.01,
+            paper_maker_min_net_return=0.0001,
+            arbitrage_max_quantity=10,
+            paper_inventory_ask_improve_bps=8,
+        )
+    )
+    state = PortfolioState(
+        balances={
+            "EUR": AssetBalance(asset="EUR", available=Decimal("6000")),
+            "BTC": AssetBalance(asset="BTC", available=Decimal("40")),
+        },
+        positions={
+            "BTCEUR": PositionState(
+                symbol="BTCEUR",
+                quantity=Decimal("40"),
+                average_entry_price=Decimal("100"),
+            )
+        },
+        quote_asset="EUR",
+        mark_prices={"BTCEUR": Decimal("100")},
+    )
+
+    class _Inv:
+        def available(self, venue: str, asset: str) -> Decimal:
+            if asset == "BTC":
+                return Decimal("5")
+            if asset == "EUR":
+                return Decimal("5000")
+            return Decimal("0")
+
+    snap = top_of_book_snapshot(
+        exchange="okx", symbol="BTCEUR", order_book=_book("100", "100.40", qty="2")
+    )
+    opps = await strategy.evaluate_markets(
+        [snap],
+        equity=Decimal("10000"),
+        inventory=_Inv(),
+        portfolio_state=state,
+    )
+    assert opps
+    assert opps[0].metadata.get("sell_only") is True
+    assert strategy.active_skew is not None
+    assert strategy.active_skew.sell_only is True
+
+
+@pytest.mark.asyncio
+async def test_dust_notional_floor_rejects_tiny_quotes() -> None:
+    set_fee_tier("retail")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_max_edge_bps=200,
+            paper_maker_venues="okx",
+            paper_maker_min_notional_eur=50,
+            paper_maker_min_profit_eur=0.01,
+            arbitrage_max_quantity=0.05,
+            arbitrage_min_liquidity_base=0.01,
+        )
+    )
+    snap = top_of_book_snapshot(
+        exchange="okx",
+        symbol="BTCEUR",
+        order_book=_book("100", "100.40", qty="0.05"),
+    )
+    opps = await strategy.evaluate_markets([snap], equity=Decimal("25000"))
+    assert opps == []
+    assert strategy.scan_stats()["reject_counts"].get("dust_or_net_floor", 0) > 0
 

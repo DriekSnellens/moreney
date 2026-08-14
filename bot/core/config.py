@@ -117,13 +117,31 @@ class Settings(BaseSettings):
     paper_maker_min_spread_bps: float = Field(default=3.0, ge=0)
     # Gross edge above this is treated as stale/public-feed dislocation, not tradable.
     paper_maker_max_edge_bps: float = Field(default=30.0, ge=0)
-    paper_maker_min_profit_eur: float = Field(default=0.001, ge=0)
+    paper_maker_min_profit_eur: float = Field(default=0.15, ge=0)
     # Extra euro floor: equity × bps / 10_000 (0.2 bps of €25k ≈ €0.50). 0 = off.
     paper_maker_min_profit_equity_bps: float = Field(default=0.0, ge=0)
+    # Hard NET return floor (0.0025 = 0.25%).
+    paper_maker_min_net_return: float = Field(default=0.0025, ge=0)
+    # Ignore quotes whose notional is below this euro dust floor.
+    paper_maker_min_notional_eur: float = Field(default=10.0, ge=0)
     # Keep a quote only if its NET euro is at least this fraction of the cycle's best.
     paper_maker_keep_vs_best_frac: float = Field(default=0.0, ge=0, le=1)
     # During cooldown, still replace a quote if NET euro improved by this fraction.
     paper_maker_replace_improve_frac: float = Field(default=0.25, ge=0)
+    # Hard cap on alt share of equity (rest must stay quote cash).
+    paper_max_alt_inventory_pct: float = Field(default=30.0, ge=0, le=90)
+    # Below this alt share, only buy deep dips (extra edge vs fair value).
+    paper_min_alt_inventory_pct: float = Field(default=10.0, ge=0, le=90)
+    # When overweight, tighten ask by this many bps to free capital faster.
+    paper_inventory_ask_improve_bps: float = Field(default=4.0, ge=0)
+    # When underweight, require this many extra bps below fair value to buy.
+    paper_inventory_buy_dip_bps: float = Field(default=8.0, ge=0)
+    # Dump guard: cancel buys if mid falls by this % inside the window.
+    paper_vol_move_pct: float = Field(default=1.5, ge=0)
+    paper_vol_window_sec: float = Field(default=300.0, ge=1)
+    paper_vol_cooldown_sec: float = Field(default=120.0, ge=0)
+    # Max seconds an alt tranche may sit before a break-even recycle sell.
+    paper_max_holding_sec: float = Field(default=7200.0, ge=0)
     # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
     paper_maker_same_venue: bool = True
     paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=30)

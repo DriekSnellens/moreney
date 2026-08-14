@@ -128,6 +128,8 @@ class TradingEngine:
                 paper = self.paper_portfolio
                 if paper is not None and paper.venue_ledger is not None:
                     kwargs["inventory"] = paper.venue_ledger
+                if paper is not None:
+                    kwargs["portfolio_state"] = paper.state
                 try:
                     opportunities = await evaluate_markets(venue_snapshots, **kwargs)
                 except TypeError:
@@ -606,6 +608,17 @@ class TradingEngine:
             exchange_key="sell_exchange",
             symbol_override=sell_symbol,
         )
+        sell_only = bool((opportunity.metadata or {}).get("sell_only"))
+        if sell_only:
+            # Inventory overweight / dump guard: recycle ALT→EUR only.
+            sell_result = await self._execute_limit(
+                sell_order, sell_book, opportunity.strategy_name
+            )
+            sell_result.metadata["sell_only"] = True
+            if cycle_result is not None:
+                cycle_result.executions.append(sell_result)
+                self._collect_order_fill(cycle_result, sell_result)
+            return sell_result
         buy_result = await self._execute_limit(buy_order, buy_book, opportunity.strategy_name)
         sell_result = await self._execute_limit(sell_order, sell_book, opportunity.strategy_name)
         buy_result.metadata["sell_leg"] = {

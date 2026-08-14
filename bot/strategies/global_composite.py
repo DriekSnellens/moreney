@@ -35,8 +35,13 @@ class GlobalCompositeStrategy(BaseStrategy):
         *,
         equity: Decimal | None = None,
         inventory: object = None,
+        portfolio_state: object = None,
     ) -> list[TradeOpportunity]:
-        kwargs: dict = {"equity": equity, "inventory": inventory}
+        kwargs: dict = {
+            "equity": equity,
+            "inventory": inventory,
+            "portfolio_state": portfolio_state,
+        }
         combined: list[TradeOpportunity] = []
         for child in self._children:
             evaluate = getattr(child, "evaluate_markets", None)
@@ -45,7 +50,12 @@ class GlobalCompositeStrategy(BaseStrategy):
             try:
                 opps = await evaluate(snapshots, **kwargs)
             except TypeError:
-                opps = await evaluate(snapshots, equity=equity)
+                try:
+                    opps = await evaluate(
+                        snapshots, equity=equity, inventory=inventory
+                    )
+                except TypeError:
+                    opps = await evaluate(snapshots, equity=equity)
             combined.extend(opps)
         return combined[: self._max_raw]
 

@@ -512,10 +512,20 @@ class CompositeDeskStrategy(BaseStrategy):
         *,
         equity: Decimal | None = None,
         inventory: object = None,
+        portfolio_state: object = None,
     ) -> list[TradeOpportunity]:
-        kwargs: dict = {"equity": equity, "inventory": inventory}
+        kwargs: dict = {
+            "equity": equity,
+            "inventory": inventory,
+            "portfolio_state": portfolio_state,
+        }
         maker_opps = await self._maker.evaluate_markets(snapshots, **kwargs)
-        tri_opps = await self._triangle.evaluate_markets(snapshots, **kwargs)
+        try:
+            tri_opps = await self._triangle.evaluate_markets(snapshots, **kwargs)
+        except TypeError:
+            tri_opps = await self._triangle.evaluate_markets(
+                snapshots, equity=equity, inventory=inventory
+            )
         combined = list(maker_opps) + list(tri_opps)
         combined.sort(
             key=lambda o: Decimal(str((o.metadata or {}).get("net_profit_eur", "0"))),
