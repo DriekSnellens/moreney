@@ -64,6 +64,21 @@ class InventorySkewPolicy:
         self._min_alt = max(Decimal("0"), min(min_alt_pct, _HUNDRED)) / _HUNDRED
         self._ask_improve = max(_ZERO, overweight_ask_improve_bps)
         self._buy_extra = max(_ZERO, underweight_buy_extra_bps)
+        self._default_max_alt = self._max_alt
+
+    def set_max_alt_pct(self, pct: Decimal | float) -> None:
+        """Dynamically tighten/restore the alt inventory hard cap (0–100 or 0–1)."""
+        value = Decimal(str(pct))
+        if value <= 1:
+            value *= _HUNDRED
+        self._max_alt = max(Decimal("0"), min(value, _HUNDRED)) / _HUNDRED
+
+    def restore_default_max_alt(self) -> None:
+        self._max_alt = self._default_max_alt
+
+    @property
+    def max_alt_fraction(self) -> Decimal:
+        return self._max_alt
 
     def snapshot(self, state: PortfolioState) -> InventorySnapshot:
         equity = state.total_equity

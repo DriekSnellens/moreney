@@ -138,16 +138,39 @@ class PaperRunner:
             )
         )
         self._hmm_enabled = bool(getattr(settings, "paper_hmm_enabled", True))
-        self._hmm = MarketRegimeDetector(
-            vol_window=int(getattr(settings, "paper_hmm_vol_window", 10) or 10),
-            min_samples=int(getattr(settings, "paper_hmm_min_samples", 60) or 60),
-            history_len=int(getattr(settings, "paper_hmm_history_len", 500) or 500),
+        atr = int(
+            getattr(settings, "paper_hmm_atr_window", None)
+            or getattr(settings, "paper_hmm_vol_window", 14)
+            or 14
         )
-        self._hmm_refit_every = int(
-            getattr(settings, "paper_hmm_refit_every_cycles", 30) or 30
+        self._hmm = MarketRegimeDetector(
+            atr_window=atr,
+            min_samples=int(getattr(settings, "paper_hmm_min_samples", 80) or 80),
+            history_len=int(getattr(settings, "paper_hmm_history_len", 750) or 750),
+            candle_timeframe_sec=float(
+                getattr(settings, "paper_hmm_candle_sec", 300) or 300
+            ),
+            refit_every_sec=float(
+                getattr(settings, "paper_hmm_refit_every_sec", 18000) or 18000
+            ),
+            toxic_confirm_steps=int(
+                getattr(settings, "paper_hmm_toxic_confirm_steps", 2) or 2
+            ),
+            toxic_proba_threshold=float(
+                getattr(settings, "paper_hmm_toxic_proba_threshold", 0.70) or 0.70
+            ),
+            normal_inventory_pct=float(
+                getattr(settings, "paper_hmm_normal_inventory_pct", 0.30) or 0.30
+            ),
+            toxic_inventory_pct=float(
+                getattr(settings, "paper_hmm_toxic_inventory_pct", 0.10) or 0.10
+            ),
         )
         self._hmm_reduce_only = False
         self._hmm_last: RegimePrediction | None = None
+        self._hmm_inventory_target = float(
+            getattr(settings, "paper_hmm_normal_inventory_pct", 0.30) or 0.30
+        )
         self._instrument_registry = InstrumentRegistry(settings)
         self._market_calendar = MarketCalendarService()
         self._regime = RegimeDetector()
@@ -837,12 +860,17 @@ class PaperRunner:
         self._apply_markout_adverse()
 
     async def _apply_hmm_regime_guardrail(self) -> None:
-        """Observe mids, (re)fit HMM, cancel bids and set REDUCE_ONLY on toxic flow."""
+        """Observe mids → 5m candles; slow refit; toxic → bids off + REDUCE_ONLY."""
+        maker = self._maker_strategy()
         if not self._hmm_enabled:
             self._hmm_reduce_only = False
-            maker = self._maker_strategy()
+            self._hmm_inventory_target = float(
+                getattr(self._settings, "paper_hmm_normal_inventory_pct", 0.30) or 0.30
+            )
             if maker is not None:
                 maker.set_hmm_regime(None, is_toxic=False)
+                maker.enable_mode("NORMAL")
+                maker.set_inventory_target_pct(self._hmm_inventory_target)
             return
 
         books = self._collect_books()
@@ -855,25 +883,37 @@ class PaperRunner:
                 mid = float((bids[0].price + asks[0].price) / 2)
                 self._hmm.observe_mid(symbol, mid)
 
-        refit = (self._cycle_count % max(1, self._hmm_refit_every)) == 0
-        pred = self._hmm.update_and_predict(symbols=self._symbols, refit=refit)
+        # Refit on wall-clock cadence (≈4–6h), never every tick.
+        pred = self._hmm.update_and_predict(symbols=self._symbols, refit=None)
         self._hmm_last = pred
         toxic = bool(pred is not None and pred.is_toxic_flow)
         self._hmm_reduce_only = toxic
+        target = (
+            float(pred.inventory_target_pct)
+            if pred is not None
+            else float(
+                getattr(self._settings, "paper_hmm_normal_inventory_pct", 0.30) or 0.30
+            )
+        )
+        self._hmm_inventory_target = target
 
-        maker = self._maker_strategy()
         if maker is not None:
             maker.set_hmm_regime(
                 pred.regime_id if pred is not None else None,
                 is_toxic=toxic,
             )
+            maker.set_inventory_target_pct(target)
+            maker.enable_mode("REDUCE_ONLY" if toxic else "NORMAL")
 
         if toxic:
             logger.warning(
-                "[HMM GUARDRAIL] Toxic flow / Dump regime detected "
-                "(label=%s confidence=%.2f). BUY-quotes cancelled; REDUCE_ONLY.",
-                pred.label if pred else "TOXIC_FLOW",
-                pred.confidence if pred else 0.0,
+                "[HMM GUARDRAIL] Toxic flow gedetecteerd "
+                "(label=%s confidence=%.1f%% toxic_p=%.1f%%). "
+                "Bids geblokkeerd; inventory target=%.0f%%; REDUCE_ONLY.",
+                pred.label if pred else "TOXIC_DUMP",
+                (pred.confidence * 100.0) if pred else 0.0,
+                (pred.toxic_probability * 100.0) if pred else 0.0,
+                target * 100.0,
             )
             await self._cancel_all_bids(reason="hmm_toxic_flow")
 

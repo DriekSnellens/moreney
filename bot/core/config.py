@@ -144,11 +144,24 @@ class Settings(BaseSettings):
     paper_max_holding_sec: float = Field(default=7200.0, ge=0)
     # HMM regime detector (hmmlearn): toxic-flow → cancel bids / REDUCE_ONLY.
     paper_hmm_enabled: bool = True
-    paper_hmm_min_samples: int = Field(default=60, ge=30)
+    paper_hmm_min_samples: int = Field(default=80, ge=30)
+    # Legacy cycle-based knob (ignored when refit_every_sec is set).
     paper_hmm_refit_every_cycles: int = Field(default=30, ge=1)
-    paper_hmm_vol_window: int = Field(default=10, ge=2)
-    paper_hmm_history_len: int = Field(default=500, ge=60)
-    # Extra ask-improve bps while HMM says up-trend (harvest EUR faster).
+    # Retrain every N seconds (default 5h). Keeps CPU off the hot path.
+    paper_hmm_refit_every_sec: float = Field(default=18000.0, ge=60)
+    # ATR window for normalized volatility (14 = classic ATR).
+    paper_hmm_atr_window: int = Field(default=14, ge=2)
+    paper_hmm_vol_window: int = Field(default=14, ge=2)  # alias → atr_window
+    # Rolling candle history for fit (clamped to 500–1000 inside detector).
+    paper_hmm_history_len: int = Field(default=750, ge=60, le=2000)
+    # Candle timeframe in seconds (300 = 5m, 900 = 15m).
+    paper_hmm_candle_sec: float = Field(default=300.0, ge=60)
+    # Hysteresis: toxic after N consecutive dump states OR proba ≥ threshold.
+    paper_hmm_toxic_confirm_steps: int = Field(default=2, ge=1, le=10)
+    paper_hmm_toxic_proba_threshold: float = Field(default=0.70, ge=0.5, le=0.99)
+    paper_hmm_normal_inventory_pct: float = Field(default=0.30, ge=0.05, le=0.90)
+    paper_hmm_toxic_inventory_pct: float = Field(default=0.10, ge=0.01, le=0.50)
+    # Extra ask-improve bps while HMM says bullish (harvest EUR faster).
     paper_hmm_uptrend_ask_improve_bps: float = Field(default=4.0, ge=0)
     # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
     paper_maker_same_venue: bool = True

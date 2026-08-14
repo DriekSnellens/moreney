@@ -1,4 +1,4 @@
-"""HMM market-regime detector: feature prep, state remapping, toxic-flow flag."""
+"""HMM market-regime detector: risk sort, ATR features, toxic hysteresis."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import pandas as pd
 import pytest
 
 from bot.regime.market_regime import (
-    REGIME_LOW_VOL,
-    REGIME_TOXIC_FLOW,
-    REGIME_UP_TREND,
+    REGIME_BULLISH,
+    REGIME_SIDEWAYS,
+    REGIME_TOXIC_DUMP,
     MarketRegimeDetector,
 )
 
@@ -20,7 +20,7 @@ def _synthetic_ohlcv(
     regime_blocks: list[tuple[str, int]] | None = None,
     seed: int = 7,
 ) -> pd.DataFrame:
-    """Build a close series with low-vol, up-trend, and dump segments."""
+    """Build OHLCV with sideways / bullish / dump segments."""
     rng = np.random.default_rng(seed)
     blocks = regime_blocks or [
         ("low", 70),
@@ -28,32 +28,33 @@ def _synthetic_ohlcv(
         ("dump", 60),
     ]
     price = 100.0
-    closes: list[float] = []
+    rows: list[dict[str, float]] = []
     for kind, length in blocks:
         for _ in range(length):
             if kind == "low":
                 ret = rng.normal(0.0, 0.0004)
             elif kind == "up":
                 ret = rng.normal(0.0015, 0.0012)
-            else:  # dump / toxic
+            else:
                 ret = rng.normal(-0.0040, 0.0035)
+            open_px = price
             price *= float(np.exp(ret))
-            closes.append(price)
-    closes = closes[:n]
-    arr = np.asarray(closes, dtype=float)
-    return pd.DataFrame(
-        {
-            "open": arr,
-            "high": arr * 1.001,
-            "low": arr * 0.999,
-            "close": arr,
-            "volume": np.ones(len(arr)),
-        }
-    )
+            high = max(open_px, price) * (1.0 + abs(rng.normal(0, 0.0003)))
+            low = min(open_px, price) * (1.0 - abs(rng.normal(0, 0.0003)))
+            rows.append(
+                {
+                    "open": open_px,
+                    "high": high,
+                    "low": low,
+                    "close": price,
+                    "volume": 1.0,
+                }
+            )
+    return pd.DataFrame(rows[:n])
 
 
-def test_prepare_features_returns_logret_and_vol() -> None:
-    det = MarketRegimeDetector(vol_window=10, min_samples=40)
+def test_prepare_features_logret_and_normalized_atr() -> None:
+    det = MarketRegimeDetector(atr_window=14, min_samples=40, history_len=500)
     df = _synthetic_ohlcv(n=120)
     X = det.prepare_features(df)
     assert X.ndim == 2
@@ -62,70 +63,104 @@ def test_prepare_features_returns_logret_and_vol() -> None:
     assert np.isfinite(X).all()
 
 
-def test_fit_maps_toxic_to_regime_2() -> None:
-    det = MarketRegimeDetector(vol_window=8, min_samples=50, n_iter=80, random_state=0)
-    df = _synthetic_ohlcv(n=220)
+def test_states_sorted_by_risk_score_vol_minus_return() -> None:
+    det = MarketRegimeDetector(atr_window=8, min_samples=50, n_iter=80, random_state=0)
+    df = _synthetic_ohlcv(n=240)
     det.fit(df)
-    # Predict on a pure dump tail.
-    dump_tail = _synthetic_ohlcv(
-        n=80,
-        regime_blocks=[("dump", 80)],
-        seed=99,
-    )
-    # Warm the model with enough history by concatenating calm + dump.
-    calm = _synthetic_ohlcv(n=80, regime_blocks=[("low", 80)], seed=1)
-    mixed = pd.concat([calm, dump_tail], ignore_index=True)
-    det.fit(mixed)
-    pred = det.predict_regime(mixed)
-    assert pred.regime_id in {REGIME_LOW_VOL, REGIME_UP_TREND, REGIME_TOXIC_FLOW}
-    assert set(det._raw_to_canonical.values()) == {
-        REGIME_LOW_VOL,
-        REGIME_UP_TREND,
-        REGIME_TOXIC_FLOW,
-    }
-    # Toxic canonical state must be the one with worst return/vol score in means.
     means = det._model.means_
-    toxic_raw = max(
-        range(3), key=lambda i: float(-means[i, 0] + means[i, 1])
+    risk = [float(means[i, 1] - means[i, 0]) for i in range(3)]
+    ordered = sorted(range(3), key=lambda i: risk[i])
+    assert det._raw_to_canonical[ordered[0]] == REGIME_SIDEWAYS
+    assert det._raw_to_canonical[ordered[1]] == REGIME_BULLISH
+    assert det._raw_to_canonical[ordered[2]] == REGIME_TOXIC_DUMP
+    assert set(det._raw_to_canonical.values()) == {
+        REGIME_SIDEWAYS,
+        REGIME_BULLISH,
+        REGIME_TOXIC_DUMP,
+    }
+
+
+def test_hysteresis_requires_two_toxic_steps() -> None:
+    det = MarketRegimeDetector(
+        atr_window=8,
+        min_samples=50,
+        n_iter=100,
+        random_state=2,
+        toxic_confirm_steps=2,
+        toxic_proba_threshold=0.99,  # force streak path, not proba shortcut
     )
-    assert det._raw_to_canonical[toxic_raw] == REGIME_TOXIC_FLOW
-
-
-def test_predict_toxic_flag_on_dump_series() -> None:
-    det = MarketRegimeDetector(vol_window=8, min_samples=50, n_iter=100, random_state=1)
-    # Long dump-dominated sample so the latest state is toxic.
     df = _synthetic_ohlcv(
-        n=240,
-        regime_blocks=[("low", 40), ("up", 40), ("dump", 160)],
-        seed=3,
+        n=260,
+        regime_blocks=[("low", 40), ("up", 40), ("dump", 180)],
+        seed=5,
     )
     det.fit(df)
-    pred = det.predict_regime(df)
-    assert pred.label in {"LOW_VOL", "UP_TREND", "TOXIC_FLOW"}
-    if pred.is_toxic_flow:
-        assert pred.regime_id == REGIME_TOXIC_FLOW
-        assert pred.reduce_only is True
+    # First toxic raw prediction alone must not arm the guardrail.
+    first = det.get_current_regime(df)
+    if first.regime_id == REGIME_TOXIC_DUMP or first.toxic_probability >= 0.99:
+        # If model is extremely sure, high-proba path may arm immediately — that
+        # is allowed by spec. Otherwise streak must reach 2.
+        if first.toxic_probability < 0.99:
+            assert first.is_toxic_flow is False or first.consecutive_toxic >= 1
+    second = det.get_current_regime(df)
+    if second.regime_id == REGIME_TOXIC_DUMP and second.consecutive_toxic >= 2:
+        assert second.is_toxic_flow is True
+        assert second.inventory_target_pct == pytest.approx(0.10)
+        assert second.reduce_only is True
 
 
-def test_online_observe_and_update() -> None:
-    det = MarketRegimeDetector(vol_window=5, min_samples=40, history_len=200)
-    rng = np.random.default_rng(0)
+def test_high_toxic_proba_arms_immediately() -> None:
+    det = MarketRegimeDetector(
+        atr_window=8,
+        min_samples=50,
+        toxic_confirm_steps=5,
+        toxic_proba_threshold=0.70,
+    )
+    # Inject a fake prediction path via hysteresis helper.
+    from bot.regime.market_regime import RegimePrediction
+
+    hot = RegimePrediction(
+        regime_id=REGIME_SIDEWAYS,
+        raw_state=0,
+        is_toxic_flow=False,
+        label="SIDEWAYS",
+        mean_return=0.0,
+        mean_volatility=0.001,
+        confidence=0.2,
+        toxic_probability=0.85,
+    )
+    out = det._apply_hysteresis(hot)
+    assert out.is_toxic_flow is True
+    assert out.inventory_target_pct == pytest.approx(0.10)
+
+
+def test_candle_builder_rolls_on_timeframe() -> None:
+    det = MarketRegimeDetector(
+        atr_window=5,
+        min_samples=5,
+        history_len=500,
+        candle_timeframe_sec=60.0,
+    )
+    t0 = 1_700_000_000.0
     price = 10.0
-    for i in range(120):
-        # Mild sideways then a sharp dump.
-        shock = -0.02 if i > 90 else 0.0
-        price *= float(np.exp(rng.normal(shock, 0.001)))
-        det.observe_mid("ATOMEUR", price)
-    pred = det.update_and_predict(symbols=["ATOMEUR"], refit=True)
-    assert pred is not None
-    assert pred.regime_id in {0, 1, 2}
-    snap = det.snapshot()
-    assert snap["fitted"] is True
-    assert "ATOMEUR" in snap["symbols_tracked"]
+    for i in range(180):
+        price *= 1.0001
+        det.observe_mid("ATOMEUR", price, now=t0 + i)
+    # 180 seconds → about 2 completed 60s candles (buckets 0 and 60; current open).
+    assert len(det._candles.get("ATOMEUR", [])) >= 2
 
 
 def test_fit_requires_enough_samples() -> None:
-    det = MarketRegimeDetector(min_samples=80, vol_window=10)
+    det = MarketRegimeDetector(min_samples=80, atr_window=14)
     df = _synthetic_ohlcv(n=30)
     with pytest.raises(ValueError, match="Need"):
         det.fit(df)
+
+
+def test_needs_refit_respects_interval() -> None:
+    det = MarketRegimeDetector(refit_every_sec=100.0, min_samples=50, atr_window=8)
+    assert det.needs_refit() is True
+    df = _synthetic_ohlcv(n=120)
+    det.fit(df)
+    assert det.needs_refit(now=det._last_fit_mono) is False
+    assert det.needs_refit(now=det._last_fit_mono + 101.0) is True

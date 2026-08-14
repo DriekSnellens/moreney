@@ -155,9 +155,26 @@ class MakerInventoryStrategy(BaseStrategy):
         self._external_reduce_only = bool(enabled)
 
     def set_hmm_regime(self, regime_id: int | None, *, is_toxic: bool = False) -> None:
-        """Apply HMM regime: toxic → REDUCE_ONLY; up-trend → tighter asks."""
+        """Apply HMM regime: toxic → REDUCE_ONLY; up-trend/bullish → tighter asks."""
         self._hmm_regime_id = regime_id
         self._external_reduce_only = bool(is_toxic)
+
+    def set_inventory_target_pct(self, fraction: float) -> None:
+        """Set alt inventory hard cap as a fraction of equity (0.10 / 0.30)."""
+        pct = float(fraction)
+        if pct <= 1.0:
+            pct *= 100.0
+        self._skew_policy.set_max_alt_pct(pct)
+
+    def enable_mode(self, mode: str) -> None:
+        """``REDUCE_ONLY`` blocks buys; ``NORMAL`` restores two-sided quoting."""
+        normalized = str(mode or "").strip().upper()
+        if normalized in {"REDUCE_ONLY", "SELL_ONLY"}:
+            self._external_reduce_only = True
+        elif normalized in {"NORMAL", "QUOTE", "MAKER"}:
+            self._external_reduce_only = False
+        else:
+            raise ValueError(f"Unknown maker mode: {mode}")
 
     @property
     def reduce_only(self) -> bool:
