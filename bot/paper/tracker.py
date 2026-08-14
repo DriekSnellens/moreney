@@ -445,6 +445,29 @@ class PerformanceTracker:
         if state.stats.maximum_drawdown > self._maximum_drawdown:
             self._maximum_drawdown = state.stats.maximum_drawdown
 
+        # USDT seed used to vanish from EUR equity (~20% fake drawdown, 0 trades).
+        # Once cash is marked in quote, rewind that accounting hole.
+        if not self._trade_pnls and self._starting_equity > 0:
+            gap = abs(equity - self._starting_equity) / self._starting_equity
+            if gap < Decimal("0.05"):
+                self._peak_equity = max(self._starting_equity, equity)
+                if self._peak_equity > 0:
+                    self._current_drawdown = (self._peak_equity - equity) / self._peak_equity
+                else:
+                    self._current_drawdown = _ZERO
+                self._maximum_drawdown = self._current_drawdown
+                state.stats.peak_equity = self._peak_equity
+                state.stats.current_drawdown = self._current_drawdown
+                state.stats.maximum_drawdown = self._maximum_drawdown
+                self._day_starting_equity = self._starting_equity
+                for day in self._daily.values():
+                    day.starting_equity = self._starting_equity
+                    day.ending_equity = equity
+                    day.net_pnl = equity - self._starting_equity
+                    if day.starting_equity > 0:
+                        day.return_pct = (day.net_pnl / day.starting_equity) * _HUNDRED
+                    day.maximum_drawdown = self._maximum_drawdown
+
         self._roll_daily(equity)
 
     def _roll_daily(self, equity: Decimal) -> None:

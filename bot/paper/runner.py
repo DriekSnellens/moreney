@@ -1013,6 +1013,7 @@ class PaperRunner:
             "USDT", AssetBalance(asset="USDT", available=Decimal("0"), reserved=Decimal("0"))
         )
         usdt.available += total_qty
+        self._portfolio.set_mark_price(fx, fx_mid)
         logger.info(
             "PAPER_USDT_SEEDED venues=%s usdt=%s eur_spent=%s fx=%s",
             len(moved), total_qty, total_cost, fx_mid,

@@ -15,8 +15,28 @@ from pydantic import BaseModel, Field, field_validator
 from bot.core.enums import OrderSide, OrderStatus, OrderType
 
 
+_ZERO = Decimal("0")
+_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP")
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _infer_quote_suffix(symbol: str, default: str = "EUR") -> str:
+    text = symbol.upper().replace("/", "").replace("-", "")
+    for suffix in _QUOTE_SUFFIXES:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return suffix
+    return default.upper()
+
+
+def _infer_base_symbol(symbol: str, quote: str = "EUR") -> str:
+    text = symbol.upper().replace("/", "").replace("-", "")
+    q = _infer_quote_suffix(text, quote)
+    if text.endswith(q) and len(text) > len(q):
+        return text[: -len(q)]
+    return text
 
 
 class Fill(BaseModel):
@@ -151,17 +171,58 @@ class PortfolioState(BaseModel):
     as_of: datetime = Field(default_factory=_utc_now)
     mark_prices: dict[str, Decimal] = Field(default_factory=dict)
 
+    def cash_to_quote(self, asset: str, amount: Decimal) -> Decimal | None:
+        """Convert a cash amount into the portfolio quote (EUR) via marks."""
+        asset = (asset or "").upper()
+        quote = (self.quote_asset or "EUR").upper()
+        if amount == 0:
+            return _ZERO
+        if asset == quote:
+            return amount
+        direct = self.mark_prices.get(f"{asset}{quote}")
+        if direct is not None and direct > 0:
+            return amount * direct
+        inverse = self.mark_prices.get(f"{quote}{asset}")
+        if inverse is not None and inverse > 0:
+            return amount / inverse
+        if asset != "USDT" and quote != "USDT":
+            usdt_px = self.mark_prices.get(f"{asset}USDT")
+            if usdt_px is not None and usdt_px > 0:
+                return self.cash_to_quote("USDT", amount * usdt_px)
+        return None
+
     @property
     def total_equity(self) -> Decimal:
-        equity = Decimal("0")
+        quote = (self.quote_asset or "EUR").upper()
+        positioned: set[str] = set()
+        for symbol, position in self.positions.items():
+            if position.quantity == 0:
+                continue
+            positioned.add(_infer_base_symbol(symbol, quote))
+
+        equity = _ZERO
         for balance in self.balances.values():
-            if balance.asset == self.quote_asset:
-                equity += balance.total
+            if balance.total == 0:
+                continue
+            asset = balance.asset.upper()
+            # Inventory that already lives in a position is valued via marks below.
+            if asset in positioned:
+                continue
+            converted = self.cash_to_quote(asset, balance.total)
+            if converted is not None:
+                equity += converted
+
         for symbol, position in self.positions.items():
             if position.quantity == 0:
                 continue
             mark = self.mark_prices.get(symbol, position.average_entry_price)
-            equity += position.quantity * mark
+            notional = position.quantity * mark
+            pos_quote = _infer_quote_suffix(symbol, quote)
+            if pos_quote == quote:
+                equity += notional
+                continue
+            converted = self.cash_to_quote(pos_quote, notional)
+            equity += converted if converted is not None else notional
         return equity
 
 

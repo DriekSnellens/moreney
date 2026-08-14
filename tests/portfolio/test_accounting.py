@@ -116,6 +116,38 @@ async def test_unrealized_pnl(
     assert portfolio.state.stats.unrealized_pnl == Decimal("4.9")
 
 
+def test_usdt_cash_counts_in_eur_equity(portfolio: PaperPortfolio) -> None:
+    from bot.portfolio.models import AssetBalance
+
+    state = portfolio.state
+    eur = state.balances["EUR"]
+    # Move 40 EUR into USDT at EURUSDT=1.16 without creating a position.
+    eur.available -= Decimal("40")
+    state.balances["USDT"] = AssetBalance(
+        asset="USDT", available=Decimal("46.4"), reserved=Decimal("0")
+    )
+    state.mark_prices["EURUSDT"] = Decimal("1.16")
+    assert state.total_equity == Decimal("200")
+
+
+def test_usdt_cash_does_not_double_count_eur_positions(portfolio: PaperPortfolio) -> None:
+    from bot.portfolio.models import AssetBalance, PositionState
+
+    state = portfolio.state
+    state.balances["EUR"].available = Decimal("100")
+    state.balances["XRP"] = AssetBalance(
+        asset="XRP", available=Decimal("10"), reserved=Decimal("0")
+    )
+    state.positions["XRPEUR"] = PositionState(
+        symbol="XRPEUR",
+        quantity=Decimal("10"),
+        average_entry_price=Decimal("10"),
+    )
+    state.mark_prices["XRPEUR"] = Decimal("10")
+    # 100 EUR cash + 10 XRP * 10, XRP cash ignored because it is the position.
+    assert state.total_equity == Decimal("200")
+
+
 @pytest.mark.asyncio
 async def test_multiple_sequential_trades(
     execution: ExecutionService, portfolio: PaperPortfolio

@@ -197,3 +197,33 @@ def test_dashboard_inventory_rows_render() -> None:
     assert "okx" in html.lower() or "OKX" in html or "Okx" in html
     assert "USDT" in html or "12.5" in html
     assert "ATOM=3" in html
+
+
+def test_tracker_rewinds_usdt_seed_fake_drawdown() -> None:
+    from bot.core.config import Settings
+    from bot.paper.tracker import PerformanceTracker
+    from bot.portfolio.models import AssetBalance
+    from bot.portfolio.portfolio import PaperPortfolio
+
+    settings = Settings(execution_mode="paper", paper_starting_eur=200.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("200"))
+    state = portfolio.state
+    state.balances["EUR"].available = Decimal("160")
+    state.balances["USDT"] = AssetBalance(
+        asset="USDT", available=Decimal("46.16"), reserved=Decimal("0")
+    )
+    state.mark_prices["EURUSDT"] = Decimal("1.154")
+    state.stats.peak_equity = Decimal("200")
+    state.stats.maximum_drawdown = Decimal("0.20")
+    state.stats.current_drawdown = Decimal("0.20")
+
+    tracker = PerformanceTracker(starting_equity=Decimal("200"))
+    tracker._current_equity = Decimal("160")  # noqa: SLF001
+    tracker._peak_equity = Decimal("200")  # noqa: SLF001
+    tracker._maximum_drawdown = Decimal("0.20")  # noqa: SLF001
+    tracker._current_drawdown = Decimal("0.20")  # noqa: SLF001
+    tracker.sync_portfolio(portfolio)
+    snap = tracker.snapshot()
+    assert abs(snap.current_equity - Decimal("200")) < Decimal("1")
+    assert snap.maximum_drawdown < Decimal("0.05")
+    assert snap.trade_count == 0
