@@ -294,6 +294,7 @@ class PaperRunner:
         self._session_started_at = datetime.now(UTC).isoformat()
         self._run_started_monotonic = time.monotonic()
         self._task = asyncio.create_task(self._loop(), name="paper-runner")
+        await self._bootstrap_inventory()
         self._persist()
         logger.info(
             "PAPER_SESSION_STARTED starting_equity=%s symbols=%s",
@@ -740,6 +741,35 @@ class PaperRunner:
             if (o.metadata or {}).get("post_only") and o.opportunity_id is not None
         }
         return len(ids)
+
+    async def _bootstrap_inventory(self) -> None:
+        """Pre-seed allowlisted base assets + USDT float so maker quotes are not venue-capped."""
+        if not self._settings.paper_venue_inventory:
+            return
+        if self._portfolio.venue_ledger is None:
+            return
+        symbols = [
+            part.strip().upper().replace("-", "").replace("/", "")
+            for part in str(getattr(self._settings, "paper_seed_symbols", "") or "").split(",")
+            if part.strip()
+        ]
+        if not symbols:
+            symbols = [
+                s.strip().upper().replace("-", "").replace("/", "")
+                for s in self._settings.market_data_symbols.split(",")
+                if s.strip().upper().endswith(self._settings.paper_quote_asset.upper())
+            ]
+        for symbol in symbols:
+            snaps = self._market_data.snapshots_for_arbitrage(symbol)
+            price = None
+            for snap in snaps:
+                if snap.bid > 0 and snap.ask > 0:
+                    price = (snap.bid + snap.ask) / Decimal("2")
+                    break
+            if price is not None:
+                self._portfolio.maybe_seed_inventory(symbol, price)
+        books = self._collect_books()
+        self._maybe_seed_usdt(books)
 
     def _collect_books(self) -> dict[str, dict[str, Any]]:
         books: dict[str, dict[str, Any]] = {}
