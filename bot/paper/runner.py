@@ -54,6 +54,7 @@ from bot.opportunity.scanner import TieredScanScheduler
 from bot.markets.registry import InstrumentRegistry
 from bot.markets.calendar import MarketCalendarService
 from bot.regime.detector import RegimeDetector
+from bot.regime.market_regime import MarketRegimeDetector, RegimePrediction
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,17 @@ class PaperRunner:
                 getattr(settings, "paper_max_holding_sec", 7200.0) or 7200.0
             )
         )
+        self._hmm_enabled = bool(getattr(settings, "paper_hmm_enabled", True))
+        self._hmm = MarketRegimeDetector(
+            vol_window=int(getattr(settings, "paper_hmm_vol_window", 10) or 10),
+            min_samples=int(getattr(settings, "paper_hmm_min_samples", 60) or 60),
+            history_len=int(getattr(settings, "paper_hmm_history_len", 500) or 500),
+        )
+        self._hmm_refit_every = int(
+            getattr(settings, "paper_hmm_refit_every_cycles", 30) or 30
+        )
+        self._hmm_reduce_only = False
+        self._hmm_last: RegimePrediction | None = None
         self._instrument_registry = InstrumentRegistry(settings)
         self._market_calendar = MarketCalendarService()
         self._regime = RegimeDetector()
@@ -445,6 +457,9 @@ class PaperRunner:
             }
             return
 
+        # HMM guardrail: toxic dump regime → cancel bids + REDUCE_ONLY before quoting.
+        await self._apply_hmm_regime_guardrail()
+
         await self._match_and_expire_quotes()
 
         equity_before = self._portfolio.state.total_equity
@@ -676,6 +691,7 @@ class PaperRunner:
             "strategy": getattr(self._strategy, "name", ""),
             "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
             "inventory": self._inventory_snapshot(),
+            "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else {"enabled": False},
             "desk_scan": (
                 (self._last_cycle or {}).get("scan") or {}
             ),
@@ -818,6 +834,57 @@ class PaperRunner:
         self._maybe_seed_usdt(books)
         self._apply_markout_adverse()
 
+    async def _apply_hmm_regime_guardrail(self) -> None:
+        """Observe mids, (re)fit HMM, cancel bids and set REDUCE_ONLY on toxic flow."""
+        if not self._hmm_enabled:
+            self._hmm_reduce_only = False
+            maker = self._maker_strategy()
+            if maker is not None:
+                maker.set_hmm_regime(None, is_toxic=False)
+            return
+
+        books = self._collect_books()
+        for venue_books in books.values():
+            for symbol, book in venue_books.items():
+                bids = getattr(book, "bids", None) or []
+                asks = getattr(book, "asks", None) or []
+                if not bids or not asks:
+                    continue
+                mid = float((bids[0].price + asks[0].price) / 2)
+                self._hmm.observe_mid(symbol, mid)
+
+        refit = (self._cycle_count % max(1, self._hmm_refit_every)) == 0
+        pred = self._hmm.update_and_predict(symbols=self._symbols, refit=refit)
+        self._hmm_last = pred
+        toxic = bool(pred is not None and pred.is_toxic_flow)
+        self._hmm_reduce_only = toxic
+
+        maker = self._maker_strategy()
+        if maker is not None:
+            maker.set_hmm_regime(
+                pred.regime_id if pred is not None else None,
+                is_toxic=toxic,
+            )
+
+        if toxic:
+            logger.warning(
+                "[HMM GUARDRAIL] Toxic flow / Dump regime detected "
+                "(label=%s confidence=%.2f). BUY-quotes cancelled; REDUCE_ONLY.",
+                pred.label if pred else "TOXIC_FLOW",
+                pred.confidence if pred else 0.0,
+            )
+            await self._cancel_all_bids(reason="hmm_toxic_flow")
+
+    async def _cancel_all_bids(self, *, reason: str) -> None:
+        from bot.core.enums import OrderSide
+
+        for order in list(self._executor.order_manager.open_orders()):
+            if order.side != OrderSide.BUY:
+                continue
+            if not (order.metadata or {}).get("post_only"):
+                continue
+            await self._executor.cancel(order.id, reason=reason)
+
     def _maker_strategy(self) -> MakerInventoryStrategy | None:
         strategy = self._strategy
         if isinstance(strategy, MakerInventoryStrategy):
@@ -832,15 +899,19 @@ class PaperRunner:
         return None
 
     async def _cancel_buys_on_dump(self) -> None:
-        """Pull resting BUY quotes when dump guard or inventory overweight fires."""
+        """Pull resting BUY quotes when dump guard, inventory overweight, or HMM toxic."""
         from bot.core.enums import OrderSide
 
         maker = self._maker_strategy()
-        if maker is None:
+        if maker is None and not self._hmm_reduce_only:
             return
-        dump = {s.upper() for s in maker.dump_symbols()}
-        skew = maker.active_skew
-        cancel_all_buys = bool(skew is not None and skew.sell_only)
+        dump = {s.upper() for s in maker.dump_symbols()} if maker is not None else set()
+        skew = maker.active_skew if maker is not None else None
+        cancel_all_buys = bool(
+            self._hmm_reduce_only
+            or (skew is not None and skew.sell_only)
+            or (maker is not None and maker.reduce_only)
+        )
         if not dump and not cancel_all_buys:
             return
         for order in list(self._executor.order_manager.open_orders()):
@@ -850,11 +921,12 @@ class PaperRunner:
                 continue
             if not cancel_all_buys and order.symbol.upper() not in dump:
                 continue
-            reason = (
-                "inventory_overweight_cancel_buys"
-                if cancel_all_buys
-                else "vol_dump_cancel_buys"
-            )
+            if self._hmm_reduce_only:
+                reason = "hmm_toxic_flow"
+            elif skew is not None and skew.sell_only:
+                reason = "inventory_overweight_cancel_buys"
+            else:
+                reason = "vol_dump_cancel_buys"
             await self._executor.cancel(order.id, reason=reason)
 
     async def _recycle_overdue_inventory(

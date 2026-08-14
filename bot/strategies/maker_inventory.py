@@ -144,6 +144,24 @@ class MakerInventoryStrategy(BaseStrategy):
         self._fair_values: dict[str, Decimal] = {}
         self._active_skew: QuoteSkew | None = None
         self._portfolio_state: PortfolioState | None = None
+        self._external_reduce_only = False
+        self._hmm_regime_id: int | None = None
+        self._hmm_uptrend_ask_improve_bps = Decimal(
+            str(getattr(settings, "paper_hmm_uptrend_ask_improve_bps", 0) or 0)
+        )
+
+    def set_reduce_only(self, enabled: bool) -> None:
+        """External guardrail (HMM toxic flow / operator): block new BUY quotes."""
+        self._external_reduce_only = bool(enabled)
+
+    def set_hmm_regime(self, regime_id: int | None, *, is_toxic: bool = False) -> None:
+        """Apply HMM regime: toxic → REDUCE_ONLY; up-trend → tighter asks."""
+        self._hmm_regime_id = regime_id
+        self._external_reduce_only = bool(is_toxic)
+
+    @property
+    def reduce_only(self) -> bool:
+        return self._external_reduce_only
 
     @property
     def active_skew(self) -> QuoteSkew | None:
@@ -242,7 +260,9 @@ class MakerInventoryStrategy(BaseStrategy):
         return selected
 
     def _symbol_sell_only(self, symbol: str) -> bool:
-        """True when inventory cap or dump guard forbids new BUY exposure."""
+        """True when inventory cap, dump guard, or HMM toxic forbids new BUY exposure."""
+        if self._external_reduce_only:
+            return True
         skew = self._active_skew
         if skew is not None and skew.sell_only:
             return True
@@ -566,6 +586,19 @@ class MakerInventoryStrategy(BaseStrategy):
                 best_bid=buy_snap.order_book.bids[0].price,
                 best_ask=sell_snap.order_book.asks[0].price,
             )
+        # HMM up-trend: harvest EUR with a slightly tighter ask.
+        if (
+            self._hmm_regime_id == 1
+            and self._hmm_uptrend_ask_improve_bps > 0
+            and not sell_only
+        ):
+            improved = sell_price * (
+                Decimal("1") - self._hmm_uptrend_ask_improve_bps / _BPS
+            )
+            floor = buy_snap.order_book.bids[0].price * Decimal("1.00005")
+            sell_price = max(improved, floor)
+            if sell_price >= buy_snap.order_book.asks[0].price:
+                sell_price = buy_snap.order_book.asks[0].price
 
         if sell_price <= buy_price:
             self._reject(
@@ -850,6 +883,8 @@ class MakerInventoryStrategy(BaseStrategy):
                     else None
                 ),
                 "adverse_bps": str(self._adverse_bps),
+                "hmm_regime_id": self._hmm_regime_id,
+                "reduce_only": sell_only or self._external_reduce_only,
             },
         )
         result = await self._profitability.evaluate(
@@ -1001,4 +1036,6 @@ class MakerInventoryStrategy(BaseStrategy):
                 float(skew.alt_fraction * Decimal("100")) if skew is not None else None
             ),
             "dump_symbols": self.dump_symbols(),
+            "reduce_only": self._external_reduce_only,
+            "hmm_regime_id": self._hmm_regime_id,
         }

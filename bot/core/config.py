@@ -142,6 +142,14 @@ class Settings(BaseSettings):
     paper_vol_cooldown_sec: float = Field(default=120.0, ge=0)
     # Max seconds an alt tranche may sit before a break-even recycle sell.
     paper_max_holding_sec: float = Field(default=7200.0, ge=0)
+    # HMM regime detector (hmmlearn): toxic-flow → cancel bids / REDUCE_ONLY.
+    paper_hmm_enabled: bool = True
+    paper_hmm_min_samples: int = Field(default=60, ge=30)
+    paper_hmm_refit_every_cycles: int = Field(default=30, ge=1)
+    paper_hmm_vol_window: int = Field(default=10, ge=2)
+    paper_hmm_history_len: int = Field(default=500, ge=60)
+    # Extra ask-improve bps while HMM says up-trend (harvest EUR faster).
+    paper_hmm_uptrend_ask_improve_bps: float = Field(default=4.0, ge=0)
     # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
     paper_maker_same_venue: bool = True
     paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=30)
