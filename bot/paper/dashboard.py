@@ -384,7 +384,7 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
     confidence = str(forecast.get("confidence") or "very_low")
     confidence_label = {
         "very_low": "Nog onzeker",
-        "low": "Voorzichtig",
+        "low": "Hoogste kans (geen garantie)",
         "medium": "Redelijk",
         "high": "Hoog (coupon)",
     }.get(confidence, confidence)
