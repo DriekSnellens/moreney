@@ -1,9 +1,6 @@
-"""Retail maker capacity: map observed fills onto a daily PnL path.
+"""Paper-only fill-rate math. Not a high-certainty live income model.
 
-€300/day on €25k is 1.2% / day. That is a turnover problem, not a fee-tier
-problem: two live Realistic fills were already NET-positive after retail
-maker fees. Price-priority trade-through (fill when the book prints through
-a resting quote) scales that observed window onto a daily target.
+See ``bot.paper.certainty`` for what €10k–€25k can actually promise per day.
 """
 
 from __future__ import annotations

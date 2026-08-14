@@ -74,23 +74,21 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     wins = perf.get("winning_trades", 0)
     losses = perf.get("losing_trades", 0)
     forecast = status.get("live_forecast") or {}
-    forecast_hour = (
-        _fmt_money(forecast.get("projected_per_hour_eur", 0))
-        if forecast.get("projection_ready", True)
-        else "n.v.t."
-    )
     forecast_day = (
         _fmt_money(forecast.get("projected_per_day_eur", 0))
         if forecast.get("projection_ready", True)
         else "n.v.t."
     )
-    forecast_note = _esc(forecast.get("note") or "Live-conservatief model.")
+    paper_day = _fmt_money(forecast.get("paper_run_rate_per_day_eur", 0))
+    certainty = forecast.get("high_certainty") or {}
+    required_cap = _fmt_money(certainty.get("required_capital_eur", 0))
+    forecast_note = _esc(forecast.get("note") or "Hoogzeker coupon-model.")
     confidence = str(forecast.get("confidence") or "very_low")
     confidence_label = {
         "very_low": "Nog onzeker",
         "low": "Voorzichtig",
         "medium": "Redelijk",
-        "high": "Stabiel",
+        "high": "Hoog (coupon)",
     }.get(confidence, confidence)
     assumptions = forecast.get("assumptions") or []
     assumption_lis = "".join(f"<li>{_esc(a)}</li>" for a in assumptions) or (
@@ -148,7 +146,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · live-inschatting</p>
+        <p class="eyebrow">Oefenhandel · geen gegarandeerd live-inkomen</p>
         <h1 class="brand">Moreney</h1>
         <p class="sub">{realism_note}</p>
       </div>
@@ -173,23 +171,23 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel highlight">
-      <h2>Live-inschatting (echt geld)</h2>
+      <h2>Hoogzeker daginkomen</h2>
       <div class="metric-grid">
         <article class="metric-card {pnl_cls}">
-          <span class="label">{pnl_word} haalbaar met echt geld</span>
+          <span class="label">Paper winst/verlies</span>
           <span class="value">{m('net_pnl')}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Tempo / uur</span>
-          <span class="value">{forecast_hour}</span>
-        </article>
-        <article class="metric-card">
-          <span class="label">Voorspelling / dag</span>
+          <span class="label">Zeker / dag (3% APY)</span>
           <span class="value">{forecast_day}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Zekerheid</span>
-          <span class="value">{confidence_label}</span>
+          <span class="label">Kapitaal voor €300/dag</span>
+          <span class="value">{required_cap}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Paper-tempo / dag</span>
+          <span class="value">{paper_day}</span>
         </article>
       </div>
       <p class="forecast-note">{forecast_note}</p>
@@ -387,7 +385,7 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
         "very_low": "Nog onzeker",
         "low": "Voorzichtig",
         "medium": "Redelijk",
-        "high": "Stabiel",
+        "high": "Hoog (coupon)",
     }.get(confidence, confidence)
 
     recent = "".join(
@@ -430,9 +428,9 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
 
   <main class="container lite-container">
     <section class="panel hero-metric {pnl_cls}">
-      <span class="label">{pnl_word} haalbaar met echt geld</span>
+      <span class="label">Paper winst/verlies</span>
       <span class="value-xl">{_fmt_money(perf.get('net_pnl', 0))}</span>
-      <span class="sub-metric">Voorspelling / dag {forecast_day} · {confidence_label}</span>
+      <span class="sub-metric">Zeker / dag {forecast_day} · {confidence_label}</span>
       <span class="sub-metric">Oefenvermogen {_fmt_money(perf.get('current_equity', 0))}</span>
     </section>
 

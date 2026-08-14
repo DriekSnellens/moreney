@@ -689,69 +689,41 @@ class PaperRunner:
         return {}
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
-        """Project live-equivalent PnL from the conservative paper model."""
-        from bot.paper.capacity import TARGET_DAILY_EUR, hits_daily_target, project_daily_pnl
+        """High-certainty coupon from capital. Paper run-rate is not live income."""
+        from bot.paper.capacity import project_daily_pnl
+        from bot.paper.certainty import snapshot as certainty_snapshot
 
         runtime = max(self.runtime_seconds(), 1.0)
-        hours = Decimal(str(runtime)) / Decimal("3600")
         net = snap.net_pnl
-        per_hour = net / hours if hours > 0 else Decimal("0")
-        per_day = project_daily_pnl(net, runtime) if runtime >= 120 else Decimal("0")
         start = snap.starting_equity
-        day_ret = (per_day / start * Decimal("100")) if start > 0 else Decimal("0")
-        if snap.trade_count >= 20 and runtime >= 1800:
-            confidence = "medium"
-            note = (
-                "Gebaseerd op trade-through fills, maker-fees, max 30 bps edge. "
-                "Geen garantie."
-            )
-        elif snap.trade_count >= 2 and runtime >= 120:
-            confidence = "low"
-            if hits_daily_target(per_day):
-                note = (
-                    f"Run-rate ≥ €{TARGET_DAILY_EUR}/dag op deze window "
-                    f"(retail maker, price-priority through). Geen garantie."
-                )
-            else:
-                note = (
-                    f"Pad naar €{TARGET_DAILY_EUR}/dag: huidige run-rate "
-                    f"€{per_day:.2f}/dag. Meer rustende quotes + through-fills "
-                    "moeten dit tillen."
-                )
-        elif snap.trade_count == 0 and runtime >= 120:
-            confidence = "medium"
-            note = (
-                "Nog geen fills. Retail-fees (≈16–30 bps heen-en-weer) moeten "
-                "door de spread. Quotes staan; wachten op trade-through."
-            )
-            per_hour = Decimal("0")
-            per_day = Decimal("0")
-            day_ret = Decimal("0")
-        else:
-            confidence = "very_low"
-            note = (
-                "Te vroeg om te extrapoleren. Model is live-conservatief op fees "
-                "(retail) en vult alleen als de markt door de quote heen handelt."
-            )
-            per_hour = Decimal("0")
-            per_day = Decimal("0")
-            day_ret = Decimal("0")
+        certain = certainty_snapshot(start)
+        certain_day = Decimal(str(certain["certain_daily_eur"]))
+        paper_day = (
+            project_daily_pnl(net, runtime)
+            if snap.trade_count >= 2 and runtime >= 120
+            else Decimal("0")
+        )
+        per_hour = certain_day / Decimal("24")
+        day_ret = (
+            (certain_day / start * Decimal("100")) if start > 0 else Decimal("0")
+        )
         return {
-            "label": "Live-inschatting (haalbaar met echt geld)",
+            "label": "Hoogzeker daginkomen (cash/T-bill-band)",
             "realized_live_eur": _dec_str(net),
             "projected_per_hour_eur": _dec_str(per_hour),
-            "projected_per_day_eur": _dec_str(per_day),
+            "projected_per_day_eur": _dec_str(certain_day),
             "projected_day_return_pct": _dec_str(day_ret),
-            "projection_ready": confidence in {"low", "medium", "high"},
-            "confidence": confidence,
-            "note": note,
+            "paper_run_rate_per_day_eur": _dec_str(paper_day),
+            "projection_ready": True,
+            "confidence": "high",
+            "note": str(certain["note"]),
             "runtime_seconds": runtime,
+            "high_certainty": certain,
             "assumptions": [
-                "Retail maker fees; rebate/VIP niet gebruikt",
-                "Alleen fill als de markt door de rustende prijs heen handelt (price priority)",
-                "Geen at-touch queue fills",
-                "Join het dichtstbijzijnde book-level dat fees cleart",
-                "Inventory vasthouden; geen one-leg taker dump",
+                "Hoge zekerheid = cash / T-bills / insured deposits (~2–4% APY)",
+                "€300/dag op die band vraagt miljoenen euro inleg, niet €10k–€25k",
+                "Paper maker-PnL is geen gegarandeerd live-inkomen",
+                "Retail trading-alpha op deze inleg heeft geen hoge zekerheid",
             ],
         }
 
