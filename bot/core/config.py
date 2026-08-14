@@ -168,11 +168,11 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8005,http://127.0.0.1:8006"
     )
     paper_fleet_labels: str = (
-        "200 EUR ultra,200 EUR live,"
-        "500 EUR ultra,500 EUR live,"
-        "1000 EUR ultra,1000 EUR live,"
-        "5000 EUR ultra,5000 EUR live,"
-        "25000 EUR ultra,25000 EUR live"
+        "200 EUR ultra,200 EUR realistic,"
+        "500 EUR ultra,500 EUR realistic,"
+        "1000 EUR ultra,1000 EUR realistic,"
+        "5000 EUR ultra,5000 EUR realistic,"
+        "25000 EUR ultra,25000 EUR realistic"
     )
     dashboard_basic_auth_enabled: bool = False
     dashboard_basic_auth_username: str = "moreney"

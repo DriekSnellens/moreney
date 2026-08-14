@@ -105,7 +105,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     desk_strategy = _esc(str(status.get("strategy") or "—"))
     desk_tier = _esc(str(status.get("fee_tier") or "retail"))
     realism_note = (
-        "Live-conservatief: retail fees, 20% trade-through, fair-value aan. Dichtst bij echt geld."
+        "Realistic-profiel: retail fees, 20% trade-through, fair-value aan. Dichtst bij echt geld."
         if str(status.get("fee_tier") or "retail").lower() == "retail"
         else "Ultra-profiel: rebate fees en hoge fill-%. Niet gelijk aan retail live-P&amp;L."
     )
@@ -477,71 +477,11 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     online = payload.get("online_count", 0)
     configured = payload.get("configured_count", 0)
 
-    cards = []
-    for row in instances:
-        if not row.get("ok"):
-            cards.append(
-                f"""
-                <article class="fleet-card offline">
-                  <header class="fleet-head">
-                    <h3>{_esc(row.get('label'))}</h3>
-                    <span class="badge warn">Offline</span>
-                  </header>
-                  <p class="error">{_esc(row.get('error'))}</p>
-                  <a class="text-link" href="{_esc(row.get('dashboard_url'))}">Open instance</a>
-                </article>
-                """
-            )
-            continue
-        running = row.get("running")
-        status_label = "Actief" if running else "Gestopt"
-        badge_cls = "ok" if running else "warn"
-        pnl_cls = _pnl_class(row.get("net_pnl"))
-        md = row.get("market_data") or {}
-        md_bits = []
-        for exchange, health in md.items():
-            if not isinstance(health, dict):
-                continue
-            state = "ok" if health.get("synchronized") and not health.get("stale") else "warn"
-            md_bits.append(f"<span class='feed {state}'>{_esc(_venue_label(exchange))}</span>")
-        md_html = " ".join(md_bits) or "<span class='muted'>Geen koersen</span>"
-        trades = row.get("trade_count")
-        scan_note = ""
-        if not trades or str(trades) in {"0", "0.0"}:
-            scanned = row.get("pairs_evaluated") or 0
-            scan_note = (
-                f"<p class='card-sub'>Nog geen fills · {_esc_fmt(scanned, 'count')} scans "
-                f"(retail wacht op NET edge)</p>"
-                if str(row.get("fee_tier") or "").lower() == "retail"
-                else f"<p class='card-sub'>Nog geen fills · {_esc_fmt(scanned, 'count')} scans</p>"
-            )
-        cards.append(
-            f"""
-            <article class="fleet-card">
-              <header class="fleet-head">
-                <div>
-                  <h3>{_esc(row.get('label'))}</h3>
-                  <p class="card-sub">Start {_esc_fmt(row.get('starting_capital'), 'money')} · {_esc(row.get('fee_tier') or 'retail')}</p>
-                </div>
-                <span class="badge {badge_cls}">{status_label}</span>
-              </header>
-              <div class="metric-grid compact">
-                <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(row.get('equity'), 'money')}</span></article>
-                <article class="metric-card {pnl_cls}"><span class="label">{_pnl_word(row.get('net_pnl'))} (echt)</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
-                <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(row.get('trade_count'), 'count')}</span></article>
-                <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
-              </div>
-              <div class="feeds">{md_html}</div>
-              {scan_note}
-              <div class="card-links">
-                <a href="{_esc(row.get('dashboard_url'))}">Overzicht</a>
-                <a href="{_esc(row.get('dashboard_lite_url'))}">Mobiel</a>
-              </div>
-            </article>
-            """
-        )
+    groups = _group_fleet_instances(instances)
+    groups_html = "".join(_render_capital_group(capital, pair) for capital, pair in groups)
+    if not groups_html:
+        groups_html = "<p class='empty'>Geen rekeningen ingesteld.</p>"
 
-    cards_html = "\n".join(cards) or "<p class='empty'>Geen rekeningen ingesteld.</p>"
     fleet_chart = _svg_fleet_bars(instances)
     html = f"""<!DOCTYPE html>
 <html lang="nl">
@@ -557,30 +497,124 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Alle oefenrekeningen</p>
+        <p class="eyebrow">Oefenhandel · per inleg</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · ultra vs live-conservatief (retail fees)</p>
+        <p class="sub">{online}/{configured} online · Ultra = optimistisch · Realistic = retail / echt-geld-achtig</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
     <div class="container totals-bar">
-      <article class="metric-card"><span class="label">Totaal vermogen</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
-      <article class="metric-card {_pnl_class(totals.get('net_pnl'))}"><span class="label">{_pnl_word(totals.get('net_pnl'))}</span><span class="value">{_esc_fmt(totals.get('net_pnl'), 'money')}</span></article>
-      <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(totals.get('trade_count'), 'count')}</span></article>
-      <article class="metric-card"><span class="label">Actief</span><span class="value">{_esc_fmt(totals.get('running_count'), 'count')}/{configured}</span></article>
+      <article class="metric-card"><span class="label">Ultra transacties</span><span class="value">{_esc_fmt(totals.get('ultra_trades', totals.get('trade_count')), 'count')}</span></article>
+      <article class="metric-card {_pnl_class(totals.get('ultra_pnl'))}"><span class="label">Ultra PnL</span><span class="value">{_esc_fmt(totals.get('ultra_pnl', totals.get('net_pnl')), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Realistic transacties</span><span class="value">{_esc_fmt(totals.get('realistic_trades', '0'), 'count')}</span></article>
+      <article class="metric-card {_pnl_class(totals.get('realistic_pnl'))}"><span class="label">Realistic PnL</span><span class="value">{_esc_fmt(totals.get('realistic_pnl', '0'), 'money')}</span></article>
     </div>
   </header>
   <main class="container">
+    {groups_html}
     <section class="panel">
       <h2>Winst per rekening</h2>
       {fleet_chart}
     </section>
-    <div class="fleet-grid">{cards_html}</div>
   </main>
-  <footer class="footer">Oefenhandel · geen opnames · geen hefboom</footer>
+  <footer class="footer">Oefenhandel · geen echte orders · Realistic = retail fees</footer>
 </body>
 </html>"""
     return HTMLResponse(content=html)
+
+
+def _fleet_profile(row: dict[str, Any]) -> str:
+    label = str(row.get("label") or "").lower()
+    if "realistic" in label or " live" in f" {label}":
+        return "realistic"
+    if "ultra" in label:
+        return "ultra"
+    if str(row.get("fee_tier") or "").lower() == "retail":
+        return "realistic"
+    return "ultra"
+
+
+def _group_fleet_instances(instances: list[dict[str, Any]]) -> list[tuple[str, dict[str, dict[str, Any]]]]:
+    """Group ultra/realistic cards by starting capital, preserving URL order."""
+    ordered: list[str] = []
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in instances:
+        capital = str(row.get("starting_capital") or row.get("label") or "?")
+        key = capital
+        if key not in grouped:
+            ordered.append(key)
+            grouped[key] = {}
+        grouped[key][_fleet_profile(row)] = row
+        if not row.get("ok") and "offline" not in grouped[key]:
+            grouped[key]["offline"] = row
+    return [(k, grouped[k]) for k in ordered]
+
+
+def _render_capital_group(capital: str, pair: dict[str, dict[str, Any]]) -> str:
+    cards = []
+    for kind in ("ultra", "realistic"):
+        row = pair.get(kind)
+        if row is None:
+            continue
+        cards.append(_render_fleet_card(row, kind=kind))
+    extra = [k for k in pair if k not in {"ultra", "realistic"}]
+    for k in extra:
+        cards.append(_render_fleet_card(pair[k], kind="other"))
+    if not cards:
+        return ""
+    return f"""
+    <section class="capital-group">
+      <h2>Inleg {_esc_fmt(capital, 'money')}</h2>
+      <div class="pair-grid">{''.join(cards)}</div>
+    </section>
+    """
+
+
+def _render_fleet_card(row: dict[str, Any], *, kind: str) -> str:
+    if not row.get("ok"):
+        return f"""
+        <article class="fleet-card offline">
+          <header class="fleet-head">
+            <h3>{_esc(row.get('label'))}</h3>
+            <span class="badge warn">Offline</span>
+          </header>
+          <p class="error">{_esc(row.get('error'))}</p>
+        </article>
+        """
+    running = row.get("running")
+    status_label = "Actief" if running else "Gestopt"
+    badge_cls = "ok" if running else "warn"
+    profile = "Realistic" if kind == "realistic" else ("Ultra" if kind == "ultra" else _esc(row.get("label")))
+    profile_cls = "realistic" if kind == "realistic" else "ultra"
+    trades = _esc_fmt(row.get("trade_count") if row.get("trade_count") is not None else 0, "count")
+    executed = _esc_fmt(
+        row.get("executed_opportunities") if row.get("executed_opportunities") is not None else 0,
+        "count",
+    )
+    scanned = _esc_fmt(row.get("pairs_evaluated") or 0, "count")
+    return f"""
+    <article class="fleet-card {profile_cls}">
+      <header class="fleet-head">
+        <div>
+          <span class="profile-pill {profile_cls}">{profile}</span>
+          <p class="card-sub">Fee {_esc(row.get('fee_tier') or '—')}</p>
+        </div>
+        <span class="badge {badge_cls}">{status_label}</span>
+      </header>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(row.get('equity'), 'money')}</span></article>
+        <article class="metric-card {_pnl_class(row.get('net_pnl'))}"><span class="label">{_pnl_word(row.get('net_pnl'))}</span><span class="value">{_esc_fmt(row.get('net_pnl'), 'money')}</span></article>
+        <article class="metric-card highlight-metric"><span class="label">Transacties</span><span class="value">{trades}</span></article>
+        <article class="metric-card"><span class="label">Uitgevoerd</span><span class="value">{executed}</span></article>
+        <article class="metric-card"><span class="label">Gescand</span><span class="value">{scanned}</span></article>
+        <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_esc_fmt(row.get('win_rate'), 'pct')}</span></article>
+      </div>
+      <div class="card-links">
+        <a href="{_esc(row.get('dashboard_url'))}">Overzicht</a>
+        <a href="{_esc(row.get('dashboard_lite_url'))}">Mobiel</a>
+      </div>
+    </article>
+    """
 
 
 def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
@@ -605,20 +639,26 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
     if fleet:
         extra += """
     .totals-bar { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .65rem; padding: 0 1rem 1rem; max-width: 1100px; margin: 0 auto; }
-    .fleet-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); max-width: 1100px; }
+    .capital-group { max-width: 1100px; margin: 0 auto 1.25rem; }
+    .capital-group h2 { margin: 0 0 .65rem; font-size: 1.05rem; color: var(--muted); font-weight: 600; }
+    .pair-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
     .fleet-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; display: grid; gap: .75rem; }
+    .fleet-card.ultra { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+    .fleet-card.realistic { border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
     .fleet-card.offline { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
     .fleet-head { display: flex; justify-content: space-between; gap: .75rem; align-items: start; }
-    .fleet-head h3 { margin: 0; font-size: 1.05rem; }
+    .profile-pill { display: inline-block; font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: .2rem .55rem; border-radius: 999px; }
+    .profile-pill.ultra { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+    .profile-pill.realistic { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
     .card-sub { margin: .25rem 0 0; color: var(--muted); font-size: .8rem; }
-    .feeds { display: flex; flex-wrap: wrap; gap: .35rem; }
-    .feed { border: 1px solid var(--line); border-radius: 999px; padding: .15rem .5rem; font-size: .68rem; text-transform: uppercase; color: var(--muted); }
-    .feed.ok { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
-    .feed.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+    .highlight-metric .value { font-size: 1.15rem; }
     .card-links { display: flex; gap: .75rem; font-size: .85rem; }
     .card-links a, .text-link { color: var(--accent); text-decoration: none; }
     .error { color: var(--bad); font-size: .85rem; margin: 0; }
-    @media (min-width: 720px) { .totals-bar { grid-template-columns: repeat(4, minmax(0,1fr)); } }
+    @media (min-width: 720px) {
+      .totals-bar { grid-template-columns: repeat(4, minmax(0,1fr)); }
+      .pair-grid { grid-template-columns: 1fr 1fr; }
+    }
         """
     return f"""
     :root {{
@@ -1200,7 +1240,12 @@ def _svg_fleet_bars(instances: list[dict]) -> str:
     if not rows:
         return '<p class="chart-empty">Nog geen online rekeningen om te vergelijken.</p>'
     values = [_as_float(row.get("net_pnl", row.get("pnl"))) for row in rows]
-    labels = [str(row.get("label") or row.get("name") or row.get("id") or "?") for row in rows]
+    labels = []
+    for row in rows:
+        capital = str(row.get("starting_capital") or "")
+        kind = "R" if _fleet_profile(row) == "realistic" else "U"
+        compact = capital.split(".")[0] if capital else str(row.get("label") or "?")[:6]
+        labels.append(f"{compact}{kind}")
     return _svg_bars(values, labels)
 
 

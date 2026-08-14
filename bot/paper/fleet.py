@@ -130,6 +130,10 @@ def _totals(online: list[dict[str, Any]]) -> dict[str, str]:
     equity = 0.0
     pnl = 0.0
     trades = 0
+    ultra_trades = 0
+    realistic_trades = 0
+    ultra_pnl = 0.0
+    realistic_pnl = 0.0
     opps = 0
     evaluated = 0
     edges = 0
@@ -138,6 +142,13 @@ def _totals(online: list[dict[str, Any]]) -> dict[str, str]:
         equity += _as_float(row.get("equity"))
         pnl += _as_float(row.get("net_pnl"))
         trades += int(_as_float(row.get("trade_count")))
+        kind = _profile_kind(row)
+        if kind == "realistic":
+            realistic_trades += int(_as_float(row.get("trade_count")))
+            realistic_pnl += _as_float(row.get("net_pnl"))
+        else:
+            ultra_trades += int(_as_float(row.get("trade_count")))
+            ultra_pnl += _as_float(row.get("net_pnl"))
         opps += int(_as_float(row.get("total_opportunities")))
         evaluated += int(_as_float(row.get("pairs_evaluated")))
         edges += int(_as_float(row.get("depth_edges_found")))
@@ -146,12 +157,27 @@ def _totals(online: list[dict[str, Any]]) -> dict[str, str]:
         "equity": f"{equity:.8g}",
         "net_pnl": f"{pnl:.8g}",
         "trade_count": str(trades),
+        "ultra_trades": str(ultra_trades),
+        "realistic_trades": str(realistic_trades),
+        "ultra_pnl": f"{ultra_pnl:.8g}",
+        "realistic_pnl": f"{realistic_pnl:.8g}",
         "total_opportunities": str(opps),
         "pairs_evaluated": str(evaluated),
         "depth_edges_found": str(edges),
         "scan_rejections": str(scan_rej),
         "running_count": str(sum(1 for row in online if row.get("running"))),
     }
+
+
+def _profile_kind(row: dict[str, Any]) -> str:
+    label = str(row.get("label") or "").lower()
+    if "realistic" in label or " live" in f" {label}":
+        return "realistic"
+    if "ultra" in label:
+        return "ultra"
+    if str(row.get("fee_tier") or "").lower() == "retail":
+        return "realistic"
+    return "ultra"
 
 
 def _as_float(value: Any) -> float:

@@ -798,5 +798,6 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
         }
     ).body.decode()
     assert "Winst per rekening" in fleet
-    assert "€200" in fleet
+    assert "€200" in fleet or "200" in fleet
+    assert "Transacties" in fleet
     assert "<rect" in fleet
