@@ -61,6 +61,15 @@ class MakerInventoryStrategy(BaseStrategy):
         super().__init__(name=name)
         self._settings = settings
         self._min_profit_eur = Decimal(str(settings.paper_maker_min_profit_eur))
+        self._min_profit_equity_bps = Decimal(
+            str(getattr(settings, "paper_maker_min_profit_equity_bps", 0) or 0)
+        )
+        self._keep_vs_best_frac = Decimal(
+            str(getattr(settings, "paper_maker_keep_vs_best_frac", 0) or 0)
+        )
+        self._replace_improve_frac = Decimal(
+            str(getattr(settings, "paper_maker_replace_improve_frac", 0.25) or 0)
+        )
         self._min_profit_pct = Decimal(str(settings.arbitrage_min_profit_pct))
         self._min_liquidity = Decimal(str(settings.arbitrage_min_liquidity_base))
         self._max_quantity = Decimal(str(settings.arbitrage_max_quantity))
@@ -93,7 +102,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._scan_rejections = 0
         self._opportunities_emitted = 0
         self._reject_counts: dict[str, int] = {}
-        self._last_emit_monotonic: dict[str, float] = {}
+        self._last_emit: dict[str, tuple[float, Decimal]] = {}
         self._fair_values: dict[str, Decimal] = {}
 
     def update_adverse_bps(self, adverse_bps: Decimal) -> None:
@@ -151,6 +160,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
         opportunities.sort(key=self._rank_opportunity, reverse=True)
         selected = opportunities[: self._max_emits]
+        selected = self._drop_small_vs_best(selected)
         for opp in selected:
             self._opportunities_emitted += 1
             self._mark_emitted(opp)
@@ -194,7 +204,9 @@ class MakerInventoryStrategy(BaseStrategy):
                 if candidate is None:
                     continue
                 self._depth_edges_found += 1
-                opportunity = await self._gate_candidate(candidate, inventory=inventory)
+                opportunity = await self._gate_candidate(
+                    candidate, inventory=inventory, equity=equity
+                )
                 if opportunity is None:
                     continue
                 if self._in_cooldown(opportunity):
@@ -219,6 +231,13 @@ class MakerInventoryStrategy(BaseStrategy):
         # Same-venue can complete without a transfer; prefer it when NET is close.
         venue_bonus = Decimal("0.05") if same_venue else _ZERO
         return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001")) + venue_bonus
+
+    def _effective_min_profit(self, equity: Decimal | None) -> Decimal:
+        floor = self._min_profit_eur
+        if equity is None or equity <= 0 or self._min_profit_equity_bps <= 0:
+            return floor
+        scaled = equity * self._min_profit_equity_bps / _BPS
+        return max(floor, scaled)
 
     def _build_fair_values(
         self, by_symbol: dict[str, list[MarketSnapshot]]
@@ -263,13 +282,38 @@ class MakerInventoryStrategy(BaseStrategy):
     def _in_cooldown(self, opportunity: TradeOpportunity) -> bool:
         if self._cooldown_ms <= 0:
             return False
-        last = self._last_emit_monotonic.get(self._pair_key(opportunity))
+        last = self._last_emit.get(self._pair_key(opportunity))
         if last is None:
             return False
-        return (time.monotonic() - last) * 1000.0 < self._cooldown_ms
+        last_ts, last_net = last
+        if (time.monotonic() - last_ts) * 1000.0 >= self._cooldown_ms:
+            return False
+        if self._replace_improve_frac <= 0:
+            return True
+        net = Decimal(str((opportunity.metadata or {}).get("net_profit_eur", "0") or "0"))
+        hurdle = last_net * (Decimal("1") + self._replace_improve_frac)
+        return net < hurdle
 
     def _mark_emitted(self, opportunity: TradeOpportunity) -> None:
-        self._last_emit_monotonic[self._pair_key(opportunity)] = time.monotonic()
+        net = Decimal(str((opportunity.metadata or {}).get("net_profit_eur", "0") or "0"))
+        self._last_emit[self._pair_key(opportunity)] = (time.monotonic(), net)
+
+    def _drop_small_vs_best(
+        self, opportunities: list[TradeOpportunity]
+    ) -> list[TradeOpportunity]:
+        """Skip dust next to a much larger NET-euro quote in the same cycle."""
+        if self._keep_vs_best_frac <= 0 or len(opportunities) < 2:
+            return opportunities
+        nets = [
+            Decimal(str((o.metadata or {}).get("net_profit_eur", "0") or "0"))
+            for o in opportunities
+        ]
+        best = max(nets)
+        if best <= 0:
+            return opportunities
+        floor = best * self._keep_vs_best_frac
+        kept = [o for o, net in zip(opportunities, nets, strict=True) if net >= floor]
+        return kept or opportunities
 
     @staticmethod
     def _pair_key(opportunity: TradeOpportunity) -> str:
@@ -348,10 +392,11 @@ class MakerInventoryStrategy(BaseStrategy):
         assert buy_snap.exchange is not None
         assert sell_snap.exchange is not None
 
-        # Join the tightest level that still clears retail maker fees. Deeper
-        # levels exist only as fallback when the touch is too tight.
+        # Pick the book level with the most NET euro. A slightly worse fill
+        # rate is fine when size × spread is much larger (profit, not trade count).
         max_level = int(getattr(self._settings, "paper_maker_book_level", 0) or 0)
         seen: set[tuple[Decimal, Decimal]] = set()
+        best: tuple[Decimal, int, MakerCandidate] | None = None
         for level in range(0, max_level + 1):
             quoted = self._depth_quote(buy_snap.order_book, sell_snap.order_book, level)
             if quoted is None:
@@ -372,9 +417,14 @@ class MakerInventoryStrategy(BaseStrategy):
                 inventory=inventory,
                 fair_value=fair_value,
             )
-            if candidate is not None:
-                return candidate
-        return None
+            if candidate is None:
+                continue
+            euro = (candidate.sell_price - candidate.buy_price) * candidate.quantity
+            # Touch fills more often; require extra euro at deeper levels.
+            score = euro / (Decimal("1") + Decimal(level) * Decimal("0.5"))
+            if best is None or score > best[0]:
+                best = (score, level, candidate)
+        return None if best is None else best[2]
 
     @staticmethod
     def _depth_quote(
@@ -585,6 +635,7 @@ class MakerInventoryStrategy(BaseStrategy):
         candidate: MakerCandidate,
         *,
         inventory: object = None,
+        equity: Decimal | None = None,
     ) -> TradeOpportunity | None:
         base = infer_base_asset(candidate.symbol, self._quote)
         fair_value = self._fair_values.get(base)
@@ -658,11 +709,12 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        if net < self._min_profit_eur:
+        min_eur = self._effective_min_profit(equity)
+        if net < min_eur:
             self._reject(
                 candidate.symbol,
                 "min_profit_eur",
-                f"NET profit {net} EUR below minimum {self._min_profit_eur} EUR",
+                f"NET profit {net} EUR below minimum {min_eur} EUR",
                 buy_exchange=candidate.buy_exchange,
                 sell_exchange=candidate.sell_exchange,
                 net_profit_eur=str(net),

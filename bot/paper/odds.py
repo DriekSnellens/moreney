@@ -42,12 +42,10 @@ def snapshot(
     euro = Decimal(str(capital_eur or 0)) * move
     in_band = hits_24h_band(move)
     note = (
-        f"Hoogste kans op +{TARGET_LOW * 100:.0f}–{TARGET_HIGH * 100:.0f}% in 24u: "
-        f"{frac * 100:.0f}% inventory in liquide EUR-alts. "
-        f"Typische up-day {alt_up_day * 100:.1f}% × inventory ≈ {move * 100:.1f}% "
-        f"(€{euro:.0f} op €{capital_eur:,.0f}). "
-        "Geen garantie; down-days en vlakke sessies missen de band. "
-        "Maker-spread is extra, niet de 2%."
+        f"{frac * 100:.0f}% inventory in liquide EUR-alts: "
+        f"typische up-day {alt_up_day * 100:.1f}% × inventory ≈ {move * 100:.1f}% "
+        f"(€{euro:.0f} op €{capital_eur:,.0f}) — dat is rest-beta, geen trading-winst. "
+        "Vermogen groeit door NET euro per fill. Down-days blijven mogelijk."
     )
     return {
         "inventory_frac": format(frac, "f"),

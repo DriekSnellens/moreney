@@ -689,7 +689,7 @@ class PaperRunner:
         return {}
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
-        """Highest-odds 24h band: alt-beta inventory, maker as overlay."""
+        """Sized maker quotes: NET euro per fill, capital recycled quickly."""
         from bot.paper.capacity import project_daily_pnl
         from bot.paper.odds import snapshot as odds_snapshot
 
@@ -709,7 +709,7 @@ class PaperRunner:
         if mtm is None:
             mtm = getattr(snap, "current_equity", start) - start
         return {
-            "label": "Hoogste-kans 24u (alt-beta + maker)",
+            "label": "Trading-alpha (sized maker, retail fees)",
             "realized_live_eur": _dec_str(net),
             "projected_per_hour_eur": _dec_str(band_eur / Decimal("24")),
             "projected_per_day_eur": _dec_str(band_eur),
@@ -722,9 +722,9 @@ class PaperRunner:
             "runtime_seconds": runtime,
             "vol_capture": odds,
             "assumptions": [
-                "2–5%/24u = coin-move op inventory, geen coupon en geen rebate-fees",
-                "75% liquide EUR-alts (ADA/ATOM/NEAR/DOT/XRP); maker oogst bps eromheen",
-                "Hoogste kans op een up-day in die band; down-days en vlakke sessies missen",
+                "Groei = NET euro per fill × hoe snel kapitaal weer vrij is",
+                "Quote-cash eerst; ~30% alts alleen om te kunnen verkopen",
+                "Weinig, grotere quotes; stofjes onder de euro-vloer gaan eruit",
                 "Retail fees, geen queue-fills, fair-value blijft aan",
             ],
         }

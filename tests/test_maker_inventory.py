@@ -547,19 +547,55 @@ async def test_retail_same_venue_roundtrip_is_net_positive_after_trade_through()
 
 
 @pytest.mark.asyncio
-async def test_joins_touch_when_retail_spread_clears_fees() -> None:
-    """€300/day needs fills: quote at the touch when that spread already pays fees."""
+async def test_picks_fatter_book_level_when_euro_edge_is_larger() -> None:
+    """Profit-max: size × spread at level 1 beats a tiny touch quote."""
     set_fee_tier("retail")
-    # Touch ~45 bps > Binance 20 bps RT; level 1 would be a rarer through.
     book = OrderBook(
         symbol="ATOMEUR",
         bids=[
-            OrderBookLevel(price=Decimal("1.330"), amount=Decimal("80")),
-            OrderBookLevel(price=Decimal("1.320"), amount=Decimal("80")),
+            OrderBookLevel(price=Decimal("1.330"), amount=Decimal("50")),
+            OrderBookLevel(price=Decimal("1.328"), amount=Decimal("400")),
         ],
         asks=[
-            OrderBookLevel(price=Decimal("1.336"), amount=Decimal("80")),
-            OrderBookLevel(price=Decimal("1.350"), amount=Decimal("80")),
+            OrderBookLevel(price=Decimal("1.336"), amount=Decimal("50")),
+            OrderBookLevel(price=Decimal("1.337"), amount=Decimal("400")),
+        ],
+    )
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_book_level=1,
+            paper_maker_max_edge_bps=80,
+            paper_maker_min_profit_eur=0.001,
+            paper_maker_adverse_bps=4,
+            paper_fee_tier="retail",
+            arbitrage_max_quantity=10000,
+            arbitrage_position_pct=8,
+            arbitrage_min_liquidity_base=0.0001,
+        )
+    )
+    opps = await strategy.evaluate_markets(
+        [top_of_book_snapshot(exchange="binance", symbol="ATOMEUR", order_book=book)],
+        equity=Decimal("25000"),
+    )
+    assert opps
+    assert opps[0].entry_price == Decimal("1.328")
+    assert opps[0].expected_exit_price == Decimal("1.337")
+    assert opps[0].quantity > Decimal("50")
+
+
+@pytest.mark.asyncio
+async def test_joins_touch_when_deeper_euro_is_similar() -> None:
+    """When both levels pay about the same euro, stay at the touch (faster fill)."""
+    set_fee_tier("retail")
+    book = OrderBook(
+        symbol="ATOMEUR",
+        bids=[
+            OrderBookLevel(price=Decimal("1.330"), amount=Decimal("500")),
+            OrderBookLevel(price=Decimal("1.329"), amount=Decimal("20")),
+        ],
+        asks=[
+            OrderBookLevel(price=Decimal("1.336"), amount=Decimal("500")),
+            OrderBookLevel(price=Decimal("1.337"), amount=Decimal("20")),
         ],
     )
     strategy = MakerInventoryStrategy(
@@ -581,4 +617,80 @@ async def test_joins_touch_when_retail_spread_clears_fees() -> None:
     assert opps
     assert opps[0].entry_price == Decimal("1.330")
     assert opps[0].expected_exit_price == Decimal("1.336")
+
+
+@pytest.mark.asyncio
+async def test_equity_bps_floor_rejects_dust_on_large_book() -> None:
+    set_fee_tier("retail")
+    book = _book("100", "100.20", qty="0.05")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_min_profit_eur=0.001,
+            paper_maker_min_profit_equity_bps=0.2,
+            paper_maker_same_venue=True,
+            arbitrage_max_quantity=10000,
+        )
+    )
+    opps = await strategy.evaluate_markets(
+        [top_of_book_snapshot(exchange="okx", symbol="BTCEUR", order_book=book)],
+        equity=Decimal("25000"),
+    )
+    assert opps == []
+    assert int(strategy.scan_stats()["reject_counts"].get("min_profit_eur", 0)) > 0  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_keeps_only_quotes_near_best_net() -> None:
+    set_fee_tier("retail")
+    fat = _book("100", "100.80", qty="5")
+    thin = _book("1.00", "1.004", qty="1")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_keep_vs_best_frac=0.35,
+            paper_maker_max_edge_bps=200,
+            paper_maker_min_spread_bps=2,
+            paper_maker_venues="okx",
+            arbitrage_max_emits_per_cycle=4,
+            arbitrage_max_quantity=100,
+            paper_maker_fair_value=False,
+        )
+    )
+    opps = await strategy.evaluate_markets(
+        [
+            top_of_book_snapshot(exchange="okx", symbol="BTCEUR", order_book=fat),
+            top_of_book_snapshot(exchange="okx", symbol="ATOMEUR", order_book=thin),
+        ],
+        equity=Decimal("25000"),
+    )
+    assert opps
+    symbols = {o.symbol for o in opps}
+    assert "BTCEUR" in symbols
+    assert "ATOMEUR" not in symbols
+
+
+@pytest.mark.asyncio
+async def test_cooldown_replaces_quote_when_net_improves() -> None:
+    set_fee_tier("retail")
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            arbitrage_opportunity_cooldown_ms=60_000,
+            paper_maker_replace_improve_frac=0.25,
+            paper_maker_max_edge_bps=200,
+            paper_maker_venues="okx",
+            arbitrage_max_quantity=10,
+        )
+    )
+    snap = top_of_book_snapshot(
+        exchange="okx", symbol="BTCEUR", order_book=_book("100", "100.40", qty="2")
+    )
+    first = await strategy.evaluate_markets([snap], equity=Decimal("25000"))
+    assert first
+    wider = top_of_book_snapshot(
+        exchange="okx", symbol="BTCEUR", order_book=_book("100", "100.90", qty="2")
+    )
+    second = await strategy.evaluate_markets([wider], equity=Decimal("25000"))
+    assert second
+    assert Decimal(str(second[0].metadata["net_profit_eur"])) > Decimal(
+        str(first[0].metadata["net_profit_eur"])
+    )
 

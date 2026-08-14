@@ -83,7 +83,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     vol = forecast.get("vol_capture") or {}
     band_pct = _esc(str(vol.get("equity_move_pct") or forecast.get("projected_day_return_pct") or "—"))
     mtm = _fmt_money(forecast.get("paper_equity_pnl") or perf.get("paper_equity_pnl") or 0)
-    forecast_note = _esc(forecast.get("note") or "Hoogste-kans 24u: alt-beta + maker.")
+    forecast_note = _esc(forecast.get("note") or "Groei via NET euro per fill, niet via trade-aantal.")
     confidence = str(forecast.get("confidence") or "very_low")
     confidence_label = {
         "very_low": "Nog onzeker",
@@ -143,7 +143,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <header class="hero">
     <div class="hero-inner">
       <div>
-        <p class="eyebrow">Oefenhandel · hoogste kans 2–5%/24u</p>
+        <p class="eyebrow">Oefenhandel · winst per fill, niet trade-aantal</p>
         <h1 class="brand">Moreney</h1>
         <p class="sub">{realism_note}</p>
       </div>
@@ -173,23 +173,23 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel highlight">
-      <h2>Hoogste kans 2–5% / 24u</h2>
+      <h2>Winst en tempo</h2>
       <div class="metric-grid">
         <article class="metric-card {pnl_cls}">
           <span class="label">Paper MTM</span>
           <span class="value">{mtm}</span>
         </article>
         <article class="metric-card">
-          <span class="label">Up-day in de band</span>
-          <span class="value">{forecast_day}</span>
-        </article>
-        <article class="metric-card">
-          <span class="label">Verwacht % (up-day)</span>
-          <span class="value">{band_pct}%</span>
+          <span class="label">Live-equivalent PnL</span>
+          <span class="value">{m('net_pnl')}</span>
         </article>
         <article class="metric-card">
           <span class="label">Maker-tempo / dag</span>
           <span class="value">{paper_day}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Zekerheid</span>
+          <span class="value">{confidence_label}</span>
         </article>
       </div>
       <p class="forecast-note">{forecast_note}</p>

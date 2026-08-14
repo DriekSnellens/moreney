@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     # Gross edge above this is treated as stale/public-feed dislocation, not tradable.
     paper_maker_max_edge_bps: float = Field(default=30.0, ge=0)
     paper_maker_min_profit_eur: float = Field(default=0.001, ge=0)
+    # Extra euro floor: equity × bps / 10_000 (0.2 bps of €25k ≈ €0.50). 0 = off.
+    paper_maker_min_profit_equity_bps: float = Field(default=0.0, ge=0)
+    # Keep a quote only if its NET euro is at least this fraction of the cycle's best.
+    paper_maker_keep_vs_best_frac: float = Field(default=0.0, ge=0, le=1)
+    # During cooldown, still replace a quote if NET euro improved by this fraction.
+    paper_maker_replace_improve_frac: float = Field(default=0.25, ge=0)
     # Same-venue MM when local spread clears fees (trade-through fills keep this honest).
     paper_maker_same_venue: bool = True
     paper_maker_max_open_quotes: int = Field(default=6, ge=1, le=30)
