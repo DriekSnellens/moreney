@@ -655,8 +655,19 @@ class PaperRunner:
                 "portfolio_exposure": self._opportunity_engine.portfolio_gate.snapshot(),
                 "recent_decisions": self._decision_log.export()[-10:],
                 "last_ranking": (self._last_cycle or {}).get("ranking"),
+                "funding": self._market_data.funding.snapshot(),
+                "funding_scan": self._funding_scan_stats(),
             },
         }
+
+    def _funding_scan_stats(self) -> dict[str, object]:
+        scan = (self._last_cycle or {}).get("scan") or {}
+        children = scan.get("children") or {}
+        if isinstance(children, dict):
+            stats = children.get("funding_basis")
+            if isinstance(stats, dict):
+                return stats
+        return {}
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
         """Project live-equivalent PnL from the conservative paper model."""

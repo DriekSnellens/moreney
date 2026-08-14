@@ -174,6 +174,8 @@ class Settings(BaseSettings):
     global_equity_symbols: str = "SPY.US,AAPL.US,SAP.DE"
     global_funding_strategy_enabled: bool = True
     global_min_funding_bps: float = Field(default=3.0, ge=0)
+    global_funding_poll_interval_sec: float = Field(default=60.0, ge=15.0)
+    global_funding_exchanges: str = "binance"
     global_fx_z_threshold: float = Field(default=1.5, gt=0)
     global_equity_deviation_bps: float = Field(default=30.0, gt=0)
     global_transfer_fee_bps: float = Field(default=10.0, ge=0)

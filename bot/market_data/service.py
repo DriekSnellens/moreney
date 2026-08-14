@@ -24,6 +24,7 @@ from bot.market_data.adapters.coinbase import CoinbasePublicAdapter
 from bot.market_data.adapters.kraken import KrakenPublicAdapter
 from bot.market_data.adapters.okx import OkxPublicAdapter
 from bot.market_data.cache import MarketDataCache
+from bot.market_data.funding import FundingRateService
 from bot.market_data.local_order_book import LocalOrderBook
 from bot.market_data.models import (
     ConnectionState,
@@ -91,6 +92,8 @@ class MarketDataService:
         self._redis_poll_s = float(getattr(settings, "market_data_redis_poll_ms", 100.0)) / 1000.0
         self._remote_health: dict[str, ExchangeHealth] = {}
         self._consumer_task: asyncio.Task[None] | None = None
+        self._funding = FundingRateService(settings)
+        self._funding_publish_task: asyncio.Task[None] | None = None
 
         if not self._adapters and start_websockets:
             self._adapters = self._build_live_adapters()
@@ -135,6 +138,10 @@ class MarketDataService:
     def shared_mode(self) -> bool:
         return self._mode == "shared"
 
+    @property
+    def funding(self) -> FundingRateService:
+        return self._funding
+
     async def start(self) -> None:
         if self._started:
             return
@@ -144,6 +151,7 @@ class MarketDataService:
         for adapter in self._adapters:
             if adapter._manager is not None:  # noqa: SLF001 — intentional live start
                 await adapter.start(self.handle_event)
+        await self._start_funding(publish=self._mode == "publisher")
         self._started = True
 
     async def start_shared_consumer(self) -> None:
@@ -158,6 +166,7 @@ class MarketDataService:
         self._consumer_task = asyncio.create_task(
             self._consumer_loop(), name="market-data-redis-consumer"
         )
+        await self._start_funding(publish=False)
         # Prime once so paper start does not wait a full poll interval.
         await self.hydrate_from_redis()
         logger.info(
@@ -169,6 +178,14 @@ class MarketDataService:
 
     async def stop(self) -> None:
         self._started = False
+        await self._funding.stop()
+        if self._funding_publish_task is not None:
+            self._funding_publish_task.cancel()
+            try:
+                await self._funding_publish_task
+            except asyncio.CancelledError:
+                pass
+            self._funding_publish_task = None
         if self._consumer_task is not None:
             self._consumer_task.cancel()
             try:
@@ -205,6 +222,29 @@ class MarketDataService:
                 tick = await self._cache.get_tick(exchange, symbol)
                 if tick is not None:
                     self._ticks[(exchange, symbol)] = tick
+        rates = await self._cache.get_funding_rates()
+        if rates:
+            self._funding.import_rates(rates)
+
+    async def _start_funding(self, *, publish: bool) -> None:
+        if not self._funding.enabled:
+            return
+        if self._mode in {"local", "publisher"}:
+            await self._funding.start()
+        if publish:
+            self._funding_publish_task = asyncio.create_task(
+                self._funding_publish_loop(), name="funding-redis-publisher"
+            )
+
+    async def _funding_publish_loop(self) -> None:
+        while self._started:
+            try:
+                await self._cache.set_funding_rates(self._funding.export_rates())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("FUNDING_REDIS_PUBLISH_FAILED error=%s", exc)
+            await asyncio.sleep(self._funding._poll_s)  # noqa: SLF001
 
     def apply_remote_book(self, exchange: str, symbol: str, book: OrderBook) -> None:
         """Replace local synchronized book from a Redis-published snapshot."""
@@ -514,6 +554,16 @@ class MarketDataService:
             bid = book.bids[0]
             ask = book.asks[0]
             age = self.get_local_book(exchange, symbol)
+            funding_rate = self._funding.rate_for_spot(exchange, symbol)
+            meta: dict[str, str] = {"source": "realtime_market_data"}
+            perp = None
+            if funding_rate is not None:
+                from bot.market_data.funding import perp_symbol_for
+
+                perp = perp_symbol_for(symbol)
+                meta["funding_source"] = "binance_perp"
+                meta["perp_symbol"] = perp or ""
+                meta["funding_rate"] = str(funding_rate)
             snapshots.append(
                 MarketSnapshot(
                     symbol=symbol,
@@ -524,7 +574,8 @@ class MarketDataService:
                     exchange=exchange,
                     latency_ms=age.age_ms if age else None,
                     timestamp=book.timestamp,
-                    metadata={"source": "realtime_market_data"},
+                    funding_rate=funding_rate,
+                    metadata=meta,
                 )
             )
         return snapshots

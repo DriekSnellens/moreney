@@ -57,6 +57,20 @@ class MarketDataCache:
         raw = await self._get(self._key("health", exchange.lower()))
         return ExchangeHealth.model_validate_json(raw) if raw else None
 
+    async def set_funding_rates(self, rates: dict[str, str]) -> None:
+        key = self._key("funding", "rates")
+        await self._set(key, json.dumps(rates))
+
+    async def get_funding_rates(self) -> dict[str, str]:
+        raw = await self._get(self._key("funding", "rates"))
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
     async def _set(self, key: str, value: str) -> None:
         self._memory[key] = value
         if self._redis is None:

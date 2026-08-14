@@ -23,7 +23,8 @@ class FundingBasisStrategy(BaseStrategy):
         self._settings = settings
         self._enabled = bool(getattr(settings, "global_funding_strategy_enabled", True))
         self._min_funding_bps = Decimal(str(getattr(settings, "global_min_funding_bps", 3) or 3))
-        self._profitability = DefaultProfitabilityEngine(settings)
+        funding_settings = settings.model_copy(update={"profitability_apply_funding": True})
+        self._profitability = DefaultProfitabilityEngine(funding_settings)
         self._scan_rejections = 0
         self._opportunities_emitted = 0
 
@@ -74,6 +75,8 @@ class FundingBasisStrategy(BaseStrategy):
                     "funding_rate": str(rate),
                     "funding_bps": str(funding_bps),
                     "buy_exchange": snap.exchange or "",
+                    "profitability_apply_funding": True,
+                    "correlation_group": "crypto_funding",
                 },
             )
             est = await self._profitability.evaluate(opp)

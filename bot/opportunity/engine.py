@@ -85,7 +85,13 @@ class GlobalOpportunityEngine:
 
         for opportunity in opportunities:
             inst = self._registry.by_symbol(opportunity.symbol)
-            asset_class = inst.asset_class if inst else AssetClass.CRYPTO_SPOT
+            meta = opportunity.metadata or {}
+            if meta.get("asset_class") == "crypto_perp":
+                asset_class = AssetClass.CRYPTO_PERP
+            elif inst:
+                asset_class = inst.asset_class
+            else:
+                asset_class = AssetClass.CRYPTO_SPOT
             if inst and not self._calendar.is_tradeable(inst):
                 self._decisions.log(
                     ScoredOpportunity(
@@ -138,7 +144,10 @@ class GlobalOpportunityEngine:
                 profitability=profitability,
                 asset_class=asset_class,
                 instrument_id=inst.instrument_id if inst else "",
-                correlation_group=inst.correlation_group if inst else "general",
+                correlation_group=str(
+                    meta.get("correlation_group")
+                    or (inst.correlation_group if inst else "general")
+                ),
                 expected_value=Decimal(str(ev_data["expected_value"])),
                 probability_profit=float(ev_data["probability_profit"]),
                 expected_loss=Decimal(str(ev_data["expected_loss"])),

@@ -158,7 +158,11 @@ class NetProfitCalculator:
         return opportunity.quantity * delta
 
     def _funding_cost(self, opportunity: TradeOpportunity, notional: Decimal) -> Decimal:
-        if not self._apply_funding or opportunity.funding_periods <= 0:
+        meta = opportunity.metadata or {}
+        apply_funding = self._apply_funding
+        if "profitability_apply_funding" in meta:
+            apply_funding = bool(meta["profitability_apply_funding"])
+        if not apply_funding or opportunity.funding_periods <= 0:
             return _ZERO
 
         rate = self._funding_rate_default

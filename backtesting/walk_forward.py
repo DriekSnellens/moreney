@@ -59,3 +59,43 @@ class WalkForwardValidator:
                 }
             )
         return result
+
+    async def run_rolling(
+        self,
+        snapshots: list,
+        *,
+        window_size: int = 50,
+        step: int | None = None,
+    ) -> WalkForwardResult:
+        """Rolling walk-forward windows over the snapshot timeline."""
+        if not snapshots or window_size < 2:
+            return WalkForwardResult()
+        step = step or max(1, window_size // 2)
+        aggregate = WalkForwardResult()
+        start = 0
+        window_idx = 0
+        while start + window_size <= len(snapshots):
+            window_idx += 1
+            chunk = snapshots[start : start + window_size]
+            split = max(1, int(len(chunk) * self._train_ratio))
+            train = chunk[:split]
+            test = chunk[split:]
+            is_res = await self._engine.run(train) if train else BacktestResult()
+            oos_res = await self._engine.run(test) if test else BacktestResult()
+            aggregate.windows += 1
+            aggregate.in_sample_approved += is_res.approved_count
+            aggregate.out_of_sample_approved += oos_res.approved_count
+            aggregate.in_sample_net += is_res.total_expected_net_profit_usd
+            aggregate.out_of_sample_net += oos_res.total_expected_net_profit_usd
+            aggregate.details.append(
+                {
+                    "window": window_idx,
+                    "snapshots": len(chunk),
+                    "in_sample_approved": is_res.approved_count,
+                    "out_of_sample_approved": oos_res.approved_count,
+                    "in_sample_net": str(is_res.total_expected_net_profit_usd),
+                    "out_of_sample_net": str(oos_res.total_expected_net_profit_usd),
+                }
+            )
+            start += step
+        return aggregate
