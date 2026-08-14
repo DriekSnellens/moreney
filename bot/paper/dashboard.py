@@ -113,6 +113,16 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     seeded_assets = _esc(", ".join(inventory.get("seeded_assets") or []) or "—")
     inventory_rows = _inventory_rows(inventory.get("venues") or {})
 
+    global_engine = status.get("global_engine") or {}
+    ge_enabled = global_engine.get("enabled")
+    ge_regime = _esc(str(global_engine.get("regime") or "—"))
+    ge_sessions = _esc(", ".join(global_engine.get("active_sessions") or []) or "—")
+    ge_exposure = global_engine.get("portfolio_exposure") or {}
+    ge_venue_exp = _esc(_exposure_summary(ge_exposure.get("venue")))
+    ge_strategy_exp = _esc(_exposure_summary(ge_exposure.get("strategy")))
+    ge_corr_exp = _esc(_exposure_summary(ge_exposure.get("correlation")))
+    ge_decision_rows = _global_decision_rows(global_engine.get("recent_decisions") or [])
+
     profit_chart = _svg_cumulative_profit(trades)
     hourly_chart = _svg_hourly_bars(hourly)
     winloss_chart = _svg_win_loss(wins, losses)
@@ -133,7 +143,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Oefenhandel · live-inschatting</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">Desk-modus: maker + EUR↔USDT-bridge, markout, hybrid hedge, venue-rebalance. Winst = live-inschatting.</p>
+        <p class="sub">Global composite: maker + triangle + funding, EV-ranking, regime &amp; portfolio-gate. Winst = live-inschatting.</p>
       </div>
       <div class="hero-badges">
         <span class="badge {status_cls}">{status_label}</span>
@@ -198,6 +208,25 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         </table>
       </div>
       <p class="forecast-note">Seeded: {seeded_assets}</p>
+    </section>
+
+    <section class="panel">
+      <h2>Global engine</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Engine</span><span class="value">{"Aan" if ge_enabled else "Uit"}</span></article>
+        <article class="metric-card"><span class="label">Regime</span><span class="value">{ge_regime}</span></article>
+        <article class="metric-card"><span class="label">Actieve sessies</span><span class="value">{ge_sessions}</span></article>
+        <article class="metric-card"><span class="label">Venue exposure</span><span class="value">{ge_venue_exp}</span></article>
+        <article class="metric-card"><span class="label">Strategie exposure</span><span class="value">{ge_strategy_exp}</span></article>
+        <article class="metric-card"><span class="label">Correlatie-groepen</span><span class="value">{ge_corr_exp}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Tijd</th><th>Actie</th><th>Strategie</th><th>Symbool</th><th>EV</th><th>Score</th><th>Stadium</th><th>Reden</th></tr></thead>
+          <tbody>{ge_decision_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Laatste beslissingen uit de EV-ranker. Volledige log: <a class="link-lite" href="/paper/opportunity-decisions">/paper/opportunity-decisions</a></p>
     </section>
 
     <section class="panel">
@@ -914,6 +943,41 @@ def _short_ts(value: Any) -> str:
     return text[-16:] if len(text) > 16 else text
 
 
+def _exposure_summary(exposure: Any) -> str:
+    if not exposure or not isinstance(exposure, dict):
+        return "—"
+    parts: list[str] = []
+    for key, value in sorted(exposure.items()):
+        if value in (None, 0, "0", "0.0"):
+            continue
+        parts.append(f"{key}={value}")
+    return ", ".join(parts[:4]) or "—"
+
+
+def _global_decision_rows(decisions: list[Any]) -> str:
+    if not decisions:
+        return "<tr><td colspan='8' class='empty'>Nog geen engine-beslissingen</td></tr>"
+    rows: list[str] = []
+    for d in reversed(decisions[-10:]):
+        if not isinstance(d, dict):
+            continue
+        action = str(d.get("action") or "—")
+        action_cls = "ok" if action in {"approve", "execute", "approved"} else "warn"
+        rows.append(
+            "<tr>"
+            f"<td class='ts'>{_esc(_short_ts(d.get('timestamp')))}</td>"
+            f"<td><span class='pill {action_cls}'>{_esc(action)}</span></td>"
+            f"<td>{_esc(_strategy_label(d.get('strategy')))}</td>"
+            f"<td><strong>{_esc(d.get('symbol'))}</strong></td>"
+            f"<td class='num'>{_esc_fmt(d.get('expected_value'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(d.get('score'), 'money')}</td>"
+            f"<td>{_esc(d.get('stage'))}</td>"
+            f"<td>{_esc((d.get('reason') or '')[:80])}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='8' class='empty'>Nog geen engine-beslissingen</td></tr>"
+
+
 def _inventory_rows(venues: dict[str, Any]) -> str:
     if not venues:
         return "<tr><td colspan='4' class='empty'>Nog geen venue-voorraad</td></tr>"
@@ -980,6 +1044,10 @@ def _strategy_label(name: Any) -> str:
         "makerinventorystrategy": "Maker: bied/laat vangen",
         "triangle_bridge": "EUR↔USDT bridge",
         "desk_composite": "Desk (maker + triangle)",
+        "global_composite": "Global composite (EV-ranked)",
+        "funding_basis": "Funding / basis",
+        "fx_relative_value": "FX relative value",
+        "equity_mean_reversion": "Equity mean reversion",
         "momentum": "Meegaan met de beweging",
         "mean_reversion": "Terug naar het gemiddelde",
         "dca": "Periodiek bijkopen",
