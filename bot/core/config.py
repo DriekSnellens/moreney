@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     paper_maker_one_leg_adverse_bps: float = Field(default=6.0, ge=0)
     # Expected adverse selection vs mid/fair value when a maker quote is hit (bps).
     paper_maker_adverse_bps: float = Field(default=4.0, ge=0)
+    # Extra bps required beyond maker fees for gross spread (fees_eat_edge gate).
+    paper_maker_spread_fee_buffer_bps: float = Field(default=1.0, ge=0)
+    # Override execution buffer in post-emit gate (default: 1 bps + adverse).
+    paper_maker_gate_buffer_bps: float | None = Field(default=None, ge=0)
     # Use BASEUSDT × EURUSDT as fair-value filter (skip toxic one-sided dislocations).
     paper_maker_fair_value: bool = True
     # FX symbol for USDT-per-EUR (Binance/OKX style).

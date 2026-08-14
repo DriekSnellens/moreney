@@ -196,6 +196,13 @@ class PaperRunner:
         settings = self._settings
         if not settings.paper_maker_enabled:
             return settings
+        adverse = float(getattr(settings, "paper_maker_adverse_bps", 0) or 0)
+        gate_buf = getattr(settings, "paper_maker_gate_buffer_bps", None)
+        exec_buffer = (
+            float(gate_buf) + adverse
+            if gate_buf is not None
+            else 1.0 + adverse
+        )
         return settings.model_copy(
             update={
                 "profitability_min_net_profit_usd": settings.paper_maker_min_profit_eur,
@@ -203,8 +210,7 @@ class PaperRunner:
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,
-                "profitability_execution_buffer_bps": 1.0
-                + float(getattr(settings, "paper_maker_adverse_bps", 0) or 0),
+                "profitability_execution_buffer_bps": exec_buffer,
                 "risk_min_net_profit_usd": settings.paper_maker_min_profit_eur,
             }
         )

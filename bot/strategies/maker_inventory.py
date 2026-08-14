@@ -74,6 +74,9 @@ class MakerInventoryStrategy(BaseStrategy):
         self._max_fee_bps = Decimal(str(settings.paper_maker_max_fee_bps))
         self._same_venue = bool(settings.paper_maker_same_venue)
         self._adverse_bps = Decimal(str(getattr(settings, "paper_maker_adverse_bps", 0) or 0))
+        self._spread_fee_buffer_bps = Decimal(
+            str(getattr(settings, "paper_maker_spread_fee_buffer_bps", 1) or 1)
+        )
         self._fair_value_enabled = bool(getattr(settings, "paper_maker_fair_value", True))
         self._fx_symbol = str(
             getattr(settings, "paper_maker_fx_symbol", "EURUSDT") or "EURUSDT"
@@ -441,13 +444,13 @@ class MakerInventoryStrategy(BaseStrategy):
                 sell_exchange=sell_snap.exchange,
             )
             return None
-        cost_bps = fee_bps + Decimal("1")
+        cost_bps = fee_bps + self._spread_fee_buffer_bps
         if cost_bps >= spread_bps:
             self._reject(
                 buy_snap.symbol,
                 "fees_eat_edge",
                 (
-                    f"Maker fees {fee_bps} bps (+1 bps buffer) leave no NET room in "
+                    f"Maker fees {fee_bps} bps (+{self._spread_fee_buffer_bps} bps buffer) leave no NET room in "
                     f"{spread_bps} bps gross edge "
                     f"(adverse {self._adverse_bps} bps applied later in NET gate)"
                 ),
