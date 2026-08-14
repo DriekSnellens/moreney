@@ -1,4 +1,4 @@
-"""Instrument registry: crypto (live), FX/equity (paper stubs when enabled)."""
+"""Instrument registry: crypto (live), FX stub, equity (Nasdaq/Yahoo when enabled)."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ class InstrumentRegistry:
                     asset_class=AssetClass.EQUITY,
                     base_asset=text.split(".")[0],
                     quote_asset="USD" if text.endswith(".US") else "EUR",
-                    venue="equity_stub",
+                    venue="nasdaq" if text.endswith(".US") else "yahoo",
                     liquidity_tier=2,
                     correlation_group=_correlation_group(text, AssetClass.EQUITY),
                     scan_interval_ms=5000.0,
@@ -120,4 +120,4 @@ class InstrumentRegistry:
     def scan_symbols(self) -> list[str]:
         """Ordered symbol list for tiered scanning (Tier-1 first)."""
         ordered = sorted(self.all(), key=lambda i: (i.liquidity_tier, i.symbol))
-        return [i.symbol for i in ordered if i.asset_class == AssetClass.CRYPTO_SPOT]
+        return [i.symbol for i in ordered]

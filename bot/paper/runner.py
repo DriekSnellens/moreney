@@ -115,6 +115,14 @@ class PaperRunner:
             if s.strip()
         ]
         self._interval = max(0.05, settings.paper_cycle_interval_ms / 1000.0)
+        equity_symbols = []
+        if getattr(settings, "global_equity_enabled", False):
+            equity_symbols = [
+                part.strip().upper()
+                for part in str(getattr(settings, "global_equity_symbols", "") or "").split(",")
+                if part.strip()
+            ]
+        self._scan_universe = list(dict.fromkeys([*self._symbols, *equity_symbols]))
         self._markout = MarkoutTracker()
         self._fx_refilled: set[UUID] = set()
         self._last_markout_bps: float | None = None
@@ -419,7 +427,7 @@ class PaperRunner:
         await self._match_and_expire_quotes()
 
         equity_before = self._portfolio.state.total_equity
-        scan_symbols = self._scan_scheduler.symbols_for_cycle(all_symbols=self._symbols)
+        scan_symbols = self._scan_scheduler.symbols_for_cycle(all_symbols=self._scan_universe)
         result = await self._engine.run_universe(scan_symbols)
         self._ingest_cycle(result, equity_before=equity_before)
 
@@ -666,6 +674,7 @@ class PaperRunner:
                 "recent_decisions": self._decision_log.export()[-10:],
                 "last_ranking": (self._last_cycle or {}).get("ranking"),
                 "funding": self._market_data.funding.snapshot(),
+                "equity": self._market_data.equity.snapshot(),
                 "funding_scan": self._funding_scan_stats(),
             },
         }

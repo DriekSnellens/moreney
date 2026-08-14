@@ -186,6 +186,8 @@ class Settings(BaseSettings):
     global_fx_pairs: str = "EURUSD,GBPUSD,USDJPY"
     global_equity_enabled: bool = False
     global_equity_symbols: str = "SPY.US,AAPL.US,SAP.DE"
+    # Nasdaq public quote API (US live bid/ask) + Yahoo chart (EU last). No API key.
+    global_equity_poll_interval_sec: float = Field(default=15.0, ge=10.0)
     global_funding_strategy_enabled: bool = True
     global_min_funding_bps: float = Field(default=3.0, ge=0)
     global_funding_poll_interval_sec: float = Field(default=60.0, ge=15.0)

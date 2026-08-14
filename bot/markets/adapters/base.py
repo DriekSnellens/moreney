@@ -78,7 +78,7 @@ class FxStubAdapter(MarketAdapter):
 
 
 class EquityStubAdapter(MarketAdapter):
-    """Placeholder equity quotes for paper architecture validation."""
+    """Offline fallback quotes. Live paper uses Nasdaq/Yahoo via EquityQuoteService."""
 
     def __init__(self, *, enabled: bool = False) -> None:
         self._enabled = enabled

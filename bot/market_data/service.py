@@ -24,6 +24,7 @@ from bot.market_data.adapters.coinbase import CoinbasePublicAdapter
 from bot.market_data.adapters.kraken import KrakenPublicAdapter
 from bot.market_data.adapters.okx import OkxPublicAdapter
 from bot.market_data.cache import MarketDataCache
+from bot.market_data.equity import EquityQuoteService
 from bot.market_data.funding import FundingRateService
 from bot.market_data.local_order_book import LocalOrderBook
 from bot.market_data.models import (
@@ -94,6 +95,8 @@ class MarketDataService:
         self._consumer_task: asyncio.Task[None] | None = None
         self._funding = FundingRateService(settings)
         self._funding_publish_task: asyncio.Task[None] | None = None
+        self._equity = EquityQuoteService(settings)
+        self._equity_publish_task: asyncio.Task[None] | None = None
 
         if not self._adapters and start_websockets:
             self._adapters = self._build_live_adapters()
@@ -142,6 +145,10 @@ class MarketDataService:
     def funding(self) -> FundingRateService:
         return self._funding
 
+    @property
+    def equity(self) -> EquityQuoteService:
+        return self._equity
+
     async def start(self) -> None:
         if self._started:
             return
@@ -152,6 +159,7 @@ class MarketDataService:
             if adapter._manager is not None:  # noqa: SLF001 — intentional live start
                 await adapter.start(self.handle_event)
         await self._start_funding(publish=self._mode == "publisher")
+        await self._start_equity(publish=self._mode == "publisher")
         self._started = True
 
     async def start_shared_consumer(self) -> None:
@@ -167,6 +175,7 @@ class MarketDataService:
             self._consumer_loop(), name="market-data-redis-consumer"
         )
         await self._start_funding(publish=False)
+        await self._start_equity(publish=False)
         # Prime once so paper start does not wait a full poll interval.
         await self.hydrate_from_redis()
         logger.info(
@@ -179,6 +188,7 @@ class MarketDataService:
     async def stop(self) -> None:
         self._started = False
         await self._funding.stop()
+        await self._equity.stop()
         if self._funding_publish_task is not None:
             self._funding_publish_task.cancel()
             try:
@@ -186,6 +196,13 @@ class MarketDataService:
             except asyncio.CancelledError:
                 pass
             self._funding_publish_task = None
+        if self._equity_publish_task is not None:
+            self._equity_publish_task.cancel()
+            try:
+                await self._equity_publish_task
+            except asyncio.CancelledError:
+                pass
+            self._equity_publish_task = None
         if self._consumer_task is not None:
             self._consumer_task.cancel()
             try:
@@ -225,6 +242,9 @@ class MarketDataService:
         rates = await self._cache.get_funding_rates()
         if rates:
             self._funding.import_rates(rates)
+        equity_quotes = await self._cache.get_equity_quotes()
+        if equity_quotes:
+            self._equity.import_quotes(equity_quotes)
 
     async def _start_funding(self, *, publish: bool) -> None:
         if not self._funding.enabled:
@@ -236,6 +256,16 @@ class MarketDataService:
                 self._funding_publish_loop(), name="funding-redis-publisher"
             )
 
+    async def _start_equity(self, *, publish: bool) -> None:
+        if not self._equity.enabled:
+            return
+        if self._mode in {"local", "publisher"}:
+            await self._equity.start()
+        if publish:
+            self._equity_publish_task = asyncio.create_task(
+                self._equity_publish_loop(), name="equity-redis-publisher"
+            )
+
     async def _funding_publish_loop(self) -> None:
         while self._started:
             try:
@@ -245,6 +275,16 @@ class MarketDataService:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("FUNDING_REDIS_PUBLISH_FAILED error=%s", exc)
             await asyncio.sleep(self._funding._poll_s)  # noqa: SLF001
+
+    async def _equity_publish_loop(self) -> None:
+        while self._started:
+            try:
+                await self._cache.set_equity_quotes(self._equity.export_quotes())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("EQUITY_REDIS_PUBLISH_FAILED error=%s", exc)
+            await asyncio.sleep(self._equity._poll_s)  # noqa: SLF001
 
     def apply_remote_book(self, exchange: str, symbol: str, book: OrderBook) -> None:
         """Replace local synchronized book from a Redis-published snapshot."""
@@ -536,6 +576,9 @@ class MarketDataService:
         Stale or unsynchronized books are omitted — strategies never see invalid data.
         """
         symbol = symbol.upper().replace("-", "").replace("/", "")
+        if self._equity.is_equity_symbol(symbol):
+            equity_snap = self._equity.snapshot_for(symbol)
+            return [equity_snap] if equity_snap is not None else []
         snapshots: list[MarketSnapshot] = []
         for exchange in self._exchanges:
             book = self.get_valid_order_book(exchange, symbol)

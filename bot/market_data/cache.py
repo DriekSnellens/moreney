@@ -71,6 +71,26 @@ class MarketDataCache:
         except json.JSONDecodeError:
             return {}
 
+    async def set_equity_quotes(self, quotes: dict[str, dict[str, str]]) -> None:
+        key = self._key("equity", "quotes")
+        await self._set(key, json.dumps(quotes))
+
+    async def get_equity_quotes(self) -> dict[str, dict[str, str]]:
+        raw = await self._get(self._key("equity", "quotes"))
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        out: dict[str, dict[str, str]] = {}
+        for sym, payload in data.items():
+            if isinstance(payload, dict):
+                out[str(sym)] = {str(k): str(v) for k, v in payload.items()}
+        return out
+
     async def _set(self, key: str, value: str) -> None:
         self._memory[key] = value
         if self._redis is None:

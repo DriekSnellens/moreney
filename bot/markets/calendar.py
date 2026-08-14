@@ -18,12 +18,12 @@ class MarketCalendarService:
 
     FX_OPEN = time(0, 0)
     FX_CLOSE = time(23, 59)
-    US_PRE = time(13, 0)
-    US_OPEN = time(14, 30)
-    US_CLOSE = time(21, 0)
-    US_AFTER = time(22, 0)
+    US_PRE = time(4, 0)
+    US_OPEN = time(9, 30)
+    US_CLOSE = time(16, 0)
+    US_AFTER = time(20, 0)
     EU_OPEN = time(8, 0)
-    EU_CLOSE = time(16, 30)
+    EU_CLOSE = time(17, 30)
 
     def phase(self, instrument: NormalizedInstrument, *, now: datetime | None = None) -> MarketSessionPhase:
         ts = now or datetime.now(UTC)
@@ -65,7 +65,10 @@ class MarketCalendarService:
         active = {AssetClass.CRYPTO_SPOT, AssetClass.CRYPTO_PERP}
         if self._fx_phase(ts) != MarketSessionPhase.CLOSED:
             active.add(AssetClass.FX)
-        if self._equity_phase_us(ts) != MarketSessionPhase.CLOSED:
+        if (
+            self._equity_phase_us(ts) != MarketSessionPhase.CLOSED
+            or self._equity_phase_eu(ts) != MarketSessionPhase.CLOSED
+        ):
             active.add(AssetClass.EQUITY)
         return active
 

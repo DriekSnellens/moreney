@@ -128,6 +128,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     ge_corr_exp = _esc(_exposure_summary(ge_exposure.get("correlation")))
     ge_decision_rows = _global_decision_rows(global_engine.get("recent_decisions") or [])
     ge_ranking_block = _global_ranking_block(global_engine.get("last_ranking"))
+    ge_equity_rows = _equity_quote_rows((global_engine.get("equity") or {}).get("quotes") or {})
 
     profit_chart = _svg_cumulative_profit(trades)
     hourly_chart = _svg_hourly_bars(hourly)
@@ -225,6 +226,12 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <article class="metric-card"><span class="label">Venue exposure</span><span class="value">{ge_venue_exp}</span></article>
         <article class="metric-card"><span class="label">Strategie exposure</span><span class="value">{ge_strategy_exp}</span></article>
         <article class="metric-card"><span class="label">Correlatie-groepen</span><span class="value">{ge_corr_exp}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Aandeel</th><th>Bid</th><th>Ask</th><th>Last</th><th>Bron</th></tr></thead>
+          <tbody>{ge_equity_rows}</tbody>
+        </table>
       </div>
       <div class="table-wrap" style="margin-top:1rem">
         <table>
@@ -1069,6 +1076,32 @@ def _global_decision_rows(decisions: list[Any]) -> str:
     return "".join(rows) or "<tr><td colspan='8' class='empty'>Nog geen engine-beslissingen</td></tr>"
 
 
+def _equity_quote_rows(quotes: dict[str, Any]) -> str:
+    if not quotes:
+        return (
+            "<tr><td colspan='5' class='empty'>"
+            "Geen aandelenfeed (GLOBAL_EQUITY_ENABLED uit, of nog geen quote)"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for symbol, payload in sorted(quotes.items()):
+        if not isinstance(payload, dict):
+            continue
+        source = str(payload.get("source") or "—")
+        rows.append(
+            "<tr>"
+            f"<td><strong>{_esc(symbol)}</strong></td>"
+            f"<td class='num'>{_esc(payload.get('bid'))}</td>"
+            f"<td class='num'>{_esc(payload.get('ask'))}</td>"
+            f"<td class='num'>{_esc(payload.get('last'))}</td>"
+            f"<td>{_esc(source)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or (
+        "<tr><td colspan='5' class='empty'>Geen aandelenfeed</td></tr>"
+    )
+
+
 def _inventory_rows(venues: dict[str, Any]) -> str:
     if not venues:
         return "<tr><td colspan='4' class='empty'>Nog geen venue-voorraad</td></tr>"
@@ -1155,6 +1188,9 @@ def _venue_label(exchange: Any) -> str:
         "bitvavo": "Bitvavo",
         "okx": "OKX",
         "bybit": "Bybit",
+        "nasdaq": "Nasdaq",
+        "yahoo": "Yahoo",
+        "equity_stub": "Equity stub",
     }.get(key, str(exchange or "—").title())
 
 
