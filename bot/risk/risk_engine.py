@@ -59,6 +59,8 @@ class RiskEngine:
             Decimal(str(settings.risk_warning_drawdown_percent)) / _HUNDRED
         )
         self._max_trades_per_minute = settings.max_trades_per_minute
+        self._allow_partial = bool(getattr(settings, "risk_allow_partial_sizing", True))
+        self._partial_min_pct = Decimal(str(getattr(settings, "risk_partial_min_notional_pct", 10))) / _HUNDRED
 
     @property
     def kill_switch(self) -> KillSwitch:
@@ -236,6 +238,19 @@ class RiskEngine:
             ctx.liquidity_base is not None
             and opportunity.quantity > ctx.liquidity_base
         ):
+            allowed_qty = ctx.liquidity_base
+            if self._allow_partial and self._partial_allowed(opportunity, allowed_qty):
+                warnings.append(
+                    f"Partial fill: qty capped to liquidity {allowed_qty}"
+                )
+                return await self._approve_partial(
+                    opportunity,
+                    portfolio,
+                    ctx,
+                    allowed_qty=allowed_qty,
+                    warnings=warnings,
+                    score=score,
+                )
             return await self._reject(
                 opportunity,
                 reason_code=RiskRejectReason.INSUFFICIENT_LIQUIDITY,
@@ -353,6 +368,21 @@ class RiskEngine:
 
         # --- Position / exposure limits ---
         limits = self._limits.evaluate(opportunity, portfolio)
+        partial_codes = {"MAX_POSITION_SIZE", "MAX_POSITION_PERCENT", "MAX_TOTAL_EXPOSURE"}
+        if set(limits.breached_codes) & partial_codes and self._allow_partial:
+            if self._partial_allowed(opportunity, limits.allowed_quantity):
+                warnings.append(
+                    f"Partial size: {limits.allowed_quantity} of {opportunity.quantity}"
+                )
+                return await self._approve_partial(
+                    opportunity,
+                    portfolio,
+                    ctx,
+                    allowed_qty=limits.allowed_quantity,
+                    warnings=warnings,
+                    score=score,
+                )
+
         if "MAX_POSITION_SIZE" in limits.breached_codes:
             return await self._reject(
                 opportunity,
@@ -461,6 +491,45 @@ class RiskEngine:
         self._kill_switch.update_conditions(conditions)
 
         # Do not auto-resume here — only escalate toward pause/stop.
+
+    def _partial_allowed(self, opportunity: TradeOpportunity, allowed_qty: Decimal) -> bool:
+        if allowed_qty <= 0:
+            return False
+        requested = opportunity.quantity
+        if allowed_qty >= requested:
+            return False
+        min_qty = requested * self._partial_min_pct
+        return allowed_qty >= min_qty
+
+    async def _approve_partial(
+        self,
+        opportunity: TradeOpportunity,
+        portfolio: PortfolioSnapshot,
+        ctx: RiskContext,
+        *,
+        allowed_qty: Decimal,
+        warnings: list[str],
+        score: Decimal,
+    ) -> RiskDecision:
+        limits = self._limits.evaluate(
+            opportunity.model_copy(update={"quantity": allowed_qty}),
+            portfolio,
+        )
+        daily_limit = self._limits.daily_loss_limit(portfolio.equity_usd, self._settings)
+        max_loss = min(limits.allowed_notional, daily_limit)
+        score += Decimal(str(min(40, int(ctx.estimated_slippage_pct * 10))))
+        self._trade_timestamps.append(time.monotonic())
+        return RiskDecision(
+            opportunity_id=opportunity.id,
+            status=RiskDecisionStatus.APPROVED,
+            reasons=["Partial approval: size reduced to fit limits"],
+            max_allowed_quantity=allowed_qty,
+            rejection_reason=None,
+            risk_score=score,
+            position_size_allowed=allowed_qty,
+            maximum_loss=max_loss,
+            warnings=warnings,
+        )
 
     async def _reject(
         self,

@@ -36,9 +36,19 @@ from bot.risk.risk_engine import RiskEngine
 from bot.strategies.arbitrage import CrossExchangeArbitrageStrategy
 from bot.strategies.maker_inventory import MakerInventoryStrategy
 from bot.strategies.triangle_bridge import CompositeDeskStrategy, TriangleBridgeStrategy
+from bot.strategies.global_composite import GlobalCompositeStrategy
+from bot.strategies.funding_basis import FundingBasisStrategy
+from bot.strategies.fx_relative_value import FxRelativeValueStrategy
+from bot.strategies.equity_mean_reversion import EquityMeanReversionStrategy
 from bot.paper.markout import MarkoutTracker
 from bot.core.venue_fees import set_fee_tier
 from bot.portfolio.venue_ledger import infer_quote_asset
+from bot.opportunity.engine import GlobalOpportunityEngine
+from bot.opportunity.decision_log import OpportunityDecisionLogger
+from bot.opportunity.scanner import TieredScanScheduler
+from bot.markets.registry import InstrumentRegistry
+from bot.markets.calendar import MarketCalendarService
+from bot.regime.detector import RegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +101,6 @@ class PaperRunner:
             # Align risk absolute floor with maker NET threshold (not taker-arb defaults).
             self._risk = RiskEngine(gate, kill_switch=risk_engine.kill_switch)
         self._provider = RealtimeMarketDataProvider(market_data)
-        self._engine = TradingEngine(
-            market_data=self._provider,
-            strategy=self._strategy,
-            profitability=self._profitability,
-            risk=self._risk,
-            portfolio=self._portfolio,
-            executor=self._executor,
-        )
-
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._last_cycle: dict[str, Any] | None = None
@@ -114,9 +115,69 @@ class PaperRunner:
         self._markout = MarkoutTracker()
         self._fx_refilled: set[UUID] = set()
         self._last_markout_bps: float | None = None
+        self._instrument_registry = InstrumentRegistry(settings)
+        self._market_calendar = MarketCalendarService()
+        self._regime = RegimeDetector()
+        self._scan_scheduler = TieredScanScheduler(
+            settings, self._instrument_registry, self._market_calendar
+        )
+        self._decision_log = OpportunityDecisionLogger()
+        self._opportunity_engine = self._build_opportunity_engine(gate)
         set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
+        self._engine = TradingEngine(
+            market_data=self._provider,
+            strategy=self._strategy,
+            profitability=self._profitability,
+            risk=self._risk,
+            portfolio=self._portfolio,
+            executor=self._executor,
+            opportunity_engine=(
+                self._opportunity_engine
+                if settings.global_opportunity_engine_enabled
+                else None
+            ),
+        )
+
+    def _build_opportunity_engine(self, gate: Settings) -> GlobalOpportunityEngine:
+        win_rate = None
+        if self._markout.snapshot().get("samples", 0):
+            try:
+                samples = int(self._markout.snapshot().get("samples", 0))
+                if samples > 0:
+                    win_rate = 0.55
+            except (TypeError, ValueError):
+                pass
+        engine = GlobalOpportunityEngine(
+            gate,
+            profitability=self._profitability,
+            risk=self._risk,
+            registry=self._instrument_registry,
+            calendar=self._market_calendar,
+            regime=self._regime,
+            decision_log=self._decision_log,
+            markout_win_rate=win_rate,
+        )
+        return engine
 
     def _build_strategy(self):
+        if getattr(self._settings, "global_use_global_composite", True):
+            children: list = []
+            if self._settings.paper_maker_enabled:
+                maker = MakerInventoryStrategy(self._settings)
+                children.append(maker)
+                if getattr(self._settings, "paper_triangle_enabled", False):
+                    children.append(TriangleBridgeStrategy(self._settings))
+            else:
+                children.append(CrossExchangeArbitrageStrategy(self._settings))
+            if getattr(self._settings, "global_funding_strategy_enabled", True):
+                children.append(FundingBasisStrategy(self._settings))
+            if getattr(self._settings, "global_fx_enabled", False):
+                children.append(FxRelativeValueStrategy(self._settings))
+            if getattr(self._settings, "global_equity_enabled", False):
+                children.append(EquityMeanReversionStrategy(self._settings))
+            if len(children) == 1:
+                return children[0]
+            return GlobalCompositeStrategy(self._settings, children=children)
         if self._settings.paper_maker_enabled:
             maker = MakerInventoryStrategy(self._settings)
             if getattr(self._settings, "paper_triangle_enabled", False):
@@ -346,7 +407,8 @@ class PaperRunner:
         await self._match_and_expire_quotes()
 
         equity_before = self._portfolio.state.total_equity
-        result = await self._engine.run_universe(self._symbols)
+        scan_symbols = self._scan_scheduler.symbols_for_cycle(all_symbols=self._symbols)
+        result = await self._engine.run_universe(scan_symbols)
         self._ingest_cycle(result, equity_before=equity_before)
 
         risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
@@ -576,6 +638,19 @@ class PaperRunner:
             ),
             "fee_tier": getattr(self._settings, "paper_fee_tier", "retail"),
             "live_forecast": self._live_forecast(snap),
+            "global_engine": {
+                "enabled": self._settings.global_opportunity_engine_enabled,
+                "regime": (
+                    self._opportunity_engine.global_regime.value
+                    if hasattr(self._opportunity_engine, "global_regime")
+                    else "normal"
+                ),
+                "active_sessions": [
+                    c.value for c in self._market_calendar.active_asset_classes()
+                ],
+                "portfolio_exposure": self._opportunity_engine.portfolio_gate.snapshot(),
+                "recent_decisions": self._decision_log.export()[-10:],
+            },
         }
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
@@ -901,6 +976,7 @@ class PaperRunner:
         gate = self._gate_settings()
         self._profitability = DefaultProfitabilityEngine(gate)
         self._risk = RiskEngine(gate, kill_switch=self._risk.kill_switch)
+        self._opportunity_engine = self._build_opportunity_engine(gate)
         self._engine = TradingEngine(
             market_data=self._provider,
             strategy=self._strategy,
@@ -908,6 +984,11 @@ class PaperRunner:
             risk=self._risk,
             portfolio=self._portfolio,
             executor=self._executor,
+            opportunity_engine=(
+                self._opportunity_engine
+                if self._settings.global_opportunity_engine_enabled
+                else None
+            ),
         )
         logger.info("MARKOUT_GATE_REBUILT adverse_bps=%s", suggested)
 

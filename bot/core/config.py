@@ -165,6 +165,33 @@ class Settings(BaseSettings):
     dashboard_basic_auth_password: SecretStr | None = None
     dashboard_session_secret: SecretStr | None = None
 
+    # --- Global opportunity engine (multi-market architecture) ---
+    global_opportunity_engine_enabled: bool = True
+    global_tiered_scan_enabled: bool = True
+    global_fx_enabled: bool = False
+    global_fx_pairs: str = "EURUSD,GBPUSD,USDJPY"
+    global_equity_enabled: bool = False
+    global_equity_symbols: str = "SPY.US,AAPL.US,SAP.DE"
+    global_funding_strategy_enabled: bool = True
+    global_min_funding_bps: float = Field(default=3.0, ge=0)
+    global_fx_z_threshold: float = Field(default=1.5, gt=0)
+    global_equity_deviation_bps: float = Field(default=30.0, gt=0)
+    global_transfer_fee_bps: float = Field(default=10.0, ge=0)
+    global_transfer_latency_bps: float = Field(default=5.0, ge=0)
+    global_max_correlation_exposure_pct: float = Field(default=40.0, gt=0, le=100)
+    global_max_strategy_exposure_pct: float = Field(default=50.0, gt=0, le=100)
+    global_max_venue_exposure_pct: float = Field(default=35.0, gt=0, le=100)
+    global_use_global_composite: bool = True
+    opportunity_default_win_prob: float = Field(default=0.55, ge=0.05, le=0.95)
+    opportunity_default_loss_pct: float = Field(default=0.002, ge=0)
+    opportunity_min_expected_value: float = Field(default=0.0, ge=0)
+    opportunity_min_score: float = Field(default=0.0, ge=0)
+    opportunity_max_executions_per_cycle: int = Field(default=3, ge=1, le=20)
+    opportunity_max_candidates_per_cycle: int = Field(default=20, ge=1, le=100)
+    opportunity_decay_ms: int = Field(default=5000, ge=0)
+    risk_allow_partial_sizing: bool = True
+    risk_partial_min_notional_pct: float = Field(default=10.0, ge=1, le=100)
+
     # Realtime public market data (no private APIs)
     # local = each process owns WebSockets (tests / single-instance)
     # publisher = one process owns WebSockets and writes Redis

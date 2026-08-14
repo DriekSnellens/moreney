@@ -65,6 +65,7 @@ class TradingEngine:
         risk: RiskEngine,
         portfolio: PortfolioService,
         executor: Executor,
+        opportunity_engine: Any | None = None,
     ) -> None:
         self._market_data = market_data
         self._strategy = strategy
@@ -72,6 +73,7 @@ class TradingEngine:
         self._risk = risk
         self._portfolio = portfolio
         self._executor = executor
+        self._opportunity_engine = opportunity_engine
 
     @property
     def paper_portfolio(self) -> PaperPortfolio | None:
@@ -140,6 +142,50 @@ class TradingEngine:
         result.opportunities = opportunities
         processed: list[TradeOpportunity] = []
 
+        if self._opportunity_engine is not None and opportunities:
+            ranked, _all_scored = await self._opportunity_engine.evaluate_batch(
+                opportunities,
+                portfolio,
+                venue_snapshots=venue_snapshots,
+                enrich_risk=self._enrich_for_risk,
+            )
+            for scored in ranked:
+                opportunity = scored.opportunity
+                profitability = scored.profitability
+                decision = scored.risk_decision
+                if decision is None or not decision.approved:
+                    continue
+                if self._should_skip_maker_quote(opportunity):
+                    continue
+                processed.append(opportunity)
+                result.profitability.append(profitability)
+                result.risk_decisions.append(decision)
+                paper = self.paper_portfolio
+                if paper is not None and opportunity.market is not None:
+                    paper.set_mark_price(opportunity.symbol, opportunity.market.last)
+                buy_book = self._resolve_execution_book(opportunity, venue_snapshots, primary)
+                execution = await self._execute_opportunity(
+                    opportunity,
+                    decision,
+                    snapshot_book=primary,
+                    order_book=buy_book,
+                    venue_snapshots=venue_snapshots,
+                    cycle_result=result,
+                )
+                result.executions.append(execution)
+                self._collect_order_fill(result, execution)
+                gate = getattr(self._opportunity_engine, "portfolio_gate", None)
+                if gate is not None:
+                    notional = opportunity.quantity * opportunity.entry_price
+                    if decision.max_allowed_quantity and decision.max_allowed_quantity < opportunity.quantity:
+                        notional = decision.max_allowed_quantity * opportunity.entry_price
+                    gate.record_fill(scored, notional)
+                portfolio = await self._portfolio.get_snapshot()
+            result.opportunities = processed
+            if self.paper_portfolio is not None:
+                result.portfolio_equity = self.paper_portfolio.state.total_equity
+            return result
+
         for opportunity in opportunities:
             if self._should_skip_maker_quote(opportunity):
                 continue
@@ -163,6 +209,17 @@ class TradingEngine:
             result.profitability.append(profitability)
 
             opportunity, risk_context = self._enrich_for_risk(opportunity, venue_snapshots)
+            slip_pct = (
+                profitability.slippage_usd
+                / (opportunity.quantity * opportunity.entry_price)
+                * Decimal("100")
+                if opportunity.quantity * opportunity.entry_price > 0
+                else Decimal("0")
+            )
+            if risk_context is not None:
+                risk_context = risk_context.model_copy(
+                    update={"estimated_slippage_pct": slip_pct}
+                )
             decision = await self._evaluate_risk(
                 opportunity, profitability, portfolio, risk_context
             )
@@ -413,6 +470,7 @@ class TradingEngine:
             "maker_inventory",
             "triangle_bridge",
             "desk_composite",
+            "global_composite",
         }:
             return True
         return bool((opportunity.metadata or {}).get("post_only"))

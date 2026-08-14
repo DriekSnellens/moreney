@@ -389,6 +389,17 @@ async def paper_opportunities(
     return {"opportunities": [r.model_dump(mode="json") for r in rows]}
 
 
+@app.get("/paper/opportunity-decisions")
+async def paper_opportunity_decisions(
+    limit: int = Query(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    runner = get_paper_runner()
+    log = getattr(runner, "_decision_log", None)
+    if log is None:
+        return {"decisions": []}
+    return {"decisions": log.export()[-limit:]}
+
+
 @app.get("/paper/trades")
 async def paper_trades(limit: int = Query(default=100, ge=1, le=1000)) -> dict[str, Any]:
     return {"trades": get_paper_runner().tracker.trades(limit=limit)}
