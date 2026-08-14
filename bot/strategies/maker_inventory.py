@@ -348,26 +348,65 @@ class MakerInventoryStrategy(BaseStrategy):
         assert buy_snap.exchange is not None
         assert sell_snap.exchange is not None
 
-        buy_price = buy_snap.order_book.bids[0].price
-        sell_price = sell_snap.order_book.asks[0].price
-        buy_touch = buy_snap.order_book.bids[0].amount
-        sell_touch = sell_snap.order_book.asks[0].amount
-
-        level = int(getattr(self._settings, "paper_maker_book_level", 0) or 0)
-        if level > 0:
-            buy_lvl = min(level, len(buy_snap.order_book.bids) - 1)
-            sell_lvl = min(level, len(sell_snap.order_book.asks) - 1)
-            buy_price = buy_snap.order_book.bids[buy_lvl].price
-            sell_price = sell_snap.order_book.asks[sell_lvl].price
-            buy_touch = sum(
-                (lvl.amount for lvl in buy_snap.order_book.bids[: buy_lvl + 1]),
-                _ZERO,
+        # Join the tightest level that still clears retail maker fees. Deeper
+        # levels exist only as fallback when the touch is too tight.
+        max_level = int(getattr(self._settings, "paper_maker_book_level", 0) or 0)
+        seen: set[tuple[Decimal, Decimal]] = set()
+        for level in range(0, max_level + 1):
+            quoted = self._depth_quote(buy_snap.order_book, sell_snap.order_book, level)
+            if quoted is None:
+                continue
+            buy_price, sell_price, buy_touch, sell_touch = quoted
+            key = (buy_price, sell_price)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidate = self._candidate_from_quote(
+                buy_snap,
+                sell_snap,
+                buy_price=buy_price,
+                sell_price=sell_price,
+                buy_touch=buy_touch,
+                sell_touch=sell_touch,
+                equity=equity,
+                inventory=inventory,
+                fair_value=fair_value,
             )
-            sell_touch = sum(
-                (lvl.amount for lvl in sell_snap.order_book.asks[: sell_lvl + 1]),
-                _ZERO,
-            )
+            if candidate is not None:
+                return candidate
+        return None
 
+    @staticmethod
+    def _depth_quote(
+        buy_book: object,
+        sell_book: object,
+        level: int,
+    ) -> tuple[Decimal, Decimal, Decimal, Decimal] | None:
+        bids = getattr(buy_book, "bids", None) or []
+        asks = getattr(sell_book, "asks", None) or []
+        if not bids or not asks:
+            return None
+        buy_lvl = min(level, len(bids) - 1)
+        sell_lvl = min(level, len(asks) - 1)
+        buy_price = bids[buy_lvl].price
+        sell_price = asks[sell_lvl].price
+        buy_touch = sum((lvl.amount for lvl in bids[: buy_lvl + 1]), _ZERO)
+        sell_touch = sum((lvl.amount for lvl in asks[: sell_lvl + 1]), _ZERO)
+        return buy_price, sell_price, buy_touch, sell_touch
+
+    def _candidate_from_quote(
+        self,
+        buy_snap: MarketSnapshot,
+        sell_snap: MarketSnapshot,
+        *,
+        buy_price: Decimal,
+        sell_price: Decimal,
+        buy_touch: Decimal,
+        sell_touch: Decimal,
+        equity: Decimal | None = None,
+        inventory: object = None,
+        fair_value: Decimal | None = None,
+    ) -> MakerCandidate | None:
         if sell_price <= buy_price:
             self._reject(
                 buy_snap.symbol,

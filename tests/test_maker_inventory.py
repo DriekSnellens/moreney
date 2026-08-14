@@ -545,3 +545,40 @@ async def test_retail_same_venue_roundtrip_is_net_positive_after_trade_through()
     gross = (sell_px - buy_px) * opp.quantity
     assert gross - fees > 0
 
+
+@pytest.mark.asyncio
+async def test_joins_touch_when_retail_spread_clears_fees() -> None:
+    """€300/day needs fills: quote at the touch when that spread already pays fees."""
+    set_fee_tier("retail")
+    # Touch ~45 bps > Binance 20 bps RT; level 1 would be a rarer through.
+    book = OrderBook(
+        symbol="ATOMEUR",
+        bids=[
+            OrderBookLevel(price=Decimal("1.330"), amount=Decimal("80")),
+            OrderBookLevel(price=Decimal("1.320"), amount=Decimal("80")),
+        ],
+        asks=[
+            OrderBookLevel(price=Decimal("1.336"), amount=Decimal("80")),
+            OrderBookLevel(price=Decimal("1.350"), amount=Decimal("80")),
+        ],
+    )
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            paper_maker_book_level=1,
+            paper_maker_max_edge_bps=80,
+            paper_maker_min_profit_eur=0.001,
+            paper_maker_adverse_bps=4,
+            paper_fee_tier="retail",
+            arbitrage_max_quantity=10000,
+            arbitrage_position_pct=8,
+            arbitrage_min_liquidity_base=0.0001,
+        )
+    )
+    opps = await strategy.evaluate_markets(
+        [top_of_book_snapshot(exchange="binance", symbol="ATOMEUR", order_book=book)],
+        equity=Decimal("25000"),
+    )
+    assert opps
+    assert opps[0].entry_price == Decimal("1.330")
+    assert opps[0].expected_exit_price == Decimal("1.336")
+

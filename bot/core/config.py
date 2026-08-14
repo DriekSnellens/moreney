@@ -110,7 +110,8 @@ class Settings(BaseSettings):
     paper_maker_rest_ms: float = Field(default=0.0, ge=0)
     # At-touch queue fills (0 = disabled; live makers rarely get full touch size).
     paper_maker_queue_fill_pct: float = Field(default=0.0, ge=0, le=1)
-    # Fraction of remaining size filled when the book trades through the quote.
+    # Fraction filled when the book prints through a resting quote (price priority).
+    # 1.0 = full size; at-touch queue remains a separate knob (default 0).
     paper_maker_trade_through_fill_pct: float = Field(default=0.20, ge=0, le=1)
     paper_maker_max_age_ms: float = Field(default=2500.0, ge=0)
     paper_maker_min_spread_bps: float = Field(default=3.0, ge=0)

@@ -690,39 +690,49 @@ class PaperRunner:
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
         """Project live-equivalent PnL from the conservative paper model."""
+        from bot.paper.capacity import TARGET_DAILY_EUR, hits_daily_target, project_daily_pnl
+
         runtime = max(self.runtime_seconds(), 1.0)
         hours = Decimal(str(runtime)) / Decimal("3600")
         net = snap.net_pnl
         per_hour = net / hours if hours > 0 else Decimal("0")
-        per_day = per_hour * Decimal("24")
+        per_day = project_daily_pnl(net, runtime) if runtime >= 120 else Decimal("0")
         start = snap.starting_equity
         day_ret = (per_day / start * Decimal("100")) if start > 0 else Decimal("0")
         if snap.trade_count >= 20 and runtime >= 1800:
             confidence = "medium"
             note = (
-                "Gebaseerd op trade-through fills, maker-fees, max 30 bps edge, "
-                "eenzijdige fills afgesloten als taker. Geen garantie."
+                "Gebaseerd op trade-through fills, maker-fees, max 30 bps edge. "
+                "Geen garantie."
             )
+        elif snap.trade_count >= 2 and runtime >= 120:
+            confidence = "low"
+            if hits_daily_target(per_day):
+                note = (
+                    f"Run-rate ≥ €{TARGET_DAILY_EUR}/dag op deze window "
+                    f"(retail maker, price-priority through). Geen garantie."
+                )
+            else:
+                note = (
+                    f"Pad naar €{TARGET_DAILY_EUR}/dag: huidige run-rate "
+                    f"€{per_day:.2f}/dag. Meer rustende quotes + through-fills "
+                    "moeten dit tillen."
+                )
         elif snap.trade_count == 0 and runtime >= 120:
             confidence = "medium"
             note = (
-                "Geen live-haalbare maker-deals gevonden: retail-fees (≈16–30 bps "
-                "heen-en-weer) eten de echte edges op publieke EUR-boeken. "
-                "Verwachte winst met echt geld ≈ €0 tot licht negatief."
+                "Nog geen fills. Retail-fees (≈16–30 bps heen-en-weer) moeten "
+                "door de spread. Quotes staan; wachten op trade-through."
             )
             per_hour = Decimal("0")
             per_day = Decimal("0")
             day_ret = Decimal("0")
-        elif snap.trade_count >= 5 and runtime >= 600:
-            confidence = "low"
-            note = "Nog weinig data; richtinggevende live-inschatting."
         else:
             confidence = "very_low"
             note = (
-                "Te vroeg om te extrapoleren. Getoonde winst is wel live-conservatief "
-                "(trade-through + one-leg taker exits)."
+                "Te vroeg om te extrapoleren. Model is live-conservatief op fees "
+                "(retail) en vult alleen als de markt door de quote heen handelt."
             )
-            # Do not annualize a handful of fills into a fake daily forecast.
             per_hour = Decimal("0")
             per_day = Decimal("0")
             day_ret = Decimal("0")
@@ -737,11 +747,11 @@ class PaperRunner:
             "note": note,
             "runtime_seconds": runtime,
             "assumptions": [
-                "Alleen maker-fills als de markt door je prijs heen handelt",
+                "Retail maker fees; rebate/VIP niet gebruikt",
+                "Alleen fill als de markt door de rustende prijs heen handelt (price priority)",
                 "Geen at-touch queue fills",
-                "Edges > 30 bps afgewezen als stale feed",
-                "Same-venue MM alleen als spread fees + buffer cleart",
-                "Eén been gevuld → tegengestelde exit met taker + 6 bps adverse",
+                "Join het dichtstbijzijnde book-level dat fees cleart",
+                "Inventory vasthouden; geen one-leg taker dump",
             ],
         }
 
