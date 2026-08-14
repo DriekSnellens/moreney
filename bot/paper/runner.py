@@ -568,6 +568,7 @@ class PaperRunner:
             "universe_scan": True,
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else None,
             "reduce_only": self._hmm_reduce_only,
+            "inventory_target_pct": self._hmm_inventory_target,
         }
         if self._cycle_count % 5 == 0:
             self._persist()
