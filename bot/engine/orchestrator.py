@@ -34,6 +34,7 @@ from bot.core.models import (
 )
 from bot.execution.executor import ExecutionService
 from bot.execution.paper_executor import PaperExecutor
+from bot.opportunity.engine import GlobalOpportunityEngine
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
 
@@ -51,6 +52,7 @@ class TradeCycleResult:
     fills: list[Fill] = field(default_factory=list)
     rejected: list[tuple[TradeOpportunity, RiskDecision]] = field(default_factory=list)
     portfolio_equity: Decimal | None = None
+    opportunity_ranking: dict[str, Any] | None = None
 
 
 class TradingEngine:
@@ -143,11 +145,16 @@ class TradingEngine:
         processed: list[TradeOpportunity] = []
 
         if self._opportunity_engine is not None and opportunities:
-            ranked, _all_scored = await self._opportunity_engine.evaluate_batch(
+            ranked, all_scored = await self._opportunity_engine.evaluate_batch(
                 opportunities,
                 portfolio,
                 venue_snapshots=venue_snapshots,
                 enrich_risk=self._enrich_for_risk,
+            )
+            result.opportunity_ranking = GlobalOpportunityEngine.ranking_summary(
+                ranked,
+                all_scored,
+                input_count=len(opportunities),
             )
             for scored in ranked:
                 opportunity = scored.opportunity

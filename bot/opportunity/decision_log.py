@@ -54,3 +54,12 @@ class OpportunityDecisionLogger:
 
     def export(self) -> list[dict]:
         return [d.model_dump(mode="json") for d in self._entries]
+
+    def import_entries(self, entries: list[dict]) -> None:
+        """Restore persisted decisions (survives restart)."""
+        self._entries.clear()
+        for raw in entries:
+            try:
+                self._entries.append(OpportunityDecision.model_validate(raw))
+            except Exception:
+                continue

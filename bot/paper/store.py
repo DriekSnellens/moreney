@@ -61,6 +61,7 @@ class PaperTradingStore:
         session_started_at: str | None,
         errors: list[str],
         runtime_seconds: float,
+        decision_log: list[dict] | None = None,
     ) -> None:
         """Write full paper session state to disk (survives restart)."""
         self.session_running = session_running
@@ -82,6 +83,7 @@ class PaperTradingStore:
             "runtime_seconds": runtime_seconds,
             "portfolio": _portfolio_dict(portfolio),
             "tracker": tracker.export_state(),
+            "decision_log": decision_log or [],
             "orders": {
                 str(k): _record_dict(v) for k, v in self.memory.orders.items()
             },
@@ -171,6 +173,7 @@ class PaperTradingStore:
             "session_started_at": self.session_started_at,
             "errors": self.errors,
             "runtime_seconds": self.runtime_seconds,
+            "decision_log": list(raw.get("decision_log") or []),
         }
         logger.info(
             "PAPER_STATE_LOADED path=%s equity=%s opportunities=%s",

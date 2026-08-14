@@ -122,6 +122,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     ge_strategy_exp = _esc(_exposure_summary(ge_exposure.get("strategy")))
     ge_corr_exp = _esc(_exposure_summary(ge_exposure.get("correlation")))
     ge_decision_rows = _global_decision_rows(global_engine.get("recent_decisions") or [])
+    ge_ranking_block = _global_ranking_block(global_engine.get("last_ranking"))
 
     profit_chart = _svg_cumulative_profit(trades)
     hourly_chart = _svg_hourly_bars(hourly)
@@ -227,6 +228,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         </table>
       </div>
       <p class="forecast-note">Laatste beslissingen uit de EV-ranker. Volledige log: <a class="link-lite" href="/paper/opportunity-decisions">/paper/opportunity-decisions</a></p>
+      {ge_ranking_block}
     </section>
 
     <section class="panel">
@@ -952,6 +954,39 @@ def _exposure_summary(exposure: Any) -> str:
             continue
         parts.append(f"{key}={value}")
     return ", ".join(parts[:4]) or "—"
+
+
+def _global_ranking_block(ranking: Any) -> str:
+    if not ranking or not isinstance(ranking, dict):
+        return ""
+    top = ranking.get("top") or []
+    if not top:
+        return (
+            '<p class="forecast-note">Laatste rank-batch: '
+            f'{_esc(ranking.get("input_candidates", 0))} kandidaten, '
+            f'{_esc(ranking.get("scored", 0))} gescoord.</p>'
+        )
+    rows = "".join(
+        "<tr>"
+        f"<td class='num'>{_esc(item.get('rank'))}</td>"
+        f"<td><strong>{_esc(item.get('symbol'))}</strong></td>"
+        f"<td>{_esc(_strategy_label(item.get('strategy')))}</td>"
+        f"<td class='num'>{_esc_fmt(item.get('expected_value'), 'money')}</td>"
+        f"<td class='num'>{_esc_fmt(item.get('score'), 'money')}</td>"
+        f"<td class='num'>{_esc_fmt(item.get('net_profit_usd'), 'money')}</td>"
+        "</tr>"
+        for item in top
+    )
+    return f"""
+      <div class="table-wrap" style="margin-top:1rem">
+        <h3 style="font-size:0.95rem;margin:0 0 0.5rem">Laatste EV-rank (top {len(top)})</h3>
+        <table>
+          <thead><tr><th>#</th><th>Symbool</th><th>Strategie</th><th>EV</th><th>Score</th><th>Net</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+        <p class="forecast-note">Batch: {_esc(ranking.get('input_candidates', 0))} in → {_esc(ranking.get('approved', 0))} goedgekeurd → {_esc(ranking.get('ranked_for_execution', 0))} uitvoerbaar</p>
+      </div>
+    """
 
 
 def _global_decision_rows(decisions: list[Any]) -> str:

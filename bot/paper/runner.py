@@ -76,12 +76,15 @@ class PaperRunner:
         self._store = store or PaperTradingStore(settings)
 
         starting = Decimal(str(settings.paper_starting_eur))
+        self._decision_log = OpportunityDecisionLogger()
         loaded = self._store.load(settings)
         if loaded is not None:
             self._portfolio, self._tracker, meta = loaded
             self._session_started_at = meta.get("session_started_at")
             self._errors = list(meta.get("errors") or [])
             self._accumulated_runtime = float(meta.get("runtime_seconds") or 0)
+            if meta.get("decision_log"):
+                self._decision_log.import_entries(meta["decision_log"])
         else:
             self._portfolio = portfolio or PaperPortfolio(settings, starting_eur=starting)
             self._tracker = tracker or PerformanceTracker(
@@ -121,7 +124,6 @@ class PaperRunner:
         self._scan_scheduler = TieredScanScheduler(
             settings, self._instrument_registry, self._market_calendar
         )
-        self._decision_log = OpportunityDecisionLogger()
         self._opportunity_engine = self._build_opportunity_engine(gate)
         set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
         self._engine = TradingEngine(
@@ -483,6 +485,7 @@ class PaperRunner:
             "symbols": cycle_results,
             "equity": str(self._portfolio.state.total_equity),
             "scan": scan,
+            "ranking": result.opportunity_ranking,
             "real_exchange_order": False,
             "execution_mode": ExecutionMode.PAPER.value,
             "universe_scan": True,
@@ -578,6 +581,7 @@ class PaperRunner:
             session_started_at=self._session_started_at,
             errors=self._errors,
             runtime_seconds=self.runtime_seconds(),
+            decision_log=self._decision_log.export(),
         )
 
 
@@ -650,6 +654,7 @@ class PaperRunner:
                 ],
                 "portfolio_exposure": self._opportunity_engine.portfolio_gate.snapshot(),
                 "recent_decisions": self._decision_log.export()[-10:],
+                "last_ranking": (self._last_cycle or {}).get("ranking"),
             },
         }
 

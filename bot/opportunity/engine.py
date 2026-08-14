@@ -232,6 +232,39 @@ class GlobalOpportunityEngine:
         max_exec = int(getattr(self._settings, "opportunity_max_executions_per_cycle", 3) or 3)
         return ranked[:max_exec], scored
 
+    @staticmethod
+    def ranking_summary(
+        ranked: list[ScoredOpportunity],
+        all_scored: list[ScoredOpportunity],
+        *,
+        input_count: int,
+    ) -> dict[str, object]:
+        """Compact Phase-1 batch stats for status/dashboard."""
+        approved = sum(
+            1
+            for s in all_scored
+            if s.risk_decision is not None and s.risk_decision.approved
+        )
+        top = [
+            {
+                "rank": s.rank,
+                "symbol": s.opportunity.symbol,
+                "strategy": s.opportunity.strategy_name,
+                "expected_value": str(s.expected_value),
+                "score": str(s.score),
+                "probability_profit": s.probability_profit,
+                "net_profit_usd": str(s.profitability.net_profit_usd),
+            }
+            for s in ranked[:5]
+        ]
+        return {
+            "input_candidates": input_count,
+            "scored": len(all_scored),
+            "approved": approved,
+            "ranked_for_execution": len(ranked),
+            "top": top,
+        }
+
 
 def _empty_profitability(opportunity: TradeOpportunity) -> ProfitabilityResult:
     return ProfitabilityResult(

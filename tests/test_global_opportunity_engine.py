@@ -14,6 +14,7 @@ from bot.markets.registry import InstrumentRegistry
 from bot.opportunity.decision_log import OpportunityDecisionLogger
 from bot.opportunity.engine import GlobalOpportunityEngine
 from bot.opportunity.ev_engine import ExpectedValueEngine
+from bot.opportunity.portfolio_gate import PortfolioExposureGate
 from bot.opportunity.ranker import OpportunityRanker
 from bot.opportunity.scanner import TieredScanScheduler
 from bot.opportunity.transfer_cost import CrossExchangeTransferCost
@@ -159,6 +160,160 @@ def test_opportunity_ranker_orders_by_score() -> None:
 
     ranked = ranker.rank([scored("0.5", "1"), scored("2", "5")])
     assert ranked[0].expected_value == Decimal("2")
+
+
+def test_portfolio_gate_rejects_correlation_exposure() -> None:
+    from bot.core.models import ProfitabilityResult
+    from bot.opportunity.models import ScoredOpportunity
+    from uuid import uuid4
+
+    settings = _settings(global_max_correlation_exposure_pct=40.0)
+    gate = PortfolioExposureGate(settings)
+    gate._exposure["btc"] = Decimal("380")
+    oid = uuid4()
+    opp = TradeOpportunity(
+        id=oid,
+        strategy_name="maker_inventory",
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("1"),
+        entry_price=Decimal("100"),
+        metadata={"buy_exchange": "binance"},
+    )
+    prof = ProfitabilityResult(
+        opportunity_id=oid,
+        gross_profit_usd=Decimal("1"),
+        fees_usd=Decimal("0.1"),
+        slippage_usd=Decimal("0"),
+        funding_usd=Decimal("0"),
+        execution_buffer_usd=Decimal("0"),
+        net_profit_usd=Decimal("0.9"),
+        is_profitable=True,
+        trade_allowed=True,
+    )
+    scored = ScoredOpportunity(
+        opportunity=opp,
+        profitability=prof,
+        correlation_group="btc",
+    )
+    ok, msg, code = gate.check(scored, PortfolioSnapshot(equity_usd=Decimal("1000")))
+    assert not ok
+    assert "Correlation group btc" in msg
+    assert code is not None
+
+
+def test_ranking_summary_counts() -> None:
+    from bot.core.models import ProfitabilityResult
+    from bot.opportunity.models import ScoredOpportunity
+    from uuid import uuid4
+
+    oid = uuid4()
+    opp = TradeOpportunity(
+        id=oid,
+        strategy_name="test",
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("1"),
+        entry_price=Decimal("100"),
+    )
+    prof = ProfitabilityResult(
+        opportunity_id=oid,
+        gross_profit_usd=Decimal("1"),
+        fees_usd=Decimal("0"),
+        slippage_usd=Decimal("0"),
+        funding_usd=Decimal("0"),
+        execution_buffer_usd=Decimal("0"),
+        net_profit_usd=Decimal("1"),
+        is_profitable=True,
+        trade_allowed=True,
+    )
+    scored = ScoredOpportunity(
+        opportunity=opp,
+        profitability=prof,
+        expected_value=Decimal("0.5"),
+        score=Decimal("0.5"),
+        rank=1,
+    )
+    summary = GlobalOpportunityEngine.ranking_summary([scored], [scored], input_count=3)
+    assert summary["input_candidates"] == 3
+    assert summary["scored"] == 1
+    assert len(summary["top"]) == 1
+
+
+def test_decision_logger_import_export() -> None:
+    from bot.opportunity.models import ScoredOpportunity
+    from bot.core.models import ProfitabilityResult
+    from uuid import uuid4
+
+    log = OpportunityDecisionLogger()
+    oid = uuid4()
+    opp = TradeOpportunity(
+        id=oid,
+        strategy_name="test",
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("1"),
+        entry_price=Decimal("100"),
+    )
+    prof = ProfitabilityResult(
+        opportunity_id=oid,
+        gross_profit_usd=Decimal("0"),
+        fees_usd=Decimal("0"),
+        slippage_usd=Decimal("0"),
+        funding_usd=Decimal("0"),
+        execution_buffer_usd=Decimal("0"),
+        net_profit_usd=Decimal("0"),
+        is_profitable=False,
+        trade_allowed=False,
+    )
+    scored = ScoredOpportunity(opportunity=opp, profitability=prof)
+    log.log(scored, action=OpportunityDecisionAction.REJECT, reason="test", stage="unit")
+    exported = log.export()
+    restored = OpportunityDecisionLogger()
+    restored.import_entries(exported)
+    assert len(restored.recent()) == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_caps_executions_per_cycle() -> None:
+    settings = _settings(
+        opportunity_min_expected_value=0,
+        opportunity_max_executions_per_cycle=2,
+        max_simultaneous_positions=20,
+    )
+    profitability = DefaultProfitabilityEngine(settings)
+    risk = RiskEngine(settings)
+    engine = GlobalOpportunityEngine(
+        settings,
+        profitability=profitability,
+        risk=risk,
+        decision_log=OpportunityDecisionLogger(),
+    )
+    opps: list[TradeOpportunity] = []
+    for idx, ev_hint in enumerate(["0.3", "0.5", "0.9", "1.2"], start=1):
+        opps.append(
+            TradeOpportunity(
+                strategy_name="maker_inventory",
+                symbol="BTCEUR",
+                side=OpportunitySide.BUY,
+                quantity=Decimal("0.1"),
+                entry_price=Decimal("100"),
+                expected_exit_price=Decimal("101"),
+                entry_fee_role=FeeRole.MAKER,
+                exit_fee_role=FeeRole.MAKER,
+                metadata={
+                    "post_only": True,
+                    "buy_exchange": "binance",
+                    "sell_exchange": "binance",
+                    "net_profit_eur": ev_hint,
+                    "win_probability": 0.5 + idx * 0.05,
+                },
+            )
+        )
+    portfolio = PortfolioSnapshot(equity_usd=Decimal("10000"))
+    ranked, all_scored = await engine.evaluate_batch(opps, portfolio)
+    assert len(all_scored) == 4
+    assert len(ranked) <= 2
 
 
 @pytest.mark.asyncio
