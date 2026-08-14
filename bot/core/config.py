@@ -162,19 +162,11 @@ class Settings(BaseSettings):
     paper_markout_ceiling_bps: float = Field(default=15.0, ge=0)
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
-        "http://127.0.0.1:8001,http://127.0.0.1:8007,"
-        "http://127.0.0.1:8002,http://127.0.0.1:8008,"
-        "http://127.0.0.1:8003,http://127.0.0.1:8009,"
-        "http://127.0.0.1:8004,http://127.0.0.1:8010,"
-        "http://127.0.0.1:8005,http://127.0.0.1:8006"
+        "http://127.0.0.1:8007,http://127.0.0.1:8008,"
+        "http://127.0.0.1:8009,http://127.0.0.1:8010,"
+        "http://127.0.0.1:8006"
     )
-    paper_fleet_labels: str = (
-        "200 EUR ultra,200 EUR realistic,"
-        "500 EUR ultra,500 EUR realistic,"
-        "1000 EUR ultra,1000 EUR realistic,"
-        "5000 EUR ultra,5000 EUR realistic,"
-        "25000 EUR ultra,25000 EUR realistic"
-    )
+    paper_fleet_labels: str = "200 EUR,500 EUR,1000 EUR,5000 EUR,25000 EUR"
     dashboard_basic_auth_enabled: bool = False
     dashboard_basic_auth_username: str = "moreney"
     dashboard_basic_auth_password: SecretStr | None = None

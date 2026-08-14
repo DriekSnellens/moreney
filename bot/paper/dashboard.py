@@ -484,7 +484,7 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     configured = payload.get("configured_count", 0)
 
     groups = _group_fleet_instances(instances)
-    groups_html = "".join(_render_capital_group(capital, pair) for capital, pair in groups)
+    groups_html = "".join(_render_capital_group(capital, rows) for capital, rows in groups)
     if not groups_html:
         groups_html = "<p class='empty'>Geen rekeningen ingesteld.</p>"
 
@@ -505,15 +505,15 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div>
         <p class="eyebrow">Oefenhandel · per inleg</p>
         <h1 class="brand">Moreney</h1>
-        <p class="sub">{online}/{configured} online · Ultra = optimistisch · Realistic = retail / echt-geld-achtig</p>
+        <p class="sub">{online}/{configured} online · retail fees</p>
       </div>
       <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
     <div class="container totals-bar">
-      <article class="metric-card"><span class="label">Ultra transacties</span><span class="value">{_esc_fmt(totals.get('ultra_trades', totals.get('trade_count')), 'count')}</span></article>
-      <article class="metric-card {_pnl_class(totals.get('ultra_pnl'))}"><span class="label">Ultra PnL</span><span class="value">{_esc_fmt(totals.get('ultra_pnl', totals.get('net_pnl')), 'money')}</span></article>
-      <article class="metric-card"><span class="label">Realistic transacties</span><span class="value">{_esc_fmt(totals.get('realistic_trades', '0'), 'count')}</span></article>
-      <article class="metric-card {_pnl_class(totals.get('realistic_pnl'))}"><span class="label">Realistic PnL</span><span class="value">{_esc_fmt(totals.get('realistic_pnl', '0'), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(totals.get('trade_count'), 'count')}</span></article>
+      <article class="metric-card {_pnl_class(totals.get('net_pnl'))}"><span class="label">PnL</span><span class="value">{_esc_fmt(totals.get('net_pnl'), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Actief</span><span class="value">{_esc_fmt(totals.get('running_count'), 'count')}</span></article>
     </div>
   </header>
   <main class="container">
@@ -523,49 +523,27 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {fleet_chart}
     </section>
   </main>
-  <footer class="footer">Oefenhandel · geen echte orders · Realistic = retail fees</footer>
+  <footer class="footer">Oefenhandel · geen echte orders · retail fees</footer>
 </body>
 </html>"""
     return HTMLResponse(content=html)
 
 
-def _fleet_profile(row: dict[str, Any]) -> str:
-    label = str(row.get("label") or "").lower()
-    if "realistic" in label or " live" in f" {label}":
-        return "realistic"
-    if "ultra" in label:
-        return "ultra"
-    if str(row.get("fee_tier") or "").lower() == "retail":
-        return "realistic"
-    return "ultra"
-
-
-def _group_fleet_instances(instances: list[dict[str, Any]]) -> list[tuple[str, dict[str, dict[str, Any]]]]:
-    """Group ultra/realistic cards by starting capital, preserving URL order."""
+def _group_fleet_instances(instances: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Group cards by starting capital, preserving URL order."""
     ordered: list[str] = []
-    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for row in instances:
         capital = str(row.get("starting_capital") or row.get("label") or "?")
-        key = capital
-        if key not in grouped:
-            ordered.append(key)
-            grouped[key] = {}
-        grouped[key][_fleet_profile(row)] = row
-        if not row.get("ok") and "offline" not in grouped[key]:
-            grouped[key]["offline"] = row
+        if capital not in grouped:
+            ordered.append(capital)
+            grouped[capital] = []
+        grouped[capital].append(row)
     return [(k, grouped[k]) for k in ordered]
 
 
-def _render_capital_group(capital: str, pair: dict[str, dict[str, Any]]) -> str:
-    cards = []
-    for kind in ("ultra", "realistic"):
-        row = pair.get(kind)
-        if row is None:
-            continue
-        cards.append(_render_fleet_card(row, kind=kind))
-    extra = [k for k in pair if k not in {"ultra", "realistic"}]
-    for k in extra:
-        cards.append(_render_fleet_card(pair[k], kind="other"))
+def _render_capital_group(capital: str, rows: list[dict[str, Any]]) -> str:
+    cards = [_render_fleet_card(row) for row in rows]
     if not cards:
         return ""
     return f"""
@@ -576,7 +554,7 @@ def _render_capital_group(capital: str, pair: dict[str, dict[str, Any]]) -> str:
     """
 
 
-def _render_fleet_card(row: dict[str, Any], *, kind: str) -> str:
+def _render_fleet_card(row: dict[str, Any]) -> str:
     if not row.get("ok"):
         return f"""
         <article class="fleet-card offline">
@@ -590,8 +568,6 @@ def _render_fleet_card(row: dict[str, Any], *, kind: str) -> str:
     running = row.get("running")
     status_label = "Actief" if running else "Gestopt"
     badge_cls = "ok" if running else "warn"
-    profile = "Realistic" if kind == "realistic" else ("Ultra" if kind == "ultra" else _esc(row.get("label")))
-    profile_cls = "realistic" if kind == "realistic" else "ultra"
     trades = _esc_fmt(row.get("trade_count") if row.get("trade_count") is not None else 0, "count")
     executed = _esc_fmt(
         row.get("executed_opportunities") if row.get("executed_opportunities") is not None else 0,
@@ -599,10 +575,10 @@ def _render_fleet_card(row: dict[str, Any], *, kind: str) -> str:
     )
     scanned = _esc_fmt(row.get("pairs_evaluated") or 0, "count")
     return f"""
-    <article class="fleet-card {profile_cls}">
+    <article class="fleet-card">
       <header class="fleet-head">
         <div>
-          <span class="profile-pill {profile_cls}">{profile}</span>
+          <h3>{_esc(row.get('label'))}</h3>
           <p class="card-sub">Fee {_esc(row.get('fee_tier') or '—')}</p>
         </div>
         <span class="badge {badge_cls}">{status_label}</span>
@@ -649,13 +625,9 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
     .capital-group h2 { margin: 0 0 .65rem; font-size: 1.05rem; color: var(--muted); font-weight: 600; }
     .pair-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
     .fleet-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; display: grid; gap: .75rem; }
-    .fleet-card.ultra { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-    .fleet-card.realistic { border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
     .fleet-card.offline { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
     .fleet-head { display: flex; justify-content: space-between; gap: .75rem; align-items: start; }
-    .profile-pill { display: inline-block; font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: .2rem .55rem; border-radius: 999px; }
-    .profile-pill.ultra { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-    .profile-pill.realistic { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+    .fleet-head h3 { margin: 0; font-size: 1rem; }
     .card-sub { margin: .25rem 0 0; color: var(--muted); font-size: .8rem; }
     .highlight-metric .value { font-size: 1.15rem; }
     .card-links { display: flex; gap: .75rem; font-size: .85rem; }
@@ -1278,9 +1250,8 @@ def _svg_fleet_bars(instances: list[dict]) -> str:
     labels = []
     for row in rows:
         capital = str(row.get("starting_capital") or "")
-        kind = "R" if _fleet_profile(row) == "realistic" else "U"
-        compact = capital.split(".")[0] if capital else str(row.get("label") or "?")[:6]
-        labels.append(f"{compact}{kind}")
+        compact = capital.split(".")[0] if capital else str(row.get("label") or "?")[:8]
+        labels.append(compact)
     return _svg_bars(values, labels)
 
 

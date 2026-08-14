@@ -801,3 +801,6 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     assert "€200" in fleet or "200" in fleet
     assert "Transacties" in fleet
     assert "<rect" in fleet
+    assert "Ultra transacties" not in fleet
+    assert "Ultra PnL" not in fleet
+    assert "Ultra =" not in fleet
