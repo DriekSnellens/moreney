@@ -44,6 +44,48 @@ class VenueLedger:
             for venue in self.venues:
                 self._balances[venue][self.quote] = each
 
+    def ensure_venues(self, venues: list[str], *, fee_bps: Decimal = Decimal("5")) -> list[str]:
+        """Add missing venues and fund them from existing balances (paper transfer)."""
+        wanted = [v.strip().lower() for v in venues if v.strip()]
+        added: list[str] = []
+        for venue in wanted:
+            if venue in self.venues:
+                continue
+            self.venues.append(venue)
+            self._balances[venue] = {}
+            added.append(venue)
+        if not added:
+            return []
+        if self.venues:
+            total_quote = sum((self.available(v, self.quote) for v in self.venues), _ZERO)
+            if total_quote > 0:
+                self.start_quote_each = total_quote / Decimal(len(self.venues))
+        self.rebalance_quote(fee_bps=fee_bps)
+        assets = sorted(self.seeded_assets)
+        for asset in assets:
+            if asset == self.quote:
+                continue
+            donors = sorted(
+                ((v, self.available(v, asset)) for v in self.venues if v not in added),
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            if not donors or donors[0][1] <= 0:
+                continue
+            src, have = donors[0]
+            slice_amt = have / Decimal(len(self.venues))
+            for dst in added:
+                if slice_amt <= 0:
+                    break
+                self.transfer(
+                    from_venue=src,
+                    to_venue=dst,
+                    asset=asset,
+                    amount=slice_amt,
+                    fee_bps=fee_bps,
+                )
+        return added
+
     def available(self, venue: str, asset: str) -> Decimal:
         row = self._balances.get(str(venue).strip().lower())
         if not row:

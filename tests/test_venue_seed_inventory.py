@@ -46,3 +46,13 @@ def test_legacy_pct_seed_still_available_on_ledger() -> None:
     assert moved
     assert ledger.available("okx", "EUR") == Decimal("90")
     assert ledger.available("okx", "BTC") == Decimal("0.2")
+
+
+def test_ensure_venues_adds_and_funds_new_exchange() -> None:
+    ledger = VenueLedger(["okx", "binance"], quote="EUR", starting_quote=Decimal("200"))
+    ledger.seed_asset("XRP", price=Decimal("1"), quote_budget=Decimal("20"))
+    added = ledger.ensure_venues(["okx", "binance", "coinbase"], fee_bps=Decimal("0"))
+    assert added == ["coinbase"]
+    assert "coinbase" in ledger.venues
+    assert ledger.available("coinbase", "EUR") > 0
+    assert ledger.available("coinbase", "XRP") > 0

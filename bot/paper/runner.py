@@ -218,8 +218,6 @@ class PaperRunner:
     def _configure_venue_inventory(self) -> None:
         if not self._settings.paper_venue_inventory:
             return
-        if self._portfolio.venue_ledger is not None:
-            return
         raw_maker = str(getattr(self._settings, "paper_maker_venues", "") or "")
         maker_venues = [part.strip() for part in raw_maker.split(",") if part.strip()]
         if maker_venues and self._settings.paper_maker_enabled:
@@ -230,6 +228,11 @@ class PaperRunner:
                 for part in self._settings.market_data_exchanges.split(",")
                 if part.strip()
             ]
+        if self._portfolio.venue_ledger is not None:
+            added = self._portfolio.venue_ledger.ensure_venues(venues)
+            if added:
+                logger.info("PAPER_VENUES_ADDED venues=%s", added)
+            return
         self._portfolio.init_venue_ledger(
             venues,
             starting_quote=Decimal(str(self._settings.paper_starting_eur)),
