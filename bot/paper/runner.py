@@ -543,6 +543,8 @@ class PaperRunner:
             "real_exchange_order": False,
             "execution_mode": ExecutionMode.PAPER.value,
             "universe_scan": True,
+            "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else None,
+            "reduce_only": self._hmm_reduce_only,
         }
         if self._cycle_count % 5 == 0:
             self._persist()
