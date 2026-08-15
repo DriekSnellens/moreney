@@ -35,6 +35,17 @@ class ScoredOpportunity(BaseModel):
     opportunity_decay_ms: int = 5000
     score: Decimal = Decimal("0")
     rank: int = 0
+    calibrated_expected_value: Decimal = Decimal("0")
+    expected_net_eur: Decimal = Decimal("0")
+    expected_net_bps: Decimal = Decimal("0")
+    expected_net_eur_per_capital_second: Decimal = Decimal("0")
+    expected_capital_time: Decimal = Decimal("0")
+    expected_fee_eur: Decimal = Decimal("0")
+    expected_slippage_eur: Decimal = Decimal("0")
+    expected_adverse_selection_eur: Decimal = Decimal("0")
+    inventory_relief_eur: Decimal = Decimal("0")
+    first_limiting_gate: str = ""
+    all_gates: list[str] = Field(default_factory=list)
 
     @property
     def opportunity_id(self) -> UUID:
@@ -67,6 +78,14 @@ class OpportunityDecision(BaseModel):
     portfolio_exposure: dict[str, Any] = Field(default_factory=dict)
     score: Decimal = Decimal("0")
     stage: str = ""
+    calibrated_expected_value: Decimal = Decimal("0")
+    expected_net_eur: Decimal = Decimal("0")
+    expected_net_eur_per_capital_second: Decimal = Decimal("0")
+    first_limiting_gate: str = ""
+    all_gates: list[str] = Field(default_factory=list)
+    buy_exchange: str = ""
+    sell_exchange: str = ""
+    theoretical_net: Decimal = Decimal("0")
 
     @classmethod
     def from_scored(
@@ -83,6 +102,7 @@ class OpportunityDecision(BaseModel):
         notional = opp.quantity * opp.entry_price
         gross_ret = prof.gross_profit_usd / notional if notional > 0 else Decimal("0")
         net_ret = prof.net_return
+        meta = opp.metadata or {}
         return cls(
             opportunity_id=opp.id,
             action=action,
@@ -106,4 +126,12 @@ class OpportunityDecision(BaseModel):
             portfolio_exposure=portfolio_exposure or {},
             score=scored.score,
             stage=stage,
+            calibrated_expected_value=scored.calibrated_expected_value,
+            expected_net_eur=scored.expected_net_eur or prof.net_profit_usd,
+            expected_net_eur_per_capital_second=scored.expected_net_eur_per_capital_second,
+            first_limiting_gate=scored.first_limiting_gate or stage,
+            all_gates=list(scored.all_gates or ([stage] if stage else [])),
+            buy_exchange=str(meta.get("buy_exchange") or ""),
+            sell_exchange=str(meta.get("sell_exchange") or ""),
+            theoretical_net=prof.net_profit_usd,
         )

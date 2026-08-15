@@ -1,4 +1,4 @@
-"""Rank opportunities by risk-adjusted expected value."""
+"""Rank opportunities by calibrated NET economics, then capital velocity."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ _ZERO = Decimal("0")
 
 
 class OpportunityRanker:
-    """Sort scored opportunities: higher EV and execution quality first."""
+    """Sort scored opportunities: calibrated NET first, velocity second."""
 
     def __init__(self, settings: Settings) -> None:
         self._min_ev = Decimal(str(getattr(settings, "opportunity_min_expected_value", 0)))
@@ -21,12 +21,16 @@ class OpportunityRanker:
         filtered = [
             c
             for c in candidates
-            if c.expected_value >= self._min_ev and c.score >= self._min_score
+            if c.calibrated_expected_value >= self._min_ev
+            and c.expected_value >= self._min_ev
+            and c.score >= self._min_score
         ]
         ordered = sorted(
             filtered,
             key=lambda c: (
                 c.score,
+                c.calibrated_expected_value,
+                c.expected_net_eur_per_capital_second,
                 c.expected_value,
                 Decimal(str(c.execution_quality)),
             ),
@@ -38,8 +42,12 @@ class OpportunityRanker:
 
     @staticmethod
     def compute_score(scored: ScoredOpportunity) -> Decimal:
-        """Composite score: EV × regime × liquidity × execution quality."""
-        ev = scored.expected_value
+        """Composite score: calibrated EV × regime × liquidity × execution quality.
+
+        Capital velocity is a ranking tie-breaker, not mixed into the euro score,
+        so a tiny fast fill cannot outrank a clearly better NET fill.
+        """
+        ev = scored.calibrated_expected_value or scored.expected_value
         if ev <= 0:
             return _ZERO
         liq = Decimal(str(max(0.1, min(1.0, scored.liquidity_score))))

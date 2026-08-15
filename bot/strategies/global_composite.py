@@ -57,6 +57,10 @@ class GlobalCompositeStrategy(BaseStrategy):
                 except TypeError:
                     opps = await evaluate(snapshots, equity=equity)
             combined.extend(opps)
+        combined.sort(
+            key=lambda o: Decimal(str((o.metadata or {}).get("net_profit_eur", "0"))),
+            reverse=True,
+        )
         return combined[: self._max_raw]
 
     def scan_stats(self) -> dict[str, object]:

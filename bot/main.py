@@ -38,6 +38,7 @@ from bot.paper.auth import (
     wants_html,
 )
 from bot.paper.runner import PaperRunner
+from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.store import PaperTradingStore
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
@@ -398,6 +399,20 @@ async def paper_opportunity_decisions(
     if log is None:
         return {"decisions": []}
     return {"decisions": log.export()[-limit:]}
+
+
+@app.get("/paper/why-not-trade")
+async def paper_why_not_trade() -> dict[str, Any]:
+    runner = get_paper_runner()
+    missed = getattr(runner, "_missed", None)
+    kpis = (runner.status() or {}).get("net_kpis") or {}
+    cal = getattr(runner, "_calibrator", None)
+    return {
+        "why_not_trade": missed.why_not_trade() if missed is not None else {},
+        "net_kpis": kpis,
+        "ev_calibration": cal.snapshot() if cal is not None else {},
+        "parameter_changes": PARAMETER_CHANGES,
+    }
 
 
 @app.get("/paper/trades")

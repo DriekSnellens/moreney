@@ -50,6 +50,9 @@ from bot.core.venue_fees import set_fee_tier
 from bot.portfolio.venue_ledger import infer_quote_asset
 from bot.opportunity.engine import GlobalOpportunityEngine
 from bot.opportunity.decision_log import OpportunityDecisionLogger
+from bot.opportunity.calibration import EvCalibrator
+from bot.opportunity.missed import MissedOpportunityTracker
+from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.opportunity.scanner import TieredScanScheduler
 from bot.markets.registry import InstrumentRegistry
 from bot.markets.calendar import MarketCalendarService
@@ -91,7 +94,9 @@ class PaperRunner:
             self._accumulated_runtime = float(meta.get("runtime_seconds") or 0)
             if meta.get("decision_log"):
                 self._decision_log.import_entries(meta["decision_log"])
+            extra_state = meta
         else:
+            extra_state = {}
             self._portfolio = portfolio or PaperPortfolio(settings, starting_eur=starting)
             self._tracker = tracker or PerformanceTracker(
                 starting_equity=self._portfolio.state.total_equity
@@ -130,6 +135,16 @@ class PaperRunner:
             ]
         self._scan_universe = list(dict.fromkeys([*self._symbols, *equity_symbols]))
         self._markout = MarkoutTracker()
+        self._calibrator = EvCalibrator(
+            prior_strength=int(getattr(settings, "ev_calibration_prior_strength", 40) or 40),
+            min_samples=int(getattr(settings, "ev_calibration_min_samples", 20) or 20),
+        )
+        self._missed = MissedOpportunityTracker()
+        if extra_state.get("markout"):
+            self._markout.import_state(extra_state.get("markout"))
+        if extra_state.get("missed"):
+            self._missed.import_state(extra_state.get("missed"))
+        self._seed_calibrator()
         self._fx_refilled: set[UUID] = set()
         self._last_markout_bps: float | None = None
         self._holding = HoldingTimeController(
@@ -193,15 +208,36 @@ class PaperRunner:
             ),
         )
 
+    def _seed_calibrator(self) -> None:
+        """Fit capture ratios from already-completed paper fills only."""
+        for row in self._tracker.calibration_observations():
+            self._calibrator.observe(
+                key=str(row["key"]),
+                route=str(row["route"]),
+                strategy=str(row["strategy"]),
+                expected_net=row["expected_net"],
+                realized_net=row["realized_net"],
+            )
+
     def _build_opportunity_engine(self, gate: Settings) -> GlobalOpportunityEngine:
-        win_rate = None
-        if self._markout.snapshot().get("samples", 0):
-            try:
-                samples = int(self._markout.snapshot().get("samples", 0))
-                if samples > 0:
-                    win_rate = 0.55
-            except (TypeError, ValueError):
-                pass
+        self._calibrator = EvCalibrator(
+            prior_strength=int(getattr(self._settings, "ev_calibration_prior_strength", 40) or 40),
+            min_samples=int(getattr(self._settings, "ev_calibration_min_samples", 20) or 20),
+        )
+        self._seed_calibrator()
+        snap = self._markout.snapshot()
+        samples = int(snap.get("samples", 0) or 0)
+        win_rate = self._markout.empirical_win_rate(
+            min_samples=int(getattr(self._settings, "paper_markout_min_samples", 20) or 20)
+        )
+        floor = Decimal(str(getattr(self._settings, "paper_markout_floor_bps", 2) or 2))
+        ceiling = Decimal(str(getattr(self._settings, "paper_markout_ceiling_bps", 15) or 15))
+
+        def _venue_adverse(venue: str, symbol: str, side: str) -> Decimal:
+            return self._markout.suggested_adverse_bps(
+                floor=floor, ceiling=ceiling, venue=venue, symbol=symbol, side=side
+            )
+
         engine = GlobalOpportunityEngine(
             gate,
             profitability=self._profitability,
@@ -211,6 +247,10 @@ class PaperRunner:
             regime=self._regime,
             decision_log=self._decision_log,
             markout_win_rate=win_rate,
+            markout_samples=samples,
+            calibrator=self._calibrator,
+            missed=self._missed,
+            venue_adverse_lookup=_venue_adverse,
         )
         return engine
 
@@ -421,6 +461,11 @@ class PaperRunner:
         self._errors = []
         self._fx_refilled = set()
         self._markout = MarkoutTracker()
+        self._calibrator = EvCalibrator(
+            prior_strength=int(getattr(self._settings, "ev_calibration_prior_strength", 40) or 40),
+            min_samples=int(getattr(self._settings, "ev_calibration_min_samples", 20) or 20),
+        )
+        self._missed = MissedOpportunityTracker()
         self._last_markout_bps = None
         self._accumulated_runtime = 0.0
         self._session_started_at = None
@@ -662,6 +707,9 @@ class PaperRunner:
             errors=self._errors,
             runtime_seconds=self.runtime_seconds(),
             decision_log=self._decision_log.export(),
+            markout=self._markout.export_state(),
+            calibration=self._calibrator.export_state(),
+            missed=self._missed.export_state(),
         )
 
 
@@ -723,6 +771,10 @@ class PaperRunner:
             ),
             "fee_tier": getattr(self._settings, "paper_fee_tier", "retail"),
             "live_forecast": self._live_forecast(snap),
+            "net_kpis": self._net_kpis(snap),
+            "why_not_trade": self._missed.why_not_trade() if hasattr(self, "_missed") else {},
+            "ev_calibration": self._calibrator.snapshot() if hasattr(self, "_calibrator") else {},
+            "parameter_changes": PARAMETER_CHANGES,
             "global_engine": {
                 "enabled": self._settings.global_opportunity_engine_enabled,
                 "regime": (
@@ -750,6 +802,36 @@ class PaperRunner:
             if isinstance(stats, dict):
                 return stats
         return {}
+
+    def _net_kpis(self, snap: Any) -> dict[str, Any]:
+        runtime = max(self.runtime_seconds(), 1.0)
+        capital = snap.starting_equity or Decimal("1")
+        net = snap.net_pnl
+        trades = int(snap.trade_count or 0)
+        volume = snap.trading_volume or Decimal("0")
+        velocity = (
+            (net / capital / Decimal(str(runtime))) if capital > 0 else Decimal("0")
+        )
+        missed_cost = Decimal("0")
+        if hasattr(self, "_missed"):
+            for row in self._missed.gate_table():
+                missed_cost += Decimal(str(row.get("estimated_missed_profit_eur") or 0))
+        markout = self._markout.snapshot() if hasattr(self, "_markout") else {}
+        return {
+            "net_eur_per_fill": str(snap.net_eur_per_fill),
+            "net_bps_per_fill": str(snap.net_bps_per_fill),
+            "ev_capture": str(snap.ev_capture) if snap.ev_capture is not None else None,
+            "fees_per_fill": str(snap.fees_per_fill),
+            "slippage_per_fill": str(snap.slippage_per_fill),
+            "capital_velocity": str(velocity),
+            "rejection_opportunity_cost": str(missed_cost),
+            "markout_1s": markout.get("avg_adverse_bps_1s"),
+            "markout_5s": markout.get("avg_adverse_bps_5s"),
+            "markout_30s": markout.get("avg_adverse_bps_30s"),
+            "markout_60s": markout.get("avg_adverse_bps_60s"),
+            "trade_count": trades,
+            "volume": str(volume),
+        }
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
         """Sized maker quotes: NET euro per fill, capital recycled quickly."""
@@ -1239,6 +1321,8 @@ class PaperRunner:
                 side=side,
                 fill_price=Decimal(str(px)),
                 mid=mid,
+                venue=venue,
+                strategy=str((order.metadata or {}).get("strategy") or ""),
             )
 
     def _update_markouts(self, books: dict[str, dict[str, Any]]) -> None:
@@ -1253,6 +1337,7 @@ class PaperRunner:
                 prev = mids.get(symbol)
                 mids[symbol] = mid if prev is None else (prev + mid) / Decimal("2")
         self._markout.update(mids)
+        self._missed.update_mids(mids)
 
     def _apply_markout_adverse(self) -> None:
         if not getattr(self._settings, "paper_markout_enabled", True):

@@ -13,6 +13,18 @@ _ZERO = Decimal("0")
 _HUNDRED = Decimal("100")
 
 
+def correlation_group_for_symbol(symbol: str) -> str:
+    """Match InstrumentRegistry crypto grouping (not symbol[:3])."""
+    sym = (symbol or "").upper()
+    if "BTC" in sym:
+        return "crypto_btc_beta"
+    if "ETH" in sym:
+        return "crypto_eth_beta"
+    if sym:
+        return "crypto_alt"
+    return "general"
+
+
 class PortfolioExposureGate:
     """Reject opportunities that worsen concentration or correlation."""
 
@@ -29,17 +41,24 @@ class PortfolioExposureGate:
     def sync_from_portfolio(self, portfolio: PortfolioSnapshot) -> None:
         self._exposure = {}
         for pos in portfolio.positions:
-            group = str((pos.symbol or "general")[:3]).lower()
+            group = correlation_group_for_symbol(pos.symbol or "")
             notional = abs(pos.quantity * pos.average_entry_price)
             self._exposure[group] = self._exposure.get(group, _ZERO) + notional
 
     def record_fill(self, scored: ScoredOpportunity, notional: Decimal) -> None:
-        group = scored.correlation_group
+        group = scored.correlation_group or correlation_group_for_symbol(
+            scored.opportunity.symbol
+        )
         self._exposure[group] = self._exposure.get(group, _ZERO) + notional
         strat = scored.opportunity.strategy_name
         self._strategy_exposure[strat] = self._strategy_exposure.get(strat, _ZERO) + notional
-        venue = str(scored.opportunity.metadata.get("buy_exchange") or "multi")
-        self._venue_exposure[venue] = self._venue_exposure.get(venue, _ZERO) + notional
+        meta = scored.opportunity.metadata or {}
+        for venue in (
+            str(meta.get("buy_exchange") or ""),
+            str(meta.get("sell_exchange") or ""),
+        ):
+            if venue:
+                self._venue_exposure[venue] = self._venue_exposure.get(venue, _ZERO) + notional
 
     def check(
         self,
@@ -51,7 +70,9 @@ class PortfolioExposureGate:
             return True, "", None
 
         notional = scored.opportunity.quantity * scored.opportunity.entry_price
-        group = scored.correlation_group
+        group = scored.correlation_group or correlation_group_for_symbol(
+            scored.opportunity.symbol
+        )
         corr_after = (self._exposure.get(group, _ZERO) + notional) / equity * _HUNDRED
         if corr_after > self._max_corr_pct:
             return (
@@ -69,8 +90,10 @@ class PortfolioExposureGate:
                 RiskRejectReason.STRATEGY_EXPOSURE_LIMIT,
             )
 
-        venue = str(scored.opportunity.metadata.get("buy_exchange") or "")
-        if venue:
+        meta = scored.opportunity.metadata or {}
+        buy = str(meta.get("buy_exchange") or "")
+        sell = str(meta.get("sell_exchange") or "")
+        for venue in {v for v in (buy, sell) if v}:
             venue_after = (self._venue_exposure.get(venue, _ZERO) + notional) / equity * _HUNDRED
             if venue_after > self._max_venue_pct:
                 return (

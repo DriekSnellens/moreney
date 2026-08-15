@@ -104,7 +104,10 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     desk_strategy = _esc(str(status.get("strategy") or "—"))
     desk_tier = _esc(str(status.get("fee_tier") or "retail"))
     realism_note = "Retail fees, fair-value aan, queue-fills uit. Dichtst bij echt geld."
+    markout_1s = f"{_esc(str(markout.get('avg_adverse_bps_1s') or '0'))} bps"
     markout_5s = f"{_esc(str(markout.get('avg_adverse_bps_5s') or '0'))} bps"
+    markout_30s = f"{_esc(str(markout.get('avg_adverse_bps_30s') or '0'))} bps"
+    markout_60s = f"{_esc(str(markout.get('avg_adverse_bps_60s') or '0'))} bps"
     markout_suggested = f"{_esc(str(markout.get('suggested_adverse_bps') or '0'))} bps"
     tri_pairs = _fmt_count(tri_scan.get("pairs_evaluated", 0))
     tri_emits = _fmt_count(tri_scan.get("opportunities_emitted", 0))
@@ -124,6 +127,16 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     ge_decision_rows = _global_decision_rows(global_engine.get("recent_decisions") or [])
     ge_ranking_block = _global_ranking_block(global_engine.get("last_ranking"))
     ge_equity_rows = _equity_quote_rows((global_engine.get("equity") or {}).get("quotes") or {})
+
+    net_kpis = status.get("net_kpis") or {}
+    why_not = status.get("why_not_trade") or {}
+    ev_cal = status.get("ev_calibration") or {}
+    why_rows = _why_not_rows(why_not)
+    gate_rows = _gate_table_rows(why_not.get("gate_table") or [])
+    cal_global = ev_cal.get("global") or {}
+    ev_capture = _esc(
+        str(net_kpis.get("ev_capture") or cal_global.get("raw_capture") or "—")
+    )
 
     profit_chart = _svg_cumulative_profit(trades)
     hourly_chart = _svg_hourly_bars(hourly)
@@ -201,7 +214,10 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <div class="metric-grid compact">
         <article class="metric-card"><span class="label">Strategie</span><span class="value">{desk_strategy}</span></article>
         <article class="metric-card"><span class="label">Fee-tier</span><span class="value">{desk_tier}</span></article>
+        <article class="metric-card"><span class="label">Markout 1s</span><span class="value">{markout_1s}</span></article>
         <article class="metric-card"><span class="label">Markout 5s</span><span class="value">{markout_5s}</span></article>
+        <article class="metric-card"><span class="label">Markout 30s</span><span class="value">{markout_30s}</span></article>
+        <article class="metric-card"><span class="label">Markout 60s</span><span class="value">{markout_60s}</span></article>
         <article class="metric-card"><span class="label">Adverse (gate)</span><span class="value">{markout_suggested}</span></article>
         <article class="metric-card"><span class="label">Triangle gescand</span><span class="value">{tri_pairs}</span></article>
         <article class="metric-card"><span class="label">Triangle emits</span><span class="value">{tri_emits}</span></article>
@@ -215,6 +231,38 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         </table>
       </div>
       <p class="forecast-note">Seeded: {seeded_assets}</p>
+    </section>
+
+    <section class="panel">
+      <h2>NET-economie (per fill)</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">NET €/fill</span><span class="value">{_esc_fmt(net_kpis.get('net_eur_per_fill'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">NET bps/fill</span><span class="value">{_esc(str(net_kpis.get('net_bps_per_fill') or '0'))}</span></article>
+        <article class="metric-card"><span class="label">EV capture</span><span class="value">{ev_capture}</span></article>
+        <article class="metric-card"><span class="label">Fees/fill</span><span class="value">{_esc_fmt(net_kpis.get('fees_per_fill'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Slippage/fill</span><span class="value">{_esc_fmt(net_kpis.get('slippage_per_fill'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Kapitaal-velocity</span><span class="value">{_esc(str(net_kpis.get('capital_velocity') or '0'))}</span></article>
+        <article class="metric-card"><span class="label">Reject opportunity cost</span><span class="value">{_esc_fmt(net_kpis.get('rejection_opportunity_cost'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Calibratie n</span><span class="value">{_esc(str(cal_global.get('n') or 0))}</span></article>
+      </div>
+      <p class="forecast-note">EV capture = realized NET / expected NET op afgeronde round-trips. Shrinkage naar 1.0 tot n≥20.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Why not trade?</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Eerste gate</th><th>Aantal</th></tr></thead>
+          <tbody>{why_rows}</tbody>
+        </table>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Gate</th><th>Rejects</th><th>Geschat terecht</th><th>Geschat gemist</th><th>Advies</th></tr></thead>
+          <tbody>{gate_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Counterfactual gebruikt alleen mid-prijzen ná de beslissing en gaat niet terug de live ranker in.</p>
     </section>
 
     <section class="panel">
@@ -1042,6 +1090,42 @@ def _global_ranking_block(ranking: Any) -> str:
         <p class="forecast-note">Batch: {_esc(ranking.get('input_candidates', 0))} in → {_esc(ranking.get('approved', 0))} goedgekeurd → {_esc(ranking.get('ranked_for_execution', 0))} uitvoerbaar</p>
       </div>
     """
+
+
+def _why_not_rows(why_not: dict[str, Any]) -> str:
+    reasons = why_not.get("top_rejection_reasons") or []
+    if not reasons:
+        return "<tr><td colspan='2' class='empty'>Nog geen engine-rejects</td></tr>"
+    rows: list[str] = []
+    for item in reasons:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(item.get('reason'))}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('count'), 'count')}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='2' class='empty'>Nog geen engine-rejects</td></tr>"
+
+
+def _gate_table_rows(table: list[Any]) -> str:
+    if not table:
+        return "<tr><td colspan='5' class='empty'>Nog geen gate-statistiek</td></tr>"
+    rows: list[str] = []
+    for item in table:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(item.get('gate'))}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('rejections'), 'count')}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('estimated_good_rejections_eur'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('estimated_missed_profit_eur'), 'money')}</td>"
+            f"<td>{_esc(item.get('recommendation'))}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='5' class='empty'>Nog geen gate-statistiek</td></tr>"
 
 
 def _global_decision_rows(decisions: list[Any]) -> str:

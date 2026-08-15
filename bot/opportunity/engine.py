@@ -6,13 +6,16 @@ from decimal import Decimal
 from typing import Any
 
 from bot.core.config import Settings
-from bot.core.enums import AssetClass, MarketRegime, OpportunityDecisionAction, RiskDecisionStatus
+from bot.core.enums import AssetClass, MarketRegime, OpportunityDecisionAction
 from bot.core.interfaces import ProfitabilityEngine, RiskEngine
 from bot.core.models import PortfolioSnapshot, ProfitabilityResult, TradeOpportunity
 from bot.markets.calendar import MarketCalendarService
 from bot.markets.registry import InstrumentRegistry
+from bot.opportunity.calibration import EvCalibrator
 from bot.opportunity.decision_log import OpportunityDecisionLogger
+from bot.opportunity.economics import build_fill_economics
 from bot.opportunity.ev_engine import ExpectedValueEngine
+from bot.opportunity.missed import MissedOpportunityTracker
 from bot.opportunity.models import ScoredOpportunity
 from bot.opportunity.portfolio_gate import PortfolioExposureGate
 from bot.opportunity.ranker import OpportunityRanker
@@ -36,6 +39,10 @@ class GlobalOpportunityEngine:
         regime: RegimeDetector | None = None,
         decision_log: OpportunityDecisionLogger | None = None,
         markout_win_rate: float | None = None,
+        markout_samples: int = 0,
+        calibrator: EvCalibrator | None = None,
+        missed: MissedOpportunityTracker | None = None,
+        venue_adverse_lookup: Any = None,
     ) -> None:
         self._settings = settings
         self._profitability = profitability
@@ -43,11 +50,23 @@ class GlobalOpportunityEngine:
         self._registry = registry or InstrumentRegistry(settings)
         self._calendar = calendar or MarketCalendarService()
         self._regime = regime or RegimeDetector()
-        self._ev = ExpectedValueEngine(settings, markout_win_rate=markout_win_rate)
+        min_markout = int(getattr(settings, "paper_markout_min_samples", 20) or 20)
+        self._ev = ExpectedValueEngine(
+            settings,
+            markout_win_rate=markout_win_rate,
+            markout_samples=markout_samples,
+            min_markout_samples=min_markout,
+        )
         self._transfer = CrossExchangeTransferCost(settings)
         self._ranker = OpportunityRanker(settings)
         self._portfolio_gate = PortfolioExposureGate(settings)
         self._decisions = decision_log or OpportunityDecisionLogger()
+        self._calibrator = calibrator or EvCalibrator(
+            prior_strength=int(getattr(settings, "ev_calibration_prior_strength", 40) or 40),
+            min_samples=int(getattr(settings, "ev_calibration_min_samples", 20) or 20),
+        )
+        self._missed = missed or MissedOpportunityTracker()
+        self._venue_adverse_lookup = venue_adverse_lookup
         self._global_regime = MarketRegime.NORMAL
 
     @property
@@ -57,6 +76,14 @@ class GlobalOpportunityEngine:
     @property
     def portfolio_gate(self) -> PortfolioExposureGate:
         return self._portfolio_gate
+
+    @property
+    def calibrator(self) -> EvCalibrator:
+        return self._calibrator
+
+    @property
+    def missed(self) -> MissedOpportunityTracker:
+        return self._missed
 
     @property
     def global_regime(self) -> MarketRegime:
@@ -93,32 +120,28 @@ class GlobalOpportunityEngine:
             else:
                 asset_class = AssetClass.CRYPTO_SPOT
             if inst and not self._calendar.is_tradeable(inst):
-                self._decisions.log(
-                    ScoredOpportunity(
-                        opportunity=opportunity,
-                        profitability=_empty_profitability(opportunity),
-                        asset_class=asset_class,
-                    ),
-                    action=OpportunityDecisionAction.REJECT,
-                    reason="Market closed for instrument session",
-                    stage="calendar",
+                item = ScoredOpportunity(
+                    opportunity=opportunity,
+                    profitability=_empty_profitability(opportunity),
+                    asset_class=asset_class,
+                    first_limiting_gate="calendar",
+                    all_gates=["calendar"],
                 )
+                self._reject(item, "Market closed for instrument session", "calendar")
                 continue
 
             sym_regime = regimes.get(opportunity.symbol.upper(), self._global_regime)
             weight = self._regime.strategy_weight(opportunity.strategy_name, sym_regime)
             if weight <= 0:
-                self._decisions.log(
-                    ScoredOpportunity(
-                        opportunity=opportunity,
-                        profitability=_empty_profitability(opportunity),
-                        regime=sym_regime,
-                        regime_weight=weight,
-                    ),
-                    action=OpportunityDecisionAction.REJECT,
-                    reason=f"Regime {sym_regime.value} disables strategy",
-                    stage="regime",
+                item = ScoredOpportunity(
+                    opportunity=opportunity,
+                    profitability=_empty_profitability(opportunity),
+                    regime=sym_regime,
+                    regime_weight=weight,
+                    first_limiting_gate="regime",
+                    all_gates=["regime"],
                 )
+                self._reject(item, f"Regime {sym_regime.value} disables strategy", "regime")
                 continue
 
             buy_rate, sell_rate = _resolve_fee_rates(opportunity, fee_rates)
@@ -129,15 +152,29 @@ class GlobalOpportunityEngine:
             )
 
             transfer_cost = self._transfer.estimate(opportunity)
+            venue_adv = self._lookup_venue_adverse(opportunity)
+            economics = build_fill_economics(
+                opportunity,
+                profitability,
+                regime=sym_regime,
+                transfer_cost=transfer_cost,
+                venue_adverse_bps=venue_adv,
+                quote_max_age_ms=float(
+                    getattr(self._settings, "paper_maker_max_age_ms", 2500) or 2500
+                ),
+            )
             ev_data = self._ev.enrich(
                 opportunity,
                 profitability,
                 regime_weight=weight,
                 transfer_cost=transfer_cost,
+                inventory_relief=economics.inventory_relief_eur,
             )
 
             liq = _liquidity_score(opportunity, venue_snapshots)
             exec_q = _execution_quality(opportunity, profitability)
+            raw_ev = Decimal(str(ev_data["expected_value"]))
+            calibrated = self._calibrator.calibrate(raw_ev, opportunity)
 
             item = ScoredOpportunity(
                 opportunity=opportunity,
@@ -148,7 +185,8 @@ class GlobalOpportunityEngine:
                     meta.get("correlation_group")
                     or (inst.correlation_group if inst else "general")
                 ),
-                expected_value=Decimal(str(ev_data["expected_value"])),
+                expected_value=raw_ev,
+                calibrated_expected_value=calibrated,
                 probability_profit=float(ev_data["probability_profit"]),
                 expected_loss=Decimal(str(ev_data["expected_loss"])),
                 risk_reward=Decimal(str(ev_data["risk_reward"])),
@@ -156,34 +194,53 @@ class GlobalOpportunityEngine:
                 regime=sym_regime,
                 regime_weight=weight,
                 transfer_cost=transfer_cost,
-                capital_required=opportunity.quantity * opportunity.entry_price,
+                capital_required=economics.capital_required_eur,
                 execution_quality=exec_q,
                 opportunity_decay_ms=int(
                     getattr(self._settings, "opportunity_decay_ms", 5000) or 5000
                 ),
+                expected_net_eur=economics.expected_net_eur,
+                expected_net_bps=economics.expected_net_bps,
+                expected_net_eur_per_capital_second=economics.expected_net_eur_per_capital_second,
+                expected_capital_time=economics.expected_capital_time,
+                expected_fee_eur=economics.expected_fee_eur,
+                expected_slippage_eur=economics.expected_slippage_eur,
+                expected_adverse_selection_eur=economics.expected_adverse_selection_eur,
+                inventory_relief_eur=economics.inventory_relief_eur,
             )
             item.score = OpportunityRanker.compute_score(item)
 
+            gates: list[str] = []
             if not profitability.trade_allowed:
-                self._decisions.log(
+                gates.append("profitability")
+            min_ev = Decimal(str(getattr(self._settings, "opportunity_min_expected_value", 0)))
+            if item.expected_value < min_ev or item.calibrated_expected_value < min_ev:
+                gates.append("ev")
+            if self._calibrator.hard_gate_negative(opportunity) and calibrated <= 0:
+                gates.append("ev_calibration")
+
+            if "profitability" in gates:
+                item.first_limiting_gate = "profitability"
+                item.all_gates = gates or ["profitability"]
+                self._reject(
                     item,
-                    action=OpportunityDecisionAction.REJECT,
-                    reason="; ".join(
+                    "; ".join(
                         (profitability.estimate.disallow_reasons if profitability.estimate else [])
                         or ["NOT_PROFITABLE"]
                     ),
-                    stage="profitability",
+                    "profitability",
                 )
                 scored.append(item)
                 continue
 
-            min_ev = Decimal(str(getattr(self._settings, "opportunity_min_expected_value", 0)))
-            if item.expected_value < min_ev:
-                self._decisions.log(
+            if "ev" in gates or "ev_calibration" in gates:
+                stage = "ev_calibration" if "ev_calibration" in gates else "ev"
+                item.first_limiting_gate = stage
+                item.all_gates = gates
+                self._reject(
                     item,
-                    action=OpportunityDecisionAction.REJECT,
-                    reason=f"EV {item.expected_value} below min {min_ev}",
-                    stage="ev",
+                    f"calibrated EV {calibrated} / raw EV {item.expected_value} below min {min_ev}",
+                    stage,
                 )
                 scored.append(item)
                 continue
@@ -206,27 +263,33 @@ class GlobalOpportunityEngine:
             item.opportunity = enriched
 
             if not decision.approved:
-                self._decisions.log(
+                gates.append("risk")
+                item.first_limiting_gate = "risk"
+                item.all_gates = gates
+                self._reject(
                     item,
-                    action=OpportunityDecisionAction.REJECT,
-                    reason=decision.rejection_reason or "; ".join(decision.reasons),
-                    stage="risk",
+                    decision.rejection_reason or "; ".join(decision.reasons),
+                    "risk",
                 )
                 scored.append(item)
                 continue
 
             ok, msg, _code = self._portfolio_gate.check(item, portfolio)
             if not ok:
-                self._decisions.log(
+                gates.append("portfolio")
+                item.first_limiting_gate = "portfolio"
+                item.all_gates = gates
+                self._reject(
                     item,
-                    action=OpportunityDecisionAction.REJECT,
-                    reason=msg,
-                    stage="portfolio",
+                    msg,
+                    "portfolio",
                     portfolio_exposure=self._portfolio_gate.snapshot(),
                 )
                 scored.append(item)
                 continue
 
+            item.first_limiting_gate = ""
+            item.all_gates = []
             self._decisions.log(
                 item,
                 action=OpportunityDecisionAction.TAKE,
@@ -239,7 +302,53 @@ class GlobalOpportunityEngine:
 
         ranked = self._ranker.rank(approved)
         max_exec = int(getattr(self._settings, "opportunity_max_executions_per_cycle", 3) or 3)
-        return ranked[:max_exec], scored
+        leftover = ranked[max_exec:]
+        kept = ranked[:max_exec]
+        for item in leftover:
+            item.first_limiting_gate = "final"
+            item.all_gates = ["final"]
+            self._reject(
+                item,
+                f"Ranked below max executions per cycle ({max_exec})",
+                "final",
+                portfolio_exposure=self._portfolio_gate.snapshot(),
+            )
+        return kept, scored
+
+    def _reject(
+        self,
+        item: ScoredOpportunity,
+        reason: str,
+        stage: str,
+        *,
+        portfolio_exposure: dict | None = None,
+    ) -> None:
+        decision = self._decisions.log(
+            item,
+            action=OpportunityDecisionAction.REJECT,
+            reason=reason,
+            stage=stage,
+            portfolio_exposure=portfolio_exposure,
+        )
+        self._missed.record_reject(
+            item,
+            decision,
+            first_gate=item.first_limiting_gate or stage,
+            all_gates=item.all_gates or [stage],
+        )
+
+    def _lookup_venue_adverse(self, opportunity: TradeOpportunity) -> Decimal | None:
+        if self._venue_adverse_lookup is None:
+            return None
+        meta = opportunity.metadata or {}
+        buy = str(meta.get("buy_exchange") or "")
+        try:
+            value = self._venue_adverse_lookup(buy, opportunity.symbol, "buy")
+        except TypeError:
+            value = self._venue_adverse_lookup()
+        if value is None:
+            return None
+        return Decimal(str(value))
 
     @staticmethod
     def ranking_summary(
@@ -260,6 +369,9 @@ class GlobalOpportunityEngine:
                 "symbol": s.opportunity.symbol,
                 "strategy": s.opportunity.strategy_name,
                 "expected_value": str(s.expected_value),
+                "calibrated_expected_value": str(s.calibrated_expected_value),
+                "expected_net_eur": str(s.expected_net_eur),
+                "net_eur_per_capital_second": str(s.expected_net_eur_per_capital_second),
                 "score": str(s.score),
                 "probability_profit": s.probability_profit,
                 "net_profit_usd": str(s.profitability.net_profit_usd),

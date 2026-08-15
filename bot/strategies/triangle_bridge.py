@@ -100,6 +100,7 @@ class TriangleBridgeStrategy(BaseStrategy):
         self._scan_rejections = 0
         self._opportunities_emitted = 0
         self._reject_counts: dict[str, int] = {}
+        self._missing_pairs: dict[str, int] = {}
         self._last_emit: dict[str, float] = {}
         self._cooldown_ms = float(settings.arbitrage_opportunity_cooldown_ms)
 
@@ -164,6 +165,13 @@ class TriangleBridgeStrategy(BaseStrategy):
                 if self._venue_ok(s.exchange)
             ]
             if not eur_snaps or not usdt_snaps:
+                missing = []
+                if not eur_snaps:
+                    missing.append(eur_sym)
+                if not usdt_snaps:
+                    missing.append(usdt_sym)
+                key = ",".join(missing)
+                self._missing_pairs[key] = self._missing_pairs.get(key, 0) + 1
                 continue
             for buy_snap in usdt_snaps:
                 for sell_snap in eur_snaps:
@@ -405,6 +413,12 @@ class TriangleBridgeStrategy(BaseStrategy):
             else candidate.buy_price
         )
         exit_eur = candidate.sell_eur_equivalent
+        fx_venue = (
+            candidate.buy_exchange
+            if candidate.direction == "usdt_to_eur"
+            else candidate.sell_exchange
+        )
+        fx_cost = (candidate.quantity * entry_eur) * venue_taker_fee(fx_venue)
         opportunity = TradeOpportunity(
             strategy_name=self.name,
             symbol=f"{candidate.base}EUR",
@@ -435,6 +449,8 @@ class TriangleBridgeStrategy(BaseStrategy):
                 "sell_maker_fee_rate": str(venue_maker_fee(candidate.sell_exchange)),
                 "fx_symbol": self._fx_symbol,
                 "fx_mid": str(candidate.fx_mid),
+                "expected_fx_cost_eur": str(fx_cost),
+                "extra_cost_eur": str(fx_cost),
                 "pricing": "triangle_maker",
                 "quote_currency": "EUR",
                 "round_trip": True,
@@ -477,6 +493,7 @@ class TriangleBridgeStrategy(BaseStrategy):
             "scan_rejections": self._scan_rejections,
             "opportunities_emitted": self._opportunities_emitted,
             "reject_counts": dict(sorted(self._reject_counts.items())),
+            "missing_pairs": dict(sorted(self._missing_pairs.items())),
         }
 
 

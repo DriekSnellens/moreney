@@ -662,7 +662,7 @@ class PaperExecutor(BaseExecutor):
     def _limit_is_marketable(self, order: Order, book: OrderBook | None) -> bool:
         assert order.requested_price is not None
         if book is None:
-            return True  # without book, accept limit at requested price
+            return False  # missing book is not a free fill
         if order.side == OrderSide.BUY:
             if not book.asks:
                 return False

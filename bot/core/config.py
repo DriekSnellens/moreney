@@ -245,6 +245,10 @@ class Settings(BaseSettings):
     opportunity_max_executions_per_cycle: int = Field(default=3, ge=1, le=30)
     opportunity_max_candidates_per_cycle: int = Field(default=20, ge=1, le=100)
     opportunity_decay_ms: int = Field(default=5000, ge=0)
+    # EV calibration (shrinkage toward 1.0 until enough realized fills exist).
+    ev_calibration_prior_strength: int = Field(default=40, ge=1, le=500)
+    ev_calibration_min_samples: int = Field(default=20, ge=5, le=500)
+    paper_markout_min_samples: int = Field(default=20, ge=5, le=500)
     risk_allow_partial_sizing: bool = True
     risk_partial_min_notional_pct: float = Field(default=10.0, ge=1, le=100)
 
@@ -255,7 +259,10 @@ class Settings(BaseSettings):
     market_data_mode: Literal["local", "shared", "publisher"] = "local"
     market_data_redis_poll_ms: float = Field(default=100.0, ge=20.0)
     market_data_exchanges: str = "binance,kraken,coinbase,bitvavo,okx,bybit"
-    market_data_symbols: str = "BTCEUR,ETHEUR,BTCUSDT,EURUSDT"
+    market_data_symbols: str = (
+        "BTCEUR,ETHEUR,BTCUSDT,ETHUSDT,EURUSDT,ADAEUR,ADAUSDT,ATOMEUR,ATOMUSDT,"
+        "DOTEUR,DOTUSDT,XRPEUR,XRPUSDT,NEAREUR,NEARUSDT"
+    )
     market_data_recording_enabled: bool = False
     market_data_recording_path: str = "./data/market_data"
     market_data_ws_reconnect_base_ms: float = Field(default=500.0, gt=0)

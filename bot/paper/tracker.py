@@ -123,6 +123,14 @@ class PerformanceTracker:
             execution_buffer=buffer,
             expected_net_profit=net,
             expected_net_return=net_ret,
+            expected_gross=gross,
+            expected_adverse=_d(meta.get("expected_adverse_eur", meta.get("execution_buffer_eur", buffer))),
+            expected_inventory=_d(meta.get("inventory_relief_eur", 0)),
+            calibrated_expected_value=(
+                _d(meta.get("calibrated_expected_value"))
+                if meta.get("calibrated_expected_value") is not None
+                else None
+            ),
             status=OpportunityLifecycleStatus.DETECTED,
             metadata=dict(meta),
         )
@@ -318,7 +326,9 @@ class PerformanceTracker:
             fx_cost = _d((tracked.metadata or {}).get("fx_refill_cost_eur", 0))
             if buy_cost <= 0 or sell_proceeds <= 0:
                 return None
-            return sell_proceeds - buy_cost - fx_cost
+            realized = sell_proceeds - buy_cost - fx_cost
+            self._attach_attribution(tracked, buy_fills, sell_fills, realized, fx_cost)
+            return realized
 
         # Cross-exchange arb without a sell fill is not a completed trade.
         if tracked.sell_exchange:
@@ -366,6 +376,47 @@ class PerformanceTracker:
                 cash = cash / fx_mid
             total += cash
         return total
+
+    def _attach_attribution(
+        self,
+        tracked: TrackedOpportunity,
+        buy_fills: list[Fill],
+        sell_fills: list[Fill],
+        realized: Decimal,
+        fx_cost: Decimal,
+    ) -> None:
+        """Decompose realized NET: gross − fees − slippage − residual (adverse/inventory)."""
+        buy_fee = sum((f.fee for f in buy_fills), _ZERO)
+        sell_fee = sum((f.fee for f in sell_fills), _ZERO)
+        buy_slip = sum((f.slippage for f in buy_fills), _ZERO)
+        sell_slip = sum((f.slippage for f in sell_fills), _ZERO)
+        tracked.realized_fees = buy_fee + sell_fee + fx_cost
+        tracked.realized_slippage = buy_slip + sell_slip
+        residual = tracked.expected_net_profit - realized
+        # Residual after fees/slippage vs expected is the combined adverse + inventory
+        # effect. We cannot split them without a mid path; store as adverse bucket.
+        tracked.realized_adverse = residual
+        tracked.realized_inventory = _ZERO
+
+    def calibration_observations(self) -> list[dict[str, Any]]:
+        """Completed fills for EV calibrator (past data only)."""
+        rows: list[dict[str, Any]] = []
+        for tracked in self._opportunities:
+            if tracked.realized_net_profit is None:
+                continue
+            rows.append(
+                {
+                    "key": (
+                        f"{tracked.strategy}|{tracked.symbol}|"
+                        f"{tracked.buy_exchange}->{tracked.sell_exchange}|buy"
+                    ),
+                    "route": f"{tracked.buy_exchange}->{tracked.sell_exchange}",
+                    "strategy": tracked.strategy,
+                    "expected_net": tracked.expected_net_profit,
+                    "realized_net": tracked.realized_net_profit,
+                }
+            )
+        return rows
 
     def _register_trade(self, tracked: TrackedOpportunity, realized: Decimal) -> None:
         self._trade_pnls.append(realized)
@@ -418,6 +469,15 @@ class PerformanceTracker:
                 "slippage": str(tracked.slippage),
                 "expected_net_profit": str(tracked.expected_net_profit),
                 "realized_net_profit": str(realized),
+                "expected_gross": str(tracked.expected_gross or tracked.gross_profit),
+                "expected_fees": str(tracked.fees),
+                "expected_slippage": str(tracked.slippage),
+                "expected_adverse": str(tracked.expected_adverse or tracked.execution_buffer),
+                "expected_inventory": str(tracked.expected_inventory or _ZERO),
+                "realized_fees": str(tracked.realized_fees) if tracked.realized_fees is not None else None,
+                "realized_slippage": str(tracked.realized_slippage) if tracked.realized_slippage is not None else None,
+                "realized_adverse": str(tracked.realized_adverse) if tracked.realized_adverse is not None else None,
+                "ev_gap": str(realized - tracked.expected_net_profit),
                 "status": tracked.status.value,
             }
         )
@@ -526,6 +586,20 @@ class PerformanceTracker:
             if self._starting_equity > 0
             else _ZERO
         )
+        completed = [o for o in self._opportunities if o.realized_net_profit is not None]
+        n_fills = Decimal(trade_count) if trade_count else _ZERO
+        net_per_fill = net_pnl / n_fills if n_fills else _ZERO
+        volume = self._trading_volume if self._trading_volume > 0 else _ZERO
+        net_bps = (net_pnl / volume * _HUNDRED * Decimal("100")) if volume > 0 else _ZERO
+        sum_expected = sum((o.expected_net_profit for o in completed), _ZERO)
+        ev_capture = (
+            (net_pnl / sum_expected) if sum_expected != 0 and completed else None
+        )
+        fees_per = self._fees / n_fills if n_fills else _ZERO
+        slip_per = self._slippage / n_fills if n_fills else _ZERO
+        # Capital velocity: NET euro per euro of starting capital per second of
+        # session is computed by the runner (has runtime). Here: NET / volume.
+        velocity = net_pnl / volume if volume > 0 else _ZERO
         return PerformanceSnapshot(
             starting_equity=self._starting_equity,
             current_equity=self._current_equity,
@@ -557,6 +631,12 @@ class PerformanceTracker:
             pairs_evaluated=self._pairs_evaluated,
             depth_edges_found=self._depth_edges_found,
             scan_rejections=self._scan_rejections,
+            net_eur_per_fill=net_per_fill,
+            net_bps_per_fill=net_bps,
+            ev_capture=ev_capture,
+            fees_per_fill=fees_per,
+            slippage_per_fill=slip_per,
+            capital_velocity=velocity,
         )
 
     def opportunities(

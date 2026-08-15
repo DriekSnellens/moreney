@@ -14,10 +14,25 @@ _ONE = Decimal("1")
 class ExpectedValueEngine:
     """Risk-adjusted EV: P(win)*gain - P(loss)*loss - costs."""
 
-    def __init__(self, settings: Settings, *, markout_win_rate: float | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        markout_win_rate: float | None = None,
+        markout_samples: int = 0,
+        min_markout_samples: int = 20,
+    ) -> None:
         self._settings = settings
         self._default_p_win = float(getattr(settings, "opportunity_default_win_prob", 0.55))
-        self._markout_win_rate = markout_win_rate
+        # Only trust empirical markout win rate once the sample is large enough.
+        # A hardcoded 0.55 whenever samples > 0 was fake calibration.
+        self._markout_win_rate: float | None = None
+        if (
+            markout_win_rate is not None
+            and markout_win_rate > 0
+            and markout_samples >= min_markout_samples
+        ):
+            self._markout_win_rate = markout_win_rate
 
     def enrich(
         self,
@@ -26,6 +41,7 @@ class ExpectedValueEngine:
         *,
         regime_weight: Decimal = _ONE,
         transfer_cost: Decimal = _ZERO,
+        inventory_relief: Decimal = _ZERO,
     ) -> dict[str, Decimal | float]:
         net = profitability.net_profit_usd
         notional = opportunity.quantity * opportunity.entry_price
@@ -42,6 +58,9 @@ class ExpectedValueEngine:
         post_only = bool(meta.get("post_only"))
 
         gain = max(net, _ZERO)
+        # Inventory relief may increase gain but never rescue a non-positive NET.
+        if net > 0 and inventory_relief > 0:
+            gain = gain + inventory_relief
         loss = abs(min(net, _ZERO))
         adverse_bps = Decimal(str(meta.get("adverse_bps", 0) or 0))
         if post_only:
