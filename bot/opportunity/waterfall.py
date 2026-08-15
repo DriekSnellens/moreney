@@ -180,6 +180,37 @@ def assert_no_double_count(expected: PnlWaterfall, realized: PnlWaterfall) -> li
     return issues
 
 
+def prediction_error(
+    *,
+    predicted_net_if_fill: Decimal,
+    realized_net: Decimal,
+    predicted_gross: Decimal,
+    realized_gross_proxy: Decimal,
+    predicted_fees: Decimal,
+    realized_fees: Decimal,
+    predicted_adverse: Decimal,
+    realized_adverse: Decimal,
+) -> dict[str, Any]:
+    """Ex-ante vs ex-post decomposition. Does not invent unsupported splits."""
+    total = realized_net - predicted_net_if_fill
+    fee_err = predicted_fees - realized_fees
+    gross_err = realized_gross_proxy - predicted_gross
+    adverse_err = predicted_adverse - realized_adverse
+    accounted = fee_err + gross_err + adverse_err
+    return {
+        "kind": "estimated",
+        "total_error": str(total),
+        "gross_spread_error": str(gross_err),
+        "fee_error": str(fee_err),
+        "adverse_error": str(adverse_err),
+        "unexplained_residual": str(total - accounted),
+        "notes": [
+            "realized_gross_proxy = realized_net + realized_fees + realized_slippage",
+            "stale-data error not separately identified without book-age at fill",
+        ],
+    }
+
+
 def decompose_trade_row(row: dict[str, Any]) -> dict[str, Any]:
     """Decompose a persisted tracker trade row into expected + realized waterfalls."""
 
@@ -203,13 +234,7 @@ def decompose_trade_row(row: dict[str, Any]) -> dict[str, Any]:
     fees_r = _d("realized_fees", str(fees_e))
     slip_r = _d("realized_slippage", str(_d("slippage")))
     realized_net = _d("realized_net_profit")
-    # Reconstruct gross from cash identity when not stored:
-    # realized = gross - fees - slip - adverse - fx - inventory
-    # We do not know gross_r separately; approximate via expected gross then residual.
     gross_r = realized_net + fees_r + slip_r
-    # If expected gross was positive and this "gross_r" is far below, adverse will
-    # absorb the gap when we rebuild from expected gross as the opportunity.
-    # Prefer opportunity gross (what the model claimed) so adverse = model error.
     opp_gross = expected.gross_opportunity
     realized = realized_waterfall(
         gross=opp_gross if opp_gross != 0 else gross_r,
@@ -218,10 +243,21 @@ def decompose_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         slippage=slip_r,
         realized_net=realized_net,
     )
+    pred_err = prediction_error(
+        predicted_net_if_fill=expected.net,
+        realized_net=realized_net,
+        predicted_gross=expected.gross_opportunity,
+        realized_gross_proxy=gross_r,
+        predicted_fees=fees_e,
+        realized_fees=fees_r,
+        predicted_adverse=expected.execution_buffer + expected.adverse_selection,
+        realized_adverse=realized.adverse_selection,
+    )
     return {
         "expected": expected.as_dict(),
         "realized": realized.as_dict(),
         "double_count_issues": assert_no_double_count(expected, realized),
         "ev_gap": str(realized_net - expected.net),
         "gross_evaporated": str(opp_gross - (realized_net + fees_r + slip_r)),
+        "prediction_error": pred_err,
     }

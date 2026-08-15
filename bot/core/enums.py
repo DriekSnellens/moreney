@@ -156,3 +156,36 @@ class OpportunityDecisionAction(StrEnum):
     TAKE = "take"
     REJECT = "reject"
     DEFER = "defer"
+
+
+class FillType(StrEnum):
+    """How a paper maker fill was produced. Not all fills are economically equal."""
+
+    QUEUE = "queue"
+    TRADE_THROUGH = "trade_through"
+    UNKNOWN = "unknown"
+
+
+class RouteState(StrEnum):
+    """Lifecycle of a venue→venue (or key) trading route under calibration."""
+
+    WARMUP = "warmup"
+    ACTIVE = "active"
+    WATCH = "watch"
+    EARLY_STOPPED = "early_stopped"
+    HARD_STOPPED = "hard_stopped"
+
+
+class RouteDecisionReason(StrEnum):
+    """Machine-readable why a route is in its current state / was gated."""
+
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    NEGATIVE_RAW_CAPTURE = "negative_raw_capture"
+    CUMULATIVE_LOSS = "cumulative_loss"
+    CALIBRATED_EV_NEGATIVE = "calibrated_ev_negative"
+    TOXIC_MARKOUT = "toxic_markout"
+    STALE_MARKET_DATA = "stale_market_data"
+    RISK_VIOLATION = "risk_violation"
+    POSITIVE_EVIDENCE = "positive_evidence"
+    EARLY_RAW_LOSS_OVERRIDES_SHRINKAGE = "early_raw_loss_overrides_shrinkage"
+

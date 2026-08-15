@@ -902,6 +902,14 @@ class MakerInventoryStrategy(BaseStrategy):
                 "adverse_bps": str(self._adverse_bps),
                 "hmm_regime_id": self._hmm_regime_id,
                 "reduce_only": sell_only or self._external_reduce_only,
+                "book_age_ms": str(
+                    max(
+                        _book_age_ms(candidate.buy_snapshot),
+                        _book_age_ms(candidate.sell_snapshot)
+                        if candidate.sell_snapshot is not None
+                        else 0.0,
+                    )
+                ),
             },
         )
         result = await self._profitability.evaluate(

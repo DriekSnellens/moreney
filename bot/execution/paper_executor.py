@@ -296,10 +296,12 @@ class PaperExecutor(BaseExecutor):
             book = (books.get(venue) or {}).get(order.symbol)
             if book is None:
                 continue
-            qty = self._maker_fill_quantity(order, book, now_ms, rest_ms, fill_pct)
+            qty, fill_type = self._maker_fill_quantity(
+                order, book, now_ms, rest_ms, fill_pct
+            )
             if qty <= 0:
                 continue
-            result = self._fill_resting(order, qty)
+            result = self._fill_resting(order, qty, fill_type=fill_type)
             if result is not None:
                 filled.append(result)
         return filled
@@ -377,11 +379,14 @@ class PaperExecutor(BaseExecutor):
         now_ms: int,
         rest_ms: float,
         fill_pct: Decimal,
-    ) -> Decimal:
+    ) -> tuple[Decimal, str]:
+        """Return (qty, fill_type). Queue fills stay opt-in; never invent fills."""
+        from bot.core.enums import FillType
+
         limit = order.requested_price
         remaining = order.remaining_quantity
         if limit is None or remaining <= 0:
-            return _ZERO
+            return _ZERO, FillType.UNKNOWN.value
         placed_ms = int(float((order.metadata or {}).get("placed_ms") or now_ms))
         aged = now_ms - placed_ms
         through_raw = getattr(self._settings, "paper_maker_trade_through_fill_pct", 1)
@@ -389,37 +394,37 @@ class PaperExecutor(BaseExecutor):
 
         if order.side == OrderSide.BUY:
             if not book.bids:
-                return _ZERO
+                return _ZERO, FillType.UNKNOWN.value
             best = book.bids[0].price
             displayed = book.bids[0].amount
             # Live-conservative: only fill when the market trades through our bid.
             if best < limit:
                 if through_pct <= 0:
-                    return _ZERO
+                    return _ZERO, FillType.UNKNOWN.value
                 take = remaining if through_pct >= 1 else remaining * through_pct
-                return min(remaining, take)
+                return min(remaining, take), FillType.TRADE_THROUGH.value
             if best > limit:
-                return _ZERO
+                return _ZERO, FillType.UNKNOWN.value
         else:
             if not book.asks:
-                return _ZERO
+                return _ZERO, FillType.UNKNOWN.value
             best = book.asks[0].price
             displayed = book.asks[0].amount
             if best > limit:
                 if through_pct <= 0:
-                    return _ZERO
+                    return _ZERO, FillType.UNKNOWN.value
                 take = remaining if through_pct >= 1 else remaining * through_pct
-                return min(remaining, take)
+                return min(remaining, take), FillType.TRADE_THROUGH.value
             if best < limit:
-                return _ZERO
+                return _ZERO, FillType.UNKNOWN.value
 
         # At-touch queue fills are optional and off by default (too optimistic live).
         if fill_pct <= 0 or aged < rest_ms:
-            return _ZERO
+            return _ZERO, FillType.UNKNOWN.value
         queued = displayed * fill_pct
         if queued <= 0:
-            return _ZERO
-        return min(remaining, queued)
+            return _ZERO, FillType.UNKNOWN.value
+        return min(remaining, queued), FillType.QUEUE.value
 
     async def close_one_leg(
         self,
@@ -483,7 +488,13 @@ class PaperExecutor(BaseExecutor):
             order_type=OrderType.LIMIT,
         )
 
-    def _fill_resting(self, order: Order, filled_qty: Decimal) -> ExecutionResult | None:
+    def _fill_resting(
+        self,
+        order: Order,
+        filled_qty: Decimal,
+        *,
+        fill_type: str = "unknown",
+    ) -> ExecutionResult | None:
         vwap = order.requested_price
         if vwap is None or filled_qty <= 0:
             return None
@@ -503,6 +514,7 @@ class PaperExecutor(BaseExecutor):
                 "post_only": True,
                 "fee_role": "maker",
                 "fee_rate": str(fee_rate),
+                "fill_type": fill_type,
             },
         )
         self._orders.attach_fill(order.id, fill)
@@ -511,6 +523,9 @@ class PaperExecutor(BaseExecutor):
             order, filled_qty, vwap, fee, inventory_locked=True
         )
         self._portfolio.set_mark_price(order.symbol, vwap)
+        meta = dict(order.metadata or {})
+        meta["last_fill_type"] = fill_type
+        order.metadata = meta
         result = ExecutionResult(
             order_id=order.id,
             opportunity_id=order.opportunity_id or order.id,
@@ -526,17 +541,19 @@ class PaperExecutor(BaseExecutor):
                 "fee": str(fee),
                 "real_exchange_order": False,
                 "fill_id": str(fill.id),
+                "fill_type": fill_type,
             },
         )
         self.history.append(result)
         logger.info(
             "PAPER_MAKER_FILL order_id=%s status=%s qty=%s price=%s fee=%s "
-            "real_exchange_order=false",
+            "fill_type=%s real_exchange_order=false",
             order.id,
             order.status.value,
             filled_qty,
             vwap,
             fee,
+            fill_type,
         )
         return result
 

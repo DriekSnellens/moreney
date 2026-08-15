@@ -15,6 +15,7 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import Any
 
+from bot.core.enums import RouteDecisionReason, RouteState
 from bot.core.models import TradeOpportunity
 
 _ZERO = Decimal("0")
@@ -163,27 +164,35 @@ class EvCalibrator:
         """
         key = calibration_key(opportunity)
         route_name = route_key(opportunity)
-        if self._early_route_stop(route_name) or self._early_route_stop_bucket(
+        if self.hard_gate_negative_route(route_name) or self._early_route_stop_bucket(
             self._by_key[key]
         ):
             return True
         bucket = self._by_key[key]
         if bucket.n < self._min_samples:
-            route = self._by_route[route_name]
-            if route.n < self._min_samples:
-                return False
-            cap = self.capture_ratio(
-                key=key,
-                route=route_name,
-                strategy=opportunity.strategy_name,
-            )
-            return cap <= 0
+            return False
         cap = self.capture_ratio(
             key=key,
             route=route_name,
             strategy=opportunity.strategy_name,
         )
         return cap <= 0
+
+    def hard_gate_negative_route(self, route: str) -> bool:
+        """Route-level stop without a TradeOpportunity (experiments / dashboards)."""
+        if not route:
+            return False
+        if self._early_route_stop(route):
+            return True
+        bucket = self._by_route[route]
+        if bucket.n < self._min_samples:
+            return False
+        raw = bucket.raw_capture()
+        if raw is None:
+            return False
+        alpha = Decimal(bucket.n) / Decimal(bucket.n + self._prior_k)
+        shrunk = alpha * raw + (_ONE - alpha) * self._prior
+        return shrunk <= 0
 
     def _early_route_stop(self, route: str) -> bool:
         if not route:
@@ -202,18 +211,86 @@ class EvCalibrator:
             return bucket.sum_realized < 0
         return raw <= self._early_capture
 
+    def route_state(self, route: str) -> dict[str, Any]:
+        """Explicit lifecycle + machine-readable reason for one venue→venue route."""
+        bucket = self._by_route[route] if route else self._global
+        n = bucket.n
+        raw = bucket.raw_capture()
+        if raw is None:
+            shrunk = self._prior
+        else:
+            alpha = Decimal(n) / Decimal(n + self._prior_k) if n else _ZERO
+            shrunk = min(
+                self._ceiling,
+                max(self._floor, alpha * raw + (_ONE - alpha) * self._prior),
+            )
+        early = self._early_route_stop_bucket(bucket)
+        hard = bool(n >= self._min_samples and shrunk <= 0)
+
+        if early:
+            state = RouteState.EARLY_STOPPED
+            reason = RouteDecisionReason.EARLY_RAW_LOSS_OVERRIDES_SHRINKAGE
+            detail = (
+                f"n={n} raw_capture={raw} shrunk_capture={shrunk} "
+                f"sum_realized={bucket.sum_realized}; "
+                "early raw loss evidence overrides neutral shrinkage"
+            )
+        elif hard:
+            state = RouteState.HARD_STOPPED
+            reason = RouteDecisionReason.CALIBRATED_EV_NEGATIVE
+            detail = f"n={n} shrunk_capture={shrunk} ≤ 0 after min_samples={self._min_samples}"
+        elif n == 0:
+            state = RouteState.WARMUP
+            reason = RouteDecisionReason.INSUFFICIENT_EVIDENCE
+            detail = "no completed round-trips on this route"
+        elif n < self._early_n:
+            state = RouteState.WARMUP
+            reason = RouteDecisionReason.INSUFFICIENT_EVIDENCE
+            detail = f"n={n} < early_stop_samples={self._early_n}"
+        elif raw is not None and raw < 0:
+            state = RouteState.WATCH
+            reason = RouteDecisionReason.NEGATIVE_RAW_CAPTURE
+            detail = f"n={n} raw_capture={raw} negative but early-stop criteria not met"
+        else:
+            state = RouteState.ACTIVE
+            reason = RouteDecisionReason.POSITIVE_EVIDENCE
+            detail = f"n={n} raw_capture={raw} shrunk_capture={shrunk}"
+
+        return {
+            "route": route,
+            "state": state.value,
+            "reason": reason.value,
+            "detail": detail,
+            "n": n,
+            "sum_expected": str(bucket.sum_expected),
+            "sum_realized": str(bucket.sum_realized),
+            "raw_capture": str(raw) if raw is not None else None,
+            "shrunk_capture": str(shrunk),
+            "early_stop": early,
+            "hard_stop": hard,
+            "overrides_positive_shrinkage": bool(early and shrunk > 0),
+        }
+
     def snapshot(self) -> dict[str, Any]:
-        def _summ(bucket: _Bucket) -> dict[str, Any]:
-            return {
+        def _summ(bucket: _Bucket, route: str = "") -> dict[str, Any]:
+            base = {
                 "n": bucket.n,
                 "sum_expected": str(bucket.sum_expected),
                 "sum_realized": str(bucket.sum_realized),
                 "raw_capture": str(bucket.raw_capture()) if bucket.raw_capture() is not None else None,
                 "early_stop": self._early_route_stop_bucket(bucket),
             }
+            if route:
+                status = self.route_state(route)
+                base["state"] = status["state"]
+                base["reason"] = status["reason"]
+                base["detail"] = status["detail"]
+                base["shrunk_capture"] = status["shrunk_capture"]
+                base["overrides_positive_shrinkage"] = status["overrides_positive_shrinkage"]
+            return base
 
         routes = {
-            k: _summ(v)
+            k: _summ(v, route=k)
             for k, v in sorted(self._by_route.items(), key=lambda kv: -kv[1].n)
             if v.n > 0
         }
@@ -227,6 +304,7 @@ class EvCalibrator:
             "early_stop_min_loss_eur": str(self._early_loss),
             "denominator": "sum(realized_net)/sum(expected_net)",
             "routes": routes,
+            "route_states": {k: self.route_state(k) for k in routes},
             "strategies": {k: _summ(v) for k, v in self._by_strategy.items() if v.n > 0},
             "keys": len([1 for v in self._by_key.values() if v.n > 0]),
         }

@@ -61,6 +61,7 @@ class PerformanceTracker:
         self._opportunities: list[TrackedOpportunity] = []
         self._by_id: dict[UUID, TrackedOpportunity] = {}
         self._trades: list[dict[str, Any]] = []
+        self._calibration_queue: list[dict[str, Any]] = []
 
         self._strategies: dict[str, StrategyStats] = {}
         self._pairs: dict[str, ExchangePairStats] = {}
@@ -495,6 +496,25 @@ class PerformanceTracker:
                 "status": tracked.status.value,
             }
         )
+        self._calibration_queue.append(
+            {
+                "key": (
+                    f"{tracked.strategy}|{tracked.symbol}|"
+                    f"{tracked.buy_exchange}->{tracked.sell_exchange}|buy"
+                ),
+                "route": f"{tracked.buy_exchange}->{tracked.sell_exchange}",
+                "strategy": tracked.strategy,
+                "expected_net": tracked.expected_net_profit,
+                "realized_net": realized,
+                "opportunity_id": str(tracked.id),
+            }
+        )
+
+    def drain_calibration_observations(self) -> list[dict[str, Any]]:
+        """Return newly completed round-trips since last drain (for live calibrate)."""
+        rows = list(self._calibration_queue)
+        self._calibration_queue.clear()
+        return rows
 
     def sync_portfolio(self, portfolio: PaperPortfolio) -> None:
         """Refresh equity / drawdown / unrealized from the live paper portfolio."""

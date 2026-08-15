@@ -268,6 +268,25 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>Route-status</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Route</th><th>State</th><th>n</th><th>Raw capture</th>
+              <th>Shrunk</th><th>Realized</th><th>Reden</th>
+            </tr>
+          </thead>
+          <tbody>{_route_state_rows((status.get('ev_calibration') or {}).get('route_states') or (status.get('ev_calibration') or {}).get('routes') or {})}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        EARLY_STOPPED = raw verlies overrulet positieve shrinkage.
+        Shrinkage blijft voor ranking; early-stop is aparte loss-containment.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Why not trade?</h2>
       <div class="table-wrap">
         <table>
@@ -1166,6 +1185,33 @@ def _global_ranking_block(ranking: Any) -> str:
         <p class="forecast-note">Batch: {_esc(ranking.get('input_candidates', 0))} in → {_esc(ranking.get('approved', 0))} goedgekeurd → {_esc(ranking.get('ranked_for_execution', 0))} uitvoerbaar</p>
       </div>
     """
+
+
+def _route_state_rows(routes: dict[str, Any]) -> str:
+    if not routes:
+        return "<tr><td colspan='7' class='empty'>Nog geen route-samples</td></tr>"
+    rows: list[str] = []
+    for route, cell in sorted(
+        routes.items(),
+        key=lambda kv: -int((kv[1] or {}).get("n") or 0),
+    ):
+        if not isinstance(cell, dict):
+            continue
+        state = str(cell.get("state") or ("early_stopped" if cell.get("early_stop") else "—"))
+        reason = cell.get("reason") or cell.get("detail") or ("—" if not cell.get("early_stop") else "early_raw_loss_overrides_shrinkage")
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(route)}</td>"
+            f"<td><strong>{_esc(state)}</strong></td>"
+            f"<td class='num'>{_esc(cell.get('n'))}</td>"
+            f"<td class='num'>{_esc(cell.get('raw_capture') if cell.get('raw_capture') is not None else '—')}</td>"
+            f"<td class='num'>{_esc(cell.get('shrunk_capture') if cell.get('shrunk_capture') is not None else '—')}</td>"
+            f"<td class='num {_pnl_class(cell.get('sum_realized'))}'>"
+            f"{_esc_fmt(cell.get('sum_realized'), 'money')}</td>"
+            f"<td>{_esc(reason)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='7' class='empty'>Nog geen route-samples</td></tr>"
 
 
 def _edge_route_rows(by_route: dict[str, Any]) -> str:

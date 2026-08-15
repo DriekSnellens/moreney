@@ -25,11 +25,16 @@ class _PendingMarkout:
     fill_price: Decimal
     mid_at_fill: Decimal
     filled_at_ms: float
+    fill_type: str = ""
     captured: dict[int, Decimal] = field(default_factory=dict)
 
 
-def _bucket_key(venue: str, symbol: str, side: str) -> str:
-    return f"{(venue or '').lower()}|{(symbol or '').upper()}|{(side or '').lower()}"
+def _bucket_key(venue: str, symbol: str, side: str, fill_type: str = "") -> str:
+    base = f"{(venue or '').lower()}|{(symbol or '').upper()}|{(side or '').lower()}"
+    ft = (fill_type or "").lower()
+    if ft and ft != "unknown":
+        return f"{base}|{ft}"
+    return base
 
 
 class MarkoutTracker:
@@ -58,6 +63,7 @@ class MarkoutTracker:
         mid: Decimal | None,
         venue: str = "",
         strategy: str = "",
+        fill_type: str = "",
     ) -> None:
         if mid is None or mid <= 0 or fill_price <= 0:
             return
@@ -72,6 +78,7 @@ class MarkoutTracker:
                 fill_price=fill_price,
                 mid_at_fill=mid,
                 filled_at_ms=time.time() * 1000.0,
+                fill_type=str(fill_type or "").lower(),
             )
         )
 
@@ -99,9 +106,9 @@ class MarkoutTracker:
                 primary = item.captured.get(5000, _ZERO)
                 self._samples.append(primary)
                 self._wins.append(primary <= 0)
-                self._by_bucket[_bucket_key(item.venue, item.symbol, item.side)].append(
-                    primary
-                )
+                self._by_bucket[
+                    _bucket_key(item.venue, item.symbol, item.side, item.fill_type)
+                ].append(primary)
             else:
                 still.append(item)
         self._pending = still
@@ -114,16 +121,26 @@ class MarkoutTracker:
         venue: str = "",
         symbol: str = "",
         side: str = "",
+        fill_type: str = "",
     ) -> Decimal:
         """Rolling median 5s adverse markout, clamped to [floor, ceiling].
 
-        When venue/symbol/side are given, shrink the bucket median toward the
-        global median so thin Bitvavo samples cannot dominate.
+        When venue/symbol/side/fill_type are given, shrink the bucket median toward
+        the global median so thin Bitvavo samples cannot dominate.
         """
         global_samples = list(self._by_horizon[5000]) or list(self._samples)
         global_med = _median(global_samples) if global_samples else floor
-        if venue or symbol or side:
-            bucket = list(self._by_bucket.get(_bucket_key(venue, symbol, side), []))
+        if venue or symbol or side or fill_type:
+            # Hierarchical fallback: specific fill_type → without fill_type → global.
+            candidates = [
+                _bucket_key(venue, symbol, side, fill_type),
+                _bucket_key(venue, symbol, side, ""),
+            ]
+            bucket: list[Decimal] = []
+            for key in candidates:
+                bucket = list(self._by_bucket.get(key, []))
+                if bucket:
+                    break
             if bucket:
                 local = _median(bucket)
                 n = len(bucket)

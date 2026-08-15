@@ -180,6 +180,31 @@ class GlobalOpportunityEngine:
                 economics.expected_adverse_selection_eur
             )
             meta["inventory_relief_eur"] = str(economics.inventory_relief_eur)
+            # Expected fill regime when queue fills are disabled: trade-through.
+            queue_pct = float(
+                getattr(self._settings, "paper_maker_queue_fill_pct", 0) or 0
+            )
+            through_pct = float(
+                getattr(self._settings, "paper_maker_trade_through_fill_pct", 0) or 0
+            )
+            if bool(meta.get("post_only")) and through_pct > 0 and queue_pct <= 0:
+                meta["expected_fill_type"] = "trade_through"
+            elif bool(meta.get("post_only")) and queue_pct > 0:
+                meta["expected_fill_type"] = "queue"
+            else:
+                meta["expected_fill_type"] = "unknown"
+            book_age = meta.get("book_age_ms")
+            if book_age is not None:
+                from bot.opportunity.quote_economics import quote_age_bucket
+
+                meta["quote_age_bucket"] = quote_age_bucket(float(book_age))
+            opportunity.metadata = meta
+
+            # Attach route state for observability (decision-time snapshot).
+            route = f"{meta.get('buy_exchange')}->{meta.get('sell_exchange')}"
+            route_status = self._calibrator.route_state(route)
+            meta["route_state"] = route_status.get("state")
+            meta["route_reason"] = route_status.get("reason")
             opportunity.metadata = meta
 
             liq = _liquidity_score(opportunity, venue_snapshots)

@@ -250,6 +250,10 @@ class Settings(BaseSettings):
     # EV calibration (shrinkage toward 1.0 until enough realized fills exist).
     ev_calibration_prior_strength: int = Field(default=40, ge=1, le=500)
     ev_calibration_min_samples: int = Field(default=20, ge=5, le=500)
+    # Early stop is independent of shrinkage (loss containment).
+    ev_calibration_early_stop_samples: int = Field(default=8, ge=3, le=100)
+    ev_calibration_early_stop_capture: float = Field(default=-0.25, le=0)
+    ev_calibration_early_stop_min_loss_eur: float = Field(default=5.0, ge=0)
     paper_markout_min_samples: int = Field(default=20, ge=5, le=500)
     risk_allow_partial_sizing: bool = True
     risk_partial_min_notional_pct: float = Field(default=10.0, ge=1, le=100)

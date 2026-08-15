@@ -116,4 +116,22 @@ PARAMETER_CHANGES: list[dict[str, str]] = [
         "expected_effect": "Honest attribution for edge dashboard",
         "risk": "None for trading; reporting-only fix",
     },
+    {
+        "file": "bot/opportunity/quote_economics.py + enums",
+        "change": "Explicit FillType, RouteState, Quote vs ExecutionEconomics",
+        "old": "Opaque p_fill×NET; early_stop bool only",
+        "new": "TRADE_THROUGH/QUEUE tagged; EARLY_STOPPED with machine-readable reason",
+        "reason": "Prompt: separate shrinkage from loss containment; condition on fill type",
+        "expected_effect": "Toxic routes stop with explainable state; EV conditions on fill regime",
+        "risk": "Sparse fill-type buckets shrink to global prior",
+    },
+    {
+        "file": "bot/paper/runner.py",
+        "change": "Observe calibrator on each completed round-trip",
+        "old": "Calibrator only reseeded on markout engine rebuild",
+        "new": "drain_calibration_observations after each completion",
+        "reason": "Early-stop lagged until adverse bps moved enough to rebuild",
+        "expected_effect": "Route stops within the same session as evidence accumulates",
+        "risk": "None if queue drained on seed (double-count guarded)",
+    },
 ]

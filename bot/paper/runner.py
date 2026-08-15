@@ -218,11 +218,23 @@ class PaperRunner:
                 expected_net=row["expected_net"],
                 realized_net=row["realized_net"],
             )
+        # Avoid double-counting rows already reflected above.
+        if hasattr(self._tracker, "drain_calibration_observations"):
+            self._tracker.drain_calibration_observations()
 
     def _build_opportunity_engine(self, gate: Settings) -> GlobalOpportunityEngine:
         self._calibrator = EvCalibrator(
             prior_strength=int(getattr(self._settings, "ev_calibration_prior_strength", 40) or 40),
             min_samples=int(getattr(self._settings, "ev_calibration_min_samples", 20) or 20),
+            early_stop_samples=int(
+                getattr(self._settings, "ev_calibration_early_stop_samples", 8) or 8
+            ),
+            early_stop_capture=Decimal(
+                str(getattr(self._settings, "ev_calibration_early_stop_capture", "-0.25") or "-0.25")
+            ),
+            early_stop_min_loss_eur=Decimal(
+                str(getattr(self._settings, "ev_calibration_early_stop_min_loss_eur", "5") or "5")
+            ),
         )
         self._seed_calibrator()
         snap = self._markout.snapshot()
@@ -234,8 +246,19 @@ class PaperRunner:
         ceiling = Decimal(str(getattr(self._settings, "paper_markout_ceiling_bps", 15) or 15))
 
         def _venue_adverse(venue: str, symbol: str, side: str) -> Decimal:
+            # Decision-time belief: trade-through is the default fill regime when
+            # queue fills are disabled — look up that bucket first.
+            from bot.core.enums import FillType
+
+            queue = float(getattr(self._settings, "paper_maker_queue_fill_pct", 0) or 0)
+            fill_type = "" if queue > 0 else FillType.TRADE_THROUGH.value
             return self._markout.suggested_adverse_bps(
-                floor=floor, ceiling=ceiling, venue=venue, symbol=symbol, side=side
+                floor=floor,
+                ceiling=ceiling,
+                venue=venue,
+                symbol=symbol,
+                side=side,
+                fill_type=fill_type,
             )
 
         engine = GlobalOpportunityEngine(
@@ -686,6 +709,7 @@ class PaperRunner:
                     equity_before=equity_before,
                     equity_after=equity_after,
                 )
+                self._observe_calibration()
                 if execution.status not in {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}:
                     if execution.status in {OrderStatus.REJECTED, OrderStatus.FAILED}:
                         pass
@@ -1343,6 +1367,11 @@ class PaperRunner:
                 mid=mid,
                 venue=venue,
                 strategy=str((order.metadata or {}).get("strategy") or ""),
+                fill_type=str(
+                    (execution.metadata or {}).get("fill_type")
+                    or (order.metadata or {}).get("last_fill_type")
+                    or ""
+                ),
             )
 
     def _update_markouts(self, books: dict[str, dict[str, Any]]) -> None:
@@ -1525,8 +1554,22 @@ class PaperRunner:
                 orders=orders or None,
                 fills=fills,
             )
+            self._observe_calibration()
         self._tracker.sync_portfolio(self._portfolio)
         self._store.save_portfolio(self._portfolio)
+
+    def _observe_calibration(self) -> None:
+        """Update route beliefs immediately on each completed round-trip."""
+        if not hasattr(self, "_calibrator") or not hasattr(self._tracker, "drain_calibration_observations"):
+            return
+        for row in self._tracker.drain_calibration_observations():
+            self._calibrator.observe(
+                key=str(row["key"]),
+                route=str(row["route"]),
+                strategy=str(row["strategy"]),
+                expected_net=row["expected_net"],
+                realized_net=row["realized_net"],
+            )
 
     async def _cancel_stale_quotes(self) -> None:
         max_age = float(getattr(self._settings, "paper_maker_max_age_ms", 0) or 0)
