@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 from bot.core.config import Settings
 from bot.core.enums import FeeRole, OpportunitySide
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 _BPS = Decimal("10000")
+_NullSpan = nullcontext()
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +54,21 @@ class MakerCandidate:
     sell_price: Decimal
     buy_snapshot: MarketSnapshot
     sell_snapshot: MarketSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class _QuoteDraft:
+    """Lightweight duck-typed quote for NET gating (not emitted downstream)."""
+
+    quantity: Decimal
+    entry_price: Decimal
+    expected_exit_price: Decimal
+    side: OpportunitySide
+    entry_fee_role: FeeRole = FeeRole.MAKER
+    exit_fee_role: FeeRole = FeeRole.MAKER
+    funding_periods: Decimal = _ZERO
+    market: MarketSnapshot | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MakerInventoryStrategy(BaseStrategy):
@@ -148,6 +166,73 @@ class MakerInventoryStrategy(BaseStrategy):
         self._hmm_regime_id: int | None = None
         self._hmm_uptrend_ask_improve_bps = Decimal(
             str(getattr(settings, "paper_hmm_uptrend_ask_improve_bps", 0) or 0)
+        )
+        # Optional fine-grained profiler (HotPathProfiler); no-op when unset.
+        self._hotpath: Any | None = None
+        # Cycle-local immutable caches (cleared at the start of each evaluate_markets).
+        self._cycle_fee_cache: dict[str, Decimal] = {}
+        self._cycle_fee_str_cache: dict[str, str] = {}
+        self._cycle_book_age_cache: dict[int, float] = {}
+
+    def attach_hotpath_profiler(self, profiler: Any | None) -> None:
+        """Attach optional HotPathProfiler for candidate-path substages."""
+        self._hotpath = profiler
+
+    def _hp(self, name: str):
+        """Return a profiler span or a no-op context manager."""
+        hp = self._hotpath
+        if hp is None or not getattr(hp, "enabled", False):
+            return _NullSpan
+        return hp.span(name)
+
+    def _begin_cycle_caches(self) -> None:
+        """Drop cycle-local caches so no values leak across evaluate_markets calls."""
+        self._cycle_fee_cache.clear()
+        self._cycle_fee_str_cache.clear()
+        self._cycle_book_age_cache.clear()
+
+    def _maker_fee(self, exchange: str | None) -> Decimal:
+        key = str(exchange or "").strip().lower()
+        cached = self._cycle_fee_cache.get(key)
+        if cached is not None:
+            return cached
+        fee = venue_maker_fee(key)
+        self._cycle_fee_cache[key] = fee
+        self._cycle_fee_str_cache[key] = str(fee)
+        return fee
+
+    def _maker_fee_str(self, exchange: str | None) -> str:
+        key = str(exchange or "").strip().lower()
+        cached = self._cycle_fee_str_cache.get(key)
+        if cached is not None:
+            return cached
+        self._maker_fee(key)
+        return self._cycle_fee_str_cache[key]
+
+    def _cached_book_age_ms(self, snapshot: MarketSnapshot) -> float:
+        key = id(snapshot)
+        cached = self._cycle_book_age_cache.get(key)
+        if cached is not None:
+            return cached
+        age = _book_age_ms(snapshot)
+        self._cycle_book_age_cache[key] = age
+        return age
+
+    def _estimate_quote_net(
+        self,
+        draft: _QuoteDraft,
+        *,
+        buy_fee_rate: Decimal,
+        sell_fee_rate: Decimal,
+    ):
+        """Run identical NET math without constructing ProfitabilityResult."""
+        estimate_sync = getattr(self._profitability, "estimate_sync", None)
+        if not callable(estimate_sync):
+            raise TypeError(
+                "Profitability engine lacks estimate_sync; use DefaultProfitabilityEngine"
+            )
+        return estimate_sync(
+            draft, buy_fee_rate=buy_fee_rate, sell_fee_rate=sell_fee_rate
         )
 
     def set_reduce_only(self, enabled: bool) -> None:
@@ -247,8 +332,12 @@ class MakerInventoryStrategy(BaseStrategy):
         else:
             self._active_skew = None
 
-        by_symbol = self._group_valid_snapshots(snapshots)
-        self._fair_values = self._build_fair_values(by_symbol)
+        self._begin_cycle_caches()
+
+        with self._hp("market_book_iteration"):
+            by_symbol = self._group_valid_snapshots(snapshots)
+        with self._hp("fair_value_calculation"):
+            self._fair_values = self._build_fair_values(by_symbol)
         # Feed mid history for dump detection before quoting.
         for symbol, venues in by_symbol.items():
             mid = self._median_mid(venues)
@@ -256,21 +345,23 @@ class MakerInventoryStrategy(BaseStrategy):
                 self._vol_guard.observe(symbol, mid)
 
         opportunities: list[TradeOpportunity] = []
-        for symbol, venues in by_symbol.items():
-            if infer_quote_asset(symbol, self._quote) != self._quote:
-                # USDT/FX books are reference-only for fair value, not quote legs.
-                continue
-            opportunities.extend(
-                await self._evaluate_symbol(
-                    symbol,
-                    venues,
-                    equity=equity,
-                    inventory=inventory,
+        with self._hp("symbol_venue_scan"):
+            for symbol, venues in by_symbol.items():
+                if infer_quote_asset(symbol, self._quote) != self._quote:
+                    # USDT/FX books are reference-only for fair value, not quote legs.
+                    continue
+                opportunities.extend(
+                    await self._evaluate_symbol(
+                        symbol,
+                        venues,
+                        equity=equity,
+                        inventory=inventory,
+                    )
                 )
-            )
-        opportunities.sort(key=self._rank_opportunity, reverse=True)
-        selected = opportunities[: self._max_emits]
-        selected = self._drop_small_vs_best(selected)
+        with self._hp("candidate_dedup_rank"):
+            opportunities.sort(key=self._rank_opportunity, reverse=True)
+            selected = opportunities[: self._max_emits]
+            selected = self._drop_small_vs_best(selected)
         for opp in selected:
             self._opportunities_emitted += 1
             self._mark_emitted(opp)
@@ -321,14 +412,15 @@ class MakerInventoryStrategy(BaseStrategy):
                 if same and not self._same_venue:
                     continue
                 self._pairs_evaluated += 1
-                candidate = self._build_candidate(
-                    buy_snap,
-                    sell_snap,
-                    equity=equity,
-                    inventory=inventory,
-                    fair_value=fair_value,
-                    sell_only=sell_only,
-                )
+                with self._hp("candidate_filtering"):
+                    candidate = self._build_candidate(
+                        buy_snap,
+                        sell_snap,
+                        equity=equity,
+                        inventory=inventory,
+                        fair_value=fair_value,
+                        sell_only=sell_only,
+                    )
                 if candidate is None:
                     continue
                 self._depth_edges_found += 1
@@ -460,7 +552,8 @@ class MakerInventoryStrategy(BaseStrategy):
     ) -> dict[str, list[MarketSnapshot]]:
         grouped: dict[str, list[MarketSnapshot]] = {}
         for snapshot in snapshots:
-            reason = self._venue_rejection_reason(snapshot)
+            with self._hp("venue_lookup"):
+                reason = self._venue_rejection_reason(snapshot)
             if reason is not None:
                 self._reject(
                     snapshot.symbol,
@@ -470,7 +563,9 @@ class MakerInventoryStrategy(BaseStrategy):
                 )
                 continue
             assert snapshot.exchange is not None
-            grouped.setdefault(snapshot.symbol.upper(), []).append(snapshot)
+            with self._hp("symbol_normalization"):
+                key = snapshot.symbol.upper()
+            grouped.setdefault(key, []).append(snapshot)
         return grouped
 
     def _venue_rejection_reason(
@@ -530,7 +625,8 @@ class MakerInventoryStrategy(BaseStrategy):
         seen: set[tuple[Decimal, Decimal]] = set()
         best: tuple[Decimal, int, MakerCandidate] | None = None
         for level in range(0, max_level + 1):
-            quoted = self._depth_quote(buy_snap.order_book, sell_snap.order_book, level)
+            with self._hp("price_extraction"):
+                quoted = self._depth_quote(buy_snap.order_book, sell_snap.order_book, level)
             if quoted is None:
                 continue
             buy_price, sell_price, buy_touch, sell_touch = quoted
@@ -630,7 +726,8 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
 
-        spread_bps = (sell_price - buy_price) / buy_price * _BPS
+        with self._hp("spread_calculation"):
+            spread_bps = (sell_price - buy_price) / buy_price * _BPS
         if buy_snap.exchange == sell_snap.exchange and spread_bps < self._min_spread_bps:
             self._reject(
                 buy_snap.symbol,
@@ -692,9 +789,10 @@ class MakerInventoryStrategy(BaseStrategy):
                 )
                 return None
 
-        fee_bps = (
-            venue_maker_fee(buy_snap.exchange) + venue_maker_fee(sell_snap.exchange)
-        ) * _BPS
+        with self._hp("fee_lookup"):
+            fee_bps = (
+                self._maker_fee(buy_snap.exchange) + self._maker_fee(sell_snap.exchange)
+            ) * _BPS
         if self._max_fee_bps > 0 and fee_bps > self._max_fee_bps:
             self._reject(
                 buy_snap.symbol,
@@ -747,15 +845,16 @@ class MakerInventoryStrategy(BaseStrategy):
             max_notional = equity * (self._position_pct / Decimal("100"))
             if buy_price > 0:
                 quantity_cap = min(quantity_cap, max_notional / buy_price)
-        quantity = min(buy_touch, sell_touch, quantity_cap)
-        quantity = self._cap_to_inventory(
-            quantity,
-            buy_snap=buy_snap,
-            sell_snap=sell_snap,
-            buy_price=buy_price,
-            inventory=inventory,
-            sell_only=sell_only,
-        )
+        with self._hp("inventory_lookup"):
+            quantity = min(buy_touch, sell_touch, quantity_cap)
+            quantity = self._cap_to_inventory(
+                quantity,
+                buy_snap=buy_snap,
+                sell_snap=sell_snap,
+                buy_price=buy_price,
+                inventory=inventory,
+                sell_only=sell_only,
+            )
         if quantity < self._min_liquidity:
             self._reject(
                 buy_snap.symbol,
@@ -812,7 +911,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     sell_exchange=sell_snap.exchange,
                 )
             return capped
-        buy_fee = Decimal("1") + venue_maker_fee(buy_snap.exchange)
+        buy_fee = Decimal("1") + self._maker_fee(buy_snap.exchange)
         quote_cash = available(buy_snap.exchange, self._quote)
         max_buy = quote_cash / (buy_price * buy_fee) if buy_price > 0 else _ZERO
         capped = min(quantity, max_buy, sell_coins)
@@ -849,76 +948,24 @@ class MakerInventoryStrategy(BaseStrategy):
             candidate, inventory=inventory, base=base
         )
         skew_meta = self._active_skew
-        opportunity = TradeOpportunity(
-            strategy_name=self.name,
-            symbol=candidate.symbol,
-            side=OpportunitySide.SELL if sell_only else OpportunitySide.BUY,
+        side = OpportunitySide.SELL if sell_only else OpportunitySide.BUY
+        buy_fee_rate = self._maker_fee(candidate.buy_exchange)
+        sell_fee_rate = self._maker_fee(candidate.sell_exchange)
+
+        # NET gate on a lightweight draft — no TradeOpportunity / ProfitabilityResult
+        # until the quote is accepted (same calculator math).
+        draft = _QuoteDraft(
             quantity=candidate.quantity,
             entry_price=candidate.buy_price,
             expected_exit_price=candidate.sell_price,
-            confidence=0.55,
-            rationale=(
-                (
-                    f"Sell-only recycle {candidate.quantity} on {candidate.sell_exchange} "
-                    f"@ ask {candidate.sell_price}"
-                    if sell_only
-                    else (
-                        f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
-                        f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
-                        f"{candidate.sell_price}"
-                    )
-                )
-                + (
-                    f"; fair_value_eur={fair_value}"
-                    if fair_value is not None
-                    else ""
-                )
-            ),
-            market=candidate.buy_snapshot.model_copy(update={"order_book": None}),
-            entry_fee_role=FeeRole.MAKER,
-            exit_fee_role=FeeRole.MAKER,
-            funding_periods=_ZERO,
-            metadata={
-                "buy_exchange": candidate.buy_exchange,
-                "sell_exchange": candidate.sell_exchange,
-                "buy_vwap": str(candidate.buy_price),
-                "sell_vwap": str(candidate.sell_price),
-                "buy_maker_fee_rate": str(venue_maker_fee(candidate.buy_exchange)),
-                "sell_maker_fee_rate": str(venue_maker_fee(candidate.sell_exchange)),
-                "pricing": "maker_touch",
-                "quote_currency": self._quote,
-                "round_trip": not sell_only,
-                "post_only": True,
-                "sell_only": sell_only,
-                "fair_value_eur": str(fair_value) if fair_value is not None else None,
-                "fair_value_aligned": fair_aligned,
-                "inventory_skew_score": str(skew),
-                "inventory_mode": skew_meta.mode if skew_meta is not None else "unknown",
-                "alt_inventory_pct": (
-                    str(skew_meta.alt_fraction * Decimal("100"))
-                    if skew_meta is not None
-                    else None
-                ),
-                "adverse_bps": str(self._adverse_bps),
-                "hmm_regime_id": self._hmm_regime_id,
-                "reduce_only": sell_only or self._external_reduce_only,
-                "book_age_ms": str(
-                    max(
-                        _book_age_ms(candidate.buy_snapshot),
-                        _book_age_ms(candidate.sell_snapshot)
-                        if candidate.sell_snapshot is not None
-                        else 0.0,
-                    )
-                ),
-            },
+            side=side,
         )
-        result = await self._profitability.evaluate(
-            opportunity,
-            buy_fee_rate=venue_maker_fee(candidate.buy_exchange),
-            sell_fee_rate=venue_maker_fee(candidate.sell_exchange),
-        )
-        net = result.net_profit_usd
-        net_return = result.net_return
+        with self._hp("validation_model_construction"):
+            estimate = self._estimate_quote_net(
+                draft, buy_fee_rate=buy_fee_rate, sell_fee_rate=sell_fee_rate
+            )
+        net = estimate.net_profit
+        net_return = estimate.net_return
         # Hard dust / NET floors (stofjes + thin margins).
         dust_reason = self._dust.reject_reason(
             quantity=candidate.quantity,
@@ -937,12 +984,8 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        if not result.trade_allowed and not sell_only:
-            reasons = (
-                result.estimate.disallow_reasons
-                if result.estimate is not None
-                else ["profitability engine rejected"]
-            )
+        if not estimate.trade_allowed and not sell_only:
+            reasons = estimate.disallow_reasons or ["profitability engine rejected"]
             self._reject(
                 candidate.symbol,
                 "profitability",
@@ -1005,17 +1048,90 @@ class MakerInventoryStrategy(BaseStrategy):
             skew,
             sell_only,
         )
-        return opportunity.model_copy(
-            update={
-                "confidence": min(0.95, 0.45 + float(net_return) * 10.0),
-                "metadata": {
-                    **opportunity.metadata,
+
+        # Thin market view: same fields as model_copy(order_book=None) without
+        # copying the full book into a new validated snapshot.
+        buy_snap = candidate.buy_snapshot
+        with self._hp("context_copying"):
+            market_view = MarketSnapshot.model_construct(
+                symbol=buy_snap.symbol,
+                bid=buy_snap.bid,
+                ask=buy_snap.ask,
+                last=buy_snap.last,
+                volume_24h=buy_snap.volume_24h,
+                funding_rate=buy_snap.funding_rate,
+                order_book=None,
+                exchange=buy_snap.exchange,
+                latency_ms=buy_snap.latency_ms,
+                timestamp=buy_snap.timestamp,
+                metadata=dict(buy_snap.metadata) if buy_snap.metadata else {},
+            )
+        book_age = max(
+            self._cached_book_age_ms(candidate.buy_snapshot),
+            self._cached_book_age_ms(candidate.sell_snapshot)
+            if candidate.sell_snapshot is not None
+            else 0.0,
+        )
+        with self._hp("candidate_object_construction"):
+            return TradeOpportunity(
+                strategy_name=self.name,
+                symbol=candidate.symbol,
+                side=side,
+                quantity=candidate.quantity,
+                entry_price=candidate.buy_price,
+                expected_exit_price=candidate.sell_price,
+                confidence=min(0.95, 0.45 + float(net_return) * 10.0),
+                rationale=(
+                    (
+                        f"Sell-only recycle {candidate.quantity} on {candidate.sell_exchange} "
+                        f"@ ask {candidate.sell_price}"
+                        if sell_only
+                        else (
+                            f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
+                            f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
+                            f"{candidate.sell_price}"
+                        )
+                    )
+                    + (
+                        f"; fair_value_eur={fair_value}"
+                        if fair_value is not None
+                        else ""
+                    )
+                ),
+                market=market_view,
+                entry_fee_role=FeeRole.MAKER,
+                exit_fee_role=FeeRole.MAKER,
+                funding_periods=_ZERO,
+                metadata={
+                    "buy_exchange": candidate.buy_exchange,
+                    "sell_exchange": candidate.sell_exchange,
+                    "buy_vwap": str(candidate.buy_price),
+                    "sell_vwap": str(candidate.sell_price),
+                    "buy_maker_fee_rate": self._maker_fee_str(candidate.buy_exchange),
+                    "sell_maker_fee_rate": self._maker_fee_str(candidate.sell_exchange),
+                    "pricing": "maker_touch",
+                    "quote_currency": self._quote,
+                    "round_trip": not sell_only,
+                    "post_only": True,
+                    "sell_only": sell_only,
+                    "fair_value_eur": str(fair_value) if fair_value is not None else None,
+                    "fair_value_aligned": fair_aligned,
+                    "inventory_skew_score": str(skew),
+                    "inventory_mode": skew_meta.mode if skew_meta is not None else "unknown",
+                    "alt_inventory_pct": (
+                        str(skew_meta.alt_fraction * Decimal("100"))
+                        if skew_meta is not None
+                        else None
+                    ),
+                    "adverse_bps": str(self._adverse_bps),
+                    "hmm_regime_id": self._hmm_regime_id,
+                    "reduce_only": sell_only or self._external_reduce_only,
+                    "book_age_ms": str(book_age),
                     "net_profit_eur": str(net),
                     "net_return": str(net_return),
-                    "gross_profit_eur": str(result.gross_profit_usd),
+                    "gross_profit_eur": str(estimate.gross_profit),
                 },
-            }
-        )
+            )
 
     def _inventory_skew_score(
         self,

@@ -152,7 +152,9 @@ Causal A/B/C/D fingerprints remain deterministic on frozen `data/paper_25000live
 
 ## Next optimization target (if continuing)
 
-Follow **candidate_creation / strategy_scan** with profiling under fixtures that emit real opportunities (so GOE net/EV/risk appear in the breakdown). Keep hydrate pipeline as-is. Consider shared decode **only** if fleet size or active parse cost grows past the ~23% savings bar.
+**Done (follow-on):** see [`CANDIDATE_HOTPATH_REPORT.md`](./CANDIDATE_HOTPATH_REPORT.md) — strategy_scan / candidate_creation optimized under GOE-emitting fixtures with frozen trading behavior.
+
+Keep hydrate pipeline as-is. Consider shared decode **only** if fleet size or active parse cost grows past the ~23% savings bar.
 
 ### cProfile notes (active)
 
