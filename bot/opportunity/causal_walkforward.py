@@ -629,9 +629,20 @@ LEAKAGE_AUDIT: list[dict[str, str]] = [
 
 
 def main(argv: list[str]) -> int:
+    import time
+
     path = Path(argv[1] if len(argv) > 1 else "data/paper_25000live.json")
+    t0 = time.perf_counter()
     report = run_matrix(path)
+    elapsed = time.perf_counter() - t0
     report["leakage_audit"] = LEAKAGE_AUDIT
+    report["runtime"] = {
+        "elapsed_s": round(elapsed, 4),
+        "events_per_sec": (
+            round(report["trade_count"] * len(CONFIGS) / elapsed, 1) if elapsed > 0 else None
+        ),
+        "note": "Direct chronological replay — no FastAPI/Redis/WebSocket.",
+    }
     dest = Path("data/causal_walkforward_report.json")
     dest.write_text(json.dumps(report, indent=2, default=str))
     # Compact stdout summary
@@ -645,7 +656,17 @@ def main(argv: list[str]) -> int:
         }
         for name, exp in report["experiments"].items()
     }
-    print(json.dumps({"source": str(path), "split": report["split"], "summary": summary}, indent=2))
+    print(
+        json.dumps(
+            {
+                "source": str(path),
+                "split": report["split"],
+                "runtime": report["runtime"],
+                "summary": summary,
+            },
+            indent=2,
+        )
+    )
     print(f"\nWrote {dest}")
     return 0
 

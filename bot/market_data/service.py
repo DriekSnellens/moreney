@@ -7,6 +7,7 @@ ProfitabilityEngine / PaperExecutor — consumers build RiskContext from health.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Sequence
@@ -97,6 +98,12 @@ class MarketDataService:
         self._funding_publish_task: asyncio.Task[None] | None = None
         self._equity = EquityQuoteService(settings)
         self._equity_publish_task: asyncio.Task[None] | None = None
+        from bot.perf.cycle_metrics import CycleLatencyTracker
+
+        self._latency = CycleLatencyTracker(
+            enabled=bool(getattr(settings, "perf_instrumentation_enabled", False)),
+            window=int(getattr(settings, "perf_instrumentation_window", 512) or 512),
+        )
 
         if not self._adapters and start_websockets:
             self._adapters = self._build_live_adapters()
@@ -227,24 +234,94 @@ class MarketDataService:
             await asyncio.sleep(self._redis_poll_s)
 
     async def hydrate_from_redis(self) -> None:
-        """Pull latest published books/ticks/health into local memory."""
+        """Pull latest published books/ticks/health into local memory.
+
+        Uses one Redis pipeline round-trip for the full exchange×symbol bundle,
+        then skips JSON decode / book rebuild when payloads are byte-identical
+        to the previous poll (publisher still holds the latest snapshot).
+        """
+        t0 = time.perf_counter()
+        bundle = await self._cache.fetch_hydrate_raw(
+            exchanges=self._exchanges,
+            symbols=self._symbols,
+        )
+        redis_ms = time.perf_counter() - t0
+        self._latency.record("redis_read", redis_ms)
+
+        t_parse = time.perf_counter()
         for exchange in self._exchanges:
-            health = await self._cache.get_health(exchange)
-            if health is not None:
-                self._remote_health[exchange] = health
+            health_raw = self._cache.consume_changed_raw(
+                self._cache.health_key(exchange),
+                bundle.get(self._cache.health_key(exchange)),
+            )
+            if health_raw is not None:
+                try:
+                    self._remote_health[exchange] = ExchangeHealth.model_validate_json(
+                        health_raw
+                    )
+                except Exception:  # noqa: BLE001 — keep hydrate alive
+                    logger.debug("HYDRATE_HEALTH_PARSE_FAILED exchange=%s", exchange)
             for symbol in self._symbols:
-                book = await self._cache.get_book(exchange, symbol)
-                if book is not None:
-                    self.apply_remote_book(exchange, symbol, book)
-                tick = await self._cache.get_tick(exchange, symbol)
-                if tick is not None:
-                    self._ticks[(exchange, symbol)] = tick
-        rates = await self._cache.get_funding_rates()
-        if rates:
-            self._funding.import_rates(rates)
-        equity_quotes = await self._cache.get_equity_quotes()
-        if equity_quotes:
-            self._equity.import_quotes(equity_quotes)
+                book_key = self._cache.book_key(exchange, symbol)
+                book_raw = self._cache.consume_changed_raw(
+                    book_key, bundle.get(book_key)
+                )
+                if book_raw is not None:
+                    try:
+                        data = json.loads(book_raw)
+                        data.pop("exchange", None)
+                        book = OrderBook.model_validate(data)
+                        self.apply_remote_book(exchange, symbol, book)
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "HYDRATE_BOOK_PARSE_FAILED exchange=%s symbol=%s",
+                            exchange,
+                            symbol,
+                        )
+                tick_key = self._cache.tick_key(exchange, symbol)
+                tick_raw = self._cache.consume_changed_raw(
+                    tick_key, bundle.get(tick_key)
+                )
+                if tick_raw is not None:
+                    try:
+                        self._ticks[(exchange, symbol)] = MarketTick.model_validate_json(
+                            tick_raw
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "HYDRATE_TICK_PARSE_FAILED exchange=%s symbol=%s",
+                            exchange,
+                            symbol,
+                        )
+        funding_raw = self._cache.consume_changed_raw(
+            self._cache.funding_key(),
+            bundle.get(self._cache.funding_key()),
+        )
+        if funding_raw is not None:
+            try:
+                data = json.loads(funding_raw)
+                if isinstance(data, dict) and data:
+                    self._funding.import_rates({str(k): str(v) for k, v in data.items()})
+            except json.JSONDecodeError:
+                pass
+        equity_raw = self._cache.consume_changed_raw(
+            self._cache.equity_key(),
+            bundle.get(self._cache.equity_key()),
+        )
+        if equity_raw is not None:
+            try:
+                data = json.loads(equity_raw)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict) and data:
+                quotes: dict[str, dict[str, str]] = {}
+                for sym, payload in data.items():
+                    if isinstance(payload, dict):
+                        quotes[str(sym)] = {str(k): str(v) for k, v in payload.items()}
+                if quotes:
+                    self._equity.import_quotes(quotes)
+        self._latency.record("hydrate_parse", time.perf_counter() - t_parse)
+        self._latency.record("hydrate_total", time.perf_counter() - t0)
 
     async def _start_funding(self, *, publish: bool) -> None:
         if not self._funding.enabled:
@@ -369,20 +446,54 @@ class MarketDataService:
                     )
                     self._ticks[key] = tick
                     if cache_due:
-                        await self._cache.set_tick(tick)
+                        pending_tick = tick
                         synced = book.to_order_book()
                         if synced is not None:
-                            await self._cache.set_book(event.exchange, synced)
+                            pending_book = synced
+                        else:
+                            pending_book = None
+                    else:
+                        pending_tick = None
+                        pending_book = None
+                else:
+                    pending_tick = None
+                    pending_book = None
+            else:
+                pending_tick = None
+                pending_book = None
+        else:
+            pending_tick = None
+            pending_book = None
 
         if event.tick is not None:
             self._ticks[key] = event.tick
             if cache_due:
-                await self._cache.set_tick(event.tick)
+                pending_tick = event.tick
 
         if cache_due:
             health = self.get_exchange_health(event.exchange)
             self._last_health[event.exchange] = health
-            await self._cache.set_health(health)
+            items: list[tuple[str, str]] = []
+            if pending_tick is not None:
+                items.append(
+                    (
+                        self._cache.tick_key(pending_tick.exchange, pending_tick.symbol),
+                        pending_tick.model_dump_json(),
+                    )
+                )
+            if pending_book is not None:
+                payload = pending_book.model_dump(mode="json")
+                payload["exchange"] = event.exchange.lower()
+                items.append(
+                    (
+                        self._cache.book_key(event.exchange, pending_book.symbol),
+                        json.dumps(payload),
+                    )
+                )
+            items.append(
+                (self._cache.health_key(health.exchange), health.model_dump_json())
+            )
+            await self._cache.pipeline_set(items)
             self._mark_cache_written(event.exchange)
             if health.stale:
                 self._log_stale_throttled(event.exchange, health.last_message_age_ms)

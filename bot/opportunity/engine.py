@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -68,6 +69,11 @@ class GlobalOpportunityEngine:
         self._missed = missed or MissedOpportunityTracker()
         self._venue_adverse_lookup = venue_adverse_lookup
         self._global_regime = MarketRegime.NORMAL
+        self._latency: Any = None
+
+    def attach_latency_tracker(self, tracker: Any | None) -> None:
+        """Optional CycleLatencyTracker; no-op when disabled/None."""
+        self._latency = tracker
 
     @property
     def decision_log(self) -> OpportunityDecisionLogger:
@@ -109,6 +115,8 @@ class GlobalOpportunityEngine:
 
         scored: list[ScoredOpportunity] = []
         approved: list[ScoredOpportunity] = []
+        lat = self._latency
+        t_net = t_belief = t_ev = t_risk = t_rank = 0.0
 
         for opportunity in opportunities:
             inst = self._registry.by_symbol(opportunity.symbol)
@@ -145,6 +153,7 @@ class GlobalOpportunityEngine:
                 continue
 
             buy_rate, sell_rate = _resolve_fee_rates(opportunity, fee_rates)
+            t0 = time.perf_counter() if lat is not None and lat.enabled else 0.0
             profitability = await self._profitability.evaluate(
                 opportunity,
                 buy_fee_rate=buy_rate,
@@ -163,6 +172,9 @@ class GlobalOpportunityEngine:
                     getattr(self._settings, "paper_maker_max_age_ms", 2500) or 2500
                 ),
             )
+            if lat is not None and lat.enabled:
+                t_net += time.perf_counter() - t0
+                t0 = time.perf_counter()
             ev_data = self._ev.enrich(
                 opportunity,
                 profitability,
@@ -172,6 +184,8 @@ class GlobalOpportunityEngine:
                 # Trade-through fills: condition NET on venue markout, not quote-time NET.
                 conditional_adverse_bps=venue_adv,
             )
+            if lat is not None and lat.enabled:
+                t_ev += time.perf_counter() - t0
             meta = dict(opportunity.metadata or {})
             meta["p_fill"] = str(ev_data.get("p_fill", 0))
             meta["e_net_given_fill"] = str(ev_data.get("e_net_given_fill", 0))
@@ -201,16 +215,22 @@ class GlobalOpportunityEngine:
             opportunity.metadata = meta
 
             # Attach route state for observability (decision-time snapshot).
+            t0 = time.perf_counter() if lat is not None and lat.enabled else 0.0
             route = f"{meta.get('buy_exchange')}->{meta.get('sell_exchange')}"
             route_status = self._calibrator.route_state(route)
             meta["route_state"] = route_status.get("state")
             meta["route_reason"] = route_status.get("reason")
             opportunity.metadata = meta
+            if lat is not None and lat.enabled:
+                t_belief += time.perf_counter() - t0
 
             liq = _liquidity_score(opportunity, venue_snapshots)
             exec_q = _execution_quality(opportunity, profitability)
             raw_ev = Decimal(str(ev_data["expected_value"]))
+            t0 = time.perf_counter() if lat is not None and lat.enabled else 0.0
             calibrated = self._calibrator.calibrate(raw_ev, opportunity)
+            if lat is not None and lat.enabled:
+                t_ev += time.perf_counter() - t0
 
             item = ScoredOpportunity(
                 opportunity=opportunity,
@@ -292,12 +312,15 @@ class GlobalOpportunityEngine:
                 slip_pct = _slippage_pct_from_profitability(profitability, enriched)
                 risk_ctx = risk_ctx.model_copy(update={"estimated_slippage_pct": slip_pct})
 
+            t0 = time.perf_counter() if lat is not None and lat.enabled else 0.0
             decision = await self._risk.evaluate(
                 enriched,
                 profitability,
                 portfolio,
                 context=risk_ctx,
             )
+            if lat is not None and lat.enabled:
+                t_risk += time.perf_counter() - t0
             item.risk_decision = decision
             item.opportunity = enriched
 
@@ -339,7 +362,15 @@ class GlobalOpportunityEngine:
             scored.append(item)
             approved.append(item)
 
+        t0 = time.perf_counter() if lat is not None and lat.enabled else 0.0
         ranked = self._ranker.rank(approved)
+        if lat is not None and lat.enabled:
+            t_rank += time.perf_counter() - t0
+            lat.record("net_calc", t_net)
+            lat.record("route_belief", t_belief)
+            lat.record("ev_calc", t_ev)
+            lat.record("risk_cap", t_risk)
+            lat.record("ranking", t_rank)
         max_exec = int(getattr(self._settings, "opportunity_max_executions_per_cycle", 3) or 3)
         leftover = ranked[max_exec:]
         kept = ranked[:max_exec]

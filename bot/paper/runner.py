@@ -53,6 +53,7 @@ from bot.opportunity.decision_log import OpportunityDecisionLogger
 from bot.opportunity.calibration import EvCalibrator
 from bot.opportunity.missed import MissedOpportunityTracker
 from bot.opportunity.parameter_log import PARAMETER_CHANGES
+from bot.perf.cycle_metrics import CycleLatencyTracker
 from bot.opportunity.scanner import TieredScanScheduler
 from bot.markets.registry import InstrumentRegistry
 from bot.markets.calendar import MarketCalendarService
@@ -192,6 +193,10 @@ class PaperRunner:
         self._scan_scheduler = TieredScanScheduler(
             settings, self._instrument_registry, self._market_calendar
         )
+        self._cycle_metrics = CycleLatencyTracker(
+            enabled=bool(getattr(settings, "perf_instrumentation_enabled", False)),
+            window=int(getattr(settings, "perf_instrumentation_window", 512) or 512),
+        )
         self._opportunity_engine = self._build_opportunity_engine(gate)
         set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
         self._engine = TradingEngine(
@@ -275,6 +280,7 @@ class PaperRunner:
             missed=self._missed,
             venue_adverse_lookup=_venue_adverse,
         )
+        engine.attach_latency_tracker(getattr(self, "_cycle_metrics", None))
         return engine
 
     def _build_strategy(self):
@@ -530,6 +536,8 @@ class PaperRunner:
             await asyncio.sleep(self._interval)
 
     async def _run_cycle(self) -> None:
+        metrics = self._cycle_metrics
+        cycle_t0 = time.perf_counter()
         # Safety: do not trade when kill switch blocks new orders.
         ks = self._risk.kill_switch.status() if hasattr(self._risk, "kill_switch") else None
         if ks is not None and ks.state in {
@@ -555,15 +563,23 @@ class PaperRunner:
             }
             return
 
-        # HMM guardrail: toxic dump regime → cancel bids + REDUCE_ONLY before quoting.
-        await self._apply_hmm_regime_guardrail()
+        # One immutable-for-this-cycle book snapshot shared by HMM + match/expire.
+        with metrics.span("collect_books"):
+            books = self._collect_books()
 
-        await self._match_and_expire_quotes()
+        # HMM guardrail: toxic dump regime → cancel bids + REDUCE_ONLY before quoting.
+        with metrics.span("hmm_regime"):
+            await self._apply_hmm_regime_guardrail(books=books)
+
+        with metrics.span("match_expire"):
+            await self._match_and_expire_quotes(books=books)
 
         equity_before = self._portfolio.state.total_equity
         scan_symbols = self._scan_scheduler.symbols_for_cycle(all_symbols=self._scan_universe)
-        result = await self._engine.run_universe(scan_symbols)
-        self._ingest_cycle(result, equity_before=equity_before)
+        with metrics.span("strategy_scan"):
+            result = await self._engine.run_universe(scan_symbols)
+        with metrics.span("ingest_cycle"):
+            self._ingest_cycle(result, equity_before=equity_before)
 
         risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
         by_symbol: dict[str, dict[str, Any]] = {
@@ -630,6 +646,7 @@ class PaperRunner:
             self._tracker.record_scan_stats(scan)
         self._tracker.sync_portfolio(self._portfolio)
         self._cycle_count += 1
+        metrics.record("total_cycle", time.perf_counter() - cycle_t0)
         self._last_cycle = {
             "blocked": False,
             "cycle": self._cycle_count,
@@ -644,6 +661,7 @@ class PaperRunner:
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else None,
             "reduce_only": self._hmm_reduce_only,
             "inventory_target_pct": self._hmm_inventory_target,
+            "latency": metrics.report() if metrics.enabled else None,
         }
         if self._cycle_count % 5 == 0:
             self._persist()
@@ -808,6 +826,7 @@ class PaperRunner:
             "why_not_trade": self._missed.why_not_trade() if hasattr(self, "_missed") else {},
             "ev_calibration": self._calibrator.snapshot() if hasattr(self, "_calibrator") else {},
             "parameter_changes": PARAMETER_CHANGES,
+            "latency": self._cycle_metrics.report(),
             "global_engine": {
                 "enabled": self._settings.global_opportunity_engine_enabled,
                 "regime": (
@@ -970,8 +989,10 @@ class PaperRunner:
                     books.setdefault(exchange, {})[symbol] = book
         return books
 
-    async def _match_and_expire_quotes(self) -> None:
-        books = self._collect_books()
+    async def _match_and_expire_quotes(
+        self, books: dict[str, dict[str, Any]] | None = None
+    ) -> None:
+        books = books if books is not None else self._collect_books()
         fills = self._executor.match_resting(books)
         if fills:
             self._ingest_delayed_fills(fills)
@@ -986,7 +1007,9 @@ class PaperRunner:
         self._maybe_seed_usdt(books)
         self._apply_markout_adverse()
 
-    async def _apply_hmm_regime_guardrail(self) -> None:
+    async def _apply_hmm_regime_guardrail(
+        self, books: dict[str, dict[str, Any]] | None = None
+    ) -> None:
         """Observe mids → 5m candles; slow refit; toxic → bids off + REDUCE_ONLY."""
         maker = self._maker_strategy()
         if not self._hmm_enabled:
@@ -1000,7 +1023,7 @@ class PaperRunner:
                 maker.set_inventory_target_pct(self._hmm_inventory_target)
             return
 
-        books = self._collect_books()
+        books = books if books is not None else self._collect_books()
         for venue_books in books.values():
             for symbol, book in venue_books.items():
                 bids = getattr(book, "bids", None) or []

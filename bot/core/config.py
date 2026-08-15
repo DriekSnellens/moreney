@@ -281,6 +281,10 @@ class Settings(BaseSettings):
     # How often to serialize books/health into the in-process cache (ms). 0 = every event.
     market_data_cache_interval_ms: float = Field(default=250.0, ge=0)
 
+    # Opt-in hot-path latency histograms (mean/p50/p95/p99). No per-event logs.
+    perf_instrumentation_enabled: bool = False
+    perf_instrumentation_window: int = Field(default=512, ge=32, le=10000)
+
     exchange_name: str = "stub"
     exchange_api_key: SecretStr | None = None
     exchange_api_secret: SecretStr | None = None
