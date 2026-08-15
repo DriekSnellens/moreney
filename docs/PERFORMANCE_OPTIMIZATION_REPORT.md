@@ -1,5 +1,8 @@
 # Performance optimization report
 
+> **Superseding profile (post-Redis):** see [`POST_REDIS_PROFILE_REPORT.md`](./POST_REDIS_PROFILE_REPORT.md).  
+> New primary bottleneck: **strategy_scan / candidate_creation**. Do not redesign Redis hydrate unless it regresses.
+
 **Constraint:** same inputs → same decisions, fills, and realized NET. No trading-logic changes.
 
 **Enable live histograms:** `PERF_INSTRUMENTATION_ENABLED=true` (optional `PERF_INSTRUMENTATION_WINDOW=512`).

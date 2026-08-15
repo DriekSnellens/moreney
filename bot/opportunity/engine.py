@@ -336,7 +336,10 @@ class GlobalOpportunityEngine:
                 scored.append(item)
                 continue
 
+            t0 = time.perf_counter() if lat is not None and lat.enabled else 0.0
             ok, msg, _code = self._portfolio_gate.check(item, portfolio)
+            if lat is not None and lat.enabled:
+                t_risk += time.perf_counter() - t0
             if not ok:
                 gates.append("portfolio")
                 item.first_limiting_gate = "portfolio"

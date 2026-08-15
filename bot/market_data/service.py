@@ -245,6 +245,7 @@ class MarketDataService:
             exchanges=self._exchanges,
             symbols=self._symbols,
         )
+        self._cache.mark_hydrate()
         redis_ms = time.perf_counter() - t0
         self._latency.record("redis_read", redis_ms)
 

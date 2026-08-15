@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
+import time
 
 from bot.core.enums import OpportunitySide, OrderStatus, OrderType, RiskDecisionStatus
 from bot.core.exceptions import ExchangeError, RiskRejectedError
@@ -76,6 +77,14 @@ class TradingEngine:
         self._portfolio = portfolio
         self._executor = executor
         self._opportunity_engine = opportunity_engine
+        self._latency: Any = None
+
+    def attach_latency_tracker(self, tracker: Any | None) -> None:
+        self._latency = tracker
+        if self._opportunity_engine is not None and hasattr(
+            self._opportunity_engine, "attach_latency_tracker"
+        ):
+            self._opportunity_engine.attach_latency_tracker(tracker)
 
     @property
     def paper_portfolio(self) -> PaperPortfolio | None:
@@ -120,7 +129,10 @@ class TradingEngine:
                     paper.set_mark_price(getattr(snap, "symbol", primary_symbol), px)
         portfolio = await self._portfolio.get_snapshot()
         portfolio_equity = portfolio.equity_usd
+        lat = self._latency
+        timing = bool(lat is not None and getattr(lat, "enabled", False))
 
+        t0 = time.perf_counter() if timing else 0.0
         if venue_snapshots:
             evaluate_markets = getattr(self._strategy, "evaluate_markets", None)
             if callable(evaluate_markets):
@@ -143,21 +155,27 @@ class TradingEngine:
                 opportunities = await self._strategy.evaluate(primary)
         else:
             opportunities = await self._strategy.evaluate(primary)
+        if timing:
+            lat.record("candidate_creation", time.perf_counter() - t0)
         result.opportunities = opportunities
         processed: list[TradeOpportunity] = []
 
         if self._opportunity_engine is not None and opportunities:
+            t0 = time.perf_counter() if timing else 0.0
             ranked, all_scored = await self._opportunity_engine.evaluate_batch(
                 opportunities,
                 portfolio,
                 venue_snapshots=venue_snapshots,
                 enrich_risk=self._enrich_for_risk,
             )
+            if timing:
+                lat.record("goe_evaluate", time.perf_counter() - t0)
             result.opportunity_ranking = GlobalOpportunityEngine.ranking_summary(
                 ranked,
                 all_scored,
                 input_count=len(opportunities),
             )
+            t_exec = 0.0
             for scored in ranked:
                 opportunity = scored.opportunity
                 profitability = scored.profitability
@@ -173,6 +191,7 @@ class TradingEngine:
                 if paper is not None and opportunity.market is not None:
                     paper.set_mark_price(opportunity.symbol, opportunity.market.last)
                 buy_book = self._resolve_execution_book(opportunity, venue_snapshots, primary)
+                te = time.perf_counter() if timing else 0.0
                 execution = await self._execute_opportunity(
                     opportunity,
                     decision,
@@ -181,6 +200,8 @@ class TradingEngine:
                     venue_snapshots=venue_snapshots,
                     cycle_result=result,
                 )
+                if timing:
+                    t_exec += time.perf_counter() - te
                 result.executions.append(execution)
                 self._collect_order_fill(result, execution)
                 gate = getattr(self._opportunity_engine, "portfolio_gate", None)
@@ -190,6 +211,8 @@ class TradingEngine:
                         notional = decision.max_allowed_quantity * opportunity.entry_price
                     gate.record_fill(scored, notional)
                 portfolio = await self._portfolio.get_snapshot()
+            if timing:
+                lat.record("executor", t_exec)
             result.opportunities = processed
             if self.paper_portfolio is not None:
                 result.portfolio_equity = self.paper_portfolio.state.total_equity

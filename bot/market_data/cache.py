@@ -21,6 +21,14 @@ class MarketDataCache:
         self._memory: dict[str, str] = {}
         # Last raw payload per key — skip JSON decode when Redis returns identical bytes.
         self._last_raw: dict[str, str] = {}
+        # Polling efficiency counters (process-local).
+        self.poll_stats: dict[str, int] = {
+            "keys_seen": 0,
+            "keys_unchanged": 0,
+            "keys_changed": 0,
+            "keys_missing": 0,
+            "hydrates": 0,
+        }
 
     @property
     def redis_client(self) -> Any | None:
@@ -126,15 +134,34 @@ class MarketDataCache:
         state — freshness semantics unchanged because the publisher value is
         still the latest snapshot.
         """
+        self.poll_stats["keys_seen"] += 1
         if raw is None:
+            self.poll_stats["keys_missing"] += 1
             return None
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
         prev = self._last_raw.get(key)
         if prev is not None and prev == raw:
+            self.poll_stats["keys_unchanged"] += 1
             return None
         self._last_raw[key] = raw
+        self.poll_stats["keys_changed"] += 1
         return raw
+
+    def mark_hydrate(self) -> None:
+        self.poll_stats["hydrates"] += 1
+
+    def polling_efficiency(self) -> dict[str, Any]:
+        seen = max(1, self.poll_stats["keys_seen"])
+        changed = self.poll_stats["keys_changed"]
+        unchanged = self.poll_stats["keys_unchanged"]
+        return {
+            **self.poll_stats,
+            "unchanged_ratio": round(unchanged / seen, 4),
+            "changed_ratio": round(changed / seen, 4),
+            "useful_key_updates": changed,
+            "total_key_observations": self.poll_stats["keys_seen"],
+        }
 
     async def pipeline_set(self, items: list[tuple[str, str]]) -> None:
         """Batch SET+EXPIRE for publisher hot path (one RTT when Redis present)."""

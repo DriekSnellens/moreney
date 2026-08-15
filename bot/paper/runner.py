@@ -537,6 +537,8 @@ class PaperRunner:
 
     async def _run_cycle(self) -> None:
         metrics = self._cycle_metrics
+        if hasattr(self, "_engine") and hasattr(self._engine, "attach_latency_tracker"):
+            self._engine.attach_latency_tracker(metrics)
         cycle_t0 = time.perf_counter()
         # Safety: do not trade when kill switch blocks new orders.
         ks = self._risk.kill_switch.status() if hasattr(self._risk, "kill_switch") else None
