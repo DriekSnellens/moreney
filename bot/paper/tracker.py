@@ -385,18 +385,32 @@ class PerformanceTracker:
         realized: Decimal,
         fx_cost: Decimal,
     ) -> None:
-        """Decompose realized NET: gross − fees − slippage − residual (adverse/inventory)."""
+        """Decompose realized NET via waterfall identity (not EV-gap as adverse)."""
+        from bot.opportunity.waterfall import realized_waterfall
+
         buy_fee = sum((f.fee for f in buy_fills), _ZERO)
         sell_fee = sum((f.fee for f in sell_fills), _ZERO)
         buy_slip = sum((f.slippage for f in buy_fills), _ZERO)
         sell_slip = sum((f.slippage for f in sell_fills), _ZERO)
         tracked.realized_fees = buy_fee + sell_fee + fx_cost
         tracked.realized_slippage = buy_slip + sell_slip
-        residual = tracked.expected_net_profit - realized
-        # Residual after fees/slippage vs expected is the combined adverse + inventory
-        # effect. We cannot split them without a mid path; store as adverse bucket.
-        tracked.realized_adverse = residual
-        tracked.realized_inventory = _ZERO
+        # Adverse = opportunity gross − known cash costs − realized NET.
+        # Never use (expected_net − realized) here: that is the EV gap, which
+        # mixes fee/slippage model error with true adverse selection.
+        wf = realized_waterfall(
+            gross=tracked.expected_gross or tracked.gross_profit,
+            buy_fee=buy_fee + fx_cost,
+            sell_fee=sell_fee,
+            slippage=buy_slip + sell_slip,
+            realized_net=realized,
+        )
+        tracked.realized_adverse = wf.adverse_selection
+        tracked.realized_inventory = wf.inventory_effect
+        tracked.metadata = {
+            **(tracked.metadata or {}),
+            "pnl_waterfall_realized": wf.as_dict(),
+            "ev_gap": str(realized - tracked.expected_net_profit),
+        }
 
     def calibration_observations(self) -> list[dict[str, Any]]:
         """Completed fills for EV calibrator (past data only)."""

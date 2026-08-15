@@ -61,7 +61,13 @@ class _Bucket:
 
 
 class EvCalibrator:
-    """James-Stein style shrinkage of EV capture ratios."""
+    """James-Stein style shrinkage of EV capture ratios.
+
+    Capture for *ranking* uses heavy shrinkage toward 1.0 so thin samples do
+    not dominate. Separately, ``hard_gate_negative`` can stop a route earlier
+    when raw ``sum(realized)/sum(expected)`` is strongly negative — shrinkage
+    toward 1.0 would otherwise let toxic routes bleed until n≈prior_strength.
+    """
 
     def __init__(
         self,
@@ -71,12 +77,18 @@ class EvCalibrator:
         prior_capture: Decimal = _ONE,
         capture_floor: Decimal = Decimal("-0.5"),
         capture_ceiling: Decimal = Decimal("1.5"),
+        early_stop_samples: int = 8,
+        early_stop_capture: Decimal = Decimal("-0.25"),
+        early_stop_min_loss_eur: Decimal = Decimal("5"),
     ) -> None:
         self._prior_k = max(1, prior_strength)
         self._min_samples = max(1, min_samples)
         self._prior = prior_capture
         self._floor = capture_floor
         self._ceiling = capture_ceiling
+        self._early_n = max(1, early_stop_samples)
+        self._early_capture = early_stop_capture
+        self._early_loss = early_stop_min_loss_eur
         self._by_key: dict[str, _Bucket] = defaultdict(_Bucket)
         self._by_route: dict[str, _Bucket] = defaultdict(_Bucket)
         self._by_strategy: dict[str, _Bucket] = defaultdict(_Bucket)
@@ -143,24 +155,52 @@ class EvCalibrator:
         return raw_ev * ratio
 
     def hard_gate_negative(self, opportunity: TradeOpportunity) -> bool:
-        """True when sample size is enough to treat negative capture as a reject."""
-        bucket = self._by_key[calibration_key(opportunity)]
+        """True when evidence is strong enough to reject the key/route.
+
+        Two paths:
+        1. Early route stop — raw capture (not shrunk) after ``early_stop_samples``.
+        2. Shrunk capture ≤ 0 after ``min_samples`` (ranking-consistent gate).
+        """
+        key = calibration_key(opportunity)
+        route_name = route_key(opportunity)
+        if self._early_route_stop(route_name) or self._early_route_stop_bucket(
+            self._by_key[key]
+        ):
+            return True
+        bucket = self._by_key[key]
         if bucket.n < self._min_samples:
-            route = self._by_route[route_key(opportunity)]
+            route = self._by_route[route_name]
             if route.n < self._min_samples:
                 return False
             cap = self.capture_ratio(
-                key=calibration_key(opportunity),
-                route=route_key(opportunity),
+                key=key,
+                route=route_name,
                 strategy=opportunity.strategy_name,
             )
             return cap <= 0
         cap = self.capture_ratio(
-            key=calibration_key(opportunity),
-            route=route_key(opportunity),
+            key=key,
+            route=route_name,
             strategy=opportunity.strategy_name,
         )
         return cap <= 0
+
+    def _early_route_stop(self, route: str) -> bool:
+        if not route:
+            return False
+        return self._early_route_stop_bucket(self._by_route[route])
+
+    def _early_route_stop_bucket(self, bucket: _Bucket) -> bool:
+        if bucket.n < self._early_n:
+            return False
+        if bucket.sum_realized >= 0:
+            return False
+        if abs(bucket.sum_realized) < self._early_loss:
+            return False
+        raw = bucket.raw_capture()
+        if raw is None:
+            return bucket.sum_realized < 0
+        return raw <= self._early_capture
 
     def snapshot(self) -> dict[str, Any]:
         def _summ(bucket: _Bucket) -> dict[str, Any]:
@@ -169,6 +209,7 @@ class EvCalibrator:
                 "sum_expected": str(bucket.sum_expected),
                 "sum_realized": str(bucket.sum_realized),
                 "raw_capture": str(bucket.raw_capture()) if bucket.raw_capture() is not None else None,
+                "early_stop": self._early_route_stop_bucket(bucket),
             }
 
         routes = {
@@ -181,6 +222,10 @@ class EvCalibrator:
             "min_samples": self._min_samples,
             "prior_strength": self._prior_k,
             "prior_capture": str(self._prior),
+            "early_stop_samples": self._early_n,
+            "early_stop_capture": str(self._early_capture),
+            "early_stop_min_loss_eur": str(self._early_loss),
+            "denominator": "sum(realized_net)/sum(expected_net)",
             "routes": routes,
             "strategies": {k: _summ(v) for k, v in self._by_strategy.items() if v.n > 0},
             "keys": len([1 for v in self._by_key.values() if v.n > 0]),

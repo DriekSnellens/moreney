@@ -779,6 +779,8 @@ class PaperRunner:
             "fee_tier": getattr(self._settings, "paper_fee_tier", "retail"),
             "live_forecast": self._live_forecast(snap),
             "net_kpis": self._net_kpis(snap),
+            "edge_decomposition": self._edge_decomposition(),
+            "cost_ownership": self._cost_ownership_snapshot(),
             "why_not_trade": self._missed.why_not_trade() if hasattr(self, "_missed") else {},
             "ev_calibration": self._calibrator.snapshot() if hasattr(self, "_calibrator") else {},
             "parameter_changes": PARAMETER_CHANGES,
@@ -839,6 +841,17 @@ class PaperRunner:
             "trade_count": trades,
             "volume": str(volume),
         }
+
+    def _edge_decomposition(self) -> dict[str, Any]:
+        from bot.opportunity.edge_decomposition import edge_decomposition
+
+        trades = self._tracker.trades(limit=500) if hasattr(self._tracker, "trades") else []
+        return edge_decomposition(list(trades or []))
+
+    def _cost_ownership_snapshot(self) -> list[dict[str, Any]]:
+        from bot.opportunity.cost_ownership import ownership_table
+
+        return ownership_table()
 
     def _live_forecast(self, snap: Any) -> dict[str, Any]:
         """Sized maker quotes: NET euro per fill, capital recycled quickly."""

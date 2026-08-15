@@ -204,7 +204,9 @@ class Settings(BaseSettings):
     # Markout-adaptive adverse haircut.
     paper_markout_enabled: bool = True
     paper_markout_floor_bps: float = Field(default=2.0, ge=0)
-    paper_markout_ceiling_bps: float = Field(default=15.0, ge=0)
+    # Observed Bitvavo 5s markout mean ~21 bps on €25k paper; a 15 bps ceiling
+    # clipped the gate below measured toxicity. Higher ceiling = more conservative.
+    paper_markout_ceiling_bps: float = Field(default=40.0, ge=0)
     # Comma-separated paper instance base URLs for the fleet dashboard.
     paper_fleet_urls: str = (
         "http://127.0.0.1:8007,http://127.0.0.1:8008,"

@@ -169,7 +169,18 @@ class GlobalOpportunityEngine:
                 regime_weight=weight,
                 transfer_cost=transfer_cost,
                 inventory_relief=economics.inventory_relief_eur,
+                # Trade-through fills: condition NET on venue markout, not quote-time NET.
+                conditional_adverse_bps=venue_adv,
             )
+            meta = dict(opportunity.metadata or {})
+            meta["p_fill"] = str(ev_data.get("p_fill", 0))
+            meta["e_net_given_fill"] = str(ev_data.get("e_net_given_fill", 0))
+            meta["fill_conditioned"] = bool(ev_data.get("fill_conditioned"))
+            meta["expected_adverse_selection_eur"] = str(
+                economics.expected_adverse_selection_eur
+            )
+            meta["inventory_relief_eur"] = str(economics.inventory_relief_eur)
+            opportunity.metadata = meta
 
             liq = _liquidity_score(opportunity, venue_snapshots)
             exec_q = _execution_quality(opportunity, profitability)
@@ -214,10 +225,13 @@ class GlobalOpportunityEngine:
             if not profitability.trade_allowed:
                 gates.append("profitability")
             min_ev = Decimal(str(getattr(self._settings, "opportunity_min_expected_value", 0)))
+            # Early route stop / hard gate rejects even when shrinkage keeps calibrated EV > 0.
+            if self._calibrator.hard_gate_negative(opportunity):
+                gates.append("ev_calibration")
+                calibrated = min(calibrated, _ZERO)
+                item.calibrated_expected_value = calibrated
             if item.expected_value < min_ev or item.calibrated_expected_value < min_ev:
                 gates.append("ev")
-            if self._calibrator.hard_gate_negative(opportunity) and calibrated <= 0:
-                gates.append("ev_calibration")
 
             if "profitability" in gates:
                 item.first_limiting_gate = "profitability"

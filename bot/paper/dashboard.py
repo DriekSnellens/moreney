@@ -245,7 +245,26 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <article class="metric-card"><span class="label">Reject opportunity cost</span><span class="value">{_esc_fmt(net_kpis.get('rejection_opportunity_cost'), 'money')}</span></article>
         <article class="metric-card"><span class="label">Calibratie n</span><span class="value">{_esc(str(cal_global.get('n') or 0))}</span></article>
       </div>
-      <p class="forecast-note">EV capture = realized NET / expected NET op afgeronde round-trips. Shrinkage naar 1.0 tot n≥20.</p>
+      <p class="forecast-note">EV capture = sum(realized NET) / sum(expected NET) op afgeronde round-trips. Shrinkage naar 1.0 voor ranking; early route-stop bij n≥8 + raw capture ≤ −0.25.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Edge-decompositie</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Gross spread</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('gross_spread_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Fees</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('fee_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Slippage</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('slippage_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Adverse</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('adverse_selection_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">NET alpha</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('net_alpha'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">E(NET|fill)</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('e_net_given_fill'), 'money')}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Route</th><th>n</th><th>Expected</th><th>Realized</th><th>EV capture</th></tr></thead>
+          <tbody>{_edge_route_rows((status.get('edge_decomposition') or {}).get('by_route') or {})}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Waterfall: gross − fees − slippage − adverse − inventory = realized NET. execution_buffer is alleen expected haircut.</p>
     </section>
 
     <section class="panel">
@@ -1147,6 +1166,29 @@ def _global_ranking_block(ranking: Any) -> str:
         <p class="forecast-note">Batch: {_esc(ranking.get('input_candidates', 0))} in → {_esc(ranking.get('approved', 0))} goedgekeurd → {_esc(ranking.get('ranked_for_execution', 0))} uitvoerbaar</p>
       </div>
     """
+
+
+def _edge_route_rows(by_route: dict[str, Any]) -> str:
+    if not by_route:
+        return "<tr><td colspan='5' class='empty'>Nog geen afgeronde round-trips</td></tr>"
+    rows: list[str] = []
+    for route, cell in sorted(
+        by_route.items(),
+        key=lambda kv: -int((kv[1] or {}).get("n") or 0),
+    ):
+        if not isinstance(cell, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(route)}</td>"
+            f"<td class='num'>{_esc(cell.get('n'))}</td>"
+            f"<td class='num'>{_esc_fmt(cell.get('expected_net'), 'money')}</td>"
+            f"<td class='num {_pnl_class(cell.get('realized_net'))}'>"
+            f"{_esc_fmt(cell.get('realized_net'), 'money')}</td>"
+            f"<td class='num'>{_esc(cell.get('ev_capture') if cell.get('ev_capture') is not None else '—')}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='5' class='empty'>Nog geen afgeronde round-trips</td></tr>"
 
 
 def _why_not_rows(why_not: dict[str, Any]) -> str:
