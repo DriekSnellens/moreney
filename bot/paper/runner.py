@@ -448,18 +448,7 @@ class PaperRunner:
             await self._risk.kill_switch.recover(force=True)
         if self._settings.paper_maker_enabled:
             self._risk = RiskEngine(gate, kill_switch=self._risk.kill_switch)
-        self._engine = TradingEngine(
-            market_data=self._provider,
-            strategy=self._strategy,
-            profitability=self._profitability,
-            risk=self._risk,
-            portfolio=self._portfolio,
-            executor=self._executor,
-        )
-        self._last_cycle = None
-        self._cycle_count = 0
-        self._errors = []
-        self._fx_refilled = set()
+        self._decision_log = OpportunityDecisionLogger()
         self._markout = MarkoutTracker()
         self._calibrator = EvCalibrator(
             prior_strength=int(getattr(self._settings, "ev_calibration_prior_strength", 40) or 40),
@@ -467,6 +456,24 @@ class PaperRunner:
         )
         self._missed = MissedOpportunityTracker()
         self._last_markout_bps = None
+        self._opportunity_engine = self._build_opportunity_engine(gate)
+        self._engine = TradingEngine(
+            market_data=self._provider,
+            strategy=self._strategy,
+            profitability=self._profitability,
+            risk=self._risk,
+            portfolio=self._portfolio,
+            executor=self._executor,
+            opportunity_engine=(
+                self._opportunity_engine
+                if self._settings.global_opportunity_engine_enabled
+                else None
+            ),
+        )
+        self._last_cycle = None
+        self._cycle_count = 0
+        self._errors = []
+        self._fx_refilled = set()
         self._accumulated_runtime = 0.0
         self._session_started_at = None
         self._persist()

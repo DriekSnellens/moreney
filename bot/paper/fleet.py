@@ -127,6 +127,108 @@ async def collect_fleet_overview(settings: Settings) -> dict[str, Any]:
     }
 
 
+async def reset_fleet(
+    settings: Settings,
+    *,
+    confirm: bool,
+    restart: bool = True,
+) -> dict[str, Any]:
+    """Reset every configured paper instance. Never touches live exchange accounts.
+
+    Posts ``/paper/reset`` on each bot, then optionally ``/paper/start`` so the
+    fleet comes back online clean (matching PAPER_AUTO_START behaviour).
+    """
+    if not confirm:
+        return {
+            "reset": False,
+            "reason": "confirmation_required",
+            "message": 'POST /fleet/reset requires {"confirm": true}',
+            "results": [],
+        }
+    endpoints = fleet_endpoints(settings)
+    timeout = httpx.Timeout(30.0, connect=3.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        results = await asyncio.gather(
+            *[
+                _reset_one(client, label=label, base_url=url, restart=restart)
+                for label, url in endpoints
+            ]
+        )
+    rows = list(results)
+    ok_count = sum(1 for row in rows if row.get("ok"))
+    return {
+        "reset": ok_count == len(rows) and len(rows) > 0,
+        "confirmed": True,
+        "restart": restart,
+        "configured_count": len(endpoints),
+        "ok_count": ok_count,
+        "real_exchange_accounts_affected": False,
+        "results": rows,
+    }
+
+
+async def _reset_one(
+    client: httpx.AsyncClient,
+    *,
+    label: str,
+    base_url: str,
+    restart: bool,
+) -> dict[str, Any]:
+    reset_url = f"{base_url}/paper/reset"
+    try:
+        response = await client.post(reset_url, json={"confirm": True})
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("reset"):
+            return {
+                "ok": False,
+                "label": label,
+                "base_url": base_url,
+                "reset": False,
+                "restarted": False,
+                "error": payload.get("message") or payload.get("reason") or "reset refused",
+            }
+        restarted = False
+        start_error = None
+        if restart:
+            try:
+                start = await client.post(f"{base_url}/paper/start", json={})
+                start.raise_for_status()
+                restarted = bool(start.json().get("started") or start.json().get("running"))
+            except Exception as exc:  # noqa: BLE001
+                start_error = f"{type(exc).__name__}: {exc}"
+                logger.info(
+                    "FLEET_RESTART_FAILED label=%s url=%s error=%s",
+                    label,
+                    base_url,
+                    type(exc).__name__,
+                )
+        return {
+            "ok": True,
+            "label": label,
+            "base_url": base_url,
+            "reset": True,
+            "restarted": restarted,
+            "starting_equity": payload.get("starting_equity"),
+            "error": start_error,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "FLEET_RESET_FAILED label=%s url=%s error=%s",
+            label,
+            base_url,
+            type(exc).__name__,
+        )
+        return {
+            "ok": False,
+            "label": label,
+            "base_url": base_url,
+            "reset": False,
+            "restarted": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def _totals(online: list[dict[str, Any]]) -> dict[str, str]:
     equity = 0.0
     pnl = 0.0

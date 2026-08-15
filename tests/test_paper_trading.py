@@ -814,6 +814,8 @@ def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
     assert "Quotes" in fleet
     assert "<table" in fleet
     assert "<rect" in fleet
+    assert "Alle bots opnieuw beginnen" in fleet
+    assert "/fleet/reset" in fleet
     assert "Ultra transacties" not in fleet
     assert "Ultra PnL" not in fleet
     assert "Ultra =" not in fleet

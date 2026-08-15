@@ -27,7 +27,7 @@ from bot.paper.dashboard import (
     render_dashboard_lite,
     render_fleet_dashboard,
 )
-from bot.paper.fleet import collect_fleet_overview, publicize_instance_urls
+from bot.paper.fleet import collect_fleet_overview, publicize_instance_urls, reset_fleet
 from bot.paper.auth import (
     clear_session_cookie,
     credentials_valid,
@@ -498,6 +498,21 @@ async def fleet_dashboard(
 @app.get("/fleet/api")
 async def fleet_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
     return await collect_fleet_overview(get_settings())
+
+
+@app.post("/fleet/reset")
+async def fleet_reset(
+    payload: dict[str, Any] | None = None,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Reset every paper bot in the fleet. Never touches live exchange accounts."""
+    body = payload or {}
+    confirm = bool(body.get("confirm"))
+    restart = bool(body.get("restart", True))
+    result = await reset_fleet(get_settings(), confirm=confirm, restart=restart)
+    if not confirm:
+        raise HTTPException(status_code=400, detail=result)
+    return result
 
 @app.get("/paper/dashboard", response_class=HTMLResponse)
 async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:

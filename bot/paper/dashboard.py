@@ -566,6 +566,21 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     <p class="sub totals-note">PnL is winst op afgeronde transacties. Vermogen is cash plus voorraad tegen de markt — geen extra inleg.</p>
   </header>
   <main class="container">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Bediening</h2>
+        <span class="muted">{online}/{configured} online</span>
+      </div>
+      <div class="controls">
+        <button type="button" class="btn btn-danger" id="fleet-reset-btn" onclick="resetFleet()">
+          Alle bots opnieuw beginnen
+        </button>
+      </div>
+      <p class="forecast-note" id="fleet-reset-status">
+        Zet elke oefenrekening terug naar startkapitaal (PnL, trades, markout, calibratie).
+        Raakt geen echte beursrekeningen. Bots starten daarna opnieuw.
+      </p>
+    </section>
     <section class="glance-grid">{glance_html}</section>
     <section class="panel">
       <h2>Vergelijking</h2>
@@ -577,6 +592,48 @@ def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
   </main>
   <footer class="footer">Oefenhandel · geen echte orders · retail fees</footer>
+  <script>
+    async function resetFleet() {{
+      const msg =
+        "Alle oefenbots opnieuw beginnen?\\n\\n" +
+        "PnL, trades, markout en calibratie gaan terug naar nul. " +
+        "Dit raakt geen echte beursrekeningen. Bots starten daarna opnieuw.";
+      if (!confirm(msg)) return;
+      const btn = document.getElementById("fleet-reset-btn");
+      const status = document.getElementById("fleet-reset-status");
+      if (btn) {{
+        btn.disabled = true;
+        btn.textContent = "Bezig…";
+      }}
+      if (status) status.textContent = "Alle bots worden gereset…";
+      try {{
+        const res = await fetch("/fleet/reset", {{
+          method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{confirm: true, restart: true}}),
+        }});
+        const data = await res.json().catch(() => ({{}}));
+        if (!res.ok) {{
+          throw new Error(
+            (data.detail && data.detail.message) || data.message || res.statusText
+          );
+        }}
+        const ok = data.ok_count ?? 0;
+        const total = data.configured_count ?? 0;
+        if (status) {{
+          status.textContent =
+            "Klaar: " + ok + "/" + total + " bots gereset. Pagina ververst…";
+        }}
+        setTimeout(() => location.reload(), 1200);
+      }} catch (err) {{
+        if (status) status.textContent = "Reset mislukt: " + err;
+        if (btn) {{
+          btn.disabled = false;
+          btn.textContent = "Alle bots opnieuw beginnen";
+        }}
+      }}
+    }}
+  </script>
 </body>
 </html>"""
     return HTMLResponse(content=html)
