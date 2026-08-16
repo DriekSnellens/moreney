@@ -285,6 +285,11 @@ class Settings(BaseSettings):
     perf_instrumentation_enabled: bool = False
     perf_instrumentation_window: int = Field(default=512, ge=32, le=10000)
 
+    # Pre-trade toxicity: shadow predictions only (never changes fills/execution).
+    toxicity_shadow_enabled: bool = True
+    toxicity_prior_strength: int = Field(default=8, ge=1, le=100)
+    toxicity_uncertainty_weight: float = Field(default=0.5, ge=0.0, le=5.0)
+
     exchange_name: str = "stub"
     exchange_api_key: SecretStr | None = None
     exchange_api_secret: SecretStr | None = None

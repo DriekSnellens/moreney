@@ -70,10 +70,46 @@ class GlobalOpportunityEngine:
         self._venue_adverse_lookup = venue_adverse_lookup
         self._global_regime = MarketRegime.NORMAL
         self._latency: Any = None
+        self._toxicity_shadow = bool(
+            getattr(settings, "toxicity_shadow_enabled", True)
+        )
+        from bot.opportunity.toxicity.shrinkage import HierarchicalToxicityModel
+
+        self._toxicity = HierarchicalToxicityModel(
+            prior_strength=int(getattr(settings, "toxicity_prior_strength", 8) or 8),
+            model="C_HIERARCHICAL",
+        )
+        self._toxicity_uncertainty_weight = Decimal(
+            str(getattr(settings, "toxicity_uncertainty_weight", 0.5) or 0.5)
+        )
+        self._last_shadow: dict[str, Any] | None = None
 
     def attach_latency_tracker(self, tracker: Any | None) -> None:
         """Optional CycleLatencyTracker; no-op when disabled/None."""
         self._latency = tracker
+
+    @property
+    def toxicity_model(self) -> Any:
+        return self._toxicity
+
+    def observe_toxicity(
+        self,
+        *,
+        features: Any,
+        adverse_bps: Decimal,
+    ) -> None:
+        """Learn from completed fill only (called after markout/adverse known)."""
+        if features is None:
+            return
+        self._toxicity.observe(features, adverse_bps)
+
+    def shadow_snapshot(self) -> dict[str, Any]:
+        return {
+            "enabled": self._toxicity_shadow,
+            "alters_execution": False,
+            "model": self._toxicity.export_state(),
+            "last": self._last_shadow,
+        }
 
     @property
     def decision_log(self) -> OpportunityDecisionLogger:
@@ -223,6 +259,69 @@ class GlobalOpportunityEngine:
             opportunity.metadata = meta
             if lat is not None and lat.enabled:
                 t_belief += time.perf_counter() - t0
+
+            # Shadow toxicity prediction — never gates live execution.
+            if self._toxicity_shadow:
+                from bot.opportunity.toxicity.dataset import features_from_opportunity_metadata
+                from bot.opportunity.toxicity.shadow import shadow_admit
+
+                side = (
+                    opportunity.side.value
+                    if hasattr(opportunity.side, "value")
+                    else str(opportunity.side)
+                )
+                notional = economics.capital_required_eur or (
+                    opportunity.quantity * opportunity.entry_price
+                    if opportunity.quantity and opportunity.entry_price
+                    else _ZERO
+                )
+                feats = features_from_opportunity_metadata(
+                    opportunity_id=str(opportunity.id),
+                    timestamp="",
+                    strategy=opportunity.strategy_name,
+                    symbol=opportunity.symbol,
+                    side=side,
+                    buy_exchange=str(meta.get("buy_exchange") or ""),
+                    sell_exchange=str(meta.get("sell_exchange") or ""),
+                    metadata=meta,
+                    expected_gross=Decimal(
+                        str(getattr(profitability.estimate, "gross_profit", 0) or 0)
+                    )
+                    if profitability.estimate
+                    else economics.expected_net_eur
+                    + economics.expected_fee_eur
+                    + economics.expected_slippage_eur
+                    + economics.expected_adverse_selection_eur,
+                    expected_fees=economics.expected_fee_eur,
+                    expected_slippage=economics.expected_slippage_eur,
+                    expected_buffer=economics.expected_adverse_selection_eur,
+                    expected_net=economics.expected_net_eur,
+                    notional=notional,
+                )
+                pred = self._toxicity.predict(feats)
+                shadow = shadow_admit(
+                    feats,
+                    pred,
+                    uncertainty_weight=self._toxicity_uncertainty_weight,
+                )
+                meta["toxicity"] = {
+                    **shadow.as_dict(),
+                    "predicted_adverse_bps": str(pred.expected_adverse_bps),
+                    "sample_count": pred.sample_count,
+                    "uncertainty_bps": str(pred.uncertainty_bps),
+                    "shrinkage_source": pred.shrinkage_source,
+                    "toxicity_percentile": (
+                        str(pred.toxicity_percentile)
+                        if pred.toxicity_percentile is not None
+                        else None
+                    ),
+                    "quote_age_bucket": feats.quote_age_bucket,
+                    "spread_bucket": feats.spread_bucket,
+                    "vol_bucket": feats.vol_bucket,
+                    "live_blocks_quote": False,
+                }
+                opportunity.metadata = meta
+                self._last_shadow = meta["toxicity"]
 
             liq = _liquidity_score(opportunity, venue_snapshots)
             exec_q = _execution_quality(opportunity, profitability)

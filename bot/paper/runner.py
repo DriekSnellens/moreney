@@ -281,7 +281,23 @@ class PaperRunner:
             venue_adverse_lookup=_venue_adverse,
         )
         engine.attach_latency_tracker(getattr(self, "_cycle_metrics", None))
+        self._seed_toxicity(engine)
         return engine
+
+    def _seed_toxicity(self, engine: GlobalOpportunityEngine) -> None:
+        """Causal seed from past completed fills only (no rejects)."""
+        if not hasattr(engine, "observe_toxicity"):
+            return
+        from bot.opportunity.toxicity.dataset import (
+            adverse_bps_from_trade,
+            estimate_notional_eur,
+            features_from_trade,
+        )
+
+        for trade in list(getattr(self._tracker, "_trades", []) or []):
+            feats = features_from_trade(trade)
+            adv = adverse_bps_from_trade(trade, estimate_notional_eur(trade))
+            engine.observe_toxicity(features=feats, adverse_bps=adv)
 
     def _build_strategy(self):
         if getattr(self._settings, "global_use_global_composite", True):
@@ -827,6 +843,12 @@ class PaperRunner:
             "cost_ownership": self._cost_ownership_snapshot(),
             "why_not_trade": self._missed.why_not_trade() if hasattr(self, "_missed") else {},
             "ev_calibration": self._calibrator.snapshot() if hasattr(self, "_calibrator") else {},
+            "toxicity_shadow": (
+                self._opportunity_engine.shadow_snapshot()
+                if hasattr(self, "_opportunity_engine")
+                and hasattr(self._opportunity_engine, "shadow_snapshot")
+                else {"enabled": False, "alters_execution": False}
+            ),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -1587,7 +1609,8 @@ class PaperRunner:
         """Update route beliefs immediately on each completed round-trip."""
         if not hasattr(self, "_calibrator") or not hasattr(self._tracker, "drain_calibration_observations"):
             return
-        for row in self._tracker.drain_calibration_observations():
+        rows = self._tracker.drain_calibration_observations()
+        for row in rows:
             self._calibrator.observe(
                 key=str(row["key"]),
                 route=str(row["route"]),
@@ -1595,6 +1618,26 @@ class PaperRunner:
                 expected_net=row["expected_net"],
                 realized_net=row["realized_net"],
             )
+        # Toxicity model learns from completed fills only (shadow — no live gate).
+        engine = getattr(self, "_opportunity_engine", None)
+        if engine is None or not hasattr(engine, "observe_toxicity"):
+            return
+        from bot.opportunity.toxicity.dataset import (
+            adverse_bps_from_trade,
+            features_from_trade,
+            estimate_notional_eur,
+        )
+
+        trades = list(getattr(self._tracker, "_trades", []) or [])
+        by_id = {str(t.get("opportunity_id")): t for t in trades}
+        for row in rows:
+            trade = by_id.get(str(row.get("opportunity_id") or ""))
+            if not trade:
+                continue
+            feats = features_from_trade(trade)
+            notional = estimate_notional_eur(trade)
+            adv_bps = adverse_bps_from_trade(trade, notional)
+            engine.observe_toxicity(features=feats, adverse_bps=adv_bps)
 
     async def _cancel_stale_quotes(self) -> None:
         max_age = float(getattr(self._settings, "paper_maker_max_age_ms", 0) or 0)

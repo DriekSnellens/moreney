@@ -287,6 +287,32 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>Toxicity shadow (pre-trade)</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Shadow mode</span><span class="value">{_esc((status.get('toxicity_shadow') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
+        <article class="metric-card"><span class="label">Wijzigt fills?</span><span class="value">Nee</span></article>
+        <article class="metric-card"><span class="label">Model n</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('model') or {}).get('global_n'))}</span></article>
+        <article class="metric-card"><span class="label">Global mean bps</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('model') or {}).get('global_mean_bps'))}</span></article>
+        <article class="metric-card"><span class="label">Predicted adverse bps</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('predicted_adverse_bps'))}</span></article>
+        <article class="metric-card"><span class="label">Uncertainty bps</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('uncertainty_bps'))}</span></article>
+        <article class="metric-card"><span class="label">Sample size</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('sample_count'))}</span></article>
+        <article class="metric-card"><span class="label">Shrinkage</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('shrinkage_source'))}</span></article>
+        <article class="metric-card"><span class="label">Toxicity %ile</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('toxicity_percentile'))}</span></article>
+        <article class="metric-card"><span class="label">Quote age bucket</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('quote_age_bucket'))}</span></article>
+        <article class="metric-card"><span class="label">Spread bucket</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('spread_bucket'))}</span></article>
+        <article class="metric-card"><span class="label">E[NET] before tox</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('expected_net_before_toxicity'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">E[adverse]</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('expected_adverse_eur'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Uncertainty penalty</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('uncertainty_penalty_eur'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Tox-adjusted NET</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('toxicity_adjusted_net'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Shadow decision</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('reason'))}</span></article>
+      </div>
+      <p class="forecast-note">
+        Pre-trade E(adverse|fill,state). Shadow only — wijzigt geen fills, fees of live toelating.
+        Observed adverse verschijnt in markout/waterfall ná fill.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Why not trade?</h2>
       <div class="table-wrap">
         <table>
