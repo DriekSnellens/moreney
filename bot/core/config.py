@@ -290,6 +290,11 @@ class Settings(BaseSettings):
     toxicity_prior_strength: int = Field(default=8, ge=1, le=100)
     toxicity_uncertainty_weight: float = Field(default=0.5, ge=0.0, le=5.0)
 
+    # Lead-lag research: observation/shadow only unless execution explicitly enabled.
+    lead_lag_enabled: bool = True
+    lead_lag_shadow_only: bool = True
+    lead_lag_execution_enabled: bool = False
+
     exchange_name: str = "stub"
     exchange_api_key: SecretStr | None = None
     exchange_api_secret: SecretStr | None = None

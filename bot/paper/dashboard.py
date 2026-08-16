@@ -347,6 +347,43 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>LEAD-LAG LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Enabled</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
+        <article class="metric-card"><span class="label">Shadow only</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('shadow_only') and 'Ja' or 'Nee')}</span></article>
+        <article class="metric-card"><span class="label">Execution enabled</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('execution_enabled') and 'Ja' or 'Nee')}</span></article>
+        <article class="metric-card"><span class="label">Wijzigt PnL?</span><span class="value">Nee</span></article>
+        <article class="metric-card"><span class="label">Verdict</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('verdict'))}</span></article>
+        <article class="metric-card"><span class="label">Data quality</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('data_quality'))}</span></article>
+        <article class="metric-card"><span class="label">Observer n</span><span class="value">{_esc(((status.get('lead_lag_lab') or {}).get('observer') or {}).get('n_observations'))}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead>
+            <tr>
+              <th>Pair</th>
+              <th>Status</th>
+              <th>Quality</th>
+              <th>n</th>
+              <th>Horizon</th>
+              <th>Hit rate</th>
+              <th>Median resp</th>
+              <th>Pred err</th>
+              <th>Shadow ops</th>
+              <th>Admitted</th>
+              <th>Shadow NET</th>
+            </tr>
+          </thead>
+          <tbody>{_lead_lag_lab_rows((status.get('lead_lag_lab') or {}).get('panel') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        RESEARCH ONLY — nooit mergen in Live-equivalent PnL.
+        Non-participation is geen alpha. Default: LEAD_LAG_EXECUTION_ENABLED=false.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Why not trade?</h2>
       <div class="table-wrap">
         <table>
@@ -1214,6 +1251,33 @@ def _fill_model_lab_rows(panel: list[dict[str, Any]]) -> str:
             f"<td class='num'>{_esc(adv_mean)}</td>"
             f"<td class='num'>{_esc(row.get('net'))}</td>"
             f"<td class='num'>{_esc(lock_med)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _lead_lag_lab_rows(panel: list[dict[str, Any]]) -> str:
+    if not panel:
+        return (
+            "<tr><td colspan='11' class='empty'>"
+            "Geen lead-lag rapport — run study (verwacht INSUFFICIENT_DATA zonder tape)"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for row in panel:
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('pair'))}</td>"
+            f"<td>{_esc(row.get('status'))}</td>"
+            f"<td>{_esc(row.get('data_quality'))}</td>"
+            f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
+            f"<td class='num'>{_esc(row.get('horizon_ms'))}</td>"
+            f"<td class='num'>{_esc(row.get('directional_hit_rate'))}</td>"
+            f"<td class='num'>{_esc(row.get('median_follower_response'))}</td>"
+            f"<td class='num'>{_esc(row.get('estimated_prediction_error'))}</td>"
+            f"<td class='num'>{_esc(row.get('shadow_opportunities'))}</td>"
+            f"<td class='num'>{_esc(row.get('conservative_admissions'))}</td>"
+            f"<td class='num'>{_esc(row.get('counterfactual_shadow_net'))}</td>"
             "</tr>"
         )
     return "".join(rows)

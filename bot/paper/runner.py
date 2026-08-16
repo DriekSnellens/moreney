@@ -199,6 +199,19 @@ class PaperRunner:
         )
         self._opportunity_engine = self._build_opportunity_engine(gate)
         set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
+        self._lead_lag_observer = None
+        if getattr(settings, "lead_lag_enabled", True):
+            from bot.opportunity.lead_lag.observer import LeadLagObserver
+
+            self._lead_lag_observer = LeadLagObserver()
+            # Hard safety: observation never executes
+            self._lead_lag_observer.alters_execution = False
+            if getattr(settings, "lead_lag_execution_enabled", False) and not getattr(
+                settings, "lead_lag_shadow_only", True
+            ):
+                # Phase D remains off unless both flags intentionally flipped;
+                # still do not auto-execute from observer.
+                pass
         self._engine = TradingEngine(
             market_data=self._provider,
             strategy=self._strategy,
@@ -585,6 +598,10 @@ class PaperRunner:
         with metrics.span("collect_books"):
             books = self._collect_books()
 
+        # Lead-lag Phase A: observation only (no orders, no ranking effect).
+        with metrics.span("lead_lag_observe"):
+            self._lead_lag_observe(books)
+
         # HMM guardrail: toxic dump regime → cancel bids + REDUCE_ONLY before quoting.
         with metrics.span("hmm_regime"):
             await self._apply_hmm_regime_guardrail(books=books)
@@ -850,6 +867,7 @@ class PaperRunner:
                 else {"enabled": False, "alters_execution": False}
             ),
             "fill_model_lab": self._fill_model_lab_snapshot(),
+            "lead_lag_lab": self._lead_lag_lab_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -870,6 +888,105 @@ class PaperRunner:
                 "funding_scan": self._funding_scan_stats(),
             },
         }
+
+    def _lead_lag_lab_snapshot(self) -> dict[str, Any]:
+        """Research-only lead-lag panel — never merges into live-equivalent PnL."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "enabled": bool(getattr(self._settings, "lead_lag_enabled", True)),
+            "shadow_only": bool(getattr(self._settings, "lead_lag_shadow_only", True)),
+            "execution_enabled": bool(
+                getattr(self._settings, "lead_lag_execution_enabled", False)
+            ),
+            "alters_execution": False,
+            "affects_production_pnl": False,
+            "label": "RESEARCH_ONLY",
+            "verdict": None,
+            "data_quality": None,
+            "panel": [],
+            "observer": (
+                self._lead_lag_observer.snapshot()
+                if getattr(self, "_lead_lag_observer", None) is not None
+                else {"enabled": False, "n_observations": 0}
+            ),
+            "source": None,
+        }
+        report_path = Path("data/lead_lag_report.json")
+        if report_path.exists():
+            try:
+                import json
+
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                base.update(
+                    {
+                        "verdict": report.get("O_final_verdict"),
+                        "data_quality": (report.get("C_timestamp_audit") or {}).get(
+                            "overall_quality"
+                        ),
+                        "panel": report.get("lead_lag_lab_panel") or [],
+                        "source": str(report_path),
+                    }
+                )
+            except Exception:
+                pass
+        if base["shadow_only"] or not base["execution_enabled"]:
+            base["execution_enabled"] = False
+            base["alters_execution"] = False
+        return base
+
+    def _lead_lag_observe(self, books: dict[str, dict[str, Any]]) -> None:
+        """Phase A: record cross-venue TOB pairs. Never places orders."""
+        observer = getattr(self, "_lead_lag_observer", None)
+        if observer is None or not getattr(self._settings, "lead_lag_enabled", True):
+            return
+        from bot.opportunity.lead_lag.pairs import directed_pairs
+        from bot.opportunity.lead_lag.timestamps import VENUE_EVENT_CLOCK
+
+        now_ms = time.time() * 1000.0
+        if len(observer.observations) > 8000:
+            observer.observations = observer.observations[-4000:]
+        venues = tuple(
+            p.strip().lower()
+            for p in self._settings.market_data_exchanges.split(",")
+            if p.strip()
+        )
+        for symbol in self._symbols:
+            for lead, foll in directed_pairs(venues or None):
+                lb = (books.get(lead) or {}).get(symbol)
+                fb = (books.get(foll) or {}).get(symbol)
+                if lb is None or fb is None:
+                    continue
+                if not lb.bids or not lb.asks or not fb.bids or not fb.asks:
+                    continue
+                l_clock = VENUE_EVENT_CLOCK.get(lead, {})
+                try:
+                    event_ms = lb.timestamp.timestamp() * 1000.0
+                except Exception:
+                    event_ms = now_ms
+                l_depth = sum((lvl.amount for lvl in lb.bids[:5]), Decimal("0")) + sum(
+                    (lvl.amount for lvl in lb.asks[:5]), Decimal("0")
+                )
+                f_depth = sum((lvl.amount for lvl in fb.bids[:5]), Decimal("0")) + sum(
+                    (lvl.amount for lvl in fb.asks[:5]), Decimal("0")
+                )
+                observer.observe_pair(
+                    timestamp_ms=event_ms,
+                    local_received_ms=now_ms,
+                    symbol=symbol,
+                    leader_venue=lead,
+                    follower_venue=foll,
+                    leader_bid=lb.bids[0].price,
+                    leader_ask=lb.asks[0].price,
+                    follower_bid=fb.bids[0].price,
+                    follower_ask=fb.asks[0].price,
+                    leader_book_age_ms=float(getattr(lb, "age_ms", 0) or 0),
+                    follower_book_age_ms=float(getattr(fb, "age_ms", 0) or 0),
+                    leader_depth=l_depth,
+                    follower_depth=f_depth,
+                    data_quality=str(l_clock.get("quality") or "UNSUPPORTED"),
+                    event_ts_source=str(l_clock.get("event_ts") or "unknown"),
+                )
 
     def _fill_model_lab_snapshot(self) -> dict[str, Any]:
         """Experimental fill-model lab panel — never alters production PnL/execution."""
