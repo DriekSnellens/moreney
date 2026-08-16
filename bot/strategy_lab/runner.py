@@ -31,6 +31,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--cycles", type=int, default=80, help="Synthetic cycle count")
     parser.add_argument("--dev-frac", type=float, default=0.70)
+    parser.add_argument(
+        "--max-events",
+        type=int,
+        default=120_000,
+        help="Max OBSERVED events to stream (memory bound; default 120000)",
+    )
+    parser.add_argument("--stride", type=int, default=1, help="Keep every Nth JSONL line")
+    parser.add_argument(
+        "--outcome-mode",
+        choices=("trade_through", "shadow"),
+        default="trade_through",
+        help="Accept outcomes: trade_through haircut (default) or shadow expected NET",
+    )
     args = parser.parse_args(argv)
 
     results = run_tournament(
@@ -40,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
         use_synthetic_if_thin=not args.no_synthetic,
         n_synthetic_cycles=args.cycles,
         development_frac=args.dev_frac,
+        max_events=args.max_events,
+        stride=args.stride,
+        outcome_mode=args.outcome_mode,
     )
     print(json.dumps(
         {

@@ -189,28 +189,64 @@ def test_net_economics_consistent_across_common_engine() -> None:
 
 
 def test_tournament_deterministic_fingerprint(tmp_path: Path) -> None:
+    empty = tmp_path / "empty_tape"
+    empty.mkdir()
     a = run_tournament(
         dataset_id="test_a",
+        research_path=empty,
         out_dir=tmp_path / "a",
         use_synthetic_if_thin=True,
         n_synthetic_cycles=40,
         development_frac=0.7,
+        outcome_mode="trade_through",
     )
     b = run_tournament(
         dataset_id="test_b",
+        research_path=empty,
         out_dir=tmp_path / "b",
         use_synthetic_if_thin=True,
         n_synthetic_cycles=40,
         development_frac=0.7,
+        outcome_mode="trade_through",
     )
+    assert a["data_label"] == "SYNTHETIC"
     assert a["fingerprints"]["dataset"] == b["fingerprints"]["dataset"]
     assert a["fingerprints"]["tournament"] == b["fingerprints"]["tournament"]
     assert criteria_manifest()["criteria_version"] == CRITERIA_VERSION
+    assert a["frozen_config"]["outcome_mode"] == "trade_through"
+
+
+def test_trade_through_haircuts_shadow_net(tmp_path: Path) -> None:
+    empty = tmp_path / "empty_tape"
+    empty.mkdir()
+    shadow = run_tournament(
+        dataset_id="shadow",
+        research_path=empty,
+        out_dir=tmp_path / "shadow",
+        n_synthetic_cycles=40,
+        outcome_mode="shadow",
+    )
+    tt = run_tournament(
+        dataset_id="tt",
+        research_path=empty,
+        out_dir=tmp_path / "tt",
+        n_synthetic_cycles=40,
+        outcome_mode="trade_through",
+    )
+    assert shadow["data_label"] == tt["data_label"] == "SYNTHETIC"
+    maker_s = next(r for r in shadow["leaderboard"] if r["strategy"] == "maker_inventory")
+    maker_t = next(r for r in tt["leaderboard"] if r["strategy"] == "maker_inventory")
+    # Same accepts; trade-through must not invent a larger NET than shadow expected.
+    if maker_s["trades"] > 0:
+        assert maker_t["net"] <= maker_s["net"] + 1e-9
 
 
 def test_dashboard_matches_scorecards(tmp_path: Path) -> None:
+    empty = tmp_path / "empty_tape"
+    empty.mkdir()
     results = run_tournament(
         dataset_id="dash",
+        research_path=empty,
         out_dir=tmp_path / "dash",
         n_synthetic_cycles=30,
     )

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings
+from bot.research.tournament.criteria import NOTIONAL_EUR_DEFAULT
+from bot.research.tournament.economics import execution_replay_net
 from bot.strategy_lab.adapters import build_all_adapters
 from bot.strategy_lab.adapter import decision_key
 from bot.strategy_lab.capital import CapitalLedger
@@ -27,6 +29,8 @@ from bot.strategy_lab.types import DecisionAction, StrategyOutcome
 from bot.strategy_lab.verdict import criteria_manifest, verdict_for_scorecard
 
 _ZERO = Decimal("0")
+# Bound OBSERVED loads so multi-million-line tapes cannot OOM the lab process.
+_DEFAULT_OBSERVED_MAX_EVENTS = 120_000
 
 
 def _settings(**kwargs: Any) -> Settings:
@@ -61,19 +65,34 @@ def run_tournament(
     n_synthetic_cycles: int = 80,
     development_frac: float = 0.70,
     settings: Settings | None = None,
+    max_events: int | None = _DEFAULT_OBSERVED_MAX_EVENTS,
+    stride: int = 1,
+    outcome_mode: str = "trade_through",
 ) -> dict[str, Any]:
     """Run DEVELOPMENT → FREEZE → untouched OOS for all strategies + control."""
     settings = settings or _settings()
     assert getattr(settings, "strategy_lab_execution_enabled", False) is False
+    if outcome_mode not in {"trade_through", "shadow"}:
+        raise ValueError(f"unsupported outcome_mode: {outcome_mode}")
 
     research_path = research_path or Path(
         getattr(settings, "research_marketdata_recording_path", "data/research_marketdata")
     )
-    events = load_research_events(research_path)
+    events = load_research_events(
+        research_path,
+        max_events=max_events,
+        stride=stride,
+    )
     data_label = "OBSERVED"
+    sample_note: str | None = None
     if len(events) < 50 and use_synthetic_if_thin:
         events = synthetic_research_tape(n_cycles=n_synthetic_cycles, seed=42)
         data_label = "SYNTHETIC"
+    elif len(events) >= 50:
+        sample_note = (
+            f"OBSERVED streamed sample max_events={max_events} stride={stride} "
+            f"(EUR × binance/bitvavo/okx); not a full-tape claim"
+        )
 
     cycles = build_cycles_from_events(events, bucket_ms=200)
     dataset_id = dataset_id or (
@@ -94,6 +113,9 @@ def run_tournament(
         "n_development": len(development_cycles),
         "n_oos": len(oos_cycles),
         "development_frac": development_frac,
+        "max_events": max_events,
+        "stride": stride,
+        "outcome_mode": outcome_mode,
         "dataset_fingerprint": dataset_fingerprint(cycles),
         "development_fingerprint": dataset_fingerprint(development_cycles),
         "oos_fingerprint": dataset_fingerprint(oos_cycles),
@@ -147,9 +169,13 @@ def run_tournament(
         sid = adapter.strategy_id
         dev_dec = [d for d in adapter.decisions() if d.cycle_id in {c.cycle_id for c in development_cycles}]
         oos_dec = oos_decisions.get(sid, [])
-        # Shadow outcomes = conservative expected (no live fills in research lab)
-        dev_outcomes = [_shadow_outcome(d) for d in dev_dec if d.action == DecisionAction.ACCEPT]
-        oos_outcomes = [_shadow_outcome(d) for d in oos_dec if d.action == DecisionAction.ACCEPT]
+        # Outcomes: trade-through conservative replay by default (fill_rate + extra adverse).
+        # Shadow mode keeps expected NET for plumbing comparisons only.
+        outcome_fn = (
+            _trade_through_outcome if outcome_mode == "trade_through" else _shadow_outcome
+        )
+        dev_outcomes = [outcome_fn(d) for d in dev_dec if d.action == DecisionAction.ACCEPT]
+        oos_outcomes = [outcome_fn(d) for d in oos_dec if d.action == DecisionAction.ACCEPT]
 
         # Funding insufficient-data shortcut
         if sid == "funding_basis" and all(
@@ -240,9 +266,15 @@ def run_tournament(
         "waterfalls": waterfalls,
         "fingerprints": fingerprints,
         "notes": [
-            "Shadow outcomes use conservative expected NET (no production fills).",
+            (
+                "Outcomes use trade-through conservative execution replay "
+                "(fill_rate=0.55 + extra adverse; no queue fills)."
+                if outcome_mode == "trade_through"
+                else "Shadow outcomes use conservative expected NET (no trade-through haircut)."
+            ),
             "OOS split is chronological and frozen before strategy scoring.",
             "Do not tune parameters after inspecting OOS.",
+            *( [sample_note] if sample_note else [] ),
         ],
     }
 
@@ -280,7 +312,40 @@ def _shadow_outcome(d) -> StrategyOutcome:
         realized_adverse_eur=d.costs.adverse_latency_eur,
         filled=True,
         independent_event_id=d.cycle_id,
-        metadata={"shadow": True},
+        metadata={"shadow": True, "trade_through_baseline": False},
+    )
+
+
+def _trade_through_outcome(d) -> StrategyOutcome:
+    """Map accept expected NET through shared trade-through execution replay.
+
+    Same assumptions as gated research tournament: no queue fills, fill_rate
+    haircut, extra adverse bps. Does not invent fills beyond accept decisions.
+    """
+    expected = float(d.costs.conservative_net_eur)
+    notional = (
+        float(d.capital_required_eur)
+        if d.capital_required_eur and d.capital_required_eur > 0
+        else float(NOTIONAL_EUR_DEFAULT)
+    )
+    replay = execution_replay_net(expected_net=expected, notional_eur=notional)
+    fill_rate = Decimal(str(replay["fill_rate"]))
+    extra_adverse = Decimal(str(notional * float(replay["adverse_extra_bps"]) / 10000.0))
+    realized_net = Decimal(str(replay["EXECUTION_NET"]))
+    return StrategyOutcome(
+        decision_key=decision_key(d),
+        realized_net_eur=realized_net,
+        realized_gross_eur=d.costs.gross_edge_eur * fill_rate,
+        realized_fees_eur=d.costs.fees_eur * fill_rate,
+        realized_slippage_eur=d.costs.slippage_eur * fill_rate,
+        realized_adverse_eur=(d.costs.adverse_latency_eur + extra_adverse) * fill_rate,
+        filled=True,
+        independent_event_id=d.cycle_id,
+        metadata={
+            "shadow": False,
+            "trade_through_baseline": True,
+            "execution_replay": replay,
+        },
     )
 
 

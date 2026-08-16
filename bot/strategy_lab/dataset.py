@@ -56,18 +56,68 @@ def event_to_view(ev: ResearchMarketEvent) -> MarketEventView:
     )
 
 
-def load_research_events(path: Path) -> list[ResearchMarketEvent]:
-    events: list[ResearchMarketEvent] = []
+def iter_research_events(
+    path: Path,
+    *,
+    max_events: int | None = None,
+    stride: int = 1,
+    venues: tuple[str, ...] | None = ("binance", "bitvavo", "okx"),
+    symbol_suffix: str | None = "EUR",
+) -> Iterator[ResearchMarketEvent]:
+    """Stream JSONL research events without loading the full tape into RAM.
+
+    Filters match the gated tournament index defaults (EUR × core venues)
+    so strategy-lab OBSERVED runs stay comparable and memory-safe.
+    """
     if not path.exists():
-        return events
+        return
     files = sorted(path.rglob("*.jsonl")) if path.is_dir() else [path]
+    venue_set = {v.lower() for v in venues} if venues else None
+    stride = max(1, int(stride))
+    seen = 0
+    kept = 0
     for fp in files:
-        for line in fp.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            raw = json.loads(line)
-            events.append(_parse_event(raw))
-    return events
+        with fp.open(encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                seen += 1
+                if stride > 1 and (seen % stride) != 0:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                venue = str(raw.get("venue") or "").lower()
+                if venue_set is not None and venue not in venue_set:
+                    continue
+                symbol = str(raw.get("symbol") or "")
+                if symbol_suffix and not symbol.endswith(symbol_suffix):
+                    continue
+                yield _parse_event(raw)
+                kept += 1
+                if max_events is not None and kept >= max_events:
+                    return
+
+
+def load_research_events(
+    path: Path,
+    *,
+    max_events: int | None = None,
+    stride: int = 1,
+    venues: tuple[str, ...] | None = ("binance", "bitvavo", "okx"),
+    symbol_suffix: str | None = "EUR",
+) -> list[ResearchMarketEvent]:
+    """Load a bounded, streamed sample of research events (never slurps multi-GB tapes)."""
+    return list(
+        iter_research_events(
+            path,
+            max_events=max_events,
+            stride=stride,
+            venues=venues,
+            symbol_suffix=symbol_suffix,
+        )
+    )
 
 
 def _parse_event(raw: dict[str, Any]) -> ResearchMarketEvent:
