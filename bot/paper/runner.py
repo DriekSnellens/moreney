@@ -900,6 +900,7 @@ class PaperRunner:
             "market_data_lab": self._market_data_lab_snapshot(),
             "research_findings": self._research_findings_snapshot(),
             "research_tournament": self._research_tournament_snapshot(),
+            "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -1265,6 +1266,88 @@ class PaperRunner:
             )
         except Exception:
             pass
+        return base
+
+    def _autonomous_research_snapshot(self) -> dict[str, Any]:
+        """AUTONOMOUS RESEARCH — local LLM scientist; tournament remains the judge."""
+        from pathlib import Path
+
+        settings = self._settings
+        base: dict[str, Any] = {
+            "label": "AUTONOMOUS_LOCAL_LLM_RESEARCH",
+            "affects_trading": False,
+            "research_only": True,
+            "Provider": "ollama",
+            "Model": getattr(settings, "research_llm_model", "qwen3:4b-instruct"),
+            "Connection": "UNKNOWN",
+            "Autonomous_mode": bool(
+                getattr(settings, "research_llm_autonomous_enabled", False)
+            ),
+            "LLM_STATUS": "UNKNOWN",
+            "CURRENT_RESEARCH_ROUND": {},
+            "HYPOTHESIS_PIPELINE": [],
+            "WHAT_THE_LLM_LEARNED": {
+                "label": "NON_AUTHORITATIVE_ANALYSIS",
+                "items": [],
+            },
+            "multiple_testing_exposure": {},
+            "disclaimer": (
+                "Canonical verdicts come from the deterministic tournament only."
+            ),
+        }
+        path = Path("data/autonomous_research_report.json")
+        if path.exists():
+            try:
+                import json
+
+                report = json.loads(path.read_text(encoding="utf-8"))
+                base.update(
+                    {
+                        "LLM_STATUS": report.get("LLM_STATUS"),
+                        "Connection": (
+                            "AVAILABLE"
+                            if report.get("LLM_STATUS") == "AVAILABLE"
+                            else "UNAVAILABLE"
+                        ),
+                        "Model": report.get("model") or base["Model"],
+                        "Autonomous_mode": report.get("autonomous_mode"),
+                        "CURRENT_RESEARCH_ROUND": {
+                            "Dataset": ((report.get("tournament") or {}).get("DATASET_ID")),
+                            "Hypotheses_proposed": report.get("hypotheses_proposed"),
+                            "Rejected_as_duplicate": report.get("rejected_duplicate"),
+                            "Rejected_by_validator": report.get("rejected_validator"),
+                            "Accepted_for_experiment": report.get("accepted_for_experiment"),
+                            "Experiments_completed": report.get("experiments_completed"),
+                        },
+                        "WHAT_THE_LLM_LEARNED": {
+                            "label": "NON_AUTHORITATIVE_ANALYSIS",
+                            "items": (report.get("llm_analysis") or {}).get("items")
+                            or report.get("llm_analysis"),
+                            "shared_lessons": (report.get("llm_analysis") or {}).get(
+                                "shared_lessons"
+                            ),
+                        },
+                        "multiple_testing_exposure": report.get("multiple_testing_exposure")
+                        or {},
+                        "proposal": report.get("proposal"),
+                        "source": str(path),
+                    }
+                )
+                board = ((report.get("tournament") or {}).get("scoreboard") or [])
+                base["HYPOTHESIS_PIPELINE"] = [
+                    {
+                        "strategy": r.get("STRATEGY"),
+                        "verdict": r.get("VERDICT"),
+                        "gate": r.get("FAILED_GATE"),
+                    }
+                    for r in board
+                ]
+            except Exception:
+                pass
+        else:
+            # Live health probe is optional / cached lightly — avoid hot path cost
+            base["Connection"] = "UNCHECKED"
+            base["LLM_STATUS"] = "UNCHECKED"
         return base
 
     def _lead_lag_observe(self, books: dict[str, dict[str, Any]]) -> None:

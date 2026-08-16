@@ -312,6 +312,23 @@ class Settings(BaseSettings):
     strategy_lab_capital_mode: Literal["ISOLATED", "COMMON_CAPITAL"] = "ISOLATED"
     strategy_lab_results_path: str = "./data/strategy_lab"
 
+    # Autonomous local LLM research (Ollama only; never on trading hot path).
+    research_llm_enabled: bool = True
+    research_llm_autonomous_enabled: bool = False  # research experiments only when true
+    research_llm_provider: str = "ollama"
+    research_llm_model: str = "qwen3:4b-instruct"
+    research_llm_base_url: str = "http://127.0.0.1:11434"
+    research_llm_timeout_seconds: float = Field(default=120.0, gt=1.0, le=600.0)
+    research_llm_max_tokens: int = Field(default=4096, ge=256, le=32768)
+    research_llm_temperature: float = Field(default=0.2, ge=0.0, le=1.0)
+    research_llm_max_rounds: int = Field(default=1, ge=1, le=3)
+    research_llm_max_calls_per_run: int = Field(default=2, ge=0, le=10)
+    research_max_new_hypotheses_per_run: int = Field(default=3, ge=1, le=20)
+    research_max_experiments_per_hypothesis: int = Field(default=5, ge=1, le=50)
+    research_max_parameter_combinations: int = Field(default=25, ge=1, le=500)
+    research_max_features_per_strategy: int = Field(default=4, ge=1, le=20)
+    research_max_total_experiments_per_dataset: int = Field(default=50, ge=1, le=500)
+
     exchange_name: str = "stub"
     exchange_api_key: SecretStr | None = None
     exchange_api_secret: SecretStr | None = None

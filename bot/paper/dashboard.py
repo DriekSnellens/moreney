@@ -414,6 +414,46 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>AUTONOMOUS RESEARCH <span class="pill">LOCAL LLM · RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('autonomous_research') or {}).get('LLM_STATUS')=='AVAILABLE' else 'NOT_READY')}">
+        <div>
+          <span class="vb-kicker">Research scientist — not the judge</span>
+          <strong class="vb-verdict">{_esc((status.get('autonomous_research') or {}).get('LLM_STATUS') or 'UNKNOWN')}</strong>
+          <p class="vb-headline">Provider: {_esc((status.get('autonomous_research') or {}).get('Provider') or 'ollama')} · Model: {_esc((status.get('autonomous_research') or {}).get('Model'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Connection: {_esc((status.get('autonomous_research') or {}).get('Connection'))}</span>
+          <span>Autonomous: {_esc((status.get('autonomous_research') or {}).get('Autonomous_mode'))}</span>
+          <span>Research-only: YES</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Round field</th><th>Value</th></tr></thead>
+          <tbody>{_autonomous_round_rows((status.get('autonomous_research') or {}).get('CURRENT_RESEARCH_ROUND') or {})}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">Hypothesis pipeline (canonical = tournament)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Strategy</th><th>Verdict</th><th>Gate</th></tr></thead>
+          <tbody>{_autonomous_pipeline_rows((status.get('autonomous_research') or {}).get('HYPOTHESIS_PIPELINE') or [])}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">Multiple testing exposure</h3>
+      <p class="forecast-note">{_esc(json.dumps((status.get('autonomous_research') or {}).get('multiple_testing_exposure') or {}, sort_keys=True))}</p>
+      <h3 class="subhead">WHAT THE LLM LEARNED</h3>
+      <p class="forecast-note">
+        <strong>NON-AUTHORITATIVE RESEARCH ANALYSIS</strong> —
+        {_esc((status.get('autonomous_research') or {}).get('disclaimer'))}
+      </p>
+      <ul class="finding-list">
+        {_autonomous_learning_items((status.get('autonomous_research') or {}).get('WHAT_THE_LLM_LEARNED') or {})}
+      </ul>
+      <p class="forecast-note">Run: python -m bot.research.autonomous.runner --dry-run</p>
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH TOURNAMENT <span class="pill">RESEARCH ONLY</span></h2>
       <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'NOT_READY')}">
         <div>
@@ -1576,6 +1616,46 @@ def _lead_lag_lab_rows(panel: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return "".join(rows)
+
+
+def _autonomous_round_rows(round_info: dict[str, Any]) -> str:
+    if not round_info:
+        return "<tr><td colspan='2' class='empty'>Nog geen autonomous run</td></tr>"
+    return "".join(
+        f"<tr><td>{_esc(k)}</td><td class='note'>{_esc(v)}</td></tr>"
+        for k, v in round_info.items()
+    )
+
+
+def _autonomous_pipeline_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<tr><td colspan='3' class='empty'>Geen pipeline</td></tr>"
+    return "".join(
+        "<tr>"
+        f"<td>{_esc(r.get('strategy'))}</td>"
+        f"<td><span class='chip {_status_chip_class(r.get('verdict'))}'>{_esc(r.get('verdict'))}</span></td>"
+        f"<td>{_esc(r.get('gate') or '—')}</td>"
+        "</tr>"
+        for r in rows
+    )
+
+
+def _autonomous_learning_items(block: dict[str, Any]) -> str:
+    items = block.get("items") if isinstance(block, dict) else None
+    if not items:
+        lessons = (block or {}).get("shared_lessons") if isinstance(block, dict) else None
+        if lessons:
+            return "".join(f"<li>{_esc(x)}</li>" for x in lessons)
+        return "<li>Nog geen LLM-analyse.</li>"
+    parts = []
+    for it in items:
+        if isinstance(it, dict):
+            parts.append(
+                f"<li>{_esc(it.get('learned') or it.get('notes') or it)}</li>"
+            )
+        else:
+            parts.append(f"<li>{_esc(it)}</li>")
+    return "".join(parts)
 
 
 def _research_tournament_rows(board: list[dict[str, Any]]) -> str:
