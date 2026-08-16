@@ -899,6 +899,7 @@ class PaperRunner:
             "lead_lag_lab": self._lead_lag_lab_snapshot(),
             "market_data_lab": self._market_data_lab_snapshot(),
             "research_findings": self._research_findings_snapshot(),
+            "research_tournament": self._research_tournament_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -1211,6 +1212,60 @@ class PaperRunner:
             "next_step": md.get("next_step"),
             "production_pnl_untouched": True,
         }
+
+    def _research_tournament_snapshot(self) -> dict[str, Any]:
+        """RESEARCH TOURNAMENT — separated from Live-equivalent / paper MTM."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "STRATEGY_RESEARCH_TOURNAMENT",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "CURRENT_DATASET": None,
+            "DATA_READINESS": {},
+            "DEV_WINDOW": None,
+            "FREEZE_BOUNDARY": None,
+            "OOS_WINDOW": None,
+            "scoreboard": [],
+            "PAPER_CANDIDATES": [],
+            "ALL_STRATEGIES_REJECTED": True,
+            "headline": "Nog geen tournament-run — python -m bot.research.tournament.runner",
+            "disclaimer": "RESEARCH CANDIDATE — NOT PROVEN LIVE PROFITABLE",
+        }
+        path = Path("data/research_tournament_report.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            paper = report.get("PAPER_CANDIDATES") or []
+            rejected = bool(report.get("ALL_STRATEGIES_REJECTED", not paper))
+            headline = (
+                f"{len(paper)} PAPER_CANDIDATE(s) — not proven live profitable"
+                if paper
+                else "ALL STRATEGIES REJECTED — valid research result"
+            )
+            base.update(
+                {
+                    "CURRENT_DATASET": report.get("DATASET_ID"),
+                    "DATA_READINESS": report.get("DATA_READINESS") or {},
+                    "DEV_WINDOW": report.get("DEVELOPMENT_WINDOW"),
+                    "FREEZE_BOUNDARY": report.get("FREEZE_BOUNDARY"),
+                    "OOS_WINDOW": report.get("OOS_WINDOW"),
+                    "scoreboard": report.get("scoreboard") or [],
+                    "candidates": report.get("candidates") or {},
+                    "PAPER_CANDIDATES": paper,
+                    "ALL_STRATEGIES_REJECTED": rejected,
+                    "headline": headline,
+                    "STATUS": report.get("STATUS"),
+                    "PERFORMANCE": report.get("PERFORMANCE"),
+                    "source": str(path),
+                }
+            )
+        except Exception:
+            pass
+        return base
 
     def _lead_lag_observe(self, books: dict[str, dict[str, Any]]) -> None:
         """Phase A: record cross-venue TOB pairs. Never places orders."""

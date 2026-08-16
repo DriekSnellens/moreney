@@ -414,6 +414,43 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>RESEARCH TOURNAMENT <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'NOT_READY')}">
+        <div>
+          <span class="vb-kicker">Strategy families under identical rules</span>
+          <strong class="vb-verdict">{_esc('PAPER_CANDIDATE' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'ALL REJECTED' if (status.get('research_tournament') or {}).get('ALL_STRATEGIES_REJECTED') else 'PENDING')}</strong>
+          <p class="vb-headline">{_esc((status.get('research_tournament') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Dataset: {_esc((status.get('research_tournament') or {}).get('CURRENT_DATASET') or 'NONE')}</span>
+          <span>Candidates: {_esc(len((status.get('research_tournament') or {}).get('PAPER_CANDIDATES') or []))}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Strategy</th>
+              <th>Verdict</th>
+              <th>Failed gate</th>
+              <th>Dev signals</th>
+              <th>OOS signals</th>
+              <th>Expected NET</th>
+              <th>Exec NET</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody>{_research_tournament_rows((status.get('research_tournament') or {}).get('scoreboard') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        Gescheiden van Live-equivalent PnL / Paper MTM.
+        {_esc((status.get('research_tournament') or {}).get('disclaimer') or 'RESEARCH CANDIDATE — NOT PROVEN LIVE PROFITABLE')}
+        Run: python -m bot.research.tournament.runner
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH DATA STATUS <span class="pill">OPERATIONAL</span></h2>
       <div class="verdict-banner {_verdict_banner_class(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('FINAL_ACCEPTANCE_VERDICT') or (status.get('market_data_lab') or {}).get('verdict'))}">
         <div>
@@ -1536,6 +1573,31 @@ def _lead_lag_lab_rows(panel: list[dict[str, Any]]) -> str:
             f"<td class='num'>{_esc(row.get('shadow_opportunities'))}</td>"
             f"<td class='num'>{_esc(row.get('conservative_admissions'))}</td>"
             f"<td class='num'>{_esc(row.get('counterfactual_shadow_net'))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _research_tournament_rows(board: list[dict[str, Any]]) -> str:
+    if not board:
+        return (
+            "<tr><td colspan='8' class='empty'>"
+            "Nog geen scoreboard — run python -m bot.research.tournament.runner"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for row in board:
+        verdict = str(row.get("VERDICT") or "")
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('STRATEGY'))}</td>"
+            f"<td><span class='chip {_status_chip_class(verdict)}'>{_esc(verdict)}</span></td>"
+            f"<td>{_esc(row.get('FAILED_GATE') or '—')}</td>"
+            f"<td class='num'>{_esc(row.get('DEV_SIGNALS'))}</td>"
+            f"<td class='num'>{_esc(row.get('OOS_SIGNALS'))}</td>"
+            f"<td class='num'>{_esc(row.get('EXPECTED_NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('EXECUTION_NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('TOURNAMENT_SCORE'))}</td>"
             "</tr>"
         )
     return "".join(rows)
