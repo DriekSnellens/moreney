@@ -384,6 +384,41 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>MARKET DATA LAB <span class="pill">RESEARCH INFRASTRUCTURE</span></h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Recorder</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
+        <article class="metric-card"><span class="label">Wijzigt trading?</span><span class="value">Nee</span></article>
+        <article class="metric-card"><span class="label">Verdict</span><span class="value">{_esc((status.get('market_data_lab') or {}).get('verdict'))}</span></article>
+        <article class="metric-card"><span class="label">Events recorded</span><span class="value">{_esc((status.get('market_data_lab') or {}).get('event_count'))}</span></article>
+        <article class="metric-card"><span class="label">Queue depth</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('queue_depth'))}</span></article>
+        <article class="metric-card"><span class="label">Dropped</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('dropped'))}</span></article>
+        <article class="metric-card"><span class="label">Complete?</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('complete'))}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead>
+            <tr>
+              <th>Venue</th>
+              <th>Events</th>
+              <th>Ex-ts %</th>
+              <th>Recv %</th>
+              <th>Seq %</th>
+              <th>p50 ms</th>
+              <th>p95 ms</th>
+              <th>p99 ms</th>
+              <th>Quality</th>
+            </tr>
+          </thead>
+          <tbody>{_market_data_lab_rows((status.get('market_data_lab') or {}).get('panel') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        RESEARCH INFRASTRUCTURE — timestamps, sync, replay. Geen alpha-optimalisatie.
+        Redis blijft transport; research tape leeft op de publisher vóór Redis.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Why not trade?</h2>
       <div class="table-wrap">
         <table>
@@ -1278,6 +1313,31 @@ def _lead_lag_lab_rows(panel: list[dict[str, Any]]) -> str:
             f"<td class='num'>{_esc(row.get('shadow_opportunities'))}</td>"
             f"<td class='num'>{_esc(row.get('conservative_admissions'))}</td>"
             f"<td class='num'>{_esc(row.get('counterfactual_shadow_net'))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _market_data_lab_rows(panel: list[dict[str, Any]]) -> str:
+    if not panel:
+        return (
+            "<tr><td colspan='9' class='empty'>"
+            "Geen market-data research rapport — run research runner"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for row in panel:
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('venue'))}</td>"
+            f"<td class='num'>{_esc(row.get('events'))}</td>"
+            f"<td class='num'>{_esc(row.get('exchange_ts_coverage'))}</td>"
+            f"<td class='num'>{_esc(row.get('receive_ts_coverage'))}</td>"
+            f"<td class='num'>{_esc(row.get('sequence_coverage'))}</td>"
+            f"<td class='num'>{_esc(row.get('p50_ms'))}</td>"
+            f"<td class='num'>{_esc(row.get('p95_ms'))}</td>"
+            f"<td class='num'>{_esc(row.get('p99_ms'))}</td>"
+            f"<td>{_esc(row.get('quality_grade'))}</td>"
             "</tr>"
         )
     return "".join(rows)

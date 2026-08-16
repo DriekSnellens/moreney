@@ -868,6 +868,7 @@ class PaperRunner:
             ),
             "fill_model_lab": self._fill_model_lab_snapshot(),
             "lead_lag_lab": self._lead_lag_lab_snapshot(),
+            "market_data_lab": self._market_data_lab_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -933,6 +934,47 @@ class PaperRunner:
         if base["shadow_only"] or not base["execution_enabled"]:
             base["execution_enabled"] = False
             base["alters_execution"] = False
+        return base
+
+    def _market_data_lab_snapshot(self) -> dict[str, Any]:
+        """MARKET DATA LAB — research infrastructure only."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "RESEARCH_INFRASTRUCTURE",
+            "affects_trading": False,
+            "recorder": (
+                self._market_data.research_recorder_status()
+                if hasattr(self._market_data, "research_recorder_status")
+                else {"enabled": False}
+            ),
+            "verdict": None,
+            "horizon_scores": {},
+            "panel": [],
+            "sync": {},
+            "source": None,
+        }
+        report_path = Path("data/market_data_research_report.json")
+        if report_path.exists():
+            try:
+                import json
+
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                base.update(
+                    {
+                        "verdict": report.get("final_verdict"),
+                        "horizon_scores": (report.get("J_horizon_readiness") or {}).get(
+                            "horizon_scores"
+                        )
+                        or {},
+                        "panel": report.get("market_data_lab_panel") or [],
+                        "sync": report.get("H_synchronization") or {},
+                        "event_count": report.get("event_count"),
+                        "source": str(report_path),
+                    }
+                )
+            except Exception:
+                pass
         return base
 
     def _lead_lag_observe(self, books: dict[str, dict[str, Any]]) -> None:

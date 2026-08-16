@@ -80,6 +80,24 @@ class MarketDataService:
             enabled=settings.market_data_recording_enabled,
             path=settings.market_data_recording_path,
         )
+        from bot.market_data.research.recorder import ResearchMarketDataRecorder
+
+        self._research_recorder = ResearchMarketDataRecorder(
+            enabled=bool(
+                getattr(settings, "research_marketdata_recording_enabled", True)
+            ),
+            path=str(
+                getattr(
+                    settings,
+                    "research_marketdata_recording_path",
+                    "./data/research_marketdata",
+                )
+            ),
+            max_queue=int(getattr(settings, "research_marketdata_max_queue", 50_000) or 50_000),
+            max_depth_levels=int(
+                getattr(settings, "research_marketdata_depth_levels", 10) or 10
+            ),
+        )
         self._books: dict[tuple[str, str], LocalOrderBook] = {}
         self._ticks: dict[tuple[str, str], MarketTick] = {}
         self._managers: dict[str, WebSocketManager] = {}
@@ -365,7 +383,11 @@ class MarketDataService:
             await asyncio.sleep(self._equity._poll_s)  # noqa: SLF001
 
     def apply_remote_book(self, exchange: str, symbol: str, book: OrderBook) -> None:
-        """Replace local synchronized book from a Redis-published snapshot."""
+        """Replace local synchronized book from a Redis-published snapshot.
+
+        Preserves publisher ``received_at`` / exchange_ts flags from metadata.
+        Never treats hydrate wall-clock as an exchange timestamp.
+        """
         from bot.market_data.models import OrderBookUpdate
 
         exchange = exchange.lower()
@@ -383,6 +405,23 @@ class MarketDataService:
             and len(local._asks) == len(book.asks)  # noqa: SLF001
         ):
             return
+        meta = dict(book.metadata or {})
+        received_at = datetime.now(UTC)
+        raw_recv = meta.get("received_at")
+        if raw_recv:
+            try:
+                text = str(raw_recv)
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                received_at = datetime.fromisoformat(text)
+                if received_at.tzinfo is None:
+                    received_at = received_at.replace(tzinfo=UTC)
+            except Exception:
+                received_at = datetime.now(UTC)
+        exchange_ts_available = bool(meta.get("exchange_ts_available"))
+        timestamp_quality = str(meta.get("timestamp_quality") or (
+            "MEDIUM" if exchange_ts_available else "UNSUPPORTED"
+        ))
         update = OrderBookUpdate(
             exchange=exchange,
             symbol=symbol,
@@ -391,7 +430,15 @@ class MarketDataService:
             is_snapshot=True,
             sequence=book.nonce,
             timestamp=book.timestamp,
-            received_at=datetime.now(UTC),
+            received_at=received_at,
+            metadata={
+                "exchange_ts_available": exchange_ts_available,
+                "timestamp_quality": timestamp_quality,
+                "exchange_ts": meta.get("exchange_ts"),
+                "received_at": received_at.isoformat(),
+                "hydrated_from_redis": True,
+                "hydrate_wall_clock": datetime.now(UTC).isoformat(),
+            },
         )
         local.apply_snapshot(update)
 
@@ -401,6 +448,8 @@ class MarketDataService:
             return
 
         await self._recorder.record(event)
+        # Research tape: same source events as Redis publisher; non-blocking enqueue.
+        self._research_recorder.enqueue_live(event)
         key = (event.exchange, event.symbol)
         cache_due = self._cache_due(event.exchange)
 
@@ -663,6 +712,13 @@ class MarketDataService:
 
     def status(self) -> dict[str, dict]:
         return {ex: self.get_exchange_health(ex).model_dump(mode="json") for ex in self._exchanges}
+
+    def research_recorder_status(self) -> dict:
+        """Research infrastructure metrics — does not affect trading."""
+        rec = getattr(self, "_research_recorder", None)
+        if rec is None:
+            return {"enabled": False, "affects_trading": False}
+        return rec.snapshot()
 
     def build_risk_context(self, exchange: str, symbol: str) -> RiskContext:
         """Build RiskContext for existing RiskEngine without modifying it."""

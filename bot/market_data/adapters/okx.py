@@ -99,7 +99,9 @@ class OkxPublicAdapter(PublicMarketDataAdapter):
             asks=asks,
             is_snapshot=is_snapshot,
             sequence=int(item["seqId"]) if item.get("seqId") is not None else None,
-            timestamp=timestamp,
+            timestamp=timestamp if ts_ms is not None else None,
+            exchange_ts_available=ts_ms is not None,
+            timestamp_quality="MEDIUM" if ts_ms is not None else "UNSUPPORTED",
         )
         if bids and asks:
             event.tick = MarketTick(
