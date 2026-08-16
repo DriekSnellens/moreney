@@ -6,9 +6,23 @@
 
 Do **not** enable experimental fill models for live-equivalent PnL. Do **not** loosen the simulator.
 
-Baseline fingerprint (frozen): see `data/fill_mechanism_report.json` → `baseline_fingerprint`.
+Machine-readable report (local): `data/fill_mechanism_report.json` (regenerate via CLI below; `data/` is gitignored).
 
-Observed economics (unchanged): 17 completed round trips, realized NET ≈ **−62.22 EUR**, maker fills **trade_through**.
+---
+
+## Frozen TRADE_THROUGH_ONLY baseline
+
+| Metric | Value |
+|---|---|
+| Quotes (post-only with `placed_ms`) | 22 |
+| Baseline TT fills | 6 |
+| Completed round trips | 17 |
+| Realized NET | ≈ **−62.22 EUR** |
+| Fill types | `trade_through` only |
+| Fees (trade sum) | ≈ 34.85 EUR |
+| Adverse (trade sum) | ≈ 93.76 EUR |
+
+Production headline PnL source remains **TRADE_THROUGH_ONLY**. Fees, quote decisions, inventory, routes, and markout accounting are unchanged by this lab.
 
 ---
 
@@ -19,7 +33,7 @@ Observed economics (unchanged): 17 completed round trips, realized NET ≈ **−
 | Top-of-book updates after quote | No (`data/market_data` absent) |
 | Depth levels | No |
 | Trade prints | No |
-| Quote timestamps (`placed_ms`) | Partially (orders with `placed_ms`) |
+| Quote timestamps (`placed_ms`) | Partial (22/24 orders) |
 | Fill timestamps (`created_at`) | Often null |
 | Markout horizons (1s/5s/30s/60s) | Yes (export lists; not per-fill joined) |
 | Fill-type labels | Yes (`trade_through`) |
@@ -29,84 +43,96 @@ Observed economics (unchanged): 17 completed round trips, realized NET ≈ **−
 | TRADE_THROUGH_ONLY | **SUPPORTED** |
 | TOUCH_ONLY | **UNSUPPORTED** |
 | TOUCH_PERSISTENCE_{100,250,500,1000} | **UNSUPPORTED** |
-| DEPTH_CONSUMPTION | **UNSUPPORTED** (queue position not estimable; no fabrication) |
+| DEPTH_CONSUMPTION | **UNSUPPORTED** (queue not estimable; no fabrication) |
 
 ---
 
 ## B. Fill model definitions
 
-- **QuoteEvent** — decision-time quote (price, side, venue, `posted` ms). Quote generation unchanged.
+- **QuoteEvent** — decision-time quote. Quote generation is not modified.
 - **FillEvent** — fill type, timestamp, price, quote age, market state at fill, markouts, fees, lock time.
-- **TRADE_THROUGH_ONLY** — conservative production baseline (current executor).
-- **TOUCH_*** — experimental counterfactual eligibility on post-quote book paths (replay-only when books exist).
+- Economics consume **FillEvent**; multiple experimental mechanisms can replay the same quote stream when books exist.
+- **TRADE_THROUGH_ONLY** — conservative production baseline.
+- **TOUCH_ONLY** — first post-quote at-touch eligibility (bid≥buy / ask≤sell); not auto-fill.
+- **TOUCH_PERSISTENCE_*** — predeclared grid **100 / 250 / 500 / 1000 ms** (not tuned on OOS).
 - **DEPTH_CONSUMPTION** — refused unless honest queue position is known.
 
-Persistence grid is **predeclared**: 100 / 250 / 500 / 1000 ms. Not tuned on OOS.
+All alternatives are labeled **EXPERIMENTAL / OBSERVATIONAL / COUNTERFACTUAL**, never live-equivalent.
 
 ---
 
 ## C. Fill eligibility counts
 
-On current paper dump:
-
-| Model | n eligible fills |
-|---|---|
-| TRADE_THROUGH_ONLY | observed baseline TT fills |
-| All experimental models | **0** (UNSUPPORTED — no book path) |
+| Model | n | Status |
+|---|---|---|
+| TRADE_THROUGH_ONLY | 6 | CONSERVATIVE_BASELINE |
+| TOUCH_ONLY | 0 | UNSUPPORTED |
+| TOUCH_PERSISTENCE_100 | 0 | UNSUPPORTED |
+| TOUCH_PERSISTENCE_250 | 0 | UNSUPPORTED |
+| TOUCH_PERSISTENCE_500 | 0 | UNSUPPORTED |
+| TOUCH_PERSISTENCE_1000 | 0 | UNSUPPORTED |
+| DEPTH_CONSUMPTION | 0 | UNSUPPORTED |
 
 ---
 
 ## D. Markout distributions by fill type
 
-Only **TRADE_THROUGH** has observed markout samples (export horizons). Touch-persistence variants have **n = 0**.
+Observed export (TT-dominated; **not** attributed to touch models):
 
-Do not attribute export markout lists to touch models. Tiny-n: report medians/means/p25/p75 + bootstrap CI as descriptive only — no significance claims.
+| Horizon | n | mean bps | median | p25 | p75 |
+|---|---|---|---|---|---|
+| 1s | 28 | 20.84 | 11.06 | 1.68 | 42.23 |
+| 5s | 28 | 27.17 | 15.34 | 7.88 | 59.58 |
+| 30s | 28 | 31.22 | 13.28 | 7.39 | 64.74 |
+| 60s | 28 | 33.37 | 19.69 | 8.43 | 67.69 |
+
+TOUCH_PERSISTENCE_* : **n = 0** (UNSUPPORTED). No cross-model distribution comparison is possible.
+
+Tiny-n: bootstrap CIs in the JSON are descriptive only — no significance claims.
 
 ---
 
 ## E. Capital lock analysis
 
-Computed for baseline fills when `placed_ms` joins to completed round-trip timestamps. Fill `created_at` often missing → lock/age partially reconstructible. Experimental models: N/A (no fills).
+Joinable quote→round-trip lock times: **n = 0** in the dump (fill `created_at` often null; opportunity joins incomplete). Quote-age reconstruction is unreliable when fill timestamps are missing. Experimental models: N/A.
 
 ---
 
 ## F. Causal / OOS comparison
 
-- Causal rule: quote at t0; market evolution only after t0 may create experimental eligibility.
-- OOS: development split defines the predeclared model grid; untouched OOS reports **every** predeclared model. No post-hoc selection.
-- Without books, experimental models remain UNSUPPORTED on both splits.
+- Causal: quote at t0; only post-t0 market evolution may create experimental eligibility.
+- OOS: development split holds the predeclared grid; untouched OOS reports every predeclared model with **no** post-hoc selection.
+- Without books, experimental models stay UNSUPPORTED on both splits.
 
 ---
 
 ## G. Is trade-through an unusually toxic fill selector?
 
-**Answer: INSUFFICIENT_DATA.**
+**INSUFFICIENT_DATA.**
 
-We cannot compare the trade-through adverse distribution to touch / persistence eligibility distributions. We only observe the TT conditional distribution. Therefore we cannot claim TT is (or is not) an unusually toxic subset of maker fills.
+Cannot compare TT adverse distributions to touch/persistence eligibility. Only the TT conditional distribution is observed.
 
 ---
 
 ## H. Production recommendation
 
-Allowed set only:
+1. **REQUIRE BETTER DATA** (primary) — record top-of-book (ideally depth + trade prints) with ms timestamps after each quote.
+2. **KEEP TRADE-THROUGH BASELINE** — remain default until better data exists.
+3. **ABANDON MAKER THESIS UNDER CURRENT ECONOMICS** — not selected as the fill-study verdict. TT economics are separately deeply negative; that still does **not** authorize loosening fills.
 
-1. **KEEP TRADE-THROUGH BASELINE** — yes (always, until better data).
-2. **REQUIRE BETTER DATA** — **primary**. Need recorded top-of-book (and ideally depth + trade prints) with ms timestamps causally after each quote.
-3. **ABANDON MAKER THESIS UNDER CURRENT ECONOMICS** — not selected as the fill-study conclusion. Separately, TT economics remain deeply negative; that does **not** authorize loosening fills or claiming counterfactual profits.
-
-**Not allowed:** promoting any experimental fill model to live-equivalent PnL without real queue/fill evidence.
+**Do not** promote experimental fill models to live-equivalent PnL without real queue/fill evidence.
 
 ---
 
 ## Dashboard
 
-Production headline remains **TRADE_THROUGH_ONLY**.
+Production headline = TRADE_THROUGH_ONLY only.
 
-Panel **FILL MODEL LAB** shows each model with CONSERVATIVE BASELINE vs EXPERIMENTAL COUNTERFACTUAL / UNSUPPORTED labels.
+**FILL MODEL LAB** panel lists each model as CONSERVATIVE BASELINE or EXPERIMENTAL COUNTERFACTUAL / UNSUPPORTED.
 
 ---
 
-## How to regenerate
+## Regenerate
 
 ```bash
 PYTHONPATH=. python -m bot.opportunity.fill_lab.runner --paper data/paper_25000live.json --out data/fill_mechanism_report.json
