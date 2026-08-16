@@ -147,3 +147,18 @@ Real tape exists, was read back, has a deterministic manifest, and the acceptanc
 ```bash
 python -m bot.market_data.research.runner
 ```
+
+## Refresh (2026-08-16 evening)
+
+Re-ran acceptance on the growing observed tape:
+
+| Field | Value |
+|-------|-------|
+| DATASET_ID | `mdresearch-research_md_v1-27116902be243a23` |
+| Events | ~7.73M |
+| Duration | ~37171 s (~10.3 h) |
+| Verdict | `DATA_READY_FOR_SLOW_HORIZONS` (unchanged class) |
+| Supported | 500 / 1000 / 2000 / 5000 ms |
+| Unsupported | 50 / 100 / 250 ms (Bitvavo exchange_ts) |
+
+Next action unchanged: chronological OOS for slow horizons only; do not claim fast-horizon causal readiness.

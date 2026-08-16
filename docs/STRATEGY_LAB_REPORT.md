@@ -1,9 +1,35 @@
 # Strategy Research Lab Report
 
-**Label separation:** SYNTHETIC (this first tournament) ≠ OBSERVED market tape ≠ live-equivalent paper fills.  
+**Label separation:** SYNTHETIC plumbing ≠ OBSERVED market tape ≠ live-equivalent paper fills.  
 **Execution:** `STRATEGY_LAB_EXECUTION_ENABLED=false` (shadow/research only).  
-**Tournament id:** `synthetic_lab_v1`  
-**Fingerprint:** `4ee58fd739400944ea5185aa882fbe425d668c4df90005b08f78db1b3e10aea9`
+**Outcomes (default):** trade-through conservative replay via shared `execution_replay_net` (fill_rate=0.55 + extra adverse; no queue fills).
+
+---
+
+## Latest OBSERVED run (`observed_tt_lab_v1`)
+
+| Field | Value |
+|-------|-------|
+| Data label | **OBSERVED** |
+| Sample | streamed `max_events=80000` `stride=5` (EUR × binance/bitvavo/okx) — **not** a full-tape claim |
+| Cycles | 45347 (DEV 31742 / OOS 13605), chronological 70/30 |
+| Outcome mode | `trade_through` |
+| Fingerprint | `f58fda886a9b8a2e31688e9fd87982e28a23703f482c82e9b9f0cd1f4234a907` |
+| Artifacts | `data/strategy_lab/observed_tt_lab_v1/` |
+
+| Strategy | Verdict | Dev NET (TT) | OOS NET (TT) | Notes |
+|----------|---------|-------------:|-------------:|-------|
+| control_no_trade | NO_EDGE | 0 | 0 | Control intact |
+| maker_inventory | **EDGE_NEGATIVE_AFTER_COSTS** | −0.39 | −124.83 | Aligns directionally with live-equivalent trade-through toxicity; not deployment |
+| executable_cross_venue_arb | INSUFFICIENT_DATA | 0 | 0 | No accepts under conservative gates |
+| lead_lag | INSUFFICIENT_DATA | 0 | 0 | No accepts |
+| order_book_imbalance | INSUFFICIENT_DATA | 0 | 0 | No accepts |
+| funding_basis | INSUFFICIENT_DATA | 0 | 0 | No funding_rate on research books |
+
+**Observed alpha:** not established. **No PAPER / capital deployment winner.**  
+Gated family tournament on the full indexed tape (`docs/STRATEGY_RESEARCH_TOURNAMENT_REPORT.md`) independently rejects all five research families — same conclusion.
+
+Companion market-data acceptance: `DATASET_ID=mdresearch-research_md_v1-27116902be243a23`, ~7.73M events, ~10.3 h, `DATA_READY_FOR_SLOW_HORIZONS`.
 
 ---
 
@@ -13,23 +39,21 @@ Which strategy has the best **real, NET, risk-adjusted, out-of-sample** edge on 
 
 ## B. Dataset
 
-| Field | Value |
-|-------|-------|
-| Observed research tape | `data/research_marketdata` — **1 event** (insufficient) |
-| Tournament tape | **SYNTHETIC** causal multi-venue books (`synthetic_research_tape`, 80 cycles) |
-| Symbols | BTCEUR, ETHEUR, ATOMEUR |
-| Venues | binance, okx, bitvavo |
-| Split | Chronological 70% DEVELOPMENT → freeze → 30% OOS |
-| Claim | Synthetic is **plumbing + methodology validation**, not alpha discovery |
+| Field | SYNTHETIC (plumbing) | OBSERVED (this report) |
+|-------|----------------------|------------------------|
+| Source | `synthetic_research_tape` | `data/research_marketdata` streamed sample |
+| Claim | Methodology only | Directional research; subsample ≠ full-tape OOS promotion |
+| Split | Chronological 70% DEV → freeze → 30% OOS | Same |
+
+Full-tape family research uses `bot.research.tournament` (L1 index), not this lab’s depth adapters.
 
 ## C. Data quality
 
 | Check | Result |
 |-------|--------|
-| Synchronized observed tape | **NOT_READY** (1 JSONL event) |
-| Dual clocks on synthetic | exchange_ts present (MEDIUM quality label) |
-| Bitvavo exchange_ts (live) | UNSUPPORTED (unchanged infra) |
-| Next step | Collect multi-hour publisher tape, then re-run tournament with `--no-synthetic` when `n_events` ≥ readiness bar |
+| Observed tape | Ready for slow horizons; fast NOT_READY (Bitvavo `exchange_ts`) |
+| Lab load path | Streaming + `max_events` / `stride` (avoids multi-GB OOM) |
+| Dual clocks | Unchanged schema |
 
 ## D. Strategies
 
@@ -46,78 +70,67 @@ Which strategy has the best **real, NET, risk-adjusted, out-of-sample** edge on 
 
 - `CommonEconomics` → `NetProfitCalculator` / `DefaultProfitabilityEngine.estimate_sync`
 - Cross-venue legs via `walk_book` executable VWAP (**never mid when depth exists**)
-- Waterfall shape from `bot/opportunity/waterfall.expected_waterfall`
+- Accept outcomes default to `execution_replay_net` (shared with gated tournament)
+- Optional `--outcome-mode shadow` for expected-NET plumbing only
 - Capital velocity: `net_eur / (capital_eur × lock_seconds)`
 
 ## F. Development methodology
 
-1. Load identical cycles for all adapters  
+1. Stream identical cycles for all adapters  
 2. Causal `generate_decisions(cycle)` only on visible books  
 3. DEVELOPMENT scorecards  
 4. **FREEZE** config + criteria version `strategy_lab_verdict_v1`  
 5. Untouched OOS  
-6. Verdict engine (frozen thresholds; SYNTHETIC caps PROMISING/ROBUST → `IN_SAMPLE_ONLY`)
+6. Verdict engine (frozen thresholds; SYNTHETIC still caps PROMISING/ROBUST → `IN_SAMPLE_ONLY`)
 
 ## G. Frozen configuration
 
-See `data/strategy_lab/synthetic_lab_v1/frozen_config.json`.
+See `data/strategy_lab/observed_tt_lab_v1/frozen_config.json` (OBSERVED) and `data/strategy_lab/synthetic_lab_v1/frozen_config.json` (plumbing).
 
 - Criteria version: `strategy_lab_verdict_v1`  
-- Min OOS completed / independent events: 30 / 20  
 - Capital mode: ISOLATED sleeves (€25k total)  
 - Execution enabled: **false**
 
 ## H. OOS methodology
 
-Chronological split only. OOS never used to tune features, venues, horizons, or thresholds. Shadow outcomes = conservative expected NET (explicitly **not** trade-through fill simulation).
+Chronological split only. OOS never used to tune features, venues, horizons, or thresholds.
 
-## I. Strategy comparison (SYNTHETIC · shadow expected)
+## I. Strategy comparison
 
-| Strategy | Verdict | Dev NET | OOS NET | Velocity | Participation | Independent events |
-|----------|---------|--------:|--------:|---------:|--------------:|-------------------:|
-| maker_inventory | **IN_SAMPLE_ONLY** | +89.99 | +38.57 | 0.048 | 0.22 | (shadow) |
-| control_no_trade | NO_EDGE | 0 | 0 | 0 | 0 | 0 |
-| executable_cross_venue_arb | INSUFFICIENT_DATA | 0 | 0 | 0 | — | — |
-| lead_lag | INSUFFICIENT_DATA | 0 | 0 | 0 | — | — |
-| order_book_imbalance | INSUFFICIENT_DATA | 0 | 0 | 0 | — | — |
-| funding_basis | INSUFFICIENT_DATA | 0 | 0 | 0 | — | no funding_rate |
+### OBSERVED · trade-through (authoritative for this report)
 
-**Interpretation:** Maker’s positive shadow expected NET on synthetic books does **not** contradict the observed live-equivalent **−€62 / TRADE_THROUGH** paper result. Shadow expected ≠ adverse-selection-realized fills.
+See table above — maker negative after trade-through haircut; others insufficient accepts.
 
-## J. NET waterfall
+### SYNTHETIC · historical shadow plumbing (`synthetic_lab_v1`)
 
-Per-strategy waterfalls are in `leaderboard.json` / dashboard “Where did the money go?”. Maker path: gross edge − maker fees − buffer/adverse − → conservative NET (expected). Cross-venue / OBI / lead-lag produced no accepts on this synthetic geometry under conservative gates.
+| Strategy | Verdict | Notes |
+|----------|---------|-------|
+| maker_inventory | IN_SAMPLE_ONLY | Positive **shadow expected** NET on synthetic — **not** OBSERVED; capped |
+| control_no_trade | NO_EDGE | Valid control |
+| others | INSUFFICIENT_DATA | |
 
-## K. Capital velocity
+Shadow expected ≠ adverse-selection-realized fills. Synthetic must not contradict live-equivalent paper toxicity.
 
-Primary ranking key alongside total NET, DD, and OOS evidence. Maker shadow velocity ≈ 0.048 €/(€·s) on synthetic — **not** a deployment metric until observed tape + fill lab.
+## J–M. Waterfall / capital / drawdowns / coverage
 
-## L. Drawdowns
-
-Reported on scorecards (`max_drawdown_eur`). Control DD = 0 by construction.
-
-## M. Opportunity coverage
-
-Baseline universe = all symbol|buy|sell pairs with valid books. Participation = accepts / baseline. Control participation = 0 (proves “trade less” is not automatic superiority).
+Per-run artifacts under `data/strategy_lab/<id>/`. Control participation = 0.
 
 ## N. Failure analysis
 
-| Strategy | Why thin / fail |
-|----------|-----------------|
-| cross_venue_arb | Conservative NET / depth gates reject most synthetic dislocations |
-| lead_lag | Hedge + conservative NET rarely admit; signal is lab proxy |
-| OBI | Weak imbalance / net-too-small rejects |
-| funding | No funding_rate on research books → INSUFFICIENT_DATA |
-| maker (live paper) | Outside this tournament: adverse selection / trade-through |
+| Strategy | OBSERVED note |
+|----------|----------------|
+| maker_inventory | Trade-through replay → EDGE_NEGATIVE_AFTER_COSTS |
+| cross_venue / lead_lag / OBI | Conservative NET / depth gates → no accepts on subsample |
+| funding | No funding_rate → INSUFFICIENT_DATA |
 
 ## O. OOS results
 
-Under SYNTHETIC, no strategy may receive `OOS_PROMISING` / `OOS_ROBUST`. Maker capped to `IN_SAMPLE_ONLY`.
+OBSERVED maker OOS NET strongly negative under trade-through. No `OOS_PROMISING` / `OOS_ROBUST`.
 
-## P. Final ranking (this run)
+## P. Final ranking (OBSERVED TT)
 
-1. maker_inventory — IN_SAMPLE_ONLY (synthetic shadow only)  
-2. control_no_trade — NO_EDGE (valid control)  
+1. control_no_trade — NO_EDGE  
+2. maker_inventory — EDGE_NEGATIVE_AFTER_COSTS  
 3–6. others — INSUFFICIENT_DATA  
 
 **No winner for capital deployment.**
@@ -126,33 +139,35 @@ Under SYNTHETIC, no strategy may receive `OOS_PROMISING` / `OOS_ROBUST`. Maker c
 
 | Claim type | Verdict |
 |------------|---------|
-| OBSERVED alpha | **Not established** — observed research tape not ready |
-| SYNTHETIC plumbing | **PASS** — tournament, scorecards, dashboard, fingerprints deterministic |
-| Live-equivalent maker | Remains **negative** per existing paper audit (not re-litigated here) |
-| Next research | Collect real synchronized tape → re-run with fill-lab / trade-through outcomes → only then consider OOS_PROMISING |
+| OBSERVED alpha (lab subsample) | **Not established** — maker negative under TT; others thin |
+| OBSERVED alpha (gated tournament) | **ALL REJECTED** — see tournament report |
+| SYNTHETIC plumbing | **PASS** — fingerprints deterministic; TT haircut tested |
+| Live-equivalent maker | Remains adverse / trade-through toxic (paper audit) |
+| Next research | Longer multi-regime tape; re-run **same** criteria; do not enable execution |
 
 ---
 
 ## How to regenerate
 
 ```bash
+# OBSERVED bounded sample + trade-through outcomes
 PYTHONPATH=. python -m bot.strategy_lab.runner \
-  --dataset-id synthetic_lab_v1 \
-  --out data/strategy_lab/synthetic_lab_v1
+  --dataset-id observed_tt_lab_v1 \
+  --out data/strategy_lab/observed_tt_lab_v1 \
+  --no-synthetic \
+  --max-events 80000 \
+  --stride 5 \
+  --outcome-mode trade_through
 
-# Dashboard
-# GET /strategy-lab
+# Gated full-tape family tournament
+PYTHONPATH=. python -m bot.research.tournament.runner
+
+# Dashboard: GET /strategy-lab
 ```
 
 ## Tests
 
 ```text
-pytest tests/test_strategy_lab.py \
-       tests/test_candidate_hotpath.py \
-       tests/test_causal_walkforward_leakage.py \
-       tests/test_lead_lag_lab.py \
-       tests/test_maker_inventory.py
-→ 71 passed
+pytest tests/test_strategy_lab.py
+→ 14 passed (incl. trade-through haircut ≤ shadow NET)
 ```
-
-Note: `tests/test_toxicity_pretrade.py` expects 17 trades in `data/paper_25000live.json`; current dump has a different trade count (environment data), unrelated to Strategy Lab code.
