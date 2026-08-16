@@ -209,6 +209,21 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <ul class="forecast-assumptions">{assumption_lis}</ul>
     </section>
 
+    <section class="panel research-board">
+      <div class="panel-head">
+        <h2>Research findings</h2>
+        <span class="badge muted">Geen productie-PnL</span>
+      </div>
+      <p class="research-sub">{_esc((status.get('research_findings') or {}).get('subtitle') or 'Onderzoeksconclusies')}</p>
+      <div class="findings-grid">
+        {_research_finding_cards((status.get('research_findings') or {}).get('cards') or [])}
+      </div>
+      <div class="finding-next">
+        <span class="label">Volgende stap</span>
+        <p>{_esc((status.get('research_findings') or {}).get('next_step') or (status.get('market_data_lab') or {}).get('next_step'))}</p>
+      </div>
+    </section>
+
     <section class="panel">
       <h2>Desk-monitor</h2>
       <div class="metric-grid compact">
@@ -314,12 +329,17 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     <section class="panel">
       <h2>FILL MODEL LAB</h2>
-      <div class="metric-grid compact">
-        <article class="metric-card"><span class="label">Production PnL source</span><span class="value">{_esc((status.get('fill_model_lab') or {}).get('production_pnl_source') or 'TRADE_THROUGH_ONLY')}</span></article>
-        <article class="metric-card"><span class="label">Wijzigt execution?</span><span class="value">Nee</span></article>
-        <article class="metric-card"><span class="label">Success letter</span><span class="value">{_esc((status.get('fill_model_lab') or {}).get('success_letter'))}</span></article>
-        <article class="metric-card"><span class="label">Recommendation</span><span class="value">{_esc((status.get('fill_model_lab') or {}).get('recommendation'))}</span></article>
-        <article class="metric-card"><span class="label">TT toxicity selector</span><span class="value">{_esc(((status.get('fill_model_lab') or {}).get('toxicity_selector') or {}).get('answer'))}</span></article>
+      <div class="verdict-banner {_verdict_banner_class((status.get('fill_model_lab') or {}).get('recommendation'))}">
+        <div>
+          <span class="vb-kicker">Aanbeveling</span>
+          <strong class="vb-verdict">{_esc((status.get('fill_model_lab') or {}).get('recommendation') or 'REQUIRE BETTER DATA')}</strong>
+          <p class="vb-headline">{_esc((status.get('fill_model_lab') or {}).get('headline') or 'Trade-through baseline behouden')}</p>
+        </div>
+        <div class="vb-meta">
+          <span>PnL source: {_esc((status.get('fill_model_lab') or {}).get('production_pnl_source') or 'TRADE_THROUGH_ONLY')}</span>
+          <span>Letter: {_esc((status.get('fill_model_lab') or {}).get('success_letter'))}</span>
+          <span>TT selector: {_esc(((status.get('fill_model_lab') or {}).get('toxicity_selector') or {}).get('answer'))}</span>
+        </div>
       </div>
       <div class="table-wrap" style="margin-top:1rem">
         <table>
@@ -348,14 +368,23 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     <section class="panel">
       <h2>LEAD-LAG LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('lead_lag_lab') or {}).get('verdict'))}">
+        <div>
+          <span class="vb-kicker">Verdict</span>
+          <strong class="vb-verdict">{_esc((status.get('lead_lag_lab') or {}).get('verdict') or 'INSUFFICIENT_DATA')}</strong>
+          <p class="vb-headline">{_esc((status.get('lead_lag_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Quality: {_esc((status.get('lead_lag_lab') or {}).get('data_quality'))}</span>
+          <span>Observer n: {_esc(((status.get('lead_lag_lab') or {}).get('observer') or {}).get('n_observations'))}</span>
+          <span>Execution: {_esc((status.get('lead_lag_lab') or {}).get('execution_enabled') and 'Aan' or 'Uit')}</span>
+        </div>
+      </div>
+      <p class="forecast-note">{_esc((status.get('lead_lag_lab') or {}).get('finding'))}</p>
       <div class="metric-grid compact">
-        <article class="metric-card"><span class="label">Enabled</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
         <article class="metric-card"><span class="label">Shadow only</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('shadow_only') and 'Ja' or 'Nee')}</span></article>
-        <article class="metric-card"><span class="label">Execution enabled</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('execution_enabled') and 'Ja' or 'Nee')}</span></article>
         <article class="metric-card"><span class="label">Wijzigt PnL?</span><span class="value">Nee</span></article>
-        <article class="metric-card"><span class="label">Verdict</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('verdict'))}</span></article>
-        <article class="metric-card"><span class="label">Data quality</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('data_quality'))}</span></article>
-        <article class="metric-card"><span class="label">Observer n</span><span class="value">{_esc(((status.get('lead_lag_lab') or {}).get('observer') or {}).get('n_observations'))}</span></article>
+        <article class="metric-card"><span class="label">Enabled</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
       </div>
       <div class="table-wrap" style="margin-top:1rem">
         <table>
@@ -385,32 +414,47 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     <section class="panel">
       <h2>MARKET DATA LAB <span class="pill">RESEARCH INFRASTRUCTURE</span></h2>
-      <div class="metric-grid compact">
-        <article class="metric-card"><span class="label">Recorder</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
-        <article class="metric-card"><span class="label">Wijzigt trading?</span><span class="value">Nee</span></article>
-        <article class="metric-card"><span class="label">Verdict</span><span class="value">{_esc((status.get('market_data_lab') or {}).get('verdict'))}</span></article>
-        <article class="metric-card"><span class="label">Events recorded</span><span class="value">{_esc((status.get('market_data_lab') or {}).get('event_count'))}</span></article>
-        <article class="metric-card"><span class="label">Queue depth</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('queue_depth'))}</span></article>
-        <article class="metric-card"><span class="label">Dropped</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('dropped'))}</span></article>
-        <article class="metric-card"><span class="label">Complete?</span><span class="value">{_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('complete'))}</span></article>
+      <div class="verdict-banner {_verdict_banner_class((status.get('market_data_lab') or {}).get('verdict'))}">
+        <div>
+          <span class="vb-kicker">Readiness</span>
+          <strong class="vb-verdict">{_esc((status.get('market_data_lab') or {}).get('verdict') or 'DATA_NOT_READY')}</strong>
+          <p class="vb-headline">{_esc((status.get('market_data_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Events: {_esc((status.get('market_data_lab') or {}).get('event_count') or 0)}</span>
+          <span>Recorder: {_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('enabled') and 'Aan' or 'Uit')}</span>
+          <span>Dropped: {_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('dropped') or 0)}</span>
+        </div>
       </div>
-      <div class="table-wrap" style="margin-top:1rem">
+      <ul class="finding-list">
+        {_finding_list_items((status.get('market_data_lab') or {}).get('findings') or [])}
+      </ul>
+      <h3 class="subhead">Horizon readiness</h3>
+      <div class="horizon-chips">
+        {_horizon_chips((status.get('market_data_lab') or {}).get('horizon_rows') or [])}
+      </div>
+      <h3 class="subhead">Venues</h3>
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Venue</th>
+              <th>Exchange ts</th>
+              <th>Quality</th>
               <th>Events</th>
               <th>Ex-ts %</th>
-              <th>Recv %</th>
-              <th>Seq %</th>
-              <th>p50 ms</th>
-              <th>p95 ms</th>
-              <th>p99 ms</th>
-              <th>Quality</th>
+              <th>p50</th>
+              <th>p95</th>
+              <th>p99</th>
+              <th>Note</th>
             </tr>
           </thead>
           <tbody>{_market_data_lab_rows((status.get('market_data_lab') or {}).get('panel') or [])}</tbody>
         </table>
+      </div>
+      <div class="finding-next">
+        <span class="label">Volgende stap</span>
+        <p>{_esc((status.get('market_data_lab') or {}).get('next_step'))}</p>
       </div>
       <p class="forecast-note">
         RESEARCH INFRASTRUCTURE — timestamps, sync, replay. Geen alpha-optimalisatie.
@@ -1023,6 +1067,150 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
     .panel.highlight {{
       background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 90%, #1a2940), var(--surface));
     }}
+    .research-board {{
+      border-color: color-mix(in srgb, var(--warn) 28%, var(--line));
+    }}
+    .research-sub {{
+      margin: 0 0 1rem;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }}
+    .findings-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 0.85rem;
+    }}
+    .finding-card {{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.9rem 1rem;
+      background: color-mix(in srgb, var(--surface) 88%, #000);
+    }}
+    .finding-top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.55rem;
+    }}
+    .finding-title {{
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    .finding-headline {{
+      margin: 0 0 0.35rem;
+      font-size: 1.02rem;
+      font-weight: 700;
+      line-height: 1.25;
+    }}
+    .finding-detail {{
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.35;
+    }}
+    .finding-next {{
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      border: 1px dashed color-mix(in srgb, var(--warn) 40%, var(--line));
+      background: color-mix(in srgb, var(--warn) 8%, transparent);
+    }}
+    .finding-next .label {{
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      font-weight: 700;
+    }}
+    .finding-next p {{
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }}
+    .verdict-banner {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.1rem;
+      border-radius: 14px;
+      margin-bottom: 1rem;
+      border: 1px solid var(--line);
+    }}
+    .verdict-banner.bad {{
+      border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+      background: color-mix(in srgb, var(--bad) 12%, transparent);
+    }}
+    .verdict-banner.warn {{
+      border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+      background: color-mix(in srgb, var(--warn) 12%, transparent);
+    }}
+    .verdict-banner.ok {{
+      border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+      background: color-mix(in srgb, var(--good) 12%, transparent);
+    }}
+    .vb-kicker {{
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }}
+    .vb-verdict {{
+      display: block;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }}
+    .vb-headline {{
+      margin: 0.35rem 0 0;
+      color: var(--text);
+      opacity: 0.9;
+    }}
+    .vb-meta {{
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      color: var(--muted);
+      font-size: 0.86rem;
+      justify-content: center;
+    }}
+    .finding-list {{
+      margin: 0 0 1rem;
+      padding-left: 1.1rem;
+      color: var(--text);
+      line-height: 1.45;
+    }}
+    .subhead {{
+      margin: 0.4rem 0 0.55rem;
+      font-size: 0.95rem;
+    }}
+    .horizon-chips {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-bottom: 1rem;
+    }}
+    .chip {{
+      display: inline-flex;
+      align-items: center;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--muted);
+    }}
+    .chip.ok {{ color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }}
+    .chip.warn {{ color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }}
+    .chip.bad {{ color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }}
+    td.note {{ max-width: 18rem; color: var(--muted); font-size: 0.82rem; }}
     .panel-head {{ display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .5rem; }}
     .panel h2 {{
       margin: 0 0 .85rem;
@@ -1322,25 +1510,86 @@ def _market_data_lab_rows(panel: list[dict[str, Any]]) -> str:
     if not panel:
         return (
             "<tr><td colspan='9' class='empty'>"
-            "Geen market-data research rapport — run research runner"
+            "Geen venue-data — recorder nog leeg"
             "</td></tr>"
         )
     rows: list[str] = []
     for row in panel:
+        note = str(row.get("note") or row.get("quality_grade") or "")
+        if len(note) > 72:
+            note = note[:69] + "…"
+        ex_cov = row.get("exchange_ts_coverage")
+        if isinstance(ex_cov, (int, float)):
+            ex_cov = f"{float(ex_cov) * 100:.0f}%"
         rows.append(
             "<tr>"
             f"<td>{_esc(row.get('venue'))}</td>"
+            f"<td>{_esc(row.get('exchange_ts') or ('Ja' if row.get('exchange_ts_coverage') else '—'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('quality') or row.get('quality_grade'))}'>"
+            f"{_esc(row.get('quality') or row.get('quality_grade'))}</span></td>"
             f"<td class='num'>{_esc(row.get('events'))}</td>"
-            f"<td class='num'>{_esc(row.get('exchange_ts_coverage'))}</td>"
-            f"<td class='num'>{_esc(row.get('receive_ts_coverage'))}</td>"
-            f"<td class='num'>{_esc(row.get('sequence_coverage'))}</td>"
+            f"<td class='num'>{_esc(ex_cov)}</td>"
             f"<td class='num'>{_esc(row.get('p50_ms'))}</td>"
             f"<td class='num'>{_esc(row.get('p95_ms'))}</td>"
             f"<td class='num'>{_esc(row.get('p99_ms'))}</td>"
-            f"<td>{_esc(row.get('quality_grade'))}</td>"
+            f"<td class='note'>{_esc(note)}</td>"
             "</tr>"
         )
     return "".join(rows)
+
+
+def _research_finding_cards(cards: list[dict[str, Any]]) -> str:
+    if not cards:
+        return "<p class='forecast-note'>Nog geen research-conclusies geladen.</p>"
+    parts: list[str] = []
+    for card in cards:
+        tone = str(card.get("tone") or "muted")
+        parts.append(
+            "<article class='finding-card'>"
+            f"<div class='finding-top'><span class='finding-title'>{_esc(card.get('title'))}</span>"
+            f"<span class='badge {tone}'>{_esc(card.get('verdict'))}</span></div>"
+            f"<p class='finding-headline'>{_esc(card.get('headline'))}</p>"
+            f"<p class='finding-detail'>{_esc(card.get('detail'))}</p>"
+            "</article>"
+        )
+    return "".join(parts)
+
+
+def _finding_list_items(items: list[Any]) -> str:
+    if not items:
+        return "<li>Geen findings in rapport.</li>"
+    return "".join(f"<li>{_esc(x)}</li>" for x in items if x)
+
+
+def _horizon_chips(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<span class='chip warn'>Geen horizon-scores</span>"
+    parts: list[str] = []
+    for row in rows:
+        status = str(row.get("status") or "NOT_READY")
+        parts.append(
+            f"<span class='chip {_status_chip_class(status)}'>"
+            f"{_esc(row.get('horizon'))}: {_esc(status)}</span>"
+        )
+    return "".join(parts)
+
+
+def _status_chip_class(status: Any) -> str:
+    text = str(status or "").upper()
+    if text in {"READY", "HIGH", "SUPPORTED", "OK"}:
+        return "ok"
+    if "CAUTION" in text or "PARTIAL" in text or "MEDIUM" in text or "LOW" in text:
+        return "warn"
+    return "bad"
+
+
+def _verdict_banner_class(verdict: Any) -> str:
+    text = str(verdict or "").upper()
+    if "READY_FOR" in text and "NOT" not in text:
+        return "ok"
+    if "PARTIAL" in text:
+        return "warn"
+    return "bad"
 
 
 def _pnl_class(value: Any) -> str:

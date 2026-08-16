@@ -63,6 +63,35 @@ from bot.regime.market_regime import MarketRegimeDetector, RegimePrediction
 logger = logging.getLogger(__name__)
 
 
+def _verdict_tone(verdict: object) -> str:
+    text = str(verdict or "").upper()
+    if any(
+        x in text
+        for x in (
+            "READY_FOR",
+            "PROMISING",
+            "KEEP TRADE-THROUGH",
+            "READY",
+        )
+    ) and "NOT_READY" not in text and "PARTIALLY" not in text:
+        return "ok"
+    if any(
+        x in text
+        for x in (
+            "NOT_READY",
+            "INSUFFICIENT",
+            "UNSUPPORTED",
+            "REQUIRE BETTER",
+            "ABANDON",
+            "REJECT",
+        )
+    ):
+        return "warn"
+    if "PARTIAL" in text or "CAUTION" in text or "SHADOW" in text:
+        return "warn"
+    return "muted"
+
+
 class PaperRunner:
     """Async paper session controller + continuous evaluation loop."""
 
@@ -869,6 +898,7 @@ class PaperRunner:
             "fill_model_lab": self._fill_model_lab_snapshot(),
             "lead_lag_lab": self._lead_lag_lab_snapshot(),
             "market_data_lab": self._market_data_lab_snapshot(),
+            "research_findings": self._research_findings_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -903,8 +933,10 @@ class PaperRunner:
             "alters_execution": False,
             "affects_production_pnl": False,
             "label": "RESEARCH_ONLY",
-            "verdict": None,
-            "data_quality": None,
+            "verdict": "INSUFFICIENT_DATA",
+            "headline": "Onvoldoende data voor causale lead/lag",
+            "finding": "Geen gesynchroniseerde book-tape — geen alpha-claim.",
+            "data_quality": "UNSUPPORTED",
             "panel": [],
             "observer": (
                 self._lead_lag_observer.snapshot()
@@ -927,6 +959,21 @@ class PaperRunner:
                         ),
                         "panel": report.get("lead_lag_lab_panel") or [],
                         "source": str(report_path),
+                        "headline": {
+                            "INSUFFICIENT_DATA": "Onvoldoende data voor causale lead/lag",
+                            "NO_STABLE_PREDICTIVE_RELATIONSHIP": "Geen stabiele predictieve relatie",
+                            "PREDICTIVE_BUT_NOT_EXECUTABLE": "Predictief maar niet executable",
+                            "EXECUTABLE_IN_SAMPLE_ONLY": "Alleen in-sample executable",
+                            "PROMISING_OOS_RESEARCH_SIGNAL": "Veelbelovend OOS research-signaal",
+                        }.get(
+                            str(report.get("O_final_verdict")),
+                            str(report.get("O_final_verdict")),
+                        ),
+                        "finding": (
+                            ((report.get("C_timestamp_audit") or {}).get("reason"))
+                            or ((report.get("G_trade_through_toxicity_selector") or {}).get("detail"))
+                            or "Zie lead-lag rapport"
+                        ),
                     }
                 )
             except Exception:
@@ -940,18 +987,62 @@ class PaperRunner:
         """MARKET DATA LAB — research infrastructure only."""
         from pathlib import Path
 
+        from bot.market_data.research.venue_audit import venue_capability_report
+
+        recorder = (
+            self._market_data.research_recorder_status()
+            if hasattr(self._market_data, "research_recorder_status")
+            else {"enabled": False}
+        )
+        venues = venue_capability_report(("binance", "bitvavo", "okx"))
+        venue_rows = []
+        for name, cap in (venues.get("venues") or {}).items():
+            venue_rows.append(
+                {
+                    "venue": name,
+                    "exchange_ts": (
+                        "Ja" if cap.get("exchange_timestamp_available") else "Nee"
+                    ),
+                    "quality": cap.get("timestamp_quality"),
+                    "sequence": "Ja" if cap.get("sequence_available") else "Nee",
+                    "note": cap.get("notes") or "",
+                    "events": 0,
+                    "exchange_ts_coverage": 0,
+                    "receive_ts_coverage": 0,
+                    "sequence_coverage": 0,
+                    "p50_ms": None,
+                    "p95_ms": None,
+                    "p99_ms": None,
+                    "quality_grade": cap.get("timestamp_quality"),
+                }
+            )
+
         base: dict[str, Any] = {
             "label": "RESEARCH_INFRASTRUCTURE",
             "affects_trading": False,
-            "recorder": (
-                self._market_data.research_recorder_status()
-                if hasattr(self._market_data, "research_recorder_status")
-                else {"enabled": False}
+            "recorder": recorder,
+            "verdict": "DATA_NOT_READY",
+            "headline": "Nog geen research-tape — lead/lag is niet klaar",
+            "findings": [
+                "Geen gesynchroniseerde market-data opname op schijf.",
+                "Bitvavo levert geen exchange-timestamp (UNSUPPORTED).",
+                "Recorder staat klaar op de publisher (vóór Redis).",
+            ],
+            "next_step": (
+                "Start moreney-marketdata met RESEARCH_MARKETDATA_RECORDING_ENABLED=true, "
+                "verzamel uren tape, run: python -m bot.market_data.research.runner"
             ),
-            "verdict": None,
-            "horizon_scores": {},
-            "panel": [],
+            "horizon_scores": {
+                f"LEAD_LAG_{h}MS": "NOT_READY"
+                for h in (50, 100, 250, 500, 1000, 2000, 5000)
+            },
+            "horizon_rows": [
+                {"horizon": f"{h} ms", "status": "NOT_READY"}
+                for h in (50, 100, 250, 500, 1000, 2000, 5000)
+            ],
+            "panel": venue_rows,
             "sync": {},
+            "event_count": 0,
             "source": None,
         }
         report_path = Path("data/market_data_research_report.json")
@@ -960,22 +1051,116 @@ class PaperRunner:
                 import json
 
                 report = json.loads(report_path.read_text(encoding="utf-8"))
+                verdict = report.get("final_verdict") or "DATA_NOT_READY"
+                scores = (report.get("J_horizon_readiness") or {}).get(
+                    "horizon_scores"
+                ) or base["horizon_scores"]
+                panel = report.get("market_data_lab_panel") or venue_rows
+                # Merge capability notes onto panel rows
+                by_name = {r["venue"]: r for r in venue_rows}
+                for row in panel:
+                    v = str(row.get("venue") or "")
+                    if v in by_name:
+                        row.setdefault("exchange_ts", by_name[v].get("exchange_ts"))
+                        row.setdefault("note", by_name[v].get("note"))
+                        row.setdefault("quality", by_name[v].get("quality"))
+                findings = [
+                    f"Verdict: {verdict}",
+                    str((report.get("A_problem") or "")[:220]),
+                    str((report.get("C_venue_capabilities") or {}).get("critical_finding") or "")[
+                        :220
+                    ],
+                ]
+                findings = [f for f in findings if f and f != "Verdict: "]
+                headline = {
+                    "DATA_READY_FOR_LEAD_LAG": "Data klaar voor lead/lag research",
+                    "DATA_PARTIALLY_READY": "Data deels klaar — alleen langere horizons",
+                    "DATA_NOT_READY": "Data nog niet klaar voor lead/lag",
+                }.get(str(verdict), str(verdict))
                 base.update(
                     {
-                        "verdict": report.get("final_verdict"),
-                        "horizon_scores": (report.get("J_horizon_readiness") or {}).get(
-                            "horizon_scores"
-                        )
-                        or {},
-                        "panel": report.get("market_data_lab_panel") or [],
+                        "verdict": verdict,
+                        "headline": headline,
+                        "findings": findings
+                        or base["findings"],
+                        "next_step": report.get("O_next_step_for_lead_lag")
+                        or base["next_step"],
+                        "horizon_scores": scores,
+                        "horizon_rows": [
+                            {
+                                "horizon": k.replace("LEAD_LAG_", "").replace("MS", " ms"),
+                                "status": v,
+                            }
+                            for k, v in scores.items()
+                        ],
+                        "panel": panel,
                         "sync": report.get("H_synchronization") or {},
-                        "event_count": report.get("event_count"),
+                        "event_count": report.get("event_count") or 0,
                         "source": str(report_path),
+                        "supported_horizons": report.get("supported_horizons") or [],
+                        "unsupported_horizons": report.get("unsupported_horizons") or [],
                     }
                 )
             except Exception:
                 pass
         return base
+
+    def _research_findings_snapshot(self) -> dict[str, Any]:
+        """One-glance research board for the dashboard (not production PnL)."""
+        md = self._market_data_lab_snapshot()
+        ll = self._lead_lag_lab_snapshot()
+        fill = self._fill_model_lab_snapshot()
+        tox = (
+            self._opportunity_engine.shadow_snapshot()
+            if hasattr(self, "_opportunity_engine")
+            and hasattr(self._opportunity_engine, "shadow_snapshot")
+            else {}
+        )
+        cards = [
+            {
+                "id": "market_data",
+                "title": "Market data",
+                "verdict": md.get("verdict") or "DATA_NOT_READY",
+                "headline": md.get("headline"),
+                "tone": _verdict_tone(md.get("verdict")),
+                "detail": (md.get("findings") or [None])[0],
+            },
+            {
+                "id": "lead_lag",
+                "title": "Lead-lag",
+                "verdict": ll.get("verdict") or "INSUFFICIENT_DATA",
+                "headline": ll.get("headline")
+                or "Onvoldoende data voor causale lead/lag",
+                "tone": _verdict_tone(ll.get("verdict")),
+                "detail": ll.get("finding"),
+            },
+            {
+                "id": "fill_lab",
+                "title": "Fill model",
+                "verdict": fill.get("recommendation")
+                or fill.get("success_letter")
+                or "REQUIRE BETTER DATA",
+                "headline": fill.get("headline")
+                or "Trade-through baseline behouden",
+                "tone": _verdict_tone(fill.get("recommendation") or fill.get("success_letter")),
+                "detail": ((fill.get("toxicity_selector") or {}).get("answer")),
+            },
+            {
+                "id": "toxicity",
+                "title": "Toxicity",
+                "verdict": "SHADOW_ONLY",
+                "headline": "Niet predictive voor live blocking",
+                "tone": "warn",
+                "detail": "Shadow only — wijzigt geen fills",
+            },
+        ]
+        return {
+            "title": "Research findings",
+            "subtitle": "Geen productie-PnL — alleen onderzoeksconclusies",
+            "cards": cards,
+            "next_step": md.get("next_step"),
+            "production_pnl_untouched": True,
+        }
 
     def _lead_lag_observe(self, books: dict[str, dict[str, Any]]) -> None:
         """Phase A: record cross-venue TOB pairs. Never places orders."""
@@ -1045,8 +1230,13 @@ class PaperRunner:
                         "production_pnl_source", "TRADE_THROUGH_ONLY"
                     ),
                     "alters_execution": False,
-                    "success_letter": report.get("success_letter"),
-                    "recommendation": report.get("recommendation"),
+                    "success_letter": report.get("success_letter")
+                    or (report.get("H_production_recommendation") or {}).get(
+                        "success_criterion"
+                    ),
+                    "recommendation": report.get("recommendation")
+                    or (report.get("H_production_recommendation") or {}).get("primary"),
+                    "headline": "Trade-through baseline behouden — betere data nodig",
                     "panel": report.get("fill_model_lab_panel") or [],
                     "toxicity_selector": report.get("G_trade_through_toxicity_selector"),
                     "source": str(report_path),
@@ -1056,8 +1246,9 @@ class PaperRunner:
         return {
             "production_pnl_source": "TRADE_THROUGH_ONLY",
             "alters_execution": False,
-            "success_letter": None,
+            "success_letter": "C",
             "recommendation": "REQUIRE BETTER DATA",
+            "headline": "Trade-through baseline behouden — betere data nodig",
             "panel": [
                 {
                     "model": "TRADE_THROUGH_ONLY",
