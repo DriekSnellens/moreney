@@ -849,6 +849,7 @@ class PaperRunner:
                 and hasattr(self._opportunity_engine, "shadow_snapshot")
                 else {"enabled": False, "alters_execution": False}
             ),
+            "fill_model_lab": self._fill_model_lab_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
             "global_engine": {
@@ -868,6 +869,50 @@ class PaperRunner:
                 "equity": self._market_data.equity.snapshot(),
                 "funding_scan": self._funding_scan_stats(),
             },
+        }
+
+    def _fill_model_lab_snapshot(self) -> dict[str, Any]:
+        """Experimental fill-model lab panel — never alters production PnL/execution."""
+        from pathlib import Path
+
+        report_path = Path("data/fill_mechanism_report.json")
+        if report_path.exists():
+            try:
+                import json
+
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                return {
+                    "production_pnl_source": report.get(
+                        "production_pnl_source", "TRADE_THROUGH_ONLY"
+                    ),
+                    "alters_execution": False,
+                    "success_letter": report.get("success_letter"),
+                    "recommendation": report.get("recommendation"),
+                    "panel": report.get("fill_model_lab_panel") or [],
+                    "toxicity_selector": report.get("G_trade_through_toxicity_selector"),
+                    "source": str(report_path),
+                }
+            except Exception:
+                pass
+        return {
+            "production_pnl_source": "TRADE_THROUGH_ONLY",
+            "alters_execution": False,
+            "success_letter": None,
+            "recommendation": "REQUIRE BETTER DATA",
+            "panel": [
+                {
+                    "model": "TRADE_THROUGH_ONLY",
+                    "status": "CONSERVATIVE_BASELINE",
+                    "support": "SUPPORTED",
+                    "sample_count": None,
+                    "notes": ["Production headline uses trade-through only."],
+                }
+            ],
+            "toxicity_selector": {
+                "answer": "INSUFFICIENT_DATA",
+                "detail": "Run fill_lab study to refresh panel.",
+            },
+            "source": None,
         }
 
     def _funding_scan_stats(self) -> dict[str, object]:

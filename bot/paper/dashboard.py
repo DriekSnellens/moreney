@@ -313,6 +313,40 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>FILL MODEL LAB</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Production PnL source</span><span class="value">{_esc((status.get('fill_model_lab') or {}).get('production_pnl_source') or 'TRADE_THROUGH_ONLY')}</span></article>
+        <article class="metric-card"><span class="label">Wijzigt execution?</span><span class="value">Nee</span></article>
+        <article class="metric-card"><span class="label">Success letter</span><span class="value">{_esc((status.get('fill_model_lab') or {}).get('success_letter'))}</span></article>
+        <article class="metric-card"><span class="label">Recommendation</span><span class="value">{_esc((status.get('fill_model_lab') or {}).get('recommendation'))}</span></article>
+        <article class="metric-card"><span class="label">TT toxicity selector</span><span class="value">{_esc(((status.get('fill_model_lab') or {}).get('toxicity_selector') or {}).get('answer'))}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Label</th>
+              <th>Support</th>
+              <th>n</th>
+              <th>Fill rate</th>
+              <th>Median adverse</th>
+              <th>Mean adverse</th>
+              <th>NET</th>
+              <th>Capital lock</th>
+            </tr>
+          </thead>
+          <tbody>{_fill_model_lab_rows((status.get('fill_model_lab') or {}).get('panel') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        CONSERVATIVE BASELINE = productie headline (TRADE_THROUGH_ONLY).
+        EXPERIMENTAL COUNTERFACTUAL = observational only — nooit live-equivalent PnL.
+        Zonder book/trade recordings blijven touch/depth-modellen UNSUPPORTED.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>Why not trade?</h2>
       <div class="table-wrap">
         <table>
@@ -1145,6 +1179,44 @@ def _esc_fmt(value: Any, kind: str = "money") -> str:
     else:
         text = _fmt_money(value)
     return _esc(text)
+
+
+def _fill_model_lab_rows(panel: list[dict[str, Any]]) -> str:
+    if not panel:
+        return "<tr><td colspan='9' class='empty'>Geen fill-lab rapport — run study</td></tr>"
+    rows: list[str] = []
+    for row in panel:
+        status = str(row.get("status") or "")
+        if status == "CONSERVATIVE_BASELINE":
+            label = "CONSERVATIVE BASELINE"
+        elif status == "UNSUPPORTED":
+            label = "EXPERIMENTAL (UNSUPPORTED)"
+        else:
+            label = "EXPERIMENTAL COUNTERFACTUAL"
+        lock = row.get("capital_lock") or {}
+        lock_med = None
+        if isinstance(lock, dict):
+            lock_med = (lock.get("capital_lock_ms") or {}).get("median")
+        adv_med = row.get("median_adverse")
+        if adv_med is None:
+            adv_med = row.get("median_adverse_bps_5s_export")
+        adv_mean = row.get("mean_adverse")
+        if adv_mean is None:
+            adv_mean = row.get("mean_adverse_bps_5s_export")
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('model'))}</td>"
+            f"<td>{_esc(label)}</td>"
+            f"<td>{_esc(row.get('support'))}</td>"
+            f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
+            f"<td class='num'>{_esc(row.get('fill_rate'))}</td>"
+            f"<td class='num'>{_esc(adv_med)}</td>"
+            f"<td class='num'>{_esc(adv_mean)}</td>"
+            f"<td class='num'>{_esc(row.get('net'))}</td>"
+            f"<td class='num'>{_esc(lock_med)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
 
 
 def _pnl_class(value: Any) -> str:
