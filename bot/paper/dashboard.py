@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
@@ -413,26 +414,60 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>RESEARCH DATA STATUS <span class="pill">OPERATIONAL</span></h2>
+      <div class="verdict-banner {_verdict_banner_class(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('FINAL_ACCEPTANCE_VERDICT') or (status.get('market_data_lab') or {}).get('verdict'))}">
+        <div>
+          <span class="vb-kicker">CURRENT STATE</span>
+          <strong class="vb-verdict">{_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('CURRENT_STATE') or (status.get('market_data_lab') or {}).get('verdict') or 'NO_REAL_TAPE')}</strong>
+          <p class="vb-headline">{_esc((status.get('market_data_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Enabled: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('RECORDER_ENABLED'))}</span>
+          <span>Running: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('RECORDER_RUNNING'))}</span>
+          <span>Written: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('EVENTS_WRITTEN') or 0)}</span>
+          <span>Dropped: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('EVENTS_DROPPED') or 0)}</span>
+          <span>Write err: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('WRITE_ERRORS') or 0)}</span>
+          <span>Queue: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('QUEUE_DEPTH') or 0)}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody>{_research_data_status_rows((status.get('market_data_lab') or {}).get('research_data_status') or {})}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">Horizon readiness</h3>
+      <div class="horizon-chips">
+        {_horizon_chips((status.get('market_data_lab') or {}).get('horizon_rows') or [])}
+      </div>
+      <p class="forecast-note">
+        Onderscheid: NO DATA ≠ BAD DATA ≠ USABLE FOR SLOW ≠ USABLE FOR FAST.
+        Geen Live-equivalent PnL-wijziging.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>MARKET DATA LAB <span class="pill">RESEARCH INFRASTRUCTURE</span></h2>
       <div class="verdict-banner {_verdict_banner_class((status.get('market_data_lab') or {}).get('verdict'))}">
         <div>
-          <span class="vb-kicker">Readiness</span>
+          <span class="vb-kicker">Acceptance</span>
           <strong class="vb-verdict">{_esc((status.get('market_data_lab') or {}).get('verdict') or 'DATA_NOT_READY')}</strong>
           <p class="vb-headline">{_esc((status.get('market_data_lab') or {}).get('headline'))}</p>
         </div>
         <div class="vb-meta">
           <span>Events: {_esc((status.get('market_data_lab') or {}).get('event_count') or 0)}</span>
-          <span>Recorder: {_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('enabled') and 'Aan' or 'Uit')}</span>
+          <span>Dataset: {_esc((status.get('market_data_lab') or {}).get('dataset_id') or 'NONE')}</span>
           <span>Dropped: {_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('dropped') or 0)}</span>
         </div>
       </div>
       <ul class="finding-list">
         {_finding_list_items((status.get('market_data_lab') or {}).get('findings') or [])}
       </ul>
-      <h3 class="subhead">Horizon readiness</h3>
-      <div class="horizon-chips">
-        {_horizon_chips((status.get('market_data_lab') or {}).get('horizon_rows') or [])}
-      </div>
       <h3 class="subhead">Venues</h3>
       <div class="table-wrap">
         <table>
@@ -1506,6 +1541,41 @@ def _lead_lag_lab_rows(panel: list[dict[str, Any]]) -> str:
     return "".join(rows)
 
 
+def _research_data_status_rows(rds: dict[str, Any]) -> str:
+    if not rds:
+        return "<tr><td colspan='2' class='empty'>Geen operational status</td></tr>"
+    order = (
+        "CURRENT_STATE",
+        "RECORDER_ENABLED",
+        "RECORDER_RUNNING",
+        "EVENTS_WRITTEN",
+        "EVENTS_DROPPED",
+        "WRITE_ERRORS",
+        "QUEUE_DEPTH",
+        "LAST_WRITE",
+        "ACTIVE_DATASET",
+        "DATASET_EVENT_COUNT",
+        "DATASET_DURATION",
+        "VENUES",
+        "TIMESTAMP_COVERAGE",
+        "FINAL_ACCEPTANCE_VERDICT",
+    )
+    rows: list[str] = []
+    for key in order:
+        val: Any = rds.get(key)
+        if isinstance(val, float) and key == "DATASET_DURATION":
+            val = f"{val:.1f}s"
+        elif isinstance(val, (dict, list)):
+            val = json.dumps(val, sort_keys=True)[:180]
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(key)}</td>"
+            f"<td class='note'>{_esc(val)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
 def _market_data_lab_rows(panel: list[dict[str, Any]]) -> str:
     if not panel:
         return (
@@ -1585,9 +1655,11 @@ def _status_chip_class(status: Any) -> str:
 
 def _verdict_banner_class(verdict: Any) -> str:
     text = str(verdict or "").upper()
-    if "READY_FOR" in text and "NOT" not in text:
+    if "READY_FOR_FAST" in text or "READY_FOR_SLOW" in text or (
+        "READY_FOR" in text and "NOT" not in text and "PARTIAL" not in text
+    ):
         return "ok"
-    if "PARTIAL" in text:
+    if "PARTIAL" in text or "RECORDING" in text or "CAUTION" in text:
         return "warn"
     return "bad"
 

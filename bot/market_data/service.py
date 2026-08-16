@@ -97,6 +97,12 @@ class MarketDataService:
             max_depth_levels=int(
                 getattr(settings, "research_marketdata_depth_levels", 10) or 10
             ),
+            flush_interval_ms=int(
+                getattr(settings, "research_marketdata_flush_interval_ms", 50) or 50
+            ),
+            flush_every=int(
+                getattr(settings, "research_marketdata_flush_every", 64) or 64
+            ),
         )
         self._books: dict[tuple[str, str], LocalOrderBook] = {}
         self._ticks: dict[tuple[str, str], MarketTick] = {}

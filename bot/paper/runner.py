@@ -1021,7 +1021,7 @@ class PaperRunner:
             "label": "RESEARCH_INFRASTRUCTURE",
             "affects_trading": False,
             "recorder": recorder,
-            "verdict": "DATA_NOT_READY",
+            "verdict": "NO_REAL_TAPE",
             "headline": "Nog geen research-tape — lead/lag is niet klaar",
             "findings": [
                 "Geen gesynchroniseerde market-data opname op schijf.",
@@ -1044,6 +1044,22 @@ class PaperRunner:
             "sync": {},
             "event_count": 0,
             "source": None,
+            "research_data_status": {
+                "CURRENT_STATE": "NO_REAL_TAPE",
+                "RECORDER_ENABLED": bool(recorder.get("enabled")),
+                "RECORDER_RUNNING": bool(recorder.get("RECORDER_RUNNING")),
+                "EVENTS_WRITTEN": recorder.get("written") or recorder.get("EVENTS_WRITTEN") or 0,
+                "EVENTS_DROPPED": recorder.get("dropped") or 0,
+                "WRITE_ERRORS": recorder.get("write_errors") or 0,
+                "QUEUE_DEPTH": recorder.get("queue_depth") or 0,
+                "LAST_WRITE": recorder.get("last_write_ns"),
+                "ACTIVE_DATASET": None,
+                "DATASET_EVENT_COUNT": 0,
+                "DATASET_DURATION": None,
+                "VENUES": [],
+                "TIMESTAMP_COVERAGE": {},
+                "FINAL_ACCEPTANCE_VERDICT": "NO_REAL_TAPE",
+            },
         }
         report_path = Path("data/market_data_research_report.json")
         if report_path.exists():
@@ -1073,10 +1089,41 @@ class PaperRunner:
                 ]
                 findings = [f for f in findings if f and f != "Verdict: "]
                 headline = {
+                    "DATA_READY_FOR_FAST_HORIZONS": "Tape bruikbaar voor snelle horizons",
+                    "DATA_READY_FOR_SLOW_HORIZONS": "Tape bruikbaar voor trage research-horizons",
                     "DATA_READY_FOR_LEAD_LAG": "Data klaar voor lead/lag research",
-                    "DATA_PARTIALLY_READY": "Data deels klaar — alleen langere horizons",
-                    "DATA_NOT_READY": "Data nog niet klaar voor lead/lag",
+                    "DATA_PARTIALLY_READY": "Data deels klaar — niet alle horizons",
+                    "DATA_NOT_READY": "Tape aanwezig maar niet acceptabel",
+                    "NO_REAL_TAPE": "Nog geen echte research-tape",
+                    "RECORDER_DISABLED": "Recorder uitgeschakeld",
+                    "RECORDER_BROKEN": "Recorder defect (schrijffouten)",
                 }.get(str(verdict), str(verdict))
+                rds = {
+                    "CURRENT_STATE": report.get("operational_state")
+                    or report.get("RECORDER_STATUS")
+                    or verdict,
+                    "RECORDER_ENABLED": bool(recorder.get("enabled")),
+                    "RECORDER_RUNNING": bool(
+                        recorder.get("RECORDER_RUNNING", recorder.get("enabled"))
+                    ),
+                    "EVENTS_WRITTEN": recorder.get("written")
+                    or recorder.get("EVENTS_WRITTEN")
+                    or 0,
+                    "EVENTS_DROPPED": report.get("RECORDER_DROPS")
+                    or recorder.get("dropped")
+                    or 0,
+                    "WRITE_ERRORS": report.get("WRITE_ERRORS")
+                    or recorder.get("write_errors")
+                    or 0,
+                    "QUEUE_DEPTH": recorder.get("queue_depth") or 0,
+                    "LAST_WRITE": recorder.get("last_write_ns"),
+                    "ACTIVE_DATASET": report.get("DATASET_ID"),
+                    "DATASET_EVENT_COUNT": report.get("event_count") or 0,
+                    "DATASET_DURATION": report.get("DURATION"),
+                    "VENUES": report.get("VENUES") or [],
+                    "TIMESTAMP_COVERAGE": report.get("TIMESTAMP_COVERAGE") or {},
+                    "FINAL_ACCEPTANCE_VERDICT": verdict,
+                }
                 base.update(
                     {
                         "verdict": verdict,
@@ -1084,6 +1131,7 @@ class PaperRunner:
                         "findings": findings
                         or base["findings"],
                         "next_step": report.get("O_next_step_for_lead_lag")
+                        or report.get("NEXT_ACTION")
                         or base["next_step"],
                         "horizon_scores": scores,
                         "horizon_rows": [
@@ -1099,6 +1147,8 @@ class PaperRunner:
                         "source": str(report_path),
                         "supported_horizons": report.get("supported_horizons") or [],
                         "unsupported_horizons": report.get("unsupported_horizons") or [],
+                        "research_data_status": rds,
+                        "dataset_id": report.get("DATASET_ID"),
                     }
                 )
             except Exception:

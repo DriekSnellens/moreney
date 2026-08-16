@@ -34,6 +34,8 @@ def build_manifest(
     venues: Sequence[str],
     symbols: Sequence[str],
     recorder_stats: dict[str, Any] | None = None,
+    content_fingerprint: str | None = None,
+    file_checksums: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     ts_list = [e.received_ts_ns for e in events]
     start = min(ts_list) if ts_list else None
@@ -43,14 +45,20 @@ def build_manifest(
     latency = latency_report(events)
     return {
         "dataset_id": dataset_id,
+        "content_fingerprint": content_fingerprint,
         "schema_version": SCHEMA_VERSION,
         "code_version_git": git_commit(),
+        "git_commit": git_commit(),
         "created_at": datetime.now(UTC).isoformat(),
         "start_ts_ns": start,
         "end_ts_ns": end,
+        "recording_start": start,
+        "recording_end": end,
+        "duration_seconds": ((end - start) / 1e9) if start is not None and end is not None else None,
         "venues": list(venues),
         "symbols": list(symbols),
         "event_count": len(events),
+        "total_events": len(events),
         "timestamp_coverage": {
             "exchange_ts": quality.get("exchange_ts_coverage"),
             "receive_ts": quality.get("receive_ts_coverage"),
@@ -58,11 +66,16 @@ def build_manifest(
         },
         "quality": quality,
         "ordering": ordering.as_dict(),
+        "ordering_diagnostics": ordering.as_dict(),
         "latency": latency,
         "recorder": recorder_stats or {},
+        "recorder_drops": (recorder_stats or {}).get("dropped"),
+        "write_errors": (recorder_stats or {}).get("write_errors"),
         "missing_data": quality.get("missing_venues") or [],
         "reconnects_approx": ordering.reconnect_boundaries,
         "sequence_gaps": ordering.sequence_gaps,
+        "sequence_diagnostics": {"sequence_gaps": ordering.sequence_gaps},
+        "file_checksums": file_checksums or {},
         "label": "RESEARCH_INFRASTRUCTURE",
     }
 
