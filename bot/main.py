@@ -27,6 +27,10 @@ from bot.paper.dashboard import (
     render_dashboard_lite,
     render_fleet_dashboard,
 )
+from bot.strategy_lab.dashboard import (
+    load_latest_lab_results,
+    render_strategy_lab_dashboard,
+)
 from bot.paper.fleet import collect_fleet_overview, publicize_instance_urls, reset_fleet
 from bot.paper.auth import (
     clear_session_cookie,
@@ -495,6 +499,40 @@ async def fleet_dashboard(
     return render_fleet_dashboard(payload)
 
 
+@app.get("/strategy-lab", response_class=HTMLResponse)
+@app.get("/lab", response_class=HTMLResponse)
+async def strategy_lab_dashboard(
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse:
+    """Strategy Research Lab leaderboard (shadow/research; no live execution)."""
+    settings = get_settings()
+    if not getattr(settings, "strategy_lab_enabled", True):
+        raise HTTPException(status_code=404, detail="Strategy Lab disabled")
+    payload = load_latest_lab_results(Path(settings.strategy_lab_results_path))
+    return render_strategy_lab_dashboard(payload)
+
+
+@app.get("/strategy-lab/api")
+@app.get("/lab/api")
+async def strategy_lab_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    settings = get_settings()
+    payload = load_latest_lab_results(Path(settings.strategy_lab_results_path))
+    if payload is None:
+        return {"available": False, "message": "Run: python -m bot.strategy_lab.runner"}
+    return {
+        "available": True,
+        "research_only": bool(getattr(settings, "strategy_lab_research_only", True)),
+        "execution_enabled": bool(
+            getattr(settings, "strategy_lab_execution_enabled", False)
+        ),
+        "dataset_id": payload.get("dataset_id"),
+        "data_label": payload.get("data_label"),
+        "leaderboard": payload.get("leaderboard"),
+        "fingerprints": payload.get("fingerprints"),
+        "frozen_config": payload.get("frozen_config"),
+    }
+
+
 @app.get("/fleet/api")
 async def fleet_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
     return await collect_fleet_overview(get_settings())
@@ -607,6 +645,7 @@ async def root() -> JSONResponse:
             "paper_dashboard_lite": "/paper/dashboard-lite",
             "fleet_dashboard": "/fleet",
             "all_bots_dashboard": "/dashboard",
+            "strategy_lab": "/strategy-lab",
             "dashboard_basic_auth_enabled": _dashboard_auth_enabled(),
             "execution_mode": "paper",
             "live_trading_enabled": False,

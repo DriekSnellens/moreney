@@ -301,6 +301,14 @@ class Settings(BaseSettings):
     lead_lag_shadow_only: bool = True
     lead_lag_execution_enabled: bool = False
 
+    # Strategy Research Lab — compare strategies on identical data (shadow/paper).
+    strategy_lab_enabled: bool = True
+    strategy_lab_research_only: bool = True
+    strategy_lab_execution_enabled: bool = False  # never live by default
+    strategy_lab_total_capital_eur: float = Field(default=25_000.0, gt=0)
+    strategy_lab_capital_mode: Literal["ISOLATED", "COMMON_CAPITAL"] = "ISOLATED"
+    strategy_lab_results_path: str = "./data/strategy_lab"
+
     exchange_name: str = "stub"
     exchange_api_key: SecretStr | None = None
     exchange_api_secret: SecretStr | None = None
