@@ -292,6 +292,9 @@ def test_min_ts_skips_forensic_rows(tmp_path: Path) -> None:
     pts = idx.points("binance", "BTCEUR")
     assert pts
     assert all(p.ts_ns > cut for p in pts)
+    hashed = build_tape_index(tmp_path / "tape", min_ts_ns=cut + 1, stride=1, parse_inventory_events=False)
+    assert hashed.dataset_id != "NONE"
+    assert hashed.dataset_id.startswith("mdresearch-")
 
 
 def test_dashboard_section() -> None:

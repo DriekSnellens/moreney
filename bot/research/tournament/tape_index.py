@@ -95,7 +95,7 @@ def build_tape_index(
     inv = scan_tape(root, parse_events=parse_inventory_events)
     ds_id = (
         dataset_id_from_fingerprint(inv.content_fingerprint, schema_version=SCHEMA_VERSION)
-        if inv.total_events
+        if inv.content_fingerprint
         else "NONE"
     )
     series: dict[tuple[str, str], list[SeriesPoint]] = {}
