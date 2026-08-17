@@ -901,6 +901,7 @@ class PaperRunner:
             "research_findings": self._research_findings_snapshot(),
             "research_tournament": self._research_tournament_snapshot(),
             "concentration_forensics": self._concentration_forensics_snapshot(),
+            "regime_hypothesis_lab": self._regime_hypothesis_lab_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1302,6 +1303,47 @@ class PaperRunner:
                     "headline": (
                         "Concentration forensics on STABILITY-rejected cost-positive families"
                     ),
+                    "STATUS": report.get("STATUS"),
+                    "source": str(path),
+                }
+            )
+        except Exception:
+            pass
+        return base
+
+    def _regime_hypothesis_lab_snapshot(self) -> dict[str, Any]:
+        """REGIME HYPOTHESIS LAB — independent H-0005/H-0007; not production."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "REGIME_HYPOTHESIS_LAB",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "rows": [],
+            "LLM_USED": "NO",
+            "PRODUCTION_EXECUTION": "DISABLED",
+            "headline": "Nog geen regime-lab — python -m bot.research.regime_lab.runner",
+            "disclaimer": (
+                "OBSERVED / DEV / OOS / HYPOTHESIS are separate. "
+                "Forensic NET is not strategy profitability."
+            ),
+        }
+        path = Path("data/regime_hypothesis_lab_report.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            base.update(
+                {
+                    "rows": report.get("rows") or [],
+                    "DATA_STATUS": report.get("DATA_STATUS"),
+                    "LLM_USED": report.get("LLM_USED"),
+                    "NEW_HYPOTHESES": report.get("NEW_HYPOTHESES") or [],
+                    "NEXT_ACTION": report.get("NEXT_ACTION"),
+                    "CONTROL_RESULTS": report.get("CONTROL_RESULTS"),
+                    "headline": "Independent H-0005 / H-0007 — parents remain REJECTED",
                     "STATUS": report.get("STATUS"),
                     "source": str(path),
                 }

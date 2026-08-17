@@ -530,6 +530,48 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>REGIME HYPOTHESIS LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">H-0005 / H-0007 — independent of rejected parents</span>
+          <strong class="vb-verdict">CANDIDATE</strong>
+          <p class="vb-headline">{_esc((status.get('regime_hypothesis_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Data: {_esc((status.get('regime_hypothesis_lab') or {}).get('DATA_STATUS') or 'PENDING')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Parent</th>
+              <th>Mechanism</th>
+              <th>Status</th>
+              <th>Discovery NET</th>
+              <th>DEV NET</th>
+              <th>OOS NET</th>
+              <th>NET/fill</th>
+              <th>Sample</th>
+              <th>Stability</th>
+              <th>Top concentration</th>
+              <th>Verdict</th>
+            </tr>
+          </thead>
+          <tbody>{_regime_hypothesis_lab_rows((status.get('regime_hypothesis_lab') or {}).get('rows') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        OBSERVED / DEV / OOS / HYPOTHESIS are separate columns.
+        Discovery NET is not forensic-as-profit (always blank unless labeled OBSERVED).
+        {_esc((status.get('regime_hypothesis_lab') or {}).get('disclaimer') or '')}
+        Run: python -m bot.research.regime_lab.runner
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH DATA STATUS <span class="pill">OPERATIONAL</span></h2>
       <div class="verdict-banner {_verdict_banner_class(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('FINAL_ACCEPTANCE_VERDICT') or (status.get('market_data_lab') or {}).get('verdict'))}">
         <div>
@@ -1753,6 +1795,43 @@ def _concentration_forensics_rows(rows: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return "".join(out)
+
+
+def _regime_hypothesis_lab_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "<tr><td colspan='12' class='empty'>"
+            "Nog geen regime-lab — run python -m bot.research.regime_lab.runner"
+            "</td></tr>"
+        )
+    parts: list[str] = []
+    for row in rows:
+        top = row.get("top_concentration") or {}
+        top_txt = (
+            f"{top.get('symbol') or '—'} {top.get('symbol_share') or ''} "
+            f"/ {top.get('route') or '—'}"
+        )
+        disc = row.get("Discovery_NET")
+        disc_s = "—" if disc is None else disc
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('ID'))}</td>"
+            f"<td>{_esc(row.get('Parent'))}</td>"
+            f"<td>{_esc(row.get('Mechanism'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('Status'))}'>"
+            f"{_esc(row.get('Status'))}</span></td>"
+            f"<td class='num'>{_esc(disc_s)}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('DEV_NET'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('OOS_NET'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('NET_per_fill'), 'money')}</td>"
+            f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
+            f"<td>{_esc(row.get('stability'))}</td>"
+            f"<td>{_esc(top_txt)}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('verdict'))}'>"
+            f"{_esc(row.get('verdict'))}</span></td>"
+            "</tr>"
+        )
+    return "".join(parts)
 
 
 def _research_data_status_rows(rds: dict[str, Any]) -> str:

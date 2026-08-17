@@ -68,7 +68,12 @@ def iter_raw_events(root: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
                     continue
 
 
-def scan_tape(root: Path | str, *, max_events: int | None = None) -> TapeInventory:
+def scan_tape(
+    root: Path | str,
+    *,
+    max_events: int | None = None,
+    parse_events: bool = True,
+) -> TapeInventory:
     root = Path(root)
     inv = TapeInventory(root=str(root))
     if not root.exists():
@@ -99,31 +104,32 @@ def scan_tape(root: Path | str, *, max_events: int | None = None) -> TapeInvento
         hasher.update(digest.encode())
         hasher.update(b"\n")
 
-    for _path, raw in iter_raw_events(root):
-        if max_events is not None and inv.total_events >= max_events:
-            break
-        inv.total_events += 1
-        venue = str(raw.get("venue") or "")
-        symbol = str(raw.get("symbol") or "")
-        inv.events_by_venue[venue] = inv.events_by_venue.get(venue, 0) + 1
-        inv.events_by_symbol[symbol] = inv.events_by_symbol.get(symbol, 0) + 1
-        bucket = cov_counts.setdefault(
-            venue, {"n": 0, "exchange_ts": 0, "received_ts": 0, "mono_ts": 0, "sequence": 0}
-        )
-        bucket["n"] += 1
-        if raw.get("exchange_ts_ns") is not None:
-            bucket["exchange_ts"] += 1
-        if raw.get("received_ts_ns") is not None:
-            bucket["received_ts"] += 1
-            r = int(raw["received_ts_ns"])
-            if inv.first_received_ts_ns is None or r < inv.first_received_ts_ns:
-                inv.first_received_ts_ns = r
-            if inv.last_received_ts_ns is None or r > inv.last_received_ts_ns:
-                inv.last_received_ts_ns = r
-        if raw.get("local_monotonic_ns") is not None:
-            bucket["mono_ts"] += 1
-        if raw.get("sequence_number") is not None:
-            bucket["sequence"] += 1
+    if parse_events:
+        for _path, raw in iter_raw_events(root):
+            if max_events is not None and inv.total_events >= max_events:
+                break
+            inv.total_events += 1
+            venue = str(raw.get("venue") or "")
+            symbol = str(raw.get("symbol") or "")
+            inv.events_by_venue[venue] = inv.events_by_venue.get(venue, 0) + 1
+            inv.events_by_symbol[symbol] = inv.events_by_symbol.get(symbol, 0) + 1
+            bucket = cov_counts.setdefault(
+                venue, {"n": 0, "exchange_ts": 0, "received_ts": 0, "mono_ts": 0, "sequence": 0}
+            )
+            bucket["n"] += 1
+            if raw.get("exchange_ts_ns") is not None:
+                bucket["exchange_ts"] += 1
+            if raw.get("received_ts_ns") is not None:
+                bucket["received_ts"] += 1
+                r = int(raw["received_ts_ns"])
+                if inv.first_received_ts_ns is None or r < inv.first_received_ts_ns:
+                    inv.first_received_ts_ns = r
+                if inv.last_received_ts_ns is None or r > inv.last_received_ts_ns:
+                    inv.last_received_ts_ns = r
+            if raw.get("local_monotonic_ns") is not None:
+                bucket["mono_ts"] += 1
+            if raw.get("sequence_number") is not None:
+                bucket["sequence"] += 1
 
     for venue, b in cov_counts.items():
         n = max(1, b["n"])

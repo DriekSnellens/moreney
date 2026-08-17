@@ -50,6 +50,10 @@ class GatedFamily(StrategyResearchCandidate):
     def param_grid(self, horizons: list[int]) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    def stability_of(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Default tournament stability. Subclasses may annotate, not relax thresholds."""
+        return _stability(events)
+
     def run(
         self,
         *,
@@ -321,7 +325,7 @@ class GatedFamily(StrategyResearchCandidate):
             )
 
         # --- STABILITY ---
-        stability = _stability(oos_events)
+        stability = self.stability_of(oos_events)
         if stability.get("concentrated"):
             return CandidateResult(
                 strategy_id=self.strategy_id,

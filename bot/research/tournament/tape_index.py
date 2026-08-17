@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -65,6 +66,19 @@ def _f(v: Any) -> float | None:
         return None
 
 
+def _session_dir_ends_before(path: Path, min_ts_ns: int) -> bool:
+    """Skip dated session folders whose UTC day ends before min_ts_ns."""
+    for part in path.parts:
+        if len(part) == 8 and part.isdigit():
+            try:
+                day = datetime.strptime(part, "%Y%m%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                return False
+            day_end_ns = int((day.timestamp() + 86400) * 1e9)
+            return day_end_ns <= int(min_ts_ns)
+    return False
+
+
 def build_tape_index(
     root: Path | str,
     *,
@@ -72,11 +86,13 @@ def build_tape_index(
     max_events: int | None = None,
     symbol_suffix: str = "EUR",
     stride: int = 1,
+    min_ts_ns: int | None = None,
+    parse_inventory_events: bool = True,
 ) -> TapeIndex:
     """Stream JSONL into compact series. Prefer EUR symbols for EUR research."""
     t0 = time.perf_counter()
     root = Path(root)
-    inv = scan_tape(root)
+    inv = scan_tape(root, parse_events=parse_inventory_events)
     ds_id = (
         dataset_id_from_fingerprint(inv.content_fingerprint, schema_version=SCHEMA_VERSION)
         if inv.total_events
@@ -86,6 +102,8 @@ def build_tape_index(
     venue_set = set(venues)
     n = 0
     for path in sorted(root.rglob("*.jsonl")):
+        if min_ts_ns is not None and _session_dir_ends_before(path, int(min_ts_ns)):
+            continue
         with path.open(encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -113,10 +131,13 @@ def build_tape_index(
                 ts = raw.get("received_ts_ns")
                 if ts is None:
                     continue
+                ts_i = int(ts)
+                if min_ts_ns is not None and ts_i < int(min_ts_ns):
+                    continue
                 key = (venue, symbol)
                 series.setdefault(key, []).append(
                     SeriesPoint(
-                        ts_ns=int(ts),
+                        ts_ns=ts_i,
                         mid=mid,
                         bid=float(bid or 0),
                         ask=float(ask or 0),

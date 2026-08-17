@@ -12,6 +12,8 @@ ALLOWED_STRATEGY_FAMILIES = (
     "short_horizon_mean_reversion",
     "order_book_imbalance",
     "short_horizon_momentum",
+    "cross_venue_dislocation_freshness",
+    "short_horizon_mean_reversion_wide_spread",
 )
 
 ALLOWED_FEATURES = (
@@ -32,6 +34,14 @@ ALLOWED_FEATURES = (
     "quote_staleness",
     "event_rate",
     "realized_volatility",
+    "quote_age_ms",
+    "event_density",
+    "spread_bps",
+    "depth",
+    "volatility",
+    "mid_return_history",
+    "cross_venue_divergence",
+    "clock_quality",
 )
 
 ALLOWED_HORIZONS_MS = (50, 100, 250, 500, 1000, 2000, 5000)
