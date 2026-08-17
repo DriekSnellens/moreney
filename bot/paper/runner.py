@@ -900,6 +900,7 @@ class PaperRunner:
             "market_data_lab": self._market_data_lab_snapshot(),
             "research_findings": self._research_findings_snapshot(),
             "research_tournament": self._research_tournament_snapshot(),
+            "concentration_forensics": self._concentration_forensics_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1261,6 +1262,47 @@ class PaperRunner:
                     "headline": headline,
                     "STATUS": report.get("STATUS"),
                     "PERFORMANCE": report.get("PERFORMANCE"),
+                    "source": str(path),
+                }
+            )
+        except Exception:
+            pass
+        return base
+
+    def _concentration_forensics_snapshot(self) -> dict[str, Any]:
+        """CONCENTRATION FORENSICS — descriptive; does not alter trading."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "CONCENTRATION_FORENSICS",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "DATASET": None,
+            "rows": [],
+            "NEW_HYPOTHESES_CREATED": [],
+            "LLM_USED": "NO",
+            "PRODUCTION_TRADING_CHANGED": False,
+            "headline": "Nog geen forensics-run — python -m bot.research.forensics.runner",
+            "disclaimer": "Descriptive forensics. Parents remain REJECTED. Not alpha.",
+        }
+        path = Path("data/concentration_forensics_report.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            base.update(
+                {
+                    "DATASET": report.get("DATASET"),
+                    "rows": report.get("rows") or [],
+                    "NEW_HYPOTHESES_CREATED": report.get("NEW_HYPOTHESES_CREATED") or [],
+                    "LLM_USED": report.get("LLM_USED"),
+                    "NEXT_RESEARCH_ACTION": report.get("NEXT_RESEARCH_ACTION"),
+                    "headline": (
+                        "Concentration forensics on STABILITY-rejected cost-positive families"
+                    ),
+                    "STATUS": report.get("STATUS"),
                     "source": str(path),
                 }
             )

@@ -29,6 +29,9 @@ ALLOWED_FEATURES = (
     "bid_depth",
     "ask_depth",
     "book_pressure",
+    "quote_staleness",
+    "event_rate",
+    "realized_volatility",
 )
 
 ALLOWED_HORIZONS_MS = (50, 100, 250, 500, 1000, 2000, 5000)
@@ -127,6 +130,58 @@ class ResultAnalysisBatch(BaseModel):
     label: Literal["NON_AUTHORITATIVE_ANALYSIS"] = "NON_AUTHORITATIVE_ANALYSIS"
     items: list[ResultAnalysisItem] = Field(default_factory=list)
     shared_lessons: list[str] = Field(default_factory=list)
+
+
+ForensicsExplanation = Literal[
+    "RANDOM",
+    "SYMBOL",
+    "VENUE",
+    "TIME",
+    "REGIME",
+    "INSUFFICIENT_EVIDENCE",
+]
+
+
+class ForensicsHypothesisAdvice(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    title: str = Field(min_length=3, max_length=200)
+    parent_hypothesis_id: str = Field(min_length=3, max_length=32)
+    economic_mechanism: str = Field(min_length=8, max_length=2000)
+    what_changed: str = Field(min_length=3, max_length=2000)
+    pre_trade_features: list[str] = Field(default_factory=list)
+    expected_failure_mode: str = Field(min_length=3, max_length=1000)
+    what_we_learn_if_fails: str = Field(min_length=3, max_length=1000)
+    information_value: InfoValue = "MEDIUM"
+    strategy_family: str
+
+    @field_validator("strategy_family")
+    @classmethod
+    def _fam(cls, v: str) -> str:
+        key = str(v).strip().lower()
+        if key not in ALLOWED_STRATEGY_FAMILIES:
+            raise ValueError(f"unknown strategy_family={v}")
+        return key
+
+    @field_validator("pre_trade_features")
+    @classmethod
+    def _feats(cls, v: list[str]) -> list[str]:
+        out = []
+        for f in v:
+            key = str(f).strip()
+            if key not in ALLOWED_FEATURES:
+                raise ValueError(f"unsupported feature={f}")
+            out.append(key)
+        return out
+
+
+class ForensicsAdvisory(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    structurally_interesting_pattern: str = Field(min_length=3, max_length=2000)
+    most_likely_explanation: ForensicsExplanation
+    hypotheses: list[ForensicsHypothesisAdvice] = Field(default_factory=list, max_length=2)
+    notes: str = Field(default="", max_length=2000)
 
 
 def hypothesis_batch_schema() -> dict[str, Any]:

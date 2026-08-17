@@ -217,6 +217,8 @@ class CrossVenueDislocationFamily(GatedFamily):
                         "route": f"{a}|{b}",
                         "forward": signed,
                         "dislocation": dis,
+                        "ts_ns": p.ts_ns,
+                        "peer_ts_ns": pb[jb].ts_ns,
                     }
                 )
         return summarize_forwards(forwards, observations=max(obs, len(forwards))), events
@@ -302,7 +304,14 @@ class ShortHorizonMeanReversionFamily(GatedFamily):
                 signed = -fwd if dev > 0 else fwd
                 forwards.append(signed)
                 events.append(
-                    {"symbol": symbol, "venue": venue, "route": venue, "forward": signed, "dev": dev}
+                    {
+                        "symbol": symbol,
+                        "venue": venue,
+                        "route": venue,
+                        "forward": signed,
+                        "dev": dev,
+                        "ts_ns": p.ts_ns,
+                    }
                 )
         return summarize_forwards(forwards, observations=max(obs, len(forwards))), events
 

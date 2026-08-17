@@ -491,6 +491,45 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>CONCENTRATION FORENSICS <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Why STABILITY failed — descriptive only</span>
+          <strong class="vb-verdict">PARENTS REJECTED</strong>
+          <p class="vb-headline">{_esc((status.get('concentration_forensics') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Dataset: {_esc((status.get('concentration_forensics') or {}).get('DATASET') or 'NONE')}</span>
+          <span>LLM: {_esc((status.get('concentration_forensics') or {}).get('LLM_USED') or 'NO')}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Strategy</th>
+              <th>Total result</th>
+              <th>Top symbol</th>
+              <th>Top venue</th>
+              <th>Top time block</th>
+              <th>Positive blocks</th>
+              <th>Negative blocks</th>
+              <th>Concentration verdict</th>
+              <th>Structural explanation</th>
+              <th>Recommended next hypothesis</th>
+            </tr>
+          </thead>
+          <tbody>{_concentration_forensics_rows((status.get('concentration_forensics') or {}).get('rows') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('concentration_forensics') or {}).get('disclaimer') or 'Descriptive forensics. Parents remain REJECTED.')}
+        Production trading unchanged.
+        Run: python -m bot.research.forensics.runner
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH DATA STATUS <span class="pill">OPERATIONAL</span></h2>
       <div class="verdict-banner {_verdict_banner_class(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('FINAL_ACCEPTANCE_VERDICT') or (status.get('market_data_lab') or {}).get('verdict'))}">
         <div>
@@ -1681,6 +1720,39 @@ def _research_tournament_rows(board: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return "".join(rows)
+
+
+def _concentration_forensics_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "<tr><td colspan='10' class='empty'>"
+            "Nog geen forensics — run python -m bot.research.forensics.runner"
+            "</td></tr>"
+        )
+    out: list[str] = []
+    for row in rows:
+        verdict = str(row.get("CONCENTRATION_VERDICT") or "")
+        top_sym = row.get("TOP_SYMBOL") or "—"
+        top_sym_c = row.get("TOP_SYMBOL_CONTRIBUTION")
+        top_ven = row.get("TOP_VENUE") or "—"
+        top_ven_c = row.get("TOP_VENUE_CONTRIBUTION")
+        top_blk = row.get("TOP_TIME_BLOCK") or "—"
+        top_blk_c = row.get("TOP_TIME_BLOCK_CONTRIBUTION")
+        out.append(
+            "<tr>"
+            f"<td>{_esc(row.get('STRATEGY'))}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('TOTAL_RESULT'), 'money')}</td>"
+            f"<td>{_esc(top_sym)} ({_esc_fmt(top_sym_c, 'money')})</td>"
+            f"<td>{_esc(top_ven)} ({_esc_fmt(top_ven_c, 'money')})</td>"
+            f"<td>{_esc(top_blk)} ({_esc_fmt(top_blk_c, 'money')})</td>"
+            f"<td class='num'>{_esc(row.get('POSITIVE_BLOCKS'))}</td>"
+            f"<td class='num'>{_esc(row.get('NEGATIVE_BLOCKS'))}</td>"
+            f"<td><span class='chip {_status_chip_class(verdict)}'>{_esc(verdict)}</span></td>"
+            f"<td>{_esc(row.get('STRUCTURAL_EXPLANATION'))}</td>"
+            f"<td>{_esc(row.get('RECOMMENDED_NEXT_HYPOTHESIS'))}</td>"
+            "</tr>"
+        )
+    return "".join(out)
 
 
 def _research_data_status_rows(rds: dict[str, Any]) -> str:
