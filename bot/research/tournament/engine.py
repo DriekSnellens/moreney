@@ -160,29 +160,31 @@ def run_tournament(
         json.dumps(scoreboard, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
-    # Compact path for dashboard
-    Path("data/research_tournament_report.json").write_text(
-        json.dumps(
-            {
-                "DATASET_ID": out["DATASET_ID"],
-                "DATA_DURATION": out["DATA_DURATION"],
-                "DEVELOPMENT_WINDOW": out["DEVELOPMENT_WINDOW"],
-                "FREEZE_BOUNDARY": out["FREEZE_BOUNDARY"],
-                "OOS_WINDOW": out["OOS_WINDOW"],
-                "DATA_READINESS": readiness,
-                "scoreboard": scoreboard,
-                "PAPER_CANDIDATES": paper,
-                "ALL_STRATEGIES_REJECTED": out["ALL_STRATEGIES_REJECTED"],
-                "candidates": out["candidates"],
-                "PERFORMANCE": out["PERFORMANCE"],
-                "STATUS": out["STATUS"],
-                "label": PACKAGE_LABEL,
-            },
-            indent=2,
-            sort_keys=True,
-            default=str,
+    # Compact dashboard snapshot — never clobber from pytest tmp dirs.
+    resolved = dest.resolve()
+    if "data" in resolved.parts and "research_tournament" in resolved.parts:
+        Path("data/research_tournament_report.json").write_text(
+            json.dumps(
+                {
+                    "DATASET_ID": out["DATASET_ID"],
+                    "DATA_DURATION": out["DATA_DURATION"],
+                    "DEVELOPMENT_WINDOW": out["DEVELOPMENT_WINDOW"],
+                    "FREEZE_BOUNDARY": out["FREEZE_BOUNDARY"],
+                    "OOS_WINDOW": out["OOS_WINDOW"],
+                    "DATA_READINESS": readiness,
+                    "scoreboard": scoreboard,
+                    "PAPER_CANDIDATES": paper,
+                    "ALL_STRATEGIES_REJECTED": out["ALL_STRATEGIES_REJECTED"],
+                    "candidates": out["candidates"],
+                    "PERFORMANCE": out["PERFORMANCE"],
+                    "STATUS": out["STATUS"],
+                    "label": PACKAGE_LABEL,
+                },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
     return out

@@ -37,6 +37,29 @@ def load_tournament_report(path: Path | str) -> dict[str, Any]:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def _is_stability_forensics_source(report: dict[str, Any]) -> bool:
+    cands = report.get("candidates") or {}
+    for sid in TARGET_STRATEGIES:
+        c = cands.get(sid) or {}
+        if c.get("failed_gate") == "STABILITY" and (c.get("OOS_SIGNALS") or 0) >= 30:
+            return True
+    return False
+
+
+def resolve_tournament_report(path: Path | str) -> tuple[Path, dict[str, Any]]:
+    """Prefer a STABILITY-rejected observed run over a later synthetic clobber."""
+    chosen = Path(path)
+    report = load_tournament_report(chosen)
+    if _is_stability_forensics_source(report):
+        return chosen, report
+    fallback = Path("data/research_tournament/rerun_stride4/results.json")
+    if fallback.exists() and fallback.resolve() != chosen.resolve():
+        fb = load_tournament_report(fallback)
+        if _is_stability_forensics_source(fb):
+            return fallback, fb
+    return chosen, report
+
+
 def _venues_for(strategy_id: str, params: dict[str, Any]) -> tuple[str, str | None]:
     if strategy_id == "cross_venue_dislocation":
         return str(params.get("venue_a") or params.get("leader") or "binance"), str(
@@ -132,7 +155,8 @@ def run_forensics(
     stride: int = 4,
     llm_enabled: bool = True,
 ) -> dict[str, Any]:
-    report = load_tournament_report(tournament_report)
+    report_path = Path(tournament_report)
+    report_path, report = resolve_tournament_report(report_path)
     oos = report.get("OOS_WINDOW") or {}
     candidates = report.get("candidates") or {}
     missing = [s for s in TARGET_STRATEGIES if s not in candidates]
@@ -169,7 +193,7 @@ def run_forensics(
         "OOS_WINDOW": oos,
         "DEVELOPMENT_WINDOW": report.get("DEVELOPMENT_WINDOW"),
         "FREEZE_BOUNDARY": report.get("FREEZE_BOUNDARY"),
-        "frozen_params_source": str(tournament_report),
+        "frozen_params_source": str(report_path),
         "stride": stride,
         "tape_points_indexed": index.peak_points,
         "tape_dataset_id": index.dataset_id,

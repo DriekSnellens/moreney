@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from bot.paper.dashboard import render_dashboard
@@ -17,6 +18,7 @@ from bot.research.forensics.buckets import chrono_block_id, quote_age_regime
 from bot.research.forensics.classify import classify
 from bot.research.forensics.hypotheses import register_forensics_hypotheses
 from bot.research.forensics.llm_advisory import maybe_llm_advisory
+from bot.research.forensics.engine import resolve_tournament_report
 from bot.research.forensics.report import compact_dashboard, write_markdown
 from bot.research.llm.hypothesis_memory import HypothesisRegistry
 from bot.research.llm.provider import FakeResearchLLMProvider
@@ -408,3 +410,23 @@ def test_forensic_totals_are_sums() -> None:
     assert t["NET"] == 0.5
     assert t["gross"] == 2.1
     assert t["signals"] == 2
+
+
+def test_resolve_keeps_stability_report(tmp_path: Path) -> None:
+    p = tmp_path / "t.json"
+    p.write_text(
+        json.dumps(
+            {
+                "candidates": {
+                    "cross_venue_dislocation": {
+                        "failed_gate": "STABILITY",
+                        "OOS_SIGNALS": 1195,
+                    }
+                }
+            }
+        )
+    )
+    chosen, report = resolve_tournament_report(p)
+    assert chosen == p
+    assert report["candidates"]["cross_venue_dislocation"]["OOS_SIGNALS"] == 1195
+
