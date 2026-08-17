@@ -116,12 +116,18 @@ def canonical_units(
 
 
 def audit_card(card: dict[str, Any]) -> dict[str, Any]:
-    oos = card.get("OOS_RESULT") or card.get("metrics_oos") or {}
-    net = oos.get("NET")
-    expected = oos.get("EXPECTED_NET")
-    execution = oos.get("EXECUTION_NET") or (oos.get("execution_replay") or {}).get("EXECUTION_NET")
-    signals = int(oos.get("signals") or card.get("SAMPLE_COUNT") or 0)
-    fills = int(oos.get("completed_round_trips") or 0)
+    oos = card.get("OOS_RESULT") or {}
+    metrics = card.get("metrics_oos") or {}
+    net = oos.get("NET") if oos.get("NET") is not None else metrics.get("NET")
+    expected = oos.get("EXPECTED_NET") if oos.get("EXPECTED_NET") is not None else metrics.get("EXPECTED_NET")
+    execution = (
+        oos.get("EXECUTION_NET")
+        or metrics.get("EXECUTION_NET")
+        or (oos.get("execution_replay") or {}).get("EXECUTION_NET")
+        or (metrics.get("execution_replay") or {}).get("EXECUTION_NET")
+    )
+    signals = int(oos.get("signals") or metrics.get("signals") or card.get("SAMPLE_COUNT") or 0)
+    fills = int(oos.get("completed_round_trips") or metrics.get("completed_round_trips") or 0)
     reported = card.get("NET/fill")
     if reported is None:
         reported = oos.get("NET/fill") or oos.get("NET_per_fill")

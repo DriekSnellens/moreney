@@ -44,15 +44,10 @@ def research_decision(
 ) -> str:
     if required_regime_diversity and not regime_diversity_ok:
         return "INSUFFICIENT_REGIME_DIVERSITY"
-    if interpretation == "GATE_INACTIVE" and required_regime_diversity:
-        # Gate never selected; do not promote. Diversity may still be the blocker.
-        if not regime_diversity_ok:
-            return "INSUFFICIENT_REGIME_DIVERSITY"
-        return "INSUFFICIENT_REGIME_DIVERSITY"
     if model_uncertainty_too_high or interpretation == "MODEL_UNCERTAINTY_TOO_HIGH":
         return "MODEL_UNCERTAINTY_TOO_HIGH"
     if interpretation == "GATE_INACTIVE":
-        return "INSUFFICIENT_REGIME_DIVERSITY" if required_regime_diversity else "COLLECT_MORE_DATA"
+        return "COLLECT_MORE_DATA"
 
     agg = sum(window_nets) if window_nets else 0.0
     dom = window_dominance(window_nets)

@@ -161,7 +161,21 @@ def test_robust_blocked_without_all_gates() -> None:
     assert d == "PROMISING_REPLICATION_REQUIRED"
 
 
-def test_h0007_decision_insufficient_regime() -> None:
+def test_h0007_gate_inactive_collect_more_when_regimes_exist() -> None:
+    d = research_decision(
+        accounting_pass=False,
+        interpretation="GATE_INACTIVE",
+        independent_windows=3,
+        window_nets=[1.0, 1.0, 1.0],
+        survives_reasonable_stress=True,
+        gate_selective=False,
+        parent_comparison_available=True,
+        production_loosened=False,
+        model_uncertainty_too_high=False,
+        regime_diversity_ok=True,
+        required_regime_diversity=True,
+    )
+    assert d == "COLLECT_MORE_DATA"
     d = research_decision(
         accounting_pass=False,
         interpretation="GATE_INACTIVE",
