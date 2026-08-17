@@ -142,7 +142,7 @@ def _leaderboard_row(r: dict[str, Any]) -> str:
         f"<td class='num'>{_esc(r.get('opportunities'))}</td>"
         f"<td class='num'>{_esc(r.get('trades'))}</td>"
         f"<td class='num {_pnl_cls(r.get('net'))}'>{_fmt(r.get('net'))}</td>"
-        f"<td class='num'>{_fmt(r.get('net_per_fill'))}</td>"
+        f"<td class='num' title='OBSERVED paper sleeve net per fill; not canonical replay'>{_fmt(r.get('net_per_fill'))}</td>"
         f"<td class='num'>{_fmt(r.get('net_bps'))}</td>"
         f"<td class='num'>{_fmt(r.get('capital'))}</td>"
         f"<td class='num'>{_fmt(r.get('capital_velocity'), digits=6)}</td>"

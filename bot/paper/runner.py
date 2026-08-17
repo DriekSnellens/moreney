@@ -903,6 +903,7 @@ class PaperRunner:
             "concentration_forensics": self._concentration_forensics_snapshot(),
             "regime_hypothesis_lab": self._regime_hypothesis_lab_snapshot(),
             "edge_robustness_lab": self._edge_robustness_lab_snapshot(),
+            "canonical_accounting": self._canonical_accounting_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1382,6 +1383,53 @@ class PaperRunner:
                     "ACCOUNTING_AUDIT": report.get("ACCOUNTING_AUDIT"),
                     "STATUS": report.get("STATUS"),
                     "headline": "H-0005 / H-0007 robustness — not live alpha",
+                    "source": str(path),
+                    "disclaimer": report.get("disclaimer") or base["disclaimer"],
+                }
+            )
+        except Exception:
+            pass
+        return base
+
+    def _canonical_accounting_snapshot(self) -> dict[str, Any]:
+        """Canonical replay accounting — research only; never production PnL."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "CANONICAL_REPLAY_ACCOUNTING",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "ACCOUNTING_AUDIT": "NOT_RUN",
+            "PRODUCTION_EXECUTION": "DISABLED",
+            "ROBUST_PAPER_CANDIDATES": [],
+            "rows": [],
+            "headline": "Nog geen canonical accounting — python -m bot.research.accounting.runner",
+            "disclaimer": (
+                "Expected, canonical execution replay, and observed worlds are separate. "
+                "ACCOUNTING_FAIL blocks ROBUST_PAPER_CANDIDATE. Execution disabled."
+            ),
+        }
+        path = Path("data/canonical_accounting_report.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            audit = report.get("ACCOUNTING_AUDIT") or "NOT_RUN"
+            base.update(
+                {
+                    "ACCOUNTING_AUDIT": audit,
+                    "schema_version": report.get("schema_version"),
+                    "replay_version": report.get("replay_version"),
+                    "rows": report.get("rows") or [],
+                    "H-0005": report.get("H-0005") or {},
+                    "H-0007": report.get("H-0007") or {},
+                    "ROBUST_PAPER_CANDIDATES": report.get("ROBUST_PAPER_CANDIDATES") or [],
+                    "headline": (
+                        f"ACCOUNTING_{audit} — canonical execution replay is the only evaluation NET"
+                    ),
+                    "STATUS": report.get("STATUS"),
                     "source": str(path),
                     "disclaimer": report.get("disclaimer") or base["disclaimer"],
                 }

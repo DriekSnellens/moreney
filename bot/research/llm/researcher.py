@@ -10,6 +10,7 @@ from bot.research.llm.hypothesis_memory import HypothesisRegistry
 from bot.research.llm.prompts import PROPOSAL_SYSTEM
 from bot.research.llm.provider import ProviderError, ResearchLLMProvider
 from bot.research.llm.schemas import HypothesisBatch, HypothesisProposal
+from bot.research.accounting.protocol import H0007_AUTO_CHILD_GENERATION
 
 
 def propose_and_filter(
@@ -53,6 +54,15 @@ def propose_and_filter(
     )
     for hyp in hyps[: budget.max_new_hypotheses_per_run * 2]:
         out["proposed"].append(hyp.model_dump())
+        parent_id = getattr(hyp, "parent_hypothesis_id", None)
+        if (not H0007_AUTO_CHILD_GENERATION) and parent_id == "H-0007":
+            out["rejected_validator"].append(
+                {
+                    "title": hyp.title,
+                    "reasons": ["H-0007_GATE_INACTIVE_no_automatic_child_hypotheses"],
+                }
+            )
+            continue
         dups = registry.find_duplicates(hyp)
         if dups:
             # Allow if explicitly differentiated

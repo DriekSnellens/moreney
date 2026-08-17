@@ -454,6 +454,28 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>ACCOUNTING STATUS <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('canonical_accounting') or {}).get('ACCOUNTING_AUDIT') or 'NOT_RUN')}">
+        <div>
+          <span class="vb-kicker">Canonical execution replay — expected / replay / observed are separate worlds</span>
+          <strong class="vb-verdict">{_esc((status.get('canonical_accounting') or {}).get('ACCOUNTING_AUDIT') or 'NOT_RUN')}</strong>
+          <p class="vb-headline">{_esc((status.get('canonical_accounting') or {}).get('headline') or 'Accounting not run')}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Schema: {_esc((status.get('canonical_accounting') or {}).get('schema_version') or '—')}</span>
+          <span>Replay: {_esc((status.get('canonical_accounting') or {}).get('replay_version') or '—')}</span>
+          <span>Execution: DISABLED</span>
+          <span>ROBUST_PAPER_CANDIDATES: {_esc((status.get('canonical_accounting') or {}).get('ROBUST_PAPER_CANDIDATES') or [])}</span>
+        </div>
+      </div>
+      <p class="forecast-note">
+        ACCOUNTING_FAIL keeps production execution disabled and blocks ROBUST_PAPER_CANDIDATE.
+        Naked NET / PnL / NET/fill / EV are not shown without an economic-world subtitle.
+      </p>
+      {_canonical_strategy_panels(status.get('canonical_accounting') or {})}
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH TOURNAMENT <span class="pill">RESEARCH ONLY</span></h2>
       <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'NOT_READY')}">
         <div>
@@ -551,9 +573,9 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
               <th>Mechanism</th>
               <th>Status</th>
               <th>Discovery NET</th>
-              <th>DEV NET</th>
-              <th>OOS NET</th>
-              <th>NET/fill</th>
+              <th>Expected NET/signal <span class="th-sub">SIGNAL_EXPECTATION</span></th>
+              <th>Replay NET <span class="th-sub">EXECUTION_REPLAY sum</span></th>
+              <th title="RealizedReplayNetEUR / EstimatedFillCount">Replay NET/fill <span class="th-sub">EXECUTION_REPLAY</span></th>
               <th>Sample</th>
               <th>Stability</th>
               <th>Top concentration</th>
@@ -591,7 +613,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
               <th>ID</th>
               <th>Mechanical</th>
               <th>Interpretation</th>
-              <th>NET/fill + unit</th>
+              <th title="RealizedReplayNetEUR / EstimatedFillCount">Replay NET/fill <span class="th-sub">EXECUTION_REPLAY</span></th>
               <th>Edge/cost</th>
               <th>Edge/uncertainty</th>
               <th>BE adverse</th>
@@ -1316,6 +1338,40 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
       grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
       gap: 0.85rem;
     }}
+    .th-sub {{
+      display: block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .world-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.85rem;
+      margin: 0.85rem 0 1.1rem;
+    }}
+    .world-card .label {{
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    .world-card .value {{
+      display: block;
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 0.2rem;
+    }}
+    .world-card .sub {{
+      display: block;
+      margin-top: 0.25rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }}
     .finding-card {{
       border: 1px solid var(--line);
       border-radius: 14px;
@@ -1856,6 +1912,11 @@ def _regime_hypothesis_lab_rows(rows: list[dict[str, Any]]) -> str:
         )
         disc = row.get("Discovery_NET")
         disc_s = "—" if disc is None else disc
+        oos_expected = row.get("OOS_NET")
+        replay_net = row.get("canonical_replay_net_eur")
+        replay_pf = row.get("canonical_replay_net_per_fill_eur")
+        if replay_pf is None:
+            replay_pf = row.get("NET_per_fill")
         parts.append(
             "<tr>"
             f"<td>{_esc(row.get('ID'))}</td>"
@@ -1863,10 +1924,10 @@ def _regime_hypothesis_lab_rows(rows: list[dict[str, Any]]) -> str:
             f"<td>{_esc(row.get('Mechanism'))}</td>"
             f"<td><span class='chip {_status_chip_class(row.get('Status'))}'>"
             f"{_esc(row.get('Status'))}</span></td>"
-            f"<td class='num'>{_esc(disc_s)}</td>"
-            f"<td class='num'>{_esc_fmt(row.get('DEV_NET'), 'money')}</td>"
-            f"<td class='num'>{_esc_fmt(row.get('OOS_NET'), 'money')}</td>"
-            f"<td class='num'>{_esc_fmt(row.get('NET_per_fill'), 'money')}</td>"
+            f"<td class='num' title='OBSERVED world only; forensic discovery is not strategy PnL'>{_esc(disc_s)}</td>"
+            f"<td class='num' title='SIGNAL_EXPECTATION: ExpectedNetPerSignalEUR'>{_esc_fmt(row.get('DEV_NET'), 'money')}</td>"
+            f"<td class='num' title='SIGNAL_EXPECTATION: ExpectedNetPerSignalEUR'>{_esc_fmt(oos_expected, 'money')}</td>"
+            f"<td class='num' title='EXECUTION_REPLAY: RealizedReplayNetEUR / EstimatedFillCount'>{_esc_fmt(replay_pf, 'money')}</td>"
             f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
             f"<td>{_esc(row.get('stability'))}</td>"
             f"<td>{_esc(top_txt)}</td>"
@@ -1886,19 +1947,27 @@ def _edge_robustness_lab_rows(rows: list[dict[str, Any]]) -> str:
         )
     parts: list[str] = []
     for row in rows:
-        unit = row.get("NET_per_fill_unit") or ""
-        netf = row.get("NET_per_fill")
+        netf = row.get("canonical_replay_net_per_fill_eur")
+        if netf is None:
+            netf = row.get("replay_net_per_fill_eur")
+        unit = "EUR / estimated fill"
         net_txt = "—" if netf is None else f"{netf} {unit}".strip()
+        title = (
+            "EXECUTION_REPLAY RealizedReplayNetEUR / EstimatedFillCount. "
+            "Not mean_edge_execution_replay_net_per_fill_eur."
+        )
         parent = row.get("parent_comparison") or {}
         parent_txt = parent.get("positive")
+        if row.get("ID") == "H-0007" or row.get("gate_inactive") or row.get("RESEARCH_STATUS") == "GATE_INACTIVE":
+            parent_txt = "GATE INACTIVE — OOS_PASS is not selective improvement"
         parts.append(
             "<tr>"
             f"<td>{_esc(row.get('ID'))}</td>"
             f"<td><span class='chip {_status_chip_class(row.get('mechanical_verdict'))}'>"
             f"{_esc(row.get('mechanical_verdict'))}</span></td>"
-            f"<td><span class='chip {_status_chip_class(row.get('interpretation_verdict'))}'>"
-            f"{_esc(row.get('interpretation_verdict'))}</span></td>"
-            f"<td class='num'>{_esc(net_txt)}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('interpretation_verdict') or row.get('RESEARCH_STATUS'))}'>"
+            f"{_esc(row.get('interpretation_verdict') or row.get('RESEARCH_STATUS'))}</span></td>"
+            f"<td class='num' title='{_esc(title)}'>{_esc(net_txt)}</td>"
             f"<td class='num'>{_esc(row.get('edge_to_cost'))}</td>"
             f"<td class='num'>{_esc(row.get('edge_to_uncertainty'))}</td>"
             f"<td class='num'>{_esc(row.get('break_even_adverse'))}</td>"
@@ -1912,6 +1981,58 @@ def _edge_robustness_lab_rows(rows: list[dict[str, Any]]) -> str:
             f"<td><span class='chip {_status_chip_class(row.get('final_research_decision'))}'>"
             f"{_esc(row.get('final_research_decision'))}</span></td>"
             "</tr>"
+        )
+    return "".join(parts)
+
+
+def _canonical_strategy_panels(block: dict[str, Any]) -> str:
+    if not block:
+        return "<p class='forecast-note'>Run: python -m bot.research.accounting.runner</p>"
+    parts: list[str] = []
+    for hid in ("H-0005", "H-0007"):
+        row = next((r for r in (block.get("rows") or []) if r.get("ID") == hid), None) or block.get(hid) or {}
+        if hid == "H-0007":
+            gate_note = (
+                "<p class='forecast-note'><strong>GATE INACTIVE.</strong> "
+                "OOS_PASS does not imply selective strategy improvement. "
+                "Do not retune the WIDE threshold. No automatic child hypotheses.</p>"
+            )
+        else:
+            gate_note = (
+                "<p class='forecast-note'><strong>Parent vs child incremental</strong> "
+                "(paired same-window replay): delta="
+                f"{_esc(row.get('paired_delta_replay_net_eur') or row.get('PARENT_CHILD_PAIRED_DELTA'))} "
+                f"· mean delta={_esc(row.get('paired_mean_delta'))} "
+                f"· positive windows={_esc(row.get('paired_positive_window_fraction'))}</p>"
+            )
+        parts.append(
+            "<article class='finding-card'>"
+            f"<div class='finding-top'><span class='finding-title'>{_esc(hid)}</span>"
+            f"<span class='badge {_status_chip_class(row.get('RESEARCH_STATUS') or row.get('RESEARCH_DECISION'))}'>"
+            f"{_esc(row.get('RESEARCH_STATUS') or row.get('RESEARCH_DECISION') or 'PENDING')}</span></div>"
+            "<div class='world-grid'>"
+            "<div class='world-card'>"
+            "<span class='label'>1. Expected economics</span>"
+            f"<span class='value' title='SIGNAL_EXPECTATION ExpectedNetPerSignalEUR'>"
+            f"{_esc(row.get('expected_net_per_signal_eur'))}</span>"
+            "<span class='sub'>SIGNAL_EXPECTATION · EUR per signal · mean-edge waterfall</span>"
+            "</div>"
+            "<div class='world-card'>"
+            "<span class='label'>2. Canonical execution replay</span>"
+            f"<span class='value' title='EXECUTION_REPLAY RealizedReplayNetEUR'>"
+            f"{_esc(row.get('replay_net_eur') or row.get('CANONICAL_REPLAY_NET'))}</span>"
+            "<span class='sub'>EXECUTION_REPLAY · replay NET/fill="
+            f"{_esc(row.get('replay_net_per_fill_eur') or row.get('CANONICAL_REPLAY_NET_PER_FILL') or row.get('canonical_replay_net_per_fill_eur'))}"
+            " (RealizedReplayNetEUR / EstimatedFillCount)</span>"
+            "</div>"
+            "<div class='world-card'>"
+            "<span class='label'>3. Observed / paper</span>"
+            f"<span class='value'>{_esc(row.get('observed_status') or 'NOT_RUN')}</span>"
+            "<span class='sub'>OBSERVED · must never silently replace replay</span>"
+            "</div>"
+            "</div>"
+            f"{gate_note}"
+            "</article>"
         )
     return "".join(parts)
 
@@ -2021,7 +2142,7 @@ def _horizon_chips(rows: list[dict[str, Any]]) -> str:
 
 def _status_chip_class(status: Any) -> str:
     text = str(status or "").upper()
-    if text in {"READY", "HIGH", "SUPPORTED", "OK", "PASS"}:
+    if text in {"READY", "HIGH", "SUPPORTED", "OK", "PASS", "ACCOUNTING_PASS"}:
         return "ok"
     if (
         "CAUTION" in text
@@ -2031,6 +2152,8 @@ def _status_chip_class(status: Any) -> str:
         or "PROMISING" in text
         or "COLLECT" in text
         or "GATE_INACTIVE" in text
+        or "NOT_RUN" in text
+        or "REPLICATING" in text
         or text == "OOS_PASS"
     ):
         return "warn"
@@ -2043,7 +2166,9 @@ def _verdict_banner_class(verdict: Any) -> str:
         "READY_FOR" in text and "NOT" not in text and "PARTIAL" not in text
     ):
         return "ok"
-    if "PARTIAL" in text or "RECORDING" in text or "CAUTION" in text:
+    if text in {"ACCOUNTING_PASS", "PASS"}:
+        return "ok"
+    if "NOT_RUN" in text or "PARTIAL" in text or "RECORDING" in text or "CAUTION" in text:
         return "warn"
     return "bad"
 

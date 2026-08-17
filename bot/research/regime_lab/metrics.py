@@ -1,9 +1,15 @@
-"""Research metrics. NET remains the only profitability metric."""
+"""Research metrics. Canonical execution replay is the only evaluation NET.
+
+EXPECTED_NET remains the tournament mean-edge per-signal figure used by OOS
+gates. It is SIGNAL_EXPECTATION, not replay.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from bot.research.accounting.schema import EconomicWorld
+from bot.research.accounting.waterfall import from_attached_events
 from bot.research.tournament.criteria import (
     ADVERSE_BPS_DEFAULT,
     LATENCY_PENALTY_BPS,
@@ -39,6 +45,9 @@ def attach_event_economics(
                 "slippage": slip,
                 "adverse": adverse,
                 "latency": latency,
+                "other_costs": latency,
+                "funding": 0.0,
+                "transfer": 0.0,
                 "net": net,
                 "capital_lock_ms": horizon_ms,
                 "inventory_effect": 0.0,
@@ -60,49 +69,76 @@ def window_metrics(
     n = len(events)
     cand = int((audit or {}).get("candidates") or n)
     admitted = int((audit or {}).get("admitted") or n)
-    gross = sum(float(e.get("gross") or 0.0) for e in events)
-    fees = sum(float(e.get("fees") or 0.0) for e in events)
-    slip = sum(float(e.get("slippage") or 0.0) for e in events)
-    adverse = sum(float(e.get("adverse") or 0.0) for e in events)
-    net = sum(float(e.get("net") or 0.0) for e in events)
-    edge = abs(float(mean_forward or 0.0))
+    canon = from_attached_events(
+        events,
+        venue=venue,
+        venue_exit=venue_exit,
+        mean_forward=mean_forward,
+        audit=audit,
+    )
+    # Tournament OOS gates still read EXPECTED_NET (mean-edge per signal).
     wf = net_waterfall_from_edge(
-        gross_edge_fraction=edge, venue=venue, venue_exit=venue_exit
+        gross_edge_fraction=abs(float(mean_forward or 0.0)), venue=venue, venue_exit=venue_exit
     )
     wf["CAPITAL_LOCK_MS"] = horizon_ms
     wf["INVENTORY_EFFECT"] = 0.0
     expected_net = float(wf["EXPECTED_NET"])
     replay = execution_replay_net(expected_net=expected_net)
     exec_net = float(replay["EXECUTION_NET"])
-    fills = max(1, int(round(n * float(replay["fill_rate"])))) if n else 0
+    fills = canon.fills.value
     dd = _max_drawdown(events)
-    net_per_fill = (exec_net / fills) if fills else None
-    gross_bps = abs(edge) * 10000.0
+    canonical_per_fill = (
+        None if canon.replay_net_per_fill is None else float(canon.replay_net_per_fill.value)
+    )
+    mean_edge_per_fill = (
+        None
+        if canon.mean_edge_execution_replay_net_per_fill is None
+        else float(canon.mean_edge_execution_replay_net_per_fill.value)
+    )
+    gross_bps = abs(float(mean_forward or 0.0)) * 10000.0
     net_per_bps = (expected_net / gross_bps) if gross_bps else None
-    ev_capture = (exec_net / expected_net) if expected_net else None
     return {
         "signals": n,
         "candidate_events": cand,
         "accepted_events": admitted,
         "completed_round_trips": fills,
-        "gross": gross,
-        "fees": fees,
-        "slippage": slip,
-        "adverse": adverse,
-        "NET": net,
+        "gross": float(canon.gross.value),
+        "fees": float(canon.fees.value),
+        "slippage": float(canon.slippage.value),
+        "adverse": float(canon.adverse.value),
+        "other_costs": float(canon.other_costs.value),
+        "NET": float(canon.replay_net.value),
+        "NET_world": EconomicWorld.EXECUTION_REPLAY.value,
+        "NET_quantity": "RealizedReplayNetEUR",
         "EXPECTED_NET": expected_net,
+        "EXPECTED_NET_world": EconomicWorld.SIGNAL_EXPECTATION.value,
+        "EXPECTED_NET_quantity": "ExpectedNetPerSignalEUR",
         "EXECUTION_NET": exec_net,
-        "NET_per_fill": net_per_fill,
+        "EXECUTION_NET_quantity": "MeanEdgeExecutionReplayNetPerSignalEUR",
+        "NET_per_fill": canonical_per_fill,
+        "NET_per_fill_world": EconomicWorld.EXECUTION_REPLAY.value,
+        "NET_per_fill_quantity": "RealizedReplayNetPerFillEUR",
+        "NET_per_fill_definition": (
+            "RealizedReplayNetEUR / EstimatedFillCount. Not the mean-edge overlay."
+        ),
+        "mean_edge_execution_replay_net_per_fill_eur": mean_edge_per_fill,
+        "mean_edge_execution_replay_net_per_fill_quantity": "MeanEdgeExecutionReplayNetPerFillEUR",
+        "canonical_replay_net_per_signal_eur": float(canon.replay_net_per_signal.value) if n else None,
         "NET_per_bps": net_per_bps,
         "EV": expected_net,
-        "EV_capture": ev_capture,
+        "EV_world": EconomicWorld.SIGNAL_EXPECTATION.value,
+        "EV_quantity": "ExpectedNetPerSignalEUR",
+        "EV_capture": None,
+        "EV_capture_note": "Cross-world; only via explicit CrossWorldComparison.",
         "maximum_drawdown": dd,
         "waterfall": wf,
         "execution_replay": replay,
         "mean_forward": mean_forward,
+        "canonical": canon.report_block(),
         "note": (
-            "Sum NET is descriptive per-event accounting. EXPECTED_NET is the "
-            "tournament mean-edge waterfall (unchanged cost model)."
+            "NET is canonical RealizedReplayNetEUR (sum of per-signal waterfalls). "
+            "EXPECTED_NET is SIGNAL_EXPECTATION mean-edge per signal (OOS gates). "
+            "mean_edge_execution_replay_net_per_fill_eur is the old unlabeled NET/fill sidecar."
         ),
     }
 

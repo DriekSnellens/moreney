@@ -80,17 +80,17 @@ def canonical_units(
         "NET_per_fill_from_sum": tagged(
             net_per_fill_from_sum,
             "EUR_per_estimated_fill",
-            "NET / completed_round_trips. Uses sum NET, not the mean-edge replay.",
+            "mapped to canonical RealizedReplayNetPerFillEUR: NET / completed_round_trips.",
         ),
         "NET_per_fill_from_replay": tagged(
             net_per_fill_from_replay,
             "EUR_per_estimated_fill_of_mean_edge_replay",
-            "EXECUTION_NET / completed_round_trips. This is what the first lab reported as NET/fill.",
+            "MeanEdgeExecutionReplayNetPerFillEUR: EXECUTION_NET / fills. DEPRECATED unlabeled NET/fill.",
         ),
         "NET_per_fill_reported": tagged(
             reported_net_per_fill,
             "EUR_per_estimated_fill_of_mean_edge_replay",
-            "Value published by the first lab as NET/fill.",
+            "MeanEdgeExecutionReplayNetPerFillEUR historically published as unlabeled NET/fill.",
         ),
         "NET_per_notional": tagged(
             net_per_notional,

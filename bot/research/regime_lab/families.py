@@ -113,6 +113,62 @@ class FreshnessCVDFamily(_AuditFamily):
         obs = max(_stats.observations, len(candidates))
         return summarize_forwards(forwards, observations=obs), admitted
 
+    def partition_window(
+        self,
+        index: TapeIndex,
+        *,
+        start_ns: int,
+        end_ns_exclusive: int | None,
+        end_ns_inclusive: int | None,
+        params: dict[str, Any],
+        horizons: list[int],
+    ) -> dict[str, Any]:
+        """Parent candidates + child split on the same universe (no second parent eval)."""
+        parent = CrossVenueDislocationFamily()
+        _stats, candidates = parent.evaluate_window(
+            index,
+            start_ns=start_ns,
+            end_ns_exclusive=end_ns_exclusive,
+            end_ns_inclusive=end_ns_inclusive,
+            params=params,
+            horizons=horizons,
+        )
+        views = views_for(index)
+        venue = str(params.get("venue_a") or "binance")
+        peer = str(params.get("venue_b") or "bitvavo")
+        admitted: list[dict[str, Any]] = []
+        rejected_rows: list[dict[str, Any]] = []
+        unsupported_rows: list[dict[str, Any]] = []
+        for raw in candidates:
+            row = enrich_pretrade(
+                raw, index=index, views=views, venue=venue, peer_venue=peer
+            )
+            age = row.get("quote_age_ms")
+            decision = classify_freshness(None if age is None else float(age))
+            row["admission"] = decision
+            if decision == "UNSUPPORTED_DATA":
+                unsupported_rows.append(row)
+            elif decision == "ADMITTED":
+                admitted.append(row)
+            else:
+                rejected_rows.append(row)
+        self.last_audit = {
+            "candidates": len(candidates),
+            "admitted": len(admitted),
+            "rejected": len(rejected_rows),
+            "unsupported": len(unsupported_rows),
+            "rejected_not_labels": True,
+            "hypothesis_id": self.hypothesis_id,
+        }
+        return {
+            "parent_events": candidates,
+            "child_events": admitted,
+            "excluded_events": rejected_rows,
+            "unsupported_events": unsupported_rows,
+            "parent_stats": _stats,
+            "audit": dict(self.last_audit),
+        }
+
 
 class WideSpreadMRFamily(_AuditFamily):
     strategy_id = "short_horizon_mean_reversion_wide_spread"
@@ -176,6 +232,64 @@ class WideSpreadMRFamily(_AuditFamily):
         }
         obs = max(_stats.observations, len(candidates))
         return summarize_forwards(forwards, observations=obs), admitted
+
+    def partition_window(
+        self,
+        index: TapeIndex,
+        *,
+        start_ns: int,
+        end_ns_exclusive: int | None,
+        end_ns_inclusive: int | None,
+        params: dict[str, Any],
+        horizons: list[int],
+    ) -> dict[str, Any]:
+        """Parent candidates + child split on the same universe (no second parent eval)."""
+        parent = ShortHorizonMeanReversionFamily()
+        _stats, candidates = parent.evaluate_window(
+            index,
+            start_ns=start_ns,
+            end_ns_exclusive=end_ns_exclusive,
+            end_ns_inclusive=end_ns_inclusive,
+            params=params,
+            horizons=horizons,
+        )
+        views = views_for(index)
+        venue = str(params.get("venue") or "bitvavo")
+        others = [v for v in ("binance", "okx", "bitvavo") if v != venue]
+        peer = others[0] if others else None
+        admitted: list[dict[str, Any]] = []
+        rejected_rows: list[dict[str, Any]] = []
+        unsupported_rows: list[dict[str, Any]] = []
+        for raw in candidates:
+            row = enrich_pretrade(
+                raw, index=index, views=views, venue=venue, peer_venue=peer
+            )
+            sp = row.get("spread_bps")
+            decision = classify_wide_spread(None if sp is None else float(sp))
+            row["admission"] = decision
+            if decision == "UNSUPPORTED_DATA":
+                unsupported_rows.append(row)
+            elif decision == "ADMITTED":
+                admitted.append(row)
+            else:
+                rejected_rows.append(row)
+        self.last_audit = {
+            "candidates": len(candidates),
+            "admitted": len(admitted),
+            "rejected": len(rejected_rows),
+            "unsupported": len(unsupported_rows),
+            "rejected_not_labels": True,
+            "hypothesis_id": self.hypothesis_id,
+            "event_density_is_feature_only": True,
+        }
+        return {
+            "parent_events": candidates,
+            "child_events": admitted,
+            "excluded_events": rejected_rows,
+            "unsupported_events": unsupported_rows,
+            "parent_stats": _stats,
+            "audit": dict(self.last_audit),
+        }
 
 
 class NoTradeBaseline(_AuditFamily):

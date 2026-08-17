@@ -47,7 +47,9 @@ def _slice(m: dict[str, Any]) -> dict[str, Any]:
     return {
         "EXPECTED_NET": m.get("EXPECTED_NET"),
         "NET": m.get("NET"),
-        "NET_per_fill": m.get("NET_per_fill"),
+        "NET_per_fill": m.get("NET_per_fill"),  # mapped to canonical RealizedReplayNetPerFillEUR when window_metrics is used
+        "NET_per_fill_world": m.get("NET_per_fill_world"),
+        "NET_per_fill_quantity": m.get("NET_per_fill_quantity") or "RealizedReplayNetPerFillEUR",
         "signals": m.get("signals"),
         "maximum_drawdown": m.get("maximum_drawdown"),
         "top_symbol_share": stab.get("top_symbol_share"),

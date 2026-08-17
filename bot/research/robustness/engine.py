@@ -451,8 +451,16 @@ def _dash_row(card: dict[str, Any], hid: str) -> dict[str, Any]:
         "ID": hid,
         "mechanical_verdict": card.get("MECHANICAL_VERDICT"),
         "interpretation_verdict": card.get("INTERPRETATION_VERDICT"),
-        "NET_per_fill": units.get("value") if units.get("value") is not None else card.get("historical_NET_per_fill"),
-        "NET_per_fill_unit": units.get("unit"),
+        "canonical_replay_net_per_fill_eur": (
+            (acc.get("units") or {}).get("NET_per_fill_from_sum") or {}
+        ).get("value"),
+        "canonical_replay_net_per_fill_world": "EXECUTION_REPLAY",
+        "mean_edge_execution_replay_net_per_fill_eur": units.get("value")
+        if units.get("value") is not None
+        else card.get("historical_NET_per_fill"),
+        "mean_edge_execution_replay_net_per_fill_unit": units.get("unit"),
+        "NET_per_fill": None,
+        "NET_per_fill_unit": None,
         "edge_to_cost": card.get("EDGE_TO_COST_RATIO"),
         "edge_to_uncertainty": card.get("EDGE_TO_MODEL_UNCERTAINTY_RATIO"),
         "break_even_adverse": be_a.get("value"),

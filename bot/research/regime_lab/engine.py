@@ -366,7 +366,11 @@ def _window_card(m: dict[str, Any], *, stability: dict[str, Any] | None = None) 
     admitted = int(audit.get("admitted") or m.get("accepted_events") or m.get("signals") or 0)
     return {
         "EXPECTED_NET": m.get("EXPECTED_NET"),
+        "EXPECTED_NET_world": m.get("EXPECTED_NET_world"),
+        "EXPECTED_NET_quantity": m.get("EXPECTED_NET_quantity"),
         "NET": m.get("NET"),
+        "NET_world": m.get("NET_world"),
+        "NET_quantity": m.get("NET_quantity"),
         "signals": m.get("signals"),
         "candidate_events": m.get("candidate_events"),
         "accepted_events": m.get("accepted_events"),
@@ -375,9 +379,17 @@ def _window_card(m: dict[str, Any], *, stability: dict[str, Any] | None = None) 
         "fees": m.get("fees"),
         "slippage": m.get("slippage"),
         "adverse": m.get("adverse"),
+        "canonical_replay_net_per_fill_eur": m.get("NET_per_fill"),
+        "canonical_replay_net_per_fill_world": m.get("NET_per_fill_world"),
         "NET/fill": m.get("NET_per_fill"),
+        "NET/fill_world": m.get("NET_per_fill_world"),
+        "NET/fill_quantity": m.get("NET_per_fill_quantity"),
+        "mean_edge_execution_replay_net_per_fill_eur": m.get(
+            "mean_edge_execution_replay_net_per_fill_eur"
+        ),
         "NET/bps": m.get("NET_per_bps"),
         "EV": m.get("EV"),
+        "EV_world": m.get("EV_world"),
         "EV_capture": m.get("EV_capture"),
         "maximum_drawdown": m.get("maximum_drawdown"),
         "block_stability": {
@@ -523,8 +535,21 @@ def _dash_row(card: dict[str, Any], hid: str) -> dict[str, Any]:
         "Status": card.get("VERDICT") or "CANDIDATE",
         "Discovery_NET": card.get("DISCOVERY_NET"),
         "DEV_NET": (card.get("DEV_RESULT") or {}).get("EXPECTED_NET"),
+        "DEV_NET_world": "SIGNAL_EXPECTATION",
         "OOS_NET": (card.get("OOS_RESULT") or {}).get("EXPECTED_NET"),
-        "NET_per_fill": card.get("NET/fill"),
+        "OOS_NET_world": "SIGNAL_EXPECTATION",
+        "OOS_NET_quantity": "ExpectedNetPerSignalEUR",
+        "canonical_replay_net_eur": (card.get("OOS_RESULT") or {}).get("NET"),
+        "canonical_replay_net_world": "EXECUTION_REPLAY",
+        "canonical_replay_net_per_fill_eur": (card.get("OOS_RESULT") or {}).get(
+            "canonical_replay_net_per_fill_eur"
+        )
+        or (card.get("OOS_RESULT") or {}).get("NET/fill"),
+        "canonical_replay_net_per_fill_world": "EXECUTION_REPLAY",
+        "mean_edge_execution_replay_net_per_fill_eur": (card.get("OOS_RESULT") or {}).get(
+            "mean_edge_execution_replay_net_per_fill_eur"
+        ),
+        "NET_per_fill": None,
         "sample_count": card.get("SAMPLE_COUNT"),
         "stability": stab.get("label"),
         "top_concentration": card.get("TOP_CONCENTRATION"),

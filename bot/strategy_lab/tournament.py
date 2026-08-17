@@ -357,7 +357,7 @@ def _leaderboard_row(sc, *, sleeve: dict[str, Any]) -> dict[str, Any]:
         "opportunities": sc.opportunities,
         "trades": sc.completed,
         "net": float(sc.realized_net_eur),
-        "net_per_fill": float(sc.net_eur_per_fill),
+        "net_per_fill": float(sc.net_eur_per_fill),  # OBSERVED paper sleeve; mapped to ObservedRealizedRoundtripNetEUR / fill count; not canonical replay
         "net_bps": float(sc.net_bps),
         "capital": float(Decimal(str(sleeve.get("budget_eur") or 0))),
         "capital_velocity": float(sc.capital_velocity),

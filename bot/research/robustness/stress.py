@@ -48,7 +48,7 @@ def _net(
     extra = n * float(ADVERSE_EXTRA_BPS) / 10000.0
     exec_net = float(fill_prob) * (expected - extra)
     fills_if_one = float(fill_prob)
-    net_per_fill = (expected - extra) if fills_if_one else expected
+    net_per_fill = (expected - extra) if fills_if_one else expected  # MeanEdgeExecutionReplayNetPerFillEUR sidecar; not canonical replay NET/fill
     return {
         "EXPECTED_NET": expected,
         "EXECUTION_NET": exec_net,

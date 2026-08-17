@@ -38,7 +38,7 @@ class _WFResult:
             "fills": self.fills,
             "completed_trades": self.completed,
             "realized_net": str(self.realized_net),
-            "net_per_fill": str(self.realized_net / Decimal(n)),
+            "net_per_fill": str(self.realized_net / Decimal(n)),  # OBSERVED: mapped to ObservedRealizedRoundtripNetEUR / fills; not canonical replay
             "adverse_per_fill": str(self.adverse_sum / Decimal(n)),
             "fees_per_fill": str(self.fees_sum / Decimal(n)),
             "fill_rate": None,  # all labeled events are fills in this dataset
@@ -285,7 +285,7 @@ def untouched_oos_eval(events: list[LabeledEvent]) -> dict[str, Any]:
             "rejected": rejected,
             "completed_trades": completed,
             "realized_net": str(net),
-            "net_per_fill": str(net / Decimal(n)),
+            "net_per_fill": str(net / Decimal(n)),  # OBSERVED: mapped to ObservedRealizedRoundtripNetEUR / fills; not canonical replay
             "adverse_per_fill": str(adv / Decimal(n)),
             "fees_per_fill": str(fees / Decimal(n)),
         }
@@ -295,7 +295,7 @@ def untouched_oos_eval(events: list[LabeledEvent]) -> dict[str, Any]:
         "test": len(test),
         "completed_trades": len(test),
         "realized_net": str(base_net),
-        "net_per_fill": str(base_net / Decimal(max(1, len(test)))),
+        "net_per_fill": str(base_net / Decimal(max(1, len(test)))),  # OBSERVED: mapped to ObservedRealizedRoundtripNetEUR / fills; not canonical replay
     }
     return oos
 

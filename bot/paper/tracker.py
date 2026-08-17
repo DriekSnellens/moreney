@@ -622,7 +622,7 @@ class PerformanceTracker:
         )
         completed = [o for o in self._opportunities if o.realized_net_profit is not None]
         n_fills = Decimal(trade_count) if trade_count else _ZERO
-        net_per_fill = net_pnl / n_fills if n_fills else _ZERO
+        net_per_fill = net_pnl / n_fills if n_fills else _ZERO  # OBSERVED: mapped to ObservedRealizedRoundtripNetEUR / ExecutionCount; not canonical replay
         volume = self._trading_volume if self._trading_volume > 0 else _ZERO
         net_bps = (net_pnl / volume * _HUNDRED * Decimal("100")) if volume > 0 else _ZERO
         sum_expected = sum((o.expected_net_profit for o in completed), _ZERO)
