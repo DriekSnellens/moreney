@@ -902,6 +902,7 @@ class PaperRunner:
             "research_tournament": self._research_tournament_snapshot(),
             "concentration_forensics": self._concentration_forensics_snapshot(),
             "regime_hypothesis_lab": self._regime_hypothesis_lab_snapshot(),
+            "edge_robustness_lab": self._edge_robustness_lab_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1346,6 +1347,43 @@ class PaperRunner:
                     "headline": "Independent H-0005 / H-0007 — parents remain REJECTED",
                     "STATUS": report.get("STATUS"),
                     "source": str(path),
+                }
+            )
+        except Exception:
+            pass
+        return base
+
+    def _edge_robustness_lab_snapshot(self) -> dict[str, Any]:
+        """EDGE ROBUSTNESS LAB — second-layer interpretation; not production."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "EDGE_ROBUSTNESS_LAB",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "rows": [],
+            "PRODUCTION_EXECUTION": "DISABLED",
+            "headline": "Nog geen robustness-lab — python -m bot.research.robustness.runner",
+            "disclaimer": (
+                "Mechanical OOS_PASS unchanged. Interpretation is a second layer. "
+                "Research-only stress. Execution disabled."
+            ),
+        }
+        path = Path("data/edge_robustness_lab_report.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            base.update(
+                {
+                    "rows": report.get("rows") or [],
+                    "ACCOUNTING_AUDIT": report.get("ACCOUNTING_AUDIT"),
+                    "STATUS": report.get("STATUS"),
+                    "headline": "H-0005 / H-0007 robustness — not live alpha",
+                    "source": str(path),
+                    "disclaimer": report.get("disclaimer") or base["disclaimer"],
                 }
             )
         except Exception:

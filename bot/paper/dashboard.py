@@ -572,6 +572,49 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>EDGE ROBUSTNESS LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Second-layer interpretation — mechanical OOS_PASS unchanged</span>
+          <strong class="vb-verdict">{_esc((status.get('edge_robustness_lab') or {}).get('ACCOUNTING_AUDIT') or 'PENDING')}</strong>
+          <p class="vb-headline">{_esc((status.get('edge_robustness_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Accounting: {_esc((status.get('edge_robustness_lab') or {}).get('ACCOUNTING_AUDIT') or 'PENDING')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Mechanical</th>
+              <th>Interpretation</th>
+              <th>NET/fill + unit</th>
+              <th>Edge/cost</th>
+              <th>Edge/uncertainty</th>
+              <th>BE adverse</th>
+              <th>BE fee</th>
+              <th>BE slip</th>
+              <th>Worst stress</th>
+              <th>OOS windows</th>
+              <th>Gate sel.</th>
+              <th>Parent Δ</th>
+              <th>Replication</th>
+              <th>Decision</th>
+            </tr>
+          </thead>
+          <tbody>{_edge_robustness_lab_rows((status.get('edge_robustness_lab') or {}).get('rows') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('edge_robustness_lab') or {}).get('disclaimer') or 'Mechanical OOS_PASS unchanged.')}
+        Run: python -m bot.research.robustness.runner
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH DATA STATUS <span class="pill">OPERATIONAL</span></h2>
       <div class="verdict-banner {_verdict_banner_class(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('FINAL_ACCEPTANCE_VERDICT') or (status.get('market_data_lab') or {}).get('verdict'))}">
         <div>
@@ -1834,6 +1877,45 @@ def _regime_hypothesis_lab_rows(rows: list[dict[str, Any]]) -> str:
     return "".join(parts)
 
 
+def _edge_robustness_lab_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "<tr><td colspan='15' class='empty'>"
+            "Nog geen robustness-lab — run python -m bot.research.robustness.runner"
+            "</td></tr>"
+        )
+    parts: list[str] = []
+    for row in rows:
+        unit = row.get("NET_per_fill_unit") or ""
+        netf = row.get("NET_per_fill")
+        net_txt = "—" if netf is None else f"{netf} {unit}".strip()
+        parent = row.get("parent_comparison") or {}
+        parent_txt = parent.get("positive")
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('ID'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('mechanical_verdict'))}'>"
+            f"{_esc(row.get('mechanical_verdict'))}</span></td>"
+            f"<td><span class='chip {_status_chip_class(row.get('interpretation_verdict'))}'>"
+            f"{_esc(row.get('interpretation_verdict'))}</span></td>"
+            f"<td class='num'>{_esc(net_txt)}</td>"
+            f"<td class='num'>{_esc(row.get('edge_to_cost'))}</td>"
+            f"<td class='num'>{_esc(row.get('edge_to_uncertainty'))}</td>"
+            f"<td class='num'>{_esc(row.get('break_even_adverse'))}</td>"
+            f"<td class='num'>{_esc(row.get('break_even_fee'))}</td>"
+            f"<td class='num'>{_esc(row.get('break_even_slippage'))}</td>"
+            f"<td class='num'>{_esc(row.get('worst_stress_NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('independent_oos_windows'))}</td>"
+            f"<td class='num'>{_esc(row.get('gate_selectivity'))}</td>"
+            f"<td>{_esc(parent_txt)}</td>"
+            f"<td>{_esc(row.get('replication_status'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('final_research_decision'))}'>"
+            f"{_esc(row.get('final_research_decision'))}</span></td>"
+            "</tr>"
+        )
+    return "".join(parts)
+
+
 def _research_data_status_rows(rds: dict[str, Any]) -> str:
     if not rds:
         return "<tr><td colspan='2' class='empty'>Geen operational status</td></tr>"
@@ -1939,9 +2021,18 @@ def _horizon_chips(rows: list[dict[str, Any]]) -> str:
 
 def _status_chip_class(status: Any) -> str:
     text = str(status or "").upper()
-    if text in {"READY", "HIGH", "SUPPORTED", "OK"}:
+    if text in {"READY", "HIGH", "SUPPORTED", "OK", "PASS"}:
         return "ok"
-    if "CAUTION" in text or "PARTIAL" in text or "MEDIUM" in text or "LOW" in text:
+    if (
+        "CAUTION" in text
+        or "PARTIAL" in text
+        or "MEDIUM" in text
+        or "LOW" in text
+        or "PROMISING" in text
+        or "COLLECT" in text
+        or "GATE_INACTIVE" in text
+        or text == "OOS_PASS"
+    ):
         return "warn"
     return "bad"
 
