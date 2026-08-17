@@ -162,3 +162,20 @@ Re-ran acceptance on the growing observed tape:
 | Unsupported | 50 / 100 / 250 ms (Bitvavo exchange_ts) |
 
 Next action unchanged: chronological OOS for slow horizons only; do not claim fast-horizon causal readiness.
+
+## Refresh (2026-08-17, ~23h tape)
+
+Re-ran acceptance with **unchanged** `PREDECLARED_RESEARCH_ACCEPTANCE_CRITERIA`:
+
+| Field | Value |
+|-------|-------|
+| DATASET_ID | `mdresearch-research_md_v1-96f20652aedb392b` |
+| Events | 32,080,711 |
+| Duration | 83,380.57 s (~23.2 h) |
+| Verdict | `DATA_READY_FOR_SLOW_HORIZONS` (unchanged class) |
+| Supported | 500 / 1000 / 2000 / 5000 ms (caution) |
+| Unsupported | 50 / 100 / 250 ms (Bitvavo exchange_ts still 0%) |
+| Drops / write errors | 0 |
+| Triad sync usable_rate | 0 |
+
+FIRST_BLOCKER unchanged: Bitvavo has no exchange timestamp. Do not claim fast-horizon causal readiness. Tournament rerun on this tape: still ALL_STRATEGIES_REJECTED (see `docs/STRATEGY_RESEARCH_TOURNAMENT_REPORT.md`).

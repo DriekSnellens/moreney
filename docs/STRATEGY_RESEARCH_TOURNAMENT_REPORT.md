@@ -5,6 +5,35 @@
 **Execution:** disabled  
 **Claim:** ALL STRATEGIES REJECTED (valid research outcome — no PAPER_CANDIDATE)
 
+## Latest observed rerun (~23–24h tape, 2026-08-17)
+
+**Branch:** `cursor/observed-tape-rerun-3d96`  
+**Criteria:** `research_tournament_v1` **unchanged**. No retune. Execution still off.
+
+Acceptance (`python -m bot.market_data.research.runner`):
+- DATASET_ID `mdresearch-research_md_v1-96f20652aedb392b`
+- 32,080,711 events, 83,380.57s (~23.2h)
+- VERDICT `DATA_READY_FOR_SLOW_HORIZONS` (500/1000/2000/5000 ms; 50/100/250 ms still NOT_READY)
+- Bitvavo exchange_ts still 0%; triad usable_rate 0; drops/write errors 0
+
+Tournament:
+- Full-index (`stride=1`) **OOM-killed** after ~1969s (~2.9 GB RSS) on 32M events. Finding, not a criteria change.
+- Completed with `--stride 4` (every 4th stream event; EUR × 3 venues). Memory-only `SeriesPoint` slots. No fee/fill/PnL change.
+- Tournament DATASET_ID `mdresearch-research_md_v1-d71a392a288f1195` (tape grew between scans; fingerprint differs from acceptance id)
+- 87,267s (~24.2h), 842,652 indexed points
+- Windows UTC: DEV 2026-08-16 16:16:25 → FREEZE 04:04:09 → OOS start 06:02:06 → OOS end 11:55:58
+- **PAPER_CANDIDATES: none. ALL_STRATEGIES_REJECTED: YES**
+
+| Strategy | Verdict | Failed gate | Dev sig | OOS sig | Expected NET | Exec NET |
+|---|---|---|---:|---:|---:|---:|
+| cross_venue_dislocation | UNSTABLE | STABILITY | 1122 | 1195 | 3.67 | 2.00 |
+| short_horizon_mean_reversion | UNSTABLE | STABILITY | 2341 | 2489 | 2.21 | 1.19 |
+| lead_lag | OOS_FAILED | OOS | 1272 | 998 | — | — |
+| order_book_imbalance | OOS_FAILED | OOS | 8836 | 9243 | — | — |
+| short_horizon_momentum | OOS_FAILED | OOS | 134 | 60 | — | — |
+
+Vs prior ~10.4h full-index run: still no PAPER_CANDIDATE; concentration still kills the two cost-positive names; lead_lag is OOS-reversed again. Fast-horizon families remain blocked by Bitvavo missing exchange timestamps. Artifacts: `data/research_tournament/rerun_stride4/`.
+
 **Rerun:** OBSERVED full tape after market-data refresh (`cursor/observed-tape-tournament-rerun-c05a`). Same criteria version `research_tournament_v1`. No threshold tuning after OOS.
 
 ---

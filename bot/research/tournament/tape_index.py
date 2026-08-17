@@ -14,7 +14,7 @@ from bot.market_data.research import SCHEMA_VERSION
 from bot.research.tournament.criteria import CORE_VENUES
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SeriesPoint:
     ts_ns: int
     mid: float
