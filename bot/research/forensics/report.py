@@ -64,10 +64,11 @@ def compact_dashboard(out: dict[str, Any]) -> dict[str, Any]:
 def _next_hyp(out: dict[str, Any], sid: str) -> str:
     recs = out.get("hypothesis_records") or {}
     parents = recs.get("parents") or {}
-    created = recs.get("created_ids") or []
+    by_sid = recs.get("created_by_strategy") or {}
     cls = ((out.get("strategies") or {}).get(sid) or {}).get("CONCENTRATION_CLASS")
-    if cls in {"SYMBOL_SPECIFIC", "VENUE_SPECIFIC", "REGIME_DEPENDENT"} and created:
-        return f"independent child of {parents.get(sid)} — {created}"
+    child = by_sid.get(sid)
+    if cls in {"SYMBOL_SPECIFIC", "VENUE_SPECIFIC", "REGIME_DEPENDENT"} and child:
+        return f"{child} (parent {parents.get(sid)}; independent, no inherited PnL)"
     if cls == "TIME_SPECIFIC":
         return "none (inspect conditions; no time filter)"
     return "none"
@@ -87,6 +88,13 @@ def write_markdown(out: dict[str, Any], path: Path) -> None:
         "**Claim:** none (descriptive analysis only)",
         "",
         "This analysis does not retune parameters, loosen gates, or change fees, fills, PnL, OOS, or execution.",
+        "",
+        "## How to read these numbers",
+        "",
+        "- Tournament STABILITY uses `abs(forward)` shares. Frozen single-route families always have `top_route_share=1` (**ROUTE_SHARE_TAUTOLOGY**). That is not a discovered venue mechanism.",
+        "- Forensic **sum NET** is descriptive per-event waterfall accounting. It is **not** tournament EXPECTED_NET and is **not** claimed profit.",
+        "- A REGIME_DEPENDENT class creates a **new hypothesis ID**. The parent strategy remains REJECTED and is not modified.",
+        "- Replay uses frozen params and the frozen OOS window. A later larger tape with the same stride can shift which rows are indexed; counts may differ slightly from the tournament scoreboard.",
         "",
         "## Frozen tournament context",
         "",

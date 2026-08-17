@@ -76,6 +76,7 @@ def register_forensics_hypotheses(
 ) -> dict[str, Any]:
     registry = registry or HypothesisRegistry()
     created: list[str] = []
+    created_by_strategy: dict[str, str] = {}
     parents: dict[str, str] = {}
     skipped: list[dict[str, Any]] = []
 
@@ -140,10 +141,12 @@ def register_forensics_hypotheses(
                 }
             )
         created.append(rec["hypothesis_id"])
+        created_by_strategy[sid] = rec["hypothesis_id"]
 
     return {
         "parents": parents,
         "created_ids": [h for h in created if h],
+        "created_by_strategy": created_by_strategy,
         "skipped": skipped,
         "inherits_parent_pnl": False,
     }
