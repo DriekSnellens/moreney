@@ -904,6 +904,7 @@ class PaperRunner:
             "regime_hypothesis_lab": self._regime_hypothesis_lab_snapshot(),
             "edge_robustness_lab": self._edge_robustness_lab_snapshot(),
             "canonical_accounting": self._canonical_accounting_snapshot(),
+            "alpha_attribution": self._alpha_attribution_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1434,6 +1435,43 @@ class PaperRunner:
                     "disclaimer": report.get("disclaimer") or base["disclaimer"],
                 }
             )
+        except Exception:
+            pass
+        return base
+
+    def _alpha_attribution_snapshot(self) -> dict[str, Any]:
+        """ALPHA ATTRIBUTION LAB — forensic only; never production PnL or alpha."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "ALPHA_ATTRIBUTION_LAB",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "PAIRED_DELTA_ACCOUNTING_AUDIT": "NOT_RUN",
+            "PRODUCTION_EXECUTION": "DISABLED",
+            "NO_NEW_ALPHA_CLAIMED": True,
+            "DESCRIPTIVE_ONLY": True,
+            "groups": [],
+            "contexts": [],
+            "headline": "Nog geen alpha attribution — python -m bot.research.alpha_attribution.runner",
+            "disclaimer": (
+                "Forensic attribution. DESCRIPTIVE_ONLY. No new alpha claimed. "
+                "Do not read NET as proven edge. Execution disabled."
+            ),
+        }
+        path = Path("data/alpha_attribution_report.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            base.update(report)
+            base["source"] = str(path)
+            base["affects_trading"] = False
+            base["execution_enabled"] = False
+            base["PRODUCTION_EXECUTION"] = "DISABLED"
+            base["NO_NEW_ALPHA_CLAIMED"] = True
         except Exception:
             pass
         return base

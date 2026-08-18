@@ -476,6 +476,64 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>ALPHA ATTRIBUTION LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Forensic parent vs H-0005 — DESCRIPTIVE_ONLY, not proven alpha</span>
+          <strong class="vb-verdict">NO NEW ALPHA CLAIMED</strong>
+          <p class="vb-headline">PAIRED_DELTA_ACCOUNTING_AUDIT: {_esc((status.get('alpha_attribution') or {}).get('PAIRED_DELTA_ACCOUNTING_AUDIT') or 'NOT_RUN')}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Parent replay NET: {_esc((status.get('alpha_attribution') or {}).get('PARENT_REPLAY_NET') or '—')}</span>
+          <span>H-0005 replay NET: {_esc((status.get('alpha_attribution') or {}).get('H-0005_REPLAY_NET') or '—')}</span>
+          <span>Excluded NET: {_esc((status.get('alpha_attribution') or {}).get('EXCLUDED_SIGNAL_NET') or '—')}</span>
+          <span>Retained NET: {_esc((status.get('alpha_attribution') or {}).get('RETAINED_SIGNAL_NET') or '—')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('alpha_attribution') or {}).get('WHY_H0005_UNDERPERFORMED') or 'Attribution not run')}
+      </p>
+      <h3 class="subhead">Groups (canonical execution replay)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>GROUP</th>
+              <th>SIGNALS</th>
+              <th>FILLS</th>
+              <th>NET <span class="th-sub">EXECUTION_REPLAY RealizedReplayNetEUR</span></th>
+              <th>NET/SIGNAL <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>Replay NET/fill <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>POSITIVE WINDOWS</th>
+            </tr>
+          </thead>
+          <tbody>{_alpha_attribution_group_rows(status.get('alpha_attribution') or {})}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">TOP ECONOMIC CONTEXTS</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>context</th>
+              <th>NET contribution <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>stability</th>
+              <th>concentration</th>
+              <th>pre-trade usable</th>
+            </tr>
+          </thead>
+          <tbody>{_alpha_attribution_context_rows(status.get('alpha_attribution') or {})}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('alpha_attribution') or {}).get('disclaimer') or 'Forensic attribution. DESCRIPTIVE_ONLY. Do not read NET as proven edge.')}
+        CONTEXT_DEPENDENCY: {_esc((status.get('alpha_attribution') or {}).get('CONTEXT_DEPENDENCY') or '—')}
+        Run: python -m bot.research.alpha_attribution.runner
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>RESEARCH TOURNAMENT <span class="pill">RESEARCH ONLY</span></h2>
       <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'NOT_READY')}">
         <div>
@@ -2033,6 +2091,52 @@ def _canonical_strategy_panels(block: dict[str, Any]) -> str:
             "</div>"
             f"{gate_note}"
             "</article>"
+        )
+    return "".join(parts)
+
+
+def _alpha_attribution_group_rows(block: dict[str, Any]) -> str:
+    rows = list(block.get("groups") or [])
+    if not rows:
+        return "<tr><td colspan='7' class='empty'>Attribution not run</td></tr>"
+    parts: list[str] = []
+    for row in rows:
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('GROUP'))}</td>"
+            f"<td class='num'>{_esc(row.get('SIGNALS'))}</td>"
+            f"<td class='num'>{_esc(row.get('FILLS'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET/SIGNAL'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET/FILL'))}</td>"
+            f"<td class='num'>{_esc(row.get('POSITIVE_WINDOWS'))}</td>"
+            "</tr>"
+        )
+    return "".join(parts)
+
+
+def _alpha_attribution_context_rows(block: dict[str, Any]) -> str:
+    rows = list(block.get("contexts") or [])
+    if not rows:
+        return "<tr><td colspan='5' class='empty'>No descriptive contexts</td></tr>"
+    parts: list[str] = []
+    for row in rows:
+        conc = row.get("concentration") or {}
+        if isinstance(conc, dict):
+            conc_txt = (
+                f"top_symbol={conc.get('top_symbol')} {conc.get('top_symbol_share')}; "
+                f"top_route={conc.get('top_route')} {conc.get('top_route_share')}"
+            )
+        else:
+            conc_txt = str(conc)
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('context'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET_contribution'))}</td>"
+            f"<td><span class='pill'>{_esc(row.get('stability'))}</span></td>"
+            f"<td class='note'>{_esc(conc_txt)}</td>"
+            f"<td>{_esc(row.get('pre_trade_usable'))}</td>"
+            "</tr>"
         )
     return "".join(parts)
 
