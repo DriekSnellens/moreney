@@ -301,4 +301,7 @@ def run_execution_realism(
     payload = json.dumps(result, indent=2, sort_keys=True, default=str) + "\n"
     (dest / "execution_realism_results.json").write_text(payload, encoding="utf-8")
 
+    from bot.research.execution_realism.report import write_report
+    write_report(result, "docs/EXECUTION_REALISM_REPORT.md")
+
     return result

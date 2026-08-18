@@ -9,7 +9,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Execution realism and counterfactual validation lab")
     p.add_argument("--mode", choices=("screen", "full", "stress"), default="screen")
     p.add_argument("--strategies", default="H-0005")
-    p.add_argument("--max-events", type=int, default=None)
+    p.add_argument("--max-events", type=int, default=None, help="Limit tape events (testing only; None=full)")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
     print(f"EXECUTION_REALISM_LAB mode={args.mode} strategies={args.strategies}")
