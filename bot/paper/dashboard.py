@@ -454,6 +454,34 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     <section class="panel">
+      <h2>FINAL VALIDATION <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('final_validation') or {}).get('FINAL_VALIDATION_VERDICT') or 'NOT_RUN')}">
+        <div>
+          <span class="vb-kicker">Does parent cross-venue dislocation survive realistic execution?</span>
+          <strong class="vb-verdict">FINAL_VALIDATION_VERDICT: {_esc((status.get('final_validation') or {}).get('FINAL_VALIDATION_VERDICT') or 'NOT_RUN')}</strong>
+          <p class="vb-headline">STRATEGY={_esc((status.get('final_validation') or {}).get('STRATEGY') or 'cross_venue_dislocation')} · EXECUTION=RESEARCH_ONLY</p>
+        </div>
+        <div class="vb-meta">
+          <span>DATASET: {_esc((status.get('final_validation') or {}).get('DATASET') or '—')}</span>
+          <span>DATASET_FINGERPRINT: {_esc((status.get('final_validation') or {}).get('DATASET_FINGERPRINT') or '—')}</span>
+          <span>BASELINE EXECUTION_NET: {_esc((status.get('final_validation') or {}).get('BASELINE_EXECUTION_NET') or '—')}</span>
+          <span>Windows: {_esc((status.get('final_validation') or {}).get('n_windows') or '—')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <p class="forecast-note"><strong>WHY</strong></p>
+      <ul class="finding-list">{_final_validation_why_items(status.get('final_validation') or {})}</ul>
+      <div class="finding-next">
+        <span class="label">NEXT_ACTION</span>
+        <p>{_esc((status.get('final_validation') or {}).get('NEXT_ACTION') or 'Run: python -m bot.research.final_validation.runner')}</p>
+      </div>
+      <p class="forecast-note">
+        H-0005 remains REJECT_AS_INCREMENTAL_FILTER. H-0007 remains REJECT / GATE_INACTIVE.
+        No new strategies. No live execution.
+      </p>
+    </section>
+
+    <section class="panel">
       <h2>ACCOUNTING STATUS <span class="pill">RESEARCH ONLY</span></h2>
       <div class="verdict-banner {_verdict_banner_class((status.get('canonical_accounting') or {}).get('ACCOUNTING_AUDIT') or 'NOT_RUN')}">
         <div>
@@ -2121,6 +2149,13 @@ def _canonical_strategy_panels(block: dict[str, Any]) -> str:
     return "".join(parts)
 
 
+def _final_validation_why_items(block: dict[str, Any]) -> str:
+    items = list(block.get("WHY") or [])
+    if not items:
+        return "<li>Not run — python -m bot.research.final_validation.runner</li>"
+    return "".join(f"<li>{_esc(x)}</li>" for x in items)
+
+
 def _alpha_attribution_group_rows(block: dict[str, Any]) -> str:
     rows = list(block.get("groups") or [])
     if not rows:
@@ -2296,9 +2331,15 @@ def _verdict_banner_class(verdict: Any) -> str:
         "READY_FOR" in text and "NOT" not in text and "PARTIAL" not in text
     ):
         return "ok"
-    if text in {"ACCOUNTING_PASS", "PASS"}:
+    if text in {"ACCOUNTING_PASS", "PASS", "ROBUST_PAPER_CANDIDATE"}:
         return "ok"
-    if "NOT_RUN" in text or "PARTIAL" in text or "RECORDING" in text or "CAUTION" in text:
+    if (
+        "PROMISING_BUT_INSUFFICIENT" in text
+        or "NOT_RUN" in text
+        or "PARTIAL" in text
+        or "RECORDING" in text
+        or "CAUTION" in text
+    ):
         return "warn"
     return "bad"
 

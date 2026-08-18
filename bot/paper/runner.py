@@ -906,6 +906,7 @@ class PaperRunner:
             "canonical_accounting": self._canonical_accounting_snapshot(),
             "alpha_attribution": self._alpha_attribution_snapshot(),
             "execution_realism": self._execution_realism_snapshot(),
+            "final_validation": self._final_validation_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1502,6 +1503,45 @@ class PaperRunner:
                 "REALISTIC_EXECUTION_NET": report.get("REALISTIC_EXECUTION_NET"),
                 "DELTA": report.get("DELTA"),
                 "FILL_SURVIVAL_PCT": report.get("FILL_SURVIVAL_PCT"),
+                "source": str(path),
+            })
+        except Exception:
+            pass
+        return base
+
+    def _final_validation_snapshot(self) -> dict[str, Any]:
+        """FINAL VALIDATION — parent cross-venue dislocation; never live alpha."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "CROSS_VENUE_DISLOCATION_FINAL_VALIDATION",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "FINAL_VALIDATION_VERDICT": "NOT_RUN",
+            "PRODUCTION_EXECUTION": "DISABLED",
+            "STRATEGY": "cross_venue_dislocation",
+            "EXECUTION": "RESEARCH_ONLY",
+            "NEXT_ACTION": "Run: python -m bot.research.final_validation.runner",
+        }
+        path = Path("data/research/final_validation/results.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            baseline = report.get("BASELINE_RESULT") or {}
+            base.update({
+                "FINAL_VALIDATION_VERDICT": report.get("FINAL_VALIDATION_VERDICT") or "NOT_RUN",
+                "WHY": report.get("WHY") or [],
+                "NEXT_ACTION": report.get("NEXT_ACTION") or base["NEXT_ACTION"],
+                "DATASET": report.get("DATASET"),
+                "DATASET_FINGERPRINT": report.get("DATASET_FINGERPRINT"),
+                "STRATEGY": report.get("STRATEGY") or "cross_venue_dislocation",
+                "n_windows": report.get("n_windows"),
+                "n_signals": report.get("n_signals"),
+                "BASELINE_EXECUTION_NET": baseline.get("EXECUTION_NET") or baseline.get("execution_net_eur"),
+                "CANONICAL_REPLAY_NET": report.get("CANONICAL_REPLAY_NET"),
                 "source": str(path),
             })
         except Exception:
