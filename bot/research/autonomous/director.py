@@ -150,7 +150,22 @@ class ResearchDirector:
             self._persist(report)
             return report
 
-        if llm_enabled and health.available and (autonomous or dry_run or True):
+        shadow_locked = False
+        try:
+            from bot.research.shadow_validation.protocol import (
+                HYPOTHESIS_GENERATOR_ENABLED as _SHADOW_HYP_GEN,
+                SHADOW_PAPER_VALIDATION_ACTIVE as _SHADOW_ACTIVE,
+            )
+
+            shadow_locked = bool(_SHADOW_ACTIVE) and not bool(_SHADOW_HYP_GEN)
+        except Exception:
+            shadow_locked = False
+
+        if shadow_locked:
+            proposal_info["llm_status"] = "LOCKED_SHADOW_PAPER_VALIDATION"
+            report["SHADOW_PAPER_VALIDATION"] = "LOCKED"
+            report["hypotheses_proposed"] = 0
+        elif llm_enabled and health.available and (autonomous or dry_run or True):
             # Proposal allowed for research planning even when autonomous flag is false,
             # but tournament mutation only when autonomous or explicit non-dry research run.
             proposal_info = propose_and_filter(

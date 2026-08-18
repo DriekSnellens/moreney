@@ -241,6 +241,13 @@ class PaperRunner:
                 # Phase D remains off unless both flags intentionally flipped;
                 # still do not auto-execute from observer.
                 pass
+        self._shadow_observer = None
+        try:
+            from bot.research.shadow_validation.observer import ShadowPaperObserver
+
+            self._shadow_observer = ShadowPaperObserver()
+        except Exception:
+            logger.exception("SHADOW_OBSERVER_INIT_FAILED")
         self._engine = TradingEngine(
             market_data=self._provider,
             strategy=self._strategy,
@@ -631,6 +638,10 @@ class PaperRunner:
         with metrics.span("lead_lag_observe"):
             self._lead_lag_observe(books)
 
+        # Shadow paper validation: live observation of frozen CVD. No orders.
+        with metrics.span("shadow_observe"):
+            self._shadow_observe(books)
+
         # HMM guardrail: toxic dump regime → cancel bids + REDUCE_ONLY before quoting.
         with metrics.span("hmm_regime"):
             await self._apply_hmm_regime_guardrail(books=books)
@@ -907,6 +918,7 @@ class PaperRunner:
             "alpha_attribution": self._alpha_attribution_snapshot(),
             "execution_realism": self._execution_realism_snapshot(),
             "final_validation": self._final_validation_snapshot(),
+            "shadow_validation": self._shadow_validation_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1508,6 +1520,39 @@ class PaperRunner:
         except Exception:
             pass
         return base
+
+    def _shadow_observe(self, books: dict[str, dict[str, Any]]) -> None:
+        """Live shadow of frozen CVD. Never places orders or changes fills."""
+        observer = getattr(self, "_shadow_observer", None)
+        if observer is None:
+            return
+        try:
+            observer.process_cycle(books, symbols=self._symbols)
+        except Exception as exc:  # noqa: BLE001 — keep runner alive
+            logger.exception("SHADOW_OBSERVE_ERROR %s", exc)
+
+    def _shadow_validation_snapshot(self) -> dict[str, Any]:
+        observer = getattr(self, "_shadow_observer", None)
+        if observer is not None:
+            try:
+                return observer.dashboard_snapshot()
+            except Exception:
+                logger.exception("SHADOW_SNAPSHOT_ERROR")
+        return {
+            "label": "SHADOW_PAPER_VALIDATION",
+            "STATUS": "INSUFFICIENT_LIVE_SAMPLE",
+            "STRATEGY": "Cross-Venue Dislocation",
+            "Frozen": "YES",
+            "Production": "DISABLED",
+            "execution_enabled": False,
+            "NEXT_ACTION": "CONTINUE_COLLECTING",
+            "provisional": True,
+            "historical": {
+                "BASELINE_EXECUTION_NET_EUR": 212011.78,
+                "n_candidates": 67443,
+                "n_canonical_fills": 67443,
+            },
+        }
 
     def _final_validation_snapshot(self) -> dict[str, Any]:
         """FINAL VALIDATION — parent cross-venue dislocation; never live alpha."""

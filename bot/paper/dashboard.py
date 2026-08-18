@@ -225,6 +225,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </div>
     </section>
 
+    {_shadow_validation_panel(status.get('shadow_validation') or {})}
+
     <section class="panel">
       <h2>Desk-monitor</h2>
       <div class="metric-grid compact">
@@ -1440,6 +1442,30 @@ def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
     .research-board {{
       border-color: color-mix(in srgb, var(--warn) 28%, var(--line));
     }}
+    .shadow-board {{
+      border-color: color-mix(in srgb, var(--good) 32%, var(--line));
+    }}
+    .shadow-compare {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.85rem;
+      margin: 0.85rem 0 1rem;
+    }}
+    .shadow-compare .col-head {{
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }}
+    .shadow-progress {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 0.65rem;
+      margin: 0.75rem 0;
+    }}
     .research-sub {{
       margin: 0 0 1rem;
       color: var(--muted);
@@ -2269,6 +2295,110 @@ def _market_data_lab_rows(panel: list[dict[str, Any]]) -> str:
     return "".join(rows)
 
 
+def _shadow_validation_panel(block: dict[str, Any]) -> str:
+    """Prominent SHADOW VALIDATION panel — research expectation vs live observation."""
+    status = str(block.get("STATUS") or block.get("SHADOW_VALIDATION_VERDICT") or "INSUFFICIENT_LIVE_SAMPLE")
+    rates = block.get("rates") or {}
+    gap = block.get("execution_gap") or {}
+    hist = (block.get("historical") or {}) if isinstance(block.get("historical"), dict) else {}
+    research_net = hist.get("BASELINE_EXECUTION_NET_EUR", "212011.78")
+    live_net = block.get("LIVE_SHADOW_EXECUTION_NET")
+    expected_live = block.get("RESEARCH_EXPECTED_NET")
+    mean_gap = gap.get("mean") if isinstance(gap, dict) else None
+    windows = block.get("complete_windows")
+    days = block.get("calendar_days")
+    min_w = block.get("min_windows") or 20
+    min_d = block.get("min_calendar_days") or 7
+    return (
+        "<section class='panel shadow-board'>"
+        "<div class='panel-head'><h2>SHADOW VALIDATION</h2>"
+        "<span class='badge muted'>Geen productie-orders</span></div>"
+        f"<div class='verdict-banner {_verdict_banner_class(status)}'>"
+        "<div>"
+        "<span class='vb-kicker'>Does the frozen strategy survive real-time market data?</span>"
+        f"<strong class='vb-verdict'>STATUS: {_esc(status)}</strong>"
+        "<p class='vb-headline'>"
+        f"Strategy: {_esc(block.get('STRATEGY') or 'Cross-Venue Dislocation')} · "
+        f"Frozen: {_esc(block.get('Frozen') or 'YES')} · "
+        f"Production: {_esc(block.get('Production') or 'DISABLED')}"
+        "</p></div>"
+        "<div class='vb-meta'>"
+        f"<span>Fingerprint: {_esc((block.get('strategy_fingerprint') or '—')[:16])}</span>"
+        f"<span>NEXT_ACTION: {_esc(block.get('NEXT_ACTION') or 'CONTINUE_COLLECTING')}</span>"
+        "<span>Execution: DISABLED</span>"
+        "</div></div>"
+        "<p class='forecast-note'><strong>Sample progress</strong> (do not stop early)</p>"
+        "<div class='shadow-progress'>"
+        f"<article class='metric-card'><span class='label'>windows</span>"
+        f"<span class='value'>{_esc(windows if windows is not None else 0)} / {_esc(min_w)}</span></article>"
+        f"<article class='metric-card'><span class='label'>calendar days</span>"
+        f"<span class='value'>{_esc(_fmt_days(days))} / {_esc(min_d)}</span></article>"
+        f"<article class='metric-card'><span class='label'>candidates</span>"
+        f"<span class='value'>{_esc(block.get('n_candidates') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>valid observations</span>"
+        f"<span class='value'>{_esc(block.get('valid_observations') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>FULL</span>"
+        f"<span class='value'>{_esc(block.get('FULL_FILL') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>PARTIAL</span>"
+        f"<span class='value'>{_esc(block.get('PARTIAL_FILL') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>NO_FILL</span>"
+        f"<span class='value'>{_esc(block.get('NO_FILL') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>DATA_INVALID</span>"
+        f"<span class='value'>{_esc(block.get('DATA_INVALID') or 0)}</span></article>"
+        "</div>"
+        "<div class='shadow-compare'>"
+        "<article class='world-card'>"
+        "<span class='col-head'>RESEARCH EXPECTATION</span>"
+        "<span class='label'>B_EXPECTED_ECONOMICS</span>"
+        f"<span class='value'>{_esc(research_net)} EUR</span>"
+        "<span class='sub'>Historical BASELINE EXECUTION_NET · 67443/67443 canonical fills</span>"
+        f"<span class='sub'>Live predicted expected NET: {_esc_fmt(expected_live, 'money')}</span>"
+        "</article>"
+        "<article class='world-card'>"
+        "<span class='col-head'>LIVE SHADOW OBSERVATION</span>"
+        "<span class='label'>C_SHADOW_EXECUTION</span>"
+        f"<span class='value'>{_esc_fmt(live_net, 'money')}</span>"
+        f"<span class='sub'>Execution gap (mean): {_esc(_fmt_gap(mean_gap))}</span>"
+        f"<span class='sub'>Observed fill rate: {_esc(_fmt_rate(rates.get('fill_rate')))}</span>"
+        f"<span class='sub'>Hedge failure rate: {_esc(_fmt_rate(rates.get('hedge_failure_rate')))}</span>"
+        f"<span class='sub'>Adverse selection: {_esc(_fmt_rate(rates.get('mean_adverse_selection_bps'), suffix=' bps'))}</span>"
+        "</article>"
+        "</div>"
+        f"<p class='forecast-note'>Current provisional status: <strong>{_esc(status)}</strong> · "
+        "A_SIGNAL ≠ fill. B_EXPECTED ≠ C_SHADOW ≠ D_REALIZED. No production orders.</p>"
+        "<div class='finding-next'><span class='label'>NEXT_ACTION</span>"
+        f"<p>{_esc(block.get('NEXT_ACTION') or 'CONTINUE_COLLECTING')}</p></div>"
+        "</section>"
+    )
+
+
+def _fmt_days(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def _fmt_gap(value: Any) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):.4f} EUR"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_rate(value: Any, *, suffix: str = "") -> str:
+    if value is None:
+        return "—"
+    try:
+        if suffix:
+            return f"{float(value):.3f}{suffix}"
+        return f"{float(value):.1%}"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _research_finding_cards(cards: list[dict[str, Any]]) -> str:
     if not cards:
         return "<p class='forecast-note'>Nog geen research-conclusies geladen.</p>"
@@ -2331,10 +2461,12 @@ def _verdict_banner_class(verdict: Any) -> str:
         "READY_FOR" in text and "NOT" not in text and "PARTIAL" not in text
     ):
         return "ok"
-    if text in {"ACCOUNTING_PASS", "PASS", "ROBUST_PAPER_CANDIDATE"}:
+    if text in {"ACCOUNTING_PASS", "PASS", "ROBUST_PAPER_CANDIDATE", "SHADOW_VALIDATED"}:
         return "ok"
     if (
         "PROMISING_BUT_INSUFFICIENT" in text
+        or "SHADOW_PROMISING" in text
+        or "INSUFFICIENT" in text
         or "NOT_RUN" in text
         or "PARTIAL" in text
         or "RECORDING" in text
