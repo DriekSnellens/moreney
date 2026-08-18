@@ -243,9 +243,43 @@ class PaperRunner:
                 pass
         self._shadow_observer = None
         try:
+            import os
+
+            from bot.research.shadow_validation.artifacts import (
+                ResumeIncompatibleError,
+                new_run_id,
+                run_dir_for,
+                runs_root,
+            )
             from bot.research.shadow_validation.observer import ShadowPaperObserver
 
-            self._shadow_observer = ShadowPaperObserver()
+            ptr = runs_root().parent / "CURRENT_RUN"
+            run_id = os.environ.get("SHADOW_VALIDATION_RUN_ID") or None
+            resume_env = os.environ.get("SHADOW_VALIDATION_RESUME", "").lower()
+            if run_id:
+                resume = resume_env not in {"0", "false", "no"}
+            elif ptr.exists():
+                run_id = ptr.read_text(encoding="utf-8").strip() or None
+                dest = run_dir_for(run_id) if run_id else None
+                # Never resume a pointer whose run directory is missing or
+                # from a different artifact schema. Do not merge mixed data.
+                resume = bool(dest and (dest / "frozen_strategy.json").exists())
+                if not resume:
+                    run_id = new_run_id()
+            else:
+                run_id = new_run_id()
+                resume = False
+            try:
+                self._shadow_observer = ShadowPaperObserver(run_id=run_id, resume=resume)
+            except ResumeIncompatibleError:
+                logger.exception("SHADOW_RESUME_INCOMPATIBLE")
+                run_id = new_run_id()
+                self._shadow_observer = ShadowPaperObserver(run_id=run_id, resume=False)
+            try:
+                ptr.parent.mkdir(parents=True, exist_ok=True)
+                ptr.write_text(str(self._shadow_observer.run_id), encoding="utf-8")
+            except OSError:
+                logger.exception("SHADOW_CURRENT_RUN_POINTER_WRITE_FAILED")
         except Exception:
             logger.exception("SHADOW_OBSERVER_INIT_FAILED")
         self._engine = TradingEngine(
@@ -1545,8 +1579,13 @@ class PaperRunner:
             "Frozen": "YES",
             "Production": "DISABLED",
             "execution_enabled": False,
+            "VALIDATION_INTEGRITY": "UNKNOWN",
             "NEXT_ACTION": "CONTINUE_COLLECTING",
             "provisional": True,
+            "progress_sentence": (
+                "We need 20 complete windows and 7 calendar days before the "
+                "frozen minimum sample is reached."
+            ),
             "historical": {
                 "BASELINE_EXECUTION_NET_EUR": 212011.78,
                 "n_candidates": 67443,

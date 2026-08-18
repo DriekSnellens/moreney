@@ -35,8 +35,11 @@ from bot.research.tournament.freeze import git_commit
 
 PACKAGE_LABEL = "SHADOW_PAPER_VALIDATION"
 PROTOCOL_VERSION = "shadow_paper_validation_v1"
-ARTIFACT_SCHEMA_VERSION = "shadow_paper_validation_v1"
+# Artifact layout for the live scorecard. Independent of PROTOCOL_VERSION
+# (frozen acceptance). Incompatible with v1 run directories.
+ARTIFACT_SCHEMA_VERSION = "shadow_scorecard_v1"
 RANDOM_SEED = 20260818
+RUNTIME_ID_LIVE = "live_paper"
 
 STRATEGY_ID = "cross_venue_dislocation"
 STRATEGY_DISPLAY_NAME = "Cross-Venue Dislocation"
@@ -120,6 +123,17 @@ MIN_CALENDAR_DAYS = 7
 # observations, keep collecting. Not chosen to fit a live result.
 MIN_VALID_OBSERVATIONS = 100
 
+# Collection target beyond the official minimum. NOT a verdict threshold.
+# After the frozen minimum, keep collecting passively toward this.
+PREFERRED_COMPLETE_WINDOWS = 50
+PREFERRED_CALENDAR_DAYS = 14
+EARLY_STOP_IF_POSITIVE = False
+EARLY_STOP_IF_NEGATIVE = False
+
+# Descriptive markout horizons (ms). Not a strategy-horizon retune.
+# Strategy decision horizon remains HORIZON_MS (5000).
+MARKOUT_HORIZONS_MS: tuple[int, ...] = (1000, 5000, 30000, 60000)
+
 # ------------------------------------------------------------------
 # Predeclared acceptance thresholds. Frozen before collection.
 # ------------------------------------------------------------------
@@ -168,7 +182,10 @@ WRITER_FLUSH_INTERVAL_S = 2.0
 ACCOUNTING_TOLERANCE = 1e-8
 
 DEFAULT_RUN_DIR = "data/research/shadow_validation"
+DEFAULT_RUNS_ROOT = "data/research/shadow_validation/runs"
 FROZEN_STRATEGY_FILENAME = "frozen_strategy.json"
+ACCEPTANCE_FILENAME = "acceptance_criteria.json"
+MANIFEST_FILENAME = "manifest.json"
 OBSERVATIONS_FILENAME = "observations.jsonl"
 ACCUMULATOR_FILENAME = "accumulator.json"
 FINAL_RESULTS_FILENAME = "final_results.json"
@@ -232,6 +249,19 @@ def frozen_acceptance() -> dict[str, Any]:
     }
 
 
+def collection_targets() -> dict[str, Any]:
+    """Not verdict criteria. Do not use to retune or to stop early."""
+    return {
+        "preferred_complete_windows": PREFERRED_COMPLETE_WINDOWS,
+        "preferred_calendar_days": PREFERRED_CALENDAR_DAYS,
+        "early_stop_if_positive": EARLY_STOP_IF_POSITIVE,
+        "early_stop_if_negative": EARLY_STOP_IF_NEGATIVE,
+        "markout_horizons_ms": list(MARKOUT_HORIZONS_MS),
+        "route_universe_limited": True,
+        "route_universe": list(ROUTE_UNIVERSE),
+    }
+
+
 def _stable_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
@@ -263,6 +293,11 @@ def protocol_hash() -> str:
             "strategy_id": STRATEGY_ID,
         }
     )
+
+
+def acceptance_hash() -> str:
+    """Hash of frozen acceptance only. Changing criteria must fail tests."""
+    return _stable_hash(frozen_acceptance())
 
 
 def strategy_fingerprint() -> str:

@@ -9,7 +9,12 @@ from bot.research.shadow_validation.books import CompactL1, L1View
 from bot.research.shadow_validation.economics import (
     ExpectedEconomics,
     execution_gap,
+    identities_hold,
+    market_gap,
+    prediction_gap,
+    realized_market_net,
     shadow_execution_net,
+    total_gap,
 )
 from bot.research.shadow_validation.protocol import (
     HEDGE_WORSE_BPS,
@@ -46,17 +51,24 @@ class ObservationResult:
     shadow_execution_net: float
     expected_net: float
     execution_gap: float
+    realized_market_net: float | None
+    prediction_gap: float
+    market_gap: float | None
+    total_gap: float | None
+    identities_ok: bool
     quote_survival: bool
     follower_availability: bool
     hedge_deterioration_bps: float | None
     adverse_selection_bps: float | None
     markout: float | None
+    markouts_bps: dict[str, float | None]
     future_mid: float | None
     future_bid: float | None
     future_ask: float | None
     book_survival: bool
     traded_through: bool
     duration_until_invalidation_ms: float | None
+    symbol: str
     record: dict[str, Any]
 
 
@@ -137,6 +149,9 @@ def classify_observation(
     future_entry: CompactL1 | L1View | None,
     expected: ExpectedEconomics,
     decision_book_age_ms: float,
+    identity: dict[str, Any] | None = None,
+    symbol: str = "",
+    markouts_fraction: dict[str, float | None] | None = None,
 ) -> ObservationResult:
     """Classify one completed shadow candidate. Missing data → DATA_INVALID."""
 
@@ -180,12 +195,41 @@ def classify_observation(
             signed = -raw if a_rich else raw
             markout = signed
             adverse_bps = max(0.0, -signed) * 10000.0
-        gap = execution_gap(shadow["shadow_execution_net"], expected.expected_net)
+        extras = markouts_fraction or {}
+        if markout is not None:
+            extras = {"5s": markout, **{k: v for k, v in extras.items() if k != "5s"}}
+        markouts_bps = {
+            k: (None if v is None else float(v) * 10000.0)
+            for k, v in (("1s", extras.get("1s")), ("5s", extras.get("5s") if extras.get("5s") is not None else markout), ("30s", extras.get("30s")), ("60s", extras.get("60s")))
+        }
+        if markouts_bps["5s"] is None and adverse_bps is not None:
+            markouts_bps["5s"] = (markout * 10000.0) if markout is not None else None
+        real_net = realized_market_net(signed_markout_fraction=markout)
+        pred = prediction_gap(shadow["shadow_execution_net"], expected.expected_net)
+        mkt = market_gap(real_net, shadow["shadow_execution_net"])
+        tot = total_gap(real_net, expected.expected_net)
+        ident_ok = identities_hold(
+            expected_net=expected.expected_net,
+            shadow_execution_net_eur=shadow["shadow_execution_net"],
+            realized_market_net_eur=real_net,
+            prediction_gap_eur=pred,
+            market_gap_eur=mkt,
+            total_gap_eur=tot,
+            shadow_legs=shadow,
+            expected=expected,
+        )
+        gap = pred
+        ident = identity or {}
         book_survival = _as_view(later_entry).ok and _as_view(later_hedge).ok
         record = {
             "candidate_id": candidate_id,
-            "strategy_fingerprint": strategy_fingerprint,
+            "strategy_fingerprint": ident.get("strategy_fingerprint") or strategy_fingerprint,
+            "config_hash": ident.get("config_hash"),
+            "runtime_id": ident.get("runtime_id"),
+            "git_commit": ident.get("git_commit"),
+            "validation_run_id": ident.get("validation_run_id"),
             "signal_time_ms": signal_time_ms,
+            "symbol": symbol or decision_entry.symbol,
             "A_SIGNAL": {
                 "label": "A_SIGNAL",
                 "a_rich": a_rich,
@@ -193,6 +237,7 @@ def classify_observation(
                 "hedge_side": hedge_side,
                 "decision_bid": decision_entry.bid,
                 "decision_ask": decision_entry.ask,
+                "not_a_fill": True,
             },
             "B_EXPECTED_ECONOMICS": expected.as_dict(),
             "C_SHADOW_EXECUTION": {
@@ -206,6 +251,7 @@ def classify_observation(
                 "fill_fraction": shadow["fill_fraction"],
                 "not_expected_net": True,
                 "not_realized_markout": True,
+                "not_profit": True,
             },
             "D_REALIZED_MARKET_OUTCOME": {
                 "label": "D_REALIZED_MARKET_OUTCOME",
@@ -213,6 +259,8 @@ def classify_observation(
                 "future_bid": future_bid,
                 "future_ask": future_ask,
                 "markout": markout,
+                "realized_market_net": real_net,
+                "markouts_bps": markouts_bps,
                 "book_survival": book_survival,
                 "quote_survival": quote_survival,
                 "follower_availability": follower_availability,
@@ -220,13 +268,19 @@ def classify_observation(
                 "hedge_deterioration_bps": hedge_det,
                 "traded_through": traded_through,
                 "not_shadow_execution_net": True,
+                "not_a_fill": True,
+                "not_profit": True,
             },
+            "prediction_gap": pred,
             "execution_gap": gap,
+            "market_gap": mkt,
+            "total_gap": tot,
+            "accounting_identities_ok": ident_ok,
             "outcome": outcome,
         }
         return ObservationResult(
             candidate_id=candidate_id,
-            strategy_fingerprint=strategy_fingerprint,
+            strategy_fingerprint=str(ident.get("strategy_fingerprint") or strategy_fingerprint),
             outcome=outcome,
             fill_fraction=shadow["fill_fraction"],
             shadow_fill=is_fill and fill_fraction >= 1.0 - 1e-12,
@@ -236,17 +290,24 @@ def classify_observation(
             shadow_execution_net=shadow["shadow_execution_net"],
             expected_net=expected.expected_net,
             execution_gap=gap,
+            realized_market_net=real_net,
+            prediction_gap=pred,
+            market_gap=mkt,
+            total_gap=tot,
+            identities_ok=ident_ok,
             quote_survival=quote_survival,
             follower_availability=follower_availability,
             hedge_deterioration_bps=hedge_det,
             adverse_selection_bps=adverse_bps,
             markout=markout,
+            markouts_bps=markouts_bps,
             future_mid=future_mid,
             future_bid=future_bid,
             future_ask=future_ask,
             book_survival=book_survival,
             traded_through=traded_through,
             duration_until_invalidation_ms=invalidation_ms,
+            symbol=symbol or decision_entry.symbol,
             record=record,
         )
 

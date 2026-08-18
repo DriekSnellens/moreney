@@ -16,6 +16,7 @@ from bot.research.shadow_validation.protocol import (
     STRATEGY_ID,
 )
 from bot.research.shadow_validation.proposal import maybe_write_proposal
+from bot.research.shadow_validation.scorecard import build_scorecard
 
 
 def _iso(ms: float) -> str:
@@ -89,6 +90,12 @@ def build_final_payload(
         "retuning_allowed": False,
         "D_REALIZED_MARKET_OUTCOME_is_not_shadow_net": True,
         "A_SIGNAL_is_not_a_fill": True,
+        "scorecard": build_scorecard(
+            snapshot,
+            decision,
+            integrity=str(identity.get("VALIDATION_INTEGRITY") or "VALID"),
+            identity=identity,
+        ),
     }
 
 
