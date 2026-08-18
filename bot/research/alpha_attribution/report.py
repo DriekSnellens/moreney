@@ -96,12 +96,14 @@ Negative delta means the child underperformed the parent on canonical replay.
 | Stored audit | {audit.get('PAIRED_DELTA_ACCOUNTING_AUDIT')} |
 | Live audit | {live_audit.get('PAIRED_DELTA_ACCOUNTING_AUDIT')} |
 | Combined `PAIRED_DELTA_ACCOUNTING_AUDIT` | {out.get('PAIRED_DELTA_ACCOUNTING_AUDIT')} |
+| LIVE_VS_PUBLISHED (current tape vs frozen number) | {out.get('LIVE_VS_PUBLISHED')} |
 | Reported aggregate delta | {audit.get('reported_aggregate_delta_eur')} |
 | SUM(window paired deltas) | {audit.get('sum_window_paired_deltas_eur')} |
 | SUM(parent replay NET) | {audit.get('sum_parent_replay_net_eur')} |
 | SUM(child replay NET) | {audit.get('sum_child_replay_net_eur')} |
 | SUM(excluded signal NET) | {audit.get('sum_excluded_signal_net_eur')} |
-| Issues | {audit.get('issues') or live_audit.get('issues') or []} |
+| Stored issues | {audit.get('issues') or []} |
+| Live vs published issues | {live_audit.get('issues') or []} |
 
 Identities checked per complete window:
 

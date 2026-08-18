@@ -489,6 +489,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
           <span>Excluded NET: {_esc((status.get('alpha_attribution') or {}).get('EXCLUDED_SIGNAL_NET') or '—')}</span>
           <span>Retained NET: {_esc((status.get('alpha_attribution') or {}).get('RETAINED_SIGNAL_NET') or '—')}</span>
           <span>Execution: DISABLED</span>
+          <span>LIVE_VS_PUBLISHED: {_esc((status.get('alpha_attribution') or {}).get('LIVE_VS_PUBLISHED') or '—')}</span>
         </div>
       </div>
       <p class="forecast-note">

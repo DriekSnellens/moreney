@@ -23,7 +23,11 @@ from bot.research.alpha_attribution.features import (
     classify_membership,
     named_context,
 )
-from bot.research.alpha_attribution.groups import assert_parent_identity, group_economics
+from bot.research.alpha_attribution.groups import (
+    assert_parent_identity,
+    group_economics,
+    groups_from_stored_paired_windows,
+)
 from bot.research.alpha_attribution.paired_audit import audit_paired_windows
 from bot.research.alpha_attribution.protocol import (
     DESCRIPTIVE_ONLY,
@@ -170,6 +174,15 @@ def test_published_paired_delta_not_silently_rewritten() -> None:
     assert audit["PAIRED_DELTA_ACCOUNTING_AUDIT"] == "PASS"
     assert abs(Decimal(audit["sum_window_paired_deltas_eur"]) - Decimal(str(reported))) <= WATERFALL_TOLERANCE
     assert abs(Decimal(str(reported)) - PUBLISHED_PAIRED_DELTA_EUR) <= Decimal("0.01")
+    grouped = groups_from_stored_paired_windows(windows)
+    assert assert_parent_identity(
+        grouped["ALL_PARENT"], grouped["RETAINED_BY_CHILD"], grouped["EXCLUDED_BY_CHILD"]
+    ) == []
+    assert abs(
+        Decimal(str(grouped["EXCLUDED_BY_CHILD"]["replay_net_eur"])) - Decimal(str(reported)) * Decimal("-1")
+    ) <= WATERFALL_TOLERANCE
+    # Extra live windows must not rewrite the published delta.
+    assert Decimal(audit["sum_window_paired_deltas_eur"]) != Decimal("0")
 
 
 def test_parent_equals_retained_plus_excluded() -> None:

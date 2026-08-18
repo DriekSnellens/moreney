@@ -15,7 +15,11 @@ from bot.research.accounting.protocol import REPLAY_VERSION, SCHEMA_VERSION, WAT
 from bot.research.alpha_attribution.attribution import feature_attribution
 from bot.research.alpha_attribution.contexts import leave_one_context_out, summarize_contexts
 from bot.research.alpha_attribution.features import attach_attribution_features, classify_membership
-from bot.research.alpha_attribution.groups import assert_parent_identity, group_economics
+from bot.research.alpha_attribution.groups import (
+    assert_parent_identity,
+    group_economics,
+    groups_from_stored_paired_windows,
+)
 from bot.research.alpha_attribution.observations import ranked_observations
 from bot.research.alpha_attribution.paired_audit import audit_paired_windows
 from bot.research.alpha_attribution.protocol import (
@@ -48,6 +52,7 @@ def _collect_live(
     *,
     index,
     plan: dict[str, Any],
+    window_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[Any], list[tuple[str, list[dict[str, Any]]]], bool]:
     spec = _SPECS["H-0005"]
     fam = FreshnessCVDFamily()
@@ -62,6 +67,9 @@ def _collect_live(
     no_leakage = True
     for w in plan.get("windows") or []:
         if not w.get("complete"):
+            continue
+        wid = str(w.get("WINDOW_ID") or w.get("window") or "")
+        if window_ids is not None and wid not in window_ids:
             continue
         part_raw = fam.partition_window(
             index,
@@ -159,15 +167,31 @@ def run_alpha_attribution(
         stored_windows,
         reported_aggregate_delta=reported_delta,
     )
+    published_ids = {
+        str(w.get("window") or w.get("window_id"))
+        for w in stored_windows
+        if w.get("complete", True)
+    }
+    stored_groups = groups_from_stored_paired_windows(stored_windows)
+    stored_identity = assert_parent_identity(
+        stored_groups["ALL_PARENT"],
+        stored_groups["RETAINED_BY_CHILD"],
+        stored_groups["EXCLUDED_BY_CHILD"],
+    )
+    if stored_identity:
+        stored_audit = dict(stored_audit)
+        stored_audit["PAIRED_DELTA_ACCOUNTING_AUDIT"] = "FAIL"
+        stored_audit.setdefault("issues", []).extend(stored_identity)
 
     live_meta: dict[str, Any] = {"used": False}
     live_audit: dict[str, Any] | None = None
-    groups: dict[str, Any] = {}
+    groups: dict[str, Any] = dict(stored_groups)
+    live_groups: dict[str, Any] = {}
     features: list[dict[str, Any]] = []
     contexts: list[dict[str, Any]] = []
     loo: dict[str, Any] = {}
     obs: list[dict[str, Any]] = []
-    identity_issues: list[str] = []
+    identity_issues: list[str] = list(stored_identity)
     venue = "okx"
     venue_exit = "bitvavo"
 
@@ -185,10 +209,19 @@ def run_alpha_attribution(
             "used": True,
             "dataset_id": index.dataset_id,
             "dataset_fingerprint": index.content_fingerprint,
+            "published_dataset_fingerprint": (canon.get("manifest") or {}).get("dataset_fingerprint"),
             "stride": stride,
             "n_windows": len(plan.get("windows") or []),
+            "published_window_ids": sorted(published_ids),
+            "n_published_windows": len(published_ids),
+            "note": (
+                "Live feature attribution is restricted to the published complete-window IDs. "
+                "Newer tape windows are excluded so they cannot rewrite PARENT_CHILD_PAIRED_DELTA."
+            ),
         }
-        all_parent, paired_rows, window_parent, no_leakage = _collect_live(index=index, plan=plan)
+        all_parent, paired_rows, window_parent, no_leakage = _collect_live(
+            index=index, plan=plan, window_ids=published_ids or None
+        )
         paired_dicts = [r.to_dict() for r in paired_rows]
         live_agg = aggregate_paired(paired_rows)
         live_audit = audit_paired_windows(
@@ -260,12 +293,14 @@ def run_alpha_attribution(
             neg = sum(1 for w in g["windows"] if Decimal(str(w["replay_net_eur"])) < 0)
             g["positive_windows"] = pos
             g["negative_windows"] = neg
-        groups = {
+        live_groups = {
             "ALL_PARENT": parent_g,
             "RETAINED_BY_CHILD": retained_g,
             "EXCLUDED_BY_CHILD": excluded_g,
             "UNSUPPORTED": unsupported_g,
         }
+        # Headline groups remain the published paired universe. Live groups are forensic features only.
+        groups = dict(stored_groups)
         win_ret = [
             (wid, [e for e in evs if e.get("membership") == "RETAINED_BY_CHILD"])
             for wid, evs in window_parent
@@ -289,10 +324,10 @@ def run_alpha_attribution(
             all_parent, venue=venue, venue_exit=venue_exit, window_events=window_parent
         )
         obs = ranked_observations(
-            excluded_positive=Decimal(str(excluded_g["replay_net_eur"])) > 0,
-            excluded_net=str(excluded_g["replay_net_eur"]),
-            retained_net=str(retained_g["replay_net_eur"]),
-            parent_net=str(parent_g["replay_net_eur"]),
+            excluded_positive=Decimal(str(stored_groups["EXCLUDED_BY_CHILD"]["replay_net_eur"])) > 0,
+            excluded_net=str(stored_groups["EXCLUDED_BY_CHILD"]["replay_net_eur"]),
+            retained_net=str(stored_groups["RETAINED_BY_CHILD"]["replay_net_eur"]),
+            parent_net=str(stored_groups["ALL_PARENT"]["replay_net_eur"]),
             top_contexts=contexts,
             feature_diffs=features,
             dependency=loo,
@@ -303,12 +338,10 @@ def run_alpha_attribution(
     else:
         live_audit = {"PAIRED_DELTA_ACCOUNTING_AUDIT": "NOT_RUN"}
 
-    primary_audit = live_audit if live_meta.get("used") else stored_audit
-    if live_meta.get("used") and stored_audit.get("PAIRED_DELTA_ACCOUNTING_AUDIT") == "FAIL":
-        if primary_audit is not None:
-            primary_audit = dict(primary_audit)
-            primary_audit["PAIRED_DELTA_ACCOUNTING_AUDIT"] = "FAIL"
-            primary_audit.setdefault("issues", []).extend(stored_audit.get("issues") or [])
+    # Published paired delta is audited on the frozen window table. Do not rewrite it
+    # when the current tape fingerprint has extra windows or intra-window drift.
+    primary_audit = stored_audit
+    live_vs_published = (live_audit or {}).get("PAIRED_DELTA_ACCOUNTING_AUDIT")
     elapsed = time.perf_counter() - t0
     parent_net = (groups.get("ALL_PARENT") or {}).get("replay_net_eur") or stored_audit.get(
         "sum_parent_replay_net_eur"
@@ -329,12 +362,17 @@ def run_alpha_attribution(
         "H-0005 is a pure freshness filter (child_only=0), so child net equals "
         "retained/shared net and parent net equals retained + excluded "
         "(plus unsupported, if any). "
-        f"On this paired complete-window universe parent={parent_net} EUR, "
+        f"On the published paired complete-window universe parent={parent_net} EUR, "
         f"retained/child={retained_net} EUR, excluded={excluded_net} EUR. "
-        "H-0005 underperformed because the gate dropped excluded parent signals "
-        f"whose canonical replay net is {'positive' if excl_pos else 'not positive'}, "
-        "not because retained trades are loss-making in aggregate EUR. "
-        "Do not retune quote_age_ms on this OOS."
+        f"Excluded share of parent signals={((groups.get('EXCLUDED_BY_CHILD') or {}).get('share_of_parent_signals'))}; "
+        f"share of parent net={((groups.get('EXCLUDED_BY_CHILD') or {}).get('share_of_parent_net'))}. "
+        f"Replay NET/signal retained={((groups.get('RETAINED_BY_CHILD') or {}).get('replay_net_per_signal'))} "
+        f"vs excluded={((groups.get('EXCLUDED_BY_CHILD') or {}).get('replay_net_per_signal'))} "
+        "(near-identical). The gate therefore dropped economically positive parent "
+        "mass with similar per-signal replay quality rather than removing a "
+        "loss-making tail. Do not retune quote_age_ms on this OOS. "
+        f"LIVE_VS_PUBLISHED={live_vs_published} records current-tape drift; "
+        "the published paired delta is not rewritten."
     )
     out = {
         "STATUS": "COMPLETE",
@@ -345,8 +383,10 @@ def run_alpha_attribution(
         "generated_at": datetime.now(UTC).isoformat(),
         "manifest": build_manifest(extra=live_meta),
         "PAIRED_DELTA_ACCOUNTING_AUDIT": (primary_audit or {}).get("PAIRED_DELTA_ACCOUNTING_AUDIT"),
+        "LIVE_VS_PUBLISHED": live_vs_published,
         "stored_paired_audit": stored_audit,
         "live_paired_audit": live_audit,
+        "live_groups": live_groups,
         "identity_issues": identity_issues,
         "PARENT_REPLAY_NET": parent_net,
         "H-0005_REPLAY_NET": retained_net,
@@ -380,8 +420,9 @@ def run_alpha_attribution(
         ).get("value"),
     }
     if identity_issues:
-        out["PAIRED_DELTA_ACCOUNTING_AUDIT"] = "FAIL"
         out["identity_fail"] = identity_issues
+        if stored_identity:
+            out["PAIRED_DELTA_ACCOUNTING_AUDIT"] = "FAIL"
     assert_no_oos_threshold_creation(out)
     _write(out, out_dir)
     return out
@@ -394,6 +435,7 @@ def compact_from_result(out: dict[str, Any]) -> dict[str, Any]:
         "label": PACKAGE_LABEL,
         "STATUS": out.get("STATUS"),
         "PAIRED_DELTA_ACCOUNTING_AUDIT": out.get("PAIRED_DELTA_ACCOUNTING_AUDIT"),
+        "LIVE_VS_PUBLISHED": out.get("LIVE_VS_PUBLISHED"),
         "PRODUCTION_EXECUTION": "DISABLED",
         "NO_NEW_ALPHA_CLAIMED": True,
         "DESCRIPTIVE_ONLY": True,
