@@ -30,6 +30,9 @@ from bot.research.tournament.freeze import git_commit
 
 PACKAGE_LABEL = "EXECUTION_REALISM_LAB"
 PROTOCOL_VERSION = "execution_realism_v1"
+# Artifact layout for the streaming runner. Independent of PROTOCOL_VERSION
+# (research economics). Never silently reinterpret a different schema.
+ARTIFACT_SCHEMA_VERSION = "execution_realism_streaming_v1"
 RANDOM_SEED = 20260818
 
 # Hard invariants

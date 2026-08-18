@@ -27,6 +27,17 @@ def audit_waterfall(wf: ExecutionWaterfall) -> dict[str, Any]:
     }
 
 
+def audit_accumulator_identity(gross: Decimal, fees: Decimal, slippage: Decimal, adverse: Decimal, inventory: Decimal, extra_costs: Decimal, execution_net: Decimal) -> dict[str, Any]:
+    """Aggregate waterfall identity on summed components (exact Decimal)."""
+    computed = gross - fees - slippage - adverse - inventory - extra_costs
+    residual = computed - execution_net
+    ok = abs(residual) <= WATERFALL_TOLERANCE
+    return {
+        "ACCOUNTING_AUDIT": "PASS" if ok else "FAIL",
+        "residual": str(residual),
+    }
+
+
 def audit_scenario(waterfalls: Sequence[ExecutionWaterfall]) -> dict[str, Any]:
     """Aggregate accounting for a complete scenario run."""
     issues: list[str] = []
