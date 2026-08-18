@@ -534,6 +534,31 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </p>
     </section>
 
+    </section>
+
+    <section class="panel">
+      <h2>EXECUTION REALISM LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Would canonical replay alpha survive realistic execution?</span>
+          <strong class="vb-verdict">{_esc((status.get('execution_realism') or {}).get('VERDICT') or 'NOT_RUN')}</strong>
+          <p class="vb-headline">Canonical NET → Realistic NET → Delta</p>
+        </div>
+        <div class="vb-meta">
+          <span>Canonical: {_esc((status.get('execution_realism') or {}).get('CANONICAL_REPLAY_NET') or '—')}</span>
+          <span>Realistic: {_esc((status.get('execution_realism') or {}).get('REALISTIC_EXECUTION_NET') or '—')}</span>
+          <span>Delta: {_esc((status.get('execution_realism') or {}).get('DELTA') or '—')}</span>
+          <span>Fill survival: {_esc((status.get('execution_realism') or {}).get('FILL_SURVIVAL_PCT') or '—')}%</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <p class="forecast-note">
+        Research-only counterfactual validation. Not proven live alpha.
+        Do not read positive execution NET as guaranteed profit.
+        Run: python -m bot.research.execution_realism.runner
+      </p>
+    </section>
+
     <section class="panel">
       <h2>RESEARCH TOURNAMENT <span class="pill">RESEARCH ONLY</span></h2>
       <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'NOT_READY')}">

@@ -905,6 +905,7 @@ class PaperRunner:
             "edge_robustness_lab": self._edge_robustness_lab_snapshot(),
             "canonical_accounting": self._canonical_accounting_snapshot(),
             "alpha_attribution": self._alpha_attribution_snapshot(),
+            "execution_realism": self._execution_realism_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
             "latency": self._cycle_metrics.report(),
@@ -1472,6 +1473,37 @@ class PaperRunner:
             base["execution_enabled"] = False
             base["PRODUCTION_EXECUTION"] = "DISABLED"
             base["NO_NEW_ALPHA_CLAIMED"] = True
+        except Exception:
+            pass
+        return base
+
+    def _execution_realism_snapshot(self) -> dict[str, Any]:
+        """EXECUTION REALISM LAB — research counterfactual; never live alpha."""
+        from pathlib import Path
+
+        base: dict[str, Any] = {
+            "label": "EXECUTION_REALISM_LAB",
+            "affects_trading": False,
+            "execution_enabled": False,
+            "VERDICT": "NOT_RUN",
+            "PRODUCTION_EXECUTION": "DISABLED",
+            "headline": "Not run — python -m bot.research.execution_realism.runner",
+        }
+        path = Path("data/research/execution_realism_results.json")
+        if not path.exists():
+            return base
+        try:
+            import json
+
+            report = json.loads(path.read_text(encoding="utf-8"))
+            base.update({
+                "VERDICT": report.get("VERDICT") or "NOT_RUN",
+                "CANONICAL_REPLAY_NET": report.get("CANONICAL_REPLAY_NET"),
+                "REALISTIC_EXECUTION_NET": report.get("REALISTIC_EXECUTION_NET"),
+                "DELTA": report.get("DELTA"),
+                "FILL_SURVIVAL_PCT": report.get("FILL_SURVIVAL_PCT"),
+                "source": str(path),
+            })
         except Exception:
             pass
         return base
