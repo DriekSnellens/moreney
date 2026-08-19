@@ -172,6 +172,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <main class="container">
     {_shadow_validation_panel(status.get('shadow_validation') or {})}
 
+    {_pipeline_funnel_panel(status.get('pipeline_funnel') or {})}
+
     <section class="panel">
       <div class="panel-head">
         <h2>Bediening</h2>
@@ -2293,6 +2295,38 @@ def _market_data_lab_rows(panel: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return "".join(rows)
+
+
+def _pipeline_funnel_panel(funnel: dict[str, Any]) -> str:
+    """Live pipeline observability — full funnel from market scan to fill."""
+    if not funnel or not funnel.get("cycles"):
+        return ""
+    steps = [
+        ("Markets scanned", funnel.get("markets_scanned", 0)),
+        ("OKX quote available", funnel.get("okx_quote_available", 0)),
+        ("Bitvavo quote available", funnel.get("bitvavo_quote_available", 0)),
+        ("Valid synchronized observations", funnel.get("valid_synchronized", 0)),
+        ("Raw dislocations", funnel.get("raw_dislocations", 0)),
+        ("≥ 40 bps", funnel.get("above_threshold_40bps", 0)),
+        ("Valid 5s candidate", funnel.get("valid_5s_candidates", 0)),
+        ("Profitability passed", funnel.get("profitability_passed", 0)),
+        ("Risk passed", funnel.get("risk_passed", 0)),
+        ("Paper orders", funnel.get("paper_orders", 0)),
+        ("Filled", funnel.get("filled", 0)),
+        ("Closed", funnel.get("closed", 0)),
+    ]
+    rows = "".join(
+        f"<tr><td>{_esc(label)}</td><td class='num'>{_fmt_count(count)}</td></tr>"
+        for label, count in steps
+    )
+    return (
+        "<section class='panel'>"
+        "<div class='panel-head'><h2>Live Pipeline — okx → bitvavo</h2>"
+        f"<span class='badge muted'>{_fmt_count(funnel.get('cycles', 0))} cycles</span></div>"
+        "<table class='tbl'><thead><tr><th>Stap</th><th class='num'>Aantal</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+        "</section>"
+    )
 
 
 def _shadow_validation_panel(block: dict[str, Any]) -> str:

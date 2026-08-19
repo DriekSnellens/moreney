@@ -53,6 +53,7 @@ from bot.opportunity.decision_log import OpportunityDecisionLogger
 from bot.opportunity.calibration import EvCalibrator
 from bot.opportunity.missed import MissedOpportunityTracker
 from bot.opportunity.parameter_log import PARAMETER_CHANGES
+from bot.paper.pipeline_funnel import LivePipelineFunnel
 from bot.perf.cycle_metrics import CycleLatencyTracker
 from bot.opportunity.scanner import TieredScanScheduler
 from bot.markets.registry import InstrumentRegistry
@@ -164,6 +165,7 @@ class PaperRunner:
                 if part.strip()
             ]
         self._scan_universe = list(dict.fromkeys([*self._symbols, *equity_symbols]))
+        self._pipeline_funnel = LivePipelineFunnel()
         self._markout = MarkoutTracker()
         self._calibrator = EvCalibrator(
             prior_strength=int(getattr(settings, "ev_calibration_prior_strength", 40) or 40),
@@ -668,6 +670,9 @@ class PaperRunner:
         with metrics.span("collect_books"):
             books = self._collect_books()
 
+        # Pipeline observability: count okx/bitvavo availability per symbol.
+        self._observe_pipeline_books(books)
+
         # Lead-lag Phase A: observation only (no orders, no ranking effect).
         with metrics.span("lead_lag_observe"):
             self._lead_lag_observe(books)
@@ -753,6 +758,7 @@ class PaperRunner:
         if hasattr(self._strategy, "scan_stats"):
             scan = self._strategy.scan_stats()
             self._tracker.record_scan_stats(scan)
+        self._observe_pipeline_results(result)
         self._tracker.sync_portfolio(self._portfolio)
         self._cycle_count += 1
         metrics.record("total_cycle", time.perf_counter() - cycle_t0)
@@ -952,6 +958,7 @@ class PaperRunner:
             "alpha_attribution": self._alpha_attribution_snapshot(),
             "execution_realism": self._execution_realism_snapshot(),
             "final_validation": self._final_validation_snapshot(),
+            "pipeline_funnel": self._pipeline_funnel.snapshot(),
             "shadow_validation": self._shadow_validation_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
@@ -1959,6 +1966,84 @@ class PaperRunner:
                 if book is not None:
                     books.setdefault(exchange, {})[symbol] = book
         return books
+
+    def _observe_pipeline_books(self, books: dict[str, dict[str, Any]]) -> None:
+        """Count per-cycle availability for the okx→bitvavo route. No parameter changes."""
+        pf = self._pipeline_funnel
+        okx_books = books.get("okx") or {}
+        btv_books = books.get("bitvavo") or {}
+        n_symbols = len(self._symbols)
+        okx_avail = sum(1 for s in self._symbols if s in okx_books)
+        btv_avail = sum(1 for s in self._symbols if s in btv_books)
+        synced = sum(1 for s in self._symbols if s in okx_books and s in btv_books)
+        pf.observe_market_scan(
+            symbol_count=n_symbols,
+            okx_symbols=okx_avail,
+            bitvavo_symbols=btv_avail,
+            synchronized_symbols=synced,
+        )
+        raw = 0
+        above = 0
+        for s in self._symbols:
+            ob_a = okx_books.get(s)
+            ob_b = btv_books.get(s)
+            if ob_a is None or ob_b is None:
+                continue
+            bids_a = getattr(ob_a, "bids", None) or []
+            asks_a = getattr(ob_a, "asks", None) or []
+            bids_b = getattr(ob_b, "bids", None) or []
+            asks_b = getattr(ob_b, "asks", None) or []
+            if not bids_a or not asks_a or not bids_b or not asks_b:
+                continue
+            mid_a = float((bids_a[0].price + asks_a[0].price)) / 2.0
+            mid_b = float((bids_b[0].price + asks_b[0].price)) / 2.0
+            if mid_a <= 0 or mid_b <= 0:
+                continue
+            dis = abs(mid_a - mid_b) / max(mid_a, mid_b)
+            if dis > 0:
+                raw += 1
+            if dis >= 0.004:
+                above += 1
+        pf.observe_dislocation(raw=raw, above_40bps=above)
+        pf.tick_cycle()
+
+    def _observe_pipeline_results(self, result: TradeCycleResult) -> None:
+        """Count okx↔bitvavo candidates through profitability/risk/execution."""
+        pf = self._pipeline_funnel
+        risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
+        cvd_opps = [
+            o for o in result.opportunities
+            if (o.metadata or {}).get("buy_exchange") in ("okx", "bitvavo")
+            and (o.metadata or {}).get("sell_exchange") in ("okx", "bitvavo")
+            and (o.metadata or {}).get("buy_exchange") != (o.metadata or {}).get("sell_exchange")
+        ]
+        pf.observe_candidates(len(cvd_opps))
+        prof_passed = sum(
+            1 for o in cvd_opps
+            if any(p.opportunity_id == o.id for p in result.profitability)
+        )
+        pf.observe_profitability_passed(prof_passed)
+        risk_ok = sum(
+            1 for o in cvd_opps
+            if risk_by_id.get(o.id) is not None and risk_by_id[o.id].approved
+        )
+        pf.observe_risk_passed(risk_ok)
+        orders = sum(
+            1 for o in result.orders
+            if o.opportunity_id is not None
+            and any(c.id == o.opportunity_id for c in cvd_opps)
+        )
+        pf.observe_paper_orders(orders)
+        fills = sum(
+            1 for f in result.fills
+            if any(
+                o.id == f.order_id
+                for o in result.orders
+                if o.opportunity_id is not None
+                and any(c.id == o.opportunity_id for c in cvd_opps)
+            )
+        )
+        pf.observe_filled(fills)
 
     async def _match_and_expire_quotes(
         self, books: dict[str, dict[str, Any]] | None = None

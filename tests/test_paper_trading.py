@@ -576,7 +576,8 @@ def test_paper_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
         assert client.get("/paper/portfolio").status_code == 200
         portfolio = client.get("/paper/portfolio").json()
-        assert Decimal(portfolio["equity"]) == Decimal("200")
+        expected_starting = Decimal(str(get_settings().paper_starting_eur))
+        assert Decimal(portfolio["equity"]) == expected_starting
 
         assert client.get("/paper/performance").status_code == 200
         assert client.get("/paper/statistics/daily").status_code == 200
