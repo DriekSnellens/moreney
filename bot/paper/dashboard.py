@@ -2400,7 +2400,7 @@ def _economic_parity_panel(block: dict[str, Any]) -> str:
             if reject_rows
             else ""
         )
-        "</section>"
+        + "</section>"
     )
 
 
