@@ -2308,21 +2308,32 @@ def _pipeline_funnel_panel(funnel: dict[str, Any]) -> str:
         ("Valid synchronized observations", funnel.get("valid_synchronized", 0)),
         ("Raw dislocations", funnel.get("raw_dislocations", 0)),
         ("≥ 40 bps", funnel.get("above_threshold_40bps", 0)),
-        ("Valid 5s candidate", funnel.get("valid_5s_candidates", 0)),
+        ("Candidate created (decision time)", funnel.get("candidate_created_immediately", 0)),
         ("Profitability passed", funnel.get("profitability_passed", 0)),
+        ("Profitability rejected", funnel.get("profitability_rejected", 0)),
         ("Risk passed", funnel.get("risk_passed", 0)),
+        ("Risk rejected", funnel.get("risk_rejected", 0)),
         ("Paper orders", funnel.get("paper_orders", 0)),
-        ("Filled", funnel.get("filled", 0)),
+        ("Full fill", funnel.get("full_fill", 0)),
+        ("Partial fill", funnel.get("partial_fill", 0)),
+        ("No fill", funnel.get("no_fill", 0)),
         ("Closed", funnel.get("closed", 0)),
+        ("T+5s outcome recorded", funnel.get("t_plus_5_outcome_recorded", 0)),
+        ("T+5s data invalid", funnel.get("t_plus_5_data_invalid", 0)),
     ]
     rows = "".join(
         f"<tr><td>{_esc(label)}</td><td class='num'>{_fmt_count(count)}</td></tr>"
         for label, count in steps
     )
+    entry_sem = _esc(funnel.get("entry_semantics") or "Decision is made at signal time")
+    outcome_sem = _esc(funnel.get("outcome_horizon") or "5 seconds")
     return (
         "<section class='panel'>"
         "<div class='panel-head'><h2>Live Pipeline — okx → bitvavo</h2>"
         f"<span class='badge muted'>{_fmt_count(funnel.get('cycles', 0))} cycles</span></div>"
+        f"<p class='forecast-note'>"
+        f"ENTRY DECISION: {entry_sem} · OUTCOME HORIZON: {outcome_sem}"
+        "</p>"
         "<table class='tbl'><thead><tr><th>Stap</th><th class='num'>Aantal</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"
         "</section>"

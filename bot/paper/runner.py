@@ -53,6 +53,7 @@ from bot.opportunity.decision_log import OpportunityDecisionLogger
 from bot.opportunity.calibration import EvCalibrator
 from bot.opportunity.missed import MissedOpportunityTracker
 from bot.opportunity.parameter_log import PARAMETER_CHANGES
+from bot.paper.cvd_candidate import create_cvd_candidates
 from bot.paper.pipeline_funnel import LivePipelineFunnel
 from bot.perf.cycle_metrics import CycleLatencyTracker
 from bot.opportunity.scanner import TieredScanScheduler
@@ -692,6 +693,9 @@ class PaperRunner:
         scan_symbols = self._scan_scheduler.symbols_for_cycle(all_symbols=self._scan_universe)
         with metrics.span("strategy_scan"):
             result = await self._engine.run_universe(scan_symbols)
+        # Inject frozen CVD candidates (decision at signal time, no 5s entry gate).
+        with metrics.span("cvd_inject"):
+            self._inject_cvd_candidates(result, books)
         with metrics.span("ingest_cycle"):
             self._ingest_cycle(result, equity_before=equity_before)
 
@@ -1967,6 +1971,35 @@ class PaperRunner:
                     books.setdefault(exchange, {})[symbol] = book
         return books
 
+    def _inject_cvd_candidates(
+        self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
+    ) -> None:
+        """Create frozen CVD candidates at decision time and feed into the pipeline.
+
+        Frozen research semantics: candidate is created immediately when >=40 bps
+        mid dislocation is detected. The 5s horizon is an OUTCOME MEASUREMENT
+        window, not an entry gate. The candidate goes through the normal
+        profitability → risk → execution pipeline.
+        """
+        try:
+            venue_snapshots = []
+            for symbol in self._symbols:
+                snaps = self._market_data.snapshots_for_arbitrage(symbol)
+                for s in snaps:
+                    if s.exchange in ("okx", "bitvavo"):
+                        venue_snapshots.append(s)
+            if not venue_snapshots:
+                return
+            cvd_opps = create_cvd_candidates(venue_snapshots)
+            if cvd_opps:
+                existing_ids = {o.id for o in result.opportunities}
+                for opp in cvd_opps:
+                    if opp.id not in existing_ids:
+                        result.opportunities.append(opp)
+                self._pipeline_funnel.observe_candidates(len(cvd_opps))
+        except Exception:
+            logger.debug("CVD_INJECT_ERROR", exc_info=True)
+
     def _observe_pipeline_books(self, books: dict[str, dict[str, Any]]) -> None:
         """Count per-cycle availability for the okx→bitvavo route. No parameter changes."""
         pf = self._pipeline_funnel
@@ -2008,42 +2041,46 @@ class PaperRunner:
         pf.tick_cycle()
 
     def _observe_pipeline_results(self, result: TradeCycleResult) -> None:
-        """Count okx↔bitvavo candidates through profitability/risk/execution."""
+        """Count okx↔bitvavo CVD candidates through profitability/risk/execution."""
         pf = self._pipeline_funnel
         risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
+        prof_by_id = {p.opportunity_id: p for p in result.profitability}
         cvd_opps = [
             o for o in result.opportunities
-            if (o.metadata or {}).get("buy_exchange") in ("okx", "bitvavo")
-            and (o.metadata or {}).get("sell_exchange") in ("okx", "bitvavo")
-            and (o.metadata or {}).get("buy_exchange") != (o.metadata or {}).get("sell_exchange")
+            if (o.metadata or {}).get("frozen_cvd") is True
+            or (
+                (o.metadata or {}).get("buy_exchange") in ("okx", "bitvavo")
+                and (o.metadata or {}).get("sell_exchange") in ("okx", "bitvavo")
+                and (o.metadata or {}).get("buy_exchange") != (o.metadata or {}).get("sell_exchange")
+            )
         ]
-        pf.observe_candidates(len(cvd_opps))
-        prof_passed = sum(
-            1 for o in cvd_opps
-            if any(p.opportunity_id == o.id for p in result.profitability)
-        )
-        pf.observe_profitability_passed(prof_passed)
-        risk_ok = sum(
-            1 for o in cvd_opps
-            if risk_by_id.get(o.id) is not None and risk_by_id[o.id].approved
-        )
-        pf.observe_risk_passed(risk_ok)
-        orders = sum(
-            1 for o in result.orders
+        for o in cvd_opps:
+            prof = prof_by_id.get(o.id)
+            decision = risk_by_id.get(o.id)
+            if prof is not None:
+                pf.observe_profitability_passed(1)
+            else:
+                pf.observe_profitability_rejected(1)
+                continue
+            if decision is not None and decision.approved:
+                pf.observe_risk_passed(1)
+            elif decision is not None:
+                pf.observe_risk_rejected(1)
+                continue
+            else:
+                continue
+        orders = [
+            o for o in result.orders
             if o.opportunity_id is not None
             and any(c.id == o.opportunity_id for c in cvd_opps)
-        )
-        pf.observe_paper_orders(orders)
-        fills = sum(
-            1 for f in result.fills
+        ]
+        pf.observe_paper_orders(len(orders))
+        for fill in result.fills:
             if any(
-                o.id == f.order_id
-                for o in result.orders
-                if o.opportunity_id is not None
-                and any(c.id == o.opportunity_id for c in cvd_opps)
-            )
-        )
-        pf.observe_filled(fills)
+                o.id == fill.order_id
+                for o in orders
+            ):
+                pf.observe_fill(full=True)
 
     async def _match_and_expire_quotes(
         self, books: dict[str, dict[str, Any]] | None = None
