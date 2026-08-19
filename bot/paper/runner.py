@@ -55,6 +55,12 @@ from bot.opportunity.missed import MissedOpportunityTracker
 from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.cvd_candidate import create_cvd_candidates
 from bot.paper.pipeline_funnel import LivePipelineFunnel
+from bot.research.economic_parity.evaluator import (
+    evaluate_frozen_research_economics,
+    evaluate_live_profitability_economics,
+    frozen_to_profitability_result,
+)
+from bot.research.economic_parity.store import EconomicParityStore
 from bot.perf.cycle_metrics import CycleLatencyTracker
 from bot.opportunity.scanner import TieredScanScheduler
 from bot.markets.registry import InstrumentRegistry
@@ -167,6 +173,7 @@ class PaperRunner:
             ]
         self._scan_universe = list(dict.fromkeys([*self._symbols, *equity_symbols]))
         self._pipeline_funnel = LivePipelineFunnel()
+        self._economic_parity_store = EconomicParityStore()
         self._markout = MarkoutTracker()
         self._calibrator = EvCalibrator(
             prior_strength=int(getattr(settings, "ev_calibration_prior_strength", 40) or 40),
@@ -963,6 +970,7 @@ class PaperRunner:
             "execution_realism": self._execution_realism_snapshot(),
             "final_validation": self._final_validation_snapshot(),
             "pipeline_funnel": self._pipeline_funnel.snapshot(),
+            "economic_parity": self._economic_parity_snapshot(),
             "shadow_validation": self._shadow_validation_snapshot(),
             "autonomous_research": self._autonomous_research_snapshot(),
             "parameter_changes": PARAMETER_CHANGES,
@@ -1971,6 +1979,9 @@ class PaperRunner:
                     books.setdefault(exchange, {})[symbol] = book
         return books
 
+    def _economic_parity_snapshot(self) -> dict[str, Any]:
+        return self._economic_parity_store.summary()
+
     def _inject_cvd_candidates(
         self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
     ) -> None:
@@ -1993,9 +2004,18 @@ class PaperRunner:
             cvd_opps = create_cvd_candidates(venue_snapshots)
             if cvd_opps:
                 existing_ids = {o.id for o in result.opportunities}
+                prof_by_id = {p.opportunity_id: p for p in result.profitability}
+                gate = self._gate_settings()
                 for opp in cvd_opps:
                     if opp.id not in existing_ids:
                         result.opportunities.append(opp)
+                    research = evaluate_frozen_research_economics(opp)
+                    live = evaluate_live_profitability_economics(opp, settings=gate)
+                    self._economic_parity_store.record(opp, research=research, live=live)
+                    if opp.id not in prof_by_id:
+                        result.profitability.append(
+                            frozen_to_profitability_result(opp, research)
+                        )
                 self._pipeline_funnel.observe_candidates(len(cvd_opps))
         except Exception:
             logger.debug("CVD_INJECT_ERROR", exc_info=True)

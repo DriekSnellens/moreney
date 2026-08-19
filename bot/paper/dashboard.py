@@ -174,6 +174,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     {_pipeline_funnel_panel(status.get('pipeline_funnel') or {})}
 
+    {_economic_parity_panel(status.get('economic_parity') or {})}
+
     <section class="panel">
       <div class="panel-head">
         <h2>Bediening</h2>
@@ -2336,6 +2338,68 @@ def _pipeline_funnel_panel(funnel: dict[str, Any]) -> str:
         "</p>"
         "<table class='tbl'><thead><tr><th>Stap</th><th class='num'>Aantal</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"
+        "</section>"
+    )
+
+
+def _economic_parity_panel(block: dict[str, Any]) -> str:
+    """LIVE ECONOMIC PARITY — research vs live profitability diagnostics."""
+    if not block or not block.get("LIVE_CANDIDATES_ANALYZED"):
+        return ""
+    verdict = str(block.get("ECONOMIC_PARITY") or "UNKNOWN")
+    chip = "ok" if verdict == "ECONOMIC_PARITY_PASS" else "warn"
+    rows = [
+        ("Candidates created", block.get("candidates_created", 0)),
+        ("Research-economics profitable", block.get("research_economics_profitable", 0)),
+        ("Live-economics profitable", block.get("live_economics_profitable", 0)),
+        ("Parity mismatches", block.get("parity_mismatches", 0)),
+        ("Median dislocation (bps)", block.get("median_dislocation_bps")),
+        ("Median break-even (bps)", block.get("median_breakeven_bps")),
+        ("Median expected net (EUR)", block.get("median_expected_net")),
+    ]
+    body = "".join(
+        f"<tr><td>{_esc(label)}</td><td class='num'>{_esc_fmt(val, 'num' if isinstance(val, (int, float)) else 'raw')}</td></tr>"
+        for label, val in rows
+    )
+    buckets = block.get("diagnostic_buckets") or []
+    bucket_rows = "".join(
+        f"<tr><td>{_esc(b.get('bucket'))}</td><td class='num'>{_fmt_count(b.get('count'))}</td>"
+        f"<td class='num'>{_esc_fmt(b.get('median_expected_net'), 'money')}</td></tr>"
+        for b in buckets
+    )
+    reject = block.get("top_rejection_causes") or {}
+    reject_rows = "".join(
+        f"<tr><td>{_esc(k)}</td><td class='num'>{_fmt_count(v)}</td></tr>"
+        for k, v in sorted(reject.items(), key=lambda x: -x[1])[:5]
+    )
+    root = block.get("ROOT_CAUSE")
+    root_line = (
+        f"<p class='forecast-note'>Root cause tag: <strong>{_esc(root)}</strong></p>"
+        if root and root != "NONE"
+        else ""
+    )
+    return (
+        "<section class='panel'>"
+        "<div class='panel-head'><h2>LIVE ECONOMIC PARITY</h2>"
+        f"<span class='chip {chip}'>{_esc(verdict)}</span></div>"
+        f"{root_line}"
+        "<table class='tbl'><thead><tr><th>Metric</th><th class='num'>Value</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+        + (
+            "<h3 class='subhead'>Dislocation buckets (diagnostic only)</h3>"
+            "<table class='tbl'><thead><tr><th>Bucket</th><th class='num'>N</th>"
+            "<th class='num'>Median research NET</th></tr></thead>"
+            f"<tbody>{bucket_rows}</tbody></table>"
+            if bucket_rows
+            else ""
+        )
+        + (
+            "<h3 class='subhead'>Top rejection causes (research economics)</h3>"
+            "<table class='tbl'><thead><tr><th>Reason</th><th class='num'>Count</th></tr></thead>"
+            f"<tbody>{reject_rows}</tbody></table>"
+            if reject_rows
+            else ""
+        )
         "</section>"
     )
 

@@ -111,6 +111,29 @@ def _check_dislocation(
         return None
 
     quantity = _NOTIONAL / entry_price
+    dis_bps = float(abs(dis) * 10000)
+    leader_bid = float(a_book.bids[0].price)
+    leader_ask = float(a_book.asks[0].price)
+    follower_bid = float(b_book.bids[0].price)
+    follower_ask = float(b_book.asks[0].price)
+
+    decision_snapshot = {
+        "route": f"{_VENUE_A}|{_VENUE_B}",
+        "dislocation_bps": dis_bps,
+        "dislocation_fraction": float(abs(dis)),
+        "notional_eur": float(_NOTIONAL),
+        "leader_bid": leader_bid,
+        "leader_ask": leader_ask,
+        "follower_bid": follower_bid,
+        "follower_ask": follower_ask,
+        "mid_a": float(mid_a),
+        "mid_b": float(mid_b),
+        "a_rich": a_rich,
+        "entry_price": float(entry_price),
+        "exit_price": float(exit_price),
+        "buy_exchange": buy_exchange,
+        "sell_exchange": sell_exchange,
+    }
 
     return TradeOpportunity(
         strategy_name="cross_venue_dislocation",
@@ -131,12 +154,13 @@ def _check_dislocation(
         metadata={
             "buy_exchange": buy_exchange,
             "sell_exchange": sell_exchange,
-            "dislocation_bps": float(abs(dis) * 10000),
+            "dislocation_bps": dis_bps,
             "mid_a": float(mid_a),
             "mid_b": float(mid_b),
             "a_rich": a_rich,
             "frozen_cvd": True,
             "decision_time_candidate": True,
+            "decision_economics_snapshot": decision_snapshot,
             "outcome_horizon_ms": 5000,
             "entry_semantics": "immediate_at_signal_time",
             "buy_taker_fee_rate": str(venue_taker_fee(buy_exchange)),
