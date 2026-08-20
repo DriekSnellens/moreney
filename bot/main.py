@@ -48,6 +48,10 @@ from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
 from bot.live.service import get_live_service, reset_live_service
 from bot.live.micro_engine import get_micro_engine, reset_micro_engine
+from bot.live.micro_session_manager import (
+    get_micro_session_manager,
+    reset_micro_session_manager,
+)
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -130,6 +134,7 @@ def reset_risk_singletons() -> None:
     reset_funding_service()
     reset_live_service()
     reset_micro_engine()
+    reset_micro_session_manager()
 
 
 class DashboardLoginRedirect(Exception):
@@ -452,6 +457,41 @@ async def live_micro_orders(payload: dict[str, Any] | None = None) -> dict[str, 
     body = payload or {}
     confirm = bool(body.get("confirm"))
     return await get_micro_engine().submit(body, confirm=confirm)
+
+
+@app.get("/live/micro/session")
+async def live_micro_session_status() -> dict[str, Any]:
+    """Live status of the full-bot micro session (budget-capped PaperRunner)."""
+    return get_micro_session_manager().status()
+
+
+@app.post("/live/micro/session/start")
+async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start a timed full-bot micro session in the background."""
+    body = payload or {}
+    minutes = float(body.get("minutes") or 15)
+    budget = float(body.get("budget_eur") or 25)
+    exclude_btc = body.get("exclude_btc", True)
+    if isinstance(exclude_btc, str):
+        exclude_btc = exclude_btc.strip().lower() not in {"0", "false", "no"}
+    symbols_raw = body.get("symbols")
+    symbols = None
+    if isinstance(symbols_raw, str) and symbols_raw.strip():
+        symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
+    elif isinstance(symbols_raw, list):
+        symbols = [str(s).strip().upper() for s in symbols_raw if str(s).strip()]
+    return await get_micro_session_manager().start(
+        minutes=minutes,
+        budget_eur=budget,
+        exclude_btc=bool(exclude_btc),
+        symbols=symbols,
+    )
+
+
+@app.post("/live/micro/session/stop")
+async def live_micro_session_stop() -> dict[str, Any]:
+    """Request stop of the running full-bot micro session."""
+    return await get_micro_session_manager().stop()
 
 
 @app.get("/live/alerts")
@@ -801,6 +841,16 @@ async def fleet_reset(
         raise HTTPException(status_code=400, detail=result)
     return result
 
+@app.get("/live/micro/dashboard", response_class=HTMLResponse)
+async def live_micro_dashboard(
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse:
+    """Dedicated auto-refresh page for the full-bot micro session."""
+    from bot.paper.dashboard import render_micro_session_dashboard
+
+    return render_micro_session_dashboard(get_micro_session_manager().status())
+
+
 @app.get("/paper/dashboard", response_class=HTMLResponse)
 async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
     runner = get_paper_runner()
@@ -830,6 +880,7 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
     ]
     live_payload = get_live_service().compact_status()
     live_payload["unlock"] = get_live_service().micro_unlock_checklist()
+    micro_session = get_micro_session_manager().status()
     return render_dashboard(
         {
             "status": runner.status(),
@@ -841,6 +892,7 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
             "trades": trades,
             "funding": funding_payload,
             "live_readiness": live_payload,
+            "micro_session": micro_session,
         }
     )
 

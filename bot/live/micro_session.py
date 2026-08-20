@@ -49,6 +49,10 @@ def _session_settings(
     persist_path: Path,
 ) -> Settings:
     """Paper mode + micro unlocks already in env; tighten capital and allowlists."""
+    mode = getattr(base, "market_data_mode", "local") or "local"
+    # Prefer shared Redis feed from the fleet publisher when available.
+    if mode == "local":
+        mode = "shared"
     return base.model_copy(
         update={
             "execution_mode": ExecutionMode.PAPER,
@@ -68,6 +72,7 @@ def _session_settings(
             "live_micro_max_notional_eur": float(budget_eur),
             "live_micro_max_daily_loss_eur": float(budget_eur),
             "live_micro_max_open_orders": 8,
+            "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
         }
     )
@@ -117,6 +122,8 @@ async def run_session(
     exclude_btc: bool = True,
     market_data: MarketDataService | None = None,
     own_market_data: bool | None = None,
+    status_callback: Any | None = None,
+    should_stop: Any | None = None,
 ) -> dict[str, Any]:
     """Run full PaperRunner cycles with live Bitvavo fills capped at budget_eur."""
     base = settings or get_settings()
@@ -152,7 +159,23 @@ async def run_session(
         }
 
     owns_md = own_market_data if own_market_data is not None else market_data is None
-    md = market_data or MarketDataService(cfg, start_websockets=cfg.market_data_mode != "shared")
+    if market_data is None:
+        from bot.core.redis_client import get_redis
+        from bot.market_data.cache import MarketDataCache
+
+        cache = None
+        if cfg.market_data_mode in {"shared", "publisher"}:
+            cache = MarketDataCache(
+                redis_client=get_redis(cfg.redis_url),
+                ttl_seconds=cfg.market_data_redis_ttl_seconds,
+            )
+        md = MarketDataService(
+            cfg,
+            cache=cache,
+            start_websockets=cfg.market_data_mode == "local",
+        )
+    else:
+        md = market_data
     risk = RiskEngine(cfg)
     store = PaperTradingStore(cfg)
     runner = PaperRunner(cfg, market_data=md, risk_engine=risk, store=store)
@@ -174,6 +197,7 @@ async def run_session(
         }
 
     deadline = time.monotonic() + minutes * 60.0
+    started_mono = time.monotonic()
     logger.info(
         "Full-bot micro session start budget=%s symbols=%s minutes=%s mode=%s",
         budget_eur,
@@ -184,9 +208,47 @@ async def run_session(
     start_equity = Decimal(str(runner.portfolio.state.total_equity))
     start_status = runner.status()
 
+    def _tick() -> None:
+        if status_callback is None:
+            return
+        st = runner.status()
+        elapsed = time.monotonic() - started_mono
+        remaining = max(0.0, deadline - time.monotonic())
+        equity = Decimal(str(runner.portfolio.state.total_equity))
+        status_callback(
+            {
+                "symbol_count": len(scan_symbols),
+                "symbols_sample": scan_symbols[:12],
+                "elapsed_seconds": round(elapsed, 1),
+                "remaining_seconds": round(remaining, 1),
+                "paper_cycles": st.get("cycle_count"),
+                "strategy": st.get("strategy"),
+                "approved_opportunities": st.get("approved_opportunities"),
+                "executed_opportunities": st.get("executed_opportunities"),
+                "trade_count": st.get("trade_count"),
+                "starting_equity_eur": str(start_equity),
+                "current_equity_eur": str(equity),
+                "pnl_paper_pocket_eur": str(equity - start_equity),
+                "bridge": bridge.snapshot_bridge(),
+                "live_trades_attempted": len(bridge.live_trades),
+                "live_trades_executed": len(
+                    [t for t in bridge.live_trades if (t.get("result") or {}).get("executed")]
+                ),
+                "last_live_trade": bridge.live_trades[-1] if bridge.live_trades else None,
+                "last_cycle": st.get("last_cycle"),
+                "why_not_trade": st.get("why_not_trade"),
+                "pipeline_funnel": st.get("pipeline_funnel"),
+            }
+        )
+
     try:
+        _tick()
         while time.monotonic() < deadline:
+            if should_stop is not None and should_stop():
+                logger.info("Full-bot micro session stop requested")
+                break
             await asyncio.sleep(1.0)
+            _tick()
             if not runner.running:
                 break
     finally:

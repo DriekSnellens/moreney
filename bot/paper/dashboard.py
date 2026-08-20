@@ -118,6 +118,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     inventory_rows = _inventory_rows(inventory.get("venues") or {})
     funding_html = _funding_panel_html(payload.get("funding") or {})
     live_html = _live_readiness_panel_html(payload.get("live_readiness") or {})
+    micro_html = _micro_session_panel_html(payload.get("micro_session") or {})
 
     global_engine = status.get("global_engine") or {}
     ge_enabled = global_engine.get("enabled")
@@ -260,6 +261,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     {funding_html}
 
     {live_html}
+
+    {micro_html}
 
     <section class="panel">
       <h2>NET-economie (per fill)</h2>
@@ -2878,6 +2881,7 @@ def _live_readiness_panel_html(live: dict[str, Any]) -> str:
         Paper blijft default. Live orders alleen na expliciete unlocks.
         API: <code>/live/observe</code>, <code>/live/credentials</code>,
         <code>/live/micro/dry-run</code>.
+        Micro-monitor: <a class="link-lite" href="/live/micro/dashboard">/live/micro/dashboard</a>.
       </p>
       <div class="metric-grid compact">
         <article class="metric-card"><span class="label">Fase</span><span class="value">{_esc(live.get('active_phase') or '—')}</span></article>
@@ -2890,6 +2894,124 @@ def _live_readiness_panel_html(live: dict[str, Any]) -> str:
       <p class="forecast-note">Blocking: {_esc(block_txt)}. Volgende stap: SEPA→Bitvavo, keys zonder withdraw, daarna dry-run.</p>
     </section>
     """
+
+
+def _micro_session_panel_html(session: dict[str, Any]) -> str:
+    """Compact panel for the full-bot € micro session."""
+    if not session:
+        session = {"running": False, "message": "idle"}
+    running = bool(session.get("running") or session.get("task_running"))
+    pill = "ok" if running else ("warn" if session.get("ok") is False else "muted")
+    state = "LIVE" if running else _esc(str(session.get("message") or "idle"))
+    bridge = session.get("bridge") or {}
+    last = session.get("last_live_trade") or {}
+    last_txt = "—"
+    if last:
+        last_txt = (
+            f"{_esc(last.get('side'))} {_esc(last.get('symbol'))} "
+            f"@ {_esc((last.get('result') or {}).get('order', {}).get('average_price') or '—')}"
+        )
+    return f"""
+    <section class="panel highlight">
+      <div class="panel-head">
+        <h2>Micro-live sessie (€ budget)</h2>
+        <span>
+          <a class="link-lite" href="/live/micro/dashboard">Fullscreen monitor</a>
+          · <span class="pill {pill}">{state}</span>
+        </span>
+      </div>
+      <p class="forecast-note">
+        Volledige bot-pipeline met hard kapitaallimiet. BTC standaard uit.
+        API: <code>/live/micro/session</code>
+      </p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Budget</span><span class="value">{_esc(session.get('budget_eur') or bridge.get('budget_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Spent</span><span class="value">{_esc(bridge.get('spent_eur') or '0')}</span></article>
+        <article class="metric-card"><span class="label">Rest</span><span class="value">{_esc(bridge.get('remaining_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">PnL pocket</span><span class="value">{_esc(session.get('pnl_paper_pocket_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Cycles</span><span class="value">{_esc(str(session.get('paper_cycles') or 0))}</span></article>
+        <article class="metric-card"><span class="label">Live fills</span><span class="value">{_esc(str(session.get('live_trades_executed') or 0))}/{_esc(str(session.get('live_trades_attempted') or 0))}</span></article>
+        <article class="metric-card"><span class="label">Symbols</span><span class="value">{_esc(str(session.get('symbol_count') or '—'))}</span></article>
+        <article class="metric-card"><span class="label">Resterend</span><span class="value">{_esc(str(session.get('remaining_seconds') or '—'))}s</span></article>
+      </div>
+      <p class="forecast-note">Laatste live: {_esc(last_txt)}</p>
+      <div class="controls">
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:15,budget_eur:25,exclude_btc:true}})">Start 15m / €25</button>
+        <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop sessie</button>
+      </div>
+    </section>
+    """
+
+
+def render_micro_session_dashboard(session: dict[str, Any]) -> HTMLResponse:
+    """Dedicated 2s-refresh monitor for the micro session."""
+    running = bool(session.get("running") or session.get("task_running"))
+    pill = "ok" if running else ("warn" if session.get("ok") is False else "muted")
+    bridge = session.get("bridge") or {}
+    skips = bridge.get("skips") or {}
+    skip_rows = "".join(
+        f"<tr><td>{_esc(k)}</td><td class='num'>{_esc(str(v))}</td></tr>"
+        for k, v in sorted(skips.items(), key=lambda kv: (-int(kv[1] or 0), str(kv[0])))
+    ) or "<tr><td colspan='2' class='empty'>Geen skips</td></tr>"
+    last = session.get("last_live_trade") or {}
+    last_json = _esc(json.dumps(last, default=str)[:500] if last else "—")
+    funnel = session.get("pipeline_funnel") or {}
+    why = session.get("why_not_trade") or {}
+    html = f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta http-equiv="refresh" content="2"/>
+  <title>Moreney — Micro-live monitor</title>
+  <style>{_shared_css()}</style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">Full-bot micro · € budget · live Bitvavo</p>
+        <h1 class="brand">Moreney</h1>
+        <p class="sub">Volledige pipeline, klein kapitaal. Refresh 2s.</p>
+      </div>
+      <div class="hero-badges">
+        <a class="link-lite" href="/paper/dashboard">Paper dashboard</a>
+        <span class="badge {pill}">{'RUNNING' if running else _esc(session.get('message') or 'idle')}</span>
+      </div>
+    </div>
+  </header>
+  <main class="container">
+    {_micro_session_panel_html(session)}
+    <section class="panel">
+      <h2>Bridge skips</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Reden</th><th>Count</th></tr></thead>
+        <tbody>{skip_rows}</tbody>
+      </table></div>
+    </section>
+    <section class="panel">
+      <h2>Laatste live trade</h2>
+      <pre style="white-space:pre-wrap;font-size:0.85rem">{last_json}</pre>
+    </section>
+    <section class="panel">
+      <h2>Pipeline / why-not</h2>
+      <pre style="white-space:pre-wrap;font-size:0.85rem">{_esc(json.dumps({'funnel': funnel, 'why_not_trade': why}, default=str)[:2500])}</pre>
+    </section>
+  </main>
+  <script>
+    async function post(url, body) {{
+      await fetch(url, {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(body || {{}})
+      }});
+      location.reload();
+    }}
+  </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
 
 
 def _funding_panel_html(funding: dict[str, Any]) -> str:
