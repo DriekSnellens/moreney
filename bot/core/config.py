@@ -356,7 +356,7 @@ class Settings(BaseSettings):
     # Dangerous: allow micro orders while research PRODUCTION_EXECUTION_ENABLED=false.
     live_allow_without_research_unlock: bool = False
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
-    live_micro_venues: str = "bitvavo,kraken"
+    live_micro_venues: str = "bitvavo"
     live_micro_symbols: str = "BTCEUR,ETHEUR"
     live_micro_max_notional_eur: float = Field(default=50.0, gt=0)
     live_micro_max_daily_loss_eur: float = Field(default=25.0, gt=0)

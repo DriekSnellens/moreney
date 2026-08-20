@@ -33,12 +33,39 @@ Also: `GET /live/status`, `GET /live/readiness` (full report).
 - `GET /fleet/api` → `live_readiness`
 - Dashboard panel **Live readiness**
 
-## Micro unlock (after Phase 0+1)
+## Micro-live engine (wired, fail-closed)
 
-1. `GET /live/micro/unlock-checklist` — see missing flags
-2. `POST /live/micro/dry-run` with `{"venue":"bitvavo","symbol":"BTCEUR","notional_eur":25}`
-3. Only if dry-run `policy_allows` and you accept risk: set unlocks in env (never via API)
-4. PaperRunner still does not place live orders until wired separately
+Separate from PaperRunner:
+
+| Step | Endpoint |
+|------|----------|
+| Status | `GET /live/micro/engine` |
+| Unlock checklist | `GET /live/micro/unlock-checklist` |
+| Dry-run | `POST /live/micro/dry-run` |
+| Arm process | `POST /live/micro/arm` |
+| Disarm | `POST /live/micro/disarm` |
+| **Real order** | `POST /live/micro/orders` with `"confirm": true` |
+
+Env unlocks (all required):
+
+```ini
+LIVE_TRADING_ENABLED=true
+LIVE_MICRO_ENABLED=true
+LIVE_ORDERS_UNLOCKED=true
+LIVE_ALLOW_WITHOUT_RESEARCH_UNLOCK=true
+AUTOMATIC_WITHDRAWALS_ENABLED=false
+LIVE_MICRO_VENUES=bitvavo
+LIVE_MICRO_SYMBOLS=BTCEUR,ETHEUR
+LIVE_MICRO_MAX_NOTIONAL_EUR=50
+```
+
+Then restart the API, `POST /live/micro/arm`, then e.g.:
+
+```json
+{"venue":"bitvavo","symbol":"BTCEUR","side":"buy","notional_eur":25,"confirm":true}
+```
+
+PaperRunner is never coupled to this path.
 
 ## Safety flags (all must be true to place a live order)
 

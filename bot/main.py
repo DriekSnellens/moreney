@@ -47,6 +47,7 @@ from bot.paper.store import PaperTradingStore
 from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
 from bot.live.service import get_live_service, reset_live_service
+from bot.live.micro_engine import get_micro_engine, reset_micro_engine
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -128,6 +129,7 @@ def reset_risk_singletons() -> None:
     _last_paper_cycle = None
     reset_funding_service()
     reset_live_service()
+    reset_micro_engine()
 
 
 class DashboardLoginRedirect(Exception):
@@ -421,6 +423,35 @@ async def live_micro_unlock_checklist() -> dict[str, Any]:
 async def live_micro_dry_run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate a hypothetical order against micro policy — does not place."""
     return get_live_service().micro_dry_run(payload or {})
+
+
+@app.get("/live/micro/engine")
+async def live_micro_engine_status() -> dict[str, Any]:
+    """Micro-live engine status (separate from PaperRunner)."""
+    return get_micro_engine().status()
+
+
+@app.post("/live/micro/arm")
+async def live_micro_arm() -> dict[str, Any]:
+    """Arm micro engine for this process after env unlocks. Does not place orders."""
+    return get_micro_engine().arm()
+
+
+@app.post("/live/micro/disarm")
+async def live_micro_disarm() -> dict[str, Any]:
+    return get_micro_engine().disarm()
+
+
+@app.post("/live/micro/orders")
+async def live_micro_orders(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Submit a micro live order. Requires env unlocks + arm + confirm=true.
+
+    Body example::
+        {"venue":"bitvavo","symbol":"BTCEUR","side":"buy","notional_eur":25,"confirm":true}
+    """
+    body = payload or {}
+    confirm = bool(body.get("confirm"))
+    return await get_micro_engine().submit(body, confirm=confirm)
 
 
 @app.get("/live/alerts")

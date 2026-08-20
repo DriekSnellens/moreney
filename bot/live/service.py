@@ -172,11 +172,17 @@ class LiveReadinessService:
         }
 
     def phase2_scaffolding(self) -> dict[str, Any]:
+        from bot.live.micro_engine import get_micro_engine
+
         return {
             "registry": self._registry.status(),
             "executor": self._executor.status(),
+            "micro_engine": get_micro_engine().status(),
             "places_orders": False,
-            "note": "Scaffolding only — force_enabled=False on MultiVenueLiveExecutor.",
+            "note": (
+                "MultiVenueLiveExecutor + LiveMicroEngine wired. "
+                "Orders still blocked until env unlocks + arm + confirm."
+            ),
         }
 
     def phase3_micro(self) -> dict[str, Any]:
