@@ -346,6 +346,24 @@ class Settings(BaseSettings):
     # Never enable automatic exchange withdrawals in this MVP.
     automatic_withdrawals_enabled: bool = False
 
+    # --- Live readiness (phases 0–5). All order-placing flags default OFF. ---
+    live_observe_enabled: bool = True
+    live_observe_venues: str = ""  # empty → funding_venues
+    live_scaffolding_ready: bool = True
+    live_trading_enabled: bool = False
+    live_micro_enabled: bool = False
+    live_orders_unlocked: bool = False
+    # Dangerous: allow micro orders while research PRODUCTION_EXECUTION_ENABLED=false.
+    live_allow_without_research_unlock: bool = False
+    live_trading_venues: str = "bitvavo,kraken,binance,okx"
+    live_micro_venues: str = "bitvavo,kraken"
+    live_micro_symbols: str = "BTCEUR,ETHEUR"
+    live_micro_max_notional_eur: float = Field(default=50.0, gt=0)
+    live_micro_max_daily_loss_eur: float = Field(default=25.0, gt=0)
+    live_micro_max_open_orders: int = Field(default=1, ge=1, le=10)
+    live_audit_path: str = "./data/live_audit.jsonl"
+    live_hardening_enabled: bool = True
+
     @field_validator("execution_mode", mode="before")
     @classmethod
     def _normalize_execution_mode(cls, value: object) -> object:

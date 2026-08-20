@@ -46,6 +46,7 @@ from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.store import PaperTradingStore
 from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
+from bot.live.service import get_live_service, reset_live_service
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -126,6 +127,7 @@ def reset_risk_singletons() -> None:
     _paper_runner = None
     _last_paper_cycle = None
     reset_funding_service()
+    reset_live_service()
 
 
 class DashboardLoginRedirect(Exception):
@@ -228,6 +230,13 @@ async def status() -> dict[str, Any]:
         "leverage_supported": False,
         "funding_main_venue": funding_flags["funding_main_venue"],
         "funding_venues": funding_flags["funding_venues"],
+        "live_readiness": {
+            "active_phase": get_live_service().active_phase().name.lower(),
+            "can_place_live_orders": False,
+            "observe_enabled": bool(settings.live_observe_enabled),
+            "micro_enabled": bool(settings.live_micro_enabled),
+            "orders_unlocked": bool(settings.live_orders_unlocked),
+        },
         "kill_switch": ks.model_dump(mode="json"),
     }
 
@@ -362,6 +371,51 @@ async def rebalancing_recommendations() -> dict[str, Any]:
             "Transfer manually via the exchange withdrawal/deposit UI, "
             "then inventory will update on the next balance refresh."
         ),
+    }
+
+
+@app.get("/live/readiness")
+async def live_readiness() -> dict[str, Any]:
+    """Full live readiness report across phases 0–5 (fail-closed)."""
+    return await get_live_service().full_status()
+
+
+@app.get("/live/status")
+async def live_status() -> dict[str, Any]:
+    svc = get_live_service()
+    micro = svc.phase3_micro()
+    return {
+        "active_phase": svc.active_phase().name.lower(),
+        "live_trading_enabled": bool(get_settings().live_trading_enabled),
+        "can_place_live_orders": bool(micro.get("can_place_orders")),
+        "block_reason": micro.get("block_reason"),
+        "withdrawals_supported": False,
+        "production_execution_enabled": False,
+        "go_no_go_ready": svc.phase0().get("ready"),
+    }
+
+
+@app.get("/live/observe")
+async def live_observe() -> dict[str, Any]:
+    """Phase 1: read-only live balances (no orders)."""
+    return await get_live_service().phase1_observe()
+
+
+@app.get("/live/alerts")
+async def live_alerts() -> dict[str, Any]:
+    """Phase 4: venue/rebalance alerts (non-executing)."""
+    observe = await get_live_service().phase1_observe()
+    return get_live_service().phase4_alerts(observe)
+
+
+@app.get("/live/audit")
+async def live_audit(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, Any]:
+    """Phase 5: recent audit events (secrets redacted)."""
+    hardening = get_live_service().phase5_hardening()
+    return {
+        "events": hardening.get("recent_audit") or [],
+        "runbook": hardening.get("runbook"),
+        "withdrawals_supported": False,
     }
 
 
