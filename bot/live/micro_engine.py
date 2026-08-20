@@ -268,6 +268,18 @@ class LiveMicroEngine:
                 "reason": "execution_error",
                 "message": str(exc),
             }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Micro order unexpected failure")
+            self._audit.record(
+                "micro_order_exception",
+                {"error": type(exc).__name__, "message": str(exc)[:300]},
+            )
+            return {
+                "submitted": False,
+                "executed": False,
+                "reason": "unexpected_error",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
 
         dry = bool((result.metadata or {}).get("dry_run"))
         row = {

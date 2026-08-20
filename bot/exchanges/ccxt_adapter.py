@@ -129,6 +129,11 @@ class CcxtExchangeAdapter(BaseExchangeClient):
             config["password"] = self._passphrase
         if self._base_url:
             config["urls"] = {"api": self._base_url}
+        # Bitvavo MiCA: operatorId required on order endpoints.
+        if self.ccxt_id == "bitvavo":
+            op_id = int(getattr(self._settings, "bitvavo_operator_id", 1001) or 1001)
+            config.setdefault("options", {})
+            config["options"]["operatorId"] = op_id
 
         logger.info(
             "Initializing CCXT exchange %s with %s",
@@ -139,6 +144,7 @@ class CcxtExchangeAdapter(BaseExchangeClient):
                     "secret": bool(self._api_secret),
                     "password": bool(self._passphrase),
                     "enableRateLimit": True,
+                    "operatorId": bool(self.ccxt_id == "bitvavo"),
                 }
             ),
         )
@@ -274,6 +280,10 @@ class CcxtExchangeAdapter(BaseExchangeClient):
         params: dict[str, Any] = {}
         if order.client_order_id:
             params["clientOrderId"] = order.client_order_id
+        if self.ccxt_id == "bitvavo":
+            params["operatorId"] = int(
+                getattr(self._settings, "bitvavo_operator_id", 1001) or 1001
+            )
 
         async def _op() -> Any:
             exchange = await self._get_exchange()
@@ -323,9 +333,16 @@ class CcxtExchangeAdapter(BaseExchangeClient):
                 f"{self.name} cancel_order blocked: enable_trading is False"
             )
         ccxt_symbol = to_ccxt_symbol(symbol)
+        params: dict[str, Any] = {}
+        if self.ccxt_id == "bitvavo":
+            params["operatorId"] = int(
+                getattr(self._settings, "bitvavo_operator_id", 1001) or 1001
+            )
 
         async def _op() -> Any:
             exchange = await self._get_exchange()
+            if params:
+                return await self._call(exchange.cancel_order, order_id, ccxt_symbol, params)
             return await self._call(exchange.cancel_order, order_id, ccxt_symbol)
 
         raw = await with_retries(

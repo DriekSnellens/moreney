@@ -334,6 +334,8 @@ class Settings(BaseSettings):
     exchange_api_secret: SecretStr | None = None
     exchange_passphrase: SecretStr | None = None
     exchange_base_url: str | None = None
+    # Bitvavo requires operatorId on create/cancel/update order (MiCA). Any stable int.
+    bitvavo_operator_id: int = Field(default=1001, ge=1)
 
     # --- Central funding / multi-venue portfolio (read-only orchestration) ---
     # Main SEPA/fiat on-ramp venue (operational; not a Moreney custody account).
