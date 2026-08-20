@@ -238,3 +238,27 @@ class HourlyStatsRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class FundingEventRecord(Base):
+    """Capital funding / transfer tracking (ORM scaffold).
+
+    Withdrawal rows are records of user actions on the exchange UI only —
+    Moreney never executes withdrawals from this table.
+    """
+
+    __tablename__ = "funding_events"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    venue: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(24, 12), nullable=False)
+    currency: Mapped[str] = mapped_column(String(16), default="EUR")
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    extra: Mapped[dict] = mapped_column(JSONB, default=dict)

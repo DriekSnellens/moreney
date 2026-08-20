@@ -44,6 +44,8 @@ from bot.paper.auth import (
 from bot.paper.runner import PaperRunner
 from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.store import PaperTradingStore
+from bot.funding.models import FundingEventType
+from bot.funding.service import get_funding_service, reset_funding_service
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -123,6 +125,7 @@ def reset_risk_singletons() -> None:
     _market_data_service = None
     _paper_runner = None
     _last_paper_cycle = None
+    reset_funding_service()
 
 
 class DashboardLoginRedirect(Exception):
@@ -209,6 +212,7 @@ async def status() -> dict[str, Any]:
     settings: Settings = get_settings()
     ks = get_kill_switch().status()
     runner = get_paper_runner()
+    funding_flags = get_funding_service().public_status_flags()
     return {
         "version": __version__,
         "environment": settings.app_env,
@@ -220,8 +224,144 @@ async def status() -> dict[str, Any]:
         "market_data_mode": settings.market_data_mode,
         "live_trading_enabled": False,
         "withdrawals_supported": False,
+        "automatic_withdrawals_enabled": False,
         "leverage_supported": False,
+        "funding_main_venue": funding_flags["funding_main_venue"],
+        "funding_venues": funding_flags["funding_venues"],
         "kill_switch": ks.model_dump(mode="json"),
+    }
+
+
+@app.get("/portfolio")
+async def portfolio_overview() -> dict[str, Any]:
+    """Multi-venue portfolio summary (paper ledger or live balances)."""
+    summary = await get_funding_service().portfolio_summary()
+    return summary.model_dump(mode="json")
+
+
+@app.get("/balances")
+async def balances_all() -> dict[str, Any]:
+    snaps = await get_funding_service().get_venue_balances()
+    return {
+        "withdrawals_supported": False,
+        "venues": [s.model_dump(mode="json") for s in snaps],
+    }
+
+
+@app.get("/balances/{venue}")
+async def balances_venue(venue: str) -> dict[str, Any]:
+    snap = await get_funding_service().get_balances_for_venue(venue)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"Unknown venue: {venue}")
+    return snap.model_dump(mode="json")
+
+
+@app.get("/funding")
+async def funding_overview() -> dict[str, Any]:
+    """Funding overview: deposits, tracked exits, pending — no auto-withdraw."""
+    svc = get_funding_service()
+    summary = await svc.portfolio_summary()
+    deposits = svc.funding_events(event_type=FundingEventType.DEPOSIT, limit=100)
+    exits = svc.funding_events(event_type=FundingEventType.WITHDRAWAL, limit=100)
+    pending = [
+        e.model_dump(mode="json")
+        for e in svc.funding_events(limit=200)
+        if e.status.value == "pending"
+    ]
+    return {
+        "main_funding_venue": svc.main_funding_venue(),
+        "total_deposited": str(summary.total_deposited),
+        "total_withdrawn": str(summary.total_withdrawn),
+        "current_portfolio": str(summary.current_portfolio),
+        "pnl": str(summary.pnl),
+        "withdrawals_supported": False,
+        "automatic_withdrawals_enabled": False,
+        "withdraw_instructions": (
+            f"To withdraw, use the {svc.main_funding_venue()} exchange UI. "
+            "Moreney does not execute withdrawals."
+        ),
+        "deposits": [e.model_dump(mode="json") for e in deposits],
+        "recorded_exits": [e.model_dump(mode="json") for e in exits],
+        "pending": pending,
+        "note": summary.note,
+    }
+
+
+@app.get("/funding/deposits")
+async def funding_deposits(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+    rows = get_funding_service().funding_events(
+        event_type=FundingEventType.DEPOSIT, limit=limit
+    )
+    return {"deposits": [e.model_dump(mode="json") for e in rows]}
+
+
+@app.get("/funding/recorded-exits")
+async def funding_recorded_exits(
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """User-recorded cash-outs via exchange UI (tracking only)."""
+    rows = get_funding_service().funding_events(
+        event_type=FundingEventType.WITHDRAWAL, limit=limit
+    )
+    return {
+        "recorded_exits": [e.model_dump(mode="json") for e in rows],
+        "withdrawals_supported": False,
+        "bot_executed": False,
+    }
+
+
+@app.post("/funding/events")
+async def funding_record_event(payload: dict[str, Any]) -> dict[str, Any]:
+    """Manually record a deposit or tracked exit (never executes exchange transfers)."""
+    svc = get_funding_service()
+    event_type = str(payload.get("type") or "deposit").strip().lower()
+    venue = str(payload.get("venue") or svc.main_funding_venue())
+    amount = payload.get("amount")
+    if amount is None:
+        raise HTTPException(status_code=400, detail="amount is required")
+    asset = str(payload.get("asset") or payload.get("currency") or "EUR")
+    currency = str(payload.get("currency") or asset)
+    ref = payload.get("external_reference")
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if event_type in {"withdrawal", "exit", "cash_out"}:
+        event = svc.record_withdrawal_tracking(
+            venue=venue,
+            amount=amount,
+            asset=asset,
+            currency=currency,
+            external_reference=ref,
+            metadata=meta,
+        )
+    elif event_type == "deposit":
+        event = svc.record_deposit(
+            venue=venue,
+            amount=amount,
+            asset=asset,
+            currency=currency,
+            external_reference=ref,
+            metadata=meta,
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="type must be deposit or withdrawal (tracking only)",
+        )
+    return {"event": event.model_dump(mode="json"), "executed": False}
+
+
+@app.get("/rebalancing/recommendations")
+async def rebalancing_recommendations() -> dict[str, Any]:
+    """Suggest inventory moves — never executed automatically."""
+    recs = get_funding_service().rebalance_recommendations()
+    fee_bps = float(get_settings().global_transfer_fee_bps)
+    return {
+        "auto_execute": False,
+        "transfer_fee_bps": fee_bps,
+        "recommendations": [r.model_dump(mode="json") for r in recs],
+        "instructions": (
+            "Transfer manually via the exchange withdrawal/deposit UI, "
+            "then inventory will update on the next balance refresh."
+        ),
     }
 
 
@@ -569,6 +709,16 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
     opportunities = [o.model_dump(mode="json") for o in runner.tracker.opportunities(limit=25)]
     hourly = [h.model_dump(mode="json") for h in runner.tracker.hourly_stats()]
     trades = runner.tracker.trades(limit=100)
+    funding = await get_funding_service().portfolio_summary()
+    rebalance = get_funding_service().rebalance_recommendations()
+    funding_payload = funding.model_dump(mode="json")
+    funding_payload["recommendations"] = [r.model_dump(mode="json") for r in rebalance]
+    funding_payload["deposits"] = [
+        e.model_dump(mode="json")
+        for e in get_funding_service().funding_events(
+            event_type=FundingEventType.DEPOSIT, limit=10
+        )
+    ]
     return render_dashboard(
         {
             "status": runner.status(),
@@ -578,6 +728,7 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
             "opportunities": opportunities,
             "hourly": hourly,
             "trades": trades,
+            "funding": funding_payload,
         }
     )
 

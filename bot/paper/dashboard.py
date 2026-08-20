@@ -116,6 +116,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     fx_refills = _fmt_count(inventory.get("fx_refilled", 0))
     seeded_assets = _esc(", ".join(inventory.get("seeded_assets") or []) or "—")
     inventory_rows = _inventory_rows(inventory.get("venues") or {})
+    funding_html = _funding_panel_html(payload.get("funding") or {})
 
     global_engine = status.get("global_engine") or {}
     ge_enabled = global_engine.get("enabled")
@@ -254,6 +255,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </div>
       <p class="forecast-note">Seeded: {seeded_assets}</p>
     </section>
+
+    {funding_html}
 
     <section class="panel">
       <h2>NET-economie (per fill)</h2>
@@ -2852,6 +2855,96 @@ def _equity_quote_rows(quotes: dict[str, Any]) -> str:
     return "".join(rows) or (
         "<tr><td colspan='5' class='empty'>Geen aandelenfeed</td></tr>"
     )
+
+
+def _funding_panel_html(funding: dict[str, Any]) -> str:
+    """Portfolio / funding / rebalance panel — exchanges hold assets."""
+    if not funding:
+        return ""
+    venues = funding.get("venues") or []
+    asset_cols = ("EUR", "BTC", "ETH", "USDT", "USDC")
+    venue_rows: list[str] = []
+    for v in venues:
+        by_asset: dict[str, Any] = {}
+        for b in v.get("balances") or []:
+            by_asset[str(b.get("asset") or "").upper()] = b.get("available") or b.get("total") or "0"
+        cells = "".join(
+            f"<td class='num'>{_esc(by_asset.get(a, '—'))}</td>" for a in asset_cols
+        )
+        online = "ok" if v.get("online", True) else "warn"
+        err = v.get("error")
+        note = f" ({_esc(err)})" if err else ""
+        venue_rows.append(
+            "<tr>"
+            f"<td>{_esc(_venue_label(v.get('venue')))}"
+            f"<span class='pill {online}'>{_esc(v.get('source') or '')}{note}</span></td>"
+            f"{cells}"
+            f"<td class='num'>{_esc_fmt(v.get('total_value_eur'), 'money')}</td>"
+            "</tr>"
+        )
+    venue_body = "".join(venue_rows) or (
+        "<tr><td colspan='7' class='empty'>Nog geen balances</td></tr>"
+    )
+    recs = funding.get("recommendations") or []
+    rec_rows = "".join(
+        "<tr>"
+        f"<td>{_esc(_venue_label(r.get('from_venue')))} → {_esc(_venue_label(r.get('to_venue')))}</td>"
+        f"<td>{_esc(r.get('asset'))}</td>"
+        f"<td class='num'>{_esc(r.get('amount'))}</td>"
+        f"<td>{_esc(r.get('reason'))}</td>"
+        f"<td><span class='pill warn'>handmatig</span></td>"
+        "</tr>"
+        for r in recs[:10]
+    ) or "<tr><td colspan='5' class='empty'>Geen rebalance nodig</td></tr>"
+    deposits = funding.get("deposits") or []
+    dep_rows = "".join(
+        "<tr>"
+        f"<td class='ts'>{_esc(_short_ts(d.get('created_at')))}</td>"
+        f"<td>{_esc(_venue_label(d.get('venue')))}</td>"
+        f"<td class='num'>{_esc(d.get('amount'))} {_esc(d.get('currency') or d.get('asset'))}</td>"
+        f"<td>{_esc(d.get('status'))}</td>"
+        "</tr>"
+        for d in deposits[:8]
+    ) or "<tr><td colspan='4' class='empty'>Nog geen deposits vastgelegd — SEPA storting gaat via de exchange</td></tr>"
+    main_venue = _esc(_venue_label(funding.get("main_funding_venue") or "bitvavo"))
+    return f"""
+    <section class="panel">
+      <h2>Portfolio &amp; funding</h2>
+      <p class="forecast-note">
+        Exchanges houden je assets; Moreney monitort. Hoofdvenue (SEPA): <strong>{main_venue}</strong>.
+        Automatische withdrawals: uit. Mode: {_esc(funding.get('mode') or 'paper')}.
+      </p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Gestort</span><span class="value">{_esc_fmt(funding.get('total_deposited'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Portfolio</span><span class="value">{_esc_fmt(funding.get('current_portfolio'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">P&amp;L</span><span class="value {_pnl_class(funding.get('pnl'))}">{_esc_fmt(funding.get('pnl'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Available</span><span class="value">{_esc_fmt(funding.get('available_capital'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Reserved</span><span class="value">{_esc_fmt(funding.get('reserved_capital'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Pending transfers</span><span class="value">{_esc(str(funding.get('pending_transfers') or 0))}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Venue</th><th>EUR</th><th>BTC</th><th>ETH</th><th>USDT</th><th>USDC</th><th>Total €</th></tr></thead>
+          <tbody>{venue_body}</tbody>
+        </table>
+      </div>
+      <h3 style="margin-top:1.25rem">Rebalance-advies (niet auto)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Route</th><th>Asset</th><th>Amount</th><th>Reden</th><th>Status</th></tr></thead>
+          <tbody>{rec_rows}</tbody>
+        </table>
+      </div>
+      <h3 style="margin-top:1.25rem">Deposits</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tijd</th><th>Venue</th><th>Bedrag</th><th>Status</th></tr></thead>
+          <tbody>{dep_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Opnemen: gebruik de exchange-interface ({main_venue}). Moreney voert geen withdrawals uit.</p>
+    </section>
+    """
 
 
 def _inventory_rows(venues: dict[str, Any]) -> str:

@@ -335,6 +335,17 @@ class Settings(BaseSettings):
     exchange_passphrase: SecretStr | None = None
     exchange_base_url: str | None = None
 
+    # --- Central funding / multi-venue portfolio (read-only orchestration) ---
+    # Main SEPA/fiat on-ramp venue (operational; not a Moreney custody account).
+    funding_main_venue: str = "bitvavo"
+    # Venues shown in portfolio (comma-separated). Defaults via market_data_exchanges.
+    funding_venues: str = "bitvavo,kraken,binance,okx,coinbase"
+    # Optional target quote weights: "bitvavo:0.4,kraken:0.3,binance:0.3"
+    funding_target_weights: str = ""
+    funding_persist_path: str = "./data/funding_events.json"
+    # Never enable automatic exchange withdrawals in this MVP.
+    automatic_withdrawals_enabled: bool = False
+
     @field_validator("execution_mode", mode="before")
     @classmethod
     def _normalize_execution_mode(cls, value: object) -> object:
