@@ -31,12 +31,16 @@ def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_credential_report_missing_and_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(funding_venues="bitvavo,kraken")
-    report = credential_report(settings)
+    monkeypatch.delenv("BITVAVO_API_KEY", raising=False)
+    monkeypatch.delenv("BITVAVO_API_SECRET", raising=False)
+    monkeypatch.delenv("KRAKEN_API_KEY", raising=False)
+    monkeypatch.delenv("KRAKEN_API_SECRET", raising=False)
+    settings = Settings(funding_venues="bitvavo,kraken", exchange_name="stub")
+    report = credential_report(settings, ["bitvavo", "kraken"])
     assert "bitvavo" in report["missing_venues"]
     monkeypatch.setenv("BITVAVO_API_KEY", "unique-key-value-zzz")
     monkeypatch.setenv("BITVAVO_API_SECRET", "unique-secret-value-zzz")
-    report2 = credential_report(settings)
+    report2 = credential_report(settings, ["bitvavo", "kraken"])
     assert report2["configured_count"] >= 1
     assert "bitvavo" not in report2["missing_venues"]
     row = resolve_credentials(settings, "bitvavo")
