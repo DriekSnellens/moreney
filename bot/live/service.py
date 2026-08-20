@@ -85,6 +85,17 @@ class LiveReadinessService:
 
     def phase0(self) -> dict[str, Any]:
         status = self._paper_status()
+        # Enrich with credential readiness for optional Phase 0 item (no secrets).
+        try:
+            status = {
+                **status,
+                "live_readiness": {
+                    **(status.get("live_readiness") or {}),
+                    "credentials": self._observe.credentials(),
+                },
+            }
+        except Exception:  # noqa: BLE001
+            pass
         ks = None
         if isinstance(status.get("kill_switch"), dict):
             ks = status["kill_switch"].get("state")
@@ -93,8 +104,8 @@ class LiveReadinessService:
         )
         return result.to_dict()
 
-    async def phase1_observe(self) -> dict[str, Any]:
-        snap = await self._observe.snapshot()
+    async def phase1_observe(self, *, probe: bool = False) -> dict[str, Any]:
+        snap = await self._observe.snapshot(probe=probe)
         paper = self._paper_status()
         inv = (paper.get("inventory") or {}).get("venues") or {}
         snap["paper_compare"] = self._observe.compare_to_paper(
@@ -104,8 +115,61 @@ class LiveReadinessService:
         self._audit.record("observe_snapshot", {
             "venues_online": snap.get("venues_online"),
             "venues_total": snap.get("venues_total"),
+            "configured_credentials": (snap.get("credentials") or {}).get(
+                "configured_count"
+            ),
         })
         return snap
+
+    def micro_unlock_checklist(self) -> dict[str, Any]:
+        from bot.live.micro_unlock import unlock_checklist
+
+        return unlock_checklist(self._settings)
+
+    async def credentials(self, *, probe: bool = False) -> dict[str, Any]:
+        if probe:
+            return await self._observe.probe_credentials()
+        return self._observe.credentials()
+
+    def micro_dry_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from bot.live.micro_unlock import dry_run_order
+
+        result = dry_run_order(
+            self._settings,
+            venue=str(payload.get("venue") or "bitvavo"),
+            symbol=str(payload.get("symbol") or "BTCEUR"),
+            side=str(payload.get("side") or "buy"),
+            quantity=payload.get("quantity") or "0.001",
+            limit_price=payload.get("limit_price"),
+            notional_eur=payload.get("notional_eur"),
+        )
+        self._audit.record("micro_dry_run", {
+            "venue": result.get("venue"),
+            "symbol": result.get("symbol"),
+            "policy_allows": result.get("policy_allows"),
+            "detail": result.get("detail"),
+        })
+        return result
+
+    def compact_status(self) -> dict[str, Any]:
+        """Lightweight summary for paper/fleet status (sync, no live HTTP)."""
+        p0 = self.phase0()
+        creds = self._observe.credentials()
+        micro = self._policy.status()
+        return {
+            "active_phase": self.active_phase().name.lower(),
+            "go_no_go_ready": bool(p0.get("ready")),
+            "go_no_go_blocking": list(p0.get("blocking") or []),
+            "observe_enabled": bool(getattr(self._settings, "live_observe_enabled", True)),
+            "credentials_configured": int(creds.get("configured_count") or 0),
+            "credentials_missing": list(creds.get("missing_venues") or []),
+            "live_trading_enabled": bool(
+                getattr(self._settings, "live_trading_enabled", False)
+            ),
+            "can_place_live_orders": bool(micro.get("can_place_orders")),
+            "block_reason": micro.get("block_reason"),
+            "withdrawals_supported": False,
+        }
 
     def phase2_scaffolding(self) -> dict[str, Any]:
         return {

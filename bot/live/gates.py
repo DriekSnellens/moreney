@@ -126,6 +126,37 @@ def evaluate_go_no_go(
         )
     )
 
+    # Live trading must stay off while paper validates (Phase 0).
+    live_on = bool(getattr(settings, "live_trading_enabled", False))
+    micro_on = bool(getattr(settings, "live_micro_enabled", False))
+    items.append(
+        ChecklistItem(
+            id="live_orders_still_locked",
+            label="Live order unlocks remain off during Phase 0",
+            passed=not (live_on and micro_on and bool(getattr(settings, "live_orders_unlocked", False))),
+            detail=(
+                f"live_trading={live_on} micro={micro_on} "
+                f"unlocked={bool(getattr(settings, 'live_orders_unlocked', False))}"
+            ),
+            required=False,
+        )
+    )
+
+    observe_creds = None
+    if isinstance(paper_status, dict):
+        observe_creds = (paper_status.get("live_readiness") or {}).get("credentials")
+    if isinstance(observe_creds, dict):
+        ready = bool(observe_creds.get("ready_for_observe"))
+        items.append(
+            ChecklistItem(
+                id="observe_credentials_optional",
+                label="At least one venue API key configured for live observe",
+                passed=ready,
+                detail=f"configured={observe_creds.get('configured_count', 0)}",
+                required=False,
+            )
+        )
+
     trade_count = int(status.get("trade_count") or 0)
     items.append(
         ChecklistItem(

@@ -9,6 +9,7 @@ from typing import Any
 from bot.core.config import Settings
 from bot.funding.multi_venue import fetch_live_venue_balances, parse_venue_list
 from bot.funding.models import VenueBalanceSnapshot
+from bot.live.credentials import credential_report, probe_all_venues
 
 
 class LiveObserveService:
@@ -23,14 +24,22 @@ class LiveObserveService:
         )
         return parse_venue_list(str(raw))
 
-    async def snapshot(self) -> dict[str, Any]:
+    def credentials(self) -> dict[str, Any]:
+        return credential_report(self._settings, self.observe_venues())
+
+    async def probe_credentials(self) -> dict[str, Any]:
+        return await probe_all_venues(self._settings, self.observe_venues())
+
+    async def snapshot(self, *, probe: bool = False) -> dict[str, Any]:
         venues = self.observe_venues()
         enabled = bool(getattr(self._settings, "live_observe_enabled", True))
+        creds = self.credentials()
         if not enabled:
             return {
                 "enabled": False,
                 "places_orders": False,
                 "venues": [],
+                "credentials": creds,
                 "as_of": datetime.now(timezone.utc).isoformat(),
                 "note": "LIVE_OBSERVE_ENABLED=false",
             }
@@ -40,7 +49,7 @@ class LiveObserveService:
         )
         online = sum(1 for s in snaps if s.online)
         total_eur = sum((s.total_value_eur for s in snaps), Decimal("0"))
-        return {
+        payload: dict[str, Any] = {
             "enabled": True,
             "places_orders": False,
             "mode": "observe_only",
@@ -49,12 +58,22 @@ class LiveObserveService:
             "venues_total": len(snaps),
             "total_value_eur": str(total_eur),
             "balances": [s.model_dump(mode="json") for s in snaps],
+            "credentials": creds,
             "as_of": datetime.now(timezone.utc).isoformat(),
             "note": (
                 "Read-only live balances. No orders placed. "
                 "Configure per-venue API keys (withdraw permission must stay off)."
             ),
+            "next_step": (
+                "Add missing venue keys from credentials.missing_venues, "
+                "then GET /live/credentials?probe=true"
+                if creds.get("missing_venues")
+                else "Credentials present — verify /live/observe balances match exchange UI"
+            ),
         }
+        if probe:
+            payload["credential_probes"] = await self.probe_credentials()
+        return payload
 
     def compare_to_paper(
         self,

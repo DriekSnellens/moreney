@@ -396,9 +396,31 @@ async def live_status() -> dict[str, Any]:
 
 
 @app.get("/live/observe")
-async def live_observe() -> dict[str, Any]:
+async def live_observe(
+    probe: bool = Query(default=False),
+) -> dict[str, Any]:
     """Phase 1: read-only live balances (no orders)."""
-    return await get_live_service().phase1_observe()
+    return await get_live_service().phase1_observe(probe=probe)
+
+
+@app.get("/live/credentials")
+async def live_credentials(
+    probe: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Per-venue API key presence (+ optional read-only health probe)."""
+    return await get_live_service().credentials(probe=probe)
+
+
+@app.get("/live/micro/unlock-checklist")
+async def live_micro_unlock_checklist() -> dict[str, Any]:
+    """Which env flags still block micro-live (never flips them)."""
+    return get_live_service().micro_unlock_checklist()
+
+
+@app.post("/live/micro/dry-run")
+async def live_micro_dry_run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate a hypothetical order against micro policy — does not place."""
+    return get_live_service().micro_dry_run(payload or {})
 
 
 @app.get("/live/alerts")
@@ -451,7 +473,9 @@ async def paper_last_cycle() -> dict[str, Any]:
 
 @app.get("/paper/status")
 async def paper_status() -> dict[str, Any]:
-    return get_paper_runner().status()
+    status = get_paper_runner().status()
+    status["live_readiness"] = get_live_service().compact_status()
+    return status
 
 
 @app.get("/paper/portfolio")
@@ -773,6 +797,8 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
             event_type=FundingEventType.DEPOSIT, limit=10
         )
     ]
+    live_payload = get_live_service().compact_status()
+    live_payload["unlock"] = get_live_service().micro_unlock_checklist()
     return render_dashboard(
         {
             "status": runner.status(),
@@ -783,6 +809,7 @@ async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRe
             "hourly": hourly,
             "trades": trades,
             "funding": funding_payload,
+            "live_readiness": live_payload,
         }
     )
 

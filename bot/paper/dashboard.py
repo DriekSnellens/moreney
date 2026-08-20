@@ -117,6 +117,7 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     seeded_assets = _esc(", ".join(inventory.get("seeded_assets") or []) or "—")
     inventory_rows = _inventory_rows(inventory.get("venues") or {})
     funding_html = _funding_panel_html(payload.get("funding") or {})
+    live_html = _live_readiness_panel_html(payload.get("live_readiness") or {})
 
     global_engine = status.get("global_engine") or {}
     ge_enabled = global_engine.get("enabled")
@@ -257,6 +258,8 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
 
     {funding_html}
+
+    {live_html}
 
     <section class="panel">
       <h2>NET-economie (per fill)</h2>
@@ -2855,6 +2858,38 @@ def _equity_quote_rows(quotes: dict[str, Any]) -> str:
     return "".join(rows) or (
         "<tr><td colspan='5' class='empty'>Geen aandelenfeed</td></tr>"
     )
+
+
+def _live_readiness_panel_html(live: dict[str, Any]) -> str:
+    if not live:
+        return ""
+    ready = bool(live.get("go_no_go_ready"))
+    ready_cls = "ok" if ready else "warn"
+    ready_label = "Groen" if ready else "Blokkers"
+    blocking = live.get("go_no_go_blocking") or live.get("blocking") or []
+    block_txt = ", ".join(str(b) for b in blocking) or "—"
+    missing = live.get("credentials_missing") or []
+    missing_txt = ", ".join(str(m) for m in missing) or "geen"
+    can_place = bool(live.get("can_place_live_orders"))
+    return f"""
+    <section class="panel">
+      <h2>Live readiness</h2>
+      <p class="forecast-note">
+        Paper blijft default. Live orders alleen na expliciete unlocks.
+        API: <code>/live/observe</code>, <code>/live/credentials</code>,
+        <code>/live/micro/dry-run</code>.
+      </p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Fase</span><span class="value">{_esc(live.get('active_phase') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Go/no-go</span><span class="value"><span class="pill {ready_cls}">{ready_label}</span></span></article>
+        <article class="metric-card"><span class="label">Keys geconfigureerd</span><span class="value">{_esc(str(live.get('credentials_configured') or 0))}</span></article>
+        <article class="metric-card"><span class="label">Keys missing</span><span class="value">{_esc(missing_txt)}</span></article>
+        <article class="metric-card"><span class="label">Live orders</span><span class="value">{'TOEGESTAAN' if can_place else _esc(live.get('block_reason') or 'geblokkeerd')}</span></article>
+        <article class="metric-card"><span class="label">Withdrawals</span><span class="value">uit</span></article>
+      </div>
+      <p class="forecast-note">Blocking: {_esc(block_txt)}. Volgende stap: SEPA→Bitvavo, keys zonder withdraw, daarna dry-run.</p>
+    </section>
+    """
 
 
 def _funding_panel_html(funding: dict[str, Any]) -> str:

@@ -119,11 +119,29 @@ async def collect_fleet_overview(settings: Settings) -> dict[str, Any]:
         )
     instances = list(rows)
     online = [row for row in instances if row.get("ok")]
+    live_readiness: dict[str, Any] = {
+        "available": False,
+        "note": "Fleet aggregator; see hub /live/readiness for full report",
+    }
+    try:
+        from bot.live.service import get_live_service
+
+        live_readiness = {
+            "available": True,
+            **get_live_service().compact_status(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        live_readiness = {
+            "available": False,
+            "error": type(exc).__name__,
+            "withdrawals_supported": False,
+        }
     return {
         "instances": instances,
         "online_count": len(online),
         "configured_count": len(endpoints),
         "totals": _totals(online),
+        "live_readiness": live_readiness,
     }
 
 

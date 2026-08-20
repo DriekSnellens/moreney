@@ -16,6 +16,30 @@ Withdrawals are never automatic.
 
 Also: `GET /live/status`, `GET /live/readiness` (full report).
 
+## Phase 1 — Live observe setup
+
+1. Create API keys on Bitvavo (+ optional Kraken/Binance/OKX) with **withdraw disabled**.
+2. Copy `docs/live-observe.example.env` into your systemd/env file and fill secrets.
+3. Restart the API process.
+4. Check:
+   - `GET /live/credentials` — which keys are present
+   - `GET /live/credentials?probe=true` — read-only health/auth
+   - `GET /live/observe` — balances (empty until keys work)
+5. Keep `LIVE_*` unlock flags **false**.
+
+## Phase 0 on paper / fleet
+
+- `GET /paper/status` → `live_readiness.go_no_go_ready`
+- `GET /fleet/api` → `live_readiness`
+- Dashboard panel **Live readiness**
+
+## Micro unlock (after Phase 0+1)
+
+1. `GET /live/micro/unlock-checklist` — see missing flags
+2. `POST /live/micro/dry-run` with `{"venue":"bitvavo","symbol":"BTCEUR","notional_eur":25}`
+3. Only if dry-run `policy_allows` and you accept risk: set unlocks in env (never via API)
+4. PaperRunner still does not place live orders until wired separately
+
 ## Safety flags (all must be true to place a live order)
 
 ```ini
