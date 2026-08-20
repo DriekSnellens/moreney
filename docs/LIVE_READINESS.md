@@ -95,7 +95,16 @@ Use `/rebalancing/recommendations` and exchange UIs. Moreney does not withdraw.
 ## Micro-live limits (defaults)
 
 - Venues: `bitvavo,kraken`
-- Symbols: `BTCEUR,ETHEUR`
+- Symbols: `BTCEUR,ETHEUR` (session may set `LIVE_MICRO_SYMBOLS=*` for full scan)
 - Max notional: €50 / order
 - Max daily loss: €25
 - Max open orders: 1
+
+## Full-bot micro session (capital cap only)
+
+`python -m bot.live.micro_session --minutes 15 --budget-eur 25`
+
+Runs the **full PaperRunner pipeline** (strategy / GOE / profitability / risk / maker
+stack) with a hard € budget. Marketable Bitvavo legs go live via
+`MicroBudgetLiveExecutor`; maker/post-only stays paper; BTC excluded by default;
+other venues without keys are skipped. Report: `data/live_micro_session_report.json`.

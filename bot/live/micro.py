@@ -34,7 +34,10 @@ class MicroLivePolicy:
 
     def allowed_symbols(self) -> list[str]:
         raw = getattr(self._settings, "live_micro_symbols", "BTCEUR,ETHEUR") or ""
-        return [s.strip().upper() for s in str(raw).split(",") if s.strip()]
+        text = str(raw).strip()
+        if text == "*":
+            return ["*"]
+        return [s.strip().upper() for s in text.split(",") if s.strip()]
 
     def max_notional_eur(self) -> Decimal:
         return Decimal(str(getattr(self._settings, "live_micro_max_notional_eur", 50) or 50))
@@ -84,7 +87,7 @@ class MicroLivePolicy:
             return False, f"venue {v} not in micro allowlist"
         sym = symbol.strip().upper().replace("/", "").replace("-", "")
         allowed = {s.replace("/", "").replace("-", "") for s in self.allowed_symbols()}
-        if sym not in allowed:
+        if "*" not in allowed and sym not in allowed:
             return False, f"symbol {symbol} not in micro allowlist"
         if notional_eur > self.max_notional_eur():
             return False, f"notional {notional_eur} exceeds max {self.max_notional_eur()}"
