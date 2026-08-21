@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -45,14 +46,25 @@ class MultiVenueLiveExecutor(BaseExecutor):
         self._force_enabled = force_enabled
         self._open_orders = 0
         self._daily_loss = Decimal("0")
+        self._open_orders_checked_mono = 0.0
+        self._open_orders_cache_sec = 5.0
 
     def trading_allowed(self) -> tuple[bool, str]:
         if self._force_enabled:
             return self._policy.can_place_orders()
         return False, "MultiVenueLiveExecutor not force-enabled (scaffolding)"
 
-    async def refresh_open_order_count(self, venue: str | None = None) -> int:
-        """Sync open-order counter from the exchange (prevents permanent policy blocks)."""
+    async def refresh_open_order_count(
+        self, venue: str | None = None, *, force: bool = False
+    ) -> int:
+        """Sync open-order counter from the exchange (cached to limit API load)."""
+        now = time.monotonic()
+        if (
+            not force
+            and now - self._open_orders_checked_mono < self._open_orders_cache_sec
+        ):
+            return self._open_orders
+
         venues = (
             [venue.strip().lower()]
             if venue
@@ -71,10 +83,13 @@ class MultiVenueLiveExecutor(BaseExecutor):
             except Exception:  # noqa: BLE001
                 logger.warning("refresh_open_order_count failed for %s", name)
         self._open_orders = total
+        self._open_orders_checked_mono = now
         return total
 
     def note_open_orders(self, count: int) -> None:
         self._open_orders = max(0, int(count))
+        # Local note is advisory until the next forced exchange refresh.
+        self._open_orders_checked_mono = 0.0
 
     async def execute(self, order: OrderRequest) -> ExecutionResult:
         allowed, reason = self.trading_allowed()

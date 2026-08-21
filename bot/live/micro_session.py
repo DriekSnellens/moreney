@@ -36,17 +36,12 @@ _ZERO = Decimal("0")
 _LIQUID_EUR_SYMBOLS = (
     "ETHEUR",
     "XRPEUR",
-    "ADAEUR",
     "SOLEUR",
     "ATOMEUR",
     "NEAREUR",
-    "DOGEUR",
+    "ADAEUR",
     "BNBEUR",
-    "AVAXEUR",
-    "LINKEUR",
-    "DOTEUR",
-    "LTCEUR",
-    "UNIEUR",
+    "DOGEUR",
 )
 
 
@@ -96,22 +91,30 @@ def _session_settings(
             "paper_maker_enabled": True,
             "paper_triangle_enabled": False,
             "paper_maker_venues": "bitvavo",
-            "paper_maker_min_notional_eur": min(25.0, max(10.0, budget_f * 0.02)),
+            "paper_maker_same_venue": True,
+            "paper_maker_max_open_quotes": 4,
+            "paper_cycle_interval_ms": 1500.0,
+            "paper_maker_min_notional_eur": min(20.0, max(10.0, budget_f * 0.015)),
             # Bitvavo maker ~15 bps/side — require real NET edge after fees.
-            "paper_maker_min_profit_eur": 0.12,
-            "paper_maker_min_net_return": 0.0015,
-            "paper_maker_min_spread_bps": 8.0,
+            "paper_maker_min_profit_eur": 0.10,
+            "paper_maker_min_net_return": 0.0012,
+            "paper_maker_min_spread_bps": 6.0,
             "paper_maker_one_leg_exit": True,
-            "paper_maker_one_leg_adverse_bps": 12.0,
-            "paper_maker_max_age_ms": 60_000.0,
-            "paper_maker_sibling_grace_ms": 15_000.0,
-            "paper_max_holding_sec": 900.0,
-            "arbitrage_min_profit_eur": 0.10,
-            "arbitrage_min_profit_pct": 0.001,
-            "profitability_min_net_profit_usd": 0.10,
-            "profitability_min_net_return": 0.001,
-            "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.10,
+            "paper_maker_one_leg_adverse_bps": 8.0,
+            "paper_maker_max_age_ms": 120_000.0,
+            "paper_maker_sibling_grace_ms": 20_000.0,
+            # 0 = disable forced ALT recycle (was dumping pre-session inventory).
+            "paper_max_holding_sec": 0.0,
+            # Allow quoting both sides even with existing Bitvavo holdings.
+            "paper_max_alt_inventory_pct": 55.0,
+            "paper_min_alt_inventory_pct": 10.0,
+            "paper_inventory_ask_improve_bps": 5.0,
+            "arbitrage_min_profit_eur": 0.08,
+            "arbitrage_min_profit_pct": 0.0008,
+            "profitability_min_net_profit_usd": 0.08,
+            "profitability_min_net_return": 0.0008,
+            "profitability_execution_buffer_bps": 1.5,
+            "risk_min_net_profit_usd": 0.08,
             "risk_max_position_usd": budget_f,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
@@ -125,8 +128,8 @@ def _session_settings(
             # Per-order ceiling = full pocket (capital recycles after sells).
             "live_micro_max_notional_eur": budget_f,
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
-            "live_micro_max_open_orders": 12,
-            "live_micro_resting_max_age_sec": 90.0,
+            "live_micro_max_open_orders": 10,
+            "live_micro_resting_max_age_sec": 120.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
         }
@@ -354,13 +357,13 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
-            if time.monotonic() - last_resting >= 5.0:
+            if time.monotonic() - last_resting >= 8.0:
                 try:
                     await bridge.manage_resting_orders("bitvavo")
                 except Exception:  # noqa: BLE001
                     logger.exception("resting order management failed")
                 last_resting = time.monotonic()
-            if time.monotonic() - last_sync >= 15.0:
+            if time.monotonic() - last_sync >= 30.0:
                 try:
                     await bridge.reconcile_from_exchange("bitvavo")
                 except Exception:  # noqa: BLE001

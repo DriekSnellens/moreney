@@ -76,11 +76,23 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_enabled is True
     assert cfg.paper_venue_inventory is True
-    assert cfg.paper_maker_min_net_return >= 0.0015
-    assert cfg.paper_maker_one_leg_adverse_bps >= 12.0
-    assert cfg.live_micro_max_open_orders >= 12
+    assert cfg.paper_max_holding_sec == 0.0
+    assert cfg.paper_maker_min_net_return >= 0.0012
+    assert cfg.paper_maker_one_leg_adverse_bps >= 8.0
+    assert cfg.live_micro_max_open_orders >= 10
+    assert cfg.live_micro_resting_max_age_sec >= 120.0
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
+    assert cfg.paper_max_alt_inventory_pct >= 50.0
+    # Default liquid allowlist (when no override) excludes thin books like AVAX.
+    default_cfg = _session_settings(
+        Settings(),
+        budget_eur=Decimal("2024"),
+        symbols=["ETHEUR", "XRPEUR", "SOLEUR", "ATOMEUR", "NEAREUR", "ADAEUR", "BNBEUR", "DOGEUR"],
+        persist_path=tmp_path / "state2.json",
+    )
+    assert "BNBEUR" in default_cfg.live_micro_symbols
+    assert "AVAXEUR" not in default_cfg.live_micro_symbols
 
 
 def test_portfolio_sync_live_balances_caps_quote() -> None:

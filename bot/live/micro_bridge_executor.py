@@ -79,6 +79,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
             or _DEFAULT_RESTING_MAX_AGE_SEC
         )
+        self._bal_cache: list[Any] | None = None
+        self._bal_cache_mono = 0.0
+        self._bal_cache_sec = 2.5
+        self._mark_fetched_at: dict[str, float] = {}
+        self._mark_ttl_sec = 30.0
+        self._last_orphan_sweep_mono = 0.0
+        self._orphan_sweep_sec = 60.0
+
+    def _invalidate_bal_cache(self) -> None:
+        self._bal_cache = None
+        self._bal_cache_mono = 0.0
 
     @property
     def free_quote_eur(self) -> Decimal:
@@ -157,6 +168,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return {"ok": False, "reason": "balance_fetch_failed", "error": str(exc)[:200]}
 
         bals = list(snap.balances or [])
+        self._bal_cache = bals
+        self._bal_cache_mono = time.monotonic()
         mapped = self._portfolio.sync_live_balances(
             bals,
             quote_available_cap=self._budget,
@@ -211,6 +224,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         return dict(self._last_sync)
 
+    async def _fetch_balances_cached(self, venue: str) -> list[Any]:
+        now = time.monotonic()
+        if (
+            self._bal_cache is not None
+            and now - self._bal_cache_mono < self._bal_cache_sec
+        ):
+            return self._bal_cache
+        client = self._trading_client(venue)
+        if client is None:
+            return self._bal_cache or []
+        snap = await client.get_balances()
+        self._bal_cache = list(snap.balances or [])
+        self._bal_cache_mono = now
+        return self._bal_cache
+
     async def refresh_portfolio_value(
         self,
         *,
@@ -224,12 +252,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         bals = balances
         if bals is None:
             try:
-                snap = await client.get_balances()
-                bals = list(snap.balances or [])
+                bals = await self._fetch_balances_cached(venue)
             except Exception:  # noqa: BLE001
                 return self.portfolio_value_eur
 
         total = _ZERO
+        now = time.monotonic()
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
             if not asset:
@@ -244,7 +272,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             symbol = f"{asset}{self._quote}"
             mark = self._portfolio.state.mark_prices.get(symbol)
-            if mark is None or mark <= 0:
+            fetched_at = self._mark_fetched_at.get(symbol, 0.0)
+            stale = now - fetched_at >= self._mark_ttl_sec
+            if mark is None or mark <= 0 or stale:
                 try:
                     ticker = await client.fetch_ticker(symbol)
                     mark = Decimal(
@@ -252,25 +282,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     )
                     if mark > 0:
                         self._portfolio.set_mark_price(symbol, mark)
+                        self._mark_fetched_at[symbol] = now
                 except Exception:  # noqa: BLE001
-                    mark = None
+                    mark = self._portfolio.state.mark_prices.get(symbol)
             if mark is not None and mark > 0:
                 total += qty * mark
         self.portfolio_value_eur = total
         return total
 
     async def _live_free(self, venue: str, asset: str) -> Decimal:
-        client = self._trading_client(venue)
-        if client is None:
-            return _ZERO
         try:
-            snap = await client.get_balances()
+            bals = await self._fetch_balances_cached(venue)
         except Exception:  # noqa: BLE001
             return _ZERO
         key = asset.upper()
-        for bal in snap.balances or []:
-            if str(bal.asset).upper() == key:
-                return Decimal(str(bal.free or 0))
+        for bal in bals:
+            if str(getattr(bal, "asset", "")).upper() == key:
+                return Decimal(str(getattr(bal, "free", 0) or 0))
         return _ZERO
 
     async def _poll_fill(
@@ -355,12 +383,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         still: list[dict[str, Any]] = []
         now = time.monotonic()
         max_age = self._resting_max_age_sec
-
-        # Also cancel exchange open orders we lost track of (age unknown → cancel if > cap).
-        try:
-            open_orders = await client.fetch_open_orders()
-        except Exception:  # noqa: BLE001
-            open_orders = []
         tracked_ids = {str(r.get("exchange_order_id")) for r in self._resting}
 
         for row in list(self._resting):
@@ -436,6 +458,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 try:
                     await client.cancel_order(oid, symbol)
                     cancelled += 1
+                    self._invalidate_bal_cache()
                     self._bump_skip("stale_quote_cancelled")
                     logger.info(
                         "MICRO_STALE_CANCEL venue=%s symbol=%s id=%s age=%.1fs",
@@ -450,26 +473,46 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             still.append(row)
 
-        # Orphan open orders on exchange not in our tracker: cancel to free capital.
-        for order in open_orders or []:
-            oid = str(getattr(order, "id", None) or "")
-            if not oid or oid in tracked_ids:
-                continue
-            symbol = str(getattr(order, "symbol", "") or "").upper().replace("/", "").replace("-", "")
-            if not symbol:
-                continue
-            try:
-                await client.cancel_order(oid, symbol)
-                cancelled += 1
-                self._bump_skip("orphan_open_cancelled")
-            except Exception:  # noqa: BLE001
-                logger.warning("orphan cancel failed id=%s", oid)
-
         self._resting = still
+        tracked_ids = {str(r.get("exchange_order_id")) for r in self._resting}
+
+        # Orphan sweep is throttled — avoid cancelling fresh quotes we just tracked.
+        do_orphan = (
+            max_age <= 0
+            or now - self._last_orphan_sweep_mono >= self._orphan_sweep_sec
+        )
+        if do_orphan:
+            self._last_orphan_sweep_mono = now
+            try:
+                open_orders = await client.fetch_open_orders()
+            except Exception:  # noqa: BLE001
+                open_orders = []
+            for order in open_orders or []:
+                oid = str(getattr(order, "id", None) or "")
+                if not oid or oid in tracked_ids:
+                    continue
+                symbol = (
+                    str(getattr(order, "symbol", "") or "")
+                    .upper()
+                    .replace("/", "")
+                    .replace("-", "")
+                )
+                if not symbol:
+                    continue
+                try:
+                    await client.cancel_order(oid, symbol)
+                    cancelled += 1
+                    self._invalidate_bal_cache()
+                    self._bump_skip("orphan_open_cancelled")
+                except Exception:  # noqa: BLE001
+                    logger.warning("orphan cancel failed id=%s", oid)
+
         live_exec = getattr(self._live, "executor", None)
         if live_exec is not None and hasattr(live_exec, "refresh_open_order_count"):
             try:
-                await live_exec.refresh_open_order_count(venue)
+                if cancelled and hasattr(live_exec, "note_open_orders"):
+                    live_exec.note_open_orders(len(self._resting))
+                await live_exec.refresh_open_order_count(venue, force=bool(cancelled))
             except Exception:  # noqa: BLE001
                 pass
         if mirrored or cancelled:
@@ -583,6 +626,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "post_only": post_only,
         }
         out = await self._live.submit(payload, confirm=True)
+        self._invalidate_bal_cache()
         row = {
             "symbol": symbol,
             "venue": venue,
@@ -746,6 +790,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             logger.exception("micro_bridge venue ledger sync failed")
         self._portfolio.set_mark_price(order.symbol, average_price)
+        self._invalidate_bal_cache()
         self.live_fill_count += 1
         self.live_transaction_count += 1
 
