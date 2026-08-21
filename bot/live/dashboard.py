@@ -249,7 +249,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Netto winst</p>
         <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">Gerealiseerd op trades (na fees)</p>
+        <p class="hint">Gerealiseerd op trades (na fees) · winst-mode</p>
       </article>
       <article class="card">
         <p class="label">Transacties</p>

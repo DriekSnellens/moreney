@@ -142,6 +142,12 @@ class MakerInventoryStrategy(BaseStrategy):
         self._spread_fee_buffer_bps = Decimal(
             str(getattr(settings, "paper_maker_spread_fee_buffer_bps", 1) or 1)
         )
+        self._allow_buy_only = bool(
+            getattr(settings, "paper_maker_allow_buy_only", True)
+        )
+        self._sell_profit_buffer_bps = Decimal(
+            str(getattr(settings, "paper_maker_sell_profit_buffer_bps", 0) or 0)
+        )
         self._fair_value_enabled = bool(getattr(settings, "paper_maker_fair_value", True))
         self._fx_symbol = str(
             getattr(settings, "paper_maker_fx_symbol", "EURUSDT") or "EURUSDT"
@@ -200,6 +206,25 @@ class MakerInventoryStrategy(BaseStrategy):
         self._cycle_fee_cache[key] = fee
         self._cycle_fee_str_cache[key] = str(fee)
         return fee
+
+    def _break_even_sell_price(
+        self, symbol: str, *, sell_fee_rate: Decimal
+    ) -> Decimal | None:
+        """Minimum ask that nets >= cost basis after sell fee + profit buffer."""
+        state = self._portfolio_state
+        if state is None:
+            return None
+        pos = state.positions.get(symbol.upper())
+        if pos is None or pos.quantity <= 0 or pos.average_entry_price <= 0:
+            return None
+        fee = max(_ZERO, Decimal(str(sell_fee_rate)))
+        denom = Decimal("1") - fee
+        if denom <= 0:
+            return None
+        be = pos.average_entry_price / denom
+        if self._sell_profit_buffer_bps > 0:
+            be *= Decimal("1") + self._sell_profit_buffer_bps / _BPS
+        return be
 
     def _maker_fee_str(self, exchange: str | None) -> str:
         key = str(exchange or "").strip().lower()
@@ -726,6 +751,25 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
 
+        # Winst-mode: never ask below fee-adjusted cost basis (+ buffer).
+        be = self._break_even_sell_price(
+            buy_snap.symbol, sell_fee_rate=self._maker_fee(sell_snap.exchange)
+        )
+        if be is not None and be > sell_price:
+            sell_price = be
+            if sell_price <= buy_price:
+                self._reject(
+                    buy_snap.symbol,
+                    "below_break_even",
+                    (
+                        f"Break-even ask {be} not above buy bid {buy_price}; "
+                        "skip until price clears cost+fees"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=sell_snap.exchange,
+                )
+                return None
+
         with self._hp("spread_calculation"):
             spread_bps = (sell_price - buy_price) / buy_price * _BPS
         if buy_snap.exchange == sell_snap.exchange and spread_bps < self._min_spread_bps:
@@ -806,9 +850,10 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         cost_bps = fee_bps + self._spread_fee_buffer_bps
-        # Same-venue inventory maker often fills one leg first. Require gross
-        # spread to clear one maker fee (+ buffer); full RT fees still apply in NET.
-        if buy_snap.exchange == sell_snap.exchange:
+        # Same-venue inventory maker often fills one leg first. When buy-only is
+        # allowed, require gross spread to clear one maker fee; otherwise demand
+        # full round-trip fee clearance (winst-mode).
+        if buy_snap.exchange == sell_snap.exchange and self._allow_buy_only:
             cost_bps = (
                 self._maker_fee(buy_snap.exchange) * _BPS + self._spread_fee_buffer_bps
             )
@@ -923,9 +968,8 @@ class MakerInventoryStrategy(BaseStrategy):
         same_venue = str(buy_snap.exchange or "").lower() == str(
             sell_snap.exchange or ""
         ).lower()
-        # Same-venue: size buys by cash only. Sell legs are sized/skipped at execute
-        # time from real inventory (otherwise underweight EUR books never quote).
-        if same_venue:
+        # Same-venue buy-only sizing only when explicitly allowed (not winst-mode).
+        if same_venue and self._allow_buy_only:
             capped = min(quantity, max_buy)
         else:
             capped = min(quantity, max_buy, sell_coins)
@@ -976,6 +1020,18 @@ class MakerInventoryStrategy(BaseStrategy):
                     candidate.sell_exchange or ""
                 ).lower()
                 if same_venue and sell_notional < self._dust.min_notional_eur:
+                    if not self._allow_buy_only:
+                        self._reject(
+                            candidate.symbol,
+                            "buy_only_disabled",
+                            (
+                                "Winst-mode: no buy without sell inventory for a "
+                                "profitable round-trip ask"
+                            ),
+                            buy_exchange=candidate.buy_exchange,
+                            sell_exchange=candidate.sell_exchange,
+                        )
+                        return None
                     buy_only = True
                     sell_fee_rate = _ZERO
 

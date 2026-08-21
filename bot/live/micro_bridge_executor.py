@@ -586,6 +586,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "resting": len(self._resting),
         }
 
+    def _unit_cost(self, base: str) -> Decimal | None:
+        lots = self._cost_lots.get(base.upper()) or []
+        total_qty = _ZERO
+        total_cost = _ZERO
+        for qty, unit in lots:
+            if qty <= 0 or unit <= 0:
+                continue
+            total_qty += qty
+            total_cost += qty * unit
+        if total_qty > 0:
+            return total_cost / total_qty
+        symbol = f"{base.upper()}{self._quote}"
+        pos = self._portfolio.state.positions.get(symbol)
+        if pos is not None and pos.quantity > 0 and pos.average_entry_price > 0:
+            return Decimal(str(pos.average_entry_price))
+        return None
+
+    def _break_even_sell_price(self, base: str) -> Decimal | None:
+        unit = self._unit_cost(base)
+        if unit is None or unit <= 0:
+            return None
+        from bot.core.venue_fees import venue_maker_fee
+
+        fee = venue_maker_fee("bitvavo")
+        denom = Decimal("1") - fee
+        if denom <= 0:
+            return None
+        be = unit / denom
+        buffer_bps = Decimal(
+            str(getattr(self._settings, "paper_maker_sell_profit_buffer_bps", 0) or 0)
+        )
+        if buffer_bps > 0:
+            be *= Decimal("1") + buffer_bps / Decimal("10000")
+        return be
+
     async def execute(
         self,
         order_request: OrderRequest,
@@ -602,6 +637,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 order_book=order_book,
                 strategy=strategy,
                 order_type=order_type,
+            )
+
+        if meta.get("buy_only") and not bool(
+            getattr(self._settings, "paper_maker_allow_buy_only", True)
+        ):
+            self._bump_skip("buy_only_disabled")
+            return await self._reject_before_live(
+                order_request,
+                reason="BUY_ONLY_DISABLED",
+                message="winst-mode rejects buy-only quotes",
             )
 
         symbol = order_request.symbol.upper().replace("/", "").replace("-", "")
@@ -667,6 +712,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if qty > live_base:
                 qty = live_base.quantize(Decimal("0.00000001"))
                 order_request = order_request.model_copy(update={"quantity": qty})
+            # Hard floor: never sell below fee-adjusted cost + profit buffer.
+            be = self._break_even_sell_price(base)
+            if be is not None and be > px:
+                px = be
+                order_request = order_request.model_copy(update={"limit_price": px})
+            if order_book is not None:
+                try:
+                    best_bid = Decimal(str(order_book.bids[0].price)) if order_book.bids else _ZERO
+                except Exception:  # noqa: BLE001
+                    best_bid = _ZERO
+                if best_bid > 0 and px <= best_bid:
+                    self._bump_skip("sell_below_break_even")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="SELL_BELOW_BREAK_EVEN",
+                        message=(
+                            f"break-even ask {px} would cross bid {best_bid}; "
+                            "waiting for profitable exit"
+                        ),
+                    )
             notional = qty * px
             if notional < _MIN_LIVE_NOTIONAL:
                 self._bump_skip("sell_below_min_notional")

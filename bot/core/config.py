@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     paper_maker_min_net_return: float = Field(default=0.0025, ge=0)
     # Ignore quotes whose notional is below this euro dust floor.
     paper_maker_min_notional_eur: float = Field(default=10.0, ge=0)
+    # When True, same-venue maker may emit buy-only quotes without sell inventory.
+    paper_maker_allow_buy_only: bool = True
+    # Extra bps above fee-adjusted cost basis required on sells (winst-mode).
+    paper_maker_sell_profit_buffer_bps: float = Field(default=0.0, ge=0)
     # Keep a quote only if its NET euro is at least this fraction of the cycle's best.
     paper_maker_keep_vs_best_frac: float = Field(default=0.0, ge=0, le=1)
     # During cooldown, still replace a quote if NET euro improved by this fraction.

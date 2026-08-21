@@ -644,6 +644,22 @@ class TradingEngine:
                 self._collect_order_fill(cycle_result, sell_result)
             return sell_result
         if buy_only:
+            settings = self._executor_settings()
+            allow_buy_only = True
+            if settings is not None:
+                allow_buy_only = bool(
+                    getattr(settings, "paper_maker_allow_buy_only", True)
+                )
+            if not allow_buy_only:
+                return ExecutionResult(
+                    order_id=buy_order.id,
+                    opportunity_id=opportunity.id,
+                    status=OrderStatus.REJECTED,
+                    filled_quantity=Decimal("0"),
+                    average_price=None,
+                    message="buy_only disabled (winst-mode)",
+                    metadata={"buy_only_disabled": True},
+                )
             buy_result = await self._execute_limit(
                 buy_order, buy_book, opportunity.strategy_name
             )
@@ -666,11 +682,25 @@ class TradingEngine:
                     free_base = Decimal(str(self._portfolio.available(base) or 0))
             min_notional = Decimal("5")
             settings = self._executor_settings()
+            allow_buy_only = True
             if settings is not None:
                 min_notional = Decimal(
                     str(getattr(settings, "paper_maker_min_notional_eur", 5) or 5)
                 )
+                allow_buy_only = bool(
+                    getattr(settings, "paper_maker_allow_buy_only", True)
+                )
             if free_base <= 0 or (free_base * sell_price) < min_notional:
+                if not allow_buy_only:
+                    return ExecutionResult(
+                        order_id=buy_order.id,
+                        opportunity_id=opportunity.id,
+                        status=OrderStatus.REJECTED,
+                        filled_quantity=Decimal("0"),
+                        average_price=None,
+                        message="insufficient base for profitable two-sided quote",
+                        metadata={"sell_leg_skipped": "insufficient_base"},
+                    )
                 buy_result = await self._execute_limit(
                     buy_order, buy_book, opportunity.strategy_name
                 )
