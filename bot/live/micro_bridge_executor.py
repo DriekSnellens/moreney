@@ -48,6 +48,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         execute_venues: set[str] | None = None,
         exclude_bases: set[str] | None = None,
         live_maker: bool = False,
+        allowed_bases: set[str] | None = None,
     ) -> None:
         super().__init__(settings, portfolio=portfolio)
         self._live = live_engine
@@ -59,6 +60,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._exclude_bases = {
             b.strip().upper() for b in (exclude_bases or {"BTC"}) if b.strip()
         }
+        self._allowed_bases = (
+            {b.strip().upper() for b in allowed_bases if b and str(b).strip()}
+            if allowed_bases is not None
+            else None
+        )
         self._live_maker = bool(live_maker)
         self.skips: dict[str, int] = {}
         self.live_trades: list[dict[str, Any]] = []
@@ -115,7 +121,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return registry.get_client(venue, enable_trading=True)
 
     async def reconcile_from_exchange(self, venue: str = "bitvavo") -> dict[str, Any]:
-        """Pull live balances into the paper pocket so buys/sells match Bitvavo."""
+        """Pull live balances into the paper pocket + venue ledger for strategy sizing."""
         client = self._trading_client(venue)
         if client is None:
             return {"ok": False, "reason": "no_client", "venue": venue}
@@ -125,23 +131,51 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             logger.warning("micro reconcile balance fetch failed: %s", type(exc).__name__)
             return {"ok": False, "reason": "balance_fetch_failed", "error": str(exc)[:200]}
 
+        bals = list(snap.balances or [])
         mapped = self._portfolio.sync_live_balances(
-            list(snap.balances or []),
+            bals,
             quote_available_cap=self._budget,
+            allowed_bases=self._allowed_bases,
+            exclude_bases=self._exclude_bases,
         )
+        # Maker strategy sizes sell legs via venue_ledger.available(venue, base).
+        if self._portfolio.venue_ledger is None:
+            self._portfolio.init_venue_ledger(
+                [venue], starting_quote=_ZERO
+            )
+        ledger_balances: dict[str, Decimal] = {}
+        for bal in bals:
+            asset = str(bal.asset or "").upper()
+            if not asset:
+                continue
+            if asset != self._quote:
+                if asset in self._exclude_bases:
+                    continue
+                if self._allowed_bases is not None and asset not in self._allowed_bases:
+                    continue
+            free = Decimal(str(bal.free or 0))
+            if free > 0:
+                if asset == self._quote:
+                    ledger_balances[asset] = min(free, self._budget)
+                else:
+                    ledger_balances[asset] = free
+        self._portfolio.venue_ledger.replace_balances(venue, ledger_balances)
+
         self._last_sync = {
             "ok": True,
             "venue": venue,
             "balances": mapped,
+            "ledger": {k: str(v) for k, v in sorted(ledger_balances.items())},
             "free_quote_eur": str(self.free_quote_eur),
             "remaining_eur": str(self.budget_remaining),
         }
         logger.info(
-            "MICRO_SYNC venue=%s free_eur=%s remaining=%s assets=%s",
+            "MICRO_SYNC venue=%s free_eur=%s remaining=%s assets=%s ledger=%s",
             venue,
             self.free_quote_eur,
             self.budget_remaining,
             sorted(mapped.keys()),
+            sorted(ledger_balances.keys()),
         )
         return dict(self._last_sync)
 

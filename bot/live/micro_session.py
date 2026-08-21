@@ -25,6 +25,7 @@ from bot.live.micro_engine import LiveMicroEngine, reset_micro_engine
 from bot.market_data.service import MarketDataService
 from bot.paper.runner import PaperRunner
 from bot.paper.store import PaperTradingStore
+from bot.portfolio.venue_ledger import infer_base_asset
 from bot.risk.risk_engine import RiskEngine
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,8 @@ def _session_settings(
             "paper_auto_start": False,
             "paper_starting_eur": budget_f,
             "paper_persist_path": str(persist_path),
-            "paper_venue_inventory": False,
+            # Venue ledger on Bitvavo so maker sizes sell legs to real inventory.
+            "paper_venue_inventory": True,
             "paper_seed_inventory_pct": 0.0,
             "paper_seed_max_assets": 0,
             "paper_seed_usdt_pct": 0.0,
@@ -83,6 +85,9 @@ def _session_settings(
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
+            # Headroom for synced inventory + maker quotes (strategy still decides).
+            "risk_max_open_positions": 50,
+            "max_simultaneous_positions": 50,
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": "*",
             # Per-order ceiling = full pocket (capital recycles after sells).
@@ -101,6 +106,7 @@ def attach_micro_bridge(
     live_engine: LiveMicroEngine,
     budget_eur: Decimal,
     exclude_bases: set[str] | None = None,
+    allowed_bases: set[str] | None = None,
 ) -> MicroBudgetLiveExecutor:
     """Replace PaperRunner executor with budget-capped live bridge; rebuild engine."""
     bridge = MicroBudgetLiveExecutor(
@@ -110,6 +116,7 @@ def attach_micro_bridge(
         budget_eur=budget_eur,
         execute_venues={"bitvavo"},
         exclude_bases=exclude_bases or {"BTC"},
+        allowed_bases=allowed_bases,
         live_maker=True,
     )
     runner._executor = bridge  # noqa: SLF001
@@ -200,17 +207,18 @@ async def run_session(
     risk = RiskEngine(cfg)
     store = PaperTradingStore(cfg)
     runner = PaperRunner(cfg, market_data=md, risk_engine=risk, store=store)
+    allowed_bases = {
+        infer_base_asset(sym)
+        for sym in scan_symbols
+        if sym and not str(sym).upper().startswith("BTC")
+    }
     bridge = attach_micro_bridge(
         runner,
         live_engine=live,
         budget_eur=budget_eur,
         exclude_bases={"BTC"} if exclude_btc else set(),
+        allowed_bases=allowed_bases,
     )
-    try:
-        sync = await bridge.reconcile_from_exchange("bitvavo")
-        logger.info("Full-bot micro initial sync: %s", sync)
-    except Exception:  # noqa: BLE001
-        logger.exception("Full-bot micro initial sync failed")
 
     started = await runner.start()
     if not started.get("started"):
@@ -221,6 +229,13 @@ async def run_session(
             "mode": "full_bot_micro",
             "trades": [],
         }
+    # After runner builds the Bitvavo venue ledger, mirror live balances so the
+    # maker strategy can size sell legs against real inventory (no forced dumps).
+    try:
+        sync = await bridge.reconcile_from_exchange("bitvavo")
+        logger.info("Full-bot micro initial sync: %s", sync)
+    except Exception:  # noqa: BLE001
+        logger.exception("Full-bot micro initial sync failed")
 
     continuous = minutes is None or float(minutes) <= 0
     deadline = (

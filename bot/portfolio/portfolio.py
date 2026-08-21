@@ -218,19 +218,37 @@ class PaperPortfolio:
         balances: list[Balance],
         *,
         quote_available_cap: Decimal | None = None,
+        allowed_bases: set[str] | None = None,
+        exclude_bases: set[str] | None = None,
     ) -> dict[str, str]:
         """Replace paper cash/inventory with live venue balances (EUR pocket capped).
 
         ``quote_available_cap`` limits free quote used as the trading pocket so a
         larger exchange balance cannot inflate paper risk beyond the session budget.
         Locked quote stays reserved so open orders are visible to the pocket.
+
+        Optional ``allowed_bases`` / ``exclude_bases`` keep dust and non-tradeable
+        coins out of the paper position book (so sells are not blocked by caps).
         """
         quote = self._quote
+        allow = (
+            {a.strip().upper() for a in allowed_bases if a and str(a).strip()}
+            if allowed_bases is not None
+            else None
+        )
+        exclude = {
+            a.strip().upper() for a in (exclude_bases or set()) if a and str(a).strip()
+        }
         next_balances: dict[str, AssetBalance] = {}
         for bal in balances:
             asset = str(bal.asset or "").upper()
             if not asset:
                 continue
+            if asset != quote:
+                if asset in exclude:
+                    continue
+                if allow is not None and asset not in allow:
+                    continue
             free = Decimal(str(bal.free or 0))
             locked = Decimal(str(bal.locked or 0))
             if free < 0:

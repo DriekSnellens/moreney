@@ -15,7 +15,7 @@ from collections import deque
 from decimal import Decimal
 
 from bot.core.config import Settings
-from bot.core.enums import KillSwitchState, RiskDecisionStatus, RiskRejectReason
+from bot.core.enums import KillSwitchState, OpportunitySide, RiskDecisionStatus, RiskRejectReason
 from bot.core.models import (
     PortfolioSnapshot,
     ProfitabilityResult,
@@ -332,7 +332,18 @@ class RiskEngine:
             )
 
         # --- Simultaneous positions ---
-        if portfolio.open_position_count >= self._limits.max_simultaneous_positions:
+        # Sells / reduce-only must still pass — otherwise inventory can never exit.
+        meta = opportunity.metadata or {}
+        is_reduce = (
+            opportunity.side == OpportunitySide.SELL
+            or bool(meta.get("sell_only"))
+            or bool(meta.get("reduce_only"))
+            or str(meta.get("exit_reason") or "").strip() != ""
+        )
+        if (
+            not is_reduce
+            and portfolio.open_position_count >= self._limits.max_simultaneous_positions
+        ):
             return await self._reject(
                 opportunity,
                 reason_code=RiskRejectReason.MAX_SIMULTANEOUS_POSITIONS,

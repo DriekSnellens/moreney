@@ -75,6 +75,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_max_daily_loss_eur == 202.4
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_enabled is True
+    assert cfg.paper_venue_inventory is True
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
 

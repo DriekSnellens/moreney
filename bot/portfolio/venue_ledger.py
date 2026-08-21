@@ -92,6 +92,24 @@ class VenueLedger:
             return _ZERO
         return row.get(asset.upper(), _ZERO)
 
+    def replace_balances(self, venue: str, balances: dict[str, Decimal]) -> None:
+        """Overwrite one venue's balances (used to mirror live exchange inventory)."""
+        v = str(venue).strip().lower()
+        if not v:
+            return
+        if v not in self._balances:
+            self.venues.append(v)
+            self._balances[v] = {}
+        cleaned: dict[str, Decimal] = {}
+        for asset, qty in balances.items():
+            key = str(asset or "").upper()
+            if not key:
+                continue
+            amount = Decimal(str(qty))
+            if amount > 0:
+                cleaned[key] = amount
+        self._balances[v] = cleaned
+
     def can_buy(self, venue: str, quote_needed: Decimal) -> bool:
         return self.available(venue, self.quote) >= quote_needed and quote_needed > 0
 
