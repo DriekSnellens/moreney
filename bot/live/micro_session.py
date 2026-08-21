@@ -92,29 +92,33 @@ def _session_settings(
             "paper_triangle_enabled": False,
             "paper_maker_venues": "bitvavo",
             "paper_maker_same_venue": True,
-            "paper_maker_max_open_quotes": 4,
-            "paper_cycle_interval_ms": 1500.0,
-            "paper_maker_min_notional_eur": min(20.0, max(10.0, budget_f * 0.015)),
-            # Bitvavo maker ~15 bps/side — require real NET edge after fees.
-            "paper_maker_min_profit_eur": 0.10,
-            "paper_maker_min_net_return": 0.0012,
-            "paper_maker_min_spread_bps": 6.0,
+            "paper_maker_max_open_quotes": 6,
+            "paper_cycle_interval_ms": 1000.0,
+            "paper_maker_min_notional_eur": min(15.0, max(8.0, budget_f * 0.01)),
+            # Bitvavo maker ~15 bps/side — keep a thin NET floor so more quotes go live.
+            "paper_maker_min_profit_eur": 0.03,
+            "paper_maker_min_net_return": 0.00035,
+            "paper_maker_min_spread_bps": 3.0,
+            "paper_maker_adverse_bps": 2.0,
+            "paper_maker_spread_fee_buffer_bps": 0.0,
             "paper_maker_one_leg_exit": True,
-            "paper_maker_one_leg_adverse_bps": 8.0,
+            "paper_maker_one_leg_adverse_bps": 6.0,
             "paper_maker_max_age_ms": 120_000.0,
             "paper_maker_sibling_grace_ms": 20_000.0,
             # 0 = disable forced ALT recycle (was dumping pre-session inventory).
             "paper_max_holding_sec": 0.0,
-            # Allow quoting both sides even with existing Bitvavo holdings.
-            "paper_max_alt_inventory_pct": 55.0,
-            "paper_min_alt_inventory_pct": 10.0,
-            "paper_inventory_ask_improve_bps": 5.0,
-            "arbitrage_min_profit_eur": 0.08,
-            "arbitrage_min_profit_pct": 0.0008,
-            "profitability_min_net_profit_usd": 0.08,
-            "profitability_min_net_return": 0.0008,
-            "profitability_execution_buffer_bps": 1.5,
-            "risk_min_net_profit_usd": 0.08,
+            # Stay near "balanced" so we quote both sides on held inventory.
+            "paper_max_alt_inventory_pct": 65.0,
+            "paper_min_alt_inventory_pct": 0.0,
+            "paper_inventory_ask_improve_bps": 3.0,
+            "paper_inventory_buy_dip_bps": 0.0,
+            "paper_markout_enabled": False,
+            "arbitrage_min_profit_eur": 0.03,
+            "arbitrage_min_profit_pct": 0.00035,
+            "profitability_min_net_profit_usd": 0.03,
+            "profitability_min_net_return": 0.00035,
+            "profitability_execution_buffer_bps": 1.0,
+            "risk_min_net_profit_usd": 0.03,
             "risk_max_position_usd": budget_f,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
@@ -128,8 +132,8 @@ def _session_settings(
             # Per-order ceiling = full pocket (capital recycles after sells).
             "live_micro_max_notional_eur": budget_f,
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
-            "live_micro_max_open_orders": 10,
-            "live_micro_resting_max_age_sec": 120.0,
+            "live_micro_max_open_orders": 12,
+            "live_micro_resting_max_age_sec": 90.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
         }
@@ -308,10 +312,11 @@ async def run_session(
                 "strategy": st.get("strategy"),
                 "approved_opportunities": st.get("approved_opportunities"),
                 "executed_opportunities": st.get("executed_opportunities"),
-                "trade_count": st.get("trade_count"),
                 "starting_equity_eur": str(start_equity),
                 "current_equity_eur": str(equity),
                 "pnl_paper_pocket_eur": str(equity - start_equity),
+                "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
+                "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),
                 "portfolio_value_eur": (
                     str(bridge.portfolio_value_eur)
                     if bridge.portfolio_value_eur is not None
@@ -320,14 +325,6 @@ async def run_session(
                 "starting_portfolio_eur": (
                     str(bridge.starting_portfolio_eur)
                     if bridge.starting_portfolio_eur is not None
-                    else None
-                ),
-                "netto_winst_eur": (
-                    str(bridge.portfolio_value_eur - bridge.starting_portfolio_eur)
-                    if (
-                        bridge.portfolio_value_eur is not None
-                        and bridge.starting_portfolio_eur is not None
-                    )
                     else None
                 ),
                 "bridge": bridge.snapshot_bridge(),

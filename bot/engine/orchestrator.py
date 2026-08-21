@@ -632,6 +632,7 @@ class TradingEngine:
             symbol_override=sell_symbol,
         )
         sell_only = bool((opportunity.metadata or {}).get("sell_only"))
+        buy_only = bool((opportunity.metadata or {}).get("buy_only"))
         if sell_only:
             # Inventory overweight / dump guard: recycle ALT→EUR only.
             sell_result = await self._execute_limit(
@@ -642,6 +643,48 @@ class TradingEngine:
                 cycle_result.executions.append(sell_result)
                 self._collect_order_fill(cycle_result, sell_result)
             return sell_result
+        if buy_only:
+            buy_result = await self._execute_limit(
+                buy_order, buy_book, opportunity.strategy_name
+            )
+            buy_result.metadata["buy_only"] = True
+            if cycle_result is not None:
+                cycle_result.executions.append(buy_result)
+                self._collect_order_fill(cycle_result, buy_result)
+            return buy_result
+        # Two-sided: only post the sell leg when inventory can cover it.
+        try:
+            from bot.portfolio.venue_ledger import infer_base_asset
+
+            base = infer_base_asset(sell_symbol)
+            free_base = Decimal("0")
+            if self._portfolio is not None:
+                ledger = getattr(self._portfolio, "venue_ledger", None)
+                if ledger is not None and sell_venue:
+                    free_base = Decimal(str(ledger.available(sell_venue, base) or 0))
+                if free_base <= 0:
+                    free_base = Decimal(str(self._portfolio.available(base) or 0))
+            min_notional = Decimal("5")
+            settings = self._executor_settings()
+            if settings is not None:
+                min_notional = Decimal(
+                    str(getattr(settings, "paper_maker_min_notional_eur", 5) or 5)
+                )
+            if free_base <= 0 or (free_base * sell_price) < min_notional:
+                buy_result = await self._execute_limit(
+                    buy_order, buy_book, opportunity.strategy_name
+                )
+                buy_result.metadata["buy_only"] = True
+                buy_result.metadata["sell_leg_skipped"] = "insufficient_base"
+                if cycle_result is not None:
+                    cycle_result.executions.append(buy_result)
+                    self._collect_order_fill(cycle_result, buy_result)
+                return buy_result
+            sell_qty = min(qty, free_base)
+            if sell_qty < qty:
+                sell_order = sell_order.model_copy(update={"quantity": sell_qty})
+        except Exception:  # noqa: BLE001
+            pass
         buy_result = await self._execute_limit(buy_order, buy_book, opportunity.strategy_name)
         sell_result = await self._execute_limit(sell_order, sell_book, opportunity.strategy_name)
         buy_result.metadata["sell_leg"] = {

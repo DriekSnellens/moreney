@@ -193,14 +193,13 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         # Fallback: observe total if it includes marks; else free EUR only.
         portfolio = _dec(observe.get("total_value_eur"))
 
-    # True economic PnL vs session start (cash + marked crypto), not paper-equity drift.
-    pnl = _dec(session.get("netto_winst_eur") or bridge.get("netto_winst_eur"))
-    if pnl is None:
-        start_pf = _dec(
-            session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur")
-        )
-        if portfolio is not None and start_pf is not None:
-            pnl = portfolio - start_pf
+    # Realized trade PnL after fees (FIFO vs session cost basis), not MTM.
+    pnl = _dec(
+        session.get("realized_trade_pnl_eur")
+        or bridge.get("realized_trade_pnl_eur")
+        or session.get("netto_winst_eur")
+        or bridge.get("netto_winst_eur")
+    )
 
     tx = session.get("live_transaction_count")
     if tx is None:
@@ -250,7 +249,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Netto winst</p>
         <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">t.o.v. start sessie (na fees op fills)</p>
+        <p class="hint">Gerealiseerd op trades (na fees)</p>
       </article>
       <article class="card">
         <p class="label">Transacties</p>

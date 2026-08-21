@@ -806,6 +806,12 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         cost_bps = fee_bps + self._spread_fee_buffer_bps
+        # Same-venue inventory maker often fills one leg first. Require gross
+        # spread to clear one maker fee (+ buffer); full RT fees still apply in NET.
+        if buy_snap.exchange == sell_snap.exchange:
+            cost_bps = (
+                self._maker_fee(buy_snap.exchange) * _BPS + self._spread_fee_buffer_bps
+            )
         # Sell-only recycle: allow thinner edge so capital velocity wins.
         if not sell_only and cost_bps >= spread_bps:
             self._reject(
@@ -914,7 +920,15 @@ class MakerInventoryStrategy(BaseStrategy):
         buy_fee = Decimal("1") + self._maker_fee(buy_snap.exchange)
         quote_cash = available(buy_snap.exchange, self._quote)
         max_buy = quote_cash / (buy_price * buy_fee) if buy_price > 0 else _ZERO
-        capped = min(quantity, max_buy, sell_coins)
+        same_venue = str(buy_snap.exchange or "").lower() == str(
+            sell_snap.exchange or ""
+        ).lower()
+        # Same-venue: size buys by cash only. Sell legs are sized/skipped at execute
+        # time from real inventory (otherwise underweight EUR books never quote).
+        if same_venue:
+            capped = min(quantity, max_buy)
+        else:
+            capped = min(quantity, max_buy, sell_coins)
         if capped < quantity:
             self._reject(
                 buy_snap.symbol,
@@ -951,6 +965,19 @@ class MakerInventoryStrategy(BaseStrategy):
         side = OpportunitySide.SELL if sell_only else OpportunitySide.BUY
         buy_fee_rate = self._maker_fee(candidate.buy_exchange)
         sell_fee_rate = self._maker_fee(candidate.sell_exchange)
+        # Same-venue without enough base to post a real ask → buy-only inventory build.
+        buy_only = False
+        if not sell_only and inventory is not None:
+            available = getattr(inventory, "available", None)
+            if callable(available):
+                sell_coins = available(candidate.sell_exchange, base)
+                sell_notional = sell_coins * candidate.sell_price
+                same_venue = str(candidate.buy_exchange or "").lower() == str(
+                    candidate.sell_exchange or ""
+                ).lower()
+                if same_venue and sell_notional < self._dust.min_notional_eur:
+                    buy_only = True
+                    sell_fee_rate = _ZERO
 
         # NET gate on a lightweight draft — no TradeOpportunity / ProfitabilityResult
         # until the quote is accepted (same calculator math).
@@ -973,7 +1000,7 @@ class MakerInventoryStrategy(BaseStrategy):
             net_profit_eur=net,
             net_return=net_return,
         )
-        if dust_reason is not None and not sell_only:
+        if dust_reason is not None and not sell_only and not buy_only:
             self._reject(
                 candidate.symbol,
                 "dust_or_net_floor",
@@ -984,7 +1011,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        if not estimate.trade_allowed and not sell_only:
+        if not estimate.trade_allowed and not sell_only and not buy_only:
             reasons = estimate.disallow_reasons or ["profitability engine rejected"]
             self._reject(
                 candidate.symbol,
@@ -997,7 +1024,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         min_eur = self._effective_min_profit(equity)
-        if not sell_only and net < min_eur:
+        if not sell_only and not buy_only and net < min_eur:
             self._reject(
                 candidate.symbol,
                 "min_profit_eur",
@@ -1007,7 +1034,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_profit_eur=str(net),
             )
             return None
-        if not sell_only and net_return < self._min_profit_pct:
+        if not sell_only and not buy_only and net_return < self._min_profit_pct:
             self._reject(
                 candidate.symbol,
                 "min_profit_pct",
@@ -1017,9 +1044,10 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        # Sell-only still needs a positive notional (no stofjes) even if edge is thin.
-        if sell_only:
-            notional = candidate.quantity * candidate.sell_price
+        # Sell-only / buy-only still need a positive notional (no stofjes).
+        if sell_only or buy_only:
+            px = candidate.sell_price if sell_only else candidate.buy_price
+            notional = candidate.quantity * px
             if (
                 self._dust.min_notional_eur > 0
                 and notional < self._dust.min_notional_eur
@@ -1028,8 +1056,8 @@ class MakerInventoryStrategy(BaseStrategy):
                     candidate.symbol,
                     "dust_or_net_floor",
                     (
-                        f"sell-only notional {notional} EUR below dust floor "
-                        f"{self._dust.min_notional_eur} EUR"
+                        f"{'sell' if sell_only else 'buy'}-only notional {notional} EUR "
+                        f"below dust floor {self._dust.min_notional_eur} EUR"
                     ),
                     buy_exchange=candidate.buy_exchange,
                     sell_exchange=candidate.sell_exchange,
@@ -1037,7 +1065,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 return None
         logger.info(
             "maker quote accepted symbol=%s buy=%s sell=%s qty=%s "
-            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s",
+            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s buy_only=%s",
             candidate.symbol,
             candidate.buy_exchange,
             candidate.sell_exchange,
@@ -1047,6 +1075,7 @@ class MakerInventoryStrategy(BaseStrategy):
             fair_value,
             skew,
             sell_only,
+            buy_only,
         )
 
         # Thin market view: same fields as model_copy(order_book=None) without
@@ -1087,9 +1116,14 @@ class MakerInventoryStrategy(BaseStrategy):
                         f"@ ask {candidate.sell_price}"
                         if sell_only
                         else (
-                            f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
-                            f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
-                            f"{candidate.sell_price}"
+                            f"Buy-only inventory build {candidate.quantity} on "
+                            f"{candidate.buy_exchange} @ bid {candidate.buy_price}"
+                            if buy_only
+                            else (
+                                f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
+                                f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
+                                f"{candidate.sell_price}"
+                            )
                         )
                     )
                     + (
@@ -1111,9 +1145,10 @@ class MakerInventoryStrategy(BaseStrategy):
                     "sell_maker_fee_rate": self._maker_fee_str(candidate.sell_exchange),
                     "pricing": "maker_touch",
                     "quote_currency": self._quote,
-                    "round_trip": not sell_only,
+                    "round_trip": not sell_only and not buy_only,
                     "post_only": True,
                     "sell_only": sell_only,
+                    "buy_only": buy_only,
                     "fair_value_eur": str(fair_value) if fair_value is not None else None,
                     "fair_value_aligned": fair_aligned,
                     "inventory_skew_score": str(skew),

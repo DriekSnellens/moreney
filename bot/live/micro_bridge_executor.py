@@ -72,9 +72,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._last_sync: dict[str, Any] | None = None
         self._resting: list[dict[str, Any]] = []
         self.live_fill_count = 0
-        self.live_transaction_count = 0  # +1 per buy of sell fill
+        self.live_transaction_count = 0  # +1 per buy or sell fill
+        self.realized_trade_pnl_eur = _ZERO  # closed-trade PnL after fees
         self.portfolio_value_eur: Decimal | None = None
         self.starting_portfolio_eur: Decimal | None = None
+        # FIFO lots for realized PnL: base -> [(qty, unit_cost_eur)]
+        self._cost_lots: dict[str, list[list[Decimal]]] = {}
+        self._lots_seeded = False
         self._resting_max_age_sec = float(
             getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
             or _DEFAULT_RESTING_MAX_AGE_SEC
@@ -108,9 +112,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return free if free <= self._budget else self._budget
 
     def snapshot_bridge(self) -> dict[str, Any]:
-        pnl = None
-        if self.portfolio_value_eur is not None and self.starting_portfolio_eur is not None:
-            pnl = self.portfolio_value_eur - self.starting_portfolio_eur
         return {
             "budget_eur": str(self._budget),
             "free_quote_eur": str(self.free_quote_eur),
@@ -124,7 +125,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if self.starting_portfolio_eur is not None
                 else None
             ),
-            "netto_winst_eur": str(pnl) if pnl is not None else None,
+            # Operator PnL = realized trade profit after fees (not mark-to-market).
+            "netto_winst_eur": str(self.realized_trade_pnl_eur),
+            "realized_trade_pnl_eur": str(self.realized_trade_pnl_eur),
             "execute_venues": sorted(self._execute_venues),
             "exclude_bases": sorted(self._exclude_bases),
             "live_maker": self._live_maker,
@@ -136,6 +139,64 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "capital_model": "pocket",
             "last_sync": self._last_sync,
         }
+
+    def _seed_cost_lots_from_balances(self, bals: list[Any]) -> None:
+        """Seed FIFO cost basis at current marks so pre-session inventory isn't 'free'."""
+        if self._lots_seeded:
+            return
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote:
+                continue
+            qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                str(getattr(bal, "locked", 0) or 0)
+            )
+            if qty <= 0:
+                continue
+            symbol = f"{asset}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol)
+            if mark is None or mark <= 0:
+                continue
+            self._cost_lots.setdefault(asset, []).append([qty, Decimal(str(mark))])
+        self._lots_seeded = True
+
+    def _record_realized_fill(
+        self,
+        *,
+        side: OrderSide,
+        symbol: str,
+        qty: Decimal,
+        price: Decimal,
+        fee: Decimal,
+    ) -> None:
+        """Update FIFO lots / realized PnL for a live mirrored fill."""
+        if qty <= 0 or price <= 0:
+            return
+        base = infer_base_asset(symbol)
+        lots = self._cost_lots.setdefault(base, [])
+        if side == OrderSide.BUY:
+            # Unit cost includes fee so sells net fee-correct PnL.
+            unit = (qty * price + fee) / qty
+            lots.append([qty, unit])
+            return
+        remaining = qty
+        proceeds = qty * price - fee
+        cost = _ZERO
+        while remaining > 0 and lots:
+            lot_qty, lot_cost = lots[0]
+            take = min(remaining, lot_qty)
+            cost += take * lot_cost
+            lot_qty -= take
+            remaining -= take
+            if lot_qty <= 0:
+                lots.pop(0)
+            else:
+                lots[0][0] = lot_qty
+        if remaining > 0:
+            # Sold more than tracked lots — cost unknown; treat leftover at fill price
+            # so PnL for that slice is ≈ −fee only.
+            cost += remaining * price
+        self.realized_trade_pnl_eur += proceeds - cost
 
     def _bump_skip(self, key: str) -> None:
         self.skips[key] = self.skips.get(key, 0) + 1
@@ -201,6 +262,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         portfolio_value = await self.refresh_portfolio_value(venue=venue, balances=bals)
         if self.starting_portfolio_eur is None and portfolio_value is not None:
             self.starting_portfolio_eur = portfolio_value
+            self._seed_cost_lots_from_balances(bals)
 
         self._last_sync = {
             "ok": True,
@@ -791,6 +853,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             logger.exception("micro_bridge venue ledger sync failed")
         self._portfolio.set_mark_price(order.symbol, average_price)
         self._invalidate_bal_cache()
+        self._record_realized_fill(
+            side=side,
+            symbol=order.symbol,
+            qty=filled_qty,
+            price=average_price,
+            fee=fee,
+        )
         self.live_fill_count += 1
         self.live_transaction_count += 1
 
