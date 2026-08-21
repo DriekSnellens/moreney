@@ -99,8 +99,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return >= 0.0015
     assert cfg.paper_maker_min_notional_eur >= 40.0
-    assert cfg.max_simultaneous_positions == 3
-    assert cfg.live_micro_max_alt_bases == 3
+    assert cfg.max_simultaneous_positions == 2
+    assert cfg.live_micro_max_alt_bases == 2
     assert cfg.live_micro_max_open_orders >= 6
     assert cfg.live_micro_resting_max_age_sec >= 180.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0

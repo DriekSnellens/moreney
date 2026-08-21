@@ -156,16 +156,16 @@ def _session_settings(
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
-            # Max 3 concurrent alt positions — concentrate for trail runners.
-            "risk_max_open_positions": 3,
-            "max_simultaneous_positions": 3,
+            # Max 2 concurrent alt positions — match corr/trail concentration.
+            "risk_max_open_positions": 2,
+            "max_simultaneous_positions": 2,
             "opportunity_max_executions_per_cycle": 2,
             "opportunity_max_candidates_per_cycle": 8,
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else "SOLEUR,ATOMEUR,NEAREUR,ADAEUR,XRPEUR",
-            "live_micro_max_alt_bases": 3,
+            "live_micro_max_alt_bases": 2,
             # Per-order ceiling = full pocket (capital recycles after sells).
             "live_micro_max_notional_eur": min(budget_f, max(80.0, budget_f * 0.15)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
