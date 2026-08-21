@@ -101,9 +101,50 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._trail_drawdown = Decimal(
             str(getattr(settings, "paper_trail_drawdown_pct", 0.10) or 0.10)
         )
+        self._trail_partial_enabled = bool(
+            getattr(settings, "paper_trail_partial_enabled", True)
+        )
+        self._trail_partial_pct = Decimal(
+            str(getattr(settings, "paper_trail_partial_pct", 0.50) or 0.50)
+        )
+        self._ladder_enabled = bool(
+            getattr(settings, "paper_ladder_buy_enabled", False)
+        )
+        raw_ladder = str(
+            getattr(settings, "paper_ladder_buy_pcts", "0.01,0.02,0.03") or ""
+        )
+        self._ladder_pcts: list[Decimal] = []
+        for part in raw_ladder.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                self._ladder_pcts.append(Decimal(part))
+            except Exception:  # noqa: BLE001
+                continue
+        if not self._ladder_pcts:
+            self._ladder_pcts = [Decimal("0.01"), Decimal("0.02"), Decimal("0.03")]
+        self._time_stop_enabled = bool(
+            getattr(settings, "paper_time_stop_enabled", False)
+        )
+        self._time_stop_sec = float(
+            getattr(settings, "paper_time_stop_sec", 86400) or 86400
+        )
+        self._dust_policy = str(
+            getattr(settings, "paper_dust_policy", "off") or "off"
+        ).strip().lower()
+        self._regime_block_buys = bool(
+            getattr(settings, "paper_regime_block_buys", True)
+        )
+        self._buys_blocked = False
+        self._position_opened_mono: dict[str, float] = {}
         self._max_alt_bases = int(
             getattr(settings, "live_micro_max_alt_bases", 0) or 0
         )
+
+    def set_buys_blocked(self, blocked: bool) -> None:
+        """Regime guard: when True, reject new BUY orders (sells/trails still run)."""
+        self._buys_blocked = bool(blocked)
 
     def _invalidate_bal_cache(self) -> None:
         self._bal_cache = None
@@ -155,21 +196,45 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "enabled": self._trail_enabled,
                 "arm_gain_pct": str(self._trail_arm_gain),
                 "drawdown_pct": str(self._trail_drawdown),
-                "states": {
-                    base: {
-                        "armed": bool(st.get("armed")),
-                        "peak": str(st.get("peak") or ""),
-                        "cost": str(st.get("cost") or ""),
-                        "mark": str(st.get("last_mark") or ""),
-                        "triggered": bool(st.get("triggered")),
-                    }
-                    for base, st in sorted(self._trail.items())
-                },
+                "partial_enabled": self._trail_partial_enabled,
+                "partial_pct": str(self._trail_partial_pct),
+                "time_stop_sec": self._time_stop_sec if self._time_stop_enabled else None,
+                "ladder_buy": self._ladder_enabled,
+                "buys_blocked": self._buys_blocked,
+                "dust_policy": self._dust_policy,
+                "states": self._trail_states_public(),
             },
             "max_alt_bases": self._max_alt_bases,
             "held_alt_bases": sorted(self._held_alt_bases()),
             "last_sync": self._last_sync,
         }
+
+    def _trail_states_public(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for base, st in sorted(self._trail.items()):
+            cost = Decimal(str(st.get("cost") or 0))
+            mark = Decimal(str(st.get("last_mark") or 0))
+            gain = ((mark - cost) / cost) if cost > 0 and mark > 0 else _ZERO
+            to_arm = self._trail_arm_gain - gain
+            opened = self._position_opened_mono.get(base)
+            age = (time.monotonic() - opened) if opened else None
+            out[base] = {
+                "armed": bool(st.get("armed")),
+                "partial_done": bool(st.get("partial_done")),
+                "peak": str(st.get("peak") or ""),
+                "cost": str(cost) if cost > 0 else "",
+                "mark": str(mark) if mark > 0 else "",
+                "gain_pct": f"{float(gain * 100):.2f}",
+                "pct_to_arm": f"{float(to_arm * 100):.2f}",
+                "triggered": bool(st.get("triggered")),
+                "age_sec": round(age, 1) if age is not None else None,
+            }
+        return out
+
+    def _note_position_opened(self, base: str) -> None:
+        key = base.upper()
+        if key not in self._position_opened_mono:
+            self._position_opened_mono[key] = time.monotonic()
 
     def _held_alt_bases(self) -> set[str]:
         """Distinct non-quote assets with meaningful live/paper inventory."""
@@ -222,6 +287,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if mark is None or mark <= 0:
                 continue
             self._cost_lots.setdefault(asset, []).append([qty, Decimal(str(mark))])
+            self._note_position_opened(asset)
         self._lots_seeded = True
 
     def _record_realized_fill(
@@ -242,6 +308,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Unit cost includes fee so sells net fee-correct PnL.
             unit = (qty * price + fee) / qty
             lots.append([qty, unit])
+            self._note_position_opened(base)
             return
         remaining = qty
         proceeds = qty * price - fee
@@ -261,6 +328,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # so PnL for that slice is ≈ −fee only.
             cost += remaining * price
         self.realized_trade_pnl_eur += proceeds - cost
+        if not lots:
+            self._position_opened_mono.pop(base, None)
+            self._trail.pop(base, None)
 
     def _bump_skip(self, key: str) -> None:
         self.skips[key] = self.skips.get(key, 0) + 1
@@ -697,8 +767,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "cost": cost,
                 "last_mark": mark,
                 "triggered": False,
+                "partial_done": False,
+                "newly_armed": False,
+                "time_stop_due": False,
             },
         )
+        st["newly_armed"] = False
+        st["time_stop_due"] = False
         if st.get("triggered"):
             st["last_mark"] = mark
             return st
@@ -711,6 +786,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if gain >= self._trail_arm_gain:
                 st["armed"] = True
                 st["peak"] = mark
+                st["newly_armed"] = True
+                st["partial_done"] = False
                 logger.info(
                     "TRAIL_ARM base=%s cost=%s mark=%s gain=%.2f%%",
                     base,
@@ -718,6 +795,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     mark,
                     float(gain * 100),
                 )
+            elif self._time_stop_enabled:
+                opened = self._position_opened_mono.get(base)
+                if opened is not None and (
+                    time.monotonic() - opened >= self._time_stop_sec
+                ):
+                    st["time_stop_due"] = True
             return st
         peak = Decimal(str(st.get("peak") or 0))
         if mark > peak:
@@ -777,11 +860,44 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._resting = still
         return cancelled
 
+    async def _submit_exit_sell(
+        self,
+        *,
+        venue: str,
+        symbol: str,
+        qty: Decimal,
+        mark: Decimal,
+        reason: str,
+        limit_price: Decimal | None = None,
+        post_only: bool = False,
+    ) -> ExecutionResult:
+        px = limit_price
+        if px is None or px <= 0:
+            px = (mark * Decimal("0.998")).quantize(Decimal("0.00000001"))
+        req = OrderRequest(
+            opportunity_id=uuid4(),
+            symbol=symbol,
+            side=OpportunitySide.SELL,
+            quantity=qty,
+            limit_price=px,
+            metadata={
+                "venue": venue,
+                "exchange": venue,
+                "trail_take_profit": True,
+                "post_only": post_only,
+                "strategy": reason,
+                "exit_reason": reason,
+            },
+        )
+        return await self.execute(
+            req, strategy=reason, order_type=OrderType.LIMIT
+        )
+
     async def check_trailing_take_profits(
         self, venue: str = "bitvavo"
     ) -> dict[str, Any]:
-        """Arm +30% trail and marketably sell on −10% from peak (winst-mode)."""
-        if not self._trail_enabled:
+        """Partial at +arm, full exit on peak drawdown; time-stop at break-even."""
+        if not self._trail_enabled and not self._time_stop_enabled:
             return {"ok": True, "enabled": False, "triggered": []}
         bals = await self._fetch_balances_cached(venue)
         triggered: list[dict[str, Any]] = []
@@ -798,6 +914,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             locked = Decimal(str(getattr(bal, "locked", 0) or 0))
             if free + locked <= 0:
                 self._trail.pop(asset, None)
+                self._position_opened_mono.pop(asset, None)
                 continue
             cost = self._unit_cost(asset)
             if cost is None or cost <= 0:
@@ -806,43 +923,75 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             mark = await self._mark_price(venue, symbol)
             if mark is None or mark <= 0:
                 continue
+            self._note_position_opened(asset)
             st = self._trail_update_state(asset, cost=cost, mark=mark)
             if st.get("armed") and not st.get("triggered"):
                 armed_now.append(asset)
-            if not st.get("triggered"):
+
+            sell_qty = _ZERO
+            reason = ""
+            limit_px: Decimal | None = None
+            post_only = False
+
+            # Partial take-profit right when trail arms.
+            if (
+                st.get("newly_armed")
+                and self._trail_partial_enabled
+                and not st.get("partial_done")
+            ):
+                if locked > 0:
+                    await self._cancel_resting_for_symbol(venue, symbol)
+                    self._invalidate_bal_cache()
+                    free = await self._live_free(venue, asset)
+                sell_qty = (free * self._trail_partial_pct).quantize(
+                    Decimal("0.00000001")
+                )
+                reason = "trail_partial"
+                st["partial_done"] = True
+            elif st.get("triggered"):
+                if locked > 0:
+                    await self._cancel_resting_for_symbol(venue, symbol)
+                    self._invalidate_bal_cache()
+                    free = await self._live_free(venue, asset)
+                sell_qty = free
+                reason = "trail_drawdown"
+            elif st.get("time_stop_due"):
+                be = self._break_even_sell_price(asset)
+                if be is not None and mark >= be:
+                    if locked > 0:
+                        await self._cancel_resting_for_symbol(venue, symbol)
+                        self._invalidate_bal_cache()
+                        free = await self._live_free(venue, asset)
+                    sell_qty = free
+                    reason = "time_stop_breakeven"
+                    limit_px = max(be, mark * Decimal("0.999"))
+                    post_only = True
+                else:
+                    self._bump_skip("time_stop_below_be")
+                    continue
+            else:
                 continue
-            # Free locked quotes so we can sell the full position.
-            if locked > 0:
-                await self._cancel_resting_for_symbol(venue, symbol)
-                self._invalidate_bal_cache()
-                free = await self._live_free(venue, asset)
-            if free * mark < _MIN_LIVE_NOTIONAL:
+
+            if sell_qty <= 0 or sell_qty * mark < _MIN_LIVE_NOTIONAL:
                 self._bump_skip("trail_dust")
-                st["triggered"] = False  # retry when size/mark allows
+                if reason == "trail_drawdown":
+                    st["triggered"] = False
                 continue
-            # Aggressive limit near mark so the trail exit fills (not post-only).
-            px = (mark * Decimal("0.998")).quantize(Decimal("0.00000001"))
-            req = OrderRequest(
-                opportunity_id=uuid4(),
+
+            result = await self._submit_exit_sell(
+                venue=venue,
                 symbol=symbol,
-                side=OpportunitySide.SELL,
-                quantity=free,
-                limit_price=px,
-                metadata={
-                    "venue": venue,
-                    "exchange": venue,
-                    "trail_take_profit": True,
-                    "post_only": False,
-                    "strategy": "trail_take_profit",
-                },
-            )
-            result = await self.execute(
-                req, strategy="trail_take_profit", order_type=OrderType.LIMIT
+                qty=sell_qty,
+                mark=mark,
+                reason=reason,
+                limit_price=limit_px,
+                post_only=post_only,
             )
             row = {
                 "base": asset,
                 "symbol": symbol,
-                "qty": str(free),
+                "reason": reason,
+                "qty": str(sell_qty),
                 "mark": str(mark),
                 "peak": str(st.get("peak")),
                 "cost": str(cost),
@@ -850,28 +999,116 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "filled": str(result.filled_quantity),
             }
             triggered.append(row)
-            self._bump_skip("trail_take_profit_sell")
-            if result.status == OrderStatus.FILLED or result.filled_quantity > 0:
+            self._bump_skip(reason)
+            if reason == "trail_drawdown" and (
+                result.status == OrderStatus.FILLED or result.filled_quantity > 0
+            ):
                 self._trail.pop(asset, None)
-            else:
-                # Keep triggered so we retry next cycle; avoid re-arm churn.
+            elif reason == "trail_drawdown":
                 st["triggered"] = True
+            elif reason == "time_stop_breakeven" and (
+                result.status == OrderStatus.FILLED or result.filled_quantity > 0
+            ):
+                self._trail.pop(asset, None)
             logger.info("TRAIL_SELL %s", row)
         return {
             "ok": True,
             "enabled": True,
             "armed": armed_now,
             "triggered": triggered,
-            "states": {
-                k: {
-                    "armed": bool(v.get("armed")),
-                    "peak": str(v.get("peak") or ""),
-                    "cost": str(v.get("cost") or ""),
-                    "mark": str(v.get("last_mark") or ""),
-                }
-                for k, v in self._trail.items()
-            },
+            "states": self._trail_states_public(),
         }
+
+    async def manage_dust_positions(
+        self, venue: str = "bitvavo"
+    ) -> dict[str, Any]:
+        """Top up sub-min positions toward min notional, else exit at break-even."""
+        policy = self._dust_policy
+        if policy in {"", "off", "none"}:
+            return {"ok": True, "policy": policy, "actions": []}
+        min_notional = Decimal(
+            str(getattr(self._settings, "paper_maker_min_notional_eur", 40) or 40)
+        )
+        bals = await self._fetch_balances_cached(venue)
+        actions: list[dict[str, Any]] = []
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote or asset in self._exclude_bases:
+                continue
+            if self._allowed_bases is not None and asset not in self._allowed_bases:
+                continue
+            free = Decimal(str(getattr(bal, "free", 0) or 0))
+            if free <= 0:
+                continue
+            symbol = f"{asset}{self._quote}"
+            mark = await self._mark_price(venue, symbol)
+            if mark is None or mark <= 0:
+                continue
+            notional = free * mark
+            if notional < _MIN_LIVE_NOTIONAL:
+                continue  # true dust — leave
+            if notional >= min_notional:
+                continue
+            need_eur = min_notional - notional
+            did = None
+            if policy in {"top_up", "top_up_or_exit"} and not self._buys_blocked:
+                held = self._held_alt_bases()
+                can_add = asset in held or (
+                    self._max_alt_bases <= 0 or len(held) < self._max_alt_bases
+                )
+                live_eur = await self._live_free(venue, self._quote)
+                spend = min(need_eur * Decimal("1.01"), live_eur, self.budget_remaining)
+                if can_add and spend >= _MIN_LIVE_NOTIONAL:
+                    qty = (spend / mark).quantize(Decimal("0.00000001"))
+                    px = (mark * Decimal("0.999")).quantize(Decimal("0.00000001"))
+                    req = OrderRequest(
+                        opportunity_id=uuid4(),
+                        symbol=symbol,
+                        side=OpportunitySide.BUY,
+                        quantity=qty,
+                        limit_price=px,
+                        metadata={
+                            "venue": venue,
+                            "exchange": venue,
+                            "post_only": True,
+                            "dust_top_up": True,
+                            "ladder_leg": True,
+                            "strategy": "dust_top_up",
+                        },
+                    )
+                    result = await self.execute(
+                        req, strategy="dust_top_up", order_type=OrderType.LIMIT
+                    )
+                    did = {
+                        "action": "top_up",
+                        "base": asset,
+                        "status": str(result.status),
+                        "qty": str(qty),
+                    }
+                    self._bump_skip("dust_top_up")
+            if did is None and policy in {"exit_breakeven", "top_up_or_exit"}:
+                be = self._break_even_sell_price(asset)
+                if be is not None and mark >= be:
+                    result = await self._submit_exit_sell(
+                        venue=venue,
+                        symbol=symbol,
+                        qty=free,
+                        mark=mark,
+                        reason="dust_exit_breakeven",
+                        limit_price=max(be, mark * Decimal("0.999")),
+                        post_only=True,
+                    )
+                    did = {
+                        "action": "exit_breakeven",
+                        "base": asset,
+                        "status": str(result.status),
+                        "qty": str(free),
+                    }
+                    self._bump_skip("dust_exit_breakeven")
+            if did is not None:
+                actions.append(did)
+                logger.info("DUST_POLICY %s", did)
+        return {"ok": True, "policy": policy, "actions": actions}
 
     async def execute(
         self,
@@ -920,6 +1157,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         remaining = self.budget_remaining
         side_is_buy = order_request.side == OpportunitySide.BUY
+        if (
+            side_is_buy
+            and self._regime_block_buys
+            and self._buys_blocked
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+        ):
+            self._bump_skip("regime_block_buys")
+            return await self._reject_before_live(
+                order_request,
+                reason="REGIME_BLOCK_BUYS",
+                message="buys blocked while regime is reduce-only/toxic",
+            )
         if side_is_buy and remaining < _MIN_LIVE_NOTIONAL:
             self._bump_skip("budget_exhausted")
             return await self._reject_before_live(
@@ -965,6 +1215,50 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         message=f"live {self._quote} free {live_eur} pocket {remaining}",
                     )
                 order_request = order_request.model_copy(update={"quantity": qty})
+            # Ladder entries: 3 post-only bids at −1/−2/−3% vs mark (⅓ size each).
+            if (
+                self._ladder_enabled
+                and post_only
+                and not meta.get("ladder_leg")
+                and not meta.get("dust_top_up")
+                and len(self._ladder_pcts) >= 2
+            ):
+                mark = await self._mark_price(venue, symbol)
+                ref = mark if mark and mark > 0 else px
+                leg_qty = (qty / Decimal(len(self._ladder_pcts))).quantize(
+                    Decimal("0.00000001")
+                )
+                if leg_qty * ref >= _MIN_LIVE_NOTIONAL:
+                    last_result: ExecutionResult | None = None
+                    for dip in self._ladder_pcts:
+                        leg_px = (ref * (Decimal("1") - dip)).quantize(
+                            Decimal("0.00000001")
+                        )
+                        if leg_px <= 0:
+                            continue
+                        leg_req = order_request.model_copy(
+                            update={
+                                "id": uuid4(),
+                                "quantity": leg_qty,
+                                "limit_price": leg_px,
+                                "metadata": {
+                                    **meta,
+                                    "ladder_leg": True,
+                                    "ladder_dip_pct": str(dip),
+                                    "post_only": True,
+                                    "venue": venue,
+                                },
+                            }
+                        )
+                        last_result = await self.execute(
+                            leg_req,
+                            order_book=order_book,
+                            strategy=strategy or "ladder_buy",
+                            order_type=order_type,
+                        )
+                    self._bump_skip("ladder_buy")
+                    if last_result is not None:
+                        return last_result
         else:
             live_base = await self._live_free(venue, base)
             if live_base <= 0:

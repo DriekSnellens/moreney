@@ -156,6 +156,38 @@ def _css() -> str:
       color: var(--muted);
       font-size: .8rem;
     }
+    .positions {
+      margin-top: 1.5rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1rem 1.1rem 1.15rem;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+      overflow-x: auto;
+    }
+    .positions h2 {
+      margin: 0 0 .75rem;
+      font-family: var(--sans);
+      font-size: .82rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    table.pos {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: .82rem;
+    }
+    table.pos th, table.pos td {
+      text-align: left;
+      padding: .45rem .35rem;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    table.pos th { color: var(--muted); font-weight: 500; }
+    table.pos td.good { color: var(--good); }
+    table.pos td.bad { color: var(--bad); }
     footer {
       margin-top: 1.75rem;
       display: flex;
@@ -217,6 +249,54 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     elif pnl is not None and pnl < 0:
         pnl_class = "bad"
 
+    trail = bridge.get("trail_take_profit") or {}
+    states = trail.get("states") or {}
+    pos_rows = []
+    for base, st in sorted(states.items()):
+        if not isinstance(st, dict):
+            continue
+        gain = st.get("gain_pct") or "—"
+        to_arm = st.get("pct_to_arm") or "—"
+        armed = "ja" if st.get("armed") else "nee"
+        partial = "ja" if st.get("partial_done") else "—"
+        gain_cls = ""
+        try:
+            g = float(str(gain).replace(",", "."))
+            if g > 0:
+                gain_cls = "good"
+            elif g < 0:
+                gain_cls = "bad"
+        except ValueError:
+            pass
+        pos_rows.append(
+            "<tr>"
+            f"<td>{_esc(base)}</td>"
+            f"<td>{_esc(st.get('cost') or '—')}</td>"
+            f"<td>{_esc(st.get('mark') or '—')}</td>"
+            f"<td class='{gain_cls}'>{_esc(gain)}%</td>"
+            f"<td>{_esc(to_arm)}%</td>"
+            f"<td>{_esc(armed)}</td>"
+            f"<td>{_esc(st.get('peak') or '—')}</td>"
+            f"<td>{_esc(partial)}</td>"
+            f"<td>{_esc(st.get('age_sec') if st.get('age_sec') is not None else '—')}</td>"
+            "</tr>"
+        )
+    if pos_rows:
+        positions_html = (
+            "<section class='positions'><h2>Posities / trail</h2>"
+            "<table class='pos'><thead><tr>"
+            "<th>Coin</th><th>Cost</th><th>Mark</th><th>Winst%</th>"
+            "<th>Tot arm</th><th>Armed</th><th>Peak</th><th>Partial</th><th>Age s</th>"
+            "</tr></thead><tbody>"
+            + "".join(pos_rows)
+            + "</tbody></table></section>"
+        )
+    else:
+        positions_html = (
+            "<section class='positions'><h2>Posities / trail</h2>"
+            "<p class='hint'>Nog geen tracked inventory</p></section>"
+        )
+
     html_doc = f"""<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -249,7 +329,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Netto winst</p>
         <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">Gerealiseerd op trades (na fees) · winst-mode</p>
+        <p class="hint">Gerealiseerd op trades (na fees) · trend/trail</p>
       </article>
       <article class="card">
         <p class="label">Transacties</p>
@@ -257,6 +337,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">Elke buy of sell fill</p>
       </article>
     </section>
+    {positions_html}
     <footer>
       <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:true}})">Start</button>
       <button type="button" class="btn" onclick="post('/live/micro/session/stop')">Stop</button>

@@ -84,6 +84,12 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.30
     assert cfg.paper_trail_drawdown_pct == 0.12
+    assert cfg.paper_trail_partial_enabled is True
+    assert cfg.paper_trail_partial_pct == 0.50
+    assert cfg.paper_ladder_buy_enabled is True
+    assert cfg.paper_time_stop_enabled is True
+    assert cfg.paper_dust_policy == "top_up_or_exit"
+    assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return >= 0.0015
     assert cfg.paper_maker_min_notional_eur >= 40.0
     assert cfg.max_simultaneous_positions == 3
@@ -352,6 +358,30 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert st["triggered"] is False
     st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
     assert st["triggered"] is True
+
+
+def test_trail_partial_flags_newly_armed() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_arm_gain_pct=0.30,
+        paper_trail_partial_enabled=True,
+        paper_trail_partial_pct=0.50,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.29"))  # noqa: SLF001
+    assert st["newly_armed"] is False
+    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.30"))  # noqa: SLF001
+    assert st["newly_armed"] is True
+    assert st["armed"] is True
+    assert st["partial_done"] is False
+    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.31"))  # noqa: SLF001
+    assert st["newly_armed"] is False
 
 
 def test_held_alt_bases_respects_concentration_cap() -> None:

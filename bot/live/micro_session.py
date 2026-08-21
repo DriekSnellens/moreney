@@ -101,10 +101,19 @@ def _session_settings(
             "paper_maker_spread_fee_buffer_bps": 2.0,
             "paper_maker_allow_buy_only": False,
             "paper_maker_sell_profit_buffer_bps": 10.0,
-            # Trail runners: arm +30%, sell on −12% from peak.
+            # Trail runners: arm +30%, partial 50%, rest on −12% from peak.
             "paper_trail_take_profit_enabled": True,
             "paper_trail_arm_gain_pct": 0.30,
             "paper_trail_drawdown_pct": 0.12,
+            "paper_trail_partial_enabled": True,
+            "paper_trail_partial_pct": 0.50,
+            "paper_ladder_buy_enabled": True,
+            "paper_ladder_buy_pcts": "0.01,0.02,0.03",
+            "paper_time_stop_enabled": True,
+            "paper_time_stop_sec": 86400.0,
+            "paper_dust_policy": "top_up_or_exit",
+            "paper_regime_block_buys": True,
+            "paper_hmm_enabled": True,
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
             "paper_maker_max_age_ms": 180_000.0,
@@ -358,6 +367,7 @@ async def run_session(
         last_sync = time.monotonic()
         last_resting = time.monotonic()
         last_trail = time.monotonic()
+        last_dust = time.monotonic()
         while True:
             if should_stop is not None and should_stop():
                 logger.info("Full-bot micro session stop requested")
@@ -365,6 +375,15 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
+            # Regime: block new buys while HMM says reduce-only / toxic.
+            try:
+                st_now = runner.status()
+                reduce_only = bool(st_now.get("reduce_only"))
+                hmm = st_now.get("hmm_regime") or {}
+                toxic = bool(hmm.get("is_toxic_flow"))
+                bridge.set_buys_blocked(reduce_only or toxic)
+            except Exception:  # noqa: BLE001
+                pass
             if time.monotonic() - last_resting >= 8.0:
                 try:
                     await bridge.manage_resting_orders("bitvavo")
@@ -379,6 +398,14 @@ async def run_session(
                 except Exception:  # noqa: BLE001
                     logger.exception("trailing take-profit check failed")
                 last_trail = time.monotonic()
+            if time.monotonic() - last_dust >= 60.0:
+                try:
+                    dust = await bridge.manage_dust_positions("bitvavo")
+                    if dust.get("actions"):
+                        logger.info("Dust policy actions: %s", dust.get("actions"))
+                except Exception:  # noqa: BLE001
+                    logger.exception("dust policy failed")
+                last_dust = time.monotonic()
             if time.monotonic() - last_sync >= 30.0:
                 try:
                     await bridge.reconcile_from_exchange("bitvavo")

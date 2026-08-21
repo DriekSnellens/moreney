@@ -132,6 +132,19 @@ class Settings(BaseSettings):
     paper_trail_take_profit_enabled: bool = False
     paper_trail_arm_gain_pct: float = Field(default=0.30, ge=0.01, le=5.0)
     paper_trail_drawdown_pct: float = Field(default=0.10, ge=0.01, le=0.90)
+    # On arm: immediately sell this fraction (0.5 = 50%), trail the rest.
+    paper_trail_partial_enabled: bool = True
+    paper_trail_partial_pct: float = Field(default=0.50, ge=0.05, le=0.95)
+    # Ladder buys: split entry into 3 post-only bids at these discounts vs mark.
+    paper_ladder_buy_enabled: bool = False
+    paper_ladder_buy_pcts: str = "0.01,0.02,0.03"
+    # Time-stop: after this many seconds without trail arm, exit at >= break-even only.
+    paper_time_stop_enabled: bool = False
+    paper_time_stop_sec: float = Field(default=86400.0, ge=3600.0)
+    # Sub-min-notional inventory: top_up | exit_breakeven | top_up_or_exit | off
+    paper_dust_policy: str = "off"
+    # When True, block new buys while HMM/regime is reduce-only / toxic.
+    paper_regime_block_buys: bool = True
     # Keep a quote only if its NET euro is at least this fraction of the cycle's best.
     paper_maker_keep_vs_best_frac: float = Field(default=0.0, ge=0, le=1)
     # During cooldown, still replace a quote if NET euro improved by this fraction.
