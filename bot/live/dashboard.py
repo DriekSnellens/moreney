@@ -284,7 +284,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <article class="metric-card"><span class="label">Engine armed</span><span class="value">{_esc(engine.get("armed"))}</span></article>
       </div>
       <div class="controls">
-        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:5000,exclude_btc:true}})">Start continuous / €5000</button>
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:true}})">Start continuous / €2024</button>
         <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop</button>
         <button type="button" class="btn" onclick="post('/live/micro/arm')">Arm engine</button>
         <button type="button" class="btn" onclick="post('/live/micro/disarm')">Disarm</button>

@@ -36,7 +36,7 @@ def test_render_live_dashboard_contains_controls() -> None:
             "session": {
                 "running": True,
                 "continuous": True,
-                "budget_eur": "5000",
+                "budget_eur": "2024",
                 "paper_cycles": 3,
                 "bridge": {"free_quote_eur": "25", "turnover_eur": "0", "skips": {}},
             },
@@ -48,7 +48,7 @@ def test_render_live_dashboard_contains_controls() -> None:
         }
     ).body.decode()
     assert "Live trading" in html
-    assert "Start continuous / €5000" in html
+    assert "Start continuous / €2024" in html
     assert "Emergency stop" in html
 
 

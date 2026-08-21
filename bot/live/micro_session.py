@@ -130,7 +130,7 @@ def attach_micro_bridge(
 async def run_session(
     *,
     minutes: float | None = None,
-    budget_eur: Decimal = Decimal("5000"),
+    budget_eur: Decimal = Decimal("2024"),
     symbols: list[str] | None = None,
     settings: Settings | None = None,
     report_path: str | Path | None = None,
@@ -377,7 +377,7 @@ def main() -> None:
         default=0.0,
         help="Session length in minutes; 0 = continuous until stop",
     )
-    parser.add_argument("--budget-eur", type=float, default=5000.0)
+    parser.add_argument("--budget-eur", type=float, default=2024.0)
     parser.add_argument(
         "--symbols",
         type=str,

@@ -467,7 +467,7 @@ async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dic
         minutes = float(raw_minutes)
         if minutes <= 0:
             minutes = None
-    budget = float(body.get("budget_eur") or 5000)
+    budget = float(body.get("budget_eur") or 2024)
     exclude_btc = body.get("exclude_btc", True)
     if isinstance(exclude_btc, str):
         exclude_btc = exclude_btc.strip().lower() not in {"0", "false", "no"}
