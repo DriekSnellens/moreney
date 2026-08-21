@@ -90,6 +90,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._mark_ttl_sec = 30.0
         self._last_orphan_sweep_mono = 0.0
         self._orphan_sweep_sec = 60.0
+        # Trailing take-profit: base -> {armed, peak, cost, triggered}
+        self._trail: dict[str, dict[str, Any]] = {}
+        self._trail_enabled = bool(
+            getattr(settings, "paper_trail_take_profit_enabled", False)
+        )
+        self._trail_arm_gain = Decimal(
+            str(getattr(settings, "paper_trail_arm_gain_pct", 0.30) or 0.30)
+        )
+        self._trail_drawdown = Decimal(
+            str(getattr(settings, "paper_trail_drawdown_pct", 0.10) or 0.10)
+        )
 
     def _invalidate_bal_cache(self) -> None:
         self._bal_cache = None
@@ -137,6 +148,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "live_transaction_count": int(self.live_transaction_count),
             "resting_orders": len(self._resting),
             "capital_model": "pocket",
+            "trail_take_profit": {
+                "enabled": self._trail_enabled,
+                "arm_gain_pct": str(self._trail_arm_gain),
+                "drawdown_pct": str(self._trail_drawdown),
+                "states": {
+                    base: {
+                        "armed": bool(st.get("armed")),
+                        "peak": str(st.get("peak") or ""),
+                        "cost": str(st.get("cost") or ""),
+                        "mark": str(st.get("last_mark") or ""),
+                        "triggered": bool(st.get("triggered")),
+                    }
+                    for base, st in sorted(self._trail.items())
+                },
+            },
             "last_sync": self._last_sync,
         }
 
@@ -621,6 +647,194 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             be *= Decimal("1") + buffer_bps / Decimal("10000")
         return be
 
+    def _trail_update_state(
+        self, base: str, *, cost: Decimal, mark: Decimal
+    ) -> dict[str, Any]:
+        """Arm at +arm_gain vs cost; track peak; return state (may set trigger)."""
+        st = self._trail.setdefault(
+            base,
+            {
+                "armed": False,
+                "peak": _ZERO,
+                "cost": cost,
+                "last_mark": mark,
+                "triggered": False,
+            },
+        )
+        if st.get("triggered"):
+            st["last_mark"] = mark
+            return st
+        st["cost"] = cost
+        st["last_mark"] = mark
+        if cost <= 0 or mark <= 0:
+            return st
+        gain = (mark - cost) / cost
+        if not st.get("armed"):
+            if gain >= self._trail_arm_gain:
+                st["armed"] = True
+                st["peak"] = mark
+                logger.info(
+                    "TRAIL_ARM base=%s cost=%s mark=%s gain=%.2f%%",
+                    base,
+                    cost,
+                    mark,
+                    float(gain * 100),
+                )
+            return st
+        peak = Decimal(str(st.get("peak") or 0))
+        if mark > peak:
+            st["peak"] = mark
+            peak = mark
+        if peak > 0 and mark <= peak * (Decimal("1") - self._trail_drawdown):
+            st["triggered"] = True
+            logger.info(
+                "TRAIL_TRIGGER base=%s cost=%s peak=%s mark=%s dd=%.2f%%",
+                base,
+                cost,
+                peak,
+                mark,
+                float((Decimal("1") - mark / peak) * 100),
+            )
+        return st
+
+    async def _mark_price(self, venue: str, symbol: str) -> Decimal | None:
+        mark = self._portfolio.state.mark_prices.get(symbol)
+        now = time.monotonic()
+        fetched_at = self._mark_fetched_at.get(symbol, 0.0)
+        if mark is not None and mark > 0 and now - fetched_at < self._mark_ttl_sec:
+            return Decimal(str(mark))
+        client = self._trading_client(venue)
+        if client is None:
+            return Decimal(str(mark)) if mark and mark > 0 else None
+        try:
+            ticker = await client.fetch_ticker(symbol)
+            mark = Decimal(str(ticker.last or ticker.bid or ticker.ask or 0))
+            if mark > 0:
+                self._portfolio.set_mark_price(symbol, mark)
+                self._mark_fetched_at[symbol] = now
+                return mark
+        except Exception:  # noqa: BLE001
+            pass
+        return Decimal(str(mark)) if mark and mark > 0 else None
+
+    async def _cancel_resting_for_symbol(self, venue: str, symbol: str) -> int:
+        client = self._trading_client(venue)
+        if client is None:
+            return 0
+        cancelled = 0
+        still: list[dict[str, Any]] = []
+        for row in list(self._resting):
+            if str(row.get("symbol") or "").upper() != symbol.upper():
+                still.append(row)
+                continue
+            oid = str(row.get("exchange_order_id") or "")
+            if not oid:
+                continue
+            try:
+                await client.cancel_order(oid, symbol)
+                cancelled += 1
+                self._invalidate_bal_cache()
+            except Exception:  # noqa: BLE001
+                still.append(row)
+        self._resting = still
+        return cancelled
+
+    async def check_trailing_take_profits(
+        self, venue: str = "bitvavo"
+    ) -> dict[str, Any]:
+        """Arm +30% trail and marketably sell on −10% from peak (winst-mode)."""
+        if not self._trail_enabled:
+            return {"ok": True, "enabled": False, "triggered": []}
+        bals = await self._fetch_balances_cached(venue)
+        triggered: list[dict[str, Any]] = []
+        armed_now: list[str] = []
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote:
+                continue
+            if asset in self._exclude_bases:
+                continue
+            if self._allowed_bases is not None and asset not in self._allowed_bases:
+                continue
+            free = Decimal(str(getattr(bal, "free", 0) or 0))
+            locked = Decimal(str(getattr(bal, "locked", 0) or 0))
+            if free + locked <= 0:
+                self._trail.pop(asset, None)
+                continue
+            cost = self._unit_cost(asset)
+            if cost is None or cost <= 0:
+                continue
+            symbol = f"{asset}{self._quote}"
+            mark = await self._mark_price(venue, symbol)
+            if mark is None or mark <= 0:
+                continue
+            st = self._trail_update_state(asset, cost=cost, mark=mark)
+            if st.get("armed") and not st.get("triggered"):
+                armed_now.append(asset)
+            if not st.get("triggered"):
+                continue
+            # Free locked quotes so we can sell the full position.
+            if locked > 0:
+                await self._cancel_resting_for_symbol(venue, symbol)
+                self._invalidate_bal_cache()
+                free = await self._live_free(venue, asset)
+            if free * mark < _MIN_LIVE_NOTIONAL:
+                self._bump_skip("trail_dust")
+                st["triggered"] = False  # retry when size/mark allows
+                continue
+            # Aggressive limit near mark so the trail exit fills (not post-only).
+            px = (mark * Decimal("0.998")).quantize(Decimal("0.00000001"))
+            req = OrderRequest(
+                opportunity_id=uuid4(),
+                symbol=symbol,
+                side=OpportunitySide.SELL,
+                quantity=free,
+                limit_price=px,
+                metadata={
+                    "venue": venue,
+                    "exchange": venue,
+                    "trail_take_profit": True,
+                    "post_only": False,
+                    "strategy": "trail_take_profit",
+                },
+            )
+            result = await self.execute(
+                req, strategy="trail_take_profit", order_type=OrderType.LIMIT
+            )
+            row = {
+                "base": asset,
+                "symbol": symbol,
+                "qty": str(free),
+                "mark": str(mark),
+                "peak": str(st.get("peak")),
+                "cost": str(cost),
+                "status": str(result.status),
+                "filled": str(result.filled_quantity),
+            }
+            triggered.append(row)
+            self._bump_skip("trail_take_profit_sell")
+            if result.status == OrderStatus.FILLED or result.filled_quantity > 0:
+                self._trail.pop(asset, None)
+            else:
+                # Keep triggered so we retry next cycle; avoid re-arm churn.
+                st["triggered"] = True
+            logger.info("TRAIL_SELL %s", row)
+        return {
+            "ok": True,
+            "enabled": True,
+            "armed": armed_now,
+            "triggered": triggered,
+            "states": {
+                k: {
+                    "armed": bool(v.get("armed")),
+                    "peak": str(v.get("peak") or ""),
+                    "cost": str(v.get("cost") or ""),
+                    "mark": str(v.get("last_mark") or ""),
+                }
+                for k, v in self._trail.items()
+            },
+        }
+
     async def execute(
         self,
         order_request: OrderRequest,
@@ -712,26 +926,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if qty > live_base:
                 qty = live_base.quantize(Decimal("0.00000001"))
                 order_request = order_request.model_copy(update={"quantity": qty})
-            # Hard floor: never sell below fee-adjusted cost + profit buffer.
-            be = self._break_even_sell_price(base)
-            if be is not None and be > px:
-                px = be
-                order_request = order_request.model_copy(update={"limit_price": px})
-            if order_book is not None:
-                try:
-                    best_bid = Decimal(str(order_book.bids[0].price)) if order_book.bids else _ZERO
-                except Exception:  # noqa: BLE001
-                    best_bid = _ZERO
-                if best_bid > 0 and px <= best_bid:
-                    self._bump_skip("sell_below_break_even")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="SELL_BELOW_BREAK_EVEN",
-                        message=(
-                            f"break-even ask {px} would cross bid {best_bid}; "
-                            "waiting for profitable exit"
-                        ),
-                    )
+            # Hard floor: never sell below fee-adjusted cost + profit buffer
+            # (trail take-profit exits are already +30% then −10% from peak).
+            if not bool(meta.get("trail_take_profit")):
+                be = self._break_even_sell_price(base)
+                if be is not None and be > px:
+                    px = be
+                    order_request = order_request.model_copy(update={"limit_price": px})
+                if order_book is not None:
+                    try:
+                        best_bid = (
+                            Decimal(str(order_book.bids[0].price))
+                            if order_book.bids
+                            else _ZERO
+                        )
+                    except Exception:  # noqa: BLE001
+                        best_bid = _ZERO
+                    if best_bid > 0 and px <= best_bid:
+                        self._bump_skip("sell_below_break_even")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="SELL_BELOW_BREAK_EVEN",
+                            message=(
+                                f"break-even ask {px} would cross bid {best_bid}; "
+                                "waiting for profitable exit"
+                            ),
+                        )
             notional = qty * px
             if notional < _MIN_LIVE_NOTIONAL:
                 self._bump_skip("sell_below_min_notional")

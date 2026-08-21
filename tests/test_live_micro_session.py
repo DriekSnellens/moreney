@@ -81,6 +81,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 0.0
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
+    assert cfg.paper_trail_take_profit_enabled is True
+    assert cfg.paper_trail_arm_gain_pct == 0.30
+    assert cfg.paper_trail_drawdown_pct == 0.10
     assert cfg.paper_maker_min_net_return >= 0.0012
     assert cfg.paper_maker_one_leg_adverse_bps >= 6.0
     assert cfg.live_micro_max_open_orders >= 10
@@ -282,6 +285,41 @@ def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
     # 1.00 / (1-0.0015) * (1+10bps) ≈ 1.0025
     assert be > Decimal("1.001")
     assert be < Decimal("1.004")
+
+
+def test_trail_arms_at_30pct_and_triggers_on_10pct_drawdown() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_arm_gain_pct=0.30,
+        paper_trail_drawdown_pct=0.10,
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
+    engine = LiveMicroEngine(settings)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=engine,
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    cost = Decimal("1.00")
+    # Below arm threshold
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.20"))  # noqa: SLF001
+    assert st["armed"] is False
+    # Arm at +30%
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
+    assert st["armed"] is True
+    assert st["peak"] == Decimal("1.30")
+    assert st["triggered"] is False
+    # New high
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
+    assert st["peak"] == Decimal("1.50")
+    # 10% off peak (1.50 * 0.9 = 1.35) — still above
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.36"))  # noqa: SLF001
+    assert st["triggered"] is False
+    # At/under 10% drawdown
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.35"))  # noqa: SLF001
+    assert st["triggered"] is True
 
 
 def test_attach_micro_bridge_does_not_pollute_paper_runner_source() -> None:

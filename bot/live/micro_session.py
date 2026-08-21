@@ -103,6 +103,9 @@ def _session_settings(
             "paper_maker_spread_fee_buffer_bps": 2.0,
             "paper_maker_allow_buy_only": False,
             "paper_maker_sell_profit_buffer_bps": 10.0,
+            "paper_trail_take_profit_enabled": True,
+            "paper_trail_arm_gain_pct": 0.30,
+            "paper_trail_drawdown_pct": 0.10,
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
             "paper_maker_max_age_ms": 180_000.0,
@@ -349,6 +352,7 @@ async def run_session(
         _tick()
         last_sync = time.monotonic()
         last_resting = time.monotonic()
+        last_trail = time.monotonic()
         while True:
             if should_stop is not None and should_stop():
                 logger.info("Full-bot micro session stop requested")
@@ -362,6 +366,14 @@ async def run_session(
                 except Exception:  # noqa: BLE001
                     logger.exception("resting order management failed")
                 last_resting = time.monotonic()
+            if time.monotonic() - last_trail >= 5.0:
+                try:
+                    trail = await bridge.check_trailing_take_profits("bitvavo")
+                    if trail.get("triggered"):
+                        logger.info("Trailing take-profit exits: %s", trail.get("triggered"))
+                except Exception:  # noqa: BLE001
+                    logger.exception("trailing take-profit check failed")
+                last_trail = time.monotonic()
             if time.monotonic() - last_sync >= 30.0:
                 try:
                     await bridge.reconcile_from_exchange("bitvavo")

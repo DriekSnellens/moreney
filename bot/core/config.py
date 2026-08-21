@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     paper_maker_allow_buy_only: bool = True
     # Extra bps above fee-adjusted cost basis required on sells (winst-mode).
     paper_maker_sell_profit_buffer_bps: float = Field(default=0.0, ge=0)
+    # Trailing take-profit: arm after +gain vs cost, sell on drawdown from peak.
+    paper_trail_take_profit_enabled: bool = False
+    paper_trail_arm_gain_pct: float = Field(default=0.30, ge=0.01, le=5.0)
+    paper_trail_drawdown_pct: float = Field(default=0.10, ge=0.01, le=0.90)
     # Keep a quote only if its NET euro is at least this fraction of the cycle's best.
     paper_maker_keep_vs_best_frac: float = Field(default=0.0, ge=0, le=1)
     # During cooldown, still replace a quote if NET euro improved by this fraction.
