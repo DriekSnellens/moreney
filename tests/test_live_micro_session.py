@@ -73,9 +73,72 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_symbols == "*"
     assert cfg.risk_max_position_usd == 2024.0
     assert cfg.live_micro_max_daily_loss_eur == 202.4
+    assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
+
+
+def test_portfolio_sync_live_balances_caps_quote() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(paper_starting_eur=2024.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("2024"))
+    mapped = portfolio.sync_live_balances(
+        [
+            Balance(asset="EUR", free=Decimal("1623.39"), locked=Decimal("100")),
+            Balance(asset="NEAR", free=Decimal("121.9"), locked=Decimal("0")),
+            Balance(asset="ATOM", free=Decimal("147.39"), locked=Decimal("0")),
+        ],
+        quote_available_cap=Decimal("2024"),
+    )
+    assert portfolio.available("EUR") == Decimal("1623.39")
+    assert portfolio.reserved("EUR") == Decimal("100")
+    assert portfolio.available("NEAR") == Decimal("121.9")
+    assert "NEAREUR" in portfolio.state.positions
+    assert portfolio.state.positions["NEAREUR"].quantity == Decimal("121.9")
+    assert "EUR" in mapped
+
+
+@pytest.mark.asyncio
+async def test_bridge_skips_sell_without_live_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked()
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("25"))
+    # Paper thinks it holds NEAR, but live free is 0.
+    portfolio.sync_live_balances(
+        [
+            Balance(asset="EUR", free=Decimal("25"), locked=Decimal("0")),
+            Balance(asset="NEAR", free=Decimal("10"), locked=Decimal("0")),
+        ],
+        quote_available_cap=Decimal("25"),
+    )
+    engine = LiveMicroEngine(settings)
+    engine.arm()
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=engine,
+        budget_eur=Decimal("25"),
+        live_maker=True,
+    )
+
+    async def no_near(_venue: str, asset: str) -> Decimal:
+        return Decimal("0") if asset == "NEAR" else Decimal("25")
+
+    monkeypatch.setattr(bridge, "_live_free", no_near)
+    req = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="NEAREUR",
+        side=OpportunitySide.SELL,
+        quantity=Decimal("10"),
+        limit_price=Decimal("1.65"),
+        metadata={"venue": "bitvavo", "post_only": True},
+    )
+    result = await bridge.execute(req)
+    assert result.status == OrderStatus.REJECTED
+    assert bridge.skips.get("insufficient_live_base", 0) >= 1
 
 
 @pytest.mark.asyncio
@@ -150,6 +213,9 @@ async def test_bridge_mirrors_live_fill(monkeypatch: pytest.MonkeyPatch) -> None
             },
         }
 
+    async def fake_live_free(_venue: str, asset: str) -> Decimal:
+        return Decimal("25") if asset.upper() == "EUR" else Decimal("0")
+
     monkeypatch.setattr(engine, "submit", fake_submit)
     bridge = MicroBudgetLiveExecutor(
         settings,
@@ -157,6 +223,7 @@ async def test_bridge_mirrors_live_fill(monkeypatch: pytest.MonkeyPatch) -> None
         live_engine=engine,
         budget_eur=Decimal("25"),
     )
+    monkeypatch.setattr(bridge, "_live_free", fake_live_free)
     req = OrderRequest(
         opportunity_id=uuid4(),
         symbol="ETHEUR",

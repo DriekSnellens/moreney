@@ -9,7 +9,9 @@ stay paper unless live_maker is enabled.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -27,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 _MIN_LIVE_NOTIONAL = Decimal("5")
+_FILL_POLL_SECONDS = 2.5
+_FILL_POLL_INTERVAL = 0.3
 
 
 class MicroBudgetLiveExecutor(PaperExecutor):
@@ -58,6 +62,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._live_maker = bool(live_maker)
         self.skips: dict[str, int] = {}
         self.live_trades: list[dict[str, Any]] = []
+        self._last_sync: dict[str, Any] | None = None
 
     @property
     def free_quote_eur(self) -> Decimal:
@@ -87,6 +92,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "skips": dict(self.skips),
             "live_trade_count": len(self.live_trades),
             "capital_model": "pocket",
+            "last_sync": self._last_sync,
         }
 
     def _bump_skip(self, key: str) -> None:
@@ -101,6 +107,101 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if sym.endswith("EUR"):
             return "bitvavo"
         return ""
+
+    def _trading_client(self, venue: str) -> Any | None:
+        registry = getattr(self._live, "_registry", None)
+        if registry is None:
+            return None
+        return registry.get_client(venue, enable_trading=True)
+
+    async def reconcile_from_exchange(self, venue: str = "bitvavo") -> dict[str, Any]:
+        """Pull live balances into the paper pocket so buys/sells match Bitvavo."""
+        client = self._trading_client(venue)
+        if client is None:
+            return {"ok": False, "reason": "no_client", "venue": venue}
+        try:
+            snap = await client.get_balances()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("micro reconcile balance fetch failed: %s", type(exc).__name__)
+            return {"ok": False, "reason": "balance_fetch_failed", "error": str(exc)[:200]}
+
+        mapped = self._portfolio.sync_live_balances(
+            list(snap.balances or []),
+            quote_available_cap=self._budget,
+        )
+        self._last_sync = {
+            "ok": True,
+            "venue": venue,
+            "balances": mapped,
+            "free_quote_eur": str(self.free_quote_eur),
+            "remaining_eur": str(self.budget_remaining),
+        }
+        logger.info(
+            "MICRO_SYNC venue=%s free_eur=%s remaining=%s assets=%s",
+            venue,
+            self.free_quote_eur,
+            self.budget_remaining,
+            sorted(mapped.keys()),
+        )
+        return dict(self._last_sync)
+
+    async def _live_free(self, venue: str, asset: str) -> Decimal:
+        client = self._trading_client(venue)
+        if client is None:
+            return _ZERO
+        try:
+            snap = await client.get_balances()
+        except Exception:  # noqa: BLE001
+            return _ZERO
+        key = asset.upper()
+        for bal in snap.balances or []:
+            if str(bal.asset).upper() == key:
+                return Decimal(str(bal.free or 0))
+        return _ZERO
+
+    async def _poll_fill(
+        self,
+        *,
+        venue: str,
+        symbol: str,
+        exchange_order_id: str | None,
+        fallback_price: Decimal,
+    ) -> tuple[Decimal, Decimal]:
+        """Poll exchange order briefly; return (filled_qty, avg_price)."""
+        if not exchange_order_id:
+            return _ZERO, fallback_price
+        client = self._trading_client(venue)
+        if client is None or not hasattr(client, "fetch_order"):
+            return _ZERO, fallback_price
+
+        deadline = time.monotonic() + _FILL_POLL_SECONDS
+        last_filled = _ZERO
+        last_avg = fallback_price
+        while True:
+            try:
+                order = await client.fetch_order(str(exchange_order_id), symbol)
+            except Exception:  # noqa: BLE001
+                break
+            last_filled = Decimal(str(order.filled_quantity or 0))
+            avg = order.average_price or order.price or fallback_price
+            last_avg = Decimal(str(avg or fallback_price))
+            status = order.status
+            status_val = status.value if hasattr(status, "value") else str(status)
+            if last_filled > 0:
+                return last_filled, last_avg if last_avg > 0 else fallback_price
+            if str(status_val).lower() in {
+                "filled",
+                "closed",
+                "cancelled",
+                "canceled",
+                "rejected",
+                "failed",
+            }:
+                return last_filled, last_avg if last_avg > 0 else fallback_price
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(_FILL_POLL_INTERVAL)
+        return last_filled, last_avg if last_avg > 0 else fallback_price
 
     async def execute(
         self,
@@ -155,18 +256,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 order_request, reason="BAD_SIZE", message="quantity/price required"
             )
 
-        notional = qty * px
-        if side_is_buy and notional > remaining:
-            qty = (remaining / px).quantize(Decimal("0.00000001"))
+        # Size against live Bitvavo free balances (paper pocket can lag fills).
+        if side_is_buy:
+            live_eur = await self._live_free(venue, self._quote)
+            spend_cap = min(remaining, live_eur) if live_eur > 0 else remaining
             notional = qty * px
-            if qty <= 0 or notional < _MIN_LIVE_NOTIONAL:
-                self._bump_skip("budget_too_small")
+            if notional > spend_cap:
+                qty = (spend_cap / px).quantize(Decimal("0.00000001"))
+                notional = qty * px
+                if qty <= 0 or notional < _MIN_LIVE_NOTIONAL:
+                    self._bump_skip("insufficient_live_quote")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="INSUFFICIENT_LIVE_QUOTE",
+                        message=f"live {self._quote} free {live_eur} pocket {remaining}",
+                    )
+                order_request = order_request.model_copy(update={"quantity": qty})
+        else:
+            live_base = await self._live_free(venue, base)
+            if live_base <= 0:
+                self._bump_skip("insufficient_live_base")
                 return await self._reject_before_live(
                     order_request,
-                    reason="BUDGET_TOO_SMALL",
-                    message="resized quantity below live minimum",
+                    reason="INSUFFICIENT_LIVE_BASE",
+                    message=f"live {base} free {live_base}",
                 )
-            order_request = order_request.model_copy(update={"quantity": qty})
+            if qty > live_base:
+                qty = live_base.quantize(Decimal("0.00000001"))
+                order_request = order_request.model_copy(update={"quantity": qty})
+            notional = qty * px
+            if notional < _MIN_LIVE_NOTIONAL:
+                self._bump_skip("sell_below_min_notional")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="SELL_BELOW_MIN",
+                    message=f"sell notional {notional} below {_MIN_LIVE_NOTIONAL}",
+                )
 
         side = "buy" if side_is_buy else "sell"
         payload = {
@@ -177,6 +302,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "limit_price": str(px) if px > 0 else None,
             "notional_eur": str(notional.quantize(Decimal("0.01"))),
             "confirm": True,
+            "post_only": post_only,
         }
         out = await self._live.submit(payload, confirm=True)
         row = {
@@ -191,6 +317,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         if not out.get("executed"):
             self._bump_skip(str(out.get("reason") or "live_not_executed"))
+            # Keep pocket honest after rejected/failed attempts.
+            await self.reconcile_from_exchange(venue)
             return await self._reject_before_live(
                 order_request,
                 reason="LIVE_NOT_EXECUTED",
@@ -200,12 +328,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         order_row = out.get("order") or {}
         filled = Decimal(str(order_row.get("filled_quantity") or 0))
         avg = Decimal(str(order_row.get("average_price") or px or 0))
+        if filled <= 0:
+            filled, avg = await self._poll_fill(
+                venue=venue,
+                symbol=symbol,
+                exchange_order_id=(
+                    str(order_row.get("exchange_order_id"))
+                    if order_row.get("exchange_order_id")
+                    else None
+                ),
+                fallback_price=px,
+            )
+
         if filled <= 0 or avg <= 0:
-            self._bump_skip("live_zero_fill")
+            # Resting order accepted — sync locked EUR / inventory from venue.
+            self._bump_skip("live_resting")
+            await self.reconcile_from_exchange(venue)
             return await self._reject_before_live(
                 order_request,
-                reason="LIVE_ZERO_FILL",
-                message="live reported executed but zero fill",
+                reason="LIVE_RESTING",
+                message="order accepted on exchange; waiting for fill (pocket synced)",
             )
 
         fill_notional = filled * avg

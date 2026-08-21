@@ -275,8 +275,6 @@ class CcxtExchangeAdapter(BaseExchangeClient):
         ccxt_symbol = to_ccxt_symbol(order.symbol)
         side = _to_ccxt_side(order.side)
         order_type = "limit" if order.limit_price is not None else "market"
-        amount = float(order.quantity)
-        price = float(order.limit_price) if order.limit_price is not None else None
         params: dict[str, Any] = {}
         if order.client_order_id:
             params["clientOrderId"] = order.client_order_id
@@ -284,9 +282,27 @@ class CcxtExchangeAdapter(BaseExchangeClient):
             params["operatorId"] = int(
                 getattr(self._settings, "bitvavo_operator_id", 1001) or 1001
             )
+        meta = order.metadata or {}
+        if meta.get("post_only") or meta.get("postOnly"):
+            params["postOnly"] = True
 
         async def _op() -> Any:
             exchange = await self._get_exchange()
+            if not getattr(exchange, "markets", None):
+                await self._call(exchange.load_markets)
+            # Venue precision — Bitvavo rejects oversized decimal strings.
+            amount = float(order.quantity)
+            price = float(order.limit_price) if order.limit_price is not None else None
+            try:
+                amount = float(exchange.amount_to_precision(ccxt_symbol, amount))
+                if price is not None:
+                    price = float(exchange.price_to_precision(ccxt_symbol, price))
+            except Exception as exc:  # noqa: BLE001
+                raise ExchangeError(
+                    f"{self.name} precision failed for {ccxt_symbol}: {safe_exc_message(exc)}"
+                ) from exc
+            if amount <= 0:
+                raise ExchangeError(f"{self.name} amount rounds to zero for {ccxt_symbol}")
             if order_type == "limit":
                 return await self._call(
                     exchange.create_order, ccxt_symbol, order_type, side, amount, price, params

@@ -1,6 +1,6 @@
-"""Full-bot micro-live session: small capital only, full PaperRunner pipeline.
+"""Full-bot micro-live session: € capital pocket, full PaperRunner pipeline.
 
-Micro means a hard € budget (default 25), not a stripped strategy.
+Micro means a hard € budget (default 2024), not a stripped strategy.
 Uses PaperRunner (strategy, GOE, profitability, risk, maker stack, labs) and
 routes marketable Bitvavo legs through LiveMicroEngine via MicroBudgetLiveExecutor.
 """
@@ -81,6 +81,8 @@ def _session_settings(
             "risk_max_position_usd": budget_f,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
+            # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
+            "global_max_venue_exposure_pct": 100.0,
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": "*",
             # Per-order ceiling = full pocket (capital recycles after sells).
@@ -204,6 +206,11 @@ async def run_session(
         budget_eur=budget_eur,
         exclude_bases={"BTC"} if exclude_btc else set(),
     )
+    try:
+        sync = await bridge.reconcile_from_exchange("bitvavo")
+        logger.info("Full-bot micro initial sync: %s", sync)
+    except Exception:  # noqa: BLE001
+        logger.exception("Full-bot micro initial sync failed")
 
     started = await runner.start()
     if not started.get("started"):
@@ -272,6 +279,7 @@ async def run_session(
 
     try:
         _tick()
+        last_sync = time.monotonic()
         while True:
             if should_stop is not None and should_stop():
                 logger.info("Full-bot micro session stop requested")
@@ -279,6 +287,12 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
+            if time.monotonic() - last_sync >= 15.0:
+                try:
+                    await bridge.reconcile_from_exchange("bitvavo")
+                except Exception:  # noqa: BLE001
+                    logger.exception("periodic micro sync failed")
+                last_sync = time.monotonic()
             _tick()
             if not runner.running:
                 break

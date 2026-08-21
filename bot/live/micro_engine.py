@@ -256,6 +256,7 @@ class LiveMicroEngine:
                 "exchange": venue,
                 "micro_live": True,
                 "notional_eur": str(notional_eur),
+                "post_only": bool(payload.get("post_only") or payload.get("postOnly")),
             },
         )
 

@@ -213,6 +213,86 @@ class PaperPortfolio:
         bal = self._state.balances.get(asset.upper())
         return bal.reserved if bal else _ZERO
 
+    def sync_live_balances(
+        self,
+        balances: list[Balance],
+        *,
+        quote_available_cap: Decimal | None = None,
+    ) -> dict[str, str]:
+        """Replace paper cash/inventory with live venue balances (EUR pocket capped).
+
+        ``quote_available_cap`` limits free quote used as the trading pocket so a
+        larger exchange balance cannot inflate paper risk beyond the session budget.
+        Locked quote stays reserved so open orders are visible to the pocket.
+        """
+        quote = self._quote
+        next_balances: dict[str, AssetBalance] = {}
+        for bal in balances:
+            asset = str(bal.asset or "").upper()
+            if not asset:
+                continue
+            free = Decimal(str(bal.free or 0))
+            locked = Decimal(str(bal.locked or 0))
+            if free < 0:
+                free = _ZERO
+            if locked < 0:
+                locked = _ZERO
+            if asset == quote and quote_available_cap is not None:
+                cap = Decimal(str(quote_available_cap))
+                if cap < 0:
+                    cap = _ZERO
+                free = min(free, cap)
+            if free == 0 and locked == 0:
+                continue
+            next_balances[asset] = AssetBalance(
+                asset=asset, available=free, reserved=locked
+            )
+        if quote not in next_balances:
+            next_balances[quote] = AssetBalance(
+                asset=quote, available=_ZERO, reserved=_ZERO
+            )
+        self._state.balances = next_balances
+
+        # Rebuild EUR-quoted positions from non-quote balances so sells see inventory.
+        keep_symbols: set[str] = set()
+        for asset, bal in next_balances.items():
+            if asset == quote:
+                continue
+            symbol = f"{asset}{quote}"
+            qty = bal.total
+            if qty <= 0:
+                continue
+            keep_symbols.add(symbol)
+            mark = self._state.mark_prices.get(symbol) or _ZERO
+            prev = self._state.positions.get(symbol)
+            entry = (
+                prev.average_entry_price
+                if prev is not None and prev.average_entry_price > 0
+                else mark
+            )
+            if entry <= 0:
+                entry = Decimal("1")
+            self._state.positions[symbol] = PositionState(
+                symbol=symbol,
+                quantity=qty,
+                average_entry_price=entry,
+                realized_pnl=prev.realized_pnl if prev is not None else _ZERO,
+                fees_paid=prev.fees_paid if prev is not None else _ZERO,
+            )
+            if mark > 0:
+                self._state.mark_prices[symbol] = mark
+        for symbol in list(self._state.positions.keys()):
+            if symbol not in keep_symbols:
+                del self._state.positions[symbol]
+
+        self._update_unrealized()
+        self._update_drawdown()
+        self._state.as_of = datetime.now(UTC)
+        return {
+            asset: f"{bal.available}/{bal.reserved}"
+            for asset, bal in sorted(next_balances.items())
+        }
+
     def reserve(self, asset: str, amount: Decimal) -> bool:
         """Move available → reserved for a pending order. Returns False if short."""
         if amount <= 0:
