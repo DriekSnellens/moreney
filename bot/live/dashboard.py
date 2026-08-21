@@ -154,23 +154,33 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     ) or "<tr><td colspan='3' class='empty'>Geen flags</td></tr>"
 
     balances = observe.get("balances") or []
-    bal_rows = "".join(
-        "<tr>"
-        f"<td>{_esc(b.get('venue'))}</td>"
-        f"<td>{_esc(b.get('asset'))}</td>"
-        f"<td class='num'>{_esc(b.get('available') if b.get('available') is not None else b.get('free') or b.get('total'))}</td>"
-        f"<td class='num'>{_esc(b.get('total') or '')}</td>"
-        "</tr>"
-        for b in balances[:40]
-    ) or "<tr><td colspan='4' class='empty'>Geen live balances</td></tr>"
-
-    # Observe may nest venue snapshots
-    if not balances and observe.get("venues"):
-        rows: list[str] = []
+    bal_rows_list: list[str] = []
+    for entry in balances:
+        if isinstance(entry, dict) and isinstance(entry.get("balances"), list):
+            venue = entry.get("venue")
+            for b in entry.get("balances") or []:
+                bal_rows_list.append(
+                    "<tr>"
+                    f"<td>{_esc(venue or b.get('venue'))}</td>"
+                    f"<td>{_esc(b.get('asset'))}</td>"
+                    f"<td class='num'>{_esc(b.get('available') if b.get('available') is not None else b.get('free') or b.get('total'))}</td>"
+                    f"<td class='num'>{_esc(b.get('total') or '')}</td>"
+                    "</tr>"
+                )
+        elif isinstance(entry, dict) and entry.get("asset"):
+            bal_rows_list.append(
+                "<tr>"
+                f"<td>{_esc(entry.get('venue'))}</td>"
+                f"<td>{_esc(entry.get('asset'))}</td>"
+                f"<td class='num'>{_esc(entry.get('available') if entry.get('available') is not None else entry.get('free') or entry.get('total'))}</td>"
+                f"<td class='num'>{_esc(entry.get('total') or '')}</td>"
+                "</tr>"
+            )
+    if not bal_rows_list and observe.get("venues"):
         for v in observe.get("venues") or []:
             venue = v.get("venue")
             for b in v.get("balances") or []:
-                rows.append(
+                bal_rows_list.append(
                     "<tr>"
                     f"<td>{_esc(venue)}</td>"
                     f"<td>{_esc(b.get('asset'))}</td>"
@@ -178,7 +188,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
                     f"<td class='num'>{_esc(b.get('total') or '')}</td>"
                     "</tr>"
                 )
-        bal_rows = "".join(rows) or bal_rows
+    bal_rows = "".join(bal_rows_list) or (
+        "<tr><td colspan='4' class='empty'>Geen live balances</td></tr>"
+    )
 
     alert_items = alerts.get("alerts") or alerts.get("items") or []
     if isinstance(alert_items, list) and alert_items:
