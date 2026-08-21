@@ -1,8 +1,8 @@
 """FastAPI application entrypoint.
 
-Exposes health, status, market-data, risk/kill-switch, and paper-trading endpoints.
-A lightweight HTML dashboard consumes the paper APIs. No withdrawal routes exist.
-Live trading, withdrawals, and leverage remain disabled.
+Exposes health, status, market-data, risk/kill-switch, funding, and live-trading
+endpoints. The HTML UI is live-only (paper dashboards redirect to /live/dashboard).
+Withdrawals remain disabled / non-automatic.
 """
 
 from __future__ import annotations
@@ -22,16 +22,6 @@ from bot.core.config import Settings, get_settings
 from bot.core.enums import ExecutionMode, KillSwitchState, OpportunityLifecycleStatus
 from bot.market_data.cache import MarketDataCache
 from bot.market_data.service import MarketDataService
-from bot.paper.dashboard import (
-    render_dashboard,
-    render_dashboard_lite,
-    render_fleet_dashboard,
-)
-from bot.strategy_lab.dashboard import (
-    load_latest_lab_results,
-    render_strategy_lab_dashboard,
-)
-from bot.paper.fleet import collect_fleet_overview, publicize_instance_urls, reset_fleet
 from bot.paper.auth import (
     clear_session_cookie,
     credentials_valid,
@@ -46,6 +36,7 @@ from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.store import PaperTradingStore
 from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
+from bot.live.dashboard import render_live_dashboard
 from bot.live.service import get_live_service, reset_live_service
 from bot.live.micro_engine import get_micro_engine, reset_micro_engine
 from bot.live.micro_session_manager import (
@@ -168,7 +159,7 @@ def require_dashboard_access(
     ):
         return
     if wants_html(request):
-        next_path = request.url.path or "/fleet"
+        next_path = request.url.path or "/live/dashboard"
         if request.url.query:
             next_path = f"{next_path}?{request.url.query}"
         raise DashboardLoginRedirect(next_path)
@@ -748,10 +739,12 @@ async def paper_reset(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(next: str = Query(default="/fleet")) -> HTMLResponse:
+async def login_page(next: str = Query(default="/live/dashboard")) -> HTMLResponse:
     settings = get_settings()
     if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(url=next if next.startswith("/") else "/fleet", status_code=303)
+        return RedirectResponse(
+            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+        )
     return render_login_page(next_path=next)
 
 
@@ -759,14 +752,16 @@ async def login_page(next: str = Query(default="/fleet")) -> HTMLResponse:
 async def login_submit(
     username: str = Form(...),
     password: str = Form(...),
-    next: str = Form(default="/fleet"),
+    next: str = Form(default="/live/dashboard"),
 ) -> Response:
     settings = get_settings()
     if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(url=next if next.startswith("/") else "/fleet", status_code=303)
+        return RedirectResponse(
+            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+        )
     if not credentials_valid(settings, username, password):
         return render_login_page(next_path=next, error="Invalid username or password")
-    safe_next = next if next.startswith("/") else "/fleet"
+    safe_next = next if next.startswith("/") else "/live/dashboard"
     response = RedirectResponse(url=safe_next, status_code=303)
     set_session_cookie(response, settings, username)
     return response
@@ -780,36 +775,48 @@ async def logout() -> Response:
     return response
 
 
+async def _live_dashboard_payload() -> dict[str, Any]:
+    live = get_live_service()
+    observe = await live.phase1_observe(probe=False)
+    readiness = live.compact_status()
+    try:
+        alerts = live.phase4_alerts(observe)
+    except Exception:  # noqa: BLE001
+        alerts = {"alerts": []}
+    return {
+        "session": get_micro_session_manager().status(),
+        "engine": get_micro_engine().status(),
+        "unlock": live.micro_unlock_checklist(),
+        "observe": observe,
+        "readiness": readiness,
+        "alerts": alerts,
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/live/dashboard", response_class=HTMLResponse)
+@app.get("/live/micro/dashboard", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
+async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+    """Primary live operator dashboard (paper UIs redirect here)."""
+    return render_live_dashboard(await _live_dashboard_payload())
+
+
 @app.get("/fleet", response_class=HTMLResponse)
-async def fleet_dashboard(
-    request: Request, _: None = Depends(require_dashboard_access)
-) -> HTMLResponse:
-    """One page covering all configured paper instances."""
-    payload = publicize_instance_urls(
-        await collect_fleet_overview(get_settings()),
-        hostname=request.url.hostname or request.headers.get("host", ""),
-        scheme=request.url.scheme,
-    )
-    return render_fleet_dashboard(payload)
-
-
+@app.get("/paper/dashboard", response_class=HTMLResponse)
+@app.get("/paper/dashboard-lite", response_class=HTMLResponse)
 @app.get("/strategy-lab", response_class=HTMLResponse)
 @app.get("/lab", response_class=HTMLResponse)
-async def strategy_lab_dashboard(
-    _: None = Depends(require_dashboard_access),
-) -> HTMLResponse:
-    """Strategy Research Lab leaderboard (shadow/research; no live execution)."""
-    settings = get_settings()
-    if not getattr(settings, "strategy_lab_enabled", True):
-        raise HTTPException(status_code=404, detail="Strategy Lab disabled")
-    payload = load_latest_lab_results(Path(settings.strategy_lab_results_path))
-    return render_strategy_lab_dashboard(payload)
+async def legacy_paper_dashboards_redirect() -> RedirectResponse:
+    """Paper / fleet / lab HTML dashboards removed — live only."""
+    return RedirectResponse(url="/live/dashboard", status_code=303)
 
 
 @app.get("/strategy-lab/api")
 @app.get("/lab/api")
 async def strategy_lab_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    from bot.strategy_lab.dashboard import load_latest_lab_results
+
     settings = get_settings()
     payload = load_latest_lab_results(Path(settings.strategy_lab_results_path))
     if payload is None:
@@ -830,6 +837,8 @@ async def strategy_lab_api(_: None = Depends(require_dashboard_access)) -> dict[
 
 @app.get("/fleet/api")
 async def fleet_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    from bot.paper.fleet import collect_fleet_overview
+
     return await collect_fleet_overview(get_settings())
 
 
@@ -839,6 +848,8 @@ async def fleet_reset(
     _: None = Depends(require_dashboard_access),
 ) -> dict[str, Any]:
     """Reset every paper bot in the fleet. Never touches live exchange accounts."""
+    from bot.paper.fleet import reset_fleet
+
     body = payload or {}
     confirm = bool(body.get("confirm"))
     restart = bool(body.get("restart", True))
@@ -846,77 +857,6 @@ async def fleet_reset(
     if not confirm:
         raise HTTPException(status_code=400, detail=result)
     return result
-
-@app.get("/live/micro/dashboard", response_class=HTMLResponse)
-async def live_micro_dashboard(
-    _: None = Depends(require_dashboard_access),
-) -> HTMLResponse:
-    """Dedicated auto-refresh page for the full-bot micro session."""
-    from bot.paper.dashboard import render_micro_session_dashboard
-
-    return render_micro_session_dashboard(get_micro_session_manager().status())
-
-
-@app.get("/paper/dashboard", response_class=HTMLResponse)
-async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    runner = get_paper_runner()
-    snap = runner.tracker.snapshot()
-    strategies = []
-    for s in runner.tracker.strategy_stats():
-        item = s.model_dump(mode="json")
-        item["win_rate"] = str(s.win_rate)
-        strategies.append(item)
-    exchanges = []
-    for p in runner.tracker.exchange_pair_stats():
-        item = p.model_dump(mode="json")
-        item["win_rate"] = str(p.win_rate)
-        exchanges.append(item)
-    opportunities = [o.model_dump(mode="json") for o in runner.tracker.opportunities(limit=25)]
-    hourly = [h.model_dump(mode="json") for h in runner.tracker.hourly_stats()]
-    trades = runner.tracker.trades(limit=100)
-    funding = await get_funding_service().portfolio_summary()
-    rebalance = get_funding_service().rebalance_recommendations()
-    funding_payload = funding.model_dump(mode="json")
-    funding_payload["recommendations"] = [r.model_dump(mode="json") for r in rebalance]
-    funding_payload["deposits"] = [
-        e.model_dump(mode="json")
-        for e in get_funding_service().funding_events(
-            event_type=FundingEventType.DEPOSIT, limit=10
-        )
-    ]
-    live_payload = get_live_service().compact_status()
-    live_payload["unlock"] = get_live_service().micro_unlock_checklist()
-    micro_session = get_micro_session_manager().status()
-    return render_dashboard(
-        {
-            "status": runner.status(),
-            "performance": snap.model_dump(mode="json"),
-            "strategies": strategies,
-            "exchanges": exchanges,
-            "opportunities": opportunities,
-            "hourly": hourly,
-            "trades": trades,
-            "funding": funding_payload,
-            "live_readiness": live_payload,
-            "micro_session": micro_session,
-        }
-    )
-
-
-@app.get("/paper/dashboard-lite", response_class=HTMLResponse)
-async def paper_dashboard_lite(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    runner = get_paper_runner()
-    snap = runner.tracker.snapshot()
-    opportunities = [o.model_dump(mode="json") for o in runner.tracker.opportunities(limit=12)]
-    return render_dashboard_lite(
-        {
-            "status": runner.status(),
-            "performance": snap.model_dump(mode="json"),
-            "opportunities": opportunities,
-            "hourly": [h.model_dump(mode="json") for h in runner.tracker.hourly_stats()],
-            "trades": runner.tracker.trades(limit=50),
-        }
-    )
 
 
 @app.get("/risk/kill-switch")
@@ -955,21 +895,21 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     return {"status": status.model_dump(mode="json")}
 
 
-@app.get("/")
-async def root() -> JSONResponse:
+@app.get("/api")
+async def api_root() -> JSONResponse:
+    settings = get_settings()
     return JSONResponse(
         {
             "name": "Moreney",
-            "message": "Trading API. Paper dashboard at /paper/dashboard",
+            "message": "Trading API. Live dashboard at /live/dashboard",
             "docs": "/docs",
-            "paper_dashboard": "/paper/dashboard",
-            "paper_dashboard_lite": "/paper/dashboard-lite",
-            "fleet_dashboard": "/fleet",
-            "all_bots_dashboard": "/dashboard",
-            "strategy_lab": "/strategy-lab",
+            "live_dashboard": "/live/dashboard",
+            "live_micro_session": "/live/micro/session",
             "dashboard_basic_auth_enabled": _dashboard_auth_enabled(),
-            "execution_mode": "paper",
-            "live_trading_enabled": False,
+            "execution_mode": settings.execution_mode.value
+            if hasattr(settings.execution_mode, "value")
+            else str(settings.execution_mode),
+            "live_trading_enabled": bool(settings.live_trading_enabled),
             "withdrawals_supported": False,
             "leverage_supported": False,
         }

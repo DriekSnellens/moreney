@@ -598,22 +598,23 @@ def test_paper_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         assert reset.json()["reset"] is True
         assert reset.json()["real_exchange_accounts_affected"] is False
 
-        dash = client.get("/paper/dashboard")
-        assert dash.status_code == 200
-        assert "Moreney" in dash.text
-        assert "Geen echte orders" in dash.text
-        assert "Winst" in dash.text
-        assert "Grafieken" in dash.text
-        lite = client.get("/paper/dashboard-lite")
-        assert lite.status_code == 200
-        assert "Moreney — Winst" in lite.text
+        dash = client.get("/paper/dashboard", follow_redirects=False)
+        assert dash.status_code == 303
+        assert dash.headers.get("location") == "/live/dashboard"
+        live = client.get("/live/dashboard")
+        assert live.status_code == 200
+        assert "Moreney" in live.text
+        assert "Live trading" in live.text
+        assert "Micro-live sessie" in live.text
+        assert "Geen echte orders" not in live.text
+        lite = client.get("/paper/dashboard-lite", follow_redirects=False)
+        assert lite.status_code == 303
+        assert lite.headers.get("location") == "/live/dashboard"
 
-        root = client.get("/").json()
-        assert root["paper_dashboard"] == "/paper/dashboard"
-        assert root["paper_dashboard_lite"] == "/paper/dashboard-lite"
-        assert root["fleet_dashboard"] == "/fleet"
-        assert root["all_bots_dashboard"] == "/dashboard"
-        assert root["live_trading_enabled"] is False
+        root = client.get("/api").json()
+        assert root["live_dashboard"] == "/live/dashboard"
+        assert "paper_dashboard" not in root
+        assert root["withdrawals_supported"] is False
 
 
 def test_paper_start_stop_without_live_orders(
@@ -658,8 +659,9 @@ def test_dashboard_basic_auth_optional_and_enforced(
     get_settings.cache_clear()
     reset_risk_singletons()
     with TestClient(app) as client:
-        assert client.get("/paper/dashboard").status_code == 200
-        assert client.get("/paper/dashboard-lite").status_code == 200
+        assert client.get("/paper/dashboard", follow_redirects=False).status_code == 303
+        assert client.get("/live/dashboard").status_code == 200
+        assert client.get("/paper/dashboard-lite", follow_redirects=False).status_code == 303
 
     # Enabled: dashboard requires valid Basic Auth.
     monkeypatch.setenv("PAPER_PERSIST_PATH", str(tmp_path / "auth-on.json"))
@@ -669,10 +671,14 @@ def test_dashboard_basic_auth_optional_and_enforced(
     get_settings.cache_clear()
     reset_risk_singletons()
     with TestClient(app) as client:
+        assert client.get("/live/dashboard").status_code == 401
         assert client.get("/paper/dashboard").status_code == 401
         assert client.get("/paper/dashboard-lite").status_code == 401
-        assert client.get("/paper/dashboard", auth=("alice", "secret")).status_code == 200
-        assert client.get("/paper/dashboard-lite", auth=("alice", "secret")).status_code == 200
+        assert client.get("/live/dashboard", auth=("alice", "secret")).status_code == 200
+        assert (
+            client.get("/paper/dashboard", auth=("alice", "secret"), follow_redirects=False).status_code
+            == 303
+        )
 
 
 def test_dashboard_uses_dutch_profit_terms_and_charts() -> None:
