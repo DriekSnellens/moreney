@@ -82,14 +82,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_inventory_buy_dip_bps >= 10.0
     assert cfg.paper_maker_sell_profit_buffer_bps >= 5.0
     assert cfg.paper_trail_take_profit_enabled is True
-    assert cfg.paper_trail_arm_gain_pct == 0.12
-    assert cfg.paper_trail_drawdown_pct == 0.06
+    assert cfg.paper_trail_arm_gain_pct == 0.06
+    assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.25
-    assert cfg.paper_trail_soft_arm_pct == 0.05
-    assert cfg.paper_trail_hard_arm_pct == 0.12
+    assert cfg.paper_trail_soft_arm_pct == 0.02
+    assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is True
-    assert cfg.paper_trail_atr_enabled is True
+    assert cfg.paper_trail_atr_enabled is False
+    assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
     assert cfg.live_micro_max_per_corr_group == 2
     assert cfg.paper_daily_kill_eur == 50.0
@@ -108,14 +109,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_markout_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
-    # Trend allowlist: volatile alts only (no ETH/BNB/AVAX).
+    # Liquid day-trade allowlist.
     from bot.live.micro_session import _liquid_symbols
 
     liquid = _liquid_symbols(Settings(), exclude_btc=True)
-    assert liquid == ["SOLEUR", "ATOMEUR", "NEAREUR", "ADAEUR", "XRPEUR"]
+    assert liquid == ["SOLEUR", "XRPEUR", "ADAEUR"]
     assert "ETHEUR" not in liquid
     assert "BNBEUR" not in liquid
-    assert "AVAXEUR" not in liquid
+    assert "ATOMEUR" not in liquid
+    assert "NEAREUR" not in liquid
 
 
 def test_portfolio_sync_live_balances_caps_quote() -> None:
@@ -369,12 +371,13 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         symbols=["ADAEUR"],
         persist_path=tmp_path / "t.json",
     )
-    assert cfg.paper_trail_drawdown_pct == 0.06
-    assert cfg.paper_trail_soft_arm_pct == 0.05
-    assert cfg.paper_trail_hard_arm_pct == 0.12
+    assert cfg.paper_trail_drawdown_pct == 0.03
+    assert cfg.paper_trail_soft_arm_pct == 0.02
+    assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.25
     assert cfg.live_micro_max_notional_eur <= 150.0
     assert cfg.paper_markout_enabled is True
+    assert cfg.live_disable_research_hooks is True
 
 
 def test_trail_partial_flags_newly_armed() -> None:

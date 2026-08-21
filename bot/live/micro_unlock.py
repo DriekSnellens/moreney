@@ -10,7 +10,7 @@ from bot.core.config import Settings
 from bot.core.enums import OpportunitySide
 from bot.core.models import OrderRequest
 from bot.live.micro import MicroLivePolicy
-from bot.research.shadow_validation.protocol import PRODUCTION_EXECUTION_ENABLED
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 
 
 def unlock_checklist(settings: Settings) -> dict[str, Any]:

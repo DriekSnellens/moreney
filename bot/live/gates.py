@@ -7,7 +7,7 @@ from typing import Any
 
 from bot.core.config import Settings
 from bot.core.enums import ExecutionMode
-from bot.research.shadow_validation.protocol import PRODUCTION_EXECUTION_ENABLED
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 
 
 @dataclass

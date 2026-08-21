@@ -1,8 +1,7 @@
-"""Full-bot micro-live session: € capital pocket, full PaperRunner pipeline.
+"""Full-bot live micro session: € capital pocket on Bitvavo.
 
-Micro means a hard € budget (default 2024), not a stripped strategy.
-Uses PaperRunner (strategy, GOE, profitability, risk, maker stack, labs) and
-routes marketable Bitvavo legs through LiveMicroEngine via MicroBudgetLiveExecutor.
+Uses the shared TradingEngine host (historically PaperRunner) with research
+hooks disabled, and routes Bitvavo fills through MicroBudgetLiveExecutor.
 """
 
 from __future__ import annotations
@@ -32,13 +31,11 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 
-# Trend/trail universe: liquid Bitvavo EUR alts that can move enough for +30% runners.
+# Most liquid Bitvavo EUR alts for day-trade harvest (fees matter).
 _LIQUID_EUR_SYMBOLS = (
     "SOLEUR",
-    "ATOMEUR",
-    "NEAREUR",
-    "ADAEUR",
     "XRPEUR",
+    "ADAEUR",
 )
 
 
@@ -102,53 +99,55 @@ def _session_settings(
             "paper_maker_allow_buy_only": False,
             # Day-trade: small buffer over fees so maker asks can clear.
             "paper_maker_sell_profit_buffer_bps": 5.0,
-            # Soft +5% / hard +12% trail (day-trade harvest); ATR can raise floors.
+            # Soft +2% / hard +6% trail — harvest toward €20–40/day path.
             "paper_trail_take_profit_enabled": True,
             "paper_trail_session_buys_only": True,
-            "paper_trail_soft_arm_pct": 0.05,
-            "paper_trail_soft_drawdown_pct": 0.03,
+            "paper_trail_soft_arm_pct": 0.02,
+            "paper_trail_soft_drawdown_pct": 0.012,
             "paper_trail_soft_partial_pct": 0.25,
-            "paper_trail_hard_arm_pct": 0.12,
-            "paper_trail_hard_drawdown_pct": 0.06,
+            "paper_trail_hard_arm_pct": 0.06,
+            "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,
-            "paper_trail_arm_gain_pct": 0.12,
-            "paper_trail_drawdown_pct": 0.06,
+            "paper_trail_arm_gain_pct": 0.06,
+            "paper_trail_drawdown_pct": 0.03,
             "paper_trail_partial_enabled": True,
             "paper_trail_partial_pct": 0.25,
-            "paper_trail_atr_enabled": True,
+            "paper_trail_atr_enabled": False,  # keep fixed harvest levels
             "paper_trail_atr_samples": 48,
             "paper_trail_atr_arm_mult": 2.5,
             "paper_trail_atr_dd_mult": 1.0,
             "paper_ladder_buy_enabled": True,
             "paper_ladder_buy_pcts": "0.01,0.02,0.03",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 14400.0,  # 4h day-trade recycle at >= BE
+            "paper_time_stop_sec": 7200.0,  # 2h recycle at >= BE
             "paper_dust_policy": "top_up_or_exit",
-            # ~15 bps slack so €40–80 dust can clear slots without waiting forever.
             "paper_dust_exit_slack_bps": 15.0,
             "paper_regime_block_buys": True,
             "paper_buy_momentum_enabled": True,
             "paper_buy_momentum_min_return": 0.0,
             "paper_buy_momentum_samples": 12,
-            "live_micro_corr_group": "ADA,ATOM,NEAR,SOL,XRP",
+            "live_micro_corr_group": "ADA,SOL,XRP",
             "live_micro_max_per_corr_group": 2,
             "paper_daily_kill_eur": 50.0,
-            "paper_alert_pct_to_arm": 0.02,
-            "paper_hmm_enabled": True,
+            "paper_alert_pct_to_arm": 0.01,
+            "paper_hmm_enabled": False,  # unfitted HMM was noise on live
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
-            "paper_maker_max_age_ms": 180_000.0,
-            "paper_maker_sibling_grace_ms": 30_000.0,
-            # 0 = disable forced ALT recycle (was dumping pre-session inventory).
+            "paper_maker_max_age_ms": 120_000.0,
+            "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
-            # Concentrate: few alts, buy dips, never cheapen asks.
             "paper_max_alt_inventory_pct": 40.0,
             "paper_min_alt_inventory_pct": 8.0,
             "paper_inventory_ask_improve_bps": 0.0,
             "paper_inventory_buy_dip_bps": 10.0,
-            # Use measured adverse when samples exist (safer than static-only).
             "paper_markout_enabled": True,
             "paper_maker_fair_value": True,
+            # Live-only: no research CVD/shadow/lead-lag on hot path.
+            "live_disable_research_hooks": True,
+            "live_allow_without_research_unlock": True,
+            "lead_lag_enabled": False,
+            "toxicity_shadow_enabled": False,
+            "global_funding_strategy_enabled": False,
             "arbitrage_min_profit_eur": 0.12,
             "arbitrage_min_profit_pct": 0.0015,
             "profitability_min_net_profit_usd": 0.12,
@@ -169,7 +168,7 @@ def _session_settings(
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
-            else "SOLEUR,ATOMEUR,NEAREUR,ADAEUR,XRPEUR",
+            else "SOLEUR,XRPEUR,ADAEUR",
             "live_micro_max_alt_bases": 2,
             # Cap live order size (env must not silently allow full pocket).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),

@@ -16,7 +16,7 @@ from bot.live.micro import MicroLivePolicy
 from bot.live.observe import LiveObserveService
 from bot.live.phases import PHASE_ORDER, LivePhase, phase_public
 from bot.live.registry import MultiVenueRegistry
-from bot.research.shadow_validation.protocol import PRODUCTION_EXECUTION_ENABLED
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 
 
 class LiveReadinessService:

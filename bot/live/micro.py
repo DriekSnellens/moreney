@@ -7,7 +7,7 @@ from typing import Any
 
 from bot.core.config import Settings
 from bot.funding.multi_venue import parse_venue_list
-from bot.research.shadow_validation.protocol import PRODUCTION_EXECUTION_ENABLED
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 
 
 class MicroLivePolicy:

@@ -176,11 +176,8 @@ async def lifespan(_app: FastAPI):
         settings.require_live_credentials()
     get_kill_switch()
     md = get_market_data_service()
-    runner = get_paper_runner()
-    if settings.paper_trading_enabled and settings.paper_auto_start:
-        await runner.start()  # connects public WebSockets + starts loop
+    # Live-only API process: do not start the legacy paper runner loop.
     yield
-    await runner.shutdown()
     await md.stop()
 
 
@@ -190,7 +187,7 @@ app = FastAPI(
         "Production-oriented cryptocurrency trading API. "
         "Strategies emit opportunities; profitability and risk gate execution. "
         "No withdrawal functionality is exposed. No leverage in this version. "
-        "Realtime market data uses public feeds only; execution stays paper."
+        "Live Bitvavo micro sessions are the production path; paper/research APIs removed."
     ),
     version=__version__,
     lifespan=lifespan,
@@ -211,18 +208,19 @@ async def health() -> dict[str, str]:
 async def status() -> dict[str, Any]:
     settings: Settings = get_settings()
     ks = get_kill_switch().status()
-    runner = get_paper_runner()
     funding_flags = get_funding_service().public_status_flags()
+    micro = get_micro_session_manager().status()
     return {
         "version": __version__,
         "environment": settings.app_env,
         "execution_mode": settings.execution_mode.value,
         "exchange": settings.exchange_name,
-        "paper_mode": settings.execution_mode == ExecutionMode.PAPER,
-        "paper_trading_enabled": settings.paper_trading_enabled,
-        "paper_running": runner.running,
+        "paper_mode": False,
+        "paper_trading_enabled": False,
+        "paper_running": False,
+        "micro_session_running": bool(micro.get("running")),
         "market_data_mode": settings.market_data_mode,
-        "live_trading_enabled": False,
+        "live_trading_enabled": bool(settings.live_trading_enabled or settings.live_micro_enabled),
         "withdrawals_supported": False,
         "automatic_withdrawals_enabled": False,
         "leverage_supported": False,
@@ -529,278 +527,6 @@ async def market_data_status() -> dict[str, Any]:
     return compact
 
 
-@app.get("/paper/last-cycle")
-async def paper_last_cycle() -> dict[str, Any]:
-    """Last paper trading cycle result (integration / ops visibility)."""
-    runner = get_paper_runner()
-    cycle = runner.last_cycle if runner.last_cycle is not None else _last_paper_cycle
-    if cycle is None:
-        return {"available": False, "cycle": None}
-    return {"available": True, "cycle": cycle}
-
-
-@app.get("/paper/status")
-async def paper_status() -> dict[str, Any]:
-    status = get_paper_runner().status()
-    status["live_readiness"] = get_live_service().compact_status()
-    return status
-
-
-@app.get("/paper/portfolio")
-async def paper_portfolio() -> dict[str, Any]:
-    portfolio = get_paper_runner().portfolio
-    state = portfolio.state
-    return {
-        "quote_asset": state.quote_asset,
-        "starting_capital": str(get_settings().paper_starting_eur),
-        "equity": str(state.total_equity),
-        "balances": {
-            k: {"available": str(v.available), "reserved": str(v.reserved), "total": str(v.total)}
-            for k, v in state.balances.items()
-        },
-        "positions": {
-            k: {
-                "quantity": str(v.quantity),
-                "average_entry_price": str(v.average_entry_price),
-                "realized_pnl": str(v.realized_pnl),
-                "fees_paid": str(v.fees_paid),
-            }
-            for k, v in state.positions.items()
-            if v.quantity != 0
-        },
-        "stats": state.stats.model_dump(mode="json"),
-        "execution_mode": ExecutionMode.PAPER.value,
-    }
-
-
-@app.get("/paper/performance")
-async def paper_performance() -> dict[str, Any]:
-    snap = get_paper_runner().tracker.snapshot()
-    return snap.model_dump(mode="json")
-
-
-@app.get("/paper/overview")
-async def paper_overview() -> dict[str, Any]:
-    """Current paper-trading state in one payload for operators/UI."""
-    runner = get_paper_runner()
-    portfolio = runner.portfolio.state
-    performance = runner.tracker.snapshot()
-    return {
-        "updated_at": portfolio.as_of.isoformat(),
-        "execution_mode": ExecutionMode.PAPER.value,
-        "status": runner.status(),
-        "market_data": get_market_data_service().status(),
-        "portfolio": {
-            "quote_asset": portfolio.quote_asset,
-            "starting_capital": str(get_settings().paper_starting_eur),
-            "equity": str(portfolio.total_equity),
-            "balances": {
-                k: {
-                    "available": str(v.available),
-                    "reserved": str(v.reserved),
-                    "total": str(v.total),
-                }
-                for k, v in portfolio.balances.items()
-            },
-            "positions": {
-                k: {
-                    "quantity": str(v.quantity),
-                    "average_entry_price": str(v.average_entry_price),
-                    "realized_pnl": str(v.realized_pnl),
-                    "fees_paid": str(v.fees_paid),
-                }
-                for k, v in portfolio.positions.items()
-                if v.quantity != 0
-            },
-            "venue_ledger": (
-                runner.portfolio.venue_ledger.export()
-                if runner.portfolio.venue_ledger is not None
-                else None
-            ),
-        },
-        "performance": performance.model_dump(mode="json"),
-    }
-
-
-@app.get("/paper/statistics/daily")
-async def paper_statistics_daily() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.daily_stats()
-    return {"daily": [r.model_dump(mode="json") for r in rows]}
-
-
-@app.get("/paper/statistics/strategies")
-async def paper_statistics_strategies() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.strategy_stats()
-    payload = []
-    for r in rows:
-        item = r.model_dump(mode="json")
-        item["win_rate"] = str(r.win_rate)
-        item["profit_factor"] = str(r.profit_factor)
-        payload.append(item)
-    return {"strategies": payload}
-
-
-@app.get("/paper/statistics/exchanges")
-async def paper_statistics_exchanges() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.exchange_pair_stats()
-    payload = []
-    for r in rows:
-        item = r.model_dump(mode="json")
-        item["pair"] = r.pair_key
-        item["win_rate"] = str(r.win_rate)
-        payload.append(item)
-    return {"exchanges": payload}
-
-
-@app.get("/paper/statistics/hourly")
-async def paper_statistics_hourly() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.hourly_stats()
-    payload = []
-    for r in rows:
-        item = r.model_dump(mode="json")
-        item["label"] = r.label
-        item["average_net_pnl"] = str(r.average_net_pnl)
-        item["win_rate"] = str(r.win_rate)
-        payload.append(item)
-    return {"hourly": payload}
-
-
-@app.get("/paper/opportunities")
-async def paper_opportunities(
-    limit: int = Query(default=100, ge=1, le=1000),
-    status: str | None = Query(default=None),
-) -> dict[str, Any]:
-    status_enum: OpportunityLifecycleStatus | None = None
-    if status:
-        try:
-            status_enum = OpportunityLifecycleStatus(status.lower())
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}") from exc
-    rows = get_paper_runner().tracker.opportunities(limit=limit, status=status_enum)
-    return {"opportunities": [r.model_dump(mode="json") for r in rows]}
-
-
-@app.get("/paper/opportunity-decisions")
-async def paper_opportunity_decisions(
-    limit: int = Query(default=50, ge=1, le=500),
-) -> dict[str, Any]:
-    runner = get_paper_runner()
-    log = getattr(runner, "_decision_log", None)
-    if log is None:
-        return {"decisions": []}
-    return {"decisions": log.export()[-limit:]}
-
-
-@app.get("/paper/why-not-trade")
-async def paper_why_not_trade() -> dict[str, Any]:
-    runner = get_paper_runner()
-    missed = getattr(runner, "_missed", None)
-    kpis = (runner.status() or {}).get("net_kpis") or {}
-    cal = getattr(runner, "_calibrator", None)
-    return {
-        "why_not_trade": missed.why_not_trade() if missed is not None else {},
-        "net_kpis": kpis,
-        "ev_calibration": cal.snapshot() if cal is not None else {},
-        "parameter_changes": PARAMETER_CHANGES,
-    }
-
-
-@app.get("/paper/trades")
-async def paper_trades(limit: int = Query(default=100, ge=1, le=1000)) -> dict[str, Any]:
-    return {"trades": get_paper_runner().tracker.trades(limit=limit)}
-
-
-@app.post("/paper/start")
-async def paper_start() -> dict[str, Any]:
-    settings = get_settings()
-    if settings.execution_mode != ExecutionMode.PAPER:
-        raise HTTPException(status_code=403, detail="Paper start refused: EXECUTION_MODE is not paper")
-    if not settings.paper_trading_enabled:
-        raise HTTPException(status_code=403, detail="PAPER_TRADING_ENABLED=false")
-    return await get_paper_runner().start()
-
-
-@app.post("/paper/stop")
-async def paper_stop() -> dict[str, Any]:
-    return await get_paper_runner().stop()
-
-
-@app.post("/paper/reset")
-async def paper_reset(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Reset paper portfolio only. Never affects real exchange accounts."""
-    confirm = bool((payload or {}).get("confirm"))
-    result = await get_paper_runner().reset(confirm=confirm)
-    if not result.get("reset"):
-        raise HTTPException(status_code=400, detail=result)
-    return result
-
-
-
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(next: str = Query(default="/live/dashboard")) -> HTMLResponse:
-    settings = get_settings()
-    if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(
-            url=next if next.startswith("/") else "/live/dashboard", status_code=303
-        )
-    return render_login_page(next_path=next)
-
-
-@app.post("/login")
-async def login_submit(
-    username: str = Form(...),
-    password: str = Form(...),
-    next: str = Form(default="/live/dashboard"),
-) -> Response:
-    settings = get_settings()
-    if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(
-            url=next if next.startswith("/") else "/live/dashboard", status_code=303
-        )
-    if not credentials_valid(settings, username, password):
-        return render_login_page(next_path=next, error="Invalid username or password")
-    safe_next = next if next.startswith("/") else "/live/dashboard"
-    response = RedirectResponse(url=safe_next, status_code=303)
-    set_session_cookie(response, settings, username)
-    return response
-
-
-@app.post("/logout")
-@app.get("/logout")
-async def logout() -> Response:
-    response = RedirectResponse(url="/login", status_code=303)
-    clear_session_cookie(response)
-    return response
-
-
-async def _live_dashboard_payload() -> dict[str, Any]:
-    live = get_live_service()
-    observe = await live.phase1_observe(probe=False)
-    readiness = live.compact_status()
-    try:
-        alerts = live.phase4_alerts(observe)
-    except Exception:  # noqa: BLE001
-        alerts = {"alerts": []}
-    return {
-        "session": get_micro_session_manager().status(),
-        "engine": get_micro_engine().status(),
-        "unlock": live.micro_unlock_checklist(),
-        "observe": observe,
-        "readiness": readiness,
-        "alerts": alerts,
-    }
-
-
-@app.get("/", response_class=HTMLResponse)
-@app.get("/live/dashboard", response_class=HTMLResponse)
-@app.get("/live/micro/dashboard", response_class=HTMLResponse)
-@app.get("/dashboard", response_class=HTMLResponse)
-async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    """Primary live operator dashboard (paper UIs redirect here)."""
-    return render_live_dashboard(await _live_dashboard_payload())
-
 
 @app.get("/fleet", response_class=HTMLResponse)
 @app.get("/paper/dashboard", response_class=HTMLResponse)
@@ -812,51 +538,35 @@ async def legacy_paper_dashboards_redirect() -> RedirectResponse:
     return RedirectResponse(url="/live/dashboard", status_code=303)
 
 
+@app.api_route("/paper/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def paper_apis_removed(path: str) -> dict[str, Any]:
+    """Legacy paper trading surface removed from the live bot."""
+    raise HTTPException(
+        status_code=410,
+        detail="Paper trading APIs removed — use /live/micro/session and /live/dashboard",
+    )
+
+
 @app.get("/strategy-lab/api")
 @app.get("/lab/api")
 async def strategy_lab_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
-    from bot.strategy_lab.dashboard import load_latest_lab_results
-
-    settings = get_settings()
-    payload = load_latest_lab_results(Path(settings.strategy_lab_results_path))
-    if payload is None:
-        return {"available": False, "message": "Run: python -m bot.strategy_lab.runner"}
-    return {
-        "available": True,
-        "research_only": bool(getattr(settings, "strategy_lab_research_only", True)),
-        "execution_enabled": bool(
-            getattr(settings, "strategy_lab_execution_enabled", False)
-        ),
-        "dataset_id": payload.get("dataset_id"),
-        "data_label": payload.get("data_label"),
-        "leaderboard": payload.get("leaderboard"),
-        "fingerprints": payload.get("fingerprints"),
-        "frozen_config": payload.get("frozen_config"),
-    }
+    raise HTTPException(status_code=410, detail="Strategy lab removed from live bot")
 
 
 @app.get("/fleet/api")
 async def fleet_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
-    from bot.paper.fleet import collect_fleet_overview
+    raise HTTPException(status_code=410, detail="Fleet/paper overview removed — use /live/dashboard")
 
-    return await collect_fleet_overview(get_settings())
 
 
 @app.post("/fleet/reset")
 async def fleet_reset(
-    payload: dict[str, Any] | None = None,
+    confirm: bool = Form(False),
+    restart: bool = Form(False),
     _: None = Depends(require_dashboard_access),
 ) -> dict[str, Any]:
-    """Reset every paper bot in the fleet. Never touches live exchange accounts."""
-    from bot.paper.fleet import reset_fleet
+    raise HTTPException(status_code=410, detail="Fleet reset removed — live accounts untouched")
 
-    body = payload or {}
-    confirm = bool(body.get("confirm"))
-    restart = bool(body.get("restart", True))
-    result = await reset_fleet(get_settings(), confirm=confirm, restart=restart)
-    if not confirm:
-        raise HTTPException(status_code=400, detail=result)
-    return result
 
 
 @app.get("/risk/kill-switch")

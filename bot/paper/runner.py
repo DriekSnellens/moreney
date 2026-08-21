@@ -55,12 +55,19 @@ from bot.opportunity.missed import MissedOpportunityTracker
 from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.cvd_candidate import create_cvd_candidates
 from bot.paper.pipeline_funnel import LivePipelineFunnel
-from bot.research.economic_parity.evaluator import (
-    evaluate_frozen_research_economics,
-    evaluate_live_profitability_economics,
-    frozen_to_profitability_result,
-)
-from bot.research.economic_parity.store import EconomicParityStore
+# Research parity is optional; live micro disables it via live_disable_research_hooks.
+try:
+    from bot.research.economic_parity.evaluator import (
+        evaluate_frozen_research_economics,
+        evaluate_live_profitability_economics,
+        frozen_to_profitability_result,
+    )
+    from bot.research.economic_parity.store import EconomicParityStore
+except Exception:  # noqa: BLE001
+    evaluate_frozen_research_economics = None  # type: ignore[assignment]
+    evaluate_live_profitability_economics = None  # type: ignore[assignment]
+    frozen_to_profitability_result = None  # type: ignore[assignment]
+    EconomicParityStore = None  # type: ignore[assignment,misc]
 from bot.perf.cycle_metrics import CycleLatencyTracker
 from bot.opportunity.scanner import TieredScanScheduler
 from bot.markets.registry import InstrumentRegistry
@@ -173,7 +180,9 @@ class PaperRunner:
             ]
         self._scan_universe = list(dict.fromkeys([*self._symbols, *equity_symbols]))
         self._pipeline_funnel = LivePipelineFunnel()
-        self._economic_parity_store = EconomicParityStore()
+        self._economic_parity_store = (
+            EconomicParityStore() if EconomicParityStore is not None else None
+        )
         self._markout = MarkoutTracker()
         self._calibrator = EvCalibrator(
             prior_strength=int(getattr(settings, "ev_calibration_prior_strength", 40) or 40),
@@ -252,46 +261,52 @@ class PaperRunner:
                 # still do not auto-execute from observer.
                 pass
         self._shadow_observer = None
-        try:
-            import os
+        self._live_disable_research = bool(
+            getattr(settings, "live_disable_research_hooks", False)
+        )
+        if not self._live_disable_research:
+            try:
+                import os
 
-            from bot.research.shadow_validation.artifacts import (
-                ResumeIncompatibleError,
-                new_run_id,
-                run_dir_for,
-                runs_root,
-            )
-            from bot.research.shadow_validation.observer import ShadowPaperObserver
+                from bot.research.shadow_validation.artifacts import (
+                    ResumeIncompatibleError,
+                    new_run_id,
+                    run_dir_for,
+                    runs_root,
+                )
+                from bot.research.shadow_validation.observer import ShadowPaperObserver
 
-            ptr = runs_root().parent / "CURRENT_RUN"
-            run_id = os.environ.get("SHADOW_VALIDATION_RUN_ID") or None
-            resume_env = os.environ.get("SHADOW_VALIDATION_RESUME", "").lower()
-            if run_id:
-                resume = resume_env not in {"0", "false", "no"}
-            elif ptr.exists():
-                run_id = ptr.read_text(encoding="utf-8").strip() or None
-                dest = run_dir_for(run_id) if run_id else None
-                # Never resume a pointer whose run directory is missing or
-                # from a different artifact schema. Do not merge mixed data.
-                resume = bool(dest and (dest / "frozen_strategy.json").exists())
-                if not resume:
+                ptr = runs_root().parent / "CURRENT_RUN"
+                run_id = os.environ.get("SHADOW_VALIDATION_RUN_ID") or None
+                resume_env = os.environ.get("SHADOW_VALIDATION_RESUME", "").lower()
+                if run_id:
+                    resume = resume_env not in {"0", "false", "no"}
+                elif ptr.exists():
+                    run_id = ptr.read_text(encoding="utf-8").strip() or None
+                    dest = run_dir_for(run_id) if run_id else None
+                    resume = bool(dest and (dest / "frozen_strategy.json").exists())
+                    if not resume:
+                        run_id = new_run_id()
+                else:
                     run_id = new_run_id()
-            else:
-                run_id = new_run_id()
-                resume = False
-            try:
-                self._shadow_observer = ShadowPaperObserver(run_id=run_id, resume=resume)
-            except ResumeIncompatibleError:
-                logger.exception("SHADOW_RESUME_INCOMPATIBLE")
-                run_id = new_run_id()
-                self._shadow_observer = ShadowPaperObserver(run_id=run_id, resume=False)
-            try:
-                ptr.parent.mkdir(parents=True, exist_ok=True)
-                ptr.write_text(str(self._shadow_observer.run_id), encoding="utf-8")
-            except OSError:
-                logger.exception("SHADOW_CURRENT_RUN_POINTER_WRITE_FAILED")
-        except Exception:
-            logger.exception("SHADOW_OBSERVER_INIT_FAILED")
+                    resume = False
+                try:
+                    self._shadow_observer = ShadowPaperObserver(
+                        run_id=run_id, resume=resume
+                    )
+                except ResumeIncompatibleError:
+                    logger.exception("SHADOW_RESUME_INCOMPATIBLE")
+                    run_id = new_run_id()
+                    self._shadow_observer = ShadowPaperObserver(
+                        run_id=run_id, resume=False
+                    )
+                try:
+                    ptr.parent.mkdir(parents=True, exist_ok=True)
+                    ptr.write_text(str(self._shadow_observer.run_id), encoding="utf-8")
+                except OSError:
+                    logger.exception("SHADOW_CURRENT_RUN_POINTER_WRITE_FAILED")
+            except Exception:
+                logger.exception("SHADOW_OBSERVER_INIT_FAILED")
         self._engine = TradingEngine(
             market_data=self._provider,
             strategy=self._strategy,
@@ -1575,6 +1590,8 @@ class PaperRunner:
         return base
 
     def _shadow_observe(self, books: dict[str, dict[str, Any]]) -> None:
+        if getattr(self, "_live_disable_research", False):
+            return
         """Live shadow of frozen CVD. Never places orders or changes fills."""
         observer = getattr(self, "_shadow_observer", None)
         if observer is None:
@@ -1980,18 +1997,18 @@ class PaperRunner:
         return books
 
     def _economic_parity_snapshot(self) -> dict[str, Any]:
+        if self._economic_parity_store is None:
+            return {"enabled": False, "disabled_for_live": True}
         return self._economic_parity_store.summary()
 
     def _inject_cvd_candidates(
         self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
     ) -> None:
-        """Create frozen CVD candidates at decision time and feed into the pipeline.
-
-        Frozen research semantics: candidate is created immediately when >=40 bps
-        mid dislocation is detected. The 5s horizon is an OUTCOME MEASUREMENT
-        window, not an entry gate. The candidate goes through the normal
-        profitability → risk → execution pipeline.
-        """
+        """Create frozen CVD candidates at decision time (research path only)."""
+        if getattr(self, "_live_disable_research", False):
+            return
+        if evaluate_frozen_research_economics is None:
+            return
         try:
             venue_snapshots = []
             for symbol in self._symbols:
