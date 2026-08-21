@@ -2936,7 +2936,7 @@ def _micro_session_panel_html(session: dict[str, Any]) -> str:
       </div>
       <p class="forecast-note">Laatste live: {_esc(last_txt)}</p>
       <div class="controls">
-        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:25,exclude_btc:true}})">Start continuous / €25</button>
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:5000,exclude_btc:true}})">Start continuous / €5000</button>
         <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop sessie</button>
       </div>
     </section>

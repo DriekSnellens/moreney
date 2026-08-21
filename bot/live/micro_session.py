@@ -79,12 +79,13 @@ def _session_settings(
             "profitability_execution_buffer_bps": 0.5,
             "risk_min_net_profit_usd": 0.01,
             "risk_max_position_usd": budget_f,
-            "risk_max_daily_loss_usd": budget_f,
+            # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
+            "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": "*",
-            # Per-order ceiling = full pocket (capital is €25 total, recycles).
+            # Per-order ceiling = full pocket (capital recycles after sells).
             "live_micro_max_notional_eur": budget_f,
-            "live_micro_max_daily_loss_eur": budget_f,
+            "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             "live_micro_max_open_orders": 8,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
@@ -129,7 +130,7 @@ def attach_micro_bridge(
 async def run_session(
     *,
     minutes: float | None = None,
-    budget_eur: Decimal = Decimal("25"),
+    budget_eur: Decimal = Decimal("5000"),
     symbols: list[str] | None = None,
     settings: Settings | None = None,
     report_path: str | Path | None = None,
@@ -376,7 +377,7 @@ def main() -> None:
         default=0.0,
         help="Session length in minutes; 0 = continuous until stop",
     )
-    parser.add_argument("--budget-eur", type=float, default=25.0)
+    parser.add_argument("--budget-eur", type=float, default=5000.0)
     parser.add_argument(
         "--symbols",
         type=str,

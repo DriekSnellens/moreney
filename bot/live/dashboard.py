@@ -210,6 +210,35 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         else f"{session.get('remaining_seconds')}s left"
     )
 
+    # Warn if Bitvavo free EUR is far below configured pocket.
+    try:
+        budget = float(session.get("budget_eur") or bridge.get("budget_eur") or 0)
+    except (TypeError, ValueError):
+        budget = 0.0
+    bitvavo_eur = 0.0
+    for entry in observe.get("balances") or []:
+        if not isinstance(entry, dict):
+            continue
+        nested = entry.get("balances") if isinstance(entry.get("balances"), list) else None
+        rows = nested if nested is not None else ([entry] if entry.get("asset") else [])
+        for b in rows:
+            if str(b.get("asset") or "").upper() == "EUR" and str(
+                b.get("venue") or entry.get("venue") or ""
+            ).lower() in {"bitvavo", ""}:
+                try:
+                    bitvavo_eur = max(bitvavo_eur, float(b.get("available") or b.get("total") or 0))
+                except (TypeError, ValueError):
+                    pass
+    funding_note = ""
+    if budget > 0 and bitvavo_eur + 1 < budget:
+        gap = budget - bitvavo_eur
+        funding_note = (
+            f"<p class='note' style='color:var(--warn)'>"
+            f"Funding gap: Bitvavo EUR ≈ {_esc(f'{bitvavo_eur:.2f}')}, pocket €{_esc(f'{budget:.0f}')}. "
+            f"Stort ~€{_esc(f'{gap:.0f}')} via SEPA → Bitvavo vóór live size matcht."
+            f"</p>"
+        )
+
     html = f"""<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -241,6 +270,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <span class="pill {"ok" if running else "muted"}">{_esc(mode_label)}</span>
       </div>
       <p class="note">€ pocket = totaalkapitaal (recyclable). BTC standaard uit. API: <code>/live/micro/session</code></p>
+      {funding_note}
       <div class="metric-grid">
         <article class="metric-card"><span class="label">Budget</span><span class="value">{_esc(session.get("budget_eur") or bridge.get("budget_eur") or "—")}</span></article>
         <article class="metric-card"><span class="label">Free EUR</span><span class="value">{_esc(bridge.get("free_quote_eur") or bridge.get("remaining_eur") or "—")}</span></article>
@@ -254,7 +284,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <article class="metric-card"><span class="label">Engine armed</span><span class="value">{_esc(engine.get("armed"))}</span></article>
       </div>
       <div class="controls">
-        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:25,exclude_btc:true}})">Start continuous / €25</button>
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:5000,exclude_btc:true}})">Start continuous / €5000</button>
         <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop</button>
         <button type="button" class="btn" onclick="post('/live/micro/arm')">Arm engine</button>
         <button type="button" class="btn" onclick="post('/live/micro/disarm')">Disarm</button>
