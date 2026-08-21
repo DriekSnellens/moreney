@@ -32,16 +32,13 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 
-# Liquid Bitvavo EUR books — prefer fill probability over long-tail dust pairs.
+# Trend/trail universe: liquid Bitvavo EUR alts that can move enough for +30% runners.
 _LIQUID_EUR_SYMBOLS = (
-    "ETHEUR",
-    "XRPEUR",
     "SOLEUR",
     "ATOMEUR",
     "NEAREUR",
     "ADAEUR",
-    "BNBEUR",
-    "DOGEUR",
+    "XRPEUR",
 )
 
 
@@ -92,53 +89,61 @@ def _session_settings(
             "paper_triangle_enabled": False,
             "paper_maker_venues": "bitvavo",
             "paper_maker_same_venue": True,
-            "paper_maker_max_open_quotes": 4,
+            "paper_maker_max_open_quotes": 3,
             "paper_cycle_interval_ms": 1200.0,
-            "paper_maker_min_notional_eur": min(15.0, max(10.0, budget_f * 0.012)),
+            # Meaningful starters so trail exits are worth fees (~€40–50).
+            "paper_maker_min_notional_eur": min(50.0, max(40.0, budget_f * 0.025)),
             # Winst-mode: only quote when round-trip clears Bitvavo maker fees (~30 bps).
-            "paper_maker_min_profit_eur": 0.10,
-            "paper_maker_min_net_return": 0.0012,
-            "paper_maker_min_spread_bps": 8.0,
+            "paper_maker_min_profit_eur": 0.12,
+            "paper_maker_min_net_return": 0.0015,
+            "paper_maker_min_spread_bps": 10.0,
             "paper_maker_adverse_bps": 3.0,
             "paper_maker_spread_fee_buffer_bps": 2.0,
             "paper_maker_allow_buy_only": False,
             "paper_maker_sell_profit_buffer_bps": 10.0,
+            # Trail runners: arm +30%, sell on −12% from peak.
             "paper_trail_take_profit_enabled": True,
             "paper_trail_arm_gain_pct": 0.30,
-            "paper_trail_drawdown_pct": 0.10,
+            "paper_trail_drawdown_pct": 0.12,
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
             "paper_maker_max_age_ms": 180_000.0,
             "paper_maker_sibling_grace_ms": 30_000.0,
             # 0 = disable forced ALT recycle (was dumping pre-session inventory).
             "paper_max_holding_sec": 0.0,
-            "paper_max_alt_inventory_pct": 55.0,
-            "paper_min_alt_inventory_pct": 5.0,
-            # Never cheapen asks — wait for profitable fills.
+            # Concentrate: few alts, buy dips, never cheapen asks.
+            "paper_max_alt_inventory_pct": 40.0,
+            "paper_min_alt_inventory_pct": 8.0,
             "paper_inventory_ask_improve_bps": 0.0,
-            "paper_inventory_buy_dip_bps": 4.0,
+            "paper_inventory_buy_dip_bps": 10.0,
             "paper_markout_enabled": False,
-            "arbitrage_min_profit_eur": 0.10,
-            "arbitrage_min_profit_pct": 0.0012,
-            "profitability_min_net_profit_usd": 0.10,
-            "profitability_min_net_return": 0.0012,
+            "paper_maker_fair_value": True,
+            "arbitrage_min_profit_eur": 0.12,
+            "arbitrage_min_profit_pct": 0.0015,
+            "profitability_min_net_profit_usd": 0.12,
+            "profitability_min_net_return": 0.0015,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.10,
-            "risk_max_position_usd": budget_f,
+            "risk_min_net_profit_usd": 0.12,
+            "risk_max_position_usd": min(budget_f, max(80.0, budget_f * 0.15)),
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
-            # Headroom for synced inventory + maker quotes (strategy still decides).
-            "risk_max_open_positions": 50,
-            "max_simultaneous_positions": 50,
+            # Max 3 concurrent alt positions — concentrate for trail runners.
+            "risk_max_open_positions": 3,
+            "max_simultaneous_positions": 3,
+            "opportunity_max_executions_per_cycle": 2,
+            "opportunity_max_candidates_per_cycle": 8,
             "live_micro_venues": "bitvavo",
-            "live_micro_symbols": ",".join(symbols) if symbols else "ETHEUR,XRPEUR,SOLEUR,ATOMEUR,NEAREUR",
+            "live_micro_symbols": ",".join(symbols)
+            if symbols
+            else "SOLEUR,ATOMEUR,NEAREUR,ADAEUR,XRPEUR",
+            "live_micro_max_alt_bases": 3,
             # Per-order ceiling = full pocket (capital recycles after sells).
-            "live_micro_max_notional_eur": budget_f,
+            "live_micro_max_notional_eur": min(budget_f, max(80.0, budget_f * 0.15)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
-            "live_micro_max_open_orders": 10,
-            "live_micro_resting_max_age_sec": 150.0,
+            "live_micro_max_open_orders": 6,
+            "live_micro_resting_max_age_sec": 180.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
         }

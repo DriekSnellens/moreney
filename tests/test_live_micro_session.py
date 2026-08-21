@@ -66,12 +66,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     cfg = _session_settings(
         Settings(),
         budget_eur=Decimal("2024"),
-        symbols=["ETHEUR", "SOLEUR"],
+        symbols=["SOLEUR", "ADAEUR"],
         persist_path=tmp_path / "state.json",
     )
     assert cfg.paper_starting_eur == 2024.0
-    assert "ETHEUR" in cfg.live_micro_symbols
-    assert cfg.risk_max_position_usd == 2024.0
+    assert "SOLEUR" in cfg.live_micro_symbols
     assert cfg.live_micro_max_daily_loss_eur == 202.4
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_enabled is True
@@ -80,28 +79,30 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_allow_buy_only is False
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 0.0
+    assert cfg.paper_inventory_buy_dip_bps >= 10.0
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.30
-    assert cfg.paper_trail_drawdown_pct == 0.10
-    assert cfg.paper_maker_min_net_return >= 0.0012
-    assert cfg.paper_maker_one_leg_adverse_bps >= 6.0
-    assert cfg.live_micro_max_open_orders >= 10
-    assert cfg.live_micro_resting_max_age_sec >= 150.0
-    assert cfg.paper_min_alt_inventory_pct >= 5.0
+    assert cfg.paper_trail_drawdown_pct == 0.12
+    assert cfg.paper_maker_min_net_return >= 0.0015
+    assert cfg.paper_maker_min_notional_eur >= 40.0
+    assert cfg.max_simultaneous_positions == 3
+    assert cfg.live_micro_max_alt_bases == 3
+    assert cfg.live_micro_max_open_orders >= 6
+    assert cfg.live_micro_resting_max_age_sec >= 180.0
+    assert cfg.paper_min_alt_inventory_pct >= 8.0
+    assert cfg.paper_max_alt_inventory_pct <= 40.0
     assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
-    assert cfg.paper_max_alt_inventory_pct >= 50.0
-    # Default liquid allowlist (when no override) excludes thin books like AVAX.
-    default_cfg = _session_settings(
-        Settings(),
-        budget_eur=Decimal("2024"),
-        symbols=["ETHEUR", "XRPEUR", "SOLEUR", "ATOMEUR", "NEAREUR", "ADAEUR", "BNBEUR", "DOGEUR"],
-        persist_path=tmp_path / "state2.json",
-    )
-    assert "BNBEUR" in default_cfg.live_micro_symbols
-    assert "AVAXEUR" not in default_cfg.live_micro_symbols
+    # Trend allowlist: volatile alts only (no ETH/BNB/AVAX).
+    from bot.live.micro_session import _liquid_symbols
+
+    liquid = _liquid_symbols(Settings(), exclude_btc=True)
+    assert liquid == ["SOLEUR", "ATOMEUR", "NEAREUR", "ADAEUR", "XRPEUR"]
+    assert "ETHEUR" not in liquid
+    assert "BNBEUR" not in liquid
+    assert "AVAXEUR" not in liquid
 
 
 def test_portfolio_sync_live_balances_caps_quote() -> None:
@@ -320,6 +321,68 @@ def test_trail_arms_at_30pct_and_triggers_on_10pct_drawdown() -> None:
     # At/under 10% drawdown
     st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.35"))  # noqa: SLF001
     assert st["triggered"] is True
+
+
+def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) -> None:
+    cfg = _session_settings(
+        Settings(),
+        budget_eur=Decimal("2024"),
+        symbols=["ADAEUR"],
+        persist_path=tmp_path / "t.json",
+    )
+    assert cfg.paper_trail_drawdown_pct == 0.12
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_arm_gain_pct=0.30,
+        paper_trail_drawdown_pct=0.12,
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    cost = Decimal("1.00")
+    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
+    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
+    # 12% off 1.50 = 1.32 — still holding
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.33"))  # noqa: SLF001
+    assert st["triggered"] is False
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
+    assert st["triggered"] is True
+
+
+def test_held_alt_bases_respects_concentration_cap() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(live_micro_max_alt_bases=3, paper_maker_min_notional_eur=10.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.sync_live_balances(
+        [
+            Balance(asset="EUR", free=Decimal("200"), locked=Decimal("0")),
+            Balance(asset="ADA", free=Decimal("100"), locked=Decimal("0")),
+            Balance(asset="ATOM", free=Decimal("20"), locked=Decimal("0")),
+            Balance(asset="NEAR", free=Decimal("30"), locked=Decimal("0")),
+        ],
+        quote_available_cap=Decimal("500"),
+    )
+    portfolio.set_mark_price("ADAEUR", Decimal("0.5"))
+    portfolio.set_mark_price("ATOMEUR", Decimal("2"))
+    portfolio.set_mark_price("NEAREUR", Decimal("2"))
+    engine = LiveMicroEngine(settings)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=engine,
+        budget_eur=Decimal("500"),
+        live_maker=True,
+        allowed_bases={"ADA", "ATOM", "NEAR", "SOL"},
+    )
+    held = bridge._held_alt_bases()  # noqa: SLF001
+    assert held >= {"ADA", "ATOM", "NEAR"}
+    assert bridge._max_alt_bases == 3  # noqa: SLF001
 
 
 def test_attach_micro_bridge_does_not_pollute_paper_runner_source() -> None:

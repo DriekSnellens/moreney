@@ -101,6 +101,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._trail_drawdown = Decimal(
             str(getattr(settings, "paper_trail_drawdown_pct", 0.10) or 0.10)
         )
+        self._max_alt_bases = int(
+            getattr(settings, "live_micro_max_alt_bases", 0) or 0
+        )
 
     def _invalidate_bal_cache(self) -> None:
         self._bal_cache = None
@@ -163,8 +166,43 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     for base, st in sorted(self._trail.items())
                 },
             },
+            "max_alt_bases": self._max_alt_bases,
+            "held_alt_bases": sorted(self._held_alt_bases()),
             "last_sync": self._last_sync,
         }
+
+    def _held_alt_bases(self) -> set[str]:
+        """Distinct non-quote assets with meaningful live/paper inventory."""
+        held: set[str] = set()
+        min_notional = Decimal(
+            str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+        )
+        for symbol, pos in self._portfolio.state.positions.items():
+            if pos.quantity <= 0:
+                continue
+            base = infer_base_asset(symbol)
+            if not base or base == self._quote or base in self._exclude_bases:
+                continue
+            mark = self._portfolio.state.mark_prices.get(symbol) or pos.average_entry_price
+            if mark and pos.quantity * mark >= min_notional:
+                held.add(base)
+            elif pos.quantity > 0 and (mark is None or mark <= 0):
+                held.add(base)
+        # Also count balances that may not yet have a position row.
+        for asset, bal in self._portfolio.state.balances.items():
+            a = str(asset or "").upper()
+            if not a or a == self._quote or a in self._exclude_bases:
+                continue
+            if bal.total <= 0:
+                continue
+            symbol = f"{a}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol) or _ZERO
+            if mark > 0 and bal.total * mark < min_notional:
+                continue  # dust — don't burn a concentration slot
+            if mark <= 0 and bal.total < Decimal("0.001"):
+                continue
+            held.add(a)
+        return held
 
     def _seed_cost_lots_from_balances(self, bals: list[Any]) -> None:
         """Seed FIFO cost basis at current marks so pre-session inventory isn't 'free'."""
@@ -889,6 +927,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 reason="BUDGET_EXHAUSTED",
                 message=f"micro pocket free EUR {remaining}",
             )
+        # Trend profile: at most N distinct alt bases — add to existing, don't spray.
+        if side_is_buy and self._max_alt_bases > 0:
+            held = self._held_alt_bases()
+            if base not in held and len(held) >= self._max_alt_bases:
+                self._bump_skip("max_alt_bases")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="MAX_ALT_BASES",
+                    message=(
+                        f"already holding {sorted(held)} "
+                        f"(max {self._max_alt_bases} bases for trail concentration)"
+                    ),
+                )
 
         px = Decimal(str(order_request.limit_price or 0))
         qty = Decimal(str(order_request.quantity or 0))

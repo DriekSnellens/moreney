@@ -372,6 +372,8 @@ class Settings(BaseSettings):
     live_micro_max_daily_loss_eur: float = Field(default=25.0, gt=0)
     live_micro_max_open_orders: int = Field(default=1, ge=1, le=20)
     live_micro_resting_max_age_sec: float = Field(default=90.0, ge=5, le=600)
+    # Cap distinct alt bases for micro trend/trail concentration (0 = unlimited).
+    live_micro_max_alt_bases: int = Field(default=0, ge=0, le=20)
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 
