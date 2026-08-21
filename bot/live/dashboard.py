@@ -188,6 +188,17 @@ def _css() -> str:
     table.pos th { color: var(--muted); font-weight: 500; }
     table.pos td.good { color: var(--good); }
     table.pos td.bad { color: var(--bad); }
+    ul.alerts {
+      margin: .4rem 0 0;
+      padding-left: 1.1rem;
+      font-family: var(--mono);
+      font-size: .8rem;
+      color: var(--fg);
+    }
+    ul.alerts .kind {
+      color: var(--muted);
+      margin-right: .35rem;
+    }
     footer {
       margin-top: 1.75rem;
       display: flex;
@@ -251,13 +262,15 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     trail = bridge.get("trail_take_profit") or {}
     states = trail.get("states") or {}
+    alerts = bridge.get("alerts") or trail.get("alerts") or []
     pos_rows = []
     for base, st in sorted(states.items()):
         if not isinstance(st, dict):
             continue
         gain = st.get("gain_pct") or "—"
         to_arm = st.get("pct_to_arm") or "—"
-        armed = "ja" if st.get("armed") else "nee"
+        soft = "ja" if st.get("soft_armed") else "nee"
+        hard = "ja" if st.get("hard_armed") else "nee"
         partial = "ja" if st.get("partial_done") else "—"
         gain_cls = ""
         try:
@@ -275,9 +288,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             f"<td>{_esc(st.get('mark') or '—')}</td>"
             f"<td class='{gain_cls}'>{_esc(gain)}%</td>"
             f"<td>{_esc(to_arm)}%</td>"
-            f"<td>{_esc(armed)}</td>"
+            f"<td>{_esc(soft)}/{_esc(hard)}</td>"
+            f"<td>{_esc(st.get('soft_arm_pct') or '—')}/{_esc(st.get('hard_arm_pct') or '—')}</td>"
             f"<td>{_esc(st.get('peak') or '—')}</td>"
             f"<td>{_esc(partial)}</td>"
+            f"<td>{_esc(st.get('session_qty') or '—')}</td>"
             f"<td>{_esc(st.get('age_sec') if st.get('age_sec') is not None else '—')}</td>"
             "</tr>"
         )
@@ -286,7 +301,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             "<section class='positions'><h2>Posities / trail</h2>"
             "<table class='pos'><thead><tr>"
             "<th>Coin</th><th>Cost</th><th>Mark</th><th>Winst%</th>"
-            "<th>Tot arm</th><th>Armed</th><th>Peak</th><th>Partial</th><th>Age s</th>"
+            "<th>Tot arm</th><th>Soft/Hard</th><th>Arms%</th><th>Peak</th>"
+            "<th>Partial</th><th>Sess qty</th><th>Age s</th>"
             "</tr></thead><tbody>"
             + "".join(pos_rows)
             + "</tbody></table></section>"
@@ -294,8 +310,30 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     else:
         positions_html = (
             "<section class='positions'><h2>Posities / trail</h2>"
-            "<p class='hint'>Nog geen tracked inventory</p></section>"
+            "<p class='hint'>Nog geen session-buy inventory (pre-session bags niet getrailed)</p></section>"
         )
+
+    alert_rows = []
+    for a in list(alerts)[-8:]:
+        if not isinstance(a, dict):
+            continue
+        alert_rows.append(
+            f"<li><span class='kind'>{_esc(a.get('kind') or '')}</span> "
+            f"{_esc(a.get('message') or '')}</li>"
+        )
+    kill = "aan" if trail.get("daily_kill_active") else "uit"
+    alerts_html = (
+        "<section class='positions'><h2>Alerts</h2>"
+        f"<p class='hint'>Daily kill: {kill} · momentum="
+        f"{'aan' if trail.get('momentum_enabled') else 'uit'} · "
+        f"corr max {trail.get('max_per_corr_group') or '—'}</p>"
+        + (
+            "<ul class='alerts'>" + "".join(alert_rows) + "</ul>"
+            if alert_rows
+            else "<p class='hint'>Geen recente alerts</p>"
+        )
+        + "</section>"
+    )
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="nl">
@@ -338,6 +376,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </article>
     </section>
     {positions_html}
+    {alerts_html}
     <footer>
       <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:true}})">Start</button>
       <button type="button" class="btn" onclick="post('/live/micro/session/stop')">Stop</button>

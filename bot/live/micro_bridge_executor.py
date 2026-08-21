@@ -90,22 +90,57 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._mark_ttl_sec = 30.0
         self._last_orphan_sweep_mono = 0.0
         self._orphan_sweep_sec = 60.0
-        # Trailing take-profit: base -> {armed, peak, cost, triggered}
+        # Trailing take-profit (soft/hard + ATR) on session buys.
+        from bot.live.trail_policy import MarkSeries, parse_corr_group
+
         self._trail: dict[str, dict[str, Any]] = {}
+        self._session_lots: dict[str, list[list[Decimal]]] = {}
+        self._mark_series: dict[str, MarkSeries] = {}
+        self._alerts: list[dict[str, Any]] = []
         self._trail_enabled = bool(
             getattr(settings, "paper_trail_take_profit_enabled", False)
         )
-        self._trail_arm_gain = Decimal(
-            str(getattr(settings, "paper_trail_arm_gain_pct", 0.30) or 0.30)
+        self._trail_session_only = bool(
+            getattr(settings, "paper_trail_session_buys_only", True)
         )
-        self._trail_drawdown = Decimal(
-            str(getattr(settings, "paper_trail_drawdown_pct", 0.10) or 0.10)
+        self._soft_arm_floor = Decimal(
+            str(getattr(settings, "paper_trail_soft_arm_pct", 0.12) or 0.12)
         )
-        self._trail_partial_enabled = bool(
-            getattr(settings, "paper_trail_partial_enabled", True)
+        self._soft_dd_floor = Decimal(
+            str(getattr(settings, "paper_trail_soft_drawdown_pct", 0.08) or 0.08)
         )
-        self._trail_partial_pct = Decimal(
-            str(getattr(settings, "paper_trail_partial_pct", 0.50) or 0.50)
+        self._soft_partial = Decimal(
+            str(getattr(settings, "paper_trail_soft_partial_pct", 0.25) or 0.25)
+        )
+        self._hard_arm_floor = Decimal(
+            str(
+                getattr(settings, "paper_trail_hard_arm_pct", None)
+                or getattr(settings, "paper_trail_arm_gain_pct", 0.30)
+                or 0.30
+            )
+        )
+        self._hard_dd_floor = Decimal(
+            str(
+                getattr(settings, "paper_trail_hard_drawdown_pct", None)
+                or getattr(settings, "paper_trail_drawdown_pct", 0.12)
+                or 0.12
+            )
+        )
+        self._hard_partial = Decimal(
+            str(getattr(settings, "paper_trail_hard_partial_pct", 0.25) or 0.25)
+        )
+        # Legacy aliases used by snapshot / older tests.
+        self._trail_arm_gain = self._hard_arm_floor
+        self._trail_drawdown = self._hard_dd_floor
+        self._trail_partial_enabled = True
+        self._trail_partial_pct = self._soft_partial
+        self._atr_enabled = bool(getattr(settings, "paper_trail_atr_enabled", True))
+        self._atr_samples = int(getattr(settings, "paper_trail_atr_samples", 48) or 48)
+        self._atr_arm_mult = Decimal(
+            str(getattr(settings, "paper_trail_atr_arm_mult", 2.5) or 2.5)
+        )
+        self._atr_dd_mult = Decimal(
+            str(getattr(settings, "paper_trail_atr_dd_mult", 1.0) or 1.0)
         )
         self._ladder_enabled = bool(
             getattr(settings, "paper_ladder_buy_enabled", False)
@@ -137,14 +172,71 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "paper_regime_block_buys", True)
         )
         self._buys_blocked = False
+        self._daily_kill_active = False
+        self._daily_kill_eur = Decimal(
+            str(getattr(settings, "paper_daily_kill_eur", 50) or 50)
+        )
+        self._alert_pct_to_arm = Decimal(
+            str(getattr(settings, "paper_alert_pct_to_arm", 0.05) or 0.05)
+        )
+        self._momentum_enabled = bool(
+            getattr(settings, "paper_buy_momentum_enabled", False)
+        )
+        self._momentum_min = Decimal(
+            str(getattr(settings, "paper_buy_momentum_min_return", 0) or 0)
+        )
+        self._momentum_samples = int(
+            getattr(settings, "paper_buy_momentum_samples", 12) or 12
+        )
+        self._corr_group = parse_corr_group(
+            str(getattr(settings, "live_micro_corr_group", "") or "")
+        )
+        self._max_per_corr = int(
+            getattr(settings, "live_micro_max_per_corr_group", 2) or 2
+        )
         self._position_opened_mono: dict[str, float] = {}
         self._max_alt_bases = int(
             getattr(settings, "live_micro_max_alt_bases", 0) or 0
         )
+        self._MarkSeries = MarkSeries
 
     def set_buys_blocked(self, blocked: bool) -> None:
         """Regime guard: when True, reject new BUY orders (sells/trails still run)."""
-        self._buys_blocked = bool(blocked)
+        self._buys_blocked = bool(blocked) or self._daily_kill_active
+
+    def _push_alert(self, kind: str, message: str, **extra: Any) -> None:
+        base = str(extra.get("base") or "")
+        # Dedupe noisy near-arm / same-kind alerts within 5 minutes.
+        now = time.time()
+        for prev in reversed(self._alerts[-20:]):
+            if (
+                prev.get("kind") == kind
+                and str(prev.get("base") or "") == base
+                and now - float(prev.get("ts") or 0) < 300
+            ):
+                return
+        row = {
+            "ts": now,
+            "kind": kind,
+            "message": message,
+            **extra,
+        }
+        self._alerts.append(row)
+        if len(self._alerts) > 50:
+            self._alerts = self._alerts[-50:]
+        logger.warning("MICRO_ALERT kind=%s %s", kind, message)
+
+    def _check_daily_kill(self) -> None:
+        if self._daily_kill_eur <= 0:
+            return
+        if self.realized_trade_pnl_eur <= -self._daily_kill_eur:
+            if not self._daily_kill_active:
+                self._daily_kill_active = True
+                self._buys_blocked = True
+                self._push_alert(
+                    "daily_kill",
+                    f"realized PnL {self.realized_trade_pnl_eur} <= -{self._daily_kill_eur}; buys blocked",
+                )
 
     def _invalidate_bal_cache(self) -> None:
         self._bal_cache = None
@@ -194,16 +286,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "capital_model": "pocket",
             "trail_take_profit": {
                 "enabled": self._trail_enabled,
-                "arm_gain_pct": str(self._trail_arm_gain),
-                "drawdown_pct": str(self._trail_drawdown),
-                "partial_enabled": self._trail_partial_enabled,
-                "partial_pct": str(self._trail_partial_pct),
+                "session_buys_only": self._trail_session_only,
+                "soft_arm_pct": str(self._soft_arm_floor),
+                "hard_arm_pct": str(self._hard_arm_floor),
+                "arm_gain_pct": str(self._hard_arm_floor),
+                "drawdown_pct": str(self._hard_dd_floor),
+                "partial_enabled": True,
+                "partial_pct": str(self._soft_partial),
+                "atr_enabled": self._atr_enabled,
                 "time_stop_sec": self._time_stop_sec if self._time_stop_enabled else None,
                 "ladder_buy": self._ladder_enabled,
                 "buys_blocked": self._buys_blocked,
+                "daily_kill_active": self._daily_kill_active,
                 "dust_policy": self._dust_policy,
+                "momentum_enabled": self._momentum_enabled,
+                "corr_group": sorted(self._corr_group),
+                "max_per_corr_group": self._max_per_corr,
                 "states": self._trail_states_public(),
+                "alerts": list(self._alerts[-10:]),
             },
+            "alerts": list(self._alerts[-10:]),
             "max_alt_bases": self._max_alt_bases,
             "held_alt_bases": sorted(self._held_alt_bases()),
             "last_sync": self._last_sync,
@@ -215,21 +317,57 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             cost = Decimal(str(st.get("cost") or 0))
             mark = Decimal(str(st.get("last_mark") or 0))
             gain = ((mark - cost) / cost) if cost > 0 and mark > 0 else _ZERO
-            to_arm = self._trail_arm_gain - gain
+            soft_arm = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
+            hard_arm = Decimal(str(st.get("hard_arm") or self._hard_arm_floor))
+            next_arm = soft_arm if not st.get("soft_armed") else hard_arm
+            to_arm = next_arm - gain
             opened = self._position_opened_mono.get(base)
             age = (time.monotonic() - opened) if opened else None
             out[base] = {
-                "armed": bool(st.get("armed")),
-                "partial_done": bool(st.get("partial_done")),
+                "armed": bool(st.get("soft_armed") or st.get("hard_armed")),
+                "soft_armed": bool(st.get("soft_armed")),
+                "hard_armed": bool(st.get("hard_armed")),
+                "partial_done": bool(st.get("soft_partial_done")),
+                "hard_partial_done": bool(st.get("hard_partial_done")),
                 "peak": str(st.get("peak") or ""),
                 "cost": str(cost) if cost > 0 else "",
                 "mark": str(mark) if mark > 0 else "",
                 "gain_pct": f"{float(gain * 100):.2f}",
                 "pct_to_arm": f"{float(to_arm * 100):.2f}",
+                "soft_arm_pct": f"{float(soft_arm * 100):.2f}",
+                "hard_arm_pct": f"{float(hard_arm * 100):.2f}",
+                "atr_pct": str(st.get("atr") or ""),
+                "session_qty": str(st.get("session_qty") or ""),
                 "triggered": bool(st.get("triggered")),
                 "age_sec": round(age, 1) if age is not None else None,
             }
         return out
+
+    def _session_unit_cost(self, base: str) -> Decimal | None:
+        lots = self._session_lots.get(base.upper()) or []
+        total_qty = _ZERO
+        total_cost = _ZERO
+        for qty, unit in lots:
+            if qty <= 0 or unit <= 0:
+                continue
+            total_qty += qty
+            total_cost += qty * unit
+        if total_qty <= 0:
+            return None
+        return total_cost / total_qty
+
+    def _session_qty(self, base: str) -> Decimal:
+        return sum(
+            (qty for qty, _unit in (self._session_lots.get(base.upper()) or []) if qty > 0),
+            _ZERO,
+        )
+
+    def _series_for(self, symbol: str) -> Any:
+        series = self._mark_series.get(symbol)
+        if series is None:
+            series = self._MarkSeries(maxlen=max(self._atr_samples, self._momentum_samples))
+            self._mark_series[symbol] = series
+        return series
 
     def _note_position_opened(self, base: str) -> None:
         key = base.upper()
@@ -308,6 +446,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Unit cost includes fee so sells net fee-correct PnL.
             unit = (qty * price + fee) / qty
             lots.append([qty, unit])
+            self._session_lots.setdefault(base, []).append([qty, unit])
             self._note_position_opened(base)
             return
         remaining = qty
@@ -323,13 +462,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 lots.pop(0)
             else:
                 lots[0][0] = lot_qty
+        # Mirror consume on session lots (trail inventory).
+        sess = self._session_lots.setdefault(base, [])
+        left = qty
+        while left > 0 and sess:
+            sq, _sc = sess[0]
+            take = min(left, sq)
+            sq -= take
+            left -= take
+            if sq <= 0:
+                sess.pop(0)
+            else:
+                sess[0][0] = sq
         if remaining > 0:
-            # Sold more than tracked lots — cost unknown; treat leftover at fill price
-            # so PnL for that slice is ≈ −fee only.
             cost += remaining * price
         self.realized_trade_pnl_eur += proceeds - cost
+        self._check_daily_kill()
         if not lots:
             self._position_opened_mono.pop(base, None)
+            self._trail.pop(base, None)
+        if not sess:
             self._trail.pop(base, None)
 
     def _bump_skip(self, key: str) -> None:
@@ -755,66 +907,170 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             be *= Decimal("1") + buffer_bps / Decimal("10000")
         return be
 
+    def _scaled_arms(self, base: str, cost: Decimal) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+        from bot.live.trail_policy import scale_thresholds
+
+        symbol = f"{base.upper()}{self._quote}"
+        atr = self._series_for(symbol).atr_pct()
+        th = scale_thresholds(
+            atr=atr,
+            soft_arm_floor=self._soft_arm_floor,
+            soft_dd_floor=self._soft_dd_floor,
+            hard_arm_floor=self._hard_arm_floor,
+            hard_dd_floor=self._hard_dd_floor,
+            atr_arm_mult=self._atr_arm_mult,
+            atr_dd_mult=self._atr_dd_mult,
+            atr_enabled=self._atr_enabled,
+        )
+        return th.soft_arm, th.soft_dd, th.hard_arm, th.hard_dd
+
+    def _corr_held_count(self, *, adding: str | None = None) -> int:
+        if not self._corr_group:
+            return 0
+        held = self._held_alt_bases()
+        if adding:
+            held = set(held) | {adding.upper()}
+        return len(held & self._corr_group)
+
+    def _momentum_ok(self, symbol: str) -> bool:
+        if not self._momentum_enabled:
+            return True
+        series = self._series_for(symbol)
+        if len(series) < max(3, min(6, self._momentum_samples // 2)):
+            return True  # not enough history yet — don't freeze entries
+        mom = series.momentum_return()
+        if mom is None:
+            return True
+        return mom >= self._momentum_min
+
     def _trail_update_state(
         self, base: str, *, cost: Decimal, mark: Decimal
     ) -> dict[str, Any]:
-        """Arm at +arm_gain vs cost; track peak; return state (may set trigger)."""
+        """Soft/hard arm vs session cost; ATR-scaled; peak drawdown trigger."""
+        soft_arm, soft_dd, hard_arm, hard_dd = self._scaled_arms(base, cost)
+        atr = self._series_for(f"{base.upper()}{self._quote}").atr_pct()
         st = self._trail.setdefault(
             base,
             {
+                "soft_armed": False,
+                "hard_armed": False,
                 "armed": False,
                 "peak": _ZERO,
                 "cost": cost,
                 "last_mark": mark,
                 "triggered": False,
-                "partial_done": False,
+                "newly_soft": False,
+                "newly_hard": False,
                 "newly_armed": False,
+                "soft_partial_done": False,
+                "hard_partial_done": False,
+                "partial_done": False,
                 "time_stop_due": False,
+                "soft_arm": str(soft_arm),
+                "hard_arm": str(hard_arm),
+                "drawdown": str(soft_dd),
+                "atr": str(atr),
+                "session_qty": str(self._session_qty(base)),
             },
         )
-        st["newly_armed"] = False
-        st["time_stop_due"] = False
-        if st.get("triggered"):
-            st["last_mark"] = mark
-            return st
         st["cost"] = cost
         st["last_mark"] = mark
+        st["soft_arm"] = str(soft_arm)
+        st["hard_arm"] = str(hard_arm)
+        st["atr"] = str(atr)
+        st["session_qty"] = str(self._session_qty(base))
+        st["newly_soft"] = False
+        st["newly_hard"] = False
+        st["newly_armed"] = False
+        st["time_stop_due"] = False
+        st["triggered"] = False
         if cost <= 0 or mark <= 0:
             return st
         gain = (mark - cost) / cost
-        if not st.get("armed"):
-            if gain >= self._trail_arm_gain:
-                st["armed"] = True
-                st["peak"] = mark
-                st["newly_armed"] = True
-                st["partial_done"] = False
-                logger.info(
-                    "TRAIL_ARM base=%s cost=%s mark=%s gain=%.2f%%",
-                    base,
-                    cost,
-                    mark,
-                    float(gain * 100),
+        st["gain"] = str(gain)
+
+        if not st.get("soft_armed") and gain >= soft_arm:
+            st["soft_armed"] = True
+            st["armed"] = True
+            st["peak"] = mark
+            st["newly_soft"] = True
+            st["newly_armed"] = True
+            st["drawdown"] = str(soft_dd)
+            self._push_alert(
+                "soft_arm",
+                f"{base} soft-arm +{float(gain * 100):.1f}% "
+                f"(need {float(soft_arm * 100):.0f}%)",
+                base=base,
+            )
+            logger.info(
+                "TRAIL_SOFT_ARM base=%s cost=%s mark=%s gain=%.2f%% arm=%.2f%%",
+                base,
+                cost,
+                mark,
+                float(gain * 100),
+                float(soft_arm * 100),
+            )
+        elif not st.get("soft_armed") and soft_arm > 0:
+            to_arm = soft_arm - gain
+            if 0 < to_arm <= self._alert_pct_to_arm:
+                self._push_alert(
+                    "near_soft_arm",
+                    f"{base} near soft-arm gain={float(gain * 100):.1f}% "
+                    f"need={float(soft_arm * 100):.0f}%",
+                    base=base,
                 )
-            elif self._time_stop_enabled:
+
+        if st.get("soft_armed") and not st.get("hard_armed") and gain >= hard_arm:
+            st["hard_armed"] = True
+            st["newly_hard"] = True
+            st["drawdown"] = str(hard_dd)
+            if mark > Decimal(str(st.get("peak") or 0)):
+                st["peak"] = mark
+            self._push_alert(
+                "hard_arm",
+                f"{base} hard-arm +{float(gain * 100):.1f}%",
+                base=base,
+            )
+            logger.info(
+                "TRAIL_HARD_ARM base=%s cost=%s mark=%s gain=%.2f%% arm=%.2f%%",
+                base,
+                cost,
+                mark,
+                float(gain * 100),
+                float(hard_arm * 100),
+            )
+
+        if not st.get("soft_armed"):
+            if self._time_stop_enabled:
                 opened = self._position_opened_mono.get(base)
                 if opened is not None and (
                     time.monotonic() - opened >= self._time_stop_sec
                 ):
                     st["time_stop_due"] = True
             return st
+
         peak = Decimal(str(st.get("peak") or 0))
         if mark > peak:
             st["peak"] = mark
             peak = mark
-        if peak > 0 and mark <= peak * (Decimal("1") - self._trail_drawdown):
+        active_dd = hard_dd if st.get("hard_armed") else soft_dd
+        st["drawdown"] = str(active_dd)
+        if peak > 0 and mark <= peak * (Decimal("1") - active_dd):
             st["triggered"] = True
+            self._push_alert(
+                "trail_fire",
+                f"{base} trail fire peak={peak} mark={mark} "
+                f"dd={float(active_dd * 100):.1f}%",
+                base=base,
+            )
             logger.info(
-                "TRAIL_TRIGGER base=%s cost=%s peak=%s mark=%s dd=%.2f%%",
+                "TRAIL_TRIGGER base=%s cost=%s peak=%s mark=%s dd=%.2f%% hard=%s",
                 base,
                 cost,
                 peak,
                 mark,
                 float((Decimal("1") - mark / peak) * 100),
+                bool(st.get("hard_armed")),
             )
         return st
 
@@ -823,20 +1079,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         now = time.monotonic()
         fetched_at = self._mark_fetched_at.get(symbol, 0.0)
         if mark is not None and mark > 0 and now - fetched_at < self._mark_ttl_sec:
-            return Decimal(str(mark))
+            m = Decimal(str(mark))
+            self._series_for(symbol).push(m)
+            return m
         client = self._trading_client(venue)
         if client is None:
-            return Decimal(str(mark)) if mark and mark > 0 else None
+            if mark and mark > 0:
+                m = Decimal(str(mark))
+                self._series_for(symbol).push(m)
+                return m
+            return None
         try:
             ticker = await client.fetch_ticker(symbol)
             mark = Decimal(str(ticker.last or ticker.bid or ticker.ask or 0))
             if mark > 0:
                 self._portfolio.set_mark_price(symbol, mark)
                 self._mark_fetched_at[symbol] = now
+                self._series_for(symbol).push(Decimal(str(mark)))
                 return mark
         except Exception:  # noqa: BLE001
             pass
-        return Decimal(str(mark)) if mark and mark > 0 else None
+        if mark is not None and mark > 0:
+            m = Decimal(str(mark))
+            self._series_for(symbol).push(m)
+            return m
+        return None
 
     async def _cancel_resting_for_symbol(self, venue: str, symbol: str) -> int:
         client = self._trading_client(venue)
@@ -893,10 +1160,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             req, strategy=reason, order_type=OrderType.LIMIT
         )
 
+    async def _refresh_free(
+        self, venue: str, symbol: str, asset: str, locked: Decimal
+    ) -> Decimal:
+        if locked > 0:
+            await self._cancel_resting_for_symbol(venue, symbol)
+            self._invalidate_bal_cache()
+        return await self._live_free(venue, asset)
+
     async def check_trailing_take_profits(
         self, venue: str = "bitvavo"
     ) -> dict[str, Any]:
-        """Partial at +arm, full exit on peak drawdown; time-stop at break-even."""
+        """Soft/hard arm partials + peak drawdown on session buys; time-stop BE."""
         if not self._trail_enabled and not self._time_stop_enabled:
             return {"ok": True, "enabled": False, "triggered": []}
         bals = await self._fetch_balances_cached(venue)
@@ -915,17 +1190,70 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if free + locked <= 0:
                 self._trail.pop(asset, None)
                 self._position_opened_mono.pop(asset, None)
+                self._session_lots.pop(asset, None)
                 continue
-            cost = self._unit_cost(asset)
-            if cost is None or cost <= 0:
+
+            # Trail only on session buys (not mark-seeded pre-session bags).
+            cost = self._session_unit_cost(asset) if self._trail_session_only else self._unit_cost(asset)
+            session_qty = self._session_qty(asset) if self._trail_session_only else (free + locked)
+            if cost is None or cost <= 0 or session_qty <= 0:
+                if self._time_stop_enabled:
+                    blend = self._unit_cost(asset)
+                    if blend is None or blend <= 0:
+                        continue
+                    symbol = f"{asset}{self._quote}"
+                    mark = await self._mark_price(venue, symbol)
+                    if mark is None or mark <= 0:
+                        continue
+                    self._note_position_opened(asset)
+                    opened = self._position_opened_mono.get(asset)
+                    if opened is None or (
+                        time.monotonic() - opened < self._time_stop_sec
+                    ):
+                        continue
+                    be = self._break_even_sell_price(asset)
+                    if be is None or mark < be:
+                        self._bump_skip("time_stop_below_be")
+                        continue
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    sell_qty = free
+                    if sell_qty <= 0 or sell_qty * mark < _MIN_LIVE_NOTIONAL:
+                        continue
+                    result = await self._submit_exit_sell(
+                        venue=venue,
+                        symbol=symbol,
+                        qty=sell_qty,
+                        mark=mark,
+                        reason="time_stop_breakeven",
+                        limit_price=max(be, mark * Decimal("0.999")),
+                        post_only=True,
+                    )
+                    triggered.append(
+                        {
+                            "base": asset,
+                            "symbol": symbol,
+                            "reason": "time_stop_breakeven",
+                            "qty": str(sell_qty),
+                            "mark": str(mark),
+                            "cost": str(blend),
+                            "status": result.status.value,
+                            "order_id": str(result.order_id)
+                            if result.order_id
+                            else None,
+                            "error": result.error,
+                        }
+                    )
+                    if result.status != OrderStatus.REJECTED:
+                        self._position_opened_mono.pop(asset, None)
                 continue
+
             symbol = f"{asset}{self._quote}"
             mark = await self._mark_price(venue, symbol)
             if mark is None or mark <= 0:
                 continue
             self._note_position_opened(asset)
             st = self._trail_update_state(asset, cost=cost, mark=mark)
-            if st.get("armed") and not st.get("triggered"):
+            if st.get("soft_armed") and not st.get("triggered"):
                 armed_now.append(asset)
 
             sell_qty = _ZERO
@@ -933,35 +1261,38 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             limit_px: Decimal | None = None
             post_only = False
 
-            # Partial take-profit right when trail arms.
             if (
-                st.get("newly_armed")
+                st.get("newly_soft")
                 and self._trail_partial_enabled
-                and not st.get("partial_done")
+                and not st.get("soft_partial_done")
             ):
-                if locked > 0:
-                    await self._cancel_resting_for_symbol(venue, symbol)
-                    self._invalidate_bal_cache()
-                    free = await self._live_free(venue, asset)
-                sell_qty = (free * self._trail_partial_pct).quantize(
-                    Decimal("0.00000001")
-                )
-                reason = "trail_partial"
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                cap = min(free, self._session_qty(asset) if self._trail_session_only else free)
+                sell_qty = (cap * self._soft_partial).quantize(Decimal("0.00000001"))
+                reason = "trail_soft_partial"
+                st["soft_partial_done"] = True
                 st["partial_done"] = True
+            elif (
+                st.get("newly_hard")
+                and self._trail_partial_enabled
+                and not st.get("hard_partial_done")
+            ):
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                cap = min(free, self._session_qty(asset) if self._trail_session_only else free)
+                sell_qty = (cap * self._hard_partial).quantize(Decimal("0.00000001"))
+                reason = "trail_hard_partial"
+                st["hard_partial_done"] = True
             elif st.get("triggered"):
-                if locked > 0:
-                    await self._cancel_resting_for_symbol(venue, symbol)
-                    self._invalidate_bal_cache()
-                    free = await self._live_free(venue, asset)
-                sell_qty = free
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                sell_qty = min(
+                    free,
+                    self._session_qty(asset) if self._trail_session_only else free,
+                )
                 reason = "trail_drawdown"
             elif st.get("time_stop_due"):
                 be = self._break_even_sell_price(asset)
                 if be is not None and mark >= be:
-                    if locked > 0:
-                        await self._cancel_resting_for_symbol(venue, symbol)
-                        self._invalidate_bal_cache()
-                        free = await self._live_free(venue, asset)
+                    free = await self._refresh_free(venue, symbol, asset, locked)
                     sell_qty = free
                     reason = "time_stop_breakeven"
                     limit_px = max(be, mark * Decimal("0.999"))
@@ -976,6 +1307,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_skip("trail_dust")
                 if reason == "trail_drawdown":
                     st["triggered"] = False
+                if reason == "trail_soft_partial":
+                    st["soft_partial_done"] = False
+                    st["partial_done"] = False
+                if reason == "trail_hard_partial":
+                    st["hard_partial_done"] = False
                 continue
 
             result = await self._submit_exit_sell(
@@ -993,29 +1329,40 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "reason": reason,
                 "qty": str(sell_qty),
                 "mark": str(mark),
-                "peak": str(st.get("peak")),
                 "cost": str(cost),
-                "status": str(result.status),
-                "filled": str(result.filled_quantity),
+                "status": result.status.value,
+                "order_id": str(result.order_id) if result.order_id else None,
+                "error": result.error,
             }
             triggered.append(row)
-            self._bump_skip(reason)
-            if reason == "trail_drawdown" and (
-                result.status == OrderStatus.FILLED or result.filled_quantity > 0
-            ):
-                self._trail.pop(asset, None)
-            elif reason == "trail_drawdown":
-                st["triggered"] = True
-            elif reason == "time_stop_breakeven" and (
-                result.status == OrderStatus.FILLED or result.filled_quantity > 0
-            ):
-                self._trail.pop(asset, None)
-            logger.info("TRAIL_SELL %s", row)
+            if result.status == OrderStatus.REJECTED:
+                if reason == "trail_drawdown":
+                    st["triggered"] = False
+                if reason == "trail_soft_partial":
+                    st["soft_partial_done"] = False
+                    st["partial_done"] = False
+                if reason == "trail_hard_partial":
+                    st["hard_partial_done"] = False
+                self._bump_skip(f"{reason}_reject")
+            else:
+                logger.info(
+                    "TRAIL_EXIT base=%s reason=%s qty=%s mark=%s status=%s",
+                    asset,
+                    reason,
+                    sell_qty,
+                    mark,
+                    result.status.value,
+                )
+                if reason in {"trail_drawdown", "time_stop_breakeven"}:
+                    self._trail.pop(asset, None)
+                    self._position_opened_mono.pop(asset, None)
+
         return {
             "ok": True,
-            "enabled": True,
+            "enabled": self._trail_enabled,
             "armed": armed_now,
             "triggered": triggered,
+            "alerts": list(self._alerts[-10:]),
             "states": self._trail_states_public(),
         }
 
@@ -1157,6 +1504,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         remaining = self.budget_remaining
         side_is_buy = order_request.side == OpportunitySide.BUY
+        if side_is_buy and self._daily_kill_active:
+            self._bump_skip("daily_kill")
+            return await self._reject_before_live(
+                order_request,
+                reason="DAILY_KILL",
+                message=(
+                    f"realized PnL {self.realized_trade_pnl_eur} "
+                    f"hit -{self._daily_kill_eur} EUR kill; buys blocked"
+                ),
+            )
         if (
             side_is_buy
             and self._regime_block_buys
@@ -1188,6 +1545,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     message=(
                         f"already holding {sorted(held)} "
                         f"(max {self._max_alt_bases} bases for trail concentration)"
+                    ),
+                )
+        # Correlation cluster: max N from ADA/ATOM/NEAR/SOL/XRP group.
+        if (
+            side_is_buy
+            and self._max_per_corr > 0
+            and base in self._corr_group
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+        ):
+            held = self._held_alt_bases()
+            if base not in held and self._corr_held_count(adding=base) > self._max_per_corr:
+                self._bump_skip("corr_group_cap")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CORR_GROUP_CAP",
+                    message=(
+                        f"corr group already at {self._max_per_corr}: "
+                        f"{sorted(held & self._corr_group)}"
+                    ),
+                )
+        if (
+            side_is_buy
+            and self._momentum_enabled
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+        ):
+            if not self._momentum_ok(symbol):
+                self._bump_skip("momentum_block")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="MOMENTUM_BLOCK",
+                    message=(
+                        f"mark momentum below {self._momentum_min} "
+                        f"over ~{self._momentum_samples} samples"
                     ),
                 )
 

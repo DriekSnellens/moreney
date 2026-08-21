@@ -128,13 +128,27 @@ class Settings(BaseSettings):
     paper_maker_allow_buy_only: bool = True
     # Extra bps above fee-adjusted cost basis required on sells (winst-mode).
     paper_maker_sell_profit_buffer_bps: float = Field(default=0.0, ge=0)
-    # Trailing take-profit: arm after +gain vs cost, sell on drawdown from peak.
+    # Trailing take-profit: soft arm + hard arm, ATR-scaled optional.
     paper_trail_take_profit_enabled: bool = False
+    # Legacy single-arm knobs (used as hard-arm floors when soft/hard unset path).
     paper_trail_arm_gain_pct: float = Field(default=0.30, ge=0.01, le=5.0)
-    paper_trail_drawdown_pct: float = Field(default=0.10, ge=0.01, le=0.90)
-    # On arm: immediately sell this fraction (0.5 = 50%), trail the rest.
+    paper_trail_drawdown_pct: float = Field(default=0.12, ge=0.01, le=0.90)
     paper_trail_partial_enabled: bool = True
     paper_trail_partial_pct: float = Field(default=0.50, ge=0.05, le=0.95)
+    # Soft / hard schedule (preferred over single partial).
+    paper_trail_soft_arm_pct: float = Field(default=0.12, ge=0.02, le=2.0)
+    paper_trail_soft_drawdown_pct: float = Field(default=0.08, ge=0.02, le=0.50)
+    paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
+    paper_trail_hard_arm_pct: float = Field(default=0.30, ge=0.05, le=5.0)
+    paper_trail_hard_drawdown_pct: float = Field(default=0.12, ge=0.02, le=0.90)
+    paper_trail_hard_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
+    # Only trail inventory bought during this live session (fix pre-session mark seed).
+    paper_trail_session_buys_only: bool = True
+    # ATR scaling for arm/drawdown floors.
+    paper_trail_atr_enabled: bool = True
+    paper_trail_atr_samples: int = Field(default=48, ge=8, le=500)
+    paper_trail_atr_arm_mult: float = Field(default=2.5, ge=0.5, le=20.0)
+    paper_trail_atr_dd_mult: float = Field(default=1.0, ge=0.2, le=10.0)
     # Ladder buys: split entry into 3 post-only bids at these discounts vs mark.
     paper_ladder_buy_enabled: bool = False
     paper_ladder_buy_pcts: str = "0.01,0.02,0.03"
@@ -145,6 +159,17 @@ class Settings(BaseSettings):
     paper_dust_policy: str = "off"
     # When True, block new buys while HMM/regime is reduce-only / toxic.
     paper_regime_block_buys: bool = True
+    # Require non-negative (or min) mark momentum before new buys.
+    paper_buy_momentum_enabled: bool = False
+    paper_buy_momentum_min_return: float = Field(default=0.0, ge=-0.5, le=0.5)
+    paper_buy_momentum_samples: int = Field(default=12, ge=3, le=200)
+    # Correlation group cap (comma bases).
+    live_micro_corr_group: str = "ADA,ATOM,NEAR,SOL,XRP,DOT"
+    live_micro_max_per_corr_group: int = Field(default=2, ge=1, le=10)
+    # Daily realized loss kill-switch for new buys (EUR).
+    paper_daily_kill_eur: float = Field(default=50.0, ge=0)
+    # Alert when within this fraction of soft/hard arm (0.05 = 5 percentage points).
+    paper_alert_pct_to_arm: float = Field(default=0.05, ge=0.01, le=0.5)
     # Keep a quote only if its NET euro is at least this fraction of the cycle's best.
     paper_maker_keep_vs_best_frac: float = Field(default=0.0, ge=0, le=1)
     # During cooldown, still replace a quote if NET euro improved by this fraction.

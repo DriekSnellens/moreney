@@ -85,7 +85,14 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_arm_gain_pct == 0.30
     assert cfg.paper_trail_drawdown_pct == 0.12
     assert cfg.paper_trail_partial_enabled is True
-    assert cfg.paper_trail_partial_pct == 0.50
+    assert cfg.paper_trail_partial_pct == 0.25
+    assert cfg.paper_trail_soft_arm_pct == 0.12
+    assert cfg.paper_trail_hard_arm_pct == 0.30
+    assert cfg.paper_trail_session_buys_only is True
+    assert cfg.paper_trail_atr_enabled is True
+    assert cfg.paper_buy_momentum_enabled is True
+    assert cfg.live_micro_max_per_corr_group == 2
+    assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is True
     assert cfg.paper_time_stop_enabled is True
     assert cfg.paper_dust_policy == "top_up_or_exit"
@@ -294,38 +301,64 @@ def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
     assert be < Decimal("1.004")
 
 
-def test_trail_arms_at_30pct_and_triggers_on_10pct_drawdown() -> None:
+def test_trail_soft_then_soft_drawdown() -> None:
     settings = _unlocked(
         paper_trail_take_profit_enabled=True,
-        paper_trail_arm_gain_pct=0.30,
-        paper_trail_drawdown_pct=0.10,
+        paper_trail_soft_arm_pct=0.12,
+        paper_trail_soft_drawdown_pct=0.08,
+        paper_trail_hard_arm_pct=0.30,
+        paper_trail_hard_drawdown_pct=0.12,
+        paper_trail_atr_enabled=False,
     )
     portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
-    engine = LiveMicroEngine(settings)
     bridge = MicroBudgetLiveExecutor(
         settings,
         portfolio=portfolio,
-        live_engine=engine,
+        live_engine=LiveMicroEngine(settings),
         budget_eur=Decimal("100"),
         live_maker=True,
     )
     cost = Decimal("1.00")
-    # Below arm threshold
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.20"))  # noqa: SLF001
-    assert st["armed"] is False
-    # Arm at +30%
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.11"))  # noqa: SLF001
+    assert st["soft_armed"] is False
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
+    assert st["soft_armed"] is True
+    assert st["newly_soft"] is True
+    assert st["hard_armed"] is False
+    assert st["peak"] == Decimal("1.12")
+    # Soft trail: peak 1.12, 8% dd → trigger at <= 1.0304
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.04"))  # noqa: SLF001
+    assert st["triggered"] is False
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.03"))  # noqa: SLF001
+    assert st["triggered"] is True
+
+
+def test_trail_hard_arm_widens_drawdown() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.12,
+        paper_trail_soft_drawdown_pct=0.08,
+        paper_trail_hard_arm_pct=0.30,
+        paper_trail_hard_drawdown_pct=0.12,
+        paper_trail_atr_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    cost = Decimal("1.00")
+    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
     st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
-    assert st["armed"] is True
-    assert st["peak"] == Decimal("1.30")
+    assert st["newly_hard"] is True
+    assert st["hard_armed"] is True
+    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
+    # 12% off 1.50 = 1.32 — still holding under hard dd
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.33"))  # noqa: SLF001
     assert st["triggered"] is False
-    # New high
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
-    assert st["peak"] == Decimal("1.50")
-    # 10% off peak (1.50 * 0.9 = 1.35) — still above
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.36"))  # noqa: SLF001
-    assert st["triggered"] is False
-    # At/under 10% drawdown
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.35"))  # noqa: SLF001
+    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
     assert st["triggered"] is True
 
 
@@ -337,35 +370,19 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.12
-    settings = _unlocked(
-        paper_trail_take_profit_enabled=True,
-        paper_trail_arm_gain_pct=0.30,
-        paper_trail_drawdown_pct=0.12,
-    )
-    portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
-    bridge = MicroBudgetLiveExecutor(
-        settings,
-        portfolio=portfolio,
-        live_engine=LiveMicroEngine(settings),
-        budget_eur=Decimal("100"),
-        live_maker=True,
-    )
-    cost = Decimal("1.00")
-    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
-    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
-    # 12% off 1.50 = 1.32 — still holding
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.33"))  # noqa: SLF001
-    assert st["triggered"] is False
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
-    assert st["triggered"] is True
+    assert cfg.paper_trail_soft_arm_pct == 0.12
+    assert cfg.paper_trail_hard_arm_pct == 0.30
+    assert cfg.paper_trail_partial_pct == 0.25
 
 
 def test_trail_partial_flags_newly_armed() -> None:
     settings = _unlocked(
         paper_trail_take_profit_enabled=True,
-        paper_trail_arm_gain_pct=0.30,
+        paper_trail_soft_arm_pct=0.12,
+        paper_trail_hard_arm_pct=0.30,
         paper_trail_partial_enabled=True,
-        paper_trail_partial_pct=0.50,
+        paper_trail_soft_partial_pct=0.25,
+        paper_trail_atr_enabled=False,
     )
     bridge = MicroBudgetLiveExecutor(
         settings,
@@ -374,14 +391,83 @@ def test_trail_partial_flags_newly_armed() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
-    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.29"))  # noqa: SLF001
-    assert st["newly_armed"] is False
-    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.30"))  # noqa: SLF001
+    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.11"))  # noqa: SLF001
+    assert st["newly_soft"] is False
+    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.12"))  # noqa: SLF001
+    assert st["newly_soft"] is True
     assert st["newly_armed"] is True
-    assert st["armed"] is True
-    assert st["partial_done"] is False
-    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.31"))  # noqa: SLF001
-    assert st["newly_armed"] is False
+    assert st["soft_armed"] is True
+    assert st["soft_partial_done"] is False
+    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.13"))  # noqa: SLF001
+    assert st["newly_soft"] is False
+
+
+def test_session_lots_only_for_trail_cost() -> None:
+    settings = _unlocked(paper_trail_session_buys_only=True)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["ADA"] = [[Decimal("10"), Decimal("1.0")]]  # noqa: SLF001
+    assert bridge._session_unit_cost("ADA") is None  # noqa: SLF001
+    from bot.core.enums import OrderSide
+
+    bridge._record_realized_fill(  # noqa: SLF001
+        side=OrderSide.BUY,
+        symbol="ADAEUR",
+        qty=Decimal("5"),
+        price=Decimal("1.0"),
+        fee=Decimal("0"),
+    )
+    assert bridge._session_unit_cost("ADA") == Decimal("1.0")  # noqa: SLF001
+    assert bridge._session_qty("ADA") == Decimal("5")  # noqa: SLF001
+
+
+def test_daily_kill_blocks_buys() -> None:
+    settings = _unlocked(paper_daily_kill_eur=50.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge.realized_trade_pnl_eur = Decimal("-50.01")
+    bridge._check_daily_kill()  # noqa: SLF001
+    assert bridge._daily_kill_active is True  # noqa: SLF001
+    assert bridge._buys_blocked is True  # noqa: SLF001
+
+
+def test_scale_thresholds_atr() -> None:
+    from bot.live.trail_policy import scale_thresholds
+
+    th = scale_thresholds(
+        atr=Decimal("0.02"),
+        soft_arm_floor=Decimal("0.12"),
+        soft_dd_floor=Decimal("0.08"),
+        hard_arm_floor=Decimal("0.30"),
+        hard_dd_floor=Decimal("0.12"),
+        atr_arm_mult=Decimal("2.5"),
+        atr_dd_mult=Decimal("1.0"),
+        atr_enabled=True,
+    )
+    assert th.soft_arm == Decimal("0.12")
+    assert th.hard_arm == Decimal("0.30")
+    th2 = scale_thresholds(
+        atr=Decimal("0.20"),
+        soft_arm_floor=Decimal("0.12"),
+        soft_dd_floor=Decimal("0.08"),
+        hard_arm_floor=Decimal("0.30"),
+        hard_dd_floor=Decimal("0.12"),
+        atr_arm_mult=Decimal("2.5"),
+        atr_dd_mult=Decimal("1.0"),
+        atr_enabled=True,
+    )
+    assert th2.hard_arm == Decimal("0.50")
+    assert th2.soft_arm == Decimal("0.35")
 
 
 def test_held_alt_bases_respects_concentration_cap() -> None:
