@@ -48,29 +48,37 @@ def _session_settings(
     symbols: list[str],
     persist_path: Path,
 ) -> Settings:
-    """Paper mode + micro unlocks already in env; tighten capital and allowlists."""
+    """Paper mode + micro unlocks already in env; € pocket capital, live arb path."""
     mode = getattr(base, "market_data_mode", "local") or "local"
     # Prefer shared Redis feed from the fleet publisher when available.
     if mode == "local":
         mode = "shared"
+    budget_f = float(budget_eur)
     return base.model_copy(
         update={
             "execution_mode": ExecutionMode.PAPER,
             "paper_trading_enabled": True,
             "paper_auto_start": False,
-            "paper_starting_eur": float(budget_eur),
+            "paper_starting_eur": budget_f,
             "paper_persist_path": str(persist_path),
             "paper_seed_inventory_pct": 0.0,
             "paper_seed_max_assets": 0,
-            # Keep maker strategy on (paper quotes); live taker via bridge.
-            "paper_maker_min_notional_eur": min(5.0, float(budget_eur)),
-            "paper_maker_min_profit_eur": min(0.05, float(budget_eur) * 0.01),
-            "risk_max_position_usd": float(budget_eur),
-            "risk_max_daily_loss_usd": float(budget_eur),
+            # Maker quotes are paper-only on the bridge; use arb for live Bitvavo fills.
+            "paper_maker_enabled": False,
+            "paper_triangle_enabled": False,
+            "paper_maker_min_notional_eur": min(5.0, budget_f),
+            "paper_maker_min_profit_eur": min(0.02, budget_f * 0.001),
+            "arbitrage_min_profit_eur": 0.01,
+            "arbitrage_min_profit_pct": 0.00015,
+            "profitability_min_net_profit_usd": 0.01,
+            "risk_min_net_profit_usd": 0.01,
+            "risk_max_position_usd": budget_f,
+            "risk_max_daily_loss_usd": budget_f,
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": "*",
-            "live_micro_max_notional_eur": float(budget_eur),
-            "live_micro_max_daily_loss_eur": float(budget_eur),
+            # Per-order ceiling = full pocket (not a separate "€25 per trade" product rule).
+            "live_micro_max_notional_eur": budget_f,
+            "live_micro_max_daily_loss_eur": budget_f,
             "live_micro_max_open_orders": 8,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
@@ -114,7 +122,7 @@ def attach_micro_bridge(
 
 async def run_session(
     *,
-    minutes: float = 15.0,
+    minutes: float | None = None,
     budget_eur: Decimal = Decimal("25"),
     symbols: list[str] | None = None,
     settings: Settings | None = None,
@@ -125,7 +133,11 @@ async def run_session(
     status_callback: Any | None = None,
     should_stop: Any | None = None,
 ) -> dict[str, Any]:
-    """Run full PaperRunner cycles with live Bitvavo fills capped at budget_eur."""
+    """Run full PaperRunner cycles with live Bitvavo fills inside a € capital pocket.
+
+    ``minutes=None`` (or <=0) runs continuously until stop is requested.
+    ``budget_eur`` is total trading capital, not a per-trade size.
+    """
     base = settings or get_settings()
     if exclude_btc:
         scan_symbols = symbols or _non_btc_symbols(base)
@@ -196,13 +208,17 @@ async def run_session(
             "trades": [],
         }
 
-    deadline = time.monotonic() + minutes * 60.0
+    continuous = minutes is None or float(minutes) <= 0
+    deadline = (
+        None if continuous else time.monotonic() + float(minutes) * 60.0
+    )
     started_mono = time.monotonic()
     logger.info(
-        "Full-bot micro session start budget=%s symbols=%s minutes=%s mode=%s",
+        "Full-bot micro session start budget=%s symbols=%s minutes=%s continuous=%s mode=%s",
         budget_eur,
         len(scan_symbols),
         minutes,
+        continuous,
         cfg.market_data_mode,
     )
     start_equity = Decimal(str(runner.portfolio.state.total_equity))
@@ -213,14 +229,20 @@ async def run_session(
             return
         st = runner.status()
         elapsed = time.monotonic() - started_mono
-        remaining = max(0.0, deadline - time.monotonic())
+        remaining = (
+            None
+            if deadline is None
+            else round(max(0.0, deadline - time.monotonic()), 1)
+        )
         equity = Decimal(str(runner.portfolio.state.total_equity))
         status_callback(
             {
+                "continuous": continuous,
+                "minutes": minutes,
                 "symbol_count": len(scan_symbols),
                 "symbols_sample": scan_symbols[:12],
                 "elapsed_seconds": round(elapsed, 1),
-                "remaining_seconds": round(remaining, 1),
+                "remaining_seconds": remaining,
                 "paper_cycles": st.get("cycle_count"),
                 "strategy": st.get("strategy"),
                 "approved_opportunities": st.get("approved_opportunities"),
@@ -243,9 +265,11 @@ async def run_session(
 
     try:
         _tick()
-        while time.monotonic() < deadline:
+        while True:
             if should_stop is not None and should_stop():
                 logger.info("Full-bot micro session stop requested")
+                break
+            if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
             _tick()
@@ -271,6 +295,7 @@ async def run_session(
     report = {
         "ok": True,
         "mode": "full_bot_micro",
+        "continuous": continuous,
         "minutes": minutes,
         "budget_eur": str(budget_eur),
         "symbols": scan_symbols,
@@ -317,9 +342,8 @@ async def run_session(
         },
         "finished_at": datetime.now(UTC).isoformat(),
         "note": (
-            "Micro = capital cap only. Full PaperRunner pipeline ran; "
-            "marketable Bitvavo legs executed live within budget; "
-            "maker/post-only stayed paper; non-Bitvavo venues skipped."
+            "Micro = € capital pocket (recycles). Continuous until stop. "
+            "Marketable Bitvavo legs live; non-Bitvavo venues skipped."
         ),
     }
 
@@ -340,7 +364,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Full-bot micro-live: PaperRunner pipeline + € budget cap"
     )
-    parser.add_argument("--minutes", type=float, default=15.0)
+    parser.add_argument(
+        "--minutes",
+        type=float,
+        default=0.0,
+        help="Session length in minutes; 0 = continuous until stop",
+    )
     parser.add_argument("--budget-eur", type=float, default=25.0)
     parser.add_argument(
         "--symbols",
@@ -357,9 +386,10 @@ def main() -> None:
         if args.symbols.strip()
         else None
     )
+    minutes = None if args.minutes <= 0 else args.minutes
     report = asyncio.run(
         run_session(
-            minutes=args.minutes,
+            minutes=minutes,
             budget_eur=Decimal(str(args.budget_eur)),
             symbols=symbols,
             exclude_btc=not args.include_btc,

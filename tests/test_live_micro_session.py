@@ -72,6 +72,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_starting_eur == 25.0
     assert cfg.live_micro_symbols == "*"
     assert cfg.risk_max_position_usd == 25.0
+    assert cfg.paper_maker_enabled is False
     assert "BTCEUR" not in cfg.market_data_symbols
 
 
@@ -166,7 +167,10 @@ async def test_bridge_mirrors_live_fill(monkeypatch: pytest.MonkeyPatch) -> None
     assert result.status == OrderStatus.FILLED
     assert result.filled_quantity == Decimal("0.01")
     assert (result.metadata or {}).get("real_exchange_order") is True
-    assert bridge.budget_remaining == Decimal("5")  # 25 - 20
+    # Pocket recycles: ~€5 free after €20 buy (+ tiny fee).
+    assert bridge.budget_remaining < Decimal("5.1")
+    assert bridge.budget_remaining > Decimal("4.5")
+    assert bridge.snapshot_bridge()["capital_model"] == "pocket"
     assert len(bridge.live_trades) == 1
 
 

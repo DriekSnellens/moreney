@@ -2926,17 +2926,17 @@ def _micro_session_panel_html(session: dict[str, Any]) -> str:
       </p>
       <div class="metric-grid compact">
         <article class="metric-card"><span class="label">Budget</span><span class="value">{_esc(session.get('budget_eur') or bridge.get('budget_eur') or '—')}</span></article>
-        <article class="metric-card"><span class="label">Spent</span><span class="value">{_esc(bridge.get('spent_eur') or '0')}</span></article>
-        <article class="metric-card"><span class="label">Rest</span><span class="value">{_esc(bridge.get('remaining_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Free EUR</span><span class="value">{_esc(bridge.get('free_quote_eur') or bridge.get('remaining_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Turnover</span><span class="value">{_esc(bridge.get('turnover_eur') or '0')}</span></article>
         <article class="metric-card"><span class="label">PnL pocket</span><span class="value">{_esc(session.get('pnl_paper_pocket_eur') or '—')}</span></article>
         <article class="metric-card"><span class="label">Cycles</span><span class="value">{_esc(str(session.get('paper_cycles') or 0))}</span></article>
         <article class="metric-card"><span class="label">Live fills</span><span class="value">{_esc(str(session.get('live_trades_executed') or 0))}/{_esc(str(session.get('live_trades_attempted') or 0))}</span></article>
         <article class="metric-card"><span class="label">Symbols</span><span class="value">{_esc(str(session.get('symbol_count') or '—'))}</span></article>
-        <article class="metric-card"><span class="label">Resterend</span><span class="value">{_esc(str(session.get('remaining_seconds') or '—'))}s</span></article>
+        <article class="metric-card"><span class="label">{'Modus' if session.get('continuous') or session.get('remaining_seconds') is None else 'Resterend'}</span><span class="value">{'continuous' if session.get('continuous') or session.get('remaining_seconds') is None else _esc(str(session.get('remaining_seconds'))) + 's'}</span></article>
       </div>
       <p class="forecast-note">Laatste live: {_esc(last_txt)}</p>
       <div class="controls">
-        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:15,budget_eur:25,exclude_btc:true}})">Start 15m / €25</button>
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:25,exclude_btc:true}})">Start continuous / €25</button>
         <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop sessie</button>
       </div>
     </section>

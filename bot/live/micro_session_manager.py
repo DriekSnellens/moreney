@@ -66,7 +66,7 @@ class MicroSessionManager:
     async def start(
         self,
         *,
-        minutes: float = 15.0,
+        minutes: float | None = None,
         budget_eur: float = 25.0,
         exclude_btc: bool = True,
         symbols: list[str] | None = None,
@@ -80,12 +80,14 @@ class MicroSessionManager:
                     "status": self.status(),
                 }
             self._stop_requested = False
+            continuous = minutes is None or float(minutes) <= 0
             self._publish(
                 {
                     "running": True,
                     "ok": None,
                     "message": "starting",
-                    "minutes": minutes,
+                    "continuous": continuous,
+                    "minutes": None if continuous else minutes,
                     "budget_eur": str(budget_eur),
                     "exclude_btc": exclude_btc,
                     "started_at": datetime.now(UTC).isoformat(),
@@ -96,14 +98,14 @@ class MicroSessionManager:
                     "live_trades_executed": 0,
                     "live_trades_attempted": 0,
                     "elapsed_seconds": 0,
-                    "remaining_seconds": minutes * 60.0,
+                    "remaining_seconds": None if continuous else float(minutes) * 60.0,
                 }
             )
 
             async def _runner() -> None:
                 try:
                     report = await run_session(
-                        minutes=minutes,
+                        minutes=None if continuous else minutes,
                         budget_eur=Decimal(str(budget_eur)),
                         symbols=symbols,
                         settings=settings or get_settings(),

@@ -1,10 +1,10 @@
-"""Bridge PaperRunner's PaperExecutor path to LiveMicroEngine with a hard budget.
+"""Bridge PaperRunner's PaperExecutor path to LiveMicroEngine with a capital pocket.
 
 PaperRunner stays paper-only in source. This adapter is wired only by the
 full-bot micro session: same strategy → GOE → profitability → risk pipeline,
-but marketable fills on allowlisted venues go live (capped). Maker/post-only
-quotes stay paper so the full quoting stack still runs without resting live
-orders by default.
+but marketable fills on allowlisted venues go live within a € pocket that
+recycles after sells (not a one-shot spend counter). Maker/post-only quotes
+stay paper unless live_maker is enabled.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ _MIN_LIVE_NOTIONAL = Decimal("5")
 
 
 class MicroBudgetLiveExecutor(PaperExecutor):
-    """PaperExecutor subclass: live taker fills + paper maker, € budget cap."""
+    """PaperExecutor subclass: live taker fills + paper maker, € capital pocket."""
 
     name = "micro_budget_live"
 
@@ -48,7 +48,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         super().__init__(settings, portfolio=portfolio)
         self._live = live_engine
         self._budget = Decimal(str(budget_eur))
-        self._spent = _ZERO
+        self._turnover = _ZERO  # lifetime traded notional (stats only)
         self._execute_venues = {
             v.strip().lower() for v in (execute_venues or {"bitvavo"}) if v.strip()
         }
@@ -60,20 +60,33 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.live_trades: list[dict[str, Any]] = []
 
     @property
+    def free_quote_eur(self) -> Decimal:
+        """Available EUR cash in the micro pocket (recycles after sells)."""
+        try:
+            return Decimal(str(self._portfolio.available(self._quote)))
+        except Exception:  # noqa: BLE001
+            return _ZERO
+
+    @property
     def budget_remaining(self) -> Decimal:
-        left = self._budget - self._spent
-        return left if left > 0 else _ZERO
+        """Capital still free to deploy on buys — not a one-shot spend counter."""
+        free = self.free_quote_eur
+        if free < 0:
+            return _ZERO
+        return free if free <= self._budget else self._budget
 
     def snapshot_bridge(self) -> dict[str, Any]:
         return {
             "budget_eur": str(self._budget),
-            "spent_eur": str(self._spent),
+            "free_quote_eur": str(self.free_quote_eur),
             "remaining_eur": str(self.budget_remaining),
+            "turnover_eur": str(self._turnover),
             "execute_venues": sorted(self._execute_venues),
             "exclude_bases": sorted(self._exclude_bases),
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
             "live_trade_count": len(self.live_trades),
+            "capital_model": "pocket",
         }
 
     def _bump_skip(self, key: str) -> None:
@@ -84,7 +97,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         venue = str(meta.get("venue") or meta.get("exchange") or "").strip().lower()
         if venue:
             return venue
-        # Single-venue / desk paths often omit venue; EUR pairs → Bitvavo pocket.
         sym = order_request.symbol.upper().replace("/", "").replace("-", "")
         if sym.endswith("EUR"):
             return "bitvavo"
@@ -101,7 +113,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         meta = dict(order_request.metadata or {})
         post_only = bool(meta.get("post_only"))
         if post_only and not self._live_maker:
-            # Full maker stack still runs; fills stay simulated.
             return await super().execute(
                 order_request,
                 order_book=order_book,
@@ -127,12 +138,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
 
         remaining = self.budget_remaining
-        if remaining < _MIN_LIVE_NOTIONAL:
+        side_is_buy = order_request.side == OpportunitySide.BUY
+        if side_is_buy and remaining < _MIN_LIVE_NOTIONAL:
             self._bump_skip("budget_exhausted")
             return await self._reject_before_live(
                 order_request,
                 reason="BUDGET_EXHAUSTED",
-                message=f"micro budget remaining {remaining}",
+                message=f"micro pocket free EUR {remaining}",
             )
 
         px = Decimal(str(order_request.limit_price or 0))
@@ -144,7 +156,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
 
         notional = qty * px
-        if notional > remaining:
+        if side_is_buy and notional > remaining:
             qty = (remaining / px).quantize(Decimal("0.00000001"))
             notional = qty * px
             if qty <= 0 or notional < _MIN_LIVE_NOTIONAL:
@@ -156,7 +168,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
             order_request = order_request.model_copy(update={"quantity": qty})
 
-        side = "buy" if order_request.side == OpportunitySide.BUY else "sell"
+        side = "buy" if side_is_buy else "sell"
         payload = {
             "venue": venue,
             "symbol": symbol,
@@ -197,7 +209,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
 
         fill_notional = filled * avg
-        self._spent += fill_notional
+        self._turnover += fill_notional
         return await self._mirror_live_fill(
             order_request,
             filled_qty=filled,
@@ -320,12 +332,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self.history.append(result)
         logger.info(
-            "MICRO_LIVE_FILL symbol=%s venue=%s qty=%s px=%s spent=%s remaining=%s",
+            "MICRO_LIVE_FILL symbol=%s venue=%s qty=%s px=%s turnover=%s free=%s",
             order.symbol,
             venue,
             filled_qty,
             average_price,
-            self._spent,
+            self._turnover,
             self.budget_remaining,
         )
         return result

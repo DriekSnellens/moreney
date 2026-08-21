@@ -467,9 +467,15 @@ async def live_micro_session_status() -> dict[str, Any]:
 
 @app.post("/live/micro/session/start")
 async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Start a timed full-bot micro session in the background."""
+    """Start a full-bot micro session in the background (continuous by default)."""
     body = payload or {}
-    minutes = float(body.get("minutes") or 15)
+    raw_minutes = body.get("minutes", None)
+    if raw_minutes in (None, "", "continuous", "forever"):
+        minutes: float | None = None
+    else:
+        minutes = float(raw_minutes)
+        if minutes <= 0:
+            minutes = None
     budget = float(body.get("budget_eur") or 25)
     exclude_btc = body.get("exclude_btc", True)
     if isinstance(exclude_btc, str):
