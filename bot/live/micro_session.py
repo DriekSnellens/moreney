@@ -100,18 +100,19 @@ def _session_settings(
             "paper_maker_adverse_bps": 3.0,
             "paper_maker_spread_fee_buffer_bps": 2.0,
             "paper_maker_allow_buy_only": False,
-            "paper_maker_sell_profit_buffer_bps": 10.0,
-            # Soft +12% / hard +30% trail on session buys only; ATR-scaled.
+            # Day-trade: small buffer over fees so maker asks can clear.
+            "paper_maker_sell_profit_buffer_bps": 5.0,
+            # Soft +5% / hard +12% trail (day-trade harvest); ATR can raise floors.
             "paper_trail_take_profit_enabled": True,
             "paper_trail_session_buys_only": True,
-            "paper_trail_soft_arm_pct": 0.12,
-            "paper_trail_soft_drawdown_pct": 0.08,
+            "paper_trail_soft_arm_pct": 0.05,
+            "paper_trail_soft_drawdown_pct": 0.03,
             "paper_trail_soft_partial_pct": 0.25,
-            "paper_trail_hard_arm_pct": 0.30,
-            "paper_trail_hard_drawdown_pct": 0.12,
+            "paper_trail_hard_arm_pct": 0.12,
+            "paper_trail_hard_drawdown_pct": 0.06,
             "paper_trail_hard_partial_pct": 0.25,
-            "paper_trail_arm_gain_pct": 0.30,
-            "paper_trail_drawdown_pct": 0.12,
+            "paper_trail_arm_gain_pct": 0.12,
+            "paper_trail_drawdown_pct": 0.06,
             "paper_trail_partial_enabled": True,
             "paper_trail_partial_pct": 0.25,
             "paper_trail_atr_enabled": True,
@@ -121,8 +122,10 @@ def _session_settings(
             "paper_ladder_buy_enabled": True,
             "paper_ladder_buy_pcts": "0.01,0.02,0.03",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 86400.0,
+            "paper_time_stop_sec": 14400.0,  # 4h day-trade recycle at >= BE
             "paper_dust_policy": "top_up_or_exit",
+            # ~15 bps slack so €40–80 dust can clear slots without waiting forever.
+            "paper_dust_exit_slack_bps": 15.0,
             "paper_regime_block_buys": True,
             "paper_buy_momentum_enabled": True,
             "paper_buy_momentum_min_return": 0.0,
@@ -130,7 +133,7 @@ def _session_settings(
             "live_micro_corr_group": "ADA,ATOM,NEAR,SOL,XRP",
             "live_micro_max_per_corr_group": 2,
             "paper_daily_kill_eur": 50.0,
-            "paper_alert_pct_to_arm": 0.05,
+            "paper_alert_pct_to_arm": 0.02,
             "paper_hmm_enabled": True,
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
@@ -143,7 +146,8 @@ def _session_settings(
             "paper_min_alt_inventory_pct": 8.0,
             "paper_inventory_ask_improve_bps": 0.0,
             "paper_inventory_buy_dip_bps": 10.0,
-            "paper_markout_enabled": False,
+            # Use measured adverse when samples exist (safer than static-only).
+            "paper_markout_enabled": True,
             "paper_maker_fair_value": True,
             "arbitrage_min_profit_eur": 0.12,
             "arbitrage_min_profit_pct": 0.0015,
@@ -151,7 +155,8 @@ def _session_settings(
             "profitability_min_net_return": 0.0015,
             "profitability_execution_buffer_bps": 2.0,
             "risk_min_net_profit_usd": 0.12,
-            "risk_max_position_usd": min(budget_f, max(80.0, budget_f * 0.15)),
+            # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
+            "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
@@ -166,8 +171,8 @@ def _session_settings(
             if symbols
             else "SOLEUR,ATOMEUR,NEAREUR,ADAEUR,XRPEUR",
             "live_micro_max_alt_bases": 2,
-            # Per-order ceiling = full pocket (capital recycles after sells).
-            "live_micro_max_notional_eur": min(budget_f, max(80.0, budget_f * 0.15)),
+            # Cap live order size (env must not silently allow full pocket).
+            "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             "live_micro_max_open_orders": 6,
             "live_micro_resting_max_age_sec": 180.0,
@@ -225,6 +230,7 @@ async def run_session(
     own_market_data: bool | None = None,
     status_callback: Any | None = None,
     should_stop: Any | None = None,
+    kill_switch: Any | None = None,
 ) -> dict[str, Any]:
     """Run full PaperRunner cycles with live Bitvavo fills inside a € capital pocket.
 
@@ -277,7 +283,7 @@ async def run_session(
         )
     else:
         md = market_data
-    risk = RiskEngine(cfg)
+    risk = RiskEngine(cfg, kill_switch=kill_switch)
     store = PaperTradingStore(cfg)
     runner = PaperRunner(cfg, market_data=md, risk_engine=risk, store=store)
     allowed_bases = {

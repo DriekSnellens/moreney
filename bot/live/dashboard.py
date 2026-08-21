@@ -322,11 +322,49 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             f"{_esc(a.get('message') or '')}</li>"
         )
     kill = "aan" if trail.get("daily_kill_active") else "uit"
+    diag = bridge.get("diagnostics") or {}
+    why = diag.get("why_idle") or []
+    why_html = (
+        "<section class='positions'><h2>Waarom geen trades</h2>"
+        + (
+            "<ul class='alerts'>"
+            + "".join(f"<li>{_esc(h)}</li>" for h in why)
+            + "</ul>"
+            if why
+            else "<p class='hint'>—</p>"
+        )
+        + "</section>"
+    )
+    trade_rows = []
+    for t in list(diag.get("recent_live_trades") or [])[-8:]:
+        if not isinstance(t, dict):
+            continue
+        trade_rows.append(
+            "<tr>"
+            f"<td>{_esc(t.get('symbol') or '')}</td>"
+            f"<td>{_esc(t.get('side') or '')}</td>"
+            f"<td>{_esc(t.get('requested_qty') or t.get('qty') or '')}</td>"
+            f"<td>{_esc((t.get('result') or {}).get('order', {}).get('status') if isinstance(t.get('result'), dict) else t.get('status') or '')}</td>"
+            "</tr>"
+        )
+    trades_html = (
+        "<section class='positions'><h2>Recente live orders</h2>"
+        + (
+            "<table class='pos'><thead><tr><th>Symbol</th><th>Side</th>"
+            "<th>Qty</th><th>Status</th></tr></thead><tbody>"
+            + "".join(trade_rows)
+            + "</tbody></table>"
+            if trade_rows
+            else "<p class='hint'>Nog geen live fills deze sessie</p>"
+        )
+        + "</section>"
+    )
     alerts_html = (
         "<section class='positions'><h2>Alerts</h2>"
         f"<p class='hint'>Daily kill: {kill} · momentum="
         f"{'aan' if trail.get('momentum_enabled') else 'uit'} · "
-        f"corr max {trail.get('max_per_corr_group') or '—'}</p>"
+        f"corr max {trail.get('max_per_corr_group') or '—'} · "
+        f"soft/hard {trail.get('soft_arm_pct') or '—'}/{trail.get('hard_arm_pct') or '—'}</p>"
         + (
             "<ul class='alerts'>" + "".join(alert_rows) + "</ul>"
             if alert_rows
@@ -376,6 +414,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </article>
     </section>
     {positions_html}
+    {why_html}
+    {trades_html}
     {alerts_html}
     <footer>
       <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:true}})">Start</button>

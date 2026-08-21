@@ -892,7 +892,19 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     await get_kill_switch().emergency_stop(reason)
     status = get_kill_switch().status()
     assert status.state == KillSwitchState.EMERGENCY_STOP
-    return {"status": status.model_dump(mode="json")}
+    # Also request micro-session stop so resting work winds down.
+    session_stop: dict[str, Any] | None = None
+    try:
+        from bot.live.micro_session_manager import get_micro_session_manager
+
+        mgr = get_micro_session_manager()
+        session_stop = await mgr.stop()
+    except Exception as exc:  # noqa: BLE001
+        session_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "status": status.model_dump(mode="json"),
+        "micro_session_stop": session_stop,
+    }
 
 
 @app.get("/api")

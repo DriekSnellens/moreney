@@ -333,6 +333,8 @@ class RiskEngine:
 
         # --- Simultaneous positions ---
         # Sells / reduce-only must still pass — otherwise inventory can never exit.
+        # Buys that ADD to an already-open symbol are allowed at the cap; only a
+        # brand-new symbol is blocked (otherwise pre-session bags freeze the book).
         meta = opportunity.metadata or {}
         is_reduce = (
             opportunity.side == OpportunitySide.SELL
@@ -340,24 +342,32 @@ class RiskEngine:
             or bool(meta.get("reduce_only"))
             or str(meta.get("exit_reason") or "").strip() != ""
         )
-        if (
-            not is_reduce
-            and portfolio.open_position_count >= self._limits.max_simultaneous_positions
-        ):
-            return await self._reject(
-                opportunity,
-                reason_code=RiskRejectReason.MAX_SIMULTANEOUS_POSITIONS,
-                message=(
-                    f"Open positions {portfolio.open_position_count} >= "
-                    f"max {self._limits.max_simultaneous_positions}"
-                ),
-                allowed_qty=_ZERO,
-                maximum_loss=_ZERO,
-                warnings=warnings,
-                risk_score=Decimal("55"),
-                requested_size=opportunity.quantity * opportunity.entry_price,
-                allowed_size=_ZERO,
-            )
+        if not is_reduce:
+            max_pos = self._limits.max_simultaneous_positions
+            if portfolio.open_position_count >= max_pos:
+                open_syms = {
+                    str(p.symbol or "").upper().replace("/", "").replace("-", "")
+                    for p in (portfolio.positions or [])
+                    if p.quantity and p.quantity > 0
+                }
+                opp_sym = str(opportunity.symbol or "").upper().replace("/", "").replace(
+                    "-", ""
+                )
+                if opp_sym not in open_syms:
+                    return await self._reject(
+                        opportunity,
+                        reason_code=RiskRejectReason.MAX_SIMULTANEOUS_POSITIONS,
+                        message=(
+                            f"Open positions {portfolio.open_position_count} >= "
+                            f"max {max_pos}; cannot open new symbol {opp_sym}"
+                        ),
+                        allowed_qty=_ZERO,
+                        maximum_loss=_ZERO,
+                        warnings=warnings,
+                        risk_score=Decimal("55"),
+                        requested_size=opportunity.quantity * opportunity.entry_price,
+                        allowed_size=_ZERO,
+                    )
 
         # --- Trades per minute ---
         self._prune_trade_window()

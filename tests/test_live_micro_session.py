@@ -80,14 +80,14 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 0.0
     assert cfg.paper_inventory_buy_dip_bps >= 10.0
-    assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
+    assert cfg.paper_maker_sell_profit_buffer_bps >= 5.0
     assert cfg.paper_trail_take_profit_enabled is True
-    assert cfg.paper_trail_arm_gain_pct == 0.30
-    assert cfg.paper_trail_drawdown_pct == 0.12
+    assert cfg.paper_trail_arm_gain_pct == 0.12
+    assert cfg.paper_trail_drawdown_pct == 0.06
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.25
-    assert cfg.paper_trail_soft_arm_pct == 0.12
-    assert cfg.paper_trail_hard_arm_pct == 0.30
+    assert cfg.paper_trail_soft_arm_pct == 0.05
+    assert cfg.paper_trail_hard_arm_pct == 0.12
     assert cfg.paper_trail_session_buys_only is True
     assert cfg.paper_trail_atr_enabled is True
     assert cfg.paper_buy_momentum_enabled is True
@@ -105,7 +105,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_resting_max_age_sec >= 180.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0
     assert cfg.paper_max_alt_inventory_pct <= 40.0
-    assert cfg.paper_markout_enabled is False
+    assert cfg.paper_markout_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
     # Trend allowlist: volatile alts only (no ETH/BNB/AVAX).
@@ -369,10 +369,12 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         symbols=["ADAEUR"],
         persist_path=tmp_path / "t.json",
     )
-    assert cfg.paper_trail_drawdown_pct == 0.12
-    assert cfg.paper_trail_soft_arm_pct == 0.12
-    assert cfg.paper_trail_hard_arm_pct == 0.30
+    assert cfg.paper_trail_drawdown_pct == 0.06
+    assert cfg.paper_trail_soft_arm_pct == 0.05
+    assert cfg.paper_trail_hard_arm_pct == 0.12
     assert cfg.paper_trail_partial_pct == 0.25
+    assert cfg.live_micro_max_notional_eur <= 150.0
+    assert cfg.paper_markout_enabled is True
 
 
 def test_trail_partial_flags_newly_armed() -> None:

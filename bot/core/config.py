@@ -136,11 +136,11 @@ class Settings(BaseSettings):
     paper_trail_partial_enabled: bool = True
     paper_trail_partial_pct: float = Field(default=0.50, ge=0.05, le=0.95)
     # Soft / hard schedule (preferred over single partial).
-    paper_trail_soft_arm_pct: float = Field(default=0.12, ge=0.02, le=2.0)
-    paper_trail_soft_drawdown_pct: float = Field(default=0.08, ge=0.02, le=0.50)
+    paper_trail_soft_arm_pct: float = Field(default=0.05, ge=0.01, le=2.0)
+    paper_trail_soft_drawdown_pct: float = Field(default=0.03, ge=0.01, le=0.50)
     paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
-    paper_trail_hard_arm_pct: float = Field(default=0.30, ge=0.05, le=5.0)
-    paper_trail_hard_drawdown_pct: float = Field(default=0.12, ge=0.02, le=0.90)
+    paper_trail_hard_arm_pct: float = Field(default=0.12, ge=0.02, le=5.0)
+    paper_trail_hard_drawdown_pct: float = Field(default=0.06, ge=0.01, le=0.90)
     paper_trail_hard_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
     # Only trail inventory bought during this live session (fix pre-session mark seed).
     paper_trail_session_buys_only: bool = True
@@ -154,9 +154,12 @@ class Settings(BaseSettings):
     paper_ladder_buy_pcts: str = "0.01,0.02,0.03"
     # Time-stop: after this many seconds without trail arm, exit at >= break-even only.
     paper_time_stop_enabled: bool = False
-    paper_time_stop_sec: float = Field(default=86400.0, ge=3600.0)
+    paper_time_stop_sec: float = Field(default=14400.0, ge=600.0)
     # Sub-min-notional inventory: top_up | exit_breakeven | top_up_or_exit | off
     paper_dust_policy: str = "off"
+    # Allow dust break-even exits within this many bps below fee-adjusted BE
+    # (inventory hygiene only; default 0 = strict BE).
+    paper_dust_exit_slack_bps: float = Field(default=0.0, ge=0, le=50)
     # When True, block new buys while HMM/regime is reduce-only / toxic.
     paper_regime_block_buys: bool = True
     # Require non-negative (or min) mark momentum before new buys.

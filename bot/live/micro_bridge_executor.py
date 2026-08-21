@@ -168,6 +168,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._dust_policy = str(
             getattr(settings, "paper_dust_policy", "off") or "off"
         ).strip().lower()
+        self._dust_exit_slack = Decimal(
+            str(getattr(settings, "paper_dust_exit_slack_bps", 0) or 0)
+        ) / Decimal("10000")
         self._regime_block_buys = bool(
             getattr(settings, "paper_regime_block_buys", True)
         )
@@ -309,7 +312,46 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "max_alt_bases": self._max_alt_bases,
             "held_alt_bases": sorted(self._held_alt_bases()),
             "last_sync": self._last_sync,
+            "diagnostics": {
+                "realized_net_pnl_eur": str(self.realized_trade_pnl_eur),
+                "live_fills": int(self.live_fill_count),
+                "live_transactions": int(self.live_transaction_count),
+                "recent_live_trades": list(self.live_trades[-12:]),
+                "skip_leaders": sorted(
+                    ((k, v) for k, v in self.skips.items()),
+                    key=lambda kv: kv[1],
+                    reverse=True,
+                )[:12],
+                "why_idle": self._why_idle_hints(),
+            },
         }
+
+    def _why_idle_hints(self) -> list[str]:
+        hints: list[str] = []
+        held = self._held_alt_bases()
+        if self._daily_kill_active:
+            hints.append("DAILY_KILL")
+        if self._buys_blocked:
+            hints.append("BUYS_BLOCKED_REGIME")
+        if self._max_alt_bases > 0 and len(held) > self._max_alt_bases:
+            hints.append(
+                f"OVER_MAX_ALT_BASES held={sorted(held)} max={self._max_alt_bases}"
+            )
+        elif self._max_alt_bases > 0 and len(held) >= self._max_alt_bases:
+            hints.append(
+                f"AT_MAX_ALT_BASES held={sorted(held)} (adds to existing only)"
+            )
+        if self.skips.get("sell_below_break_even", 0) > 0:
+            hints.append("SELLS_BELOW_BREAK_EVEN")
+        if self.skips.get("fees_eat_edge", 0) > 0:
+            hints.append("FEES_EAT_EDGE")
+        if self.skips.get("momentum_block", 0) > 0:
+            hints.append("MOMENTUM_BLOCK")
+        if self.skips.get("corr_group_cap", 0) > 0:
+            hints.append("CORR_GROUP_CAP")
+        if not hints:
+            hints.append("SCANNING_NO_PASSING_EDGE")
+        return hints
 
     def _trail_states_public(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -1369,7 +1411,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     async def manage_dust_positions(
         self, venue: str = "bitvavo"
     ) -> dict[str, Any]:
-        """Top up sub-min positions toward min notional, else exit at break-even."""
+        """Top up sub-min positions, else exit near break-even; trim over-cap bags."""
         policy = self._dust_policy
         if policy in {"", "off", "none"}:
             return {"ok": True, "policy": policy, "actions": []}
@@ -1378,6 +1420,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         bals = await self._fetch_balances_cached(venue)
         actions: list[dict[str, Any]] = []
+        sized: list[tuple[str, Decimal, Decimal, Decimal]] = []
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
             if not asset or asset == self._quote or asset in self._exclude_bases:
@@ -1393,13 +1436,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             notional = free * mark
             if notional < _MIN_LIVE_NOTIONAL:
-                continue  # true dust — leave
-            if notional >= min_notional:
                 continue
+            sized.append((asset, free, mark, notional))
+
+        held = {a for a, _f, _m, n in sized if n >= min_notional * Decimal("0.5")}
+        over_cap = self._max_alt_bases > 0 and len(held) > self._max_alt_bases
+
+        for asset, free, mark, notional in sized:
+            symbol = f"{asset}{self._quote}"
             need_eur = min_notional - notional
+            is_sub_min = notional < min_notional
+            is_trim_target = False
+            if over_cap and sized:
+                smallest = min(sized, key=lambda r: r[3])
+                is_trim_target = asset == smallest[0] and notional <= (
+                    min_notional * Decimal("2")
+                )
+            if not is_sub_min and not is_trim_target:
+                continue
+
             did = None
-            if policy in {"top_up", "top_up_or_exit"} and not self._buys_blocked:
-                held = self._held_alt_bases()
+            if (
+                is_sub_min
+                and policy in {"top_up", "top_up_or_exit"}
+                and not self._buys_blocked
+                and not self._daily_kill_active
+            ):
                 can_add = asset in held or (
                     self._max_alt_bases <= 0 or len(held) < self._max_alt_bases
                 )
@@ -1435,23 +1497,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     self._bump_skip("dust_top_up")
             if did is None and policy in {"exit_breakeven", "top_up_or_exit"}:
                 be = self._break_even_sell_price(asset)
-                if be is not None and mark >= be:
+                floor = be
+                if be is not None and self._dust_exit_slack > 0:
+                    floor = be * (Decimal("1") - self._dust_exit_slack)
+                if floor is not None and mark >= floor:
+                    reason = (
+                        "inventory_trim_breakeven"
+                        if is_trim_target and not is_sub_min
+                        else "dust_exit_breakeven"
+                    )
                     result = await self._submit_exit_sell(
                         venue=venue,
                         symbol=symbol,
                         qty=free,
                         mark=mark,
-                        reason="dust_exit_breakeven",
-                        limit_price=max(be, mark * Decimal("0.999")),
+                        reason=reason,
+                        limit_price=max(be or mark, mark * Decimal("0.999")),
                         post_only=True,
                     )
                     did = {
-                        "action": "exit_breakeven",
+                        "action": (
+                            "inventory_trim"
+                            if is_trim_target and not is_sub_min
+                            else "exit_breakeven"
+                        ),
                         "base": asset,
                         "status": str(result.status),
                         "qty": str(free),
+                        "be": str(be) if be is not None else None,
+                        "floor": str(floor),
                     }
-                    self._bump_skip("dust_exit_breakeven")
+                    self._bump_skip(
+                        "inventory_trim"
+                        if is_trim_target and not is_sub_min
+                        else "dust_exit_breakeven"
+                    )
             if did is not None:
                 actions.append(did)
                 logger.info("DUST_POLICY %s", did)

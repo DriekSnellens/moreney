@@ -103,6 +103,15 @@ class MicroSessionManager:
             )
 
             async def _runner() -> None:
+                # Share process kill-switch with API /risk/kill-switch/* so
+                # emergency-stop actually blocks micro-session new orders.
+                shared_ks = None
+                try:
+                    from bot.main import get_kill_switch
+
+                    shared_ks = get_kill_switch()
+                except Exception:  # noqa: BLE001
+                    logger.warning("micro session could not bind shared kill switch")
                 try:
                     report = await run_session(
                         minutes=None if continuous else minutes,
@@ -113,6 +122,7 @@ class MicroSessionManager:
                         report_path=_REPORT_PATH,
                         status_callback=self._on_session_tick,
                         should_stop=lambda: self._stop_requested,
+                        kill_switch=shared_ks,
                     )
                     self._publish(
                         {
