@@ -309,13 +309,32 @@ async def run_session(
                 "starting_equity_eur": str(start_equity),
                 "current_equity_eur": str(equity),
                 "pnl_paper_pocket_eur": str(equity - start_equity),
+                "portfolio_value_eur": (
+                    str(bridge.portfolio_value_eur)
+                    if bridge.portfolio_value_eur is not None
+                    else None
+                ),
+                "starting_portfolio_eur": (
+                    str(bridge.starting_portfolio_eur)
+                    if bridge.starting_portfolio_eur is not None
+                    else None
+                ),
+                "netto_winst_eur": (
+                    str(bridge.portfolio_value_eur - bridge.starting_portfolio_eur)
+                    if (
+                        bridge.portfolio_value_eur is not None
+                        and bridge.starting_portfolio_eur is not None
+                    )
+                    else None
+                ),
                 "bridge": bridge.snapshot_bridge(),
                 "live_trades_attempted": len(bridge.live_trades),
                 "live_trades_executed": len(
                     [t for t in bridge.live_trades if (t.get("result") or {}).get("executed")]
                 ),
-                "trade_count": int(bridge.live_fill_count),
+                "trade_count": int(bridge.live_transaction_count),
                 "live_fill_count": int(bridge.live_fill_count),
+                "live_transaction_count": int(bridge.live_transaction_count),
                 "resting_orders": len(bridge._resting),  # noqa: SLF001
                 "last_live_trade": bridge.live_trades[-1] if bridge.live_trades else None,
                 "last_cycle": st.get("last_cycle"),

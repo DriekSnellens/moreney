@@ -1,4 +1,4 @@
-"""Live-only operator dashboard — minimal: cash, net PnL, trades."""
+"""Live-only operator dashboard — portfolio, cash, net PnL, transactions."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _css() -> str:
         linear-gradient(165deg, #0a0e14 0%, var(--bg0) 45%, #101820 100%);
     }
     .wrap {
-      max-width: 920px;
+      max-width: 1100px;
       margin: 0 auto;
       padding: clamp(1.5rem, 4vw, 3rem) 1.25rem 2.5rem;
     }
@@ -115,8 +115,11 @@ def _css() -> str:
       gap: 1rem;
       grid-template-columns: 1fr;
     }
-    @media (min-width: 720px) {
-      .grid { grid-template-columns: repeat(3, 1fr); }
+    @media (min-width: 900px) {
+      .grid { grid-template-columns: repeat(4, 1fr); }
+    }
+    @media (min-width: 600px) and (max-width: 899px) {
+      .grid { grid-template-columns: repeat(2, 1fr); }
     }
     .card {
       background: color-mix(in srgb, var(--bg1) 88%, transparent);
@@ -140,7 +143,7 @@ def _css() -> str:
     .value {
       margin: .85rem 0 0;
       font-family: var(--mono);
-      font-size: clamp(1.85rem, 4.5vw, 2.45rem);
+      font-size: clamp(1.55rem, 3.6vw, 2.15rem);
       font-weight: 600;
       letter-spacing: -0.03em;
       line-height: 1.1;
@@ -175,7 +178,7 @@ def _css() -> str:
 
 
 def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
-    """Show free cash, net profit, and trade count — nothing else."""
+    """Portfolio value, free cash, net session PnL, buy/sell transaction count."""
     session = payload.get("session") or {}
     observe = payload.get("observe") or {}
     bridge = session.get("bridge") or {}
@@ -185,24 +188,29 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     if free is None:
         free = _dec(bridge.get("free_quote_eur") or bridge.get("remaining_eur"))
 
-    pnl = _dec(session.get("pnl_paper_pocket_eur"))
-    if pnl is None:
-        start = _dec(session.get("starting_equity_eur"))
-        current = _dec(session.get("current_equity_eur"))
-        if start is not None and current is not None:
-            pnl = current - start
+    portfolio = _dec(session.get("portfolio_value_eur") or bridge.get("portfolio_value_eur"))
+    if portfolio is None:
+        # Fallback: observe total if it includes marks; else free EUR only.
+        portfolio = _dec(observe.get("total_value_eur"))
 
-    trades = session.get("live_fill_count")
-    if trades is None:
-        trades = (session.get("bridge") or {}).get("live_fill_count")
-    if trades is None:
-        trades = session.get("trade_count")
-    if trades is None:
-        trades = session.get("live_trades_executed")
+    # True economic PnL vs session start (cash + marked crypto), not paper-equity drift.
+    pnl = _dec(session.get("netto_winst_eur") or bridge.get("netto_winst_eur"))
+    if pnl is None:
+        start_pf = _dec(
+            session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur")
+        )
+        if portfolio is not None and start_pf is not None:
+            pnl = portfolio - start_pf
+
+    tx = session.get("live_transaction_count")
+    if tx is None:
+        tx = bridge.get("live_transaction_count")
+    if tx is None:
+        tx = session.get("live_fill_count") or bridge.get("live_fill_count")
     try:
-        trade_n = int(trades or 0)
+        tx_n = int(tx or 0)
     except (TypeError, ValueError):
-        trade_n = 0
+        tx_n = 0
 
     pnl_class = ""
     if pnl is not None and pnl > 0:
@@ -230,6 +238,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </header>
     <section class="grid">
       <article class="card">
+        <p class="label">Portfolio</p>
+        <p class="value">{_esc(_eur(portfolio))}</p>
+        <p class="hint">EUR + crypto tegen marktprijs</p>
+      </article>
+      <article class="card">
         <p class="label">Vrij te besteden</p>
         <p class="value">{_esc(_eur(free))}</p>
         <p class="hint">Beschikbare EUR op Bitvavo</p>
@@ -237,12 +250,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Netto winst</p>
         <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">Sessie PnL na kosten</p>
+        <p class="hint">t.o.v. start sessie (na fees op fills)</p>
       </article>
       <article class="card">
-        <p class="label">Trades</p>
-        <p class="value">{_esc(trade_n)}</p>
-        <p class="hint">Echte fills (niet openstaande quotes)</p>
+        <p class="label">Transacties</p>
+        <p class="value">{_esc(tx_n)}</p>
+        <p class="hint">Elke buy of sell fill</p>
       </article>
     </section>
     <footer>

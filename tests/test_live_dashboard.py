@@ -37,10 +37,17 @@ def test_render_live_dashboard_contains_controls() -> None:
                 "running": True,
                 "continuous": True,
                 "budget_eur": "2024",
-                "pnl_paper_pocket_eur": "12.50",
-                "trade_count": 7,
-                "live_fill_count": 7,
-                "bridge": {"free_quote_eur": "1623.39", "turnover_eur": "0", "skips": {}, "live_fill_count": 7},
+                "portfolio_value_eur": "2100.50",
+                "starting_portfolio_eur": "2000.00",
+                "netto_winst_eur": "100.50",
+                "live_transaction_count": 7,
+                "bridge": {
+                    "free_quote_eur": "1623.39",
+                    "portfolio_value_eur": "2100.50",
+                    "netto_winst_eur": "100.50",
+                    "live_transaction_count": 7,
+                    "skips": {},
+                },
             },
             "engine": {"armed": False, "can_place_orders": False, "block_reason": "locked"},
             "unlock": {"can_place_orders": False, "flags": []},
@@ -61,10 +68,10 @@ def test_render_live_dashboard_contains_controls() -> None:
         }
     ).body.decode()
     assert "Moreney" in html
+    assert "Portfolio" in html
     assert "Vrij te besteden" in html
     assert "Netto winst" in html
-    assert "Trades" in html
-    assert "1623,39" in html or "€1.623,39" in html
+    assert "Transacties" in html
     assert "7" in html
     assert "Start" in html
     assert "Emergency stop" not in html
@@ -76,7 +83,8 @@ def test_live_dashboard_routes_and_paper_redirects() -> None:
         live = client.get("/live/dashboard")
         assert live.status_code == 200
         assert "Vrij te besteden" in live.text
-        assert "Netto winst" in live.text
+        assert "Portfolio" in live.text
+        assert "Transacties" in live.text
         assert client.get("/", follow_redirects=False).status_code == 200
         assert client.get("/dashboard", follow_redirects=False).status_code == 200
         for path in ("/paper/dashboard", "/paper/dashboard-lite", "/fleet", "/strategy-lab"):

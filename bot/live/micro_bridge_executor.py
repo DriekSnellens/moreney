@@ -72,6 +72,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._last_sync: dict[str, Any] | None = None
         self._resting: list[dict[str, Any]] = []
         self.live_fill_count = 0
+        self.live_transaction_count = 0  # +1 per buy of sell fill
+        self.portfolio_value_eur: Decimal | None = None
+        self.starting_portfolio_eur: Decimal | None = None
         self._resting_max_age_sec = float(
             getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
             or _DEFAULT_RESTING_MAX_AGE_SEC
@@ -94,17 +97,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return free if free <= self._budget else self._budget
 
     def snapshot_bridge(self) -> dict[str, Any]:
+        pnl = None
+        if self.portfolio_value_eur is not None and self.starting_portfolio_eur is not None:
+            pnl = self.portfolio_value_eur - self.starting_portfolio_eur
         return {
             "budget_eur": str(self._budget),
             "free_quote_eur": str(self.free_quote_eur),
             "remaining_eur": str(self.budget_remaining),
             "turnover_eur": str(self._turnover),
+            "portfolio_value_eur": (
+                str(self.portfolio_value_eur) if self.portfolio_value_eur is not None else None
+            ),
+            "starting_portfolio_eur": (
+                str(self.starting_portfolio_eur)
+                if self.starting_portfolio_eur is not None
+                else None
+            ),
+            "netto_winst_eur": str(pnl) if pnl is not None else None,
             "execute_venues": sorted(self._execute_venues),
             "exclude_bases": sorted(self._exclude_bases),
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
             "live_trade_count": len(self.live_trades),
             "live_fill_count": int(self.live_fill_count),
+            "live_transaction_count": int(self.live_transaction_count),
             "resting_orders": len(self._resting),
             "capital_model": "pocket",
             "last_sync": self._last_sync,
@@ -169,6 +185,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 else:
                     ledger_balances[asset] = free
         self._portfolio.venue_ledger.replace_balances(venue, ledger_balances)
+        portfolio_value = await self.refresh_portfolio_value(venue=venue, balances=bals)
+        if self.starting_portfolio_eur is None and portfolio_value is not None:
+            self.starting_portfolio_eur = portfolio_value
 
         self._last_sync = {
             "ok": True,
@@ -177,16 +196,68 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "ledger": {k: str(v) for k, v in sorted(ledger_balances.items())},
             "free_quote_eur": str(self.free_quote_eur),
             "remaining_eur": str(self.budget_remaining),
+            "portfolio_value_eur": (
+                str(self.portfolio_value_eur) if self.portfolio_value_eur is not None else None
+            ),
         }
         logger.info(
-            "MICRO_SYNC venue=%s free_eur=%s remaining=%s assets=%s ledger=%s",
+            "MICRO_SYNC venue=%s free_eur=%s portfolio=%s remaining=%s assets=%s ledger=%s",
             venue,
             self.free_quote_eur,
+            self.portfolio_value_eur,
             self.budget_remaining,
             sorted(mapped.keys()),
             sorted(ledger_balances.keys()),
         )
         return dict(self._last_sync)
+
+    async def refresh_portfolio_value(
+        self,
+        *,
+        venue: str = "bitvavo",
+        balances: list[Any] | None = None,
+    ) -> Decimal | None:
+        """Mark Bitvavo portfolio to EUR (cash + crypto × last/bid)."""
+        client = self._trading_client(venue)
+        if client is None:
+            return self.portfolio_value_eur
+        bals = balances
+        if bals is None:
+            try:
+                snap = await client.get_balances()
+                bals = list(snap.balances or [])
+            except Exception:  # noqa: BLE001
+                return self.portfolio_value_eur
+
+        total = _ZERO
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset:
+                continue
+            qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                str(getattr(bal, "locked", 0) or 0)
+            )
+            if qty <= 0:
+                continue
+            if asset == self._quote:
+                total += qty
+                continue
+            symbol = f"{asset}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol)
+            if mark is None or mark <= 0:
+                try:
+                    ticker = await client.fetch_ticker(symbol)
+                    mark = Decimal(
+                        str(ticker.last or ticker.bid or ticker.ask or 0)
+                    )
+                    if mark > 0:
+                        self._portfolio.set_mark_price(symbol, mark)
+                except Exception:  # noqa: BLE001
+                    mark = None
+            if mark is not None and mark > 0:
+                total += qty * mark
+        self.portfolio_value_eur = total
+        return total
 
     async def _live_free(self, venue: str, asset: str) -> Decimal:
         client = self._trading_client(venue)
@@ -676,6 +747,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             logger.exception("micro_bridge venue ledger sync failed")
         self._portfolio.set_mark_price(order.symbol, average_price)
         self.live_fill_count += 1
+        self.live_transaction_count += 1
 
         result = ExecutionResult(
             order_id=order.id,
