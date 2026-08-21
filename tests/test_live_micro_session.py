@@ -72,7 +72,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_starting_eur == 25.0
     assert cfg.live_micro_symbols == "*"
     assert cfg.risk_max_position_usd == 25.0
-    assert cfg.paper_maker_enabled is False
+    assert cfg.paper_maker_enabled is True
+    assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
 
 

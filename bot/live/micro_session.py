@@ -61,22 +61,28 @@ def _session_settings(
             "paper_auto_start": False,
             "paper_starting_eur": budget_f,
             "paper_persist_path": str(persist_path),
+            "paper_venue_inventory": False,
             "paper_seed_inventory_pct": 0.0,
             "paper_seed_max_assets": 0,
-            # Maker quotes are paper-only on the bridge; use arb for live Bitvavo fills.
-            "paper_maker_enabled": False,
+            "paper_seed_usdt_pct": 0.0,
+            # Live Bitvavo maker quotes inside the € pocket (arb needs multi-venue keys).
+            "paper_maker_enabled": True,
             "paper_triangle_enabled": False,
+            "paper_maker_venues": "bitvavo",
             "paper_maker_min_notional_eur": min(5.0, budget_f),
-            "paper_maker_min_profit_eur": min(0.02, budget_f * 0.001),
+            "paper_maker_min_profit_eur": 0.02,
+            "paper_maker_min_net_return": 0.0005,
             "arbitrage_min_profit_eur": 0.01,
             "arbitrage_min_profit_pct": 0.00015,
             "profitability_min_net_profit_usd": 0.01,
+            "profitability_min_net_return": 0.00005,
+            "profitability_execution_buffer_bps": 0.5,
             "risk_min_net_profit_usd": 0.01,
             "risk_max_position_usd": budget_f,
             "risk_max_daily_loss_usd": budget_f,
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": "*",
-            # Per-order ceiling = full pocket (not a separate "€25 per trade" product rule).
+            # Per-order ceiling = full pocket (capital is €25 total, recycles).
             "live_micro_max_notional_eur": budget_f,
             "live_micro_max_daily_loss_eur": budget_f,
             "live_micro_max_open_orders": 8,
@@ -101,7 +107,7 @@ def attach_micro_bridge(
         budget_eur=budget_eur,
         execute_venues={"bitvavo"},
         exclude_bases=exclude_bases or {"BTC"},
-        live_maker=False,
+        live_maker=True,
     )
     runner._executor = bridge  # noqa: SLF001
     runner._engine = TradingEngine(  # noqa: SLF001
