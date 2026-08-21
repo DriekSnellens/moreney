@@ -362,7 +362,8 @@ class Settings(BaseSettings):
     live_micro_symbols: str = "BTCEUR,ETHEUR"
     live_micro_max_notional_eur: float = Field(default=50.0, gt=0)
     live_micro_max_daily_loss_eur: float = Field(default=25.0, gt=0)
-    live_micro_max_open_orders: int = Field(default=1, ge=1, le=10)
+    live_micro_max_open_orders: int = Field(default=1, ge=1, le=20)
+    live_micro_resting_max_age_sec: float = Field(default=90.0, ge=5, le=600)
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

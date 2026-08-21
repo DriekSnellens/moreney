@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any
 
@@ -13,6 +14,8 @@ from bot.execution.base import BaseExecutor
 from bot.live.audit import LiveAuditLog
 from bot.live.micro import MicroLivePolicy
 from bot.live.registry import MultiVenueRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class MultiVenueLiveExecutor(BaseExecutor):
@@ -48,6 +51,31 @@ class MultiVenueLiveExecutor(BaseExecutor):
             return self._policy.can_place_orders()
         return False, "MultiVenueLiveExecutor not force-enabled (scaffolding)"
 
+    async def refresh_open_order_count(self, venue: str | None = None) -> int:
+        """Sync open-order counter from the exchange (prevents permanent policy blocks)."""
+        venues = (
+            [venue.strip().lower()]
+            if venue
+            else list(self._policy.allowed_venues())
+        )
+        total = 0
+        for name in venues:
+            if not name:
+                continue
+            client = self._registry.get_client(name, enable_trading=True)
+            if client is None or not hasattr(client, "fetch_open_orders"):
+                continue
+            try:
+                orders = await client.fetch_open_orders()
+                total += len(orders or [])
+            except Exception:  # noqa: BLE001
+                logger.warning("refresh_open_order_count failed for %s", name)
+        self._open_orders = total
+        return total
+
+    def note_open_orders(self, count: int) -> None:
+        self._open_orders = max(0, int(count))
+
     async def execute(self, order: OrderRequest) -> ExecutionResult:
         allowed, reason = self.trading_allowed()
         venue = str(
@@ -60,6 +88,11 @@ class MultiVenueLiveExecutor(BaseExecutor):
         px = Decimal(str(order.limit_price or 0))
         qty = Decimal(str(order.quantity or 0))
         notional = px * qty if px > 0 else qty
+
+        try:
+            await self.refresh_open_order_count(venue or None)
+        except Exception:  # noqa: BLE001
+            logger.warning("open-order refresh skipped before place")
 
         ok, detail = self._policy.validate_order(
             venue=venue or "unknown",
@@ -96,7 +129,13 @@ class MultiVenueLiveExecutor(BaseExecutor):
         )
         if result.status == OrderStatus.REJECTED:
             raise ExecutionError(result.message or "Exchange rejected order")
-        self._open_orders += 1
+        filled = Decimal(str(result.filled_quantity or 0))
+        status_val = (
+            result.status.value if hasattr(result.status, "value") else str(result.status)
+        )
+        # Only count still-open orders toward the policy cap.
+        if filled <= 0 and str(status_val).lower() not in {"filled", "closed"}:
+            self._open_orders += 1
         return result
 
     def status(self) -> dict[str, Any]:
@@ -108,5 +147,6 @@ class MultiVenueLiveExecutor(BaseExecutor):
             "block_reason": None if allowed else reason,
             "policy": self._policy.status(),
             "registry": self._registry.status(),
+            "open_orders_tracked": self._open_orders,
             "withdrawals_supported": False,
         }

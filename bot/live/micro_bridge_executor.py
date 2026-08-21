@@ -31,6 +31,7 @@ _ZERO = Decimal("0")
 _MIN_LIVE_NOTIONAL = Decimal("5")
 _FILL_POLL_SECONDS = 2.5
 _FILL_POLL_INTERVAL = 0.3
+_DEFAULT_RESTING_MAX_AGE_SEC = 90.0
 
 
 class MicroBudgetLiveExecutor(PaperExecutor):
@@ -69,6 +70,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.skips: dict[str, int] = {}
         self.live_trades: list[dict[str, Any]] = []
         self._last_sync: dict[str, Any] | None = None
+        self._resting: list[dict[str, Any]] = []
+        self.live_fill_count = 0
+        self._resting_max_age_sec = float(
+            getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
+            or _DEFAULT_RESTING_MAX_AGE_SEC
+        )
 
     @property
     def free_quote_eur(self) -> Decimal:
@@ -97,6 +104,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
             "live_trade_count": len(self.live_trades),
+            "live_fill_count": int(self.live_fill_count),
+            "resting_orders": len(self._resting),
             "capital_model": "pocket",
             "last_sync": self._last_sync,
         }
@@ -237,6 +246,170 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             await asyncio.sleep(_FILL_POLL_INTERVAL)
         return last_filled, last_avg if last_avg > 0 else fallback_price
 
+    def _track_resting(
+        self,
+        *,
+        venue: str,
+        symbol: str,
+        side: str,
+        exchange_order_id: str | None,
+        quantity: Decimal,
+        price: Decimal,
+        strategy: str,
+        opportunity_id: Any,
+    ) -> None:
+        if not exchange_order_id:
+            return
+        self._resting.append(
+            {
+                "venue": venue,
+                "symbol": symbol,
+                "side": side,
+                "exchange_order_id": str(exchange_order_id),
+                "quantity": Decimal(str(quantity)),
+                "price": Decimal(str(price)),
+                "strategy": strategy,
+                "opportunity_id": opportunity_id,
+                "placed_mono": time.monotonic(),
+            }
+        )
+
+    async def manage_resting_orders(self, venue: str = "bitvavo") -> dict[str, Any]:
+        """Poll resting live orders: mirror fills, cancel stale quotes, free capital."""
+        client = self._trading_client(venue)
+        if client is None:
+            return {"ok": False, "reason": "no_client"}
+        mirrored = 0
+        cancelled = 0
+        still: list[dict[str, Any]] = []
+        now = time.monotonic()
+        max_age = self._resting_max_age_sec
+
+        # Also cancel exchange open orders we lost track of (age unknown → cancel if > cap).
+        try:
+            open_orders = await client.fetch_open_orders()
+        except Exception:  # noqa: BLE001
+            open_orders = []
+        tracked_ids = {str(r.get("exchange_order_id")) for r in self._resting}
+
+        for row in list(self._resting):
+            oid = str(row.get("exchange_order_id") or "")
+            symbol = str(row.get("symbol") or "")
+            if not oid or not symbol:
+                continue
+            filled = _ZERO
+            avg = Decimal(str(row.get("price") or 0))
+            status_val = "open"
+            try:
+                order = await client.fetch_order(oid, symbol)
+                filled = Decimal(str(order.filled_quantity or 0))
+                avg = Decimal(
+                    str(order.average_price or order.price or row.get("price") or 0)
+                )
+                status = order.status
+                status_val = status.value if hasattr(status, "value") else str(status)
+            except Exception:  # noqa: BLE001
+                logger.warning("resting fetch_order failed id=%s", oid)
+
+            if filled > 0 and avg > 0:
+                from bot.core.models import OrderRequest
+                from uuid import UUID
+
+                side_raw = str(row.get("side") or "buy").lower()
+                opp_side = (
+                    OpportunitySide.BUY if side_raw.startswith("b") else OpportunitySide.SELL
+                )
+                opp_id = row.get("opportunity_id")
+                try:
+                    opp_uuid = opp_id if isinstance(opp_id, UUID) else uuid4()
+                except Exception:  # noqa: BLE001
+                    opp_uuid = uuid4()
+                req = OrderRequest(
+                    opportunity_id=opp_uuid,
+                    symbol=symbol,
+                    side=opp_side,
+                    quantity=filled,
+                    limit_price=avg,
+                    metadata={"venue": venue, "exchange": venue},
+                )
+                await self._mirror_live_fill(
+                    req,
+                    filled_qty=filled,
+                    average_price=avg,
+                    venue=venue,
+                    strategy=str(row.get("strategy") or "maker_inventory"),
+                    exchange_order_id=oid,
+                )
+                mirrored += 1
+                remaining_open = str(status_val).lower() in {"open", "submitted", "pending", "partial"}
+                if remaining_open and filled < Decimal(str(row.get("quantity") or filled)):
+                    # partial — keep tracking remainder
+                    row["quantity"] = Decimal(str(row.get("quantity") or 0)) - filled
+                    if row["quantity"] > 0:
+                        still.append(row)
+                continue
+
+            age = now - float(row.get("placed_mono") or now)
+            terminal = str(status_val).lower() in {
+                "cancelled",
+                "canceled",
+                "rejected",
+                "failed",
+                "expired",
+                "filled",
+                "closed",
+            }
+            if terminal:
+                continue
+            if age >= max_age:
+                try:
+                    await client.cancel_order(oid, symbol)
+                    cancelled += 1
+                    self._bump_skip("stale_quote_cancelled")
+                    logger.info(
+                        "MICRO_STALE_CANCEL venue=%s symbol=%s id=%s age=%.1fs",
+                        venue,
+                        symbol,
+                        oid,
+                        age,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("stale cancel failed id=%s", oid)
+                    still.append(row)
+                continue
+            still.append(row)
+
+        # Orphan open orders on exchange not in our tracker: cancel to free capital.
+        for order in open_orders or []:
+            oid = str(getattr(order, "id", None) or "")
+            if not oid or oid in tracked_ids:
+                continue
+            symbol = str(getattr(order, "symbol", "") or "").upper().replace("/", "").replace("-", "")
+            if not symbol:
+                continue
+            try:
+                await client.cancel_order(oid, symbol)
+                cancelled += 1
+                self._bump_skip("orphan_open_cancelled")
+            except Exception:  # noqa: BLE001
+                logger.warning("orphan cancel failed id=%s", oid)
+
+        self._resting = still
+        live_exec = getattr(self._live, "executor", None)
+        if live_exec is not None and hasattr(live_exec, "refresh_open_order_count"):
+            try:
+                await live_exec.refresh_open_order_count(venue)
+            except Exception:  # noqa: BLE001
+                pass
+        if mirrored or cancelled:
+            await self.reconcile_from_exchange(venue)
+        return {
+            "ok": True,
+            "mirrored": mirrored,
+            "cancelled": cancelled,
+            "resting": len(self._resting),
+        }
+
     async def execute(
         self,
         order_request: OrderRequest,
@@ -375,8 +548,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
 
         if filled <= 0 or avg <= 0:
-            # Resting order accepted — sync locked EUR / inventory from venue.
+            # Resting order accepted — track for fill/cancel; sync locked balances.
             self._bump_skip("live_resting")
+            self._track_resting(
+                venue=venue,
+                symbol=symbol,
+                side=side,
+                exchange_order_id=(
+                    str(order_row.get("exchange_order_id"))
+                    if order_row.get("exchange_order_id")
+                    else None
+                ),
+                quantity=qty,
+                price=px,
+                strategy=strategy,
+                opportunity_id=order_request.opportunity_id,
+            )
             await self.reconcile_from_exchange(venue)
             return await self._reject_before_live(
                 order_request,
@@ -488,6 +675,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             logger.exception("micro_bridge venue ledger sync failed")
         self._portfolio.set_mark_price(order.symbol, average_price)
+        self.live_fill_count += 1
 
         result = ExecutionResult(
             order_id=order.id,

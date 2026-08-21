@@ -32,6 +32,23 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 
+# Liquid Bitvavo EUR books — prefer fill probability over long-tail dust pairs.
+_LIQUID_EUR_SYMBOLS = (
+    "ETHEUR",
+    "XRPEUR",
+    "ADAEUR",
+    "SOLEUR",
+    "ATOMEUR",
+    "NEAREUR",
+    "DOGEUR",
+    "BNBEUR",
+    "AVAXEUR",
+    "LINKEUR",
+    "DOTEUR",
+    "LTCEUR",
+    "UNIEUR",
+)
+
 
 def _non_btc_symbols(settings: Settings) -> list[str]:
     raw = [
@@ -40,6 +57,14 @@ def _non_btc_symbols(settings: Settings) -> list[str]:
         if s.strip()
     ]
     return [s for s in raw if not s.startswith("BTC")]
+
+
+def _liquid_symbols(settings: Settings, *, exclude_btc: bool = True) -> list[str]:
+    del settings  # allowlist is Bitvavo-liquid EUR pairs, not feed-dependent
+    out = list(_LIQUID_EUR_SYMBOLS)
+    if exclude_btc:
+        out = [s for s in out if not s.startswith("BTC")]
+    return out
 
 
 def _session_settings(
@@ -67,19 +92,26 @@ def _session_settings(
             "paper_seed_inventory_pct": 0.0,
             "paper_seed_max_assets": 0,
             "paper_seed_usdt_pct": 0.0,
-            # Live Bitvavo maker quotes inside the € pocket (arb needs multi-venue keys).
+            # Live Bitvavo maker quotes inside the € pocket.
             "paper_maker_enabled": True,
             "paper_triangle_enabled": False,
             "paper_maker_venues": "bitvavo",
-            "paper_maker_min_notional_eur": min(5.0, budget_f),
-            "paper_maker_min_profit_eur": 0.02,
-            "paper_maker_min_net_return": 0.0005,
-            "arbitrage_min_profit_eur": 0.01,
-            "arbitrage_min_profit_pct": 0.00015,
-            "profitability_min_net_profit_usd": 0.01,
-            "profitability_min_net_return": 0.00005,
-            "profitability_execution_buffer_bps": 0.5,
-            "risk_min_net_profit_usd": 0.01,
+            "paper_maker_min_notional_eur": min(25.0, max(10.0, budget_f * 0.02)),
+            # Bitvavo maker ~15 bps/side — require real NET edge after fees.
+            "paper_maker_min_profit_eur": 0.12,
+            "paper_maker_min_net_return": 0.0015,
+            "paper_maker_min_spread_bps": 8.0,
+            "paper_maker_one_leg_exit": True,
+            "paper_maker_one_leg_adverse_bps": 12.0,
+            "paper_maker_max_age_ms": 60_000.0,
+            "paper_maker_sibling_grace_ms": 15_000.0,
+            "paper_max_holding_sec": 900.0,
+            "arbitrage_min_profit_eur": 0.10,
+            "arbitrage_min_profit_pct": 0.001,
+            "profitability_min_net_profit_usd": 0.10,
+            "profitability_min_net_return": 0.001,
+            "profitability_execution_buffer_bps": 2.0,
+            "risk_min_net_profit_usd": 0.10,
             "risk_max_position_usd": budget_f,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
@@ -89,11 +121,12 @@ def _session_settings(
             "risk_max_open_positions": 50,
             "max_simultaneous_positions": 50,
             "live_micro_venues": "bitvavo",
-            "live_micro_symbols": "*",
+            "live_micro_symbols": ",".join(symbols) if symbols else "ETHEUR,XRPEUR,SOLEUR,ATOMEUR,NEAREUR",
             # Per-order ceiling = full pocket (capital recycles after sells).
             "live_micro_max_notional_eur": budget_f,
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
-            "live_micro_max_open_orders": 8,
+            "live_micro_max_open_orders": 12,
+            "live_micro_resting_max_age_sec": 90.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
         }
@@ -156,14 +189,10 @@ async def run_session(
     """
     base = settings or get_settings()
     if exclude_btc:
-        scan_symbols = symbols or _non_btc_symbols(base)
+        scan_symbols = symbols or _liquid_symbols(base, exclude_btc=True)
         scan_symbols = [s for s in scan_symbols if not s.upper().startswith("BTC")]
     else:
-        scan_symbols = symbols or [
-            s.strip().upper().replace("-", "").replace("/", "")
-            for s in base.market_data_symbols.split(",")
-            if s.strip()
-        ]
+        scan_symbols = symbols or _liquid_symbols(base, exclude_btc=False)
     if not scan_symbols:
         raise ValueError("No symbols configured for micro session")
 
@@ -285,6 +314,9 @@ async def run_session(
                 "live_trades_executed": len(
                     [t for t in bridge.live_trades if (t.get("result") or {}).get("executed")]
                 ),
+                "trade_count": int(bridge.live_fill_count),
+                "live_fill_count": int(bridge.live_fill_count),
+                "resting_orders": len(bridge._resting),  # noqa: SLF001
                 "last_live_trade": bridge.live_trades[-1] if bridge.live_trades else None,
                 "last_cycle": st.get("last_cycle"),
                 "why_not_trade": st.get("why_not_trade"),
@@ -295,6 +327,7 @@ async def run_session(
     try:
         _tick()
         last_sync = time.monotonic()
+        last_resting = time.monotonic()
         while True:
             if should_stop is not None and should_stop():
                 logger.info("Full-bot micro session stop requested")
@@ -302,6 +335,12 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
+            if time.monotonic() - last_resting >= 5.0:
+                try:
+                    await bridge.manage_resting_orders("bitvavo")
+                except Exception:  # noqa: BLE001
+                    logger.exception("resting order management failed")
+                last_resting = time.monotonic()
             if time.monotonic() - last_sync >= 15.0:
                 try:
                     await bridge.reconcile_from_exchange("bitvavo")
@@ -312,6 +351,12 @@ async def run_session(
             if not runner.running:
                 break
     finally:
+        try:
+            # Free locked capital: cancel any leftover resting live quotes.
+            bridge._resting_max_age_sec = 0.0  # noqa: SLF001
+            await bridge.manage_resting_orders("bitvavo")
+        except Exception:  # noqa: BLE001
+            logger.exception("final resting cleanup failed")
         try:
             await runner.stop()
         except Exception:  # noqa: BLE001

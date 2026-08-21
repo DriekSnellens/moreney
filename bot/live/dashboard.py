@@ -192,7 +192,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         if start is not None and current is not None:
             pnl = current - start
 
-    trades = session.get("trade_count")
+    trades = session.get("live_fill_count")
+    if trades is None:
+        trades = (session.get("bridge") or {}).get("live_fill_count")
+    if trades is None:
+        trades = session.get("trade_count")
     if trades is None:
         trades = session.get("live_trades_executed")
     try:
@@ -238,7 +242,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Trades</p>
         <p class="value">{_esc(trade_n)}</p>
-        <p class="hint">Uitgevoerde fills door de bot</p>
+        <p class="hint">Echte fills (niet openstaande quotes)</p>
       </article>
     </section>
     <footer>

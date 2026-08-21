@@ -70,12 +70,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
         persist_path=tmp_path / "state.json",
     )
     assert cfg.paper_starting_eur == 2024.0
-    assert cfg.live_micro_symbols == "*"
+    assert "ETHEUR" in cfg.live_micro_symbols
     assert cfg.risk_max_position_usd == 2024.0
     assert cfg.live_micro_max_daily_loss_eur == 202.4
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_enabled is True
     assert cfg.paper_venue_inventory is True
+    assert cfg.paper_maker_min_net_return >= 0.0015
+    assert cfg.paper_maker_one_leg_adverse_bps >= 12.0
+    assert cfg.live_micro_max_open_orders >= 12
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
 
