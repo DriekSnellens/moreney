@@ -324,6 +324,49 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     kill = "aan" if trail.get("daily_kill_active") else "uit"
     diag = bridge.get("diagnostics") or {}
     why = diag.get("why_idle") or []
+    funnel = session.get("pipeline_funnel") or {}
+    cv = funnel.get("cross_venue") or {}
+    cv_pairs = cv.get("pairs_evaluated", 0)
+    cv_edges = cv.get("edges_found", 0)
+    cv_emitted = cv.get("opportunities_emitted", 0)
+    cv_prof_ok = cv.get("profitability_passed", 0)
+    cv_prof_no = cv.get("profitability_rejected", 0)
+    cv_risk_ok = cv.get("risk_passed", 0)
+    cv_live = cv.get("live_orders", 0)
+    cv_fills = cv.get("live_fills", 0)
+    cv_rejects = cv.get("top_rejection_reasons") or []
+    cv_reject_html = (
+        "<ul class='alerts'>"
+        + "".join(
+            f"<li>{_esc(r.get('reason'))}: {_esc(r.get('count'))}</li>"
+            for r in cv_rejects
+            if isinstance(r, dict)
+        )
+        + "</ul>"
+        if cv_rejects
+        else "<p class='hint'>Nog geen cross-venue rejects geteld</p>"
+    )
+    cross_venue_html = (
+        "<section class='positions'><h2>Cross-venue OKX ↔ Bitvavo</h2>"
+        "<p class='hint'>Sessie-totalen: gezien vs door profitability / risk / live</p>"
+        "<table class='pos'><thead><tr>"
+        "<th>Pairs gescand</th><th>Edges</th><th>Kansen</th>"
+        "<th>Profit ✓</th><th>Profit ✗</th><th>Risk ✓</th>"
+        "<th>Live orders</th><th>Fills</th>"
+        "</tr></thead><tbody><tr>"
+        f"<td>{_esc(cv_pairs)}</td>"
+        f"<td>{_esc(cv_edges)}</td>"
+        f"<td>{_esc(cv_emitted)}</td>"
+        f"<td class='good'>{_esc(cv_prof_ok)}</td>"
+        f"<td class='bad'>{_esc(cv_prof_no)}</td>"
+        f"<td>{_esc(cv_risk_ok)}</td>"
+        f"<td>{_esc(cv_live)}</td>"
+        f"<td>{_esc(cv_fills)}</td>"
+        "</tr></tbody></table>"
+        "<p class='hint'>Top strategy rejects (cross-venue)</p>"
+        f"{cv_reject_html}"
+        "</section>"
+    )
     why_html = (
         "<section class='positions'><h2>Waarom geen trades</h2>"
         + (
@@ -414,6 +457,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       </article>
     </section>
     {positions_html}
+    {cross_venue_html}
     {why_html}
     {trades_html}
     {alerts_html}

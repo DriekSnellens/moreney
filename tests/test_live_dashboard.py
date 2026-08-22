@@ -75,7 +75,40 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "7" in html
     assert "Start" in html
     assert "Emergency stop" not in html
-    assert "Pipeline funnel" not in html
+
+
+def test_render_live_dashboard_cross_venue_panel() -> None:
+    html = render_live_dashboard(
+        {
+            "session": {
+                "running": True,
+                "pipeline_funnel": {
+                    "cross_venue": {
+                        "pairs_evaluated": 1200,
+                        "edges_found": 45,
+                        "opportunities_emitted": 3,
+                        "profitability_passed": 1,
+                        "profitability_rejected": 2,
+                        "risk_passed": 1,
+                        "live_orders": 0,
+                        "live_fills": 0,
+                        "top_rejection_reasons": [
+                            {"reason": "fees_eat_edge", "count": 30}
+                        ],
+                    }
+                },
+                "bridge": {},
+            },
+            "observe": {},
+            "engine": {},
+            "unlock": {},
+            "readiness": {},
+            "alerts": {},
+        }
+    ).body.decode()
+    assert "Cross-venue OKX ↔ Bitvavo" in html
+    assert "1200" in html
+    assert "fees_eat_edge" in html
 
 
 def test_live_dashboard_routes_and_paper_redirects() -> None:

@@ -164,6 +164,10 @@ class MakerInventoryStrategy(BaseStrategy):
         self._scan_rejections = 0
         self._opportunities_emitted = 0
         self._reject_counts: dict[str, int] = {}
+        self._cv_pairs_evaluated = 0
+        self._cv_edges_found = 0
+        self._cv_opportunities_emitted = 0
+        self._cv_reject_counts: dict[str, int] = {}
         self._last_emit: dict[str, tuple[float, Decimal]] = {}
         self._fair_values: dict[str, Decimal] = {}
         self._active_skew: QuoteSkew | None = None
@@ -190,6 +194,13 @@ class MakerInventoryStrategy(BaseStrategy):
         if hp is None or not getattr(hp, "enabled", False):
             return _NullSpan
         return hp.span(name)
+
+    def _is_cross_venue(self, buy_exchange: str | None, sell_exchange: str | None) -> bool:
+        buy = str(buy_exchange or "").strip().lower()
+        sell = str(sell_exchange or "").strip().lower()
+        if not buy or not sell or buy == sell:
+            return False
+        return buy in {"okx", "bitvavo"} and sell in {"okx", "bitvavo"}
 
     def _begin_cycle_caches(self) -> None:
         """Drop cycle-local caches so no values leak across evaluate_markets calls."""
@@ -389,6 +400,12 @@ class MakerInventoryStrategy(BaseStrategy):
             selected = self._drop_small_vs_best(selected)
         for opp in selected:
             self._opportunities_emitted += 1
+            meta = opp.metadata or {}
+            if self._is_cross_venue(
+                str(meta.get("buy_exchange") or ""),
+                str(meta.get("sell_exchange") or ""),
+            ):
+                self._cv_opportunities_emitted += 1
             self._mark_emitted(opp)
         return selected
 
@@ -434,8 +451,11 @@ class MakerInventoryStrategy(BaseStrategy):
                 if not self._venue_allowed(sell_snap.exchange):
                     continue
                 same = buy_snap.exchange == sell_snap.exchange
+                cross = self._is_cross_venue(buy_snap.exchange, sell_snap.exchange)
                 if same and not self._same_venue:
                     continue
+                if cross:
+                    self._cv_pairs_evaluated += 1
                 self._pairs_evaluated += 1
                 with self._hp("candidate_filtering"):
                     candidate = self._build_candidate(
@@ -448,6 +468,8 @@ class MakerInventoryStrategy(BaseStrategy):
                     )
                 if candidate is None:
                     continue
+                if cross:
+                    self._cv_edges_found += 1
                 self._depth_edges_found += 1
                 opportunity = await self._gate_candidate(
                     candidate,
@@ -1244,6 +1266,11 @@ class MakerInventoryStrategy(BaseStrategy):
     def _reject(self, symbol: str, code: str, reason: str, **context: object) -> None:
         self._scan_rejections += 1
         self._reject_counts[code] = self._reject_counts.get(code, 0) + 1
+        if self._is_cross_venue(
+            str(context.get("buy_exchange") or ""),
+            str(context.get("sell_exchange") or ""),
+        ):
+            self._cv_reject_counts[code] = self._cv_reject_counts.get(code, 0) + 1
         extras = " ".join(
             f"{key}={value}" for key, value in context.items() if value is not None
         )
@@ -1263,6 +1290,12 @@ class MakerInventoryStrategy(BaseStrategy):
             "scan_rejections": self._scan_rejections,
             "opportunities_emitted": self._opportunities_emitted,
             "reject_counts": dict(sorted(self._reject_counts.items())),
+            "cross_venue": {
+                "pairs_evaluated": self._cv_pairs_evaluated,
+                "edges_found": self._cv_edges_found,
+                "opportunities_emitted": self._cv_opportunities_emitted,
+                "reject_counts": dict(sorted(self._cv_reject_counts.items())),
+            },
             "inventory_mode": skew.mode if skew is not None else None,
             "alt_inventory_pct": (
                 float(skew.alt_fraction * Decimal("100")) if skew is not None else None

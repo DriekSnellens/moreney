@@ -784,6 +784,7 @@ class PaperRunner:
         if hasattr(self._strategy, "scan_stats"):
             scan = self._strategy.scan_stats()
             self._tracker.record_scan_stats(scan)
+            self._pipeline_funnel.observe_cross_venue_scan(scan)
         self._observe_pipeline_results(result)
         self._tracker.sync_portfolio(self._portfolio)
         self._cycle_count += 1
@@ -2077,47 +2078,55 @@ class PaperRunner:
         pf.observe_dislocation(raw=raw, above_40bps=above)
         pf.tick_cycle()
 
+    def _is_cross_venue_opportunity(self, opportunity: Any) -> bool:
+        meta = opportunity.metadata or {}
+        buy = str(meta.get("buy_exchange") or "").strip().lower()
+        sell = str(meta.get("sell_exchange") or "").strip().lower()
+        if not buy or not sell or buy == sell:
+            return bool(meta.get("frozen_cvd"))
+        return buy in {"okx", "bitvavo"} and sell in {"okx", "bitvavo"}
+
     def _observe_pipeline_results(self, result: TradeCycleResult) -> None:
-        """Count okx↔bitvavo CVD candidates through profitability/risk/execution."""
+        """Count okx↔bitvavo opportunities through profitability/risk/execution."""
         pf = self._pipeline_funnel
+        cv = pf.cross_venue
         risk_by_id = {d.opportunity_id: d for d in result.risk_decisions}
         prof_by_id = {p.opportunity_id: p for p in result.profitability}
-        cvd_opps = [
-            o for o in result.opportunities
-            if (o.metadata or {}).get("frozen_cvd") is True
-            or (
-                (o.metadata or {}).get("buy_exchange") in ("okx", "bitvavo")
-                and (o.metadata or {}).get("sell_exchange") in ("okx", "bitvavo")
-                and (o.metadata or {}).get("buy_exchange") != (o.metadata or {}).get("sell_exchange")
-            )
+        cross_opps = [
+            o for o in result.opportunities if self._is_cross_venue_opportunity(o)
         ]
-        for o in cvd_opps:
+        for o in cross_opps:
             prof = prof_by_id.get(o.id)
-            decision = risk_by_id.get(o.id)
-            if prof is not None:
+            if prof is not None and prof.trade_allowed:
                 pf.observe_profitability_passed(1)
+                cv.observe_profitability_passed(1)
+            elif prof is not None:
+                pf.observe_profitability_rejected(1)
+                cv.observe_profitability_rejected(1)
+                continue
             else:
                 pf.observe_profitability_rejected(1)
+                cv.observe_profitability_rejected(1)
                 continue
+            decision = risk_by_id.get(o.id)
             if decision is not None and decision.approved:
                 pf.observe_risk_passed(1)
+                cv.observe_risk_passed(1)
             elif decision is not None:
                 pf.observe_risk_rejected(1)
-                continue
-            else:
-                continue
+                cv.observe_risk_rejected(1)
         orders = [
-            o for o in result.orders
+            o
+            for o in result.orders
             if o.opportunity_id is not None
-            and any(c.id == o.opportunity_id for c in cvd_opps)
+            and any(c.id == o.opportunity_id for c in cross_opps)
         ]
         pf.observe_paper_orders(len(orders))
+        cv.observe_live_orders(len(orders))
         for fill in result.fills:
-            if any(
-                o.id == fill.order_id
-                for o in orders
-            ):
+            if any(o.id == fill.order_id for o in orders):
                 pf.observe_fill(full=True)
+                cv.observe_live_fills(1)
 
     async def _match_and_expire_quotes(
         self, books: dict[str, dict[str, Any]] | None = None
