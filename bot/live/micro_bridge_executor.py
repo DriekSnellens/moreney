@@ -78,14 +78,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.starting_portfolio_eur: Decimal | None = None
         # FIFO lots for realized PnL: base -> [(qty, unit_cost_eur)]
         self._cost_lots: dict[str, list[list[Decimal]]] = {}
-        self._lots_seeded = False
+        self._lots_seeded_venues: set[str] = set()
         self._resting_max_age_sec = float(
             getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
             or _DEFAULT_RESTING_MAX_AGE_SEC
         )
-        self._bal_cache: list[Any] | None = None
-        self._bal_cache_mono = 0.0
+        self._bal_cache: dict[str, list[Any]] = {}
+        self._bal_cache_mono: dict[str, float] = {}
         self._bal_cache_sec = 2.5
+        self._venue_raw_balances: dict[str, list[Any]] = {}
+        self._last_sync_by_venue: dict[str, dict[str, Any]] = {}
         self._mark_fetched_at: dict[str, float] = {}
         self._mark_ttl_sec = 30.0
         self._last_orphan_sweep_mono = 0.0
@@ -241,9 +243,64 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"realized PnL {self.realized_trade_pnl_eur} <= -{self._daily_kill_eur}; buys blocked",
                 )
 
-    def _invalidate_bal_cache(self) -> None:
-        self._bal_cache = None
-        self._bal_cache_mono = 0.0
+    def _invalidate_bal_cache(self, venue: str | None = None) -> None:
+        if venue is None:
+            self._bal_cache.clear()
+            self._bal_cache_mono.clear()
+            return
+        key = venue.strip().lower()
+        self._bal_cache.pop(key, None)
+        self._bal_cache_mono.pop(key, None)
+
+    @staticmethod
+    def _lots_key(venue: str, base: str) -> str:
+        return f"{venue.strip().lower()}:{base.upper()}"
+
+    def _venue_budget_remaining(self, venue: str) -> Decimal:
+        """Per-venue deployable EUR — each exchange gets its own pocket cap."""
+        key = venue.strip().lower()
+        ledger = self._portfolio.venue_ledger
+        live_eur = _ZERO
+        if ledger is not None:
+            live_eur = ledger.available(key, self._quote)
+        if live_eur <= 0:
+            live_eur = self._live_free_sync(key, self._quote)
+        if live_eur <= 0 and len(self._execute_venues) == 1:
+            live_eur = self.free_quote_eur
+        if live_eur > 0:
+            return min(live_eur, self._budget)
+        return _ZERO
+
+    def _live_free_sync(self, venue: str, asset: str) -> Decimal:
+        """Sync read of cached venue balances (no await)."""
+        key = asset.upper()
+        for bal in self._bal_cache.get(venue.strip().lower(), []):
+            if str(getattr(bal, "asset", "")).upper() == key:
+                return Decimal(str(getattr(bal, "free", 0) or 0))
+        return _ZERO
+
+    def _rebuild_aggregate_from_venues(self) -> dict[str, str]:
+        """Merge all cached venue balances into the paper pocket."""
+        from bot.core.models import Balance
+
+        venue_maps: dict[str, list[Balance]] = {}
+        for v, raw in self._venue_raw_balances.items():
+            venue_maps[v] = [
+                Balance(
+                    asset=str(getattr(b, "asset", "") or ""),
+                    free=Decimal(str(getattr(b, "free", 0) or 0)),
+                    locked=Decimal(str(getattr(b, "locked", 0) or 0)),
+                )
+                for b in raw
+            ]
+        if not venue_maps:
+            return {}
+        return self._portfolio.sync_live_balances_from_venues(
+            venue_maps,
+            quote_available_cap=self._budget,
+            allowed_bases=self._allowed_bases,
+            exclude_bases=self._exclude_bases,
+        )
 
     @property
     def free_quote_eur(self) -> Decimal:
@@ -255,7 +312,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     @property
     def budget_remaining(self) -> Decimal:
-        """Capital still free to deploy on buys — not a one-shot spend counter."""
+        """Capital still free to deploy on buys — sum of per-venue pockets."""
+        if len(self._execute_venues) > 1:
+            total = sum(
+                (self._venue_budget_remaining(v) for v in self._execute_venues),
+                _ZERO,
+            )
+            return total
         free = self.free_quote_eur
         if free < 0:
             return _ZERO
@@ -312,6 +375,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "max_alt_bases": self._max_alt_bases,
             "held_alt_bases": sorted(self._held_alt_bases()),
             "last_sync": self._last_sync,
+            "last_sync_by_venue": dict(self._last_sync_by_venue),
             "diagnostics": {
                 "realized_net_pnl_eur": str(self.realized_trade_pnl_eur),
                 "live_fills": int(self.live_fill_count),
@@ -355,7 +419,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     def _trail_states_public(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        for base, st in sorted(self._trail.items()):
+        for trail_key, st in sorted(self._trail.items()):
             cost = Decimal(str(st.get("cost") or 0))
             mark = Decimal(str(st.get("last_mark") or 0))
             gain = ((mark - cost) / cost) if cost > 0 and mark > 0 else _ZERO
@@ -363,9 +427,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hard_arm = Decimal(str(st.get("hard_arm") or self._hard_arm_floor))
             next_arm = soft_arm if not st.get("soft_armed") else hard_arm
             to_arm = next_arm - gain
-            opened = self._position_opened_mono.get(base)
+            opened = self._position_opened_mono.get(trail_key)
             age = (time.monotonic() - opened) if opened else None
-            out[base] = {
+            out[trail_key] = {
+                "venue": st.get("venue") or trail_key.split(":", 1)[0],
+                "base": st.get("base") or trail_key.split(":", 1)[-1],
                 "armed": bool(st.get("soft_armed") or st.get("hard_armed")),
                 "soft_armed": bool(st.get("soft_armed")),
                 "hard_armed": bool(st.get("hard_armed")),
@@ -385,8 +451,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             }
         return out
 
-    def _session_unit_cost(self, base: str) -> Decimal | None:
-        lots = self._session_lots.get(base.upper()) or []
+    def _session_unit_cost(self, venue: str, base: str) -> Decimal | None:
+        lots = self._session_lots.get(self._lots_key(venue, base)) or []
         total_qty = _ZERO
         total_cost = _ZERO
         for qty, unit in lots:
@@ -398,9 +464,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return None
         return total_cost / total_qty
 
-    def _session_qty(self, base: str) -> Decimal:
+    def _session_qty(self, venue: str, base: str) -> Decimal:
         return sum(
-            (qty for qty, _unit in (self._session_lots.get(base.upper()) or []) if qty > 0),
+            (
+                qty
+                for qty, _unit in (
+                    self._session_lots.get(self._lots_key(venue, base)) or []
+                )
+                if qty > 0
+            ),
             _ZERO,
         )
 
@@ -411,8 +483,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._mark_series[symbol] = series
         return series
 
-    def _note_position_opened(self, base: str) -> None:
-        key = base.upper()
+    def _note_position_opened(self, venue: str, base: str) -> None:
+        key = self._lots_key(venue, base)
         if key not in self._position_opened_mono:
             self._position_opened_mono[key] = time.monotonic()
 
@@ -449,9 +521,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             held.add(a)
         return held
 
-    def _seed_cost_lots_from_balances(self, bals: list[Any]) -> None:
+    def _seed_cost_lots_from_balances(self, venue: str, bals: list[Any]) -> None:
         """Seed FIFO cost basis at current marks so pre-session inventory isn't 'free'."""
-        if self._lots_seeded:
+        key = venue.strip().lower()
+        if key in self._lots_seeded_venues:
             return
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
@@ -466,9 +539,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             mark = self._portfolio.state.mark_prices.get(symbol)
             if mark is None or mark <= 0:
                 continue
-            self._cost_lots.setdefault(asset, []).append([qty, Decimal(str(mark))])
-            self._note_position_opened(asset)
-        self._lots_seeded = True
+            lot_key = self._lots_key(venue, asset)
+            self._cost_lots.setdefault(lot_key, []).append([qty, Decimal(str(mark))])
+            self._note_position_opened(venue, asset)
+        self._lots_seeded_venues.add(key)
 
     def _record_realized_fill(
         self,
@@ -478,18 +552,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         qty: Decimal,
         price: Decimal,
         fee: Decimal,
+        venue: str = "",
     ) -> None:
         """Update FIFO lots / realized PnL for a live mirrored fill."""
         if qty <= 0 or price <= 0:
             return
         base = infer_base_asset(symbol)
-        lots = self._cost_lots.setdefault(base, [])
+        lot_key = self._lots_key(venue or "bitvavo", base)
+        lots = self._cost_lots.setdefault(lot_key, [])
         if side == OrderSide.BUY:
             # Unit cost includes fee so sells net fee-correct PnL.
             unit = (qty * price + fee) / qty
             lots.append([qty, unit])
-            self._session_lots.setdefault(base, []).append([qty, unit])
-            self._note_position_opened(base)
+            self._session_lots.setdefault(lot_key, []).append([qty, unit])
+            self._note_position_opened(venue or "bitvavo", base)
             return
         remaining = qty
         proceeds = qty * price - fee
@@ -505,7 +581,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             else:
                 lots[0][0] = lot_qty
         # Mirror consume on session lots (trail inventory).
-        sess = self._session_lots.setdefault(base, [])
+        sess = self._session_lots.setdefault(lot_key, [])
         left = qty
         while left > 0 and sess:
             sq, _sc = sess[0]
@@ -521,10 +597,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.realized_trade_pnl_eur += proceeds - cost
         self._check_daily_kill()
         if not lots:
-            self._position_opened_mono.pop(base, None)
-            self._trail.pop(base, None)
+            self._position_opened_mono.pop(lot_key, None)
+            self._trail.pop(lot_key, None)
         if not sess:
-            self._trail.pop(base, None)
+            self._trail.pop(lot_key, None)
 
     def _bump_skip(self, key: str) -> None:
         self.skips[key] = self.skips.get(key, 0) + 1
@@ -547,6 +623,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     async def reconcile_from_exchange(self, venue: str = "bitvavo") -> dict[str, Any]:
         """Pull live balances into the paper pocket + venue ledger for strategy sizing."""
+        venue = venue.strip().lower()
         client = self._trading_client(venue)
         if client is None:
             return {"ok": False, "reason": "no_client", "venue": venue}
@@ -557,19 +634,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return {"ok": False, "reason": "balance_fetch_failed", "error": str(exc)[:200]}
 
         bals = list(snap.balances or [])
-        self._bal_cache = bals
-        self._bal_cache_mono = time.monotonic()
-        mapped = self._portfolio.sync_live_balances(
-            bals,
-            quote_available_cap=self._budget,
-            allowed_bases=self._allowed_bases,
-            exclude_bases=self._exclude_bases,
-        )
-        # Maker strategy sizes sell legs via venue_ledger.available(venue, base).
+        self._bal_cache[venue] = bals
+        self._bal_cache_mono[venue] = time.monotonic()
+        self._venue_raw_balances[venue] = bals
+
         if self._portfolio.venue_ledger is None:
             self._portfolio.init_venue_ledger(
-                [venue], starting_quote=_ZERO
+                sorted(self._execute_venues), starting_quote=_ZERO
             )
+        else:
+            self._portfolio.venue_ledger.ensure_venues(sorted(self._execute_venues))
+
         ledger_balances: dict[str, Decimal] = {}
         for bal in bals:
             asset = str(bal.asset or "").upper()
@@ -587,98 +662,112 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 else:
                     ledger_balances[asset] = free
         self._portfolio.venue_ledger.replace_balances(venue, ledger_balances)
-        portfolio_value = await self.refresh_portfolio_value(venue=venue, balances=bals)
+
+        mapped = self._rebuild_aggregate_from_venues()
+        portfolio_value = await self.refresh_portfolio_value()
         if self.starting_portfolio_eur is None and portfolio_value is not None:
             self.starting_portfolio_eur = portfolio_value
-            self._seed_cost_lots_from_balances(bals)
+            self._seed_cost_lots_from_balances(venue, bals)
 
-        self._last_sync = {
+        venue_sync = {
             "ok": True,
             "venue": venue,
             "balances": mapped,
             "ledger": {k: str(v) for k, v in sorted(ledger_balances.items())},
-            "free_quote_eur": str(self.free_quote_eur),
+            "venue_budget_remaining": str(self._venue_budget_remaining(venue)),
+            "free_quote_eur": str(self._venue_budget_remaining(venue)),
             "remaining_eur": str(self.budget_remaining),
             "portfolio_value_eur": (
                 str(self.portfolio_value_eur) if self.portfolio_value_eur is not None else None
             ),
         }
+        self._last_sync_by_venue[venue] = venue_sync
+        self._last_sync = venue_sync
         logger.info(
-            "MICRO_SYNC venue=%s free_eur=%s portfolio=%s remaining=%s assets=%s ledger=%s",
+            "MICRO_SYNC venue=%s venue_eur=%s portfolio=%s total_remaining=%s assets=%s ledger=%s",
             venue,
-            self.free_quote_eur,
+            self._venue_budget_remaining(venue),
             self.portfolio_value_eur,
             self.budget_remaining,
             sorted(mapped.keys()),
             sorted(ledger_balances.keys()),
         )
-        return dict(self._last_sync)
+        return dict(venue_sync)
 
     async def _fetch_balances_cached(self, venue: str) -> list[Any]:
+        venue = venue.strip().lower()
         now = time.monotonic()
+        cached_mono = self._bal_cache_mono.get(venue, 0.0)
         if (
-            self._bal_cache is not None
-            and now - self._bal_cache_mono < self._bal_cache_sec
+            venue in self._bal_cache
+            and now - cached_mono < self._bal_cache_sec
         ):
-            return self._bal_cache
+            return self._bal_cache[venue]
         client = self._trading_client(venue)
         if client is None:
-            return self._bal_cache or []
+            return self._bal_cache.get(venue, [])
         snap = await client.get_balances()
-        self._bal_cache = list(snap.balances or [])
-        self._bal_cache_mono = now
-        return self._bal_cache
+        bals = list(snap.balances or [])
+        self._bal_cache[venue] = bals
+        self._bal_cache_mono[venue] = now
+        self._venue_raw_balances[venue] = bals
+        return bals
 
     async def refresh_portfolio_value(
         self,
         *,
-        venue: str = "bitvavo",
+        venue: str | None = None,
         balances: list[Any] | None = None,
     ) -> Decimal | None:
-        """Mark Bitvavo portfolio to EUR (cash + crypto × last/bid)."""
-        client = self._trading_client(venue)
-        if client is None:
-            return self.portfolio_value_eur
-        bals = balances
-        if bals is None:
-            try:
-                bals = await self._fetch_balances_cached(venue)
-            except Exception:  # noqa: BLE001
-                return self.portfolio_value_eur
-
+        """Mark portfolio to EUR across all execute venues (cash + crypto × last/bid)."""
+        venues = [venue.strip().lower()] if venue else sorted(self._execute_venues)
         total = _ZERO
         now = time.monotonic()
-        for bal in bals:
-            asset = str(getattr(bal, "asset", "") or "").upper()
-            if not asset:
+        for v in venues:
+            client = self._trading_client(v)
+            if client is None:
                 continue
-            qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
-                str(getattr(bal, "locked", 0) or 0)
-            )
-            if qty <= 0:
-                continue
-            if asset == self._quote:
-                total += qty
-                continue
-            symbol = f"{asset}{self._quote}"
-            mark = self._portfolio.state.mark_prices.get(symbol)
-            fetched_at = self._mark_fetched_at.get(symbol, 0.0)
-            stale = now - fetched_at >= self._mark_ttl_sec
-            if mark is None or mark <= 0 or stale:
+            bals = balances if venue and balances is not None else None
+            if bals is None:
                 try:
-                    ticker = await client.fetch_ticker(symbol)
-                    mark = Decimal(
-                        str(ticker.last or ticker.bid or ticker.ask or 0)
-                    )
-                    if mark > 0:
-                        self._portfolio.set_mark_price(symbol, mark)
-                        self._mark_fetched_at[symbol] = now
+                    bals = await self._fetch_balances_cached(v)
                 except Exception:  # noqa: BLE001
-                    mark = self._portfolio.state.mark_prices.get(symbol)
-            if mark is not None and mark > 0:
-                total += qty * mark
-        self.portfolio_value_eur = total
-        return total
+                    continue
+            for bal in bals:
+                asset = str(getattr(bal, "asset", "") or "").upper()
+                if not asset:
+                    continue
+                qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+                if qty <= 0:
+                    continue
+                if asset == self._quote:
+                    if venue is None and v in self._venue_raw_balances:
+                        # Cap each venue's EUR when summing total portfolio value.
+                        qty = min(qty, self._budget)
+                    total += qty
+                    continue
+                symbol = f"{asset}{self._quote}"
+                mark = self._portfolio.state.mark_prices.get(symbol)
+                fetched_at = self._mark_fetched_at.get(symbol, 0.0)
+                stale = now - fetched_at >= self._mark_ttl_sec
+                if mark is None or mark <= 0 or stale:
+                    try:
+                        ticker = await client.fetch_ticker(symbol)
+                        mark = Decimal(
+                            str(ticker.last or ticker.bid or ticker.ask or 0)
+                        )
+                        if mark > 0:
+                            self._portfolio.set_mark_price(symbol, mark)
+                            self._mark_fetched_at[symbol] = now
+                    except Exception:  # noqa: BLE001
+                        mark = self._portfolio.state.mark_prices.get(symbol)
+                if mark is not None and mark > 0:
+                    total += qty * mark
+        if total > 0:
+            self.portfolio_value_eur = total
+        return self.portfolio_value_eur
 
     async def _live_free(self, venue: str, asset: str) -> Decimal:
         try:
@@ -914,8 +1003,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "resting": len(self._resting),
         }
 
-    def _unit_cost(self, base: str) -> Decimal | None:
-        lots = self._cost_lots.get(base.upper()) or []
+    def _unit_cost(self, venue: str, base: str) -> Decimal | None:
+        lots = self._cost_lots.get(self._lots_key(venue, base)) or []
         total_qty = _ZERO
         total_cost = _ZERO
         for qty, unit in lots:
@@ -931,13 +1020,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(pos.average_entry_price))
         return None
 
-    def _break_even_sell_price(self, base: str) -> Decimal | None:
-        unit = self._unit_cost(base)
+    def _break_even_sell_price(self, venue: str, base: str) -> Decimal | None:
+        unit = self._unit_cost(venue, base)
         if unit is None or unit <= 0:
             return None
         from bot.core.venue_fees import venue_maker_fee
 
-        fee = venue_maker_fee("bitvavo")
+        fee = venue_maker_fee(venue)
         denom = Decimal("1") - fee
         if denom <= 0:
             return None
@@ -986,14 +1075,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return mom >= self._momentum_min
 
     def _trail_update_state(
-        self, base: str, *, cost: Decimal, mark: Decimal
+        self, venue: str, base: str, *, cost: Decimal, mark: Decimal
     ) -> dict[str, Any]:
         """Soft/hard arm vs session cost; ATR-scaled; peak drawdown trigger."""
+        trail_key = self._lots_key(venue, base)
         soft_arm, soft_dd, hard_arm, hard_dd = self._scaled_arms(base, cost)
         atr = self._series_for(f"{base.upper()}{self._quote}").atr_pct()
         st = self._trail.setdefault(
-            base,
+            trail_key,
             {
+                "venue": venue,
+                "base": base.upper(),
                 "soft_armed": False,
                 "hard_armed": False,
                 "armed": False,
@@ -1012,15 +1104,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "hard_arm": str(hard_arm),
                 "drawdown": str(soft_dd),
                 "atr": str(atr),
-                "session_qty": str(self._session_qty(base)),
+                "session_qty": str(self._session_qty(venue, base)),
             },
         )
+        st["venue"] = venue
+        st["base"] = base.upper()
         st["cost"] = cost
         st["last_mark"] = mark
         st["soft_arm"] = str(soft_arm)
         st["hard_arm"] = str(hard_arm)
         st["atr"] = str(atr)
-        st["session_qty"] = str(self._session_qty(base))
+        st["session_qty"] = str(self._session_qty(venue, base))
         st["newly_soft"] = False
         st["newly_hard"] = False
         st["newly_armed"] = False
@@ -1207,7 +1301,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     ) -> Decimal:
         if locked > 0:
             await self._cancel_resting_for_symbol(venue, symbol)
-            self._invalidate_bal_cache()
+            self._invalidate_bal_cache(venue)
         return await self._live_free(venue, asset)
 
     async def check_trailing_take_profits(
@@ -1216,6 +1310,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """Soft/hard arm partials + peak drawdown on session buys; time-stop BE."""
         if not self._trail_enabled and not self._time_stop_enabled:
             return {"ok": True, "enabled": False, "triggered": []}
+        venue = venue.strip().lower()
         bals = await self._fetch_balances_cached(venue)
         triggered: list[dict[str, Any]] = []
         armed_now: list[str] = []
@@ -1227,33 +1322,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             if self._allowed_bases is not None and asset not in self._allowed_bases:
                 continue
+            trail_key = self._lots_key(venue, asset)
             free = Decimal(str(getattr(bal, "free", 0) or 0))
             locked = Decimal(str(getattr(bal, "locked", 0) or 0))
             if free + locked <= 0:
-                self._trail.pop(asset, None)
-                self._position_opened_mono.pop(asset, None)
-                self._session_lots.pop(asset, None)
+                self._trail.pop(trail_key, None)
+                self._position_opened_mono.pop(trail_key, None)
+                self._session_lots.pop(trail_key, None)
                 continue
 
             # Trail only on session buys (not mark-seeded pre-session bags).
-            cost = self._session_unit_cost(asset) if self._trail_session_only else self._unit_cost(asset)
-            session_qty = self._session_qty(asset) if self._trail_session_only else (free + locked)
+            cost = (
+                self._session_unit_cost(venue, asset)
+                if self._trail_session_only
+                else self._unit_cost(venue, asset)
+            )
+            session_qty = (
+                self._session_qty(venue, asset)
+                if self._trail_session_only
+                else (free + locked)
+            )
             if cost is None or cost <= 0 or session_qty <= 0:
                 if self._time_stop_enabled:
-                    blend = self._unit_cost(asset)
+                    blend = self._unit_cost(venue, asset)
                     if blend is None or blend <= 0:
                         continue
                     symbol = f"{asset}{self._quote}"
                     mark = await self._mark_price(venue, symbol)
                     if mark is None or mark <= 0:
                         continue
-                    self._note_position_opened(asset)
-                    opened = self._position_opened_mono.get(asset)
+                    self._note_position_opened(venue, asset)
+                    opened = self._position_opened_mono.get(trail_key)
                     if opened is None or (
                         time.monotonic() - opened < self._time_stop_sec
                     ):
                         continue
-                    be = self._break_even_sell_price(asset)
+                    be = self._break_even_sell_price(venue, asset)
                     if be is None or mark < be:
                         self._bump_skip("time_stop_below_be")
                         continue
@@ -1272,6 +1376,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     )
                     triggered.append(
                         {
+                            "venue": venue,
                             "base": asset,
                             "symbol": symbol,
                             "reason": "time_stop_breakeven",
@@ -1286,17 +1391,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         }
                     )
                     if result.status != OrderStatus.REJECTED:
-                        self._position_opened_mono.pop(asset, None)
+                        self._position_opened_mono.pop(trail_key, None)
                 continue
 
             symbol = f"{asset}{self._quote}"
             mark = await self._mark_price(venue, symbol)
             if mark is None or mark <= 0:
                 continue
-            self._note_position_opened(asset)
-            st = self._trail_update_state(asset, cost=cost, mark=mark)
+            self._note_position_opened(venue, asset)
+            st = self._trail_update_state(venue, asset, cost=cost, mark=mark)
             if st.get("soft_armed") and not st.get("triggered"):
-                armed_now.append(asset)
+                armed_now.append(f"{venue}:{asset}")
 
             sell_qty = _ZERO
             reason = ""
@@ -1309,7 +1414,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not st.get("soft_partial_done")
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(free, self._session_qty(asset) if self._trail_session_only else free)
+                cap = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
                 sell_qty = (cap * self._soft_partial).quantize(Decimal("0.00000001"))
                 reason = "trail_soft_partial"
                 st["soft_partial_done"] = True
@@ -1320,7 +1430,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not st.get("hard_partial_done")
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(free, self._session_qty(asset) if self._trail_session_only else free)
+                cap = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
                 sell_qty = (cap * self._hard_partial).quantize(Decimal("0.00000001"))
                 reason = "trail_hard_partial"
                 st["hard_partial_done"] = True
@@ -1328,11 +1443,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 sell_qty = min(
                     free,
-                    self._session_qty(asset) if self._trail_session_only else free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
                 )
                 reason = "trail_drawdown"
             elif st.get("time_stop_due"):
-                be = self._break_even_sell_price(asset)
+                be = self._break_even_sell_price(venue, asset)
                 if be is not None and mark >= be:
                     free = await self._refresh_free(venue, symbol, asset, locked)
                     sell_qty = free
@@ -1366,6 +1483,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 post_only=post_only,
             )
             row = {
+                "venue": venue,
                 "base": asset,
                 "symbol": symbol,
                 "reason": reason,
@@ -1388,7 +1506,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_skip(f"{reason}_reject")
             else:
                 logger.info(
-                    "TRAIL_EXIT base=%s reason=%s qty=%s mark=%s status=%s",
+                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
+                    venue,
                     asset,
                     reason,
                     sell_qty,
@@ -1396,12 +1515,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     result.status.value,
                 )
                 if reason in {"trail_drawdown", "time_stop_breakeven"}:
-                    self._trail.pop(asset, None)
-                    self._position_opened_mono.pop(asset, None)
+                    self._trail.pop(trail_key, None)
+                    self._position_opened_mono.pop(trail_key, None)
 
         return {
             "ok": True,
             "enabled": self._trail_enabled,
+            "venue": venue,
             "armed": armed_now,
             "triggered": triggered,
             "alerts": list(self._alerts[-10:]),
@@ -1466,7 +1586,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     self._max_alt_bases <= 0 or len(held) < self._max_alt_bases
                 )
                 live_eur = await self._live_free(venue, self._quote)
-                spend = min(need_eur * Decimal("1.01"), live_eur, self.budget_remaining)
+                spend = min(
+                    need_eur * Decimal("1.01"),
+                    live_eur,
+                    self._venue_budget_remaining(venue),
+                )
                 if can_add and spend >= _MIN_LIVE_NOTIONAL:
                     qty = (spend / mark).quantize(Decimal("0.00000001"))
                     px = (mark * Decimal("0.999")).quantize(Decimal("0.00000001"))
@@ -1496,7 +1620,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     }
                     self._bump_skip("dust_top_up")
             if did is None and policy in {"exit_breakeven", "top_up_or_exit"}:
-                be = self._break_even_sell_price(asset)
+                be = self._break_even_sell_price(venue, asset)
                 floor = be
                 if be is not None and self._dust_exit_slack > 0:
                     floor = be * (Decimal("1") - self._dust_exit_slack)
@@ -1582,7 +1706,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 message=f"venue {venue or 'unknown'} has no live keys in this session",
             )
 
-        remaining = self.budget_remaining
+        remaining = self._venue_budget_remaining(venue)
         side_is_buy = order_request.side == OpportunitySide.BUY
         if side_is_buy and self._daily_kill_active:
             self._bump_skip("daily_kill")
@@ -1747,7 +1871,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Hard floor: never sell below fee-adjusted cost + profit buffer
             # (trail take-profit exits are already +30% then −10% from peak).
             if not bool(meta.get("trail_take_profit")):
-                be = self._break_even_sell_price(base)
+                be = self._break_even_sell_price(venue, base)
                 if be is not None and be > px:
                     px = be
                     order_request = order_request.model_copy(update={"limit_price": px})
@@ -1962,6 +2086,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             qty=filled_qty,
             price=average_price,
             fee=fee,
+            venue=venue,
         )
         self.live_fill_count += 1
         self.live_transaction_count += 1

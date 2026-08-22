@@ -74,7 +74,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_max_daily_loss_eur == 202.4
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
-    assert cfg.paper_maker_same_venue is False
+    assert cfg.paper_maker_same_venue is True
     assert cfg.live_micro_execute_venues == "bitvavo"
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
@@ -141,6 +141,30 @@ def test_portfolio_sync_live_balances_caps_quote() -> None:
     assert portfolio.available("NEAR") == Decimal("121.9")
     assert "NEAREUR" in portfolio.state.positions
     assert portfolio.state.positions["NEAREUR"].quantity == Decimal("121.9")
+    assert "EUR" in mapped
+
+
+def test_portfolio_sync_live_balances_from_venues_merges() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(paper_starting_eur=2024.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("2024"))
+    mapped = portfolio.sync_live_balances_from_venues(
+        {
+            "bitvavo": [
+                Balance(asset="EUR", free=Decimal("1623.39"), locked=Decimal("100")),
+                Balance(asset="NEAR", free=Decimal("121.9"), locked=Decimal("0")),
+            ],
+            "okx": [
+                Balance(asset="EUR", free=Decimal("2000"), locked=Decimal("0")),
+            ],
+        },
+        quote_available_cap=Decimal("2024"),
+    )
+    assert portfolio.available("EUR") == Decimal("3623.39")
+    assert portfolio.reserved("EUR") == Decimal("100")
+    assert portfolio.available("NEAR") == Decimal("121.9")
+    assert "NEAREUR" in portfolio.state.positions
     assert "EUR" in mapped
 
 
@@ -298,8 +322,8 @@ def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
-    bridge._cost_lots["NEAR"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
-    be = bridge._break_even_sell_price("NEAR")  # noqa: SLF001
+    bridge._cost_lots["bitvavo:NEAR"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "NEAR")  # noqa: SLF001
     assert be is not None
     # 1.00 / (1-0.0015) * (1+10bps) ≈ 1.0025
     assert be > Decimal("1.001")
@@ -324,17 +348,17 @@ def test_trail_soft_then_soft_drawdown() -> None:
         live_maker=True,
     )
     cost = Decimal("1.00")
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.11"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.11"))  # noqa: SLF001
     assert st["soft_armed"] is False
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
     assert st["soft_armed"] is True
     assert st["newly_soft"] is True
     assert st["hard_armed"] is False
     assert st["peak"] == Decimal("1.12")
     # Soft trail: peak 1.12, 8% dd → trigger at <= 1.0304
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.04"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.04"))  # noqa: SLF001
     assert st["triggered"] is False
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.03"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.03"))  # noqa: SLF001
     assert st["triggered"] is True
 
 
@@ -355,15 +379,15 @@ def test_trail_hard_arm_widens_drawdown() -> None:
         live_maker=True,
     )
     cost = Decimal("1.00")
-    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
+    bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
     assert st["newly_hard"] is True
     assert st["hard_armed"] is True
-    bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
+    bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
     # 12% off 1.50 = 1.32 — still holding under hard dd
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.33"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.33"))  # noqa: SLF001
     assert st["triggered"] is False
-    st = bridge._trail_update_state("ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
     assert st["triggered"] is True
 
 
@@ -399,14 +423,14 @@ def test_trail_partial_flags_newly_armed() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
-    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.11"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=Decimal("1"), mark=Decimal("1.11"))  # noqa: SLF001
     assert st["newly_soft"] is False
-    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.12"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=Decimal("1"), mark=Decimal("1.12"))  # noqa: SLF001
     assert st["newly_soft"] is True
     assert st["newly_armed"] is True
     assert st["soft_armed"] is True
     assert st["soft_partial_done"] is False
-    st = bridge._trail_update_state("ADA", cost=Decimal("1"), mark=Decimal("1.13"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=Decimal("1"), mark=Decimal("1.13"))  # noqa: SLF001
     assert st["newly_soft"] is False
 
 
@@ -419,8 +443,8 @@ def test_session_lots_only_for_trail_cost() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
-    bridge._cost_lots["ADA"] = [[Decimal("10"), Decimal("1.0")]]  # noqa: SLF001
-    assert bridge._session_unit_cost("ADA") is None  # noqa: SLF001
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("10"), Decimal("1.0")]]  # noqa: SLF001
+    assert bridge._session_unit_cost("bitvavo", "ADA") is None  # noqa: SLF001
     from bot.core.enums import OrderSide
 
     bridge._record_realized_fill(  # noqa: SLF001
@@ -429,9 +453,10 @@ def test_session_lots_only_for_trail_cost() -> None:
         qty=Decimal("5"),
         price=Decimal("1.0"),
         fee=Decimal("0"),
+        venue="bitvavo",
     )
-    assert bridge._session_unit_cost("ADA") == Decimal("1.0")  # noqa: SLF001
-    assert bridge._session_qty("ADA") == Decimal("5")  # noqa: SLF001
+    assert bridge._session_unit_cost("bitvavo", "ADA") == Decimal("1.0")  # noqa: SLF001
+    assert bridge._session_qty("bitvavo", "ADA") == Decimal("5")  # noqa: SLF001
 
 
 def test_daily_kill_blocks_buys() -> None:

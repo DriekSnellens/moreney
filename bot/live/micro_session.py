@@ -117,7 +117,8 @@ def _session_settings(
             "paper_maker_enabled": True,
             "paper_triangle_enabled": False,
             "paper_maker_venues": maker_venues,
-            "paper_maker_same_venue": not cross_venue,
+            # Independent same-venue quotes on each exchange alongside cross-venue arb.
+            "paper_maker_same_venue": True,
             "paper_maker_max_open_quotes": 3,
             "paper_cycle_interval_ms": 1200.0,
             # Meaningful starters so trail exits are worth fees (~€40–50).
@@ -204,7 +205,7 @@ def _session_settings(
             "max_simultaneous_positions": 5,
             "opportunity_max_executions_per_cycle": 2,
             "opportunity_max_candidates_per_cycle": 8,
-            "live_micro_venues": "bitvavo",
+            "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else "SOLEUR,XRPEUR,ADAEUR,ATOMEUR,NEAREUR",
@@ -354,6 +355,11 @@ async def run_session(
         exclude_bases={"BTC"} if exclude_btc else set(),
         allowed_bases=allowed_bases,
     )
+    execute_venues = sorted(_parse_execute_venues(cfg))
+    if runner.portfolio.venue_ledger is None:
+        runner.portfolio.init_venue_ledger(execute_venues, starting_quote=_ZERO)
+    else:
+        runner.portfolio.venue_ledger.ensure_venues(execute_venues)
 
     started = await runner.start()
     if not started.get("started"):
@@ -468,36 +474,48 @@ async def run_session(
             except Exception:  # noqa: BLE001
                 pass
             if time.monotonic() - last_resting >= 8.0:
-                try:
-                    await bridge.manage_resting_orders("bitvavo")
-                    if "okx" in bridge._execute_venues:  # noqa: SLF001
-                        await bridge.manage_resting_orders("okx")
-                except Exception:  # noqa: BLE001
-                    logger.exception("resting order management failed")
+                for resting_venue in sorted(bridge._execute_venues):  # noqa: SLF001
+                    try:
+                        await bridge.manage_resting_orders(resting_venue)
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "resting order management failed venue=%s", resting_venue
+                        )
                 last_resting = time.monotonic()
             if time.monotonic() - last_trail >= 5.0:
-                try:
-                    trail = await bridge.check_trailing_take_profits("bitvavo")
-                    if trail.get("triggered"):
-                        logger.info("Trailing take-profit exits: %s", trail.get("triggered"))
-                except Exception:  # noqa: BLE001
-                    logger.exception("trailing take-profit check failed")
+                for trail_venue in sorted(bridge._execute_venues):  # noqa: SLF001
+                    try:
+                        trail = await bridge.check_trailing_take_profits(trail_venue)
+                        if trail.get("triggered"):
+                            logger.info(
+                                "Trailing take-profit exits venue=%s: %s",
+                                trail_venue,
+                                trail.get("triggered"),
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "trailing take-profit check failed venue=%s", trail_venue
+                        )
                 last_trail = time.monotonic()
             if time.monotonic() - last_dust >= 60.0:
-                try:
-                    dust = await bridge.manage_dust_positions("bitvavo")
-                    if dust.get("actions"):
-                        logger.info("Dust policy actions: %s", dust.get("actions"))
-                except Exception:  # noqa: BLE001
-                    logger.exception("dust policy failed")
+                for dust_venue in sorted(bridge._execute_venues):  # noqa: SLF001
+                    try:
+                        dust = await bridge.manage_dust_positions(dust_venue)
+                        if dust.get("actions"):
+                            logger.info(
+                                "Dust policy actions venue=%s: %s",
+                                dust_venue,
+                                dust.get("actions"),
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("dust policy failed venue=%s", dust_venue)
                 last_dust = time.monotonic()
             if time.monotonic() - last_sync >= 30.0:
-                try:
-                    await bridge.reconcile_from_exchange("bitvavo")
-                    if "okx" in bridge._execute_venues:  # noqa: SLF001
-                        await bridge.reconcile_from_exchange("okx")
-                except Exception:  # noqa: BLE001
-                    logger.exception("periodic micro sync failed")
+                for sync_venue in sorted(bridge._execute_venues):  # noqa: SLF001
+                    try:
+                        await bridge.reconcile_from_exchange(sync_venue)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("periodic micro sync failed venue=%s", sync_venue)
                 last_sync = time.monotonic()
             _tick()
             if not runner.running:
@@ -506,9 +524,8 @@ async def run_session(
         try:
             # Free locked capital: cancel any leftover resting live quotes.
             bridge._resting_max_age_sec = 0.0  # noqa: SLF001
-            await bridge.manage_resting_orders("bitvavo")
-            if "okx" in bridge._execute_venues:  # noqa: SLF001
-                await bridge.manage_resting_orders("okx")
+            for cleanup_venue in sorted(bridge._execute_venues):  # noqa: SLF001
+                await bridge.manage_resting_orders(cleanup_venue)
         except Exception:  # noqa: BLE001
             logger.exception("final resting cleanup failed")
         try:

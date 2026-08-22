@@ -311,6 +311,119 @@ class PaperPortfolio:
             for asset, bal in sorted(next_balances.items())
         }
 
+    def sync_live_balances_from_venues(
+        self,
+        venue_balances: dict[str, list[Balance]],
+        *,
+        quote_available_cap: Decimal | None = None,
+        allowed_bases: set[str] | None = None,
+        exclude_bases: set[str] | None = None,
+    ) -> dict[str, str]:
+        """Merge live balances from multiple venues into one paper pocket.
+
+        Each venue's free quote is capped independently so €2k on Bitvavo and
+        €2k on OKX both remain deployable without one sync wiping the other.
+        """
+        quote = self._quote
+        allow = (
+            {a.strip().upper() for a in allowed_bases if a and str(a).strip()}
+            if allowed_bases is not None
+            else None
+        )
+        exclude = {
+            a.strip().upper() for a in (exclude_bases or set()) if a and str(a).strip()
+        }
+        cap = (
+            Decimal(str(quote_available_cap))
+            if quote_available_cap is not None
+            else None
+        )
+        if cap is not None and cap < 0:
+            cap = _ZERO
+
+        merged: dict[str, AssetBalance] = {}
+
+        def _merge_asset(asset: str, free: Decimal, locked: Decimal) -> None:
+            if free < 0:
+                free = _ZERO
+            if locked < 0:
+                locked = _ZERO
+            if free == 0 and locked == 0:
+                return
+            prev = merged.get(asset)
+            if prev is None:
+                merged[asset] = AssetBalance(
+                    asset=asset, available=free, reserved=locked
+                )
+            else:
+                merged[asset] = AssetBalance(
+                    asset=asset,
+                    available=prev.available + free,
+                    reserved=prev.reserved + locked,
+                )
+
+        for _venue, balances in venue_balances.items():
+            for bal in balances:
+                asset = str(bal.asset or "").upper()
+                if not asset:
+                    continue
+                if asset != quote:
+                    if asset in exclude:
+                        continue
+                    if allow is not None and asset not in allow:
+                        continue
+                free = Decimal(str(bal.free or 0))
+                locked = Decimal(str(bal.locked or 0))
+                if asset == quote and cap is not None:
+                    free = min(free, cap)
+                _merge_asset(asset, free, locked)
+
+        if quote not in merged:
+            merged[quote] = AssetBalance(
+                asset=quote, available=_ZERO, reserved=_ZERO
+            )
+
+        self._state.balances = merged
+
+        keep_symbols: set[str] = set()
+        for asset, bal in merged.items():
+            if asset == quote:
+                continue
+            symbol = f"{asset}{quote}"
+            qty = bal.total
+            if qty <= 0:
+                continue
+            keep_symbols.add(symbol)
+            mark = self._state.mark_prices.get(symbol) or _ZERO
+            prev = self._state.positions.get(symbol)
+            entry = (
+                prev.average_entry_price
+                if prev is not None and prev.average_entry_price > 0
+                else mark
+            )
+            if entry <= 0:
+                entry = Decimal("1")
+            self._state.positions[symbol] = PositionState(
+                symbol=symbol,
+                quantity=qty,
+                average_entry_price=entry,
+                realized_pnl=prev.realized_pnl if prev is not None else _ZERO,
+                fees_paid=prev.fees_paid if prev is not None else _ZERO,
+            )
+            if mark > 0:
+                self._state.mark_prices[symbol] = mark
+        for symbol in list(self._state.positions.keys()):
+            if symbol not in keep_symbols:
+                del self._state.positions[symbol]
+
+        self._update_unrealized()
+        self._update_drawdown()
+        self._state.as_of = datetime.now(UTC)
+        return {
+            asset: f"{bal.available}/{bal.reserved}"
+            for asset, bal in sorted(merged.items())
+        }
+
     def reserve(self, asset: str, amount: Decimal) -> bool:
         """Move available → reserved for a pending order. Returns False if short."""
         if amount <= 0:
