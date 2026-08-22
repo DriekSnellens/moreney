@@ -37,6 +37,7 @@ from bot.paper.store import PaperTradingStore
 from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
 from bot.live.dashboard import render_live_dashboard
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 from bot.live.service import get_live_service, reset_live_service
 from bot.live.micro_engine import get_micro_engine, reset_micro_engine
 from bot.live.micro_session_manager import (
@@ -386,7 +387,7 @@ async def live_status() -> dict[str, Any]:
         "can_place_live_orders": bool(micro.get("can_place_orders")),
         "block_reason": micro.get("block_reason"),
         "withdrawals_supported": False,
-        "production_execution_enabled": False,
+        "production_execution_enabled": bool(PRODUCTION_EXECUTION_ENABLED),
         "go_no_go_ready": svc.phase0().get("ready"),
     }
 
