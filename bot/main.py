@@ -527,6 +527,69 @@ async def market_data_status() -> dict[str, Any]:
     return compact
 
 
+async def _live_dashboard_payload() -> dict[str, Any]:
+    live = get_live_service()
+    observe = await live.phase1_observe(probe=False)
+    readiness = live.compact_status()
+    try:
+        alerts = live.phase4_alerts(observe)
+    except Exception:  # noqa: BLE001
+        alerts = {"alerts": []}
+    return {
+        "session": get_micro_session_manager().status(),
+        "engine": get_micro_engine().status(),
+        "unlock": live.micro_unlock_checklist(),
+        "observe": observe,
+        "readiness": readiness,
+        "alerts": alerts,
+    }
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(next: str = Query(default="/live/dashboard")) -> HTMLResponse:
+    settings = get_settings()
+    if not settings.dashboard_basic_auth_enabled:
+        return RedirectResponse(
+            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+        )
+    return render_login_page(next_path=next)
+
+
+@app.post("/login")
+async def login_submit(
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form(default="/live/dashboard"),
+) -> Response:
+    settings = get_settings()
+    if not settings.dashboard_basic_auth_enabled:
+        return RedirectResponse(
+            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+        )
+    if not credentials_valid(settings, username, password):
+        return render_login_page(next_path=next, error="Invalid username or password")
+    safe_next = next if next.startswith("/") else "/live/dashboard"
+    response = RedirectResponse(url=safe_next, status_code=303)
+    set_session_cookie(response, settings, username)
+    return response
+
+
+@app.post("/logout")
+@app.get("/logout")
+async def logout() -> Response:
+    response = RedirectResponse(url="/login", status_code=303)
+    clear_session_cookie(response)
+    return response
+
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/live/dashboard", response_class=HTMLResponse)
+@app.get("/live/micro/dashboard", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
+async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+    """Primary live operator dashboard."""
+    return render_live_dashboard(await _live_dashboard_payload())
+
 
 @app.get("/fleet", response_class=HTMLResponse)
 @app.get("/paper/dashboard", response_class=HTMLResponse)

@@ -65,9 +65,8 @@ def _session_settings(
 ) -> Settings:
     """Paper mode + micro unlocks already in env; € pocket capital, live arb path."""
     mode = getattr(base, "market_data_mode", "local") or "local"
-    # Prefer shared Redis feed from the fleet publisher when available.
-    if mode == "local":
-        mode = "shared"
+    # Direct WebSockets for live — do not depend on shared Redis publisher.
+    mode = "local"
     budget_f = float(budget_eur)
     return base.model_copy(
         update={
@@ -145,6 +144,8 @@ def _session_settings(
             # Live-only: no research CVD/shadow/lead-lag on hot path.
             "live_disable_research_hooks": True,
             "live_allow_without_research_unlock": True,
+            "research_marketdata_recording_enabled": False,
+            "market_data_recording_enabled": False,
             "lead_lag_enabled": False,
             "toxicity_shadow_enabled": False,
             "global_funding_strategy_enabled": False,
