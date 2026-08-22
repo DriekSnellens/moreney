@@ -549,6 +549,34 @@ class TradingEngine:
                 return True
         return False
 
+    def _live_execute_venues(self) -> set[str] | None:
+        venues = getattr(self._executor, "_execute_venues", None)
+        if not venues:
+            return None
+        return {str(v).strip().lower() for v in venues if str(v).strip()}
+
+    def _apply_live_venue_leg_policy(
+        self,
+        *,
+        buy_venue: str,
+        sell_venue: str,
+        sell_only: bool,
+        buy_only: bool,
+    ) -> tuple[bool, bool]:
+        """When only some venues are live, prefer executable legs only."""
+        live = self._live_execute_venues()
+        if live is None:
+            return sell_only, buy_only
+        buy_live = buy_venue.strip().lower() in live if buy_venue else False
+        sell_live = sell_venue.strip().lower() in live if sell_venue else False
+        if buy_live and sell_live:
+            return sell_only, buy_only
+        if sell_live and not buy_live:
+            return True, False
+        if buy_live and not sell_live:
+            return False, True
+        return sell_only, buy_only
+
     async def _execute_maker_quote(
         self,
         opportunity: TradeOpportunity,
@@ -633,6 +661,12 @@ class TradingEngine:
         )
         sell_only = bool((opportunity.metadata or {}).get("sell_only"))
         buy_only = bool((opportunity.metadata or {}).get("buy_only"))
+        sell_only, buy_only = self._apply_live_venue_leg_policy(
+            buy_venue=buy_venue,
+            sell_venue=sell_venue,
+            sell_only=sell_only,
+            buy_only=buy_only,
+        )
         if sell_only:
             # Inventory overweight / dump guard: recycle ALT→EUR only.
             sell_result = await self._execute_limit(

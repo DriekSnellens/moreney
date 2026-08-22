@@ -73,7 +73,12 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert "SOLEUR" in cfg.live_micro_symbols
     assert cfg.live_micro_max_daily_loss_eur == 202.4
     assert cfg.global_max_venue_exposure_pct == 100.0
-    assert cfg.paper_maker_enabled is True
+    assert cfg.paper_maker_venues == "okx,bitvavo"
+    assert cfg.paper_maker_same_venue is False
+    assert cfg.live_micro_execute_venues == "bitvavo"
+    assert cfg.live_micro_cross_venue_enabled is True
+    assert "EURUSDT" in cfg.market_data_symbols
+    assert "SOLUSDT" in cfg.market_data_symbols
     assert cfg.paper_venue_inventory is True
     assert cfg.paper_max_holding_sec == 0.0
     assert cfg.paper_maker_allow_buy_only is False

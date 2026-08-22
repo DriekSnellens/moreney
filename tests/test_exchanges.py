@@ -23,6 +23,7 @@ from bot.exchanges.ccxt_adapter import CcxtExchangeAdapter
 from bot.exchanges.coinbase import CoinbaseExchange
 from bot.exchanges.factory import create_exchange_client
 from bot.exchanges.kraken import KrakenExchange
+from bot.exchanges.okx import OkxExchange
 from bot.exchanges.retry import RetryPolicy, compute_backoff, with_retries
 from bot.exchanges.sanitize import redact_mapping, redact_text
 from bot.exchanges.stub import StubExchangeClient
@@ -424,6 +425,8 @@ def test_factory_creates_expected_clients(settings) -> None:
     assert isinstance(create_exchange_client(settings), CoinbaseExchange)
     settings.exchange_name = "bitvavo"
     assert isinstance(create_exchange_client(settings), BitvavoExchange)
+    settings.exchange_name = "okx"
+    assert isinstance(create_exchange_client(settings), OkxExchange)
 
 
 def test_secret_not_logged_on_init(settings, caplog: pytest.LogCaptureFixture) -> None:

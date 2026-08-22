@@ -419,6 +419,10 @@ class Settings(BaseSettings):
     live_micro_resting_max_age_sec: float = Field(default=90.0, ge=5, le=600)
     # Cap distinct alt bases for micro trend/trail concentration (0 = unlimited).
     live_micro_max_alt_bases: int = Field(default=0, ge=0, le=20)
+    # Comma-separated venues that may place live orders (e.g. bitvavo or bitvavo,okx).
+    live_micro_execute_venues: str = "bitvavo"
+    # Scan OKX+Bitvavo books for dislocations; unfunded venues skip live legs.
+    live_micro_cross_venue_enabled: bool = True
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

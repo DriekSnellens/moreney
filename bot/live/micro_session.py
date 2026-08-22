@@ -25,6 +25,7 @@ from bot.live.micro_engine import LiveMicroEngine, reset_micro_engine
 from bot.market_data.service import MarketDataService
 from bot.paper.runner import PaperRunner
 from bot.paper.store import PaperTradingStore
+from bot.funding.multi_venue import parse_venue_list
 from bot.portfolio.venue_ledger import infer_base_asset
 from bot.risk.risk_engine import RiskEngine
 
@@ -59,6 +60,31 @@ def _liquid_symbols(settings: Settings, *, exclude_btc: bool = True) -> list[str
     return out
 
 
+def _parse_execute_venues(settings: Settings) -> set[str]:
+    raw = str(getattr(settings, "live_micro_execute_venues", "bitvavo") or "bitvavo")
+    return {v for v in parse_venue_list(raw) if v}
+
+
+def _cross_venue_market_symbols(eur_symbols: list[str]) -> list[str]:
+    """EUR pairs for Bitvavo + USDT/EURUSDT legs for OKX fair-value bridge."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for sym in eur_symbols:
+        s = sym.strip().upper().replace("/", "").replace("-", "")
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+        if s.endswith("EUR") and len(s) > 3:
+            usdt = f"{s[:-3]}USDT"
+            if usdt not in seen:
+                seen.add(usdt)
+                out.append(usdt)
+    if "EURUSDT" not in seen:
+        out.append("EURUSDT")
+    return out
+
+
 def _session_settings(
     base: Settings,
     *,
@@ -71,6 +97,10 @@ def _session_settings(
     # Direct WebSockets for live — do not depend on shared Redis publisher.
     mode = "local"
     budget_f = float(budget_eur)
+    cross_venue = bool(getattr(base, "live_micro_cross_venue_enabled", True))
+    execute_venues = _parse_execute_venues(base)
+    md_symbols = _cross_venue_market_symbols(symbols) if cross_venue else list(symbols)
+    maker_venues = "okx,bitvavo" if cross_venue else "bitvavo"
     return base.model_copy(
         update={
             "execution_mode": ExecutionMode.PAPER,
@@ -86,8 +116,8 @@ def _session_settings(
             # Live Bitvavo maker quotes inside the € pocket.
             "paper_maker_enabled": True,
             "paper_triangle_enabled": False,
-            "paper_maker_venues": "bitvavo",
-            "paper_maker_same_venue": True,
+            "paper_maker_venues": maker_venues,
+            "paper_maker_same_venue": not cross_venue,
             "paper_maker_max_open_quotes": 3,
             "paper_cycle_interval_ms": 1200.0,
             # Meaningful starters so trail exits are worth fees (~€40–50).
@@ -153,6 +183,10 @@ def _session_settings(
             "lead_lag_enabled": False,
             "toxicity_shadow_enabled": False,
             "global_funding_strategy_enabled": False,
+            # Multi-venue scan: live legs only on execute_venues (Bitvavo until OKX funded).
+            "global_max_venue_exposure_pct": 50.0 if cross_venue else 100.0,
+            "live_micro_execute_venues": ",".join(sorted(execute_venues)),
+            "live_micro_cross_venue_enabled": cross_venue,
             "arbitrage_min_profit_eur": 0.12,
             "arbitrage_min_profit_pct": 0.0015,
             "profitability_min_net_profit_usd": 0.12,
@@ -181,7 +215,10 @@ def _session_settings(
             "live_micro_max_open_orders": 6,
             "live_micro_resting_max_age_sec": 180.0,
             "market_data_mode": mode,
-            "market_data_symbols": ",".join(symbols) if symbols else base.market_data_symbols,
+            "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
+            "market_data_exchanges": "binance,kraken,coinbase,bitvavo,okx,bybit"
+            if cross_venue
+            else base.market_data_exchanges,
         }
     )
 
@@ -195,12 +232,14 @@ def attach_micro_bridge(
     allowed_bases: set[str] | None = None,
 ) -> MicroBudgetLiveExecutor:
     """Replace PaperRunner executor with budget-capped live bridge; rebuild engine."""
+    settings = runner._settings  # noqa: SLF001
+    execute_venues = _parse_execute_venues(settings)
     bridge = MicroBudgetLiveExecutor(
-        runner._settings,  # noqa: SLF001
+        settings,
         portfolio=runner.portfolio,
         live_engine=live_engine,
         budget_eur=budget_eur,
-        execute_venues={"bitvavo"},
+        execute_venues=execute_venues,
         exclude_bases=exclude_bases or {"BTC"},
         allowed_bases=allowed_bases,
         live_maker=True,
