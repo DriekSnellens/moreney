@@ -411,6 +411,8 @@ class Settings(BaseSettings):
     # Live-only: skip CVD inject, shadow observer, research status panels in PaperRunner.
     live_disable_research_hooks: bool = True
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
+    # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
+    okx_hostname: str = "eea.okx.com"
     live_micro_venues: str = "bitvavo"
     live_micro_symbols: str = "BTCEUR,ETHEUR"
     live_micro_max_notional_eur: float = Field(default=50.0, gt=0)

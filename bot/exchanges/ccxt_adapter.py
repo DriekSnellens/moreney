@@ -134,6 +134,10 @@ class CcxtExchangeAdapter(BaseExchangeClient):
             op_id = int(getattr(self._settings, "bitvavo_operator_id", 1001) or 1001)
             config.setdefault("options", {})
             config["options"]["operatorId"] = op_id
+        if self.ccxt_id == "okx":
+            hostname = str(getattr(self._settings, "okx_hostname", "") or "").strip()
+            if hostname:
+                config["hostname"] = hostname
 
         logger.info(
             "Initializing CCXT exchange %s with %s",
