@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.core.disk_guard import disk_guard_status
 from bot.core.enums import ExecutionMode
 from bot.engine.orchestrator import TradingEngine
 from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
@@ -31,11 +32,13 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 
-# Most liquid Bitvavo EUR alts for day-trade harvest (fees matter).
+# Most liquid Bitvavo EUR alts for day-trade harvest + existing inventory bags.
 _LIQUID_EUR_SYMBOLS = (
     "SOLEUR",
     "XRPEUR",
     "ADAEUR",
+    "ATOMEUR",
+    "NEAREUR",
 )
 
 
@@ -100,7 +103,8 @@ def _session_settings(
             "paper_maker_sell_profit_buffer_bps": 5.0,
             # Soft +2% / hard +6% trail — harvest toward €20–40/day path.
             "paper_trail_take_profit_enabled": True,
-            "paper_trail_session_buys_only": True,
+            # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
+            "paper_trail_session_buys_only": False,
             "paper_trail_soft_arm_pct": 0.02,
             "paper_trail_soft_drawdown_pct": 0.012,
             "paper_trail_soft_partial_pct": 0.25,
@@ -125,8 +129,8 @@ def _session_settings(
             "paper_buy_momentum_enabled": True,
             "paper_buy_momentum_min_return": 0.0,
             "paper_buy_momentum_samples": 12,
-            "live_micro_corr_group": "ADA,SOL,XRP",
-            "live_micro_max_per_corr_group": 2,
+            "live_micro_corr_group": "ADA,ATOM,NEAR,SOL,XRP",
+            "live_micro_max_per_corr_group": 4,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.01,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
@@ -161,16 +165,16 @@ def _session_settings(
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
-            # Max 2 concurrent alt positions — match corr/trail concentration.
-            "risk_max_open_positions": 2,
-            "max_simultaneous_positions": 2,
+            # Max alt bases: existing bags (ATOM/NEAR) + day-trade slots.
+            "risk_max_open_positions": 5,
+            "max_simultaneous_positions": 5,
             "opportunity_max_executions_per_cycle": 2,
             "opportunity_max_candidates_per_cycle": 8,
             "live_micro_venues": "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
-            else "SOLEUR,XRPEUR,ADAEUR",
-            "live_micro_max_alt_bases": 2,
+            else "SOLEUR,XRPEUR,ADAEUR,ATOMEUR,NEAREUR",
+            "live_micro_max_alt_bases": 5,
             # Cap live order size (env must not silently allow full pocket).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
@@ -238,6 +242,19 @@ async def run_session(
     ``budget_eur`` is total trading capital, not a per-trade size.
     """
     base = settings or get_settings()
+    disk = disk_guard_status(
+        "/",
+        warn_pct=float(base.disk_guard_warn_pct),
+        block_pct=float(base.disk_guard_block_pct),
+    )
+    if disk.get("blocked"):
+        return {
+            "ok": False,
+            "reason": "disk_full",
+            "detail": disk,
+            "mode": "full_bot_micro",
+            "trades": [],
+        }
     if exclude_btc:
         scan_symbols = symbols or _liquid_symbols(base, exclude_btc=True)
         scan_symbols = [s for s in scan_symbols if not s.upper().startswith("BTC")]

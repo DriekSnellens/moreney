@@ -19,6 +19,7 @@ from starlette import status as http_status
 
 from bot import __version__
 from bot.core.config import Settings, get_settings
+from bot.core.disk_guard import disk_guard_status, log_disk_guard
 from bot.core.enums import ExecutionMode, KillSwitchState, OpportunityLifecycleStatus
 from bot.market_data.cache import MarketDataCache
 from bot.market_data.service import MarketDataService
@@ -38,6 +39,7 @@ from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
 from bot.live.dashboard import render_live_dashboard
 from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
+from bot.market_data.research.retention import prune_research_marketdata
 from bot.live.service import get_live_service, reset_live_service
 from bot.live.micro_engine import get_micro_engine, reset_micro_engine
 from bot.live.micro_session_manager import (
@@ -175,7 +177,18 @@ async def lifespan(_app: FastAPI):
     settings = get_settings()
     if settings.execution_mode == ExecutionMode.LIVE:
         settings.require_live_credentials()
+    log_disk_guard(
+        "/",
+        warn_pct=float(settings.disk_guard_warn_pct),
+        block_pct=float(settings.disk_guard_block_pct),
+    )
+    prune_research_marketdata(
+        settings.research_marketdata_recording_path,
+        retention_days=int(settings.marketdata_retention_days),
+        execute_delete=True,
+    )
     get_kill_switch()
+    get_micro_engine().arm()
     md = get_market_data_service()
     # Live-only API process: do not start the legacy paper runner loop.
     yield
@@ -201,8 +214,18 @@ async def _dashboard_login_redirect(_request: Request, exc: DashboardLoginRedire
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
+async def health() -> dict[str, Any]:
+    settings = get_settings()
+    disk = disk_guard_status(
+        "/",
+        warn_pct=float(settings.disk_guard_warn_pct),
+        block_pct=float(settings.disk_guard_block_pct),
+    )
+    return {
+        "status": "ok" if not disk["blocked"] else "degraded",
+        "version": __version__,
+        "disk": disk,
+    }
 
 
 @app.get("/status")

@@ -88,11 +88,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_partial_pct == 0.25
     assert cfg.paper_trail_soft_arm_pct == 0.02
     assert cfg.paper_trail_hard_arm_pct == 0.06
-    assert cfg.paper_trail_session_buys_only is True
+    assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.live_micro_max_per_corr_group == 2
+    assert cfg.live_micro_max_per_corr_group == 4
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is True
     assert cfg.paper_time_stop_enabled is True
@@ -100,8 +100,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return >= 0.0015
     assert cfg.paper_maker_min_notional_eur >= 40.0
-    assert cfg.max_simultaneous_positions == 2
-    assert cfg.live_micro_max_alt_bases == 2
+    assert cfg.max_simultaneous_positions == 5
+    assert cfg.live_micro_max_alt_bases == 5
     assert cfg.live_micro_max_open_orders >= 6
     assert cfg.live_micro_resting_max_age_sec >= 180.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0
@@ -113,11 +113,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     from bot.live.micro_session import _liquid_symbols
 
     liquid = _liquid_symbols(Settings(), exclude_btc=True)
-    assert liquid == ["SOLEUR", "XRPEUR", "ADAEUR"]
+    assert liquid == ["SOLEUR", "XRPEUR", "ADAEUR", "ATOMEUR", "NEAREUR"]
     assert "ETHEUR" not in liquid
     assert "BNBEUR" not in liquid
-    assert "ATOMEUR" not in liquid
-    assert "NEAREUR" not in liquid
 
 
 def test_portfolio_sync_live_balances_caps_quote() -> None:

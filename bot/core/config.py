@@ -321,14 +321,16 @@ class Settings(BaseSettings):
     market_data_recording_enabled: bool = False
     market_data_recording_path: str = "./data/market_data"
     # Research infrastructure recorder (publisher hot-path enqueue; does not alter trading).
-    # Explicit env: RESEARCH_MARKETDATA_RECORDING_ENABLED (default True keeps live tape continuous).
-    research_marketdata_recording_enabled: bool = True
+    # Default off — live micro uses local WebSockets; tape fills disk if left on.
+    research_marketdata_recording_enabled: bool = False
     research_marketdata_recording_path: str = "./data/research_marketdata"
     research_marketdata_max_queue: int = Field(default=50_000, ge=1000, le=5_000_000)
     research_marketdata_depth_levels: int = Field(default=10, ge=1, le=50)
     research_marketdata_flush_interval_ms: int = Field(default=50, ge=1, le=10_000)
     research_marketdata_flush_every: int = Field(default=64, ge=1, le=10_000)
-    marketdata_retention_days: int = Field(default=30, ge=1, le=3650)
+    marketdata_retention_days: int = Field(default=3, ge=1, le=3650)
+    disk_guard_warn_pct: float = Field(default=85.0, ge=50.0, le=99.0)
+    disk_guard_block_pct: float = Field(default=92.0, ge=50.0, le=99.9)
     market_data_ws_reconnect_base_ms: float = Field(default=500.0, gt=0)
     market_data_ws_reconnect_max_ms: float = Field(default=30000.0, gt=0)
     market_data_heartbeat_interval_ms: float = Field(default=15000.0, gt=0)
