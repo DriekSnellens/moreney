@@ -368,7 +368,10 @@ async def run_session(
     # maker strategy can size sell legs against real inventory (no forced dumps).
     try:
         sync = await bridge.reconcile_from_exchange("bitvavo")
-        logger.info("Full-bot micro initial sync: %s", sync)
+        logger.info("Full-bot micro initial sync bitvavo: %s", sync)
+        if "okx" in _parse_execute_venues(cfg):
+            okx_sync = await bridge.reconcile_from_exchange("okx")
+            logger.info("Full-bot micro initial sync okx: %s", okx_sync)
     except Exception:  # noqa: BLE001
         logger.exception("Full-bot micro initial sync failed")
 
@@ -467,6 +470,8 @@ async def run_session(
             if time.monotonic() - last_resting >= 8.0:
                 try:
                     await bridge.manage_resting_orders("bitvavo")
+                    if "okx" in bridge._execute_venues:  # noqa: SLF001
+                        await bridge.manage_resting_orders("okx")
                 except Exception:  # noqa: BLE001
                     logger.exception("resting order management failed")
                 last_resting = time.monotonic()
@@ -489,6 +494,8 @@ async def run_session(
             if time.monotonic() - last_sync >= 30.0:
                 try:
                     await bridge.reconcile_from_exchange("bitvavo")
+                    if "okx" in bridge._execute_venues:  # noqa: SLF001
+                        await bridge.reconcile_from_exchange("okx")
                 except Exception:  # noqa: BLE001
                     logger.exception("periodic micro sync failed")
                 last_sync = time.monotonic()
@@ -500,6 +507,8 @@ async def run_session(
             # Free locked capital: cancel any leftover resting live quotes.
             bridge._resting_max_age_sec = 0.0  # noqa: SLF001
             await bridge.manage_resting_orders("bitvavo")
+            if "okx" in bridge._execute_venues:  # noqa: SLF001
+                await bridge.manage_resting_orders("okx")
         except Exception:  # noqa: BLE001
             logger.exception("final resting cleanup failed")
         try:
