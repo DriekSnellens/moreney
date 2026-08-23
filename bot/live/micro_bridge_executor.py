@@ -79,6 +79,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # FIFO lots for realized PnL: base -> [(qty, unit_cost_eur)]
         self._cost_lots: dict[str, list[list[Decimal]]] = {}
         self._lots_seeded_venues: set[str] = set()
+        # Only session fills / exchange trade history count as trusted cost basis.
+        # Mark-seeded lots must not authorize a sell (would allow selling below true buy).
+        self._trusted_cost_keys: set[str] = set()
         self._resting_max_age_sec = float(
             getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
             or _DEFAULT_RESTING_MAX_AGE_SEC
@@ -522,7 +525,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return held
 
     def _seed_cost_lots_from_balances(self, venue: str, bals: list[Any]) -> None:
-        """Seed FIFO cost basis at current marks so pre-session inventory isn't 'free'."""
+        """Seed provisional FIFO lots at mark (untrusted — not safe for sells)."""
         key = venue.strip().lower()
         if key in self._lots_seeded_venues:
             return
@@ -540,9 +543,141 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if mark is None or mark <= 0:
                 continue
             lot_key = self._lots_key(venue, asset)
+            # Mark seed is provisional only — never trusted for profitable-sell gate.
             self._cost_lots.setdefault(lot_key, []).append([qty, Decimal(str(mark))])
             self._note_position_opened(venue, asset)
         self._lots_seeded_venues.add(key)
+
+    def _has_trusted_cost(self, venue: str, base: str) -> bool:
+        return self._lots_key(venue, base) in self._trusted_cost_keys
+
+    def _mark_cost_trusted(self, venue: str, base: str) -> None:
+        self._trusted_cost_keys.add(self._lots_key(venue, base))
+
+    async def _hydrate_cost_basis_from_trades(self, venue: str) -> dict[str, Any]:
+        """Replace mark-seeded lots with FIFO cost rebuilt from exchange fills."""
+        venue = venue.strip().lower()
+        client = self._trading_client(venue)
+        if client is None:
+            return {"ok": False, "reason": "no_client"}
+        get_ex = getattr(client, "_get_exchange", None)
+        if not callable(get_ex):
+            return {"ok": False, "reason": "no_exchange"}
+        try:
+            exchange = await get_ex()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": "exchange_unavailable", "error": str(exc)[:160]}
+
+        hydrated: list[str] = []
+        for lot_key, lots in list(self._cost_lots.items()):
+            if not lot_key.startswith(f"{venue}:"):
+                continue
+            if lot_key in self._trusted_cost_keys:
+                continue
+            base = lot_key.split(":", 1)[1]
+            held = sum((q for q, _u in lots if q > 0), _ZERO)
+            if held <= 0:
+                continue
+            symbol = f"{base}/{self._quote}"
+            try:
+                raw = await exchange.fetch_my_trades(symbol, limit=100)
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "cost hydrate trades failed venue=%s base=%s err=%s",
+                    venue,
+                    base,
+                    type(exc).__name__,
+                )
+                continue
+            rebuilt: list[list[Decimal]] = []
+            for trade in sorted(raw or [], key=lambda t: int(t.get("timestamp") or 0)):
+                side = str(trade.get("side") or "").lower()
+                amt = Decimal(str(trade.get("amount") or 0))
+                px = Decimal(str(trade.get("price") or 0))
+                if amt <= 0 or px <= 0:
+                    continue
+                fee_info = trade.get("fee") or {}
+                fee_amt = Decimal(str(fee_info.get("cost") or 0))
+                fee_cur = str(fee_info.get("currency") or "").upper()
+                if side == "buy":
+                    if fee_cur == self._quote and fee_amt > 0:
+                        unit = (amt * px + fee_amt) / amt
+                    else:
+                        # Fee in base reduces received size → higher EUR unit cost.
+                        received = amt - fee_amt if fee_cur == base and fee_amt > 0 else amt
+                        if received <= 0:
+                            continue
+                        unit = (amt * px) / received
+                    rebuilt.append([amt if fee_cur != base else received, unit])
+                elif side == "sell":
+                    remaining = amt
+                    while remaining > 0 and rebuilt:
+                        lq, lc = rebuilt[0]
+                        take = min(remaining, lq)
+                        lq -= take
+                        remaining -= take
+                        if lq <= 0:
+                            rebuilt.pop(0)
+                        else:
+                            rebuilt[0][0] = lq
+            rebuilt_qty = sum((q for q, _u in rebuilt if q > 0), _ZERO)
+            if rebuilt_qty <= 0:
+                # Fallback: OKX conversion / bill ledger (manual buys may not appear in trades).
+                try:
+                    ledger = await exchange.fetch_ledger(base, limit=50)
+                except Exception:  # noqa: BLE001
+                    ledger = []
+                try:
+                    eur_ledger = await exchange.fetch_ledger(self._quote, limit=50)
+                except Exception:  # noqa: BLE001
+                    eur_ledger = []
+                # Pair same-timestamp SOL credit with EUR debit.
+                eur_by_ts: dict[int, Decimal] = {}
+                for entry in eur_ledger or []:
+                    ts = int(entry.get("timestamp") or 0)
+                    amt = Decimal(str(entry.get("amount") or 0))
+                    direction = str(entry.get("direction") or "").lower()
+                    if ts and amt < 0 and direction in {"", "out", "debit"}:
+                        eur_by_ts[ts] = eur_by_ts.get(ts, _ZERO) + (-amt)
+                    elif ts and amt > 0 and direction == "out":
+                        eur_by_ts[ts] = eur_by_ts.get(ts, _ZERO) + amt
+                for entry in sorted(ledger or [], key=lambda e: int(e.get("timestamp") or 0)):
+                    ts = int(entry.get("timestamp") or 0)
+                    amt = Decimal(str(entry.get("amount") or 0))
+                    direction = str(entry.get("direction") or "").lower()
+                    if amt <= 0:
+                        continue
+                    if direction and direction not in {"in", "credit"}:
+                        continue
+                    spent = eur_by_ts.get(ts)
+                    if spent is None or spent <= 0:
+                        continue
+                    rebuilt.append([amt, spent / amt])
+                rebuilt_qty = sum((q for q, _u in rebuilt if q > 0), _ZERO)
+                if rebuilt_qty <= 0:
+                    continue
+            # Keep lots covering current held qty (drop excess oldest if needed).
+            if rebuilt_qty > held * Decimal("1.001"):
+                need = held
+                trimmed: list[list[Decimal]] = []
+                for q, u in reversed(rebuilt):
+                    if need <= 0:
+                        break
+                    take = min(q, need)
+                    trimmed.append([take, u])
+                    need -= take
+                rebuilt = list(reversed(trimmed))
+            self._cost_lots[lot_key] = rebuilt
+            self._trusted_cost_keys.add(lot_key)
+            hydrated.append(base)
+            logger.info(
+                "cost basis hydrated venue=%s base=%s lots=%s unit=%s",
+                venue,
+                base,
+                len(rebuilt),
+                self._unit_cost(venue, base),
+            )
+        return {"ok": True, "venue": venue, "hydrated": hydrated}
 
     def _record_realized_fill(
         self,
@@ -566,6 +701,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             lots.append([qty, unit])
             self._session_lots.setdefault(lot_key, []).append([qty, unit])
             self._note_position_opened(venue or "bitvavo", base)
+            self._mark_cost_trusted(venue or "bitvavo", base)
             return
         remaining = qty
         proceeds = qty * price - fee
@@ -668,6 +804,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self.starting_portfolio_eur is None and portfolio_value is not None:
             self.starting_portfolio_eur = portfolio_value
             self._seed_cost_lots_from_balances(venue, bals)
+        # Prefer real exchange fills over mark seeds before any auto-sell.
+        try:
+            hydrate = await self._hydrate_cost_basis_from_trades(venue)
+            if hydrate.get("hydrated"):
+                venue_sync_hydrate = hydrate
+            else:
+                venue_sync_hydrate = hydrate
+        except Exception as exc:  # noqa: BLE001
+            venue_sync_hydrate = {"ok": False, "error": str(exc)[:160]}
 
         venue_sync = {
             "ok": True,
@@ -680,6 +825,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "portfolio_value_eur": (
                 str(self.portfolio_value_eur) if self.portfolio_value_eur is not None else None
             ),
+            "cost_hydrate": venue_sync_hydrate,
         }
         self._last_sync_by_venue[venue] = venue_sync
         self._last_sync = venue_sync
@@ -1021,6 +1167,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return None
 
     def _break_even_sell_price(self, venue: str, base: str) -> Decimal | None:
+        """Min sell price that nets profit after fees + buffer. Requires trusted cost."""
+        if not self._has_trusted_cost(venue, base):
+            return None
         unit = self._unit_cost(venue, base)
         if unit is None or unit <= 0:
             return None
@@ -1037,6 +1186,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if buffer_bps > 0:
             be *= Decimal("1") + buffer_bps / Decimal("10000")
         return be
+
+    def _sell_allowed_at(
+        self, venue: str, base: str, price: Decimal
+    ) -> tuple[bool, str, Decimal | None]:
+        """Gate every auto-sell: trusted cost and price >= fee-aware break-even."""
+        if price <= 0:
+            return False, "invalid_price", None
+        if not self._has_trusted_cost(venue, base):
+            return False, "sell_no_trusted_cost", None
+        be = self._break_even_sell_price(venue, base)
+        if be is None:
+            return False, "sell_no_break_even", None
+        if price < be:
+            return False, "sell_below_break_even", be
+        return True, "ok", be
 
     def _scaled_arms(self, base: str, cost: Decimal) -> tuple[Decimal, Decimal, Decimal, Decimal]:
         from bot.live.trail_policy import scale_thresholds
@@ -1473,6 +1637,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["hard_partial_done"] = False
                 continue
 
+            # Never trail-exit at a loss (fees included). Hold until profitable.
+            ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, mark)
+            if not ok_sell:
+                self._bump_skip(gate_reason)
+                if reason == "trail_drawdown":
+                    st["triggered"] = False
+                if reason == "trail_soft_partial":
+                    st["soft_partial_done"] = False
+                    st["partial_done"] = False
+                if reason == "trail_hard_partial":
+                    st["hard_partial_done"] = False
+                continue
+            if be is not None:
+                if limit_px is None or limit_px < be:
+                    limit_px = be
+                post_only = True
+
             result = await self._submit_exit_sell(
                 venue=venue,
                 symbol=symbol,
@@ -1620,10 +1801,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     }
                     self._bump_skip("dust_top_up")
             if did is None and policy in {"exit_breakeven", "top_up_or_exit"}:
+                # No slack below break-even — user rule: always sell at a profit after fees.
                 be = self._break_even_sell_price(venue, asset)
                 floor = be
-                if be is not None and self._dust_exit_slack > 0:
-                    floor = be * (Decimal("1") - self._dust_exit_slack)
                 if floor is not None and mark >= floor:
                     reason = (
                         "inventory_trim_breakeven"
@@ -1868,32 +2048,49 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if qty > live_base:
                 qty = live_base.quantize(Decimal("0.00000001"))
                 order_request = order_request.model_copy(update={"quantity": qty})
-            # Hard floor: never sell below fee-adjusted cost + profit buffer
-            # (trail take-profit exits are already +30% then −10% from peak).
-            if not bool(meta.get("trail_take_profit")):
-                be = self._break_even_sell_price(venue, base)
-                if be is not None and be > px:
-                    px = be
-                    order_request = order_request.model_copy(update={"limit_price": px})
-                if order_book is not None:
-                    try:
-                        best_bid = (
-                            Decimal(str(order_book.bids[0].price))
-                            if order_book.bids
-                            else _ZERO
-                        )
-                    except Exception:  # noqa: BLE001
-                        best_bid = _ZERO
-                    if best_bid > 0 and px <= best_bid:
-                        self._bump_skip("sell_below_break_even")
-                        return await self._reject_before_live(
-                            order_request,
-                            reason="SELL_BELOW_BREAK_EVEN",
-                            message=(
-                                f"break-even ask {px} would cross bid {best_bid}; "
-                                "waiting for profitable exit"
-                            ),
-                        )
+            # Hard floor: NEVER sell below fee-adjusted cost + profit buffer.
+            # Applies to trail exits too — no loss-taking sells.
+            be = self._break_even_sell_price(venue, base)
+            if be is None:
+                self._bump_skip("sell_no_trusted_cost")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="SELL_NO_TRUSTED_COST",
+                    message=(
+                        f"no trusted cost basis for {venue}:{base}; "
+                        "refusing sell until buy fill or trade history is known"
+                    ),
+                )
+            if be > px:
+                px = be
+                order_request = order_request.model_copy(update={"limit_price": px})
+            if order_book is not None:
+                try:
+                    best_bid = (
+                        Decimal(str(order_book.bids[0].price))
+                        if order_book.bids
+                        else _ZERO
+                    )
+                except Exception:  # noqa: BLE001
+                    best_bid = _ZERO
+                if best_bid > 0 and px <= best_bid:
+                    self._bump_skip("sell_below_break_even")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="SELL_BELOW_BREAK_EVEN",
+                        message=(
+                            f"break-even ask {px} would cross bid {best_bid}; "
+                            "waiting for profitable exit"
+                        ),
+                    )
+            # Even without a book, refuse a sell priced below break-even.
+            if px < be:
+                self._bump_skip("sell_below_break_even")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="SELL_BELOW_BREAK_EVEN",
+                    message=f"limit {px} below break-even {be}",
+                )
             notional = qty * px
             if notional < _MIN_LIVE_NOTIONAL:
                 self._bump_skip("sell_below_min_notional")

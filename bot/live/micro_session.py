@@ -155,7 +155,7 @@ def _session_settings(
             "paper_maker_spread_fee_buffer_bps": 1.0,
             "paper_maker_allow_buy_only": True,
             # Day-trade: small buffer over fees so maker asks can clear.
-            "paper_maker_sell_profit_buffer_bps": 5.0,
+            "paper_maker_sell_profit_buffer_bps": 10.0,  # always net profit after fees
             # Soft +2% / hard +6% trail — harvest toward €20–40/day path.
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
@@ -179,7 +179,7 @@ def _session_settings(
             "paper_time_stop_enabled": True,
             "paper_time_stop_sec": 7200.0,  # 2h recycle at >= BE
             "paper_dust_policy": "top_up_or_exit",
-            "paper_dust_exit_slack_bps": 15.0,
+            "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,
             "paper_buy_momentum_enabled": False,
             "paper_buy_momentum_min_return": 0.0,

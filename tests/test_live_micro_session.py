@@ -85,7 +85,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 0.0
     assert cfg.paper_inventory_buy_dip_bps >= 15.0
-    assert cfg.paper_maker_sell_profit_buffer_bps >= 5.0
+    assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
+    assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.06
     assert cfg.paper_trail_drawdown_pct == 0.03
@@ -325,11 +326,78 @@ def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
         live_maker=True,
     )
     bridge._cost_lots["bitvavo:NEAR"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    # Mark-seeded lots are untrusted until a real fill / trade hydrate.
+    assert bridge._break_even_sell_price("bitvavo", "NEAR") is None  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:NEAR")  # noqa: SLF001
     be = bridge._break_even_sell_price("bitvavo", "NEAR")  # noqa: SLF001
     assert be is not None
     # 1.00 / (1-0.0015) * (1+10bps) ≈ 1.0025
     assert be > Decimal("1.001")
     assert be < Decimal("1.004")
+
+
+def test_sell_allowed_at_blocks_below_break_even() -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=10.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    # Untrusted seed → blocked
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("80")]]  # noqa: SLF001
+    ok, reason, be = bridge._sell_allowed_at("bitvavo", "SOL", Decimal("90"))  # noqa: SLF001
+    assert ok is False
+    assert reason == "sell_no_trusted_cost"
+    assert be is None
+
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    # Trusted but mark below fee-aware BE → blocked
+    ok, reason, be = bridge._sell_allowed_at("bitvavo", "SOL", Decimal("80"))  # noqa: SLF001
+    assert ok is False
+    assert reason == "sell_below_break_even"
+    assert be is not None and be > Decimal("80")
+
+    # Comfortably above BE → allowed
+    ok, reason, be = bridge._sell_allowed_at("bitvavo", "SOL", Decimal("82"))  # noqa: SLF001
+    assert ok is True
+    assert reason == "ok"
+
+
+@pytest.mark.asyncio
+async def test_bridge_execute_sell_rejects_without_trusted_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=10.0)
+    engine = LiveMicroEngine(settings)
+    engine.arm()
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("200")),
+        live_engine=engine,
+        budget_eur=Decimal("200"),
+        live_maker=True,
+    )
+    # Untrusted mark seed only — must refuse sell even at a high price
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+
+    async def fake_live_free(_venue: str, asset: str) -> Decimal:
+        return Decimal("1") if asset.upper() == "ADA" else Decimal("200")
+
+    monkeypatch.setattr(bridge, "_live_free", fake_live_free)
+    req = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="ADAEUR",
+        side=OpportunitySide.SELL,
+        quantity=Decimal("1"),
+        limit_price=Decimal("110"),
+        metadata={"venue": "bitvavo"},
+    )
+    result = await bridge.execute(req)
+    assert result.status == OrderStatus.REJECTED
+    assert bridge.skips.get("sell_no_trusted_cost", 0) >= 1
+
 
 
 def test_trail_soft_then_soft_drawdown() -> None:
