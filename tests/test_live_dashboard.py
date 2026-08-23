@@ -40,12 +40,18 @@ def test_render_live_dashboard_contains_controls() -> None:
                 "portfolio_value_eur": "2100.50",
                 "starting_portfolio_eur": "2000.00",
                 "netto_winst_eur": "100.50",
-                "live_transaction_count": 7,
+                "session_live_transaction_count": 7,
                 "bridge": {
                     "free_quote_eur": "1623.39",
                     "portfolio_value_eur": "2100.50",
                     "netto_winst_eur": "100.50",
-                    "live_transaction_count": 7,
+                    "session_live_transaction_count": 7,
+                    "backfill_mirrored_count": 42,
+                    "unrealized_mtm_eur": "-25.50",
+                    "blocked_sells_session": "21",
+                    "locked_notional_eur": "450.00",
+                    "micro_locked_notional_eur": "120.00",
+                    "long_hold_notional_eur": "330.00",
                     "skips": {},
                     "last_sync_by_venue": {
                         "bitvavo": {"ledger": {"EUR": "900.00"}, "venue_budget_remaining": "900.00"},
@@ -67,8 +73,11 @@ def test_render_live_dashboard_contains_controls() -> None:
                             "bitvavo:ETH": {
                                 "venue": "bitvavo",
                                 "base": "ETH",
+                                "role": "long_hold",
                                 "cost": "2000",
                                 "mark": "1950",
+                                "notional_eur": "330.00",
+                                "unrealized_eur": "-8.25",
                                 "gain_pct": "-2.50",
                                 "pct_to_arm": "3.40",
                                 "soft_armed": False,
@@ -109,16 +118,21 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "Moreney" in html
     assert "Portfolio" in html
     assert "Vrij te besteden" in html
-    assert "Netto winst" in html
-    assert "Transacties" in html
+    assert "Gerealiseerd (live)" in html
+    assert "Ongerealiseerd MTM" in html
+    assert "Geblokkeerde sells" in html
+    assert "Sessie-transacties" in html
+    assert "Vastgezet kapitaal" in html
     assert "7" in html
+    assert "42" in html
+    assert "long-hold" in html
     assert "Start" in html
     assert "Emergency stop" not in html
     assert "Waarom nu stil" in html
     assert "Bags onder kostprijs" in html
     assert "bitvavo vrij EUR" in html
     assert "okx vrij EUR" in html
-    assert "onder kost — houdt vast" in html
+    assert "long-hold — buiten micro-recycle" in html
     assert "sell onder break-even" in html
 
 
@@ -162,7 +176,7 @@ def test_live_dashboard_routes_and_paper_redirects() -> None:
         assert live.status_code == 200
         assert "Vrij te besteden" in live.text
         assert "Portfolio" in live.text
-        assert "Transacties" in live.text
+        assert "Sessie-transacties" in live.text
         assert client.get("/", follow_redirects=False).status_code == 200
         assert client.get("/dashboard", follow_redirects=False).status_code == 200
         for path in ("/paper/dashboard", "/paper/dashboard-lite", "/fleet", "/strategy-lab"):

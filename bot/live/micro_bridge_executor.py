@@ -10,9 +10,11 @@ stay paper unless live_maker is enabled.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -119,8 +121,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._last_sync: dict[str, Any] | None = None
         self._resting: list[dict[str, Any]] = []
         self.live_fill_count = 0
-        self.live_transaction_count = 0  # +1 per buy or sell fill
+        self.live_transaction_count = 0  # legacy alias of session counters
+        self.session_live_fill_count = 0
+        self.session_live_transaction_count = 0
+        self.backfill_mirrored_count = 0
         self.realized_trade_pnl_eur = _ZERO  # closed-trade PnL after fees
+        self._persist_path = Path(
+            str(
+                getattr(
+                    settings,
+                    "live_micro_bridge_persist_path",
+                    "./data/live_micro_bridge_state.json",
+                )
+            )
+        )
+        self._long_hold_bases = {
+            b.strip().upper()
+            for b in str(
+                getattr(settings, "live_micro_long_hold_bases", "ETH") or "ETH"
+            ).split(",")
+            if b.strip()
+        }
         self.portfolio_value_eur: Decimal | None = None
         self.starting_portfolio_eur: Decimal | None = None
         # FIFO lots for realized PnL: base -> [(qty, unit_cost_eur)]
@@ -253,10 +274,239 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_max_per_corr_group", 2) or 2
         )
         self._position_opened_mono: dict[str, float] = {}
+        self._position_opened_at: dict[str, float] = {}
         self._max_alt_bases = int(
             getattr(settings, "live_micro_max_alt_bases", 0) or 0
         )
         self._MarkSeries = MarkSeries
+        self._try_load_persisted_state()
+
+    def _is_long_hold(self, base: str) -> bool:
+        return str(base or "").strip().upper() in self._long_hold_bases
+
+    def _balance_qty(self, venue: str, base: str) -> Decimal:
+        venue_l = venue.strip().lower()
+        base_u = str(base or "").strip().upper()
+        for bal in self._venue_raw_balances.get(venue_l) or []:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if asset != base_u:
+                continue
+            return Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                str(getattr(bal, "locked", 0) or 0)
+            )
+        return _ZERO
+
+    def _blocked_sells_session(self) -> int:
+        return int(self.skips.get("sell_below_break_even", 0) or 0) + int(
+            self.skips.get("time_stop_below_be", 0) or 0
+        )
+
+    def _mtm_summary(self) -> dict[str, str]:
+        unrealized = _ZERO
+        locked = _ZERO
+        micro_locked = _ZERO
+        long_hold_locked = _ZERO
+        seen: set[str] = set()
+        for trail_key, st in self._trail.items():
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0:
+                continue
+            venue = str(st.get("venue") or trail_key.split(":", 1)[0])
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            qty = self._balance_qty(venue, base)
+            if qty <= 0:
+                qty = Decimal(str(st.get("session_qty") or 0))
+            if qty <= 0:
+                continue
+            seen.add(trail_key)
+            notional = qty * mark
+            locked += notional
+            unrealized += (mark - cost) * qty
+            if self._is_long_hold(base):
+                long_hold_locked += notional
+            else:
+                micro_locked += notional
+        for venue in sorted(self._execute_venues):
+            for bal in self._venue_raw_balances.get(venue) or []:
+                asset = str(getattr(bal, "asset", "") or "").upper()
+                if not asset or asset == self._quote or asset in self._exclude_bases:
+                    continue
+                if not self._is_long_hold(asset):
+                    continue
+                trail_key = self._lots_key(venue, asset)
+                if trail_key in seen:
+                    continue
+                qty = self._balance_qty(venue, asset)
+                if qty <= 0:
+                    continue
+                symbol = f"{asset}{self._quote}"
+                mark = Decimal(
+                    str(
+                        self._portfolio.state.mark_prices.get(symbol)
+                        or self._unit_cost(venue, asset)
+                        or 0
+                    )
+                )
+                cost = self._unit_cost(venue, asset) or mark
+                if mark <= 0:
+                    continue
+                notional = qty * mark
+                locked += notional
+                long_hold_locked += notional
+                if cost > 0:
+                    unrealized += (mark - cost) * qty
+        return {
+            "unrealized_mtm_eur": str(unrealized.quantize(Decimal("0.01"))),
+            "locked_notional_eur": str(locked.quantize(Decimal("0.01"))),
+            "micro_locked_notional_eur": str(micro_locked.quantize(Decimal("0.01"))),
+            "long_hold_notional_eur": str(long_hold_locked.quantize(Decimal("0.01"))),
+            "blocked_sells_session": str(self._blocked_sells_session()),
+        }
+
+    def _serialize_lots(
+        self, lots: dict[str, list[list[Decimal]]]
+    ) -> dict[str, list[list[str]]]:
+        out: dict[str, list[list[str]]] = {}
+        for key, rows in lots.items():
+            out[key] = [[str(qty), str(unit)] for qty, unit in rows]
+        return out
+
+    def _deserialize_lots(
+        self, raw: dict[str, list[list[str]]] | None
+    ) -> dict[str, list[list[Decimal]]]:
+        out: dict[str, list[list[Decimal]]] = {}
+        for key, rows in (raw or {}).items():
+            parsed: list[list[Decimal]] = []
+            for row in rows or []:
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                    continue
+                parsed.append([Decimal(str(row[0])), Decimal(str(row[1]))])
+            if parsed:
+                out[str(key)] = parsed
+        return out
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        resting: list[dict[str, Any]] = []
+        for row in self._resting:
+            opp = row.get("opportunity_id")
+            resting.append(
+                {
+                    **{k: v for k, v in row.items() if k != "opportunity_id"},
+                    "opportunity_id": str(opp) if opp is not None else None,
+                    "quantity": str(row.get("quantity") or 0),
+                    "price": str(row.get("price") or 0),
+                    "placed_at": float(
+                        row.get("placed_at") or row.get("placed_mono") or time.time()
+                    ),
+                }
+            )
+        return {
+            "version": 1,
+            "saved_at": time.time(),
+            "session_started_ms": self._session_started_ms,
+            "trail": self._trail,
+            "resting": resting,
+            "mirrored_trade_ids": sorted(self._mirrored_trade_ids),
+            "session_lots": self._serialize_lots(self._session_lots),
+            "position_opened_at": dict(self._position_opened_at),
+            "skips": dict(self.skips),
+            "session_live_fill_count": int(self.session_live_fill_count),
+            "session_live_transaction_count": int(self.session_live_transaction_count),
+            "backfill_mirrored_count": int(self.backfill_mirrored_count),
+            "live_fill_count": int(self.live_fill_count),
+            "live_transaction_count": int(self.live_transaction_count),
+            "realized_trade_pnl_eur": str(self.realized_trade_pnl_eur),
+        }
+
+    def _try_load_persisted_state(self) -> bool:
+        return self.load_persisted_state(self._persist_path)
+
+    def load_persisted_state(self, path: Path | str | None = None) -> bool:
+        p = Path(path) if path is not None else self._persist_path
+        if not p.exists():
+            return False
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("micro bridge persist load failed path=%s err=%s", p, exc)
+            return False
+        if not isinstance(raw, dict):
+            return False
+        self._trail = {
+            str(k): (v if isinstance(v, dict) else {})
+            for k, v in (raw.get("trail") or {}).items()
+        }
+        self._resting = []
+        for row in raw.get("resting") or []:
+            if not isinstance(row, dict):
+                continue
+            self._resting.append(
+                {
+                    **row,
+                    "quantity": Decimal(str(row.get("quantity") or 0)),
+                    "price": Decimal(str(row.get("price") or 0)),
+                    "placed_mono": time.monotonic(),
+                }
+            )
+        self._mirrored_trade_ids = {
+            str(x) for x in (raw.get("mirrored_trade_ids") or []) if str(x)
+        }
+        self._session_lots = self._deserialize_lots(raw.get("session_lots"))
+        self._position_opened_at = {
+            str(k): float(v)
+            for k, v in (raw.get("position_opened_at") or {}).items()
+            if v is not None
+        }
+        now = time.time()
+        self._position_opened_mono = {
+            key: time.monotonic() - max(0.0, now - opened)
+            for key, opened in self._position_opened_at.items()
+        }
+        self.skips = {
+            str(k): int(v)
+            for k, v in (raw.get("skips") or {}).items()
+            if str(k)
+        }
+        self.session_live_fill_count = int(raw.get("session_live_fill_count") or 0)
+        self.session_live_transaction_count = int(
+            raw.get("session_live_transaction_count") or 0
+        )
+        self.backfill_mirrored_count = int(raw.get("backfill_mirrored_count") or 0)
+        self.live_fill_count = self.session_live_fill_count
+        self.live_transaction_count = self.session_live_transaction_count
+        try:
+            self.realized_trade_pnl_eur = Decimal(
+                str(raw.get("realized_trade_pnl_eur") or 0)
+            )
+        except Exception:  # noqa: BLE001
+            self.realized_trade_pnl_eur = _ZERO
+        if raw.get("session_started_ms") is not None:
+            self._session_started_ms = float(raw.get("session_started_ms"))
+        logger.info(
+            "micro bridge state loaded path=%s trail=%s resting=%s session_fills=%s",
+            p,
+            len(self._trail),
+            len(self._resting),
+            self.session_live_transaction_count,
+        )
+        return True
+
+    def persist_runtime_state(self) -> None:
+        path = self._persist_path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(
+                json.dumps(self.export_runtime_state(), indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            tmp.replace(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("micro bridge persist failed path=%s err=%s", path, exc)
 
     def set_buys_blocked(self, blocked: bool) -> None:
         """Regime guard: when True, reject new BUY orders (sells/trails still run)."""
@@ -399,9 +649,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
             "live_trade_count": len(self.live_trades),
-            "live_fill_count": int(self.live_fill_count),
-            "live_transaction_count": int(self.live_transaction_count),
+            "live_fill_count": int(self.session_live_fill_count),
+            "live_transaction_count": int(self.session_live_transaction_count),
+            "session_live_fill_count": int(self.session_live_fill_count),
+            "session_live_transaction_count": int(self.session_live_transaction_count),
+            "backfill_mirrored_count": int(self.backfill_mirrored_count),
             "resting_orders": len(self._resting),
+            "long_hold_bases": sorted(self._long_hold_bases),
+            **self._mtm_summary(),
             "capital_model": "pocket",
             "trail_take_profit": {
                 "enabled": self._trail_enabled,
@@ -431,8 +686,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "last_sync_by_venue": dict(self._last_sync_by_venue),
             "diagnostics": {
                 "realized_net_pnl_eur": str(self.realized_trade_pnl_eur),
-                "live_fills": int(self.live_fill_count),
-                "live_transactions": int(self.live_transaction_count),
+                "live_fills": int(self.session_live_fill_count),
+                "live_transactions": int(self.session_live_transaction_count),
+                "session_live_fills": int(self.session_live_fill_count),
+                "session_live_transactions": int(self.session_live_transaction_count),
+                "backfill_mirrored": int(self.backfill_mirrored_count),
+                **self._mtm_summary(),
                 "recent_live_trades": list(self.live_trades[-12:]),
                 "skip_leaders": sorted(
                     ((k, v) for k, v in self.skips.items()),
@@ -478,6 +737,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         # Current underwater bags (not just lifetime skip counts).
         underwater: list[str] = []
+        long_hold: list[str] = []
         waiting_arm: list[str] = []
         for trail_key, st in self._trail.items():
             try:
@@ -487,8 +747,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             if cost <= 0 or mark <= 0:
                 continue
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
             gain = (mark - cost) / cost
+            qty = self._balance_qty(
+                str(st.get("venue") or trail_key.split(":", 1)[0]), base
+            )
+            notional = qty * mark if qty > 0 and mark > 0 else _ZERO
+            notional_bit = f"€{float(notional):.0f}" if notional > 0 else ""
             label = f"{trail_key}:{float(gain * 100):+.2f}%"
+            if notional_bit:
+                label += f"({notional_bit})"
+            if self._is_long_hold(base):
+                long_hold.append(label)
+                continue
             if gain < 0:
                 underwater.append(label)
             elif not st.get("soft_armed"):
@@ -498,6 +769,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     waiting_arm.append(
                         f"{trail_key}:need+{float(need * 100):.2f}%"
                     )
+        if long_hold:
+            hints.append(
+                "LONG_HOLD_OUTSIDE_MICRO "
+                + ", ".join(long_hold[:6])
+                + ("…" if len(long_hold) > 6 else "")
+            )
         if underwater:
             hints.append(
                 "HOLDING_BELOW_COST "
@@ -509,6 +786,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if be_skips or ts_skips:
             hints.append(
                 f"SELLS_BLOCKED_NEVER_LOSS sell_be={be_skips} time_stop_be={ts_skips}"
+            )
+        mtm = self._mtm_summary()
+        if Decimal(str(mtm.get("micro_locked_notional_eur") or 0)) > 0:
+            hints.append(
+                "MICRO_CAPITAL_LOCKED "
+                f"micro=€{mtm.get('micro_locked_notional_eur')} "
+                f"long_hold=€{mtm.get('long_hold_notional_eur')}"
             )
         if waiting_arm:
             hints.append(
@@ -565,11 +849,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hard_arm = Decimal(str(st.get("hard_arm") or self._hard_arm_floor))
             next_arm = soft_arm if not st.get("soft_armed") else hard_arm
             to_arm = next_arm - gain
+            venue = str(st.get("venue") or trail_key.split(":", 1)[0])
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
             opened = self._position_opened_mono.get(trail_key)
-            age = (time.monotonic() - opened) if opened else None
+            opened_at = self._position_opened_at.get(trail_key)
+            if opened_at:
+                age = max(0.0, time.time() - opened_at)
+            elif opened is not None:
+                age = time.monotonic() - opened
+            else:
+                age = None
+            qty = self._balance_qty(venue, base)
+            if qty <= 0:
+                qty = Decimal(str(st.get("session_qty") or 0))
+            notional = (qty * mark) if qty > 0 and mark > 0 else _ZERO
+            unrealized = (mark - cost) * qty if qty > 0 and cost > 0 and mark > 0 else _ZERO
+            role = "long_hold" if self._is_long_hold(base) else "micro_recycle"
             out[trail_key] = {
-                "venue": st.get("venue") or trail_key.split(":", 1)[0],
-                "base": st.get("base") or trail_key.split(":", 1)[-1],
+                "venue": venue,
+                "base": base,
+                "role": role,
                 "armed": bool(st.get("soft_armed") or st.get("hard_armed")),
                 "soft_armed": bool(st.get("soft_armed")),
                 "hard_armed": bool(st.get("hard_armed")),
@@ -578,6 +877,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "peak": str(st.get("peak") or ""),
                 "cost": str(cost) if cost > 0 else "",
                 "mark": str(mark) if mark > 0 else "",
+                "qty": str(qty) if qty > 0 else "",
+                "notional_eur": str(notional.quantize(Decimal("0.01"))) if notional > 0 else "",
+                "unrealized_eur": str(unrealized.quantize(Decimal("0.01"))) if qty > 0 else "",
                 "gain_pct": f"{float(gain * 100):.2f}",
                 "pct_to_arm": f"{float(to_arm * 100):.2f}",
                 "soft_arm_pct": f"{float(soft_arm * 100):.2f}",
@@ -587,6 +889,55 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "triggered": bool(st.get("triggered")),
                 "age_sec": round(age, 1) if age is not None else None,
             }
+        for venue in sorted(self._execute_venues):
+            for bal in self._venue_raw_balances.get(venue) or []:
+                asset = str(getattr(bal, "asset", "") or "").upper()
+                if not asset or asset == self._quote or asset in self._exclude_bases:
+                    continue
+                if not self._is_long_hold(asset):
+                    continue
+                trail_key = self._lots_key(venue, asset)
+                if trail_key in out:
+                    continue
+                qty = self._balance_qty(venue, asset)
+                if qty <= 0:
+                    continue
+                symbol = f"{asset}{self._quote}"
+                mark = Decimal(
+                    str(self._portfolio.state.mark_prices.get(symbol) or 0)
+                )
+                cost = self._unit_cost(venue, asset) or mark
+                if mark <= 0:
+                    continue
+                gain = ((mark - cost) / cost) if cost > 0 else _ZERO
+                notional = qty * mark
+                unrealized = (mark - cost) * qty if cost > 0 else _ZERO
+                opened_at = self._position_opened_at.get(trail_key)
+                age = max(0.0, time.time() - opened_at) if opened_at else None
+                out[trail_key] = {
+                    "venue": venue,
+                    "base": asset,
+                    "role": "long_hold",
+                    "armed": False,
+                    "soft_armed": False,
+                    "hard_armed": False,
+                    "partial_done": False,
+                    "hard_partial_done": False,
+                    "peak": "",
+                    "cost": str(cost) if cost > 0 else "",
+                    "mark": str(mark),
+                    "qty": str(qty),
+                    "notional_eur": str(notional.quantize(Decimal("0.01"))),
+                    "unrealized_eur": str(unrealized.quantize(Decimal("0.01"))),
+                    "gain_pct": f"{float(gain * 100):.2f}",
+                    "pct_to_arm": "—",
+                    "soft_arm_pct": "—",
+                    "hard_arm_pct": "—",
+                    "atr_pct": "",
+                    "session_qty": "0",
+                    "triggered": False,
+                    "age_sec": round(age, 1) if age is not None else None,
+                }
         return out
 
     def _session_unit_cost(self, venue: str, base: str) -> Decimal | None:
@@ -625,6 +976,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         key = self._lots_key(venue, base)
         if key not in self._position_opened_mono:
             self._position_opened_mono[key] = time.monotonic()
+            self._position_opened_at[key] = time.time()
 
     def _held_alt_bases(self) -> set[str]:
         """Distinct non-quote assets with meaningful live/paper inventory."""
@@ -638,6 +990,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             base = infer_base_asset(symbol)
             if not base or base == self._quote or base in self._exclude_bases:
                 continue
+            if self._is_long_hold(base):
+                continue
             mark = self._portfolio.state.mark_prices.get(symbol) or pos.average_entry_price
             if mark and pos.quantity * mark >= min_notional:
                 held.add(base)
@@ -647,6 +1001,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         for asset, bal in self._portfolio.state.balances.items():
             a = str(asset or "").upper()
             if not a or a == self._quote or a in self._exclude_bases:
+                continue
+            if self._is_long_hold(a):
                 continue
             if bal.total <= 0:
                 continue
@@ -937,12 +1293,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     fee_quote = fee_amt
                 else:
                     fee_quote = fee_amt if fee_amt > 0 else (amt * px * Decimal("0.001"))
-                # Buys: if hydrate already trusted the cost, only count the fill —
-                # do NOT append duplicate FIFO lots.
+                # Buys: if hydrate already trusted the cost, only dedupe the trade id.
                 if side == "buy" and self._has_trusted_cost(venue, base):
                     self._mirrored_trade_ids.add(mirror_key)
-                    self.live_fill_count += 1
-                    self.live_transaction_count += 1
+                    self.backfill_mirrored_count += 1
                     mirrored += 1
                     continue
                 try:
@@ -966,8 +1320,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         venue=venue,
                     )
                 self._mirrored_trade_ids.add(mirror_key)
-                self.live_fill_count += 1
-                self.live_transaction_count += 1
+                self.backfill_mirrored_count += 1
                 mirrored += 1
                 logger.info(
                     "FILL_BACKFILL venue=%s base=%s side=%s qty=%s px=%s trade=%s",
@@ -1160,6 +1513,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             sorted(mapped.keys()),
             sorted(ledger_balances.keys()),
         )
+        self.persist_runtime_state()
         return dict(venue_sync)
 
     async def _fetch_balances_cached(self, venue: str) -> list[Any]:
@@ -1317,8 +1671,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "strategy": strategy,
                 "opportunity_id": opportunity_id,
                 "placed_mono": time.monotonic(),
+                "placed_at": time.time(),
             }
         )
+        self.persist_runtime_state()
 
     async def manage_resting_orders(self, venue: str = "bitvavo") -> dict[str, Any]:
         """Poll resting live orders: mirror fills, cancel stale quotes, free capital."""
@@ -1506,6 +1862,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 pass
         if mirrored or cancelled:
             await self.reconcile_from_exchange(venue)
+        self.persist_runtime_state()
         return {
             "ok": True,
             "mirrored": mirrored,
@@ -1931,6 +2288,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if not asset or asset == self._quote:
                 continue
             if asset in self._exclude_bases:
+                continue
+            if self._is_long_hold(asset):
+                symbol = f"{asset}{self._quote}"
+                mark = await self._mark_price(venue, symbol)
+                cost = self._unit_cost(venue, asset)
+                if mark is not None and cost is not None and cost > 0 and mark > 0:
+                    self._trail_update_state(venue, asset, cost=cost, mark=mark)
                 continue
             if self._allowed_bases is not None and asset not in self._allowed_bases:
                 continue
@@ -2636,6 +3000,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "side": side,
             "requested_qty": str(qty),
             "requested_notional": str(notional),
+            "source": "live",
             "result": out,
         }
         self.live_trades.append(row)
@@ -2802,8 +3167,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             fee=fee,
             venue=venue,
         )
-        self.live_fill_count += 1
-        self.live_transaction_count += 1
+        self.session_live_fill_count += 1
+        self.session_live_transaction_count += 1
+        self.live_fill_count = self.session_live_fill_count
+        self.live_transaction_count = self.session_live_transaction_count
 
         result = ExecutionResult(
             order_id=order.id,

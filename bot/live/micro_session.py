@@ -487,9 +487,14 @@ async def run_session(
                 "live_trades_executed": len(
                     [t for t in bridge.live_trades if (t.get("result") or {}).get("executed")]
                 ),
-                "trade_count": int(bridge.live_transaction_count),
-                "live_fill_count": int(bridge.live_fill_count),
-                "live_transaction_count": int(bridge.live_transaction_count),
+                "trade_count": int(bridge.session_live_transaction_count),
+                "live_fill_count": int(bridge.session_live_fill_count),
+                "live_transaction_count": int(bridge.session_live_transaction_count),
+                "session_live_fill_count": int(bridge.session_live_fill_count),
+                "session_live_transaction_count": int(
+                    bridge.session_live_transaction_count
+                ),
+                "backfill_mirrored_count": int(bridge.backfill_mirrored_count),
                 "resting_orders": len(bridge._resting),  # noqa: SLF001
                 "last_live_trade": bridge.live_trades[-1] if bridge.live_trades else None,
                 "last_cycle": st.get("last_cycle"),

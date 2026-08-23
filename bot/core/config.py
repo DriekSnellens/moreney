@@ -427,6 +427,10 @@ class Settings(BaseSettings):
     live_micro_execute_venues: str = "bitvavo"
     # Scan OKX+Bitvavo books for dislocations; unfunded venues skip live legs.
     live_micro_cross_venue_enabled: bool = True
+    # Bases shown as long-hold / outside micro recycle (comma-separated, e.g. ETH).
+    live_micro_long_hold_bases: str = "ETH"
+    # Durable trail/resting/session counters across micro session restarts.
+    live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

@@ -96,6 +96,8 @@ def _nl_idle(hint: str) -> str:
         "EXECUTION_ERROR": "Execution errors",
         "BUDGET_EXHAUSTED": "Budget op",
         "VENUE_CASH": "Vrije cash per venue",
+        "LONG_HOLD_OUTSIDE_MICRO": "Long-hold buiten micro-recycle",
+        "MICRO_CAPITAL_LOCKED": "Vastgezet kapitaal (micro vs long-hold)",
         "SCANNING_NO_PASSING_EDGE": "Scant — geen edge die alle filters passeert",
         "SCANNING": "Scant / wacht op setup",
         "GESTOPTE SESSIE": "Sessie gestopt",
@@ -181,7 +183,7 @@ def _css() -> str:
       grid-template-columns: 1fr;
     }
     @media (min-width: 900px) {
-      .grid { grid-template-columns: repeat(4, 1fr); }
+      .grid { grid-template-columns: repeat(3, 1fr); }
     }
     @media (min-width: 600px) and (max-width: 899px) {
       .grid { grid-template-columns: repeat(2, 1fr); }
@@ -253,6 +255,20 @@ def _css() -> str:
     table.pos th { color: var(--muted); font-weight: 500; }
     table.pos td.good { color: var(--good); }
     table.pos td.bad { color: var(--bad); }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: .1rem .45rem;
+      font-size: .68rem;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .tag.long-hold {
+      border-color: #4a5a78;
+      color: #b8c7de;
+    }
     ul.alerts {
       margin: .4rem 0 0;
       padding-left: 1.1rem;
@@ -358,21 +374,49 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         or bridge.get("netto_winst_eur")
     )
 
-    tx = session.get("live_transaction_count")
-    if tx is None:
-        tx = bridge.get("live_transaction_count")
+    tx = (
+        session.get("session_live_transaction_count")
+        or bridge.get("session_live_transaction_count")
+        or session.get("live_transaction_count")
+        or bridge.get("live_transaction_count")
+    )
     if tx is None:
         tx = session.get("live_fill_count") or bridge.get("live_fill_count")
     try:
         tx_n = int(tx or 0)
     except (TypeError, ValueError):
         tx_n = 0
+    backfill_n = int(bridge.get("backfill_mirrored_count") or 0)
+    diag = bridge.get("diagnostics") or {}
+    unrealized = _dec(
+        bridge.get("unrealized_mtm_eur")
+        or diag.get("unrealized_mtm_eur")
+    )
+    blocked_sells = int(
+        bridge.get("blocked_sells_session")
+        or diag.get("blocked_sells_session")
+        or 0
+    )
+    locked_notional = _dec(
+        bridge.get("locked_notional_eur") or diag.get("locked_notional_eur")
+    )
+    micro_locked = _dec(
+        bridge.get("micro_locked_notional_eur") or diag.get("micro_locked_notional_eur")
+    )
+    long_hold_locked = _dec(
+        bridge.get("long_hold_notional_eur") or diag.get("long_hold_notional_eur")
+    )
 
     pnl_class = ""
     if pnl is not None and pnl > 0:
         pnl_class = "good"
     elif pnl is not None and pnl < 0:
         pnl_class = "bad"
+    unreal_class = ""
+    if unrealized is not None and unrealized > 0:
+        unreal_class = "good"
+    elif unrealized is not None and unrealized < 0:
+        unreal_class = "bad"
 
     trail = bridge.get("trail_take_profit") or {}
     states = trail.get("states") or {}
@@ -385,19 +429,34 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         base = st.get("base") or (str(key).split(":", 1)[-1] if ":" in str(key) else key)
         gain = st.get("gain_pct") or "—"
         to_arm = st.get("pct_to_arm") or "—"
+        role = str(st.get("role") or "micro_recycle")
+        notional = st.get("notional_eur") or "—"
+        unreal = st.get("unrealized_eur") or "—"
         soft = "ja" if st.get("soft_armed") else "nee"
         hard = "ja" if st.get("hard_armed") else "nee"
         partial = "ja" if st.get("partial_done") else "—"
         gain_cls = ""
         status = "—"
         status_cls = ""
+        unreal_cls = ""
+        try:
+            u = float(str(unreal).replace(",", "."))
+            if u > 0:
+                unreal_cls = "good"
+            elif u < 0:
+                unreal_cls = "bad"
+        except ValueError:
+            pass
         try:
             g = float(str(gain).replace(",", "."))
             if g > 0:
                 gain_cls = "good"
             elif g < 0:
                 gain_cls = "bad"
-            if g < 0:
+            if role == "long_hold":
+                status = "long-hold — buiten micro-recycle"
+                status_cls = ""
+            elif g < 0:
                 status = "onder kost — houdt vast"
                 status_cls = "bad"
             elif st.get("hard_armed"):
@@ -410,11 +469,18 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
                 status = f"wacht soft-arm (+{to_arm}%)"
         except ValueError:
             pass
+        role_tag = (
+            "<span class='tag long-hold'>long-hold</span>"
+            if role == "long_hold"
+            else "<span class='tag'>micro</span>"
+        )
         pos_rows.append(
             "<tr>"
             f"<td>{_esc(venue)}</td>"
-            f"<td>{_esc(base)}</td>"
+            f"<td>{_esc(base)} {role_tag}</td>"
             f"<td class='{status_cls}'>{_esc(status)}</td>"
+            f"<td>{_esc(_eur(notional))}</td>"
+            f"<td class='{unreal_cls}'>{_esc(_eur(unreal, signed=True))}</td>"
             f"<td>{_esc(st.get('cost') or '—')}</td>"
             f"<td>{_esc(st.get('mark') or '—')}</td>"
             f"<td class='{gain_cls}'>{_esc(gain)}%</td>"
@@ -430,9 +496,10 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     if pos_rows:
         positions_html = (
             "<section class='positions'><h2>Posities / trail</h2>"
-            "<p class='hint'>Winst% = mark vs kost (ongerealiseerd). Never-loss: geen sell onder break-even.</p>"
+            "<p class='hint'>Winst% = mark vs kost (ongerealiseerd). Long-hold (ETH) telt niet mee voor micro-recycle.</p>"
             "<table class='pos'><thead><tr>"
-            "<th>Venue</th><th>Coin</th><th>Status</th><th>Cost</th><th>Mark</th><th>Winst%</th>"
+            "<th>Venue</th><th>Coin</th><th>Status</th><th>Vast €</th><th>Ongereal. €</th>"
+            "<th>Cost</th><th>Mark</th><th>Winst%</th>"
             "<th>Tot arm</th><th>Soft/Hard</th><th>Arms%</th><th>Peak</th>"
             "<th>Partial</th><th>Sess qty</th><th>Age s</th>"
             "</tr></thead><tbody>"
@@ -496,8 +563,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "<p class='hint'>Top strategy rejects (cross-venue)</p>"
         f"{cv_reject_html}"
         "</section>"
-    )
-    diag = bridge.get("diagnostics") or {}
+        )
     why = list(diag.get("why_idle") or [])
     skip_leaders = list(diag.get("skip_leaders") or [])
     # Per-venue free EUR: prefer last sync, fall back to observe.
@@ -537,6 +603,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "EXECUTION_ERROR",
         "OVER_MAX",
         "AT_MAX",
+        "LONG_HOLD",
     )
     idle_ok = running and not any(tok in primary_raw for tok in blocker_tokens)
     skip_li = ""
@@ -649,14 +716,29 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">Totaal vrij (zie per venue hierboven)</p>
       </article>
       <article class="card">
-        <p class="label">Netto winst</p>
+        <p class="label">Gerealiseerd (live)</p>
         <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">Live FIFO gerealiseerd (na fees) — niet mark-to-market</p>
+        <p class="hint">FIFO na fees — alleen gesloten trades</p>
       </article>
       <article class="card">
-        <p class="label">Transacties</p>
+        <p class="label">Ongerealiseerd MTM</p>
+        <p class="value {unreal_class}">{_esc(_eur(unrealized, signed=True))}</p>
+        <p class="hint">Mark vs kost op open bags</p>
+      </article>
+      <article class="card">
+        <p class="label">Geblokkeerde sells</p>
+        <p class="value">{_esc(blocked_sells)}</p>
+        <p class="hint">Never-loss skips deze sessie (BE / time-stop)</p>
+      </article>
+      <article class="card">
+        <p class="label">Sessie-transacties</p>
         <p class="value">{_esc(tx_n)}</p>
-        <p class="hint">Elke buy of sell fill</p>
+        <p class="hint">Live fills (geen hydrate/backfill: {backfill_n})</p>
+      </article>
+      <article class="card">
+        <p class="label">Vastgezet kapitaal</p>
+        <p class="value">{_esc(_eur(locked_notional))}</p>
+        <p class="hint">Micro {_esc(_eur(micro_locked))} · long-hold {_esc(_eur(long_hold_locked))}</p>
       </article>
     </section>
     {positions_html}
