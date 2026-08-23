@@ -1597,6 +1597,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     blend = self._unit_cost(venue, asset)
                     if blend is None or blend <= 0:
                         continue
+                    # Time-stop also requires trusted fee-aware cost — never guess.
+                    if not self._has_trusted_cost(venue, asset):
+                        self._bump_skip("trail_no_trusted_cost")
+                        continue
                     symbol = f"{asset}{self._quote}"
                     mark = await self._mark_price(venue, symbol)
                     if mark is None or mark <= 0:
@@ -1642,6 +1646,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     )
                     if result.status != OrderStatus.REJECTED:
                         self._position_opened_mono.pop(trail_key, None)
+                continue
+
+            # Untrusted / mark-seeded cost must never arm or exit a trail.
+            if not self._has_trusted_cost(venue, asset):
+                self._bump_skip("trail_no_trusted_cost")
                 continue
 
             symbol = f"{asset}{self._quote}"
