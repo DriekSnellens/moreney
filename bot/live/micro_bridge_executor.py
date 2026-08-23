@@ -1258,9 +1258,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         still: list[dict[str, Any]] = []
         now = time.monotonic()
         max_age = self._resting_max_age_sec
-        tracked_ids = {str(r.get("exchange_order_id")) for r in self._resting}
+        venue_l = venue.strip().lower()
+        tracked_ids = {
+            str(r.get("exchange_order_id"))
+            for r in self._resting
+            if str(r.get("venue") or "").strip().lower() == venue_l
+        }
 
         for row in list(self._resting):
+            row_venue = str(row.get("venue") or "").strip().lower()
+            # Critical: never poll Bitvavo ids on OKX (or vice versa) — that
+            # yields ExchangeError spam, drops fill mirrors, and hits max-open.
+            if row_venue and row_venue != venue_l:
+                still.append(row)
+                continue
             oid = str(row.get("exchange_order_id") or "")
             symbol = str(row.get("symbol") or "")
             if not oid or not symbol:
@@ -1278,10 +1289,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 status_val = status.value if hasattr(status, "value") else str(status)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "resting fetch_order failed id=%s symbol=%s err=%s",
+                    "resting fetch_order failed venue=%s id=%s symbol=%s err=%s",
+                    venue_l,
                     oid,
                     symbol,
-                    type(exc).__name__,
+                    f"{type(exc).__name__}: {exc}"[:180],
                 )
 
             if filled > 0 and avg > 0:
@@ -1770,7 +1782,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return 0
         cancelled = 0
         still: list[dict[str, Any]] = []
+        venue_l = venue.strip().lower()
         for row in list(self._resting):
+            row_venue = str(row.get("venue") or "").strip().lower()
+            if row_venue and row_venue != venue_l:
+                still.append(row)
+                continue
             if str(row.get("symbol") or "").upper() != symbol.upper():
                 still.append(row)
                 continue
