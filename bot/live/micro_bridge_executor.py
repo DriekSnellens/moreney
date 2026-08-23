@@ -1992,7 +1992,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         message=f"live {self._quote} free {live_eur} pocket {remaining}",
                     )
                 order_request = order_request.model_copy(update={"quantity": qty})
-            # Ladder entries: 3 post-only bids at −1/−2/−3% vs mark (⅓ size each).
+            # Ladder entries: first leg joins the strategy bid (touch), deeper
+            # legs only as backup. Using mark*(1-dip) previously parked all
+            # bids ~1% below market so they never filled.
             if (
                 self._ladder_enabled
                 and post_only
@@ -2000,8 +2002,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not meta.get("dust_top_up")
                 and len(self._ladder_pcts) >= 2
             ):
-                mark = await self._mark_price(venue, symbol)
-                ref = mark if mark and mark > 0 else px
+                ref = px if px > 0 else await self._mark_price(venue, symbol)
+                if ref is None or ref <= 0:
+                    ref = px
+                # Post-only safety: never cross the ask.
+                best_ask = _ZERO
+                best_bid = _ZERO
+                if order_book is not None:
+                    try:
+                        if order_book.asks:
+                            best_ask = Decimal(str(order_book.asks[0].price))
+                        if order_book.bids:
+                            best_bid = Decimal(str(order_book.bids[0].price))
+                    except Exception:  # noqa: BLE001
+                        best_ask = _ZERO
+                        best_bid = _ZERO
+                if best_bid > 0:
+                    ref = max(ref, best_bid)
                 leg_qty = (qty / Decimal(len(self._ladder_pcts))).quantize(
                     Decimal("0.00000001")
                 )
@@ -2011,6 +2028,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         leg_px = (ref * (Decimal("1") - dip)).quantize(
                             Decimal("0.00000001")
                         )
+                        if best_ask > 0 and leg_px >= best_ask:
+                            leg_px = (best_ask * Decimal("0.9999")).quantize(
+                                Decimal("0.00000001")
+                            )
                         if leg_px <= 0:
                             continue
                         leg_req = order_request.model_copy(

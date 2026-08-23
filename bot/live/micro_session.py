@@ -175,8 +175,8 @@ def _session_settings(
             "paper_trail_atr_arm_mult": 2.5,
             "paper_trail_atr_dd_mult": 1.0,
             "paper_ladder_buy_enabled": True,
-            # Closer ladder → more fills (was 1/2/3% and rarely touched).
-            "paper_ladder_buy_pcts": "0.003,0.007,0.012",
+            # First leg joins the bid (0%); mild backups only.
+            "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
             "paper_time_stop_sec": 7200.0,  # 2h recycle at >= BE
             "paper_dust_policy": "top_up_or_exit",
@@ -200,8 +200,8 @@ def _session_settings(
             "paper_max_alt_inventory_pct": 30.0,
             "paper_min_alt_inventory_pct": 8.0,
             "paper_inventory_ask_improve_bps": 0.0,
-            # Milder dip gate so buys quote nearer the touch.
-            "paper_inventory_buy_dip_bps": 8.0,
+            # Join near touch; fair-value dip only a tiny edge, not a deep park.
+            "paper_inventory_buy_dip_bps": 2.0,
             "paper_markout_enabled": True,
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.

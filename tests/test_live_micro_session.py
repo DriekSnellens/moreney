@@ -84,8 +84,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_allow_buy_only is True
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 0.0
-    assert cfg.paper_inventory_buy_dip_bps >= 8.0
-    assert cfg.paper_ladder_buy_pcts.startswith("0.003")
+    assert cfg.paper_inventory_buy_dip_bps >= 2.0
+    assert cfg.paper_ladder_buy_pcts.startswith("0,")
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
