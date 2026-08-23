@@ -294,6 +294,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
                 str(getattr(bal, "locked", 0) or 0)
             )
+        sync = self._last_sync_by_venue.get(venue_l) or {}
+        ledger = sync.get("ledger") or {}
+        if base_u in ledger:
+            try:
+                return Decimal(str(ledger.get(base_u) or 0))
+            except Exception:  # noqa: BLE001
+                pass
+        mapped = sync.get("balances") or {}
+        if base_u in mapped:
+            try:
+                return Decimal(str(mapped.get(base_u) or 0))
+            except Exception:  # noqa: BLE001
+                pass
+        bal = self._portfolio.state.balances.get(base_u)
+        if bal is not None and bal.total > 0:
+            return Decimal(str(bal.total))
         return _ZERO
 
     def _blocked_sells_session(self) -> int:
