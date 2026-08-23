@@ -19,7 +19,11 @@ from bot.core.models import OrderRequest
 from bot.exchanges.base import BaseExchangeClient
 from bot.exchanges.binance import BinanceExchange
 from bot.exchanges.bitvavo import BitvavoExchange
-from bot.exchanges.ccxt_adapter import CcxtExchangeAdapter, sanitize_okx_client_order_id
+from bot.exchanges.ccxt_adapter import (
+    CcxtExchangeAdapter,
+    sanitize_bitvavo_client_order_id,
+    sanitize_okx_client_order_id,
+)
 from bot.exchanges.coinbase import CoinbaseExchange
 from bot.exchanges.factory import create_exchange_client
 from bot.exchanges.kraken import KrakenExchange
@@ -110,6 +114,12 @@ class FakeCcxtExchange:
             self.fail_times[name] = remaining - 1
             raise self.errors.get(name, ExchangeTransientError("transient"))
 
+    def amount_to_precision(self, symbol: str, amount: float) -> str:
+        return str(amount)
+
+    def price_to_precision(self, symbol: str, price: float) -> str:
+        return str(price)
+
     async def fetch_ticker(self, symbol: str) -> dict[str, Any]:
         await self._maybe_fail("fetch_ticker")
         payload = dict(self.ticker)
@@ -149,6 +159,7 @@ class FakeCcxtExchange:
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         await self._maybe_fail("create_order")
+        self.last_create_order_params = dict(params or {})
         payload = dict(self.created_order)
         payload.update(
             {
@@ -469,3 +480,31 @@ def test_sanitize_okx_client_order_id_strips_hyphens() -> None:
     assert len(out) <= 32
     assert out[0].isalpha()
     assert out.startswith("micro")
+
+
+def test_sanitize_bitvavo_client_order_id_formats_uuid() -> None:
+    out = sanitize_bitvavo_client_order_id("m" + "a" * 31)
+    parts = out.split("-")
+    assert len(parts) == 5
+    assert len(parts[0]) == 8
+    assert len(parts[4]) == 12
+    assert out == out.lower()
+
+
+def test_sanitize_bitvavo_client_order_id_preserves_valid_uuid() -> None:
+    sample = "2be7d0df-d8dc-7b93-a550-8876f3b393e9"
+    assert sanitize_bitvavo_client_order_id(sample) == sample
+
+
+@pytest.mark.asyncio
+async def test_bitvavo_place_order_sanitizes_client_order_id(settings) -> None:
+    fake = FakeCcxtExchange()
+    fake.markets = {"BTC/EUR": {}}
+    client = BitvavoExchange(settings, exchange=fake, enable_trading=True)
+    order = _order_request()
+    order = order.model_copy(update={"client_order_id": "m" + "b" * 31})
+    await client.place_order(order)
+    cl_id = fake.last_create_order_params["clientOrderId"]
+    assert "-" in cl_id
+    assert len(cl_id.split("-")) == 5
+    assert fake.last_create_order_params["operatorId"] == 1001

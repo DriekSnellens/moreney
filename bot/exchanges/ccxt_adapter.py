@@ -55,6 +55,27 @@ def sanitize_okx_client_order_id(raw: str | None) -> str:
         cleaned = f"m{cleaned}"
     return cleaned[:32]
 
+
+def sanitize_bitvavo_client_order_id(raw: str | None) -> str:
+    """Bitvavo clientOrderId: hyphenated UUID (8-4-4-4-12), unique among open orders."""
+    text = str(raw or "").strip().lower()
+    parts = text.split("-")
+    if (
+        len(parts) == 5
+        and len(parts[0]) == 8
+        and len(parts[1]) == 4
+        and len(parts[2]) == 4
+        and len(parts[3]) == 4
+        and len(parts[4]) == 12
+        and all(all(ch in "0123456789abcdef" for ch in part) for part in parts)
+    ):
+        return text
+    cleaned = "".join(ch for ch in text if ch.isalnum())
+    if len(cleaned) >= 32:
+        h = cleaned[:32]
+        return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
+    return str(uuid4())
+
 try:
     import ccxt.async_support as ccxt
     from ccxt.base.errors import (
@@ -294,6 +315,8 @@ class CcxtExchangeAdapter(BaseExchangeClient):
             cl_id = order.client_order_id
             if self.ccxt_id == "okx":
                 cl_id = sanitize_okx_client_order_id(cl_id)
+            elif self.ccxt_id == "bitvavo":
+                cl_id = sanitize_bitvavo_client_order_id(cl_id)
             params["clientOrderId"] = cl_id
         if self.ccxt_id == "bitvavo":
             params["operatorId"] = int(

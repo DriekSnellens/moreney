@@ -250,7 +250,7 @@ class LiveMicroEngine:
             side=side,
             quantity=qty,
             limit_price=limit_price,
-            client_order_id=f"m{uuid4().hex[:31]}",
+            client_order_id=str(uuid4()),
             metadata={
                 "venue": venue,
                 "exchange": venue,
