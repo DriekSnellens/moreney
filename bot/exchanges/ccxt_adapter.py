@@ -45,6 +45,16 @@ from bot.exchanges.symbols import to_ccxt_symbol, to_internal_symbol
 
 logger = logging.getLogger(__name__)
 
+
+def sanitize_okx_client_order_id(raw: str | None) -> str:
+    """OKX clOrdId: alphanumeric only, ≤32 chars, must start with a letter."""
+    cleaned = "".join(ch for ch in str(raw or "") if ch.isalnum())
+    if not cleaned:
+        cleaned = uuid4().hex
+    if cleaned[0].isdigit():
+        cleaned = f"m{cleaned}"
+    return cleaned[:32]
+
 try:
     import ccxt.async_support as ccxt
     from ccxt.base.errors import (
@@ -281,7 +291,10 @@ class CcxtExchangeAdapter(BaseExchangeClient):
         order_type = "limit" if order.limit_price is not None else "market"
         params: dict[str, Any] = {}
         if order.client_order_id:
-            params["clientOrderId"] = order.client_order_id
+            cl_id = order.client_order_id
+            if self.ccxt_id == "okx":
+                cl_id = sanitize_okx_client_order_id(cl_id)
+            params["clientOrderId"] = cl_id
         if self.ccxt_id == "bitvavo":
             params["operatorId"] = int(
                 getattr(self._settings, "bitvavo_operator_id", 1001) or 1001

@@ -1387,7 +1387,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                             "order_id": str(result.order_id)
                             if result.order_id
                             else None,
-                            "error": result.error,
+                            "error": result.message,
                         }
                     )
                     if result.status != OrderStatus.REJECTED:
@@ -1492,7 +1492,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "cost": str(cost),
                 "status": result.status.value,
                 "order_id": str(result.order_id) if result.order_id else None,
-                "error": result.error,
+                "error": result.message,
             }
             triggered.append(row)
             if result.status == OrderStatus.REJECTED:

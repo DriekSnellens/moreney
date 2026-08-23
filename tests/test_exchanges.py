@@ -19,7 +19,7 @@ from bot.core.models import OrderRequest
 from bot.exchanges.base import BaseExchangeClient
 from bot.exchanges.binance import BinanceExchange
 from bot.exchanges.bitvavo import BitvavoExchange
-from bot.exchanges.ccxt_adapter import CcxtExchangeAdapter
+from bot.exchanges.ccxt_adapter import CcxtExchangeAdapter, sanitize_okx_client_order_id
 from bot.exchanges.coinbase import CoinbaseExchange
 from bot.exchanges.factory import create_exchange_client
 from bot.exchanges.kraken import KrakenExchange
@@ -461,3 +461,11 @@ def test_exchange_modules_do_not_import_strategies() -> None:
         source = inspect.getsource(module)
         assert "bot.strategies" not in source
         assert "TradeOpportunity" not in source
+
+
+def test_sanitize_okx_client_order_id_strips_hyphens() -> None:
+    out = sanitize_okx_client_order_id("micro-ccb77bc79e1f4fca")
+    assert "-" not in out
+    assert len(out) <= 32
+    assert out[0].isalpha()
+    assert out.startswith("micro")
