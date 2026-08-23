@@ -35,8 +35,9 @@ def _eur(value: Any, *, signed: bool = False) -> str:
     return f"€{text}"
 
 
-def _bitvavo_free_eur(observe: dict[str, Any]) -> Decimal | None:
-    best: Decimal | None = None
+def _free_eur_by_venue(observe: dict[str, Any]) -> dict[str, Decimal]:
+    """Sum free EUR per venue from observe balances."""
+    out: dict[str, Decimal] = {}
     for entry in observe.get("balances") or []:
         if not isinstance(entry, dict):
             continue
@@ -47,16 +48,80 @@ def _bitvavo_free_eur(observe: dict[str, Any]) -> Decimal | None:
             if not isinstance(row, dict):
                 continue
             asset = str(row.get("asset") or "").upper()
-            row_venue = str(row.get("venue") or venue or "").lower()
-            if asset != "EUR" or row_venue not in {"bitvavo", ""}:
+            if asset != "EUR":
                 continue
+            row_venue = str(row.get("venue") or venue or "unknown").lower() or "unknown"
             free = _dec(row.get("available") if row.get("available") is not None else row.get("free"))
             if free is None:
                 free = _dec(row.get("total"))
             if free is None:
                 continue
-            best = free if best is None else max(best, free)
-    return best
+            prev = out.get(row_venue)
+            out[row_venue] = free if prev is None else max(prev, free)
+    return out
+
+
+def _bitvavo_free_eur(observe: dict[str, Any]) -> Decimal | None:
+    by_venue = _free_eur_by_venue(observe)
+    if "bitvavo" in by_venue:
+        return by_venue["bitvavo"]
+    if len(by_venue) == 1:
+        return next(iter(by_venue.values()))
+    return None
+
+
+def _nl_idle(hint: str) -> str:
+    """Map machine idle codes to short Dutch operator lines."""
+    raw = (hint or "").strip()
+    if not raw:
+        return "—"
+    code = raw.split(" ", 1)[0]
+    rest = raw[len(code) :].strip()
+    labels = {
+        "RISK_KILL_SWITCH_PAUSED": "Kill-switch gepauzeerd",
+        "RISK_KILL_SWITCH_EMERGENCY_STOP": "Emergency stop actief",
+        "DAILY_KILL": "Dagelijkse kill actief — geen nieuwe trades",
+        "BUYS_BLOCKED_REGIME": "Buys geblokkeerd (regime)",
+        "RESTING_ORDERS": "Openstaande orders op de beurs",
+        "HOLDING_BELOW_COST": "Bags onder kostprijs — never-loss houdt vast",
+        "SELLS_BLOCKED_NEVER_LOSS": "Sells geblokkeerd (never-loss / onder break-even)",
+        "SELLS_BELOW_BREAK_EVEN": "Sells onder break-even (never-loss)",
+        "WAITING_SOFT_ARM": "Wacht op soft-arm winstdrempel",
+        "OVER_MAX_ALT_BASES": "Te veel alt-bases vast",
+        "AT_MAX_ALT_BASES": "Max alt-bases bereikt (alleen bijvullen)",
+        "FEES_EAT_EDGE": "Edge te klein na fees",
+        "MOMENTUM_BLOCK": "Momentum-filter blokkeert",
+        "CORR_GROUP_CAP": "Correlatie-groep vol",
+        "POLICY_BLOCKED": "Policy blokkeert",
+        "EXECUTION_ERROR": "Execution errors",
+        "BUDGET_EXHAUSTED": "Budget op",
+        "VENUE_CASH": "Vrije cash per venue",
+        "SCANNING_NO_PASSING_EDGE": "Scant — geen edge die alle filters passeert",
+        "SCANNING": "Scant / wacht op setup",
+        "GESTOPTE SESSIE": "Sessie gestopt",
+    }
+    title = labels.get(code, code)
+    return f"{title} — {rest}" if rest else title
+
+
+def _nl_skip(reason: str) -> str:
+    labels = {
+        "sell_below_break_even": "sell onder break-even",
+        "time_stop_below_be": "time-stop onder BE",
+        "live_resting": "wacht op resting fill",
+        "stale_quote_cancelled": "stale quote geannuleerd",
+        "ladder_buy": "ladder buy skip",
+        "orphan_open_cancelled": "orphan order cancelled",
+        "policy_blocked": "policy",
+        "execution_error": "execution error",
+        "fees_eat_edge": "fees eten edge",
+        "momentum_block": "momentum",
+        "corr_group_cap": "corr-groep",
+        "budget_exhausted": "budget",
+        "venue_inventory": "venue inventory",
+        "stale_edge": "stale edge",
+    }
+    return labels.get(reason, reason)
 
 
 def _css() -> str:
@@ -217,6 +282,52 @@ def _css() -> str:
       cursor: pointer;
     }
     .btn:hover { color: var(--text); border-color: #3a4b63; }
+    .idle-banner {
+      margin: 0 0 1.25rem;
+      padding: 1rem 1.15rem;
+      border-radius: 14px;
+      border: 1px solid #5a3a2a;
+      background: linear-gradient(135deg, rgba(255,107,107,.14), rgba(20,28,39,.9));
+    }
+    .idle-banner.ok {
+      border-color: #2a5a40;
+      background: linear-gradient(135deg, rgba(61,220,151,.10), rgba(20,28,39,.9));
+    }
+    .idle-banner h2 {
+      margin: 0 0 .45rem;
+      font-size: .95rem;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #ffb4a8;
+    }
+    .idle-banner.ok h2 { color: var(--good); }
+    .idle-banner .primary {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: .95rem;
+      line-height: 1.35;
+    }
+    .idle-banner ul {
+      margin: .55rem 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: .78rem;
+    }
+    .cash-grid {
+      display: grid;
+      gap: .6rem;
+      grid-template-columns: 1fr 1fr;
+      margin: 0 0 1.25rem;
+    }
+    .cash-grid .mini {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: .7rem .85rem;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+    }
+    .cash-grid .mini .label { font-size: .72rem; }
+    .cash-grid .mini .value { margin: .35rem 0 0; font-size: 1.15rem; }
     """
 
 
@@ -227,7 +338,10 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     bridge = session.get("bridge") or {}
 
     running = bool(session.get("running") or session.get("task_running"))
-    free = _bitvavo_free_eur(observe)
+    free_by_observe = _free_eur_by_venue(observe)
+    free = None
+    if free_by_observe:
+        free = sum(free_by_observe.values(), Decimal("0"))
     if free is None:
         free = _dec(bridge.get("free_quote_eur") or bridge.get("remaining_eur"))
 
@@ -264,26 +378,43 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     states = trail.get("states") or {}
     alerts = bridge.get("alerts") or trail.get("alerts") or []
     pos_rows = []
-    for base, st in sorted(states.items()):
+    for key, st in sorted(states.items()):
         if not isinstance(st, dict):
             continue
+        venue = st.get("venue") or (str(key).split(":", 1)[0] if ":" in str(key) else "—")
+        base = st.get("base") or (str(key).split(":", 1)[-1] if ":" in str(key) else key)
         gain = st.get("gain_pct") or "—"
         to_arm = st.get("pct_to_arm") or "—"
         soft = "ja" if st.get("soft_armed") else "nee"
         hard = "ja" if st.get("hard_armed") else "nee"
         partial = "ja" if st.get("partial_done") else "—"
         gain_cls = ""
+        status = "—"
+        status_cls = ""
         try:
             g = float(str(gain).replace(",", "."))
             if g > 0:
                 gain_cls = "good"
             elif g < 0:
                 gain_cls = "bad"
+            if g < 0:
+                status = "onder kost — houdt vast"
+                status_cls = "bad"
+            elif st.get("hard_armed"):
+                status = "hard-armed — trail exit"
+                status_cls = "good"
+            elif st.get("soft_armed"):
+                status = "soft-armed — partial/trail"
+                status_cls = "good"
+            else:
+                status = f"wacht soft-arm (+{to_arm}%)"
         except ValueError:
             pass
         pos_rows.append(
             "<tr>"
+            f"<td>{_esc(venue)}</td>"
             f"<td>{_esc(base)}</td>"
+            f"<td class='{status_cls}'>{_esc(status)}</td>"
             f"<td>{_esc(st.get('cost') or '—')}</td>"
             f"<td>{_esc(st.get('mark') or '—')}</td>"
             f"<td class='{gain_cls}'>{_esc(gain)}%</td>"
@@ -299,8 +430,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     if pos_rows:
         positions_html = (
             "<section class='positions'><h2>Posities / trail</h2>"
+            "<p class='hint'>Winst% = mark vs kost (ongerealiseerd). Never-loss: geen sell onder break-even.</p>"
             "<table class='pos'><thead><tr>"
-            "<th>Coin</th><th>Cost</th><th>Mark</th><th>Winst%</th>"
+            "<th>Venue</th><th>Coin</th><th>Status</th><th>Cost</th><th>Mark</th><th>Winst%</th>"
             "<th>Tot arm</th><th>Soft/Hard</th><th>Arms%</th><th>Peak</th>"
             "<th>Partial</th><th>Sess qty</th><th>Age s</th>"
             "</tr></thead><tbody>"
@@ -322,8 +454,6 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             f"{_esc(a.get('message') or '')}</li>"
         )
     kill = "aan" if trail.get("daily_kill_active") else "uit"
-    diag = bridge.get("diagnostics") or {}
-    why = diag.get("why_idle") or []
     funnel = session.get("pipeline_funnel") or {}
     cv = funnel.get("cross_venue") or {}
     cv_pairs = cv.get("pairs_evaluated", 0)
@@ -367,17 +497,88 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"{cv_reject_html}"
         "</section>"
     )
+    diag = bridge.get("diagnostics") or {}
+    why = list(diag.get("why_idle") or [])
+    skip_leaders = list(diag.get("skip_leaders") or [])
+    # Per-venue free EUR: prefer last sync, fall back to observe.
+    sync_by = bridge.get("last_sync_by_venue") or {}
+    cash_cards = []
+    for venue in ("bitvavo", "okx"):
+        sync = sync_by.get(venue) or {}
+        ledger = sync.get("ledger") or {}
+        eur = (
+            ledger.get("EUR")
+            or sync.get("venue_budget_remaining")
+            or sync.get("free_quote_eur")
+            or free_by_observe.get(venue)
+        )
+        cash_cards.append(
+            "<div class='mini'>"
+            f"<p class='label'>{_esc(venue)} vrij EUR</p>"
+            f"<p class='value'>{_esc(_eur(eur))}</p>"
+            "</div>"
+        )
+    cash_html = (
+        "<section class='cash-grid'>" + "".join(cash_cards) + "</section>"
+        if cash_cards
+        else ""
+    )
+    primary_raw = why[0] if why else ("SCANNING" if running else "GESTOPTE SESSIE")
+    primary = _nl_idle(primary_raw)
+    blocker_tokens = (
+        "SELLS_BLOCKED",
+        "SELLS_BELOW",
+        "HOLDING_BELOW",
+        "WAITING_SOFT",
+        "RISK_KILL",
+        "DAILY_KILL",
+        "RESTING",
+        "BUYS_BLOCKED",
+        "EXECUTION_ERROR",
+        "OVER_MAX",
+        "AT_MAX",
+    )
+    idle_ok = running and not any(tok in primary_raw for tok in blocker_tokens)
+    skip_li = ""
+    for item in skip_leaders[:8]:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            skip_li += f"<li>{_esc(_nl_skip(str(item[0])))}: {_esc(item[1])}</li>"
+        else:
+            skip_li += f"<li>{_esc(item)}</li>"
+    extra = "".join(f"<li>{_esc(_nl_idle(h))}</li>" for h in why[1:8])
+    idle_banner = (
+        f"<section class='idle-banner{' ok' if idle_ok else ''}'>"
+        "<h2>Waarom nu stil / wat blokkeert</h2>"
+        f"<p class='primary'>{_esc(primary)}</p>"
+        + (
+            "<ul>"
+            + extra
+            + (f"<li><em>Top skips deze sessie</em></li>{skip_li}" if skip_li else "")
+            + "</ul>"
+            if extra or skip_li
+            else ""
+        )
+        + "</section>"
+    )
     why_html = (
-        "<section class='positions'><h2>Waarom geen trades</h2>"
+        "<section class='positions'><h2>Idle detail (codes)</h2>"
         + (
             "<ul class='alerts'>"
-            + "".join(f"<li>{_esc(h)}</li>" for h in why)
+            + "".join(f"<li>{_esc(_nl_idle(h))} <span class='hint'>({_esc(h)})</span></li>" for h in why)
             + "</ul>"
             if why
             else "<p class='hint'>—</p>"
         )
+        + (
+            "<p class='hint'>Skip-counters (sessie)</p><ul class='alerts'>"
+            + skip_li
+            + "</ul>"
+            if skip_li
+            else ""
+        )
         + "</section>"
     )
+
     trade_rows = []
     for t in list(diag.get("recent_live_trades") or [])[-8:]:
         if not isinstance(t, dict):
@@ -434,6 +635,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <h1 class="brand">Moreney</h1>
       <p class="status {"on" if running else ""}">{("live" if running else "gestopt")}</p>
     </header>
+    {idle_banner}
+    {cash_html}
     <section class="grid">
       <article class="card">
         <p class="label">Portfolio</p>
@@ -443,12 +646,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Vrij te besteden</p>
         <p class="value">{_esc(_eur(free))}</p>
-        <p class="hint">Beschikbare EUR op Bitvavo</p>
+        <p class="hint">Totaal vrij (zie per venue hierboven)</p>
       </article>
       <article class="card">
         <p class="label">Netto winst</p>
         <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">Gerealiseerd op trades (na fees) · trend/trail</p>
+        <p class="hint">Live FIFO gerealiseerd (na fees) — niet mark-to-market</p>
       </article>
       <article class="card">
         <p class="label">Transacties</p>

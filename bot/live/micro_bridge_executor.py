@@ -444,28 +444,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         }
 
     def _why_idle_hints(self) -> list[str]:
+        """Operator-facing blockers — ordered by severity / current truth."""
         hints: list[str] = []
         held = self._held_alt_bases()
-        if self._daily_kill_active:
-            hints.append("DAILY_KILL")
-        if self._buys_blocked:
-            hints.append("BUYS_BLOCKED_REGIME")
-        if self._max_alt_bases > 0 and len(held) > self._max_alt_bases:
-            hints.append(
-                f"OVER_MAX_ALT_BASES held={sorted(held)} max={self._max_alt_bases}"
-            )
-        elif self._max_alt_bases > 0 and len(held) >= self._max_alt_bases:
-            hints.append(
-                f"AT_MAX_ALT_BASES held={sorted(held)} (adds to existing only)"
-            )
-        if self.skips.get("sell_below_break_even", 0) > 0:
-            hints.append("SELLS_BELOW_BREAK_EVEN")
-        if self.skips.get("fees_eat_edge", 0) > 0:
-            hints.append("FEES_EAT_EDGE")
-        if self.skips.get("momentum_block", 0) > 0:
-            hints.append("MOMENTUM_BLOCK")
-        if self.skips.get("corr_group_cap", 0) > 0:
-            hints.append("CORR_GROUP_CAP")
+
         ks = getattr(self, "_kill_switch", None)
         if ks is not None:
             try:
@@ -474,11 +456,101 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 if str(state).lower() in {"paused", "emergency_stop"}:
                     reason = getattr(ks, "reason", None) or "unknown"
-                    hints.insert(
-                        0, f"RISK_KILL_SWITCH_{str(state).upper()}: {reason}"
+                    hints.append(
+                        f"RISK_KILL_SWITCH_{str(state).upper()}: {reason}"
                     )
             except Exception:  # noqa: BLE001
                 pass
+
+        if self._daily_kill_active:
+            hints.append("DAILY_KILL")
+        if self._buys_blocked:
+            hints.append("BUYS_BLOCKED_REGIME")
+
+        resting_n = len(self._resting)
+        if resting_n > 0:
+            by_venue: dict[str, int] = {}
+            for row in self._resting:
+                v = str(row.get("venue") or "?").lower()
+                by_venue[v] = by_venue.get(v, 0) + 1
+            venue_bits = ",".join(f"{v}={n}" for v, n in sorted(by_venue.items()))
+            hints.append(f"RESTING_ORDERS n={resting_n} ({venue_bits})")
+
+        # Current underwater bags (not just lifetime skip counts).
+        underwater: list[str] = []
+        waiting_arm: list[str] = []
+        for trail_key, st in self._trail.items():
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0:
+                continue
+            gain = (mark - cost) / cost
+            label = f"{trail_key}:{float(gain * 100):+.2f}%"
+            if gain < 0:
+                underwater.append(label)
+            elif not st.get("soft_armed"):
+                soft = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
+                need = soft - gain
+                if need > 0:
+                    waiting_arm.append(
+                        f"{trail_key}:need+{float(need * 100):.2f}%"
+                    )
+        if underwater:
+            hints.append(
+                "HOLDING_BELOW_COST "
+                + ", ".join(underwater[:8])
+                + ("…" if len(underwater) > 8 else "")
+            )
+        be_skips = int(self.skips.get("sell_below_break_even", 0) or 0)
+        ts_skips = int(self.skips.get("time_stop_below_be", 0) or 0)
+        if be_skips or ts_skips:
+            hints.append(
+                f"SELLS_BLOCKED_NEVER_LOSS sell_be={be_skips} time_stop_be={ts_skips}"
+            )
+        if waiting_arm:
+            hints.append(
+                "WAITING_SOFT_ARM "
+                + ", ".join(waiting_arm[:6])
+                + ("…" if len(waiting_arm) > 6 else "")
+            )
+
+        if self._max_alt_bases > 0 and len(held) > self._max_alt_bases:
+            hints.append(
+                f"OVER_MAX_ALT_BASES held={sorted(held)} max={self._max_alt_bases}"
+            )
+        elif self._max_alt_bases > 0 and len(held) >= self._max_alt_bases:
+            hints.append(
+                f"AT_MAX_ALT_BASES held={sorted(held)} (adds to existing only)"
+            )
+
+        if self.skips.get("fees_eat_edge", 0) > 0:
+            hints.append(f"FEES_EAT_EDGE n={self.skips.get('fees_eat_edge')}")
+        if self.skips.get("momentum_block", 0) > 0:
+            hints.append(f"MOMENTUM_BLOCK n={self.skips.get('momentum_block')}")
+        if self.skips.get("corr_group_cap", 0) > 0:
+            hints.append(f"CORR_GROUP_CAP n={self.skips.get('corr_group_cap')}")
+        if self.skips.get("policy_blocked", 0) > 0:
+            hints.append(f"POLICY_BLOCKED n={self.skips.get('policy_blocked')}")
+        if self.skips.get("execution_error", 0) > 0:
+            hints.append(f"EXECUTION_ERROR n={self.skips.get('execution_error')}")
+        if self.skips.get("budget_exhausted", 0) > 0:
+            hints.append(f"BUDGET_EXHAUSTED n={self.skips.get('budget_exhausted')}")
+
+        # Per-venue free cash so OKX under-deployment is visible.
+        venue_cash: list[str] = []
+        for venue in sorted(self._execute_venues):
+            try:
+                rem = self._venue_budget_remaining(venue)
+            except Exception:  # noqa: BLE001
+                rem = None
+            if rem is not None:
+                venue_cash.append(f"{venue}=€{float(rem):.0f}")
+        if venue_cash:
+            hints.append("VENUE_CASH " + " ".join(venue_cash))
+
         if not hints:
             hints.append("SCANNING_NO_PASSING_EDGE")
         return hints

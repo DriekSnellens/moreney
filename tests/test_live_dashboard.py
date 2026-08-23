@@ -47,6 +47,39 @@ def test_render_live_dashboard_contains_controls() -> None:
                     "netto_winst_eur": "100.50",
                     "live_transaction_count": 7,
                     "skips": {},
+                    "last_sync_by_venue": {
+                        "bitvavo": {"ledger": {"EUR": "900.00"}, "venue_budget_remaining": "900.00"},
+                        "okx": {"ledger": {"EUR": "700.00"}, "venue_budget_remaining": "700.00"},
+                    },
+                    "diagnostics": {
+                        "why_idle": [
+                            "HOLDING_BELOW_COST bitvavo:ETH:-2.10%",
+                            "SELLS_BLOCKED_NEVER_LOSS sell_be=12 time_stop_be=9",
+                            "VENUE_CASH bitvavo=€900 okx=€700",
+                        ],
+                        "skip_leaders": [
+                            ["sell_below_break_even", 12],
+                            ["time_stop_below_be", 9],
+                        ],
+                    },
+                    "trail_take_profit": {
+                        "states": {
+                            "bitvavo:ETH": {
+                                "venue": "bitvavo",
+                                "base": "ETH",
+                                "cost": "2000",
+                                "mark": "1950",
+                                "gain_pct": "-2.50",
+                                "pct_to_arm": "3.40",
+                                "soft_armed": False,
+                                "hard_armed": False,
+                                "soft_arm_pct": "0.90",
+                                "hard_arm_pct": "1.80",
+                                "session_qty": "0.1",
+                                "age_sec": 120,
+                            }
+                        }
+                    },
                 },
             },
             "engine": {"armed": False, "can_place_orders": False, "block_reason": "locked"},
@@ -58,9 +91,15 @@ def test_render_live_dashboard_contains_controls() -> None:
                     {
                         "venue": "bitvavo",
                         "balances": [
-                            {"asset": "EUR", "available": "1623.39", "total": "1623.39"},
+                            {"asset": "EUR", "available": "900.00", "total": "900.00"},
                         ],
-                    }
+                    },
+                    {
+                        "venue": "okx",
+                        "balances": [
+                            {"asset": "EUR", "available": "700.00", "total": "700.00"},
+                        ],
+                    },
                 ],
             },
             "readiness": {"active_phase": "phase1", "can_place_live_orders": False},
@@ -75,6 +114,12 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "7" in html
     assert "Start" in html
     assert "Emergency stop" not in html
+    assert "Waarom nu stil" in html
+    assert "Bags onder kostprijs" in html
+    assert "bitvavo vrij EUR" in html
+    assert "okx vrij EUR" in html
+    assert "onder kost — houdt vast" in html
+    assert "sell onder break-even" in html
 
 
 def test_render_live_dashboard_cross_venue_panel() -> None:
