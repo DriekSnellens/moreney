@@ -93,7 +93,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.25
-    assert cfg.paper_trail_soft_arm_pct == 0.02
+    assert cfg.paper_trail_soft_arm_pct == 0.012
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
@@ -470,7 +470,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
-    assert cfg.paper_trail_soft_arm_pct == 0.02
+    assert cfg.paper_trail_soft_arm_pct == 0.012
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.25
     assert cfg.live_micro_max_notional_eur <= 150.0
@@ -733,3 +733,69 @@ def test_break_even_taker_above_maker() -> None:
     be_t = bridge._break_even_sell_price("bitvavo", "FET", taker=True)  # noqa: SLF001
     assert be_m is not None and be_t is not None
     assert be_t > be_m
+
+
+def test_trail_time_stop_uses_venue_key() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.12,
+        paper_time_stop_enabled=True,
+        paper_time_stop_sec=600.0,
+        paper_trail_atr_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    import time as _time
+
+    bridge._position_opened_mono[bridge._lots_key("bitvavo", "ADA")] = (  # noqa: SLF001
+        _time.monotonic() - 601
+    )
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "ADA", cost=Decimal("1"), mark=Decimal("1.01")
+    )
+    assert st["soft_armed"] is False
+    assert st["time_stop_due"] is True
+
+
+def test_trail_ignores_mark_spike_before_soft_arm() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.02,
+        paper_trail_atr_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    cost = Decimal("1.00")
+    bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.01"))  # noqa: SLF001
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.25"))  # noqa: SLF001
+    assert st["soft_armed"] is False
+    assert bridge.skips.get("trail_mark_spike", 0) >= 1
+    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.025"))  # noqa: SLF001
+    assert st["soft_armed"] is True
+
+
+def test_portfolio_sync_does_not_invent_one_eur_entry() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(paper_starting_eur=100.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
+    portfolio.sync_live_balances(
+        [
+            Balance(asset="EUR", free=Decimal("50"), locked=Decimal("0")),
+            Balance(asset="ADA", free=Decimal("10"), locked=Decimal("0")),
+        ],
+        quote_available_cap=Decimal("50"),
+    )
+    pos = portfolio.state.positions.get("ADAEUR")
+    assert pos is not None
+    assert pos.average_entry_price == Decimal("0")

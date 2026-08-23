@@ -160,7 +160,7 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            "paper_trail_soft_arm_pct": 0.02,
+            "paper_trail_soft_arm_pct": 0.012,  # ~1.2%: more recycles toward €20–50/day
             "paper_trail_soft_drawdown_pct": 0.012,
             "paper_trail_soft_partial_pct": 0.25,
             "paper_trail_hard_arm_pct": 0.06,
@@ -224,6 +224,9 @@ def _session_settings(
             "risk_min_net_profit_usd": 0.08,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
+            # Keep maker clips ≤ risk ceiling (8% equity was rejecting as MAX_POSITION_SIZE).
+            "arbitrage_position_pct": min(3.5, max(2.0, (min(150.0, max(50.0, budget_f * 0.08)) / max(budget_f, 1.0)) * 100.0)),
+            "live_micro_ignore_paper_daily_loss": True,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
@@ -408,6 +411,20 @@ async def run_session(
             logger.info("Full-bot micro initial sync okx: %s", okx_sync)
     except Exception:  # noqa: BLE001
         logger.exception("Full-bot micro initial sync failed")
+
+    # Inventory sync is not trading — clear phantom paper PnL and resume if a
+    # false paper daily-loss pause was inherited from a prior fill mirror.
+    try:
+        bridge.reset_paper_realized_after_inventory_sync()
+    except Exception:  # noqa: BLE001
+        logger.exception("paper realized reset failed")
+    bridge._kill_switch = kill_switch  # noqa: SLF001 — diagnostics only
+    if kill_switch is not None:
+        try:
+            recovered = await kill_switch.recover(force=True)
+            logger.info("micro session kill-switch recover force=%s", recovered)
+        except Exception:  # noqa: BLE001
+            logger.exception("micro session kill-switch recover failed")
 
     continuous = minutes is None or float(minutes) <= 0
     deadline = (

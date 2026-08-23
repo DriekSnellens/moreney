@@ -466,6 +466,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hints.append("MOMENTUM_BLOCK")
         if self.skips.get("corr_group_cap", 0) > 0:
             hints.append("CORR_GROUP_CAP")
+        ks = getattr(self, "_kill_switch", None)
+        if ks is not None:
+            try:
+                state = getattr(getattr(ks, "state", None), "value", None) or str(
+                    getattr(ks, "state", "")
+                )
+                if str(state).lower() in {"paused", "emergency_stop"}:
+                    reason = getattr(ks, "reason", None) or "unknown"
+                    hints.insert(
+                        0, f"RISK_KILL_SWITCH_{str(state).upper()}: {reason}"
+                    )
+            except Exception:  # noqa: BLE001
+                pass
         if not hints:
             hints.append("SCANNING_NO_PASSING_EDGE")
         return hints
@@ -752,6 +765,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 rebuilt_qty = sum((q for q, _u in rebuilt if q > 0), _ZERO)
                 if rebuilt_qty <= 0:
                     continue
+            # Incomplete trade history must NOT become trusted cost (never-loss).
+            if rebuilt_qty < held * Decimal("0.98"):
+                logger.info(
+                    "cost hydrate incomplete venue=%s base=%s rebuilt=%s held=%s",
+                    venue,
+                    base,
+                    rebuilt_qty,
+                    held,
+                )
+                continue
             # Keep lots covering current held qty (drop excess oldest if needed).
             if rebuilt_qty > held * Decimal("1.001"):
                 need = held
@@ -766,6 +789,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._cost_lots[lot_key] = rebuilt
             self._trusted_cost_keys.add(lot_key)
             hydrated.append(base)
+            self._sync_paper_entry_from_lots(venue, base)
             logger.info(
                 "cost basis hydrated venue=%s base=%s lots=%s unit=%s",
                 venue,
@@ -1405,7 +1429,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "resting": len(self._resting),
         }
 
+    def _sync_paper_entry_from_lots(self, venue: str, base: str) -> None:
+        """Align paper average entry with trusted live lots (prevents phantom daily loss)."""
+        unit = self._unit_cost(venue, base)
+        if unit is None or unit <= 0:
+            return
+        symbol = f"{base.upper()}{self._quote}"
+        pos = self._portfolio.state.positions.get(symbol)
+        if pos is None or pos.quantity <= 0:
+            return
+        pos.average_entry_price = unit
+
+    def reset_paper_realized_after_inventory_sync(self) -> None:
+        """Inventory sync is not a trade — clear phantom paper realized PnL."""
+        try:
+            self._portfolio.state.stats.realized_pnl = _ZERO
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to reset paper realized after sync")
+
     def _unit_cost(self, venue: str, base: str) -> Decimal | None:
+
         lots = self._cost_lots.get(self._lots_key(venue, base)) or []
         total_qty = _ZERO
         total_cost = _ZERO
@@ -1572,6 +1615,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         st["venue"] = venue
         st["base"] = base.upper()
         st["cost"] = cost
+        prev_mark = Decimal(str(st.get("last_mark") or 0))
         st["last_mark"] = mark
         st["soft_arm"] = str(soft_arm)
         st["hard_arm"] = str(hard_arm)
@@ -1587,7 +1631,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         gain = (mark - cost) / cost
         st["gain"] = str(gain)
 
-        if not st.get("soft_armed") and gain >= soft_arm:
+        # Reject one-tick mark spikes (bad ticker/print) before arming trail.
+        mark_spike = False
+        if prev_mark > 0 and mark >= prev_mark * Decimal("1.08"):
+            mark_spike = True
+        elif gain >= max(soft_arm * Decimal("5"), Decimal("0.10")):
+            mark_spike = True
+        if mark_spike and not st.get("soft_armed") and gain >= soft_arm:
+            logger.warning(
+                "TRAIL_MARK_SPIKE_IGNORED base=%s cost=%s prev=%s mark=%s gain=%.2f%%",
+                base,
+                cost,
+                prev_mark,
+                mark,
+                float(gain * 100),
+            )
+            self._bump_skip("trail_mark_spike")
+
+        if not st.get("soft_armed") and gain >= soft_arm and not mark_spike:
             st["soft_armed"] = True
             st["armed"] = True
             st["peak"] = mark
@@ -1640,7 +1701,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         if not st.get("soft_armed"):
             if self._time_stop_enabled:
-                opened = self._position_opened_mono.get(base)
+                opened = self._position_opened_mono.get(trail_key)
                 if opened is not None and (
                     time.monotonic() - opened >= self._time_stop_sec
                 ):

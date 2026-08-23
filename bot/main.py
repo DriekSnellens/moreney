@@ -669,9 +669,9 @@ async def risk_events() -> dict[str, Any]:
 
 
 @app.post("/risk/kill-switch/recover")
-async def kill_switch_recover() -> dict[str, Any]:
+async def kill_switch_recover(force: bool = False) -> dict[str, Any]:
     ks = get_kill_switch()
-    recovered = await ks.recover()
+    recovered = await ks.recover(force=force)
     if not recovered:
         raise HTTPException(
             status_code=409,

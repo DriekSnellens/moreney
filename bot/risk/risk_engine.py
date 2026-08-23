@@ -290,8 +290,14 @@ class RiskEngine:
                 )
 
         # --- Daily loss ---
-        daily_loss = max(-portfolio.daily_realized_pnl_usd, _ZERO)
-        daily_limit = self._limits.daily_loss_limit(portfolio.equity_usd, self._settings)
+        # Live micro uses exchange-true PnL elsewhere; paper sync can invent
+        # huge "daily losses" (e.g. €1 entry fallback) that must not pause trading.
+        if bool(getattr(self._settings, "live_micro_ignore_paper_daily_loss", False)):
+            daily_loss = _ZERO
+            daily_limit = _ZERO
+        else:
+            daily_loss = max(-portfolio.daily_realized_pnl_usd, _ZERO)
+            daily_limit = self._limits.daily_loss_limit(portfolio.equity_usd, self._settings)
         if daily_loss >= daily_limit and daily_limit > 0:
             await self._kill_switch.pause(
                 f"Daily loss {daily_loss} reached limit {daily_limit}",

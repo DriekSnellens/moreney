@@ -289,7 +289,8 @@ class PaperPortfolio:
                 else mark
             )
             if entry <= 0:
-                entry = Decimal("1")
+                # Never invent €1 cost — that creates huge phantom losses on sell.
+                entry = mark if mark > 0 else _ZERO
             self._state.positions[symbol] = PositionState(
                 symbol=symbol,
                 quantity=qty,
@@ -402,7 +403,8 @@ class PaperPortfolio:
                 else mark
             )
             if entry <= 0:
-                entry = Decimal("1")
+                # Never invent €1 cost — that creates huge phantom losses on sell.
+                entry = mark if mark > 0 else _ZERO
             self._state.positions[symbol] = PositionState(
                 symbol=symbol,
                 quantity=qty,

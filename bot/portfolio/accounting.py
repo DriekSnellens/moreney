@@ -122,6 +122,9 @@ class AccountingEngine:
             if close_qty > 0 and position.average_entry_price > 0:
                 cost_basis = position.average_entry_price * close_qty
                 realized = (proceeds * close_qty / fill.quantity) - cost_basis
+            elif close_qty > 0:
+                # Unknown basis: treat as flat (0 PnL) rather than inventing cost.
+                realized = _ZERO
             position.quantity -= close_qty
             if position.quantity <= 0:
                 position.quantity = _ZERO

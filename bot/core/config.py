@@ -417,6 +417,8 @@ class Settings(BaseSettings):
     live_micro_symbols: str = "BTCEUR,ETHEUR"
     live_micro_max_notional_eur: float = Field(default=50.0, gt=0)
     live_micro_max_daily_loss_eur: float = Field(default=25.0, gt=0)
+    # Live micro: paper inventory sync can invent false daily losses — do not pause on them.
+    live_micro_ignore_paper_daily_loss: bool = False
     live_micro_max_open_orders: int = Field(default=1, ge=1, le=20)
     live_micro_resting_max_age_sec: float = Field(default=90.0, ge=5, le=600)
     # Cap distinct alt bases for micro trend/trail concentration (0 = unlimited).
