@@ -86,29 +86,29 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_inventory_ask_improve_bps == 0.0
     assert cfg.paper_inventory_buy_dip_bps >= 2.0
     assert cfg.paper_ladder_buy_pcts.startswith("0,")
-    assert cfg.paper_maker_sell_profit_buffer_bps >= 15.0
+    assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.06
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
-    assert cfg.paper_trail_partial_pct == 0.25
-    assert cfg.paper_trail_soft_arm_pct == 0.012
+    assert cfg.paper_trail_partial_pct == 0.40
+    assert cfg.paper_trail_soft_arm_pct == 0.009
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is False
-    assert cfg.live_micro_max_per_corr_group == 6
+    assert cfg.live_micro_max_per_corr_group == 3
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is True
     assert cfg.paper_time_stop_enabled is True
     assert cfg.paper_dust_policy == "top_up_or_exit"
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return >= 0.0010
-    assert cfg.paper_maker_min_notional_eur >= 40.0
-    assert cfg.max_simultaneous_positions == 8
-    assert cfg.live_micro_max_alt_bases == 8
+    assert cfg.paper_maker_min_notional_eur >= 55.0
+    assert cfg.max_simultaneous_positions == 5
+    assert cfg.live_micro_max_alt_bases == 5
     assert cfg.live_micro_max_open_orders >= 12
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0
@@ -470,9 +470,9 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
-    assert cfg.paper_trail_soft_arm_pct == 0.012
+    assert cfg.paper_trail_soft_arm_pct == 0.009
     assert cfg.paper_trail_hard_arm_pct == 0.06
-    assert cfg.paper_trail_partial_pct == 0.25
+    assert cfg.paper_trail_partial_pct == 0.40
     assert cfg.live_micro_max_notional_eur <= 150.0
     assert cfg.paper_markout_enabled is True
     assert cfg.live_disable_research_hooks is True

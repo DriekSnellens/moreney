@@ -143,10 +143,10 @@ def _session_settings(
             "paper_maker_venues": maker_venues,
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
-            "paper_maker_max_open_quotes": 8,
+            "paper_maker_max_open_quotes": 10,
             "paper_cycle_interval_ms": 1200.0,
-            # Meaningful starters so trail exits are worth fees (~€40–50).
-            "paper_maker_min_notional_eur": min(50.0, max(40.0, budget_f * 0.025)),
+            # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
+            "paper_maker_min_notional_eur": min(70.0, max(55.0, budget_f * 0.03)),
             # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.08,
             "paper_maker_min_net_return": 0.0010,
@@ -154,22 +154,22 @@ def _session_settings(
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
             "paper_maker_allow_buy_only": True,
-            # Day-trade: small buffer over fees so maker asks can clear.
-            "paper_maker_sell_profit_buffer_bps": 15.0,  # always net profit after fees
-            # Soft +2% / hard +6% trail — harvest toward €20–40/day path.
+            # Still fee-aware never-loss; thinner buffer = asks clear sooner.
+            "paper_maker_sell_profit_buffer_bps": 10.0,
+            # Soft harvest earlier / larger partials → more €/day recycles.
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            "paper_trail_soft_arm_pct": 0.012,  # ~1.2%: more recycles toward €20–50/day
-            "paper_trail_soft_drawdown_pct": 0.012,
-            "paper_trail_soft_partial_pct": 0.25,
+            "paper_trail_soft_arm_pct": 0.009,  # ~0.9%: still ≫ ~45 bps fee+buffer floor
+            "paper_trail_soft_drawdown_pct": 0.008,
+            "paper_trail_soft_partial_pct": 0.40,
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,
             "paper_trail_arm_gain_pct": 0.06,
             "paper_trail_drawdown_pct": 0.03,
             "paper_trail_partial_enabled": True,
-            "paper_trail_partial_pct": 0.25,
+            "paper_trail_partial_pct": 0.40,
             "paper_trail_atr_enabled": False,  # keep fixed harvest levels
             "paper_trail_atr_samples": 48,
             "paper_trail_atr_arm_mult": 2.5,
@@ -178,19 +178,18 @@ def _session_settings(
             # First leg joins the bid (0%); mild backups only.
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 7200.0,  # 2h recycle at >= BE
+            "paper_time_stop_sec": 3600.0,  # 1h recycle at >= BE (capital velocity)
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,
             "paper_buy_momentum_enabled": False,
             "paper_buy_momentum_min_return": 0.0,
             "paper_buy_momentum_samples": 12,
-            "live_micro_corr_group": (
-                "ADA,ARB,ATOM,AVAX,DOGE,DOT,ETH,FET,INJ,LINK,LTC,NEAR,OP,PEPE,POL,SHIB,SOL,SUI,XRP"
-            ),
-            "live_micro_max_per_corr_group": 6,
+            # Concentrate: correlated spray dilutes €/trail on €2k pockets.
+            "live_micro_corr_group": "ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
+            "live_micro_max_per_corr_group": 3,
             "paper_daily_kill_eur": 50.0,
-            "paper_alert_pct_to_arm": 0.01,
+            "paper_alert_pct_to_arm": 0.006,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
@@ -224,23 +223,26 @@ def _session_settings(
             "risk_min_net_profit_usd": 0.08,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
-            # Keep maker clips ≤ risk ceiling (8% equity was rejecting as MAX_POSITION_SIZE).
-            "arbitrage_position_pct": min(3.5, max(2.0, (min(150.0, max(50.0, budget_f * 0.08)) / max(budget_f, 1.0)) * 100.0)),
+            # Clips nearer the €150 ceiling → soft-partial € worth fees.
+            "arbitrage_position_pct": min(
+                6.5,
+                max(3.0, (min(150.0, max(50.0, budget_f * 0.08)) / max(budget_f, 1.0)) * 100.0),
+            ),
             "live_micro_ignore_paper_daily_loss": True,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
-            # Market-first: up to 8 distinct alt bases chosen by edge, not bags.
-            "risk_max_open_positions": 8,
-            "max_simultaneous_positions": 8,
-            "opportunity_max_executions_per_cycle": 5,
+            # Fewer concurrent bases → larger trails → more realized €/day.
+            "risk_max_open_positions": 5,
+            "max_simultaneous_positions": 5,
+            "opportunity_max_executions_per_cycle": 8,
             "opportunity_max_candidates_per_cycle": 16,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else ",".join(_LIQUID_EUR_SYMBOLS),
-            "live_micro_max_alt_bases": 8,
+            "live_micro_max_alt_bases": 5,
             # Cap live order size (env must not silently allow full pocket).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
