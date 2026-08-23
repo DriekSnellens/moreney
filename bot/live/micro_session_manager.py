@@ -67,7 +67,7 @@ class MicroSessionManager:
         self,
         *,
         minutes: float | None = None,
-        budget_eur: float = 2024.0,
+        budget_eur: float = 2000.0,
         exclude_btc: bool = True,
         symbols: list[str] | None = None,
         settings: Settings | None = None,

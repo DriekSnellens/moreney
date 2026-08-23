@@ -33,14 +33,31 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 
-# Most liquid Bitvavo EUR alts for day-trade harvest + existing inventory bags.
+# Top liquid Bitvavo/OKX EUR alts — market-first scan (not portfolio-driven).
 _LIQUID_EUR_SYMBOLS = (
+    "ETHEUR",
     "SOLEUR",
     "XRPEUR",
     "ADAEUR",
-    "ATOMEUR",
+    "DOGEUR",
+    "LINKEUR",
+    "DOTEUR",
+    "AVAXEUR",
+    "LTCEUR",
     "NEAREUR",
+    "ATOMEUR",
+    "ARBEUR",
+    "OPEUR",
+    "INJEUR",
+    "SUIEUR",
+    "APTEUR",
+    "FETEUR",
+    "PEPEEUR",
+    "SHIBEUR",
+    "POLEUR",
 )
+
+_DEFAULT_BUDGET_EUR = Decimal("2000")
 
 
 def _non_btc_symbols(settings: Settings) -> list[str]:
@@ -53,10 +70,17 @@ def _non_btc_symbols(settings: Settings) -> list[str]:
 
 
 def _liquid_symbols(settings: Settings, *, exclude_btc: bool = True) -> list[str]:
-    del settings  # allowlist is Bitvavo-liquid EUR pairs, not feed-dependent
-    out = list(_LIQUID_EUR_SYMBOLS)
+    raw = str(getattr(settings, "live_micro_symbols", "") or "").strip()
+    if raw and raw != "*":
+        out = [
+            s.strip().upper().replace("-", "").replace("/", "")
+            for s in raw.split(",")
+            if s.strip()
+        ]
+    else:
+        out = list(_LIQUID_EUR_SYMBOLS)
     if exclude_btc:
-        out = [s for s in out if not s.startswith("BTC")]
+        out = [s for s in out if not s.upper().startswith("BTC")]
     return out
 
 
@@ -119,17 +143,17 @@ def _session_settings(
             "paper_maker_venues": maker_venues,
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
-            "paper_maker_max_open_quotes": 3,
+            "paper_maker_max_open_quotes": 5,
             "paper_cycle_interval_ms": 1200.0,
             # Meaningful starters so trail exits are worth fees (~€40–50).
             "paper_maker_min_notional_eur": min(50.0, max(40.0, budget_f * 0.025)),
-            # Winst-mode: only quote when round-trip clears Bitvavo maker fees (~30 bps).
-            "paper_maker_min_profit_eur": 0.12,
-            "paper_maker_min_net_return": 0.0015,
-            "paper_maker_min_spread_bps": 10.0,
+            # Option A: more fills while still fee-positive after maker costs.
+            "paper_maker_min_profit_eur": 0.08,
+            "paper_maker_min_net_return": 0.0010,
+            "paper_maker_min_spread_bps": 7.0,
             "paper_maker_adverse_bps": 3.0,
-            "paper_maker_spread_fee_buffer_bps": 2.0,
-            "paper_maker_allow_buy_only": False,
+            "paper_maker_spread_fee_buffer_bps": 1.0,
+            "paper_maker_allow_buy_only": True,
             # Day-trade: small buffer over fees so maker asks can clear.
             "paper_maker_sell_profit_buffer_bps": 5.0,
             # Soft +2% / hard +6% trail — harvest toward €20–40/day path.
@@ -157,11 +181,13 @@ def _session_settings(
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 15.0,
             "paper_regime_block_buys": True,
-            "paper_buy_momentum_enabled": True,
+            "paper_buy_momentum_enabled": False,
             "paper_buy_momentum_min_return": 0.0,
             "paper_buy_momentum_samples": 12,
-            "live_micro_corr_group": "ADA,ATOM,NEAR,SOL,XRP",
-            "live_micro_max_per_corr_group": 4,
+            "live_micro_corr_group": (
+                "ADA,ARB,ATOM,AVAX,DOGE,DOT,ETH,FET,INJ,LINK,LTC,NEAR,OP,PEPE,POL,SHIB,SOL,SUI,XRP"
+            ),
+            "live_micro_max_per_corr_group": 6,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.01,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
@@ -170,10 +196,10 @@ def _session_settings(
             "paper_maker_max_age_ms": 120_000.0,
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
-            "paper_max_alt_inventory_pct": 40.0,
+            "paper_max_alt_inventory_pct": 30.0,
             "paper_min_alt_inventory_pct": 8.0,
             "paper_inventory_ask_improve_bps": 0.0,
-            "paper_inventory_buy_dip_bps": 10.0,
+            "paper_inventory_buy_dip_bps": 15.0,
             "paper_markout_enabled": True,
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.
@@ -188,28 +214,28 @@ def _session_settings(
             "global_max_venue_exposure_pct": 50.0 if cross_venue else 100.0,
             "live_micro_execute_venues": ",".join(sorted(execute_venues)),
             "live_micro_cross_venue_enabled": cross_venue,
-            "arbitrage_min_profit_eur": 0.12,
-            "arbitrage_min_profit_pct": 0.0015,
-            "profitability_min_net_profit_usd": 0.12,
-            "profitability_min_net_return": 0.0015,
+            "arbitrage_min_profit_eur": 0.08,
+            "arbitrage_min_profit_pct": 0.0010,
+            "profitability_min_net_profit_usd": 0.08,
+            "profitability_min_net_return": 0.0010,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.12,
+            "risk_min_net_profit_usd": 0.08,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
-            # Max alt bases: existing bags (ATOM/NEAR) + day-trade slots.
-            "risk_max_open_positions": 5,
-            "max_simultaneous_positions": 5,
-            "opportunity_max_executions_per_cycle": 2,
-            "opportunity_max_candidates_per_cycle": 8,
+            # Market-first: up to 8 distinct alt bases chosen by edge, not bags.
+            "risk_max_open_positions": 8,
+            "max_simultaneous_positions": 8,
+            "opportunity_max_executions_per_cycle": 3,
+            "opportunity_max_candidates_per_cycle": 12,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
-            else "SOLEUR,XRPEUR,ADAEUR,ATOMEUR,NEAREUR",
-            "live_micro_max_alt_bases": 5,
+            else ",".join(_LIQUID_EUR_SYMBOLS),
+            "live_micro_max_alt_bases": 8,
             # Cap live order size (env must not silently allow full pocket).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
@@ -265,7 +291,7 @@ def attach_micro_bridge(
 async def run_session(
     *,
     minutes: float | None = None,
-    budget_eur: Decimal = Decimal("2024"),
+    budget_eur: Decimal = _DEFAULT_BUDGET_EUR,
     symbols: list[str] | None = None,
     settings: Settings | None = None,
     report_path: str | Path | None = None,
@@ -622,7 +648,7 @@ def main() -> None:
         default=0.0,
         help="Session length in minutes; 0 = continuous until stop",
     )
-    parser.add_argument("--budget-eur", type=float, default=2024.0)
+    parser.add_argument("--budget-eur", type=float, default=2000.0)
     parser.add_argument(
         "--symbols",
         type=str,

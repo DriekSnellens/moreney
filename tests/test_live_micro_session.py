@@ -64,7 +64,7 @@ def test_non_btc_symbols_filters() -> None:
 
 def test_session_settings_cap_capital(tmp_path: Path) -> None:
     cfg = _session_settings(
-        Settings(),
+        Settings(live_micro_execute_venues="bitvavo"),
         budget_eur=Decimal("2024"),
         symbols=["SOLEUR", "ADAEUR"],
         persist_path=tmp_path / "state.json",
@@ -81,10 +81,10 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert "SOLUSDT" in cfg.market_data_symbols
     assert cfg.paper_venue_inventory is True
     assert cfg.paper_max_holding_sec == 0.0
-    assert cfg.paper_maker_allow_buy_only is False
+    assert cfg.paper_maker_allow_buy_only is True
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 0.0
-    assert cfg.paper_inventory_buy_dip_bps >= 10.0
+    assert cfg.paper_inventory_buy_dip_bps >= 15.0
     assert cfg.paper_maker_sell_profit_buffer_bps >= 5.0
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.06
@@ -96,21 +96,21 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
-    assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.live_micro_max_per_corr_group == 4
+    assert cfg.paper_buy_momentum_enabled is False
+    assert cfg.live_micro_max_per_corr_group == 6
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is True
     assert cfg.paper_time_stop_enabled is True
     assert cfg.paper_dust_policy == "top_up_or_exit"
     assert cfg.paper_regime_block_buys is True
-    assert cfg.paper_maker_min_net_return >= 0.0015
+    assert cfg.paper_maker_min_net_return >= 0.0010
     assert cfg.paper_maker_min_notional_eur >= 40.0
-    assert cfg.max_simultaneous_positions == 5
-    assert cfg.live_micro_max_alt_bases == 5
+    assert cfg.max_simultaneous_positions == 8
+    assert cfg.live_micro_max_alt_bases == 8
     assert cfg.live_micro_max_open_orders >= 6
     assert cfg.live_micro_resting_max_age_sec >= 180.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0
-    assert cfg.paper_max_alt_inventory_pct <= 40.0
+    assert cfg.paper_max_alt_inventory_pct <= 30.0
     assert cfg.paper_markout_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
@@ -118,8 +118,10 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     from bot.live.micro_session import _liquid_symbols
 
     liquid = _liquid_symbols(Settings(), exclude_btc=True)
-    assert liquid == ["SOLEUR", "XRPEUR", "ADAEUR", "ATOMEUR", "NEAREUR"]
-    assert "ETHEUR" not in liquid
+    assert len(liquid) >= 20
+    assert "ETHEUR" in liquid
+    assert "SOLEUR" in liquid
+    assert "LINKEUR" in liquid
     assert "BNBEUR" not in liquid
 
 

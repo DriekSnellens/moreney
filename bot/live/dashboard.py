@@ -462,7 +462,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     {trades_html}
     {alerts_html}
     <footer>
-      <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:true}})">Start</button>
+      <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2000,exclude_btc:true}})">Start</button>
       <button type="button" class="btn" onclick="post('/live/micro/session/stop')">Stop</button>
     </footer>
   </div>
