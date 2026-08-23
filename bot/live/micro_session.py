@@ -143,15 +143,15 @@ def _session_settings(
             "paper_maker_venues": maker_venues,
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
-            "paper_maker_max_open_quotes": 5,
+            "paper_maker_max_open_quotes": 8,
             "paper_cycle_interval_ms": 1200.0,
             # Meaningful starters so trail exits are worth fees (~€40–50).
             "paper_maker_min_notional_eur": min(50.0, max(40.0, budget_f * 0.025)),
-            # Option A: more fills while still fee-positive after maker costs.
+            # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.08,
             "paper_maker_min_net_return": 0.0010,
-            "paper_maker_min_spread_bps": 7.0,
-            "paper_maker_adverse_bps": 3.0,
+            "paper_maker_min_spread_bps": 5.0,
+            "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
             "paper_maker_allow_buy_only": True,
             # Day-trade: small buffer over fees so maker asks can clear.
@@ -175,7 +175,8 @@ def _session_settings(
             "paper_trail_atr_arm_mult": 2.5,
             "paper_trail_atr_dd_mult": 1.0,
             "paper_ladder_buy_enabled": True,
-            "paper_ladder_buy_pcts": "0.01,0.02,0.03",
+            # Closer ladder → more fills (was 1/2/3% and rarely touched).
+            "paper_ladder_buy_pcts": "0.003,0.007,0.012",
             "paper_time_stop_enabled": True,
             "paper_time_stop_sec": 7200.0,  # 2h recycle at >= BE
             "paper_dust_policy": "top_up_or_exit",
@@ -193,13 +194,14 @@ def _session_settings(
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
             "paper_maker_one_leg_exit": False,
             "paper_maker_one_leg_adverse_bps": 6.0,
-            "paper_maker_max_age_ms": 120_000.0,
+            "paper_maker_max_age_ms": 180_000.0,
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
             "paper_max_alt_inventory_pct": 30.0,
             "paper_min_alt_inventory_pct": 8.0,
             "paper_inventory_ask_improve_bps": 0.0,
-            "paper_inventory_buy_dip_bps": 15.0,
+            # Milder dip gate so buys quote nearer the touch.
+            "paper_inventory_buy_dip_bps": 8.0,
             "paper_markout_enabled": True,
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.
@@ -229,8 +231,8 @@ def _session_settings(
             # Market-first: up to 8 distinct alt bases chosen by edge, not bags.
             "risk_max_open_positions": 8,
             "max_simultaneous_positions": 8,
-            "opportunity_max_executions_per_cycle": 3,
-            "opportunity_max_candidates_per_cycle": 12,
+            "opportunity_max_executions_per_cycle": 5,
+            "opportunity_max_candidates_per_cycle": 16,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
@@ -239,8 +241,8 @@ def _session_settings(
             # Cap live order size (env must not silently allow full pocket).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
-            "live_micro_max_open_orders": 6,
-            "live_micro_resting_max_age_sec": 180.0,
+            "live_micro_max_open_orders": 12,
+            "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
             "market_data_exchanges": "binance,kraken,coinbase,bitvavo,okx,bybit"
