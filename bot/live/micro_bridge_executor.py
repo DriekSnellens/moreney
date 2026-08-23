@@ -129,6 +129,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Only session fills / exchange trade history count as trusted cost basis.
         # Mark-seeded lots must not authorize a sell (would allow selling below true buy).
         self._trusted_cost_keys: set[str] = set()
+        self._mirrored_trade_ids: set[str] = set()
+        self._exit_cooldown_mono: dict[str, float] = {}
+        self._session_started_ms: float | None = None
         self._resting_max_age_sec = float(
             getattr(settings, "live_micro_resting_max_age_sec", _DEFAULT_RESTING_MAX_AGE_SEC)
             or _DEFAULT_RESTING_MAX_AGE_SEC
@@ -615,6 +618,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "reason": "exchange_unavailable", "error": str(exc)[:160]}
 
+        # Ensure lot keys exist for every held balance (even if mark-seed skipped).
+        bals = self._venue_raw_balances.get(venue) or []
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote:
+                continue
+            qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                str(getattr(bal, "locked", 0) or 0)
+            )
+            if qty <= 0:
+                continue
+            lot_key = self._lots_key(venue, asset)
+            if lot_key not in self._cost_lots:
+                symbol_i = f"{asset}{self._quote}"
+                mark = self._portfolio.state.mark_prices.get(symbol_i)
+                if mark is None or mark <= 0:
+                    try:
+                        ticker = await client.fetch_ticker(symbol_i)
+                        mark = Decimal(
+                            str(
+                                getattr(ticker, "last", None)
+                                or getattr(ticker, "bid", None)
+                                or getattr(ticker, "ask", None)
+                                or 0
+                            )
+                        )
+                    except Exception:  # noqa: BLE001
+                        mark = _ZERO
+                if mark and mark > 0:
+                    self._cost_lots[lot_key] = [[qty, mark]]
+                    self._note_position_opened(venue, asset)
+                else:
+                    # Placeholder so trade rebuild can still run.
+                    self._cost_lots[lot_key] = [[qty, _ZERO]]
+
         hydrated: list[str] = []
         for lot_key, lots in list(self._cost_lots.items()):
             if not lot_key.startswith(f"{venue}:"):
@@ -623,6 +661,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             base = lot_key.split(":", 1)[1]
             held = sum((q for q, _u in lots if q > 0), _ZERO)
+            # Prefer live balance qty when available.
+            for bal in bals:
+                if str(getattr(bal, "asset", "") or "").upper() == base:
+                    bal_qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                        str(getattr(bal, "locked", 0) or 0)
+                    )
+                    if bal_qty > 0:
+                        held = bal_qty
+                    break
             if held <= 0:
                 continue
             symbol = f"{base}/{self._quote}"
@@ -727,6 +774,116 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._unit_cost(venue, base),
             )
         return {"ok": True, "venue": venue, "hydrated": hydrated}
+
+    async def _backfill_fills_from_trades(self, venue: str) -> dict[str, Any]:
+        """Mirror recent exchange fills into pocket PnL / fill counters.
+
+        Resting-order polls can miss fills (fetch_order races). Trade history is
+        the source of truth for session fills on both Bitvavo and OKX.
+        """
+        venue = venue.strip().lower()
+        client = self._trading_client(venue)
+        if client is None:
+            return {"ok": False, "reason": "no_client"}
+        get_ex = getattr(client, "_get_exchange", None)
+        if not callable(get_ex):
+            return {"ok": False, "reason": "no_exchange"}
+        try:
+            exchange = await get_ex()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": "exchange_unavailable", "error": str(exc)[:160]}
+
+        started_ms = float(self._session_started_ms or 0)
+        since_ms = max(0.0, started_ms - 6 * 3600 * 1000) if started_ms else 0.0
+        mirrored = 0
+        bases: set[str] = set()
+        for bal in self._venue_raw_balances.get(venue) or []:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if asset and asset != self._quote:
+                bases.add(asset)
+        for lot_key in list(self._cost_lots):
+            if lot_key.startswith(f"{venue}:"):
+                bases.add(lot_key.split(":", 1)[1])
+
+        from bot.core.enums import OrderSide as _OrderSide
+
+        for base in sorted(bases):
+            symbol = f"{base}/{self._quote}"
+            try:
+                raw = await exchange.fetch_my_trades(symbol, limit=50)
+            except Exception:  # noqa: BLE001
+                continue
+            for trade in sorted(raw or [], key=lambda t: int(t.get("timestamp") or 0)):
+                tid = str(trade.get("id") or "")
+                if not tid:
+                    continue
+                mirror_key = f"{venue}:{tid}"
+                if mirror_key in self._mirrored_trade_ids:
+                    continue
+                ts = int(trade.get("timestamp") or 0)
+                if since_ms and ts and ts < since_ms:
+                    continue
+                side = str(trade.get("side") or "").lower()
+                amt = Decimal(str(trade.get("amount") or 0))
+                px = Decimal(str(trade.get("price") or 0))
+                if amt <= 0 or px <= 0 or side not in {"buy", "sell"}:
+                    continue
+                # Don't re-realize pre-session sells (would double-count PnL on restart).
+                if side == "sell" and started_ms and ts and ts < started_ms:
+                    self._mirrored_trade_ids.add(mirror_key)
+                    continue
+                fee_info = trade.get("fee") or {}
+                fee_amt = Decimal(str(fee_info.get("cost") or 0))
+                fee_cur = str(fee_info.get("currency") or self._quote).upper()
+                if fee_cur == base and fee_amt > 0:
+                    fee_quote = fee_amt * px
+                elif fee_cur == self._quote:
+                    fee_quote = fee_amt
+                else:
+                    fee_quote = fee_amt if fee_amt > 0 else (amt * px * Decimal("0.001"))
+                # Buys: if hydrate already trusted the cost, only count the fill —
+                # do NOT append duplicate FIFO lots.
+                if side == "buy" and self._has_trusted_cost(venue, base):
+                    self._mirrored_trade_ids.add(mirror_key)
+                    self.live_fill_count += 1
+                    self.live_transaction_count += 1
+                    mirrored += 1
+                    continue
+                try:
+                    self._record_realized_fill(
+                        side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
+                        symbol=f"{base}{self._quote}",
+                        qty=amt,
+                        price=px,
+                        fee=fee_quote,
+                        venue=venue,
+                        fee_currency=fee_cur,
+                    )
+                except TypeError:
+                    # Older signature without fee_currency.
+                    self._record_realized_fill(
+                        side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
+                        symbol=f"{base}{self._quote}",
+                        qty=amt,
+                        price=px,
+                        fee=fee_quote,
+                        venue=venue,
+                    )
+                self._mirrored_trade_ids.add(mirror_key)
+                self.live_fill_count += 1
+                self.live_transaction_count += 1
+                mirrored += 1
+                logger.info(
+                    "FILL_BACKFILL venue=%s base=%s side=%s qty=%s px=%s trade=%s",
+                    venue,
+                    base,
+                    side,
+                    amt,
+                    px,
+                    tid,
+                )
+        return {"ok": True, "venue": venue, "mirrored": mirrored}
+
 
     def _record_realized_fill(
         self,
@@ -864,16 +1021,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         portfolio_value = await self.refresh_portfolio_value()
         if self.starting_portfolio_eur is None and portfolio_value is not None:
             self.starting_portfolio_eur = portfolio_value
-            self._seed_cost_lots_from_balances(venue, bals)
+        if self._session_started_ms is None:
+            self._session_started_ms = time.time() * 1000.0
+        # Seed EVERY execute venue (not only the first sync) so OKX lots exist.
+        self._seed_cost_lots_from_balances(venue, bals)
         # Prefer real exchange fills over mark seeds before any auto-sell.
         try:
             hydrate = await self._hydrate_cost_basis_from_trades(venue)
-            if hydrate.get("hydrated"):
-                venue_sync_hydrate = hydrate
-            else:
-                venue_sync_hydrate = hydrate
+            venue_sync_hydrate = hydrate
         except Exception as exc:  # noqa: BLE001
             venue_sync_hydrate = {"ok": False, "error": str(exc)[:160]}
+        try:
+            backfill = await self._backfill_fills_from_trades(venue)
+            venue_sync_hydrate = {
+                **(venue_sync_hydrate if isinstance(venue_sync_hydrate, dict) else {}),
+                "fill_backfill": backfill,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.info("fill backfill failed venue=%s err=%s", venue, type(exc).__name__)
 
         venue_sync = {
             "ok": True,
@@ -1087,8 +1252,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 status = order.status
                 status_val = status.value if hasattr(status, "value") else str(status)
-            except Exception:  # noqa: BLE001
-                logger.warning("resting fetch_order failed id=%s", oid)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "resting fetch_order failed id=%s symbol=%s err=%s",
+                    oid,
+                    symbol,
+                    type(exc).__name__,
+                )
 
             if filled > 0 and avg > 0:
                 from bot.core.models import OrderRequest
@@ -1252,16 +1422,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(pos.average_entry_price))
         return None
 
-    def _break_even_sell_price(self, venue: str, base: str) -> Decimal | None:
+    def _break_even_sell_price(
+        self, venue: str, base: str, *, taker: bool = False
+    ) -> Decimal | None:
         """Min sell price that nets profit after fees + buffer. Requires trusted cost."""
         if not self._has_trusted_cost(venue, base):
             return None
         unit = self._unit_cost(venue, base)
         if unit is None or unit <= 0:
             return None
-        from bot.core.venue_fees import venue_maker_fee
+        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
 
-        fee = venue_maker_fee(venue)
+        fee = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
         denom = Decimal("1") - fee
         if denom <= 0:
             return None
@@ -1272,6 +1444,46 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if buffer_bps > 0:
             be *= Decimal("1") + buffer_bps / Decimal("10000")
         return be
+
+    async def _profitable_exit_quote(
+        self, venue: str, base: str, mark: Decimal
+    ) -> tuple[Decimal | None, bool, str]:
+        """Pick a fillable exit price that still clears fee-aware break-even.
+
+        Returns (limit_price, post_only, reason). When the bid is already above
+        taker break-even, hit the bid (taker) so trail exits actually fill.
+        """
+        be_maker = self._break_even_sell_price(venue, base, taker=False)
+        be_taker = self._break_even_sell_price(venue, base, taker=True)
+        if be_maker is None or be_taker is None:
+            return None, True, "no_break_even"
+        if mark < be_maker:
+            return None, True, "mark_below_maker_be"
+
+        best_bid = _ZERO
+        best_ask = _ZERO
+        client = self._trading_client(venue)
+        symbol = f"{base.upper()}{self._quote}"
+        if client is not None:
+            try:
+                ticker = await client.fetch_ticker(symbol)
+                best_bid = Decimal(str(getattr(ticker, "bid", None) or 0))
+                best_ask = Decimal(str(getattr(ticker, "ask", None) or 0))
+            except Exception:  # noqa: BLE001
+                pass
+        if best_bid <= 0:
+            best_bid = mark
+        if best_ask <= 0:
+            best_ask = mark
+
+        # Bid already clears taker BE → take liquidity for a sure profitable fill.
+        if best_bid >= be_taker:
+            return best_bid, False, "hit_bid_taker"
+        # Otherwise rest as maker at/above maker BE, near the touch.
+        maker_px = max(be_maker, min(best_ask, mark))
+        if maker_px <= best_bid:
+            maker_px = max(be_maker, best_bid + (best_bid * Decimal("0.0001")))
+        return maker_px, True, "rest_maker_be"
 
     def _sell_allowed_at(
         self, venue: str, base: str, price: Decimal
@@ -1744,10 +1956,40 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if reason == "trail_hard_partial":
                     st["hard_partial_done"] = False
                 continue
-            if be is not None:
-                if limit_px is None or limit_px < be:
-                    limit_px = be
-                post_only = True
+
+            cooldown_key = f"{venue}:{asset}:{reason}"
+            last_try = self._exit_cooldown_mono.get(cooldown_key, 0.0)
+            if time.monotonic() - last_try < 45.0:
+                self._bump_skip("exit_cooldown")
+                continue
+
+            exit_px, post_only, quote_reason = await self._profitable_exit_quote(
+                venue, asset, mark
+            )
+            if exit_px is None:
+                self._bump_skip(f"exit_quote_{quote_reason}")
+                if reason == "trail_drawdown":
+                    st["triggered"] = False
+                if reason == "trail_soft_partial":
+                    st["soft_partial_done"] = False
+                    st["partial_done"] = False
+                if reason == "trail_hard_partial":
+                    st["hard_partial_done"] = False
+                continue
+            if limit_px is None or limit_px < exit_px:
+                limit_px = exit_px
+            # Keep limit at least at the profitable quote (never below BE path).
+            limit_px = max(limit_px, exit_px)
+            self._exit_cooldown_mono[cooldown_key] = time.monotonic()
+            logger.info(
+                "TRAIL_EXIT_QUOTE venue=%s base=%s reason=%s quote=%s px=%s post_only=%s",
+                venue,
+                asset,
+                reason,
+                quote_reason,
+                limit_px,
+                post_only,
+            )
 
             result = await self._submit_exit_sell(
                 venue=venue,
@@ -2189,16 +2431,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     )
                 except Exception:  # noqa: BLE001
                     best_bid = _ZERO
-                if best_bid > 0 and px <= best_bid:
+                # If bid is already above break-even, crossing is a profitable fill.
+                # Only block when the bid itself is still below break-even.
+                if best_bid > 0 and best_bid < be:
                     self._bump_skip("sell_below_break_even")
                     return await self._reject_before_live(
                         order_request,
                         reason="SELL_BELOW_BREAK_EVEN",
                         message=(
-                            f"break-even ask {px} would cross bid {best_bid}; "
-                            "waiting for profitable exit"
+                            f"best bid {best_bid} still below break-even {be}; "
+                            "holding for profitable exit"
                         ),
                     )
+                if best_bid > 0 and px < best_bid and best_bid >= be:
+                    # Lift limit to the bid so the exit actually fills.
+                    px = best_bid
+                    order_request = order_request.model_copy(update={"limit_price": px})
+                    meta = dict(order_request.metadata or {})
+                    meta["post_only"] = False
+                    order_request = order_request.model_copy(update={"metadata": meta})
             # Even without a book, refuse a sell priced below break-even.
             if px < be:
                 self._bump_skip("sell_below_break_even")

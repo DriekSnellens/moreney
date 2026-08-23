@@ -685,3 +685,51 @@ def test_okx_sell_blocked_below_trusted_break_even() -> None:
     ok2, reason2, _ = bridge._sell_allowed_at("okx", "OP", be + Decimal("0.001"))  # noqa: SLF001
     assert ok2 is True
     assert reason2 == "ok"
+
+
+@pytest.mark.asyncio
+async def test_profitable_exit_quote_hits_bid_when_above_taker_be() -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=15.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:FET"] = [[Decimal("10"), Decimal("0.14")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:FET")  # noqa: SLF001
+
+    class _T:
+        bid = Decimal("0.142")
+        ask = Decimal("0.1422")
+        last = Decimal("0.1421")
+
+    class _Client:
+        async def fetch_ticker(self, symbol: str):
+            return _T()
+
+    bridge._trading_client = lambda venue: _Client()  # type: ignore[method-assign]  # noqa: SLF001
+    px, post_only, reason = await bridge._profitable_exit_quote(  # noqa: SLF001
+        "bitvavo", "FET", Decimal("0.1421")
+    )
+    assert reason == "hit_bid_taker"
+    assert post_only is False
+    assert px == Decimal("0.142")
+
+
+def test_break_even_taker_above_maker() -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=15.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:FET"] = [[Decimal("10"), Decimal("0.14")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:FET")  # noqa: SLF001
+    be_m = bridge._break_even_sell_price("bitvavo", "FET", taker=False)  # noqa: SLF001
+    be_t = bridge._break_even_sell_price("bitvavo", "FET", taker=True)  # noqa: SLF001
+    assert be_m is not None and be_t is not None
+    assert be_t > be_m
