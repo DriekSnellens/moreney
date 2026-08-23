@@ -231,6 +231,7 @@ class LiveMicroEngine:
             notional_eur=notional_eur,
             open_orders=self._executor._open_orders,
             daily_loss_eur=self._executor._daily_loss,
+            side=side,
         )
         if not ok:
             self._audit.record(

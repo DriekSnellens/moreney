@@ -86,7 +86,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_inventory_ask_improve_bps == 0.0
     assert cfg.paper_inventory_buy_dip_bps >= 2.0
     assert cfg.paper_ladder_buy_pcts.startswith("0,")
-    assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
+    assert cfg.paper_maker_sell_profit_buffer_bps >= 15.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.06
@@ -614,3 +614,74 @@ def test_attach_micro_bridge_does_not_pollute_paper_runner_source() -> None:
     assert "LiveMicroEngine" not in src
     assert "MicroBudgetLiveExecutor" not in src
     assert callable(attach_micro_bridge)
+
+
+def test_policy_sells_exempt_from_max_open_orders() -> None:
+    pol = MicroLivePolicy(
+        _unlocked(live_micro_max_open_orders=2, live_micro_venues="bitvavo,okx")
+    )
+    buy_blocked, reason = pol.validate_order(
+        venue="bitvavo",
+        symbol="SOLEUR",
+        notional_eur=Decimal("10"),
+        open_orders=2,
+        side="buy",
+    )
+    assert buy_blocked is False
+    assert "max open orders" in reason
+    sell_ok, sell_reason = pol.validate_order(
+        venue="okx",
+        symbol="OPLEUR",
+        notional_eur=Decimal("10"),
+        open_orders=20,
+        side="sell",
+    )
+    assert sell_ok is True
+    assert sell_reason == "ok"
+
+
+def test_buy_lot_base_fee_raises_unit_cost() -> None:
+    from bot.live.micro_bridge_executor import _buy_lot_qty_and_unit
+
+    qty, unit = _buy_lot_qty_and_unit(
+        amount=Decimal("7.3"),
+        price=Decimal("0.0946"),
+        fee_amt=Decimal("0.00365"),
+        fee_cur="OP",
+        base="OP",
+        quote="EUR",
+    )
+    assert qty == Decimal("7.29635")
+    assert unit > Decimal("0.0946")
+    # Quote-fee path still includes fee in unit cost.
+    qty2, unit2 = _buy_lot_qty_and_unit(
+        amount=Decimal("7.3"),
+        price=Decimal("0.0946"),
+        fee_amt=Decimal("0.00055"),
+        fee_cur="EUR",
+        base="OP",
+        quote="EUR",
+    )
+    assert qty2 == Decimal("7.3")
+    assert unit2 > Decimal("0.0946")
+
+
+def test_okx_sell_blocked_below_trusted_break_even() -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=15.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["okx:OP"] = [[Decimal("10"), Decimal("0.10")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("okx:OP")  # noqa: SLF001
+    be = bridge._break_even_sell_price("okx", "OP")  # noqa: SLF001
+    assert be is not None and be > Decimal("0.10")
+    ok, reason, _ = bridge._sell_allowed_at("okx", "OP", Decimal("0.10"))  # noqa: SLF001
+    assert ok is False
+    assert reason == "sell_below_break_even"
+    ok2, reason2, _ = bridge._sell_allowed_at("okx", "OP", be + Decimal("0.001"))  # noqa: SLF001
+    assert ok2 is True
+    assert reason2 == "ok"

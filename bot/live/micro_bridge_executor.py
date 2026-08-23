@@ -32,6 +32,53 @@ _MIN_LIVE_NOTIONAL = Decimal("5")
 _FILL_POLL_SECONDS = 2.5
 _FILL_POLL_INTERVAL = 0.3
 _DEFAULT_RESTING_MAX_AGE_SEC = 90.0
+_QUOTE_FEE_CURRENCIES = frozenset({"EUR", "USDT", "USDC", "USD"})
+
+
+def _buy_lot_qty_and_unit(
+    *,
+    amount: Decimal,
+    price: Decimal,
+    fee_amt: Decimal,
+    fee_cur: str,
+    base: str,
+    quote: str,
+) -> tuple[Decimal, Decimal]:
+    """Fee-aware buy lot: (lot_qty, unit_cost in quote).
+
+    OKX often charges maker fees in the base asset. Treating those as quote
+    understates EUR cost and can authorize a false "profitable" sell.
+    """
+    if amount <= 0 or price <= 0:
+        return amount, price
+    fee_amt = max(_ZERO, Decimal(str(fee_amt or 0)))
+    fee_cur_u = str(fee_cur or "").strip().upper()
+    base_u = str(base or "").strip().upper()
+    quote_u = str(quote or "").strip().upper()
+    notional = amount * price
+    if fee_amt <= 0:
+        return amount, price
+
+    quote_aliases = _QUOTE_FEE_CURRENCIES | ({quote_u} if quote_u else set())
+    treat_as_base = fee_cur_u == base_u
+    if not treat_as_base and fee_cur_u not in quote_aliases:
+        # Missing/unknown fee currency: if fee looks too large vs quote-fee
+        # expectations but small vs base size, treat as base (OKX pattern).
+        quote_fee_floor = notional * Decimal("0.0005")
+        if (
+            fee_amt >= quote_fee_floor * 2
+            and fee_amt / amount <= Decimal("0.01")
+            and fee_amt < notional
+        ):
+            treat_as_base = True
+
+    if treat_as_base:
+        received = amount - fee_amt
+        if received <= 0:
+            return amount, (notional / amount) if amount > 0 else price
+        return received, notional / received
+
+    return amount, (notional + fee_amt) / amount
 
 
 class MicroBudgetLiveExecutor(PaperExecutor):
@@ -600,15 +647,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 fee_amt = Decimal(str(fee_info.get("cost") or 0))
                 fee_cur = str(fee_info.get("currency") or "").upper()
                 if side == "buy":
-                    if fee_cur == self._quote and fee_amt > 0:
-                        unit = (amt * px + fee_amt) / amt
-                    else:
-                        # Fee in base reduces received size → higher EUR unit cost.
-                        received = amt - fee_amt if fee_cur == base and fee_amt > 0 else amt
-                        if received <= 0:
-                            continue
-                        unit = (amt * px) / received
-                    rebuilt.append([amt if fee_cur != base else received, unit])
+                    lot_qty, unit = _buy_lot_qty_and_unit(
+                        amount=amt,
+                        price=px,
+                        fee_amt=fee_amt,
+                        fee_cur=fee_cur,
+                        base=base,
+                        quote=self._quote,
+                    )
+                    if lot_qty <= 0 or unit <= 0:
+                        continue
+                    rebuilt.append([lot_qty, unit])
                 elif side == "sell":
                     remaining = amt
                     while remaining > 0 and rebuilt:
@@ -688,6 +737,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         price: Decimal,
         fee: Decimal,
         venue: str = "",
+        fee_currency: str | None = None,
     ) -> None:
         """Update FIFO lots / realized PnL for a live mirrored fill."""
         if qty <= 0 or price <= 0:
@@ -696,15 +746,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         lot_key = self._lots_key(venue or "bitvavo", base)
         lots = self._cost_lots.setdefault(lot_key, [])
         if side == OrderSide.BUY:
-            # Unit cost includes fee so sells net fee-correct PnL.
-            unit = (qty * price + fee) / qty
-            lots.append([qty, unit])
-            self._session_lots.setdefault(lot_key, []).append([qty, unit])
+            lot_qty, unit = _buy_lot_qty_and_unit(
+                amount=qty,
+                price=price,
+                fee_amt=fee,
+                fee_cur=str(fee_currency or self._quote),
+                base=base,
+                quote=self._quote,
+            )
+            lots.append([lot_qty, unit])
+            self._session_lots.setdefault(lot_key, []).append([lot_qty, unit])
             self._note_position_opened(venue or "bitvavo", base)
             self._mark_cost_trusted(venue or "bitvavo", base)
             return
         remaining = qty
-        proceeds = qty * price - fee
+        # Quote-denominated fee reduces proceeds; base fee is already outside qty.
+        fee_cur = str(fee_currency or self._quote).upper()
+        if fee_cur == base.upper() and fee > 0:
+            proceeds = qty * price
+        else:
+            proceeds = qty * price - fee
         cost = _ZERO
         while remaining > 0 and lots:
             lot_qty, lot_cost = lots[0]
@@ -1079,6 +1140,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             }
             if terminal:
                 continue
+            # Never leave a loss-making sell resting on either venue.
+            side_raw = str(row.get("side") or "buy").lower()
+            if side_raw.startswith("s"):
+                base = infer_base_asset(symbol)
+                px = Decimal(str(row.get("price") or 0))
+                ok_sell, gate_reason, be = self._sell_allowed_at(venue, base, px)
+                if not ok_sell:
+                    try:
+                        await client.cancel_order(oid, symbol)
+                        cancelled += 1
+                        self._invalidate_bal_cache()
+                        self._bump_skip("sell_below_break_even_cancelled")
+                        logger.info(
+                            "MICRO_LOSS_SELL_CANCEL venue=%s symbol=%s id=%s reason=%s be=%s px=%s",
+                            venue,
+                            symbol,
+                            oid,
+                            gate_reason,
+                            be,
+                            px,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("loss-sell cancel failed id=%s", oid)
+                        still.append(row)
+                    continue
             if age >= max_age:
                 try:
                     await client.cancel_order(oid, symbol)

@@ -78,6 +78,7 @@ class MicroLivePolicy:
         notional_eur: Decimal,
         open_orders: int = 0,
         daily_loss_eur: Decimal = Decimal("0"),
+        side: str = "",
     ) -> tuple[bool, str]:
         ok, reason = self.can_place_orders()
         if not ok:
@@ -91,7 +92,10 @@ class MicroLivePolicy:
             return False, f"symbol {symbol} not in micro allowlist"
         if notional_eur > self.max_notional_eur():
             return False, f"notional {notional_eur} exceeds max {self.max_notional_eur()}"
-        if open_orders >= self.max_open_orders():
+        # Profitable exits must never be blocked by resting buy ladders.
+        side_l = str(side or "").strip().lower()
+        is_sell = side_l.startswith("s")
+        if (not is_sell) and open_orders >= self.max_open_orders():
             return False, "max open orders reached"
         if daily_loss_eur >= self.max_daily_loss_eur():
             return False, "daily loss limit reached"

@@ -92,6 +92,7 @@ def dry_run_order(
         notional_eur=notional,
         open_orders=0,
         daily_loss_eur=Decimal("0"),
+        side=side,
     )
     side_enum = (
         OpportunitySide.BUY

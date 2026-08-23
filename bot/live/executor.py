@@ -109,12 +109,14 @@ class MultiVenueLiveExecutor(BaseExecutor):
         except Exception:  # noqa: BLE001
             logger.warning("open-order refresh skipped before place")
 
+        side = str(getattr(order, "side", "") or "")
         ok, detail = self._policy.validate_order(
             venue=venue or "unknown",
             symbol=symbol,
             notional_eur=notional,
             open_orders=self._open_orders,
             daily_loss_eur=self._daily_loss,
+            side=side,
         )
         if not allowed or not ok:
             msg = f"Live order blocked: {reason if not allowed else detail}"
