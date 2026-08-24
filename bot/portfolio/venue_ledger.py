@@ -92,6 +92,33 @@ class VenueLedger:
             return _ZERO
         return row.get(asset.upper(), _ZERO)
 
+    def equity_breakdown(
+        self,
+        venue: str,
+        mark_prices: dict[str, Decimal] | None = None,
+    ) -> tuple[Decimal, Decimal, Decimal]:
+        """Return (quote_cash, alt_market_value, total_equity) for one venue."""
+        v = str(venue).strip().lower()
+        row = self._balances.get(v) or {}
+        quote_cash = Decimal(str(row.get(self.quote, 0) or 0))
+        alt_value = _ZERO
+        marks = mark_prices or {}
+        for asset, qty_raw in row.items():
+            asset_u = str(asset or "").upper()
+            if not asset_u or asset_u == self.quote:
+                continue
+            qty = Decimal(str(qty_raw or 0))
+            if qty <= 0:
+                continue
+            symbol = f"{asset_u}{self.quote}"
+            mark = marks.get(symbol) or marks.get(asset_u)
+            if mark is not None and Decimal(str(mark)) > 0:
+                alt_value += qty * Decimal(str(mark))
+            else:
+                alt_value += qty
+        total = quote_cash + alt_value
+        return quote_cash, alt_value, total
+
     def replace_balances(self, venue: str, balances: dict[str, Decimal]) -> None:
         """Overwrite one venue's balances (used to mirror live exchange inventory)."""
         v = str(venue).strip().lower()

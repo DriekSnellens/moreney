@@ -825,3 +825,31 @@ def test_balanced_emits_give_each_venue_a_slot() -> None:
     assert venues == {"bitvavo", "okx"}
     assert len(selected) == 2
 
+
+def test_global_overweight_does_not_block_okx_buys() -> None:
+    from bot.paper.capital_policy import QuoteSkew
+
+    strategy = MakerInventoryStrategy(_maker_settings())
+    strategy._active_skew = QuoteSkew(
+        allow_buy=False,
+        sell_only=True,
+        ask_improve_bps=Decimal("4"),
+        buy_extra_edge_bps=Decimal("0"),
+        alt_fraction=Decimal("0.39"),
+        mode="overweight_sell_only",
+    )
+    strategy._venue_skews = {
+        "bitvavo": strategy._active_skew,
+        "okx": QuoteSkew(
+            allow_buy=True,
+            sell_only=False,
+            ask_improve_bps=Decimal("0"),
+            buy_extra_edge_bps=Decimal("8"),
+            alt_fraction=Decimal("0.05"),
+            mode="underweight_selective_buy",
+        ),
+    }
+    assert strategy._symbol_sell_only("SOLEUR") is False
+    assert strategy._venue_blocks_buy("bitvavo") is True
+    assert strategy._venue_blocks_buy("okx") is False
+

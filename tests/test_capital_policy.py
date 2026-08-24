@@ -115,7 +115,33 @@ def test_dust_filter_blocks_stofjes_and_thin_net() -> None:
     )
 
 
-def test_vol_dump_guard_triggers_on_fast_drop() -> None:
+def test_inventory_skew_per_venue_independent() -> None:
+    from bot.portfolio.venue_ledger import VenueLedger
+
+    policy = InventorySkewPolicy(
+        max_alt_pct=Decimal("30"),
+        min_alt_pct=Decimal("10"),
+    )
+    ledger = VenueLedger(["bitvavo", "okx"], quote="EUR", starting_quote=Decimal("0"))
+    ledger.replace_balances(
+        "bitvavo",
+        {
+            "EUR": Decimal("800"),
+            "APT": Decimal("280"),
+            "SOL": Decimal("3"),
+        },
+    )
+    ledger.replace_balances("okx", {"EUR": Decimal("1600"), "SOL": Decimal("1")})
+    marks = {
+        "APTEUR": Decimal("0.54"),
+        "SOLEUR": Decimal("80"),
+    }
+    bv = policy.skew_venue(ledger, "bitvavo", mark_prices=marks)
+    okx = policy.skew_venue(ledger, "okx", mark_prices=marks)
+    assert bv.mode == "overweight_sell_only"
+    assert bv.sell_only is True
+    assert okx.mode == "underweight_selective_buy"
+    assert okx.sell_only is False
     guard = VolatilityDumpGuard(
         move_pct=Decimal("1.5"),
         window_sec=300.0,

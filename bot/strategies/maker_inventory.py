@@ -171,6 +171,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._last_emit: dict[str, tuple[float, Decimal]] = {}
         self._fair_values: dict[str, Decimal] = {}
         self._active_skew: QuoteSkew | None = None
+        self._venue_skews: dict[str, QuoteSkew] = {}
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
         self._hmm_regime_id: int | None = None
@@ -363,8 +364,18 @@ class MakerInventoryStrategy(BaseStrategy):
         portfolio_state: PortfolioState | None = None,
     ) -> list[TradeOpportunity]:
         self._portfolio_state = portfolio_state
+        self._venue_skews = {}
         if portfolio_state is not None:
             self._active_skew = self._skew_policy.skew(portfolio_state)
+            ledger = inventory
+            if ledger is not None and hasattr(ledger, "venues"):
+                marks = portfolio_state.mark_prices or {}
+                for venue in ledger.venues:
+                    key = str(venue).strip().lower()
+                    if key:
+                        self._venue_skews[key] = self._skew_policy.skew_venue(
+                            ledger, key, mark_prices=marks
+                        )
         else:
             self._active_skew = None
 
@@ -409,12 +420,19 @@ class MakerInventoryStrategy(BaseStrategy):
             self._mark_emitted(opp)
         return selected
 
+    def _venue_skew(self, venue: str) -> QuoteSkew | None:
+        key = str(venue or "").strip().lower()
+        if key and key in self._venue_skews:
+            return self._venue_skews[key]
+        return self._active_skew
+
+    def _venue_blocks_buy(self, venue: str) -> bool:
+        skew = self._venue_skew(venue)
+        return skew is not None and skew.sell_only
+
     def _symbol_sell_only(self, symbol: str) -> bool:
-        """True when inventory cap, dump guard, or HMM toxic forbids new BUY exposure."""
+        """True when dump guard or HMM toxic forbids new BUY exposure (not global alt cap)."""
         if self._external_reduce_only:
-            return True
-        skew = self._active_skew
-        if skew is not None and skew.sell_only:
             return True
         return self._vol_guard.is_dump(symbol)
 
@@ -434,8 +452,8 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return []
 
-        sell_only = self._symbol_sell_only(symbol)
-        if sell_only and self._vol_guard.is_dump(symbol):
+        dump_or_reduce = self._symbol_sell_only(symbol)
+        if dump_or_reduce and self._vol_guard.is_dump(symbol):
             self._reject(
                 symbol,
                 "vol_dump_sell_only",
@@ -447,6 +465,7 @@ class MakerInventoryStrategy(BaseStrategy):
         for buy_snap in venues:
             if not self._venue_allowed(buy_snap.exchange):
                 continue
+            buy_venue = str(buy_snap.exchange or "").strip().lower()
             for sell_snap in venues:
                 if not self._venue_allowed(sell_snap.exchange):
                     continue
@@ -454,6 +473,12 @@ class MakerInventoryStrategy(BaseStrategy):
                 cross = self._is_cross_venue(buy_snap.exchange, sell_snap.exchange)
                 if same and not self._same_venue:
                     continue
+                pair_sell_only = dump_or_reduce
+                if not pair_sell_only and self._venue_blocks_buy(buy_venue):
+                    if same:
+                        pair_sell_only = True
+                    else:
+                        continue
                 if cross:
                     self._cv_pairs_evaluated += 1
                 self._pairs_evaluated += 1
@@ -464,7 +489,7 @@ class MakerInventoryStrategy(BaseStrategy):
                         equity=equity,
                         inventory=inventory,
                         fair_value=fair_value,
-                        sell_only=sell_only,
+                        sell_only=pair_sell_only,
                     )
                 if candidate is None:
                     continue
@@ -475,7 +500,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     candidate,
                     inventory=inventory,
                     equity=equity,
-                    sell_only=sell_only,
+                    sell_only=pair_sell_only,
                 )
                 if opportunity is None:
                     continue
@@ -798,7 +823,7 @@ class MakerInventoryStrategy(BaseStrategy):
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
 
-        skew = self._active_skew
+        skew = self._venue_skew(str(buy_snap.exchange or ""))
         if skew is not None:
             buy_price, sell_price = self._skew_policy.apply_prices(
                 buy_price=buy_price,
@@ -1088,7 +1113,7 @@ class MakerInventoryStrategy(BaseStrategy):
         skew = self._inventory_skew_score(
             candidate, inventory=inventory, base=base
         )
-        skew_meta = self._active_skew
+        skew_meta = self._venue_skew(str(candidate.buy_exchange or ""))
         side = OpportunitySide.SELL if sell_only else OpportunitySide.BUY
         buy_fee_rate = self._maker_fee(candidate.buy_exchange)
         sell_fee_rate = self._maker_fee(candidate.sell_exchange)
@@ -1361,6 +1386,9 @@ class MakerInventoryStrategy(BaseStrategy):
             "alt_inventory_pct": (
                 float(skew.alt_fraction * Decimal("100")) if skew is not None else None
             ),
+            "venue_inventory_modes": {
+                v: s.mode for v, s in sorted(self._venue_skews.items())
+            },
             "dump_symbols": self.dump_symbols(),
             "reduce_only": self._external_reduce_only,
             "hmm_regime_id": self._hmm_regime_id,

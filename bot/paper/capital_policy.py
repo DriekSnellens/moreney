@@ -114,7 +114,31 @@ class InventorySkewPolicy:
 
     def skew(self, state: PortfolioState) -> QuoteSkew:
         snap = self.snapshot(state)
-        alt = snap.alt_fraction
+        return self._skew_from_alt_fraction(snap.alt_fraction)
+
+    def skew_venue(
+        self,
+        ledger: Any,
+        venue: str,
+        *,
+        mark_prices: dict[str, Decimal] | None = None,
+    ) -> QuoteSkew:
+        """Per-exchange inventory skew — Bitvavo overweight must not block OKX buys."""
+        breakdown = getattr(ledger, "equity_breakdown", None)
+        if not callable(breakdown):
+            return QuoteSkew(
+                allow_buy=True,
+                sell_only=False,
+                ask_improve_bps=_ZERO,
+                buy_extra_edge_bps=_ZERO,
+                alt_fraction=_ZERO,
+                mode="unknown",
+            )
+        _quote_cash, _alt_value, total = breakdown(venue, mark_prices)
+        alt_frac = _alt_value / total if total > 0 else _ZERO
+        return self._skew_from_alt_fraction(alt_frac)
+
+    def _skew_from_alt_fraction(self, alt: Decimal) -> QuoteSkew:
         if alt > self._max_alt:
             return QuoteSkew(
                 allow_buy=False,
