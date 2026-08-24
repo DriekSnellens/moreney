@@ -2311,7 +2311,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 cost = self._unit_cost(venue, asset)
                 if mark is not None and cost is not None and cost > 0 and mark > 0:
                     self._trail_update_state(venue, asset, cost=cost, mark=mark)
-                continue
+                # Long-hold: do not stop the function early.
+                # Exits still go through the never-loss / break-even gates.
             if self._allowed_bases is not None and asset not in self._allowed_bases:
                 continue
             trail_key = self._lots_key(venue, asset)
