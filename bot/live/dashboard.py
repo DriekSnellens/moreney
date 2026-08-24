@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import html
+import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi.responses import HTMLResponse
+
+from bot.live.dashboard_history import chart_series_from_history, load_history
 
 
 def _esc(value: Any) -> str:
@@ -344,7 +347,79 @@ def _css() -> str:
     }
     .cash-grid .mini .label { font-size: .72rem; }
     .cash-grid .mini .value { margin: .35rem 0 0; font-size: 1.15rem; }
+    .charts {
+      display: grid;
+      gap: 1rem;
+      margin: 0 0 1.25rem;
+    }
+    @media (min-width: 900px) {
+      .charts { grid-template-columns: 1fr 1fr; }
+    }
+    .chart-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1rem 1rem .85rem;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+    }
+    .chart-card h2 {
+      margin: 0 0 .65rem;
+      font-size: .82rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .chart-wrap {
+      position: relative;
+      height: min(42vw, 220px);
+      min-height: 180px;
+    }
+    .chart-wrap canvas { width: 100% !important; height: 100% !important; }
+    .install-banner {
+      display: none;
+      margin: 0 0 1rem;
+      padding: .85rem 1rem;
+      border-radius: 14px;
+      border: 1px dashed color-mix(in srgb, var(--good) 45%, var(--line));
+      background: color-mix(in srgb, var(--good) 8%, transparent);
+      font-size: .88rem;
+    }
+    .install-banner.show { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+    .install-banner button {
+      border: 0;
+      border-radius: 999px;
+      padding: .45rem .9rem;
+      background: var(--good);
+      color: #062015;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    details.fold {
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+    }
+    details.fold > summary {
+      cursor: pointer;
+      padding: .9rem 1.1rem;
+      font-weight: 600;
+      list-style: none;
+    }
+    details.fold > summary::-webkit-details-marker { display: none; }
+    details.fold .fold-body { padding: 0 1.1rem 1.1rem; }
+    .updated-at {
+      margin: .5rem 0 0;
+      color: var(--muted);
+      font-size: .75rem;
+      font-family: var(--mono);
+    }
     """
+
+
+def _chart_bootstrap(history: list[dict[str, Any]]) -> str:
+    """JSON for initial Chart.js datasets (safe in script tag)."""
+    return json.dumps(chart_series_from_history(history))
 
 
 def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
@@ -684,16 +759,54 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         + "</section>"
     )
 
+    history = payload.get("history") or load_history(limit=720)
+    chart_json = _chart_bootstrap(history if isinstance(history, list) else [])
+    session_pnl = None
+    start_pf = _dec(session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur"))
+    if portfolio is not None and start_pf is not None:
+        session_pnl = portfolio - start_pf
+    session_pnl_class = ""
+    if session_pnl is not None and session_pnl > 0:
+        session_pnl_class = "good"
+    elif session_pnl is not None and session_pnl < 0:
+        session_pnl_class = "bad"
+
+    charts_html = """
+    <section class="charts" aria-label="Portfolio charts">
+      <article class="chart-card">
+        <h2>Portfolio waarde (EUR)</h2>
+        <div class="chart-wrap"><canvas id="chart-portfolio" role="img" aria-label="Portfolio waarde grafiek"></canvas></div>
+      </article>
+      <article class="chart-card">
+        <h2>PnL (EUR)</h2>
+        <div class="chart-wrap"><canvas id="chart-pnl" role="img" aria-label="PnL grafiek"></canvas></div>
+      </article>
+    </section>
+    """
+
+    detail_html = (
+        f"<details class='fold'><summary>Posities, cross-venue &amp; detail</summary>"
+        f"<div class='fold-body'>{positions_html}{cross_venue_html}{why_html}{trades_html}{alerts_html}</div></details>"
+    )
+
     html_doc = f"""<!DOCTYPE html>
 <html lang="nl">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <meta http-equiv="refresh" content="5"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0c1118"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Moreney"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="manifest" href="/live/manifest.webmanifest"/>
+  <link rel="icon" href="/live/icon.svg" type="image/svg+xml"/>
+  <link rel="apple-touch-icon" href="/live/icon.svg"/>
   <title>Moreney</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@500;600&family=Sora:wght@500;600&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
   <style>{_css()}</style>
 </head>
 <body>
@@ -702,63 +815,198 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <h1 class="brand">Moreney</h1>
       <p class="status {"on" if running else ""}">{("live" if running else "gestopt")}</p>
     </header>
+    <div id="install-banner" class="install-banner" hidden>
+      <span>Voeg Moreney toe aan je startscherm voor snelle PnL-updates.</span>
+      <button type="button" id="install-btn">Installeren</button>
+    </div>
     {idle_banner}
     {cash_html}
+    {charts_html}
+    <p class="updated-at" id="updated-at">—</p>
     <section class="grid">
       <article class="card">
         <p class="label">Portfolio</p>
-        <p class="value">{_esc(_eur(portfolio))}</p>
+        <p class="value" id="kpi-portfolio">{_esc(_eur(portfolio))}</p>
         <p class="hint">EUR + crypto tegen marktprijs</p>
       </article>
       <article class="card">
-        <p class="label">Vrij te besteden</p>
-        <p class="value">{_esc(_eur(free))}</p>
-        <p class="hint">Totaal vrij (zie per venue hierboven)</p>
+        <p class="label">Sessie PnL (MTM)</p>
+        <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
+        <p class="hint">Portfolio vs start van deze sessie</p>
       </article>
       <article class="card">
         <p class="label">Gerealiseerd (live)</p>
-        <p class="value {pnl_class}">{_esc(_eur(pnl, signed=True))}</p>
+        <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
         <p class="hint">FIFO na fees — alleen gesloten trades</p>
       </article>
       <article class="card">
         <p class="label">Ongerealiseerd MTM</p>
-        <p class="value {unreal_class}">{_esc(_eur(unrealized, signed=True))}</p>
+        <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
         <p class="hint">Mark vs kost op open bags</p>
       </article>
       <article class="card">
-        <p class="label">Geblokkeerde sells</p>
-        <p class="value">{_esc(blocked_sells)}</p>
-        <p class="hint">Never-loss skips deze sessie (BE / time-stop)</p>
+        <p class="label">Vrij te besteden</p>
+        <p class="value" id="kpi-free">{_esc(_eur(free))}</p>
+        <p class="hint">Totaal vrij EUR</p>
       </article>
       <article class="card">
         <p class="label">Sessie-transacties</p>
-        <p class="value">{_esc(tx_n)}</p>
+        <p class="value" id="kpi-tx">{_esc(tx_n)}</p>
         <p class="hint">Live fills (geen hydrate/backfill: {backfill_n})</p>
       </article>
-      <article class="card">
-        <p class="label">Vastgezet kapitaal</p>
-        <p class="value">{_esc(_eur(locked_notional))}</p>
-        <p class="hint">Micro {_esc(_eur(micro_locked))} · long-hold {_esc(_eur(long_hold_locked))}</p>
-      </article>
     </section>
-    {positions_html}
-    {cross_venue_html}
-    {why_html}
-    {trades_html}
-    {alerts_html}
+    {detail_html}
     <footer>
       <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2000,exclude_btc:true}})">Start</button>
       <button type="button" class="btn" onclick="post('/live/micro/session/stop')">Stop</button>
     </footer>
   </div>
   <script>
+    const CHART_BOOT = {chart_json};
+
     async function post(url, body) {{
       await fetch(url, {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify(body || {{}})
       }});
-      location.reload();
+      await refreshMetrics();
+    }}
+
+    const eurFmt = (v, signed=false) => {{
+      if (v === null || v === undefined || Number.isNaN(v)) return '—';
+      const n = Number(v);
+      const text = Math.abs(n).toLocaleString('nl-NL', {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+      if (signed && n > 0) return '+€' + text;
+      if (signed && n < 0) return '-€' + text;
+      return '€' + text;
+    }};
+
+    const chartDefaults = {{
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {{ duration: 350 }},
+      plugins: {{ legend: {{ labels: {{ color: '#93a4bb', boxWidth: 12 }} }} }},
+      scales: {{
+        x: {{ ticks: {{ color: '#93a4bb', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }}, grid: {{ color: 'rgba(36,50,71,.45)' }} }},
+        y: {{ ticks: {{ color: '#93a4bb' }}, grid: {{ color: 'rgba(36,50,71,.45)' }} }}
+      }}
+    }};
+
+    let portfolioChart = null;
+    let pnlChart = null;
+
+    function buildCharts(data) {{
+      const labels = data.labels || [];
+      const pfCtx = document.getElementById('chart-portfolio');
+      const pnlCtx = document.getElementById('chart-pnl');
+      if (!pfCtx || !pnlCtx || !window.Chart) return;
+
+      if (portfolioChart) portfolioChart.destroy();
+      if (pnlChart) pnlChart.destroy();
+
+      portfolioChart = new Chart(pfCtx, {{
+        type: 'line',
+        data: {{
+          labels,
+          datasets: [{{
+            label: 'Portfolio',
+            data: data.portfolio || [],
+            borderColor: '#78a0dc',
+            backgroundColor: 'rgba(120,160,220,.12)',
+            fill: true,
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 2,
+          }}]
+        }},
+        options: chartDefaults
+      }});
+
+      pnlChart = new Chart(pnlCtx, {{
+        type: 'line',
+        data: {{
+          labels,
+          datasets: [
+            {{
+              label: 'Gerealiseerd',
+              data: data.realized || [],
+              borderColor: '#3ddc97',
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 2,
+            }},
+            {{
+              label: 'Sessie MTM',
+              data: data.session_pnl || [],
+              borderColor: '#f0b429',
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 2,
+            }},
+            {{
+              label: 'Ongerealiseerd',
+              data: data.unrealized || [],
+              borderColor: '#ff6b6b',
+              borderDash: [4, 4],
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 1.5,
+            }}
+          ]
+        }},
+        options: chartDefaults
+      }});
+    }}
+
+    function applyMetrics(m) {{
+      const set = (id, text) => {{ const el = document.getElementById(id); if (el) el.textContent = text; }};
+      set('kpi-portfolio', eurFmt(m.portfolio_eur));
+      set('kpi-session-pnl', eurFmt(m.session_pnl_eur, true));
+      set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
+      set('kpi-unrealized', eurFmt(m.unrealized_eur, true));
+      set('kpi-free', eurFmt(m.free_eur));
+      if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
+      const ts = document.getElementById('updated-at');
+      if (ts && m.updated_at) ts.textContent = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');
+    }}
+
+    async function refreshMetrics() {{
+      try {{
+        const res = await fetch('/live/dashboard/metrics', {{ credentials: 'same-origin' }});
+        if (!res.ok) return;
+        const body = await res.json();
+        if (body.metrics) applyMetrics(body.metrics);
+        if (body.history) buildCharts(body.history);
+      }} catch (_) {{}}
+    }}
+
+    window.addEventListener('DOMContentLoaded', () => {{
+      buildCharts(CHART_BOOT);
+      refreshMetrics();
+      setInterval(refreshMetrics, 30000);
+    }});
+
+    if ('serviceWorker' in navigator) {{
+      navigator.serviceWorker.register('/live/sw.js').catch(() => {{}});
+    }}
+
+    let deferredPrompt = null;
+    const banner = document.getElementById('install-banner');
+    const installBtn = document.getElementById('install-btn');
+    window.addEventListener('beforeinstallprompt', (e) => {{
+      e.preventDefault();
+      deferredPrompt = e;
+      if (banner) {{ banner.hidden = false; banner.classList.add('show'); }}
+    }});
+    if (installBtn) {{
+      installBtn.addEventListener('click', async () => {{
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        if (banner) banner.hidden = true;
+      }});
     }}
   </script>
 </body>

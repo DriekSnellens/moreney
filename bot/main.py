@@ -37,7 +37,14 @@ from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.store import PaperTradingStore
 from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
+from bot.live.dashboard_history import (
+    chart_series_from_history,
+    load_history,
+    metrics_from_payload,
+    record_snapshot,
+)
 from bot.live.dashboard import render_live_dashboard
+from bot.live.pwa_assets import ICON_SVG, MANIFEST_JSON, SERVICE_WORKER_JS
 from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 from bot.market_data.research.retention import prune_research_marketdata
 from bot.live.service import get_live_service, reset_live_service
@@ -551,22 +558,32 @@ async def market_data_status() -> dict[str, Any]:
     return compact
 
 
-async def _live_dashboard_payload() -> dict[str, Any]:
+async def _live_dashboard_payload(*, record: bool = True, light: bool = False) -> dict[str, Any]:
     live = get_live_service()
-    observe = await live.phase1_observe(probe=False)
-    readiness = live.compact_status()
-    try:
-        alerts = live.phase4_alerts(observe)
-    except Exception:  # noqa: BLE001
-        alerts = {"alerts": []}
-    return {
-        "session": get_micro_session_manager().status(),
+    session = get_micro_session_manager().status()
+    payload: dict[str, Any] = {
+        "session": session,
         "engine": get_micro_engine().status(),
-        "unlock": live.micro_unlock_checklist(),
-        "observe": observe,
-        "readiness": readiness,
-        "alerts": alerts,
     }
+    if not light:
+        observe = await live.phase1_observe(probe=False)
+        readiness = live.compact_status()
+        try:
+            alerts = live.phase4_alerts(observe)
+        except Exception:  # noqa: BLE001
+            alerts = {"alerts": []}
+        payload.update(
+            {
+                "unlock": live.micro_unlock_checklist(),
+                "observe": observe,
+                "readiness": readiness,
+                "alerts": alerts,
+            }
+        )
+    if record:
+        record_snapshot(payload)
+    payload["history"] = load_history(limit=720)
+    return payload
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -613,6 +630,37 @@ async def logout() -> Response:
 async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
     """Primary live operator dashboard."""
     return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/dashboard/metrics")
+async def live_dashboard_metrics(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """JSON KPIs + chart series for mobile polling (no full HTML reload)."""
+    payload = await _live_dashboard_payload(light=True)
+    history = payload.get("history") or load_history(limit=720)
+    return {
+        "metrics": metrics_from_payload(payload),
+        "history": chart_series_from_history(history if isinstance(history, list) else []),
+    }
+
+
+@app.get("/live/dashboard/history")
+async def live_dashboard_history(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    return {"points": load_history(limit=720)}
+
+
+@app.get("/live/manifest.webmanifest")
+async def live_pwa_manifest() -> Response:
+    return Response(content=MANIFEST_JSON, media_type="application/manifest+json")
+
+
+@app.get("/live/sw.js")
+async def live_service_worker() -> Response:
+    return Response(content=SERVICE_WORKER_JS, media_type="application/javascript")
+
+
+@app.get("/live/icon.svg")
+async def live_pwa_icon() -> Response:
+    return Response(content=ICON_SVG, media_type="image/svg+xml")
 
 
 @app.get("/fleet", response_class=HTMLResponse)

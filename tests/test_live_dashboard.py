@@ -120,9 +120,8 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "Vrij te besteden" in html
     assert "Gerealiseerd (live)" in html
     assert "Ongerealiseerd MTM" in html
-    assert "Geblokkeerde sells" in html
     assert "Sessie-transacties" in html
-    assert "Vastgezet kapitaal" in html
+    assert "Sessie PnL" in html
     assert "7" in html
     assert "42" in html
     assert "long-hold" in html
@@ -132,6 +131,8 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "Bags onder kostprijs" in html
     assert "bitvavo vrij EUR" in html
     assert "okx vrij EUR" in html
+    assert "chart-portfolio" in html
+    assert "manifest.webmanifest" in html
     assert "long-hold — buiten micro-recycle" in html
     assert "sell onder break-even" in html
 
@@ -179,6 +180,8 @@ def test_live_dashboard_routes_and_paper_redirects() -> None:
         assert "Sessie-transacties" in live.text
         assert client.get("/", follow_redirects=False).status_code == 200
         assert client.get("/dashboard", follow_redirects=False).status_code == 200
+        assert client.get("/live/manifest.webmanifest").status_code == 200
+        assert client.get("/live/dashboard/metrics").status_code == 200
         for path in ("/paper/dashboard", "/paper/dashboard-lite", "/fleet", "/strategy-lab"):
             resp = client.get(path, follow_redirects=False)
             assert resp.status_code == 303, path

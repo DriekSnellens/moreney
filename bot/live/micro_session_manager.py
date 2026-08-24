@@ -166,6 +166,12 @@ class MicroSessionManager:
                 **snapshot,
             }
         )
+        try:
+            from bot.live.dashboard_history import seed_from_session_status
+
+            seed_from_session_status(self._status)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def stop(self) -> dict[str, Any]:
         async with self._lock:
