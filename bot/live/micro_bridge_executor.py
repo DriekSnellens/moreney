@@ -1425,14 +1425,43 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.skips[key] = self.skips.get(key, 0) + 1
 
     def _resolve_venue(self, order_request: OrderRequest) -> str:
+        """Pick the live venue for an order — never hardcode Bitvavo for EUR.
+
+        Prefer explicit venue metadata, then buy/sell exchange from the
+        opportunity, then the cash-richest execute venue. Missing venue must
+        not silently route every *EUR pair to Bitvavo and starve OKX.
+        """
         meta = order_request.metadata or {}
         venue = str(meta.get("venue") or meta.get("exchange") or "").strip().lower()
         if venue:
             return venue
-        sym = order_request.symbol.upper().replace("/", "").replace("-", "")
-        if sym.endswith("EUR"):
-            return "bitvavo"
-        return ""
+        side = order_request.side
+        side_l = str(side.value if hasattr(side, "value") else side).lower()
+        if side_l.startswith("s"):
+            venue = str(
+                meta.get("sell_exchange") or meta.get("buy_exchange") or ""
+            ).strip().lower()
+        else:
+            venue = str(
+                meta.get("buy_exchange") or meta.get("sell_exchange") or ""
+            ).strip().lower()
+        if venue:
+            return venue
+        candidates = sorted(self._execute_venues)
+        if not candidates:
+            return ""
+        best = ""
+        best_score = Decimal("-1")
+        for cand in candidates:
+            # Prefer real free EUR on the venue (cache) so a full €2k+€2k
+            # pocket does not collapse to alphabetical Bitvavo.
+            live = self._live_free_sync(cand, self._quote)
+            pocket = self._venue_budget_remaining(cand)
+            score = live if live > 0 else pocket
+            if score > best_score:
+                best_score = score
+                best = cand
+        return best
 
     def _trading_client(self, venue: str) -> Any | None:
         registry = getattr(self._live, "_registry", None)
@@ -1945,6 +1974,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             be *= Decimal("1") + buffer_bps / Decimal("10000")
         return be
 
+    def _time_stop_floor_price(self, venue: str, base: str) -> Decimal | None:
+        """Time-stop must clear a little profit above fee-aware break-even."""
+        be = self._break_even_sell_price(venue, base)
+        if be is None:
+            return None
+        extra_bps = Decimal(
+            str(getattr(self._settings, "paper_time_stop_min_profit_bps", 0) or 0)
+        )
+        if extra_bps > 0:
+            be *= Decimal("1") + extra_bps / Decimal("10000")
+        return be
+
     async def _profitable_exit_quote(
         self, venue: str, base: str, mark: Decimal
     ) -> tuple[Decimal | None, bool, str]:
@@ -2354,8 +2395,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         time.monotonic() - opened < self._time_stop_sec
                     ):
                         continue
-                    be = self._break_even_sell_price(venue, asset)
-                    if be is None or mark < be:
+                    floor = self._time_stop_floor_price(venue, asset)
+                    if floor is None or mark < floor:
                         self._bump_skip("time_stop_below_be")
                         continue
                     free = await self._refresh_free(venue, symbol, asset, locked)
@@ -2368,7 +2409,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         qty=sell_qty,
                         mark=mark,
                         reason="time_stop_breakeven",
-                        limit_price=max(be, mark * Decimal("0.999")),
+                        limit_price=max(floor, mark * Decimal("0.999")),
                         post_only=True,
                     )
                     triggered.append(
@@ -2380,6 +2421,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                             "qty": str(sell_qty),
                             "mark": str(mark),
                             "cost": str(blend),
+                            "floor": str(floor),
                             "status": result.status.value,
                             "order_id": str(result.order_id)
                             if result.order_id
@@ -2451,12 +2493,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 reason = "trail_drawdown"
             elif st.get("time_stop_due"):
-                be = self._break_even_sell_price(venue, asset)
-                if be is not None and mark >= be:
+                floor = self._time_stop_floor_price(venue, asset)
+                if floor is not None and mark >= floor:
                     free = await self._refresh_free(venue, symbol, asset, locked)
                     sell_qty = free
                     reason = "time_stop_breakeven"
-                    limit_px = max(be, mark * Decimal("0.999"))
+                    limit_px = max(floor, mark * Decimal("0.999"))
                     post_only = True
                 else:
                     self._bump_skip("time_stop_below_be")

@@ -152,9 +152,11 @@ class Settings(BaseSettings):
     # Ladder buys: split entry into 3 post-only bids at these discounts vs mark.
     paper_ladder_buy_enabled: bool = False
     paper_ladder_buy_pcts: str = "0.01,0.02,0.03"
-    # Time-stop: after this many seconds without trail arm, exit at >= break-even only.
+    # Time-stop: after this many seconds without trail arm, exit only once a
+    # small profit above break-even is available (not flat at BE).
     paper_time_stop_enabled: bool = False
     paper_time_stop_sec: float = Field(default=7200.0, ge=600.0)
+    paper_time_stop_min_profit_bps: float = Field(default=10.0, ge=0, le=100)
     # Sub-min-notional inventory: top_up | exit_breakeven | top_up_or_exit | off
     paper_dust_policy: str = "off"
     # Allow dust break-even exits within this many bps below fee-adjusted BE

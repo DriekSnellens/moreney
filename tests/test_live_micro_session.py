@@ -75,6 +75,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
+    assert cfg.arbitrage_max_emits_per_cycle == 6
+    assert cfg.paper_maker_max_open_quotes == 12
     assert cfg.live_micro_execute_venues == "bitvavo"
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
@@ -760,6 +762,79 @@ def test_trail_time_stop_uses_venue_key() -> None:
     )
     assert st["soft_armed"] is False
     assert st["time_stop_due"] is True
+
+
+def test_time_stop_requires_profit_above_break_even() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_session_buys_only=False,
+        paper_time_stop_enabled=True,
+        paper_time_stop_sec=600.0,
+        paper_time_stop_min_profit_bps=25.0,
+        paper_trail_atr_enabled=False,
+        paper_maker_sell_profit_buffer_bps=10.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    floor = bridge._time_stop_floor_price("bitvavo", "ADA")  # noqa: SLF001
+    assert floor is not None
+    be = bridge._break_even_sell_price("bitvavo", "ADA")  # noqa: SLF001
+    assert be is not None and floor > be
+
+
+def test_resolve_venue_uses_exchange_meta_not_eur_bitvavo_default() -> None:
+    settings = _unlocked()
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        execute_venues={"bitvavo", "okx"},
+        live_maker=True,
+    )
+    buy = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="ADAEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("10"),
+        limit_price=Decimal("1"),
+        metadata={"buy_exchange": "okx", "sell_exchange": "okx"},
+    )
+    sell = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="ADAEUR",
+        side=OpportunitySide.SELL,
+        quantity=Decimal("10"),
+        limit_price=Decimal("1"),
+        metadata={"buy_exchange": "bitvavo", "sell_exchange": "okx"},
+    )
+    assert bridge._resolve_venue(buy) == "okx"  # noqa: SLF001
+    assert bridge._resolve_venue(sell) == "okx"  # noqa: SLF001
+    # No metadata: pick cash-richest execute venue, never hardcode Bitvavo for EUR.
+    empty = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="ADAEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("10"),
+        limit_price=Decimal("1"),
+        metadata={},
+    )
+    from bot.core.models import Balance
+
+    bridge._bal_cache["okx"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("900"), locked=Decimal("0"))
+    ]
+    bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("100"), locked=Decimal("0"))
+    ]
+    assert bridge._resolve_venue(empty) == "okx"  # noqa: SLF001
 
 
 def test_trail_ignores_mark_spike_before_soft_arm() -> None:

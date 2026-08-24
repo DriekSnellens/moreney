@@ -782,3 +782,46 @@ async def test_dust_notional_floor_rejects_tiny_quotes() -> None:
     assert opps == []
     assert strategy.scan_stats()["reject_counts"].get("dust_or_net_floor", 0) > 0
 
+
+def test_balanced_emits_give_each_venue_a_slot() -> None:
+    """Bitvavo-ranked edges must not monopolize a tiny emit budget."""
+    from bot.core.enums import OpportunitySide
+    from bot.core.models import TradeOpportunity
+    from uuid import uuid4
+
+    strategy = MakerInventoryStrategy(
+        _maker_settings(arbitrage_max_emits_per_cycle=2)
+    )
+    def _opp(venue: str, net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol="ADAEUR",
+            side=OpportunitySide.BUY,
+            quantity=Decimal("10"),
+            entry_price=Decimal("1"),
+            expected_exit_price=Decimal("1.01"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": venue,
+                "sell_exchange": venue,
+                "net_profit_eur": net,
+                "post_only": True,
+            },
+        )
+
+    # Three Bitvavo edges rank above the sole OKX edge.
+    ranked = [
+        _opp("bitvavo", "3.0"),
+        _opp("bitvavo", "2.5"),
+        _opp("bitvavo", "2.0"),
+        _opp("okx", "1.5"),
+    ]
+    selected = strategy._select_balanced_emits(ranked)  # noqa: SLF001
+    venues = {
+        (o.metadata or {}).get("buy_exchange") for o in selected
+    }
+    assert venues == {"bitvavo", "okx"}
+    assert len(selected) == 2
+

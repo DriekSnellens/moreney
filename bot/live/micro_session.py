@@ -143,7 +143,10 @@ def _session_settings(
             "paper_maker_venues": maker_venues,
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
-            "paper_maker_max_open_quotes": 10,
+            # Room for both Bitvavo and OKX resting quotes in the same cycle.
+            "paper_maker_max_open_quotes": 12 if cross_venue else 8,
+            # Default config is 2 emits — Bitvavo monopolizes; give OKX fair slots.
+            "arbitrage_max_emits_per_cycle": 6 if cross_venue else 3,
             "paper_cycle_interval_ms": 1200.0,
             # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
             "paper_maker_min_notional_eur": min(70.0, max(55.0, budget_f * 0.03)),
@@ -178,7 +181,8 @@ def _session_settings(
             # First leg joins the bid (0%); mild backups only.
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 3600.0,  # 1h recycle at >= BE (capital velocity)
+            "paper_time_stop_sec": 3600.0,  # 1h recycle after profit clears extra buffer
+            "paper_time_stop_min_profit_bps": 25.0,
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,

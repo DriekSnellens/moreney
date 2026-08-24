@@ -396,7 +396,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 )
         with self._hp("candidate_dedup_rank"):
             opportunities.sort(key=self._rank_opportunity, reverse=True)
-            selected = opportunities[: self._max_emits]
+            selected = self._select_balanced_emits(opportunities)
             selected = self._drop_small_vs_best(selected)
         for opp in selected:
             self._opportunities_emitted += 1
@@ -567,6 +567,67 @@ class MakerInventoryStrategy(BaseStrategy):
     def _mark_emitted(self, opportunity: TradeOpportunity) -> None:
         net = Decimal(str((opportunity.metadata or {}).get("net_profit_eur", "0") or "0"))
         self._last_emit[self._pair_key(opportunity)] = (time.monotonic(), net)
+
+    def _primary_venue(self, opportunity: TradeOpportunity) -> str:
+        meta = opportunity.metadata or {}
+        side = opportunity.side
+        side_l = str(side.value if hasattr(side, "value") else side).lower()
+        if side_l.startswith("s"):
+            return str(
+                meta.get("sell_exchange") or meta.get("buy_exchange") or "?"
+            ).strip().lower()
+        return str(
+            meta.get("buy_exchange") or meta.get("sell_exchange") or "?"
+        ).strip().lower()
+
+    def _select_balanced_emits(
+        self, opportunities: list[TradeOpportunity]
+    ) -> list[TradeOpportunity]:
+        """Take top emits with a per-venue fairness pass.
+
+        Without this, Bitvavo often monopolizes the tiny max_emits budget whenever
+        its NET ranks slightly higher — leaving OKX with cash but no quotes.
+        Never changes profitability/never-loss gates; only emit scheduling.
+        """
+        if not opportunities or self._max_emits <= 0:
+            return []
+        by_venue: dict[str, list[TradeOpportunity]] = {}
+        for opp in opportunities:
+            by_venue.setdefault(self._primary_venue(opp), []).append(opp)
+
+        selected: list[TradeOpportunity] = []
+        selected_ids: set[Any] = set()
+        venues = sorted(by_venue.keys())
+        # Pass 1: round-robin one opportunity per venue until budget is full.
+        # Stops Bitvavo from taking every slot when max_emits is small.
+        while len(selected) < self._max_emits:
+            added = False
+            for venue in venues:
+                if len(selected) >= self._max_emits:
+                    break
+                for opp in by_venue[venue]:
+                    oid = getattr(opp, "id", None) or id(opp)
+                    if oid in selected_ids:
+                        continue
+                    selected.append(opp)
+                    selected_ids.add(oid)
+                    added = True
+                    break
+            if not added:
+                break
+        # Pass 2: fill any leftover slots by global rank order.
+        for opp in opportunities:
+            if len(selected) >= self._max_emits:
+                break
+            oid = getattr(opp, "id", None) or id(opp)
+            if oid in selected_ids:
+                continue
+            selected.append(opp)
+            selected_ids.add(oid)
+        # Keep global rank order so the best NET still leads the emit list.
+        rank = {id(o): i for i, o in enumerate(opportunities)}
+        selected.sort(key=lambda o: rank.get(id(o), 10**9))
+        return selected
 
     def _drop_small_vs_best(
         self, opportunities: list[TradeOpportunity]
