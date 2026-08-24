@@ -419,6 +419,11 @@ class Settings(BaseSettings):
     live_micro_symbols: str = "BTCEUR,ETHEUR"
     live_micro_max_notional_eur: float = Field(default=50.0, gt=0)
     live_micro_max_daily_loss_eur: float = Field(default=25.0, gt=0)
+    # Drawdown kill-switch ceiling for live micro (alt-beta book; default 12%).
+    # When >0, micro sessions use this instead of max_drawdown_percent.
+    live_micro_max_drawdown_percent: float = Field(default=12.0, gt=0, le=100)
+    # Rewind peak equity to current portfolio at micro session start (avoid stale peaks).
+    live_micro_reset_drawdown_on_start: bool = True
     # Live micro: paper inventory sync can invent false daily losses — do not pause on them.
     live_micro_ignore_paper_daily_loss: bool = False
     live_micro_max_open_orders: int = Field(default=1, ge=1, le=20)

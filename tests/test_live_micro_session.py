@@ -490,6 +490,27 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.live_micro_max_notional_eur <= 150.0
     assert cfg.paper_markout_enabled is True
     assert cfg.live_disable_research_hooks is True
+    assert cfg.max_drawdown_percent == 12.0
+    assert cfg.live_micro_reset_drawdown_on_start is True
+
+
+def test_reset_drawdown_baseline_rewinds_peak() -> None:
+    portfolio = PaperPortfolio(Settings(paper_starting_eur=2000.0), starting_eur=Decimal("2000"))
+    portfolio.set_mark_price("ADAEUR", Decimal("1"))
+    portfolio._state.balances["EUR"] = portfolio._state.balances.get("EUR")  # noqa: SLF001
+    from bot.portfolio.models import AssetBalance
+
+    portfolio._state.balances["EUR"] = AssetBalance(  # noqa: SLF001
+        asset="EUR", available=Decimal("2000"), reserved=Decimal("0")
+    )
+    portfolio._state.stats.peak_equity = Decimal("5000")
+    portfolio.set_mark_price("ADAEUR", Decimal("0.9"))
+    portfolio._update_drawdown()  # noqa: SLF001
+    assert portfolio._state.stats.current_drawdown > 0  # noqa: SLF001
+    peak = portfolio.reset_drawdown_baseline()
+    assert portfolio._state.stats.peak_equity == peak  # noqa: SLF001
+    assert portfolio._state.stats.current_drawdown == 0  # noqa: SLF001
+    assert portfolio._state.stats.maximum_drawdown == 0  # noqa: SLF001
 
 
 def test_trail_partial_flags_newly_armed() -> None:

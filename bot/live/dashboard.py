@@ -226,6 +226,38 @@ def _css() -> str:
       color: var(--muted);
       font-size: .8rem;
     }
+    .target-band {
+      margin: 0 0 1.25rem;
+      padding: 1rem 1.15rem;
+      border-radius: 16px;
+      border: 1px solid color-mix(in srgb, #f0b429 35%, var(--line));
+      background: color-mix(in srgb, #f0b429 8%, var(--bg1));
+    }
+    .target-band h2 {
+      margin: 0 0 .45rem;
+      font-size: .95rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #f0b429;
+    }
+    .target-band p {
+      margin: 0;
+      font-size: .88rem;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+    .target-band .band-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .75rem 1.5rem;
+      margin-top: .65rem;
+      font-family: var(--mono);
+      font-size: .82rem;
+    }
+    .target-band .band-row span { color: var(--text); }
+    .target-band .in-band { color: var(--good); }
+    .target-band .out-band { color: var(--muted); }
     .positions {
       margin-top: 1.5rem;
       border: 1px solid var(--line);
@@ -771,6 +803,27 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     elif session_pnl is not None and session_pnl < 0:
         session_pnl_class = "bad"
 
+    target_low = Decimal("20")
+    target_high = Decimal("50")
+    in_target_band = (
+        session_pnl is not None and target_low <= session_pnl <= target_high
+    )
+    band_class = "in-band" if in_target_band else "out-band"
+    target_band_html = (
+        "<section class='target-band' aria-label='Doelband onderzoek'>"
+        "<h2>Onderzoeksdoel €20–50 / dag</h2>"
+        "<p>Paper-onderzoek: <strong>sessie MTM</strong> (portfolio vs start), "
+        "niet gerealiseerde maker-winst. Op een goede alt-dag met ~75% inventaris "
+        "is 2–5% equity ≈ dit band — vandaag gemeten via de gele lijn / Sessie PnL.</p>"
+        "<div class='band-row'>"
+        f"<span>Sessie MTM: <strong class='{band_class}'>"
+        f"{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else '—')}"
+        f"</strong> (doel €20–50)</span>"
+        f"<span>Gerealiseerd: {_esc(_eur(pnl, signed=True))} (FIFO fills)</span>"
+        f"<span>Ongerealiseerd: {_esc(_eur(unrealized, signed=True))}</span>"
+        "</div></section>"
+    )
+
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
       <article class="chart-card">
@@ -778,8 +831,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <div class="chart-wrap"><canvas id="chart-portfolio" role="img" aria-label="Portfolio waarde grafiek"></canvas></div>
       </article>
       <article class="chart-card">
-        <h2>PnL (EUR)</h2>
-        <div class="chart-wrap"><canvas id="chart-pnl" role="img" aria-label="PnL grafiek"></canvas></div>
+        <h2>PnL — sessie MTM vs gerealiseerd</h2>
+        <div class="chart-wrap"><canvas id="chart-pnl" role="img" aria-label="PnL grafiek sessie MTM en gerealiseerd"></canvas></div>
+        <p class="hint">Geel = sessie MTM (onderzoeksband €20–50). Groen = gerealiseerd na fees.</p>
       </article>
     </section>
     """
@@ -820,6 +874,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <button type="button" id="install-btn">Installeren</button>
     </div>
     {idle_banner}
+    {target_band_html}
     {cash_html}
     {charts_html}
     <p class="updated-at" id="updated-at">—</p>
@@ -832,12 +887,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Sessie PnL (MTM)</p>
         <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
-        <p class="hint">Portfolio vs start van deze sessie</p>
+        <p class="hint">Onderzoeksband €20–50 — portfolio vs sessiestart</p>
       </article>
       <article class="card">
         <p class="label">Gerealiseerd (live)</p>
         <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">FIFO na fees — alleen gesloten trades</p>
+        <p class="hint">FIFO na fees — alleen gesloten trades (≠ MTM-band)</p>
       </article>
       <article class="card">
         <p class="label">Ongerealiseerd MTM</p>

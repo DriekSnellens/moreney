@@ -122,6 +122,8 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "Ongerealiseerd MTM" in html
     assert "Sessie-transacties" in html
     assert "Sessie PnL" in html
+    assert "Onderzoeksdoel" in html
+    assert "€20–50" in html
     assert "7" in html
     assert "42" in html
     assert "long-hold" in html

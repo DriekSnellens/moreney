@@ -489,3 +489,12 @@ class PaperPortfolio:
                 stats.maximum_drawdown = stats.current_drawdown
         else:
             stats.current_drawdown = _ZERO
+
+    def reset_drawdown_baseline(self) -> Decimal:
+        """Set peak equity to current MTM so session drawdown starts fresh."""
+        equity = self._state.total_equity
+        stats = self._state.stats
+        stats.peak_equity = equity
+        stats.current_drawdown = _ZERO
+        stats.maximum_drawdown = _ZERO
+        return equity

@@ -259,6 +259,13 @@ def _session_settings(
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
+            # Alt-beta book: wider drawdown band than default 5–8% global kill.
+            "max_drawdown_percent": float(
+                getattr(base, "live_micro_max_drawdown_percent", 12.0) or 12.0
+            ),
+            "live_micro_reset_drawdown_on_start": bool(
+                getattr(base, "live_micro_reset_drawdown_on_start", True)
+            ),
             "live_micro_max_open_orders": 8 if cross_venue else 12,
             "live_micro_max_open_orders_per_venue": 8 if cross_venue else 0,
             "live_micro_resting_max_age_sec": 480.0,
@@ -434,6 +441,12 @@ async def run_session(
         bridge.reset_paper_realized_after_inventory_sync()
     except Exception:  # noqa: BLE001
         logger.exception("paper realized reset failed")
+    if bool(getattr(cfg, "live_micro_reset_drawdown_on_start", True)):
+        try:
+            peak = bridge.reset_session_risk_baseline(tracker=runner.tracker)
+            logger.info("micro session drawdown baseline reset peak=%s", peak)
+        except Exception:  # noqa: BLE001
+            logger.exception("micro session drawdown baseline reset failed")
     bridge._kill_switch = kill_switch  # noqa: SLF001 — diagnostics only
     if kill_switch is not None:
         try:

@@ -79,6 +79,13 @@ class PerformanceTracker:
         self._reject_counts: dict[str, int] = {}
         self._counted_fill_ids: set[UUID] = set()
 
+    def reset_drawdown_baseline(self, *, equity: Decimal | None = None) -> None:
+        """Align peak equity with current MTM (live micro session start)."""
+        current = equity if equity is not None else self._current_equity
+        self._peak_equity = current
+        self._current_drawdown = _ZERO
+        self._maximum_drawdown = _ZERO
+
     # ------------------------------------------------------------------
     # Opportunity lifecycle
     # ------------------------------------------------------------------

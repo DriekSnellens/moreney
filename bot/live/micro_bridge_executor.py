@@ -1997,6 +1997,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             logger.exception("failed to reset paper realized after sync")
 
+    def reset_session_risk_baseline(self, *, tracker: Any | None = None) -> Decimal:
+        """Rewind drawdown peak to current equity at micro session start."""
+        equity = self._portfolio.reset_drawdown_baseline()
+        if tracker is not None and hasattr(tracker, "reset_drawdown_baseline"):
+            tracker.reset_drawdown_baseline(equity=equity)
+        return equity
+
     def _unit_cost(self, venue: str, base: str) -> Decimal | None:
 
         lots = self._cost_lots.get(self._lots_key(venue, base)) or []

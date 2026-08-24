@@ -172,6 +172,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._fair_values: dict[str, Decimal] = {}
         self._active_skew: QuoteSkew | None = None
         self._venue_skews: dict[str, QuoteSkew] = {}
+        self._venue_free_quote: dict[str, Decimal] = {}
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
         self._hmm_regime_id: int | None = None
@@ -365,17 +366,21 @@ class MakerInventoryStrategy(BaseStrategy):
     ) -> list[TradeOpportunity]:
         self._portfolio_state = portfolio_state
         self._venue_skews = {}
+        self._venue_free_quote = {}
         if portfolio_state is not None:
             self._active_skew = self._skew_policy.skew(portfolio_state)
             ledger = inventory
             if ledger is not None and hasattr(ledger, "venues"):
                 marks = portfolio_state.mark_prices or {}
+                quote = self._quote
                 for venue in ledger.venues:
                     key = str(venue).strip().lower()
                     if key:
                         self._venue_skews[key] = self._skew_policy.skew_venue(
                             ledger, key, mark_prices=marks
                         )
+                        if hasattr(ledger, "available"):
+                            self._venue_free_quote[key] = ledger.available(key, quote)
         else:
             self._active_skew = None
 
@@ -605,6 +610,31 @@ class MakerInventoryStrategy(BaseStrategy):
             meta.get("buy_exchange") or meta.get("sell_exchange") or "?"
         ).strip().lower()
 
+    def _venue_emit_rotation(self, venues: list[str]) -> list[str]:
+        """Order venues for emit fairness; cash-rich venues get extra turns."""
+        if not venues:
+            return []
+        cash = {
+            v: self._venue_free_quote.get(v, _ZERO) for v in venues
+        }
+        ordered = sorted(venues, key=lambda v: cash.get(v, _ZERO), reverse=True)
+        if len(ordered) < 2:
+            return ordered
+        rich, poor = ordered[0], ordered[1]
+        rich_c = cash.get(rich, _ZERO)
+        poor_c = cash.get(poor, _ZERO)
+        bias_ratio = Decimal("1.5")
+        if poor_c <= 0:
+            return ordered
+        if rich_c < poor_c * bias_ratio:
+            return ordered
+        # OKX (or whichever venue) has materially more EUR — weight its slots ~2:1.
+        rotation: list[str] = []
+        for venue in ordered:
+            weight = 2 if venue == rich else 1
+            rotation.extend([venue] * weight)
+        return rotation
+
     def _select_balanced_emits(
         self, opportunities: list[TradeOpportunity]
     ) -> list[TradeOpportunity]:
@@ -612,6 +642,7 @@ class MakerInventoryStrategy(BaseStrategy):
 
         Without this, Bitvavo often monopolizes the tiny max_emits budget whenever
         its NET ranks slightly higher — leaving OKX with cash but no quotes.
+        Venues with more free EUR get extra rotation slots (≥1.5× peer cash).
         Never changes profitability/never-loss gates; only emit scheduling.
         """
         if not opportunities or self._max_emits <= 0:
@@ -623,14 +654,19 @@ class MakerInventoryStrategy(BaseStrategy):
         selected: list[TradeOpportunity] = []
         selected_ids: set[Any] = set()
         venues = sorted(by_venue.keys())
-        # Pass 1: round-robin one opportunity per venue until budget is full.
-        # Stops Bitvavo from taking every slot when max_emits is small.
-        while len(selected) < self._max_emits:
+        rotation = self._venue_emit_rotation(venues)
+        if not rotation:
+            rotation = venues
+        # Pass 1: weighted round-robin until budget is full.
+        rot_idx = 0
+        while len(selected) < self._max_emits and rotation:
             added = False
-            for venue in venues:
-                if len(selected) >= self._max_emits:
-                    break
-                for opp in by_venue[venue]:
+            attempts = 0
+            while attempts < len(rotation) and len(selected) < self._max_emits:
+                venue = rotation[rot_idx % len(rotation)]
+                rot_idx += 1
+                attempts += 1
+                for opp in by_venue.get(venue, []):
                     oid = getattr(opp, "id", None) or id(opp)
                     if oid in selected_ids:
                         continue

@@ -826,6 +826,53 @@ def test_balanced_emits_give_each_venue_a_slot() -> None:
     assert len(selected) == 2
 
 
+def test_balanced_emits_bias_cash_rich_venue() -> None:
+    """Venue with ≥1.5× peer free EUR gets extra emit slots."""
+    from bot.core.enums import OpportunitySide
+    from bot.core.models import TradeOpportunity
+    from uuid import uuid4
+
+    strategy = MakerInventoryStrategy(
+        _maker_settings(arbitrage_max_emits_per_cycle=3)
+    )
+    strategy._venue_free_quote = {
+        "okx": Decimal("1570"),
+        "bitvavo": Decimal("860"),
+    }
+
+    def _opp(venue: str, net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol="ADAEUR",
+            side=OpportunitySide.BUY,
+            quantity=Decimal("10"),
+            entry_price=Decimal("1"),
+            expected_exit_price=Decimal("1.01"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": venue,
+                "sell_exchange": venue,
+                "net_profit_eur": net,
+                "post_only": True,
+            },
+        )
+
+    ranked = [
+        _opp("bitvavo", "3.0"),
+        _opp("bitvavo", "2.5"),
+        _opp("okx", "2.0"),
+        _opp("okx", "1.8"),
+    ]
+    selected = strategy._select_balanced_emits(ranked)  # noqa: SLF001
+    okx_count = sum(
+        1 for o in selected if (o.metadata or {}).get("buy_exchange") == "okx"
+    )
+    assert okx_count >= 2
+    assert len(selected) == 3
+
+
 def test_global_overweight_does_not_block_okx_buys() -> None:
     from bot.paper.capital_policy import QuoteSkew
 
