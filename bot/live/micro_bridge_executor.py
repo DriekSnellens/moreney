@@ -708,6 +708,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "alerts": list(self._alerts[-10:]),
             "max_alt_bases": self._max_alt_bases,
             "held_alt_bases": sorted(self._held_alt_bases()),
+            "held_alt_bases_by_venue": {
+                v: sorted(self._held_alt_bases(v)) for v in sorted(self._execute_venues)
+            },
             "last_sync": self._last_sync,
             "last_sync_by_venue": dict(self._last_sync_by_venue),
             "diagnostics": {
@@ -732,6 +735,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """Operator-facing blockers — ordered by severity / current truth."""
         hints: list[str] = []
         held = self._held_alt_bases()
+        held_by_venue = {
+            v: self._held_alt_bases(v) for v in sorted(self._execute_venues)
+        }
 
         ks = getattr(self, "_kill_switch", None)
         if ks is not None:
@@ -827,7 +833,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 + ("…" if len(waiting_arm) > 6 else "")
             )
 
-        if self._max_alt_bases > 0 and len(held) > self._max_alt_bases:
+        if len(self._execute_venues) > 1:
+            for venue, vheld in sorted(held_by_venue.items()):
+                if self._max_alt_bases > 0 and len(vheld) > self._max_alt_bases:
+                    hints.append(
+                        f"OVER_MAX_ALT_BASES@{venue} held={sorted(vheld)} "
+                        f"max={self._max_alt_bases}"
+                    )
+                elif self._max_alt_bases > 0 and len(vheld) >= self._max_alt_bases:
+                    hints.append(
+                        f"AT_MAX_ALT_BASES@{venue} held={sorted(vheld)} "
+                        "(adds to existing only)"
+                    )
+        elif self._max_alt_bases > 0 and len(held) > self._max_alt_bases:
             hints.append(
                 f"OVER_MAX_ALT_BASES held={sorted(held)} max={self._max_alt_bases}"
             )
@@ -1005,12 +1023,58 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._position_opened_mono[key] = time.monotonic()
             self._position_opened_at[key] = time.time()
 
-    def _held_alt_bases(self) -> set[str]:
-        """Distinct non-quote assets with meaningful live/paper inventory."""
+    def _resting_count_for(self, venue: str) -> int:
+        venue_l = venue.strip().lower()
+        return sum(
+            1
+            for row in self._resting
+            if str(row.get("venue") or "").strip().lower() == venue_l
+            and str(row.get("side") or "buy").lower().startswith("b")
+        )
+
+    def _held_alt_bases(self, venue: str | None = None) -> set[str]:
+        """Distinct non-quote assets with meaningful inventory.
+
+        When *venue* is set, only that exchange's balances count toward the
+        concentration cap — Bitvavo holdings must not block OKX new-base buys.
+        """
         held: set[str] = set()
         min_notional = Decimal(
             str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
         )
+        venue_l = venue.strip().lower() if venue else None
+
+        def _maybe_add(base: str, qty: Decimal) -> None:
+            if not base or base == self._quote or base in self._exclude_bases:
+                return
+            if self._is_long_hold(base):
+                return
+            if qty <= 0:
+                return
+            symbol = f"{base}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol) or _ZERO
+            if mark > 0 and qty * mark < min_notional:
+                return  # dust — don't burn a concentration slot
+            if mark <= 0 and qty < Decimal("0.001"):
+                return
+            held.add(base)
+
+        if venue_l:
+            for bal in self._venue_raw_balances.get(venue_l) or []:
+                asset = str(getattr(bal, "asset", "") or "").upper()
+                qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+                _maybe_add(asset, qty)
+            return held
+
+        venues = sorted(self._execute_venues) if self._execute_venues else []
+        if venues:
+            for v in venues:
+                held |= self._held_alt_bases(v)
+            return held
+
+        # Single-venue / pre-sync fallback: aggregate paper pocket balances.
         for symbol, pos in self._portfolio.state.positions.items():
             if pos.quantity <= 0:
                 continue
@@ -1024,22 +1088,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 held.add(base)
             elif pos.quantity > 0 and (mark is None or mark <= 0):
                 held.add(base)
-        # Also count balances that may not yet have a position row.
         for asset, bal in self._portfolio.state.balances.items():
-            a = str(asset or "").upper()
-            if not a or a == self._quote or a in self._exclude_bases:
-                continue
-            if self._is_long_hold(a):
-                continue
-            if bal.total <= 0:
-                continue
-            symbol = f"{a}{self._quote}"
-            mark = self._portfolio.state.mark_prices.get(symbol) or _ZERO
-            if mark > 0 and bal.total * mark < min_notional:
-                continue  # dust — don't burn a concentration slot
-            if mark <= 0 and bal.total < Decimal("0.001"):
-                continue
-            held.add(a)
+            _maybe_add(str(asset or "").upper(), Decimal(str(bal.total or 0)))
         return held
 
     def _seed_cost_lots_from_balances(self, venue: str, bals: list[Any]) -> None:
@@ -1911,8 +1961,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         live_exec = getattr(self._live, "executor", None)
         if live_exec is not None and hasattr(live_exec, "refresh_open_order_count"):
             try:
-                if cancelled and hasattr(live_exec, "note_open_orders"):
-                    live_exec.note_open_orders(len(self._resting))
+                resting_here = self._resting_count_for(venue_l)
+                if hasattr(live_exec, "note_open_orders_for"):
+                    live_exec.note_open_orders_for(venue_l, resting_here)
+                elif cancelled and hasattr(live_exec, "note_open_orders"):
+                    live_exec.note_open_orders(resting_here)
                 await live_exec.refresh_open_order_count(venue, force=bool(cancelled))
             except Exception:  # noqa: BLE001
                 pass
@@ -2113,10 +2166,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         return th.soft_arm, th.soft_dd, th.hard_arm, th.hard_dd
 
-    def _corr_held_count(self, *, adding: str | None = None) -> int:
+    def _corr_held_count(
+        self, *, venue: str | None = None, adding: str | None = None
+    ) -> int:
         if not self._corr_group:
             return 0
-        held = self._held_alt_bases()
+        held = self._held_alt_bases(venue)
         if adding:
             held = set(held) | {adding.upper()}
         return len(held & self._corr_group)
@@ -2873,14 +2928,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         # Trend profile: at most N distinct alt bases — add to existing, don't spray.
         if side_is_buy and self._max_alt_bases > 0:
-            held = self._held_alt_bases()
+            held = self._held_alt_bases(venue)
             if base not in held and len(held) >= self._max_alt_bases:
                 self._bump_skip("max_alt_bases")
                 return await self._reject_before_live(
                     order_request,
                     reason="MAX_ALT_BASES",
                     message=(
-                        f"already holding {sorted(held)} "
+                        f"{venue} already holding {sorted(held)} "
                         f"(max {self._max_alt_bases} bases for trail concentration)"
                     ),
                 )
@@ -2892,14 +2947,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
         ):
-            held = self._held_alt_bases()
-            if base not in held and self._corr_held_count(adding=base) > self._max_per_corr:
+            held = self._held_alt_bases(venue)
+            if (
+                base not in held
+                and self._corr_held_count(venue=venue, adding=base) > self._max_per_corr
+            ):
                 self._bump_skip("corr_group_cap")
                 return await self._reject_before_live(
                     order_request,
                     reason="CORR_GROUP_CAP",
                     message=(
-                        f"corr group already at {self._max_per_corr}: "
+                        f"{venue} corr group already at {self._max_per_corr}: "
                         f"{sorted(held & self._corr_group)}"
                     ),
                 )
@@ -3093,6 +3151,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "notional_eur": str(notional.quantize(Decimal("0.01"))),
             "confirm": True,
             "post_only": post_only,
+            "local_open_orders": self._resting_count_for(venue),
         }
         out = await self._live.submit(payload, confirm=True)
         self._invalidate_bal_cache()

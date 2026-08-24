@@ -231,6 +231,9 @@ class LiveMicroEngine:
         except Exception:  # noqa: BLE001
             pass
         venue_open = self._executor.open_orders_for(venue)
+        local_open = int(payload.get("local_open_orders") or 0)
+        if local_open > venue_open:
+            venue_open = local_open
         ok, detail = self._policy.validate_order(
             venue=venue,
             symbol=symbol,

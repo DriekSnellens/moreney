@@ -422,6 +422,8 @@ class Settings(BaseSettings):
     # Live micro: paper inventory sync can invent false daily losses — do not pause on them.
     live_micro_ignore_paper_daily_loss: bool = False
     live_micro_max_open_orders: int = Field(default=1, ge=1, le=20)
+    # Explicit per-venue cap (falls back to live_micro_max_open_orders when unset/0).
+    live_micro_max_open_orders_per_venue: int = Field(default=0, ge=0, le=20)
     live_micro_resting_max_age_sec: float = Field(default=90.0, ge=5, le=600)
     # Cap distinct alt bases for micro trend/trail concentration (0 = unlimited).
     live_micro_max_alt_bases: int = Field(default=0, ge=0, le=20)

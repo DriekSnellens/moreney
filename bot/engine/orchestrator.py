@@ -176,6 +176,7 @@ class TradingEngine:
                 input_count=len(opportunities),
             )
             t_exec = 0.0
+            ranked = self._interleave_ranked_by_buy_venue(ranked)
             for scored in ranked:
                 opportunity = scored.opportunity
                 profitability = scored.profitability
@@ -506,6 +507,35 @@ class TradingEngine:
         }:
             return True
         return bool((opportunity.metadata or {}).get("post_only"))
+
+    def _interleave_ranked_by_buy_venue(self, ranked: list[Any]) -> list[Any]:
+        """Round-robin approved opportunities by buy venue so OKX is not starved."""
+        if len(ranked) <= 1:
+            return ranked
+        by_venue: dict[str, list[Any]] = {}
+        for item in ranked:
+            opp = getattr(item, "opportunity", None)
+            meta = getattr(opp, "metadata", None) or {}
+            venue = str(
+                meta.get("buy_exchange") or meta.get("venue") or ""
+            ).strip().lower() or "_"
+            by_venue.setdefault(venue, []).append(item)
+        if len(by_venue) <= 1:
+            return ranked
+        venues = sorted(by_venue.keys())
+        out: list[Any] = []
+        idx = 0
+        while True:
+            added = False
+            for venue in venues:
+                bucket = by_venue[venue]
+                if idx < len(bucket):
+                    out.append(bucket[idx])
+                    added = True
+            if not added:
+                break
+            idx += 1
+        return out or ranked
 
     def _should_skip_maker_quote(self, opportunity: TradeOpportunity) -> bool:
         if not self._is_maker_quote(opportunity):

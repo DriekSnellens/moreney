@@ -46,6 +46,10 @@ class MicroLivePolicy:
         return Decimal(str(getattr(self._settings, "live_micro_max_daily_loss_eur", 25) or 25))
 
     def max_open_orders(self) -> int:
+        """Per-venue resting-buy cap (Bitvavo and OKX each get their own budget)."""
+        per = getattr(self._settings, "live_micro_max_open_orders_per_venue", None)
+        if per is not None and int(per) > 0:
+            return int(per)
         return int(getattr(self._settings, "live_micro_max_open_orders", 1) or 1)
 
     def can_place_orders(self) -> tuple[bool, str]:
@@ -113,6 +117,7 @@ class MicroLivePolicy:
             "max_notional_eur": str(self.max_notional_eur()),
             "max_daily_loss_eur": str(self.max_daily_loss_eur()),
             "max_open_orders": self.max_open_orders(),
+            "max_open_orders_scope": "per_venue",
             "production_execution_enabled": bool(PRODUCTION_EXECUTION_ENABLED),
             "withdrawals_supported": False,
         }

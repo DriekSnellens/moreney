@@ -88,6 +88,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert dual.arbitrage_position_pct == 3.75
     assert dual.arbitrage_max_emits_per_cycle == 6
     assert dual.live_micro_max_open_orders == 8
+    assert dual.live_micro_max_open_orders_per_venue == 8
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -122,6 +123,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.max_simultaneous_positions == 5
     assert cfg.live_micro_max_alt_bases == 5
     assert cfg.live_micro_max_open_orders == 8
+    assert cfg.live_micro_max_open_orders_per_venue == 8
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0
     assert cfg.paper_max_alt_inventory_pct <= 30.0
@@ -612,9 +614,74 @@ def test_held_alt_bases_respects_concentration_cap() -> None:
         live_maker=True,
         allowed_bases={"ADA", "ATOM", "NEAR", "SOL"},
     )
-    held = bridge._held_alt_bases()  # noqa: SLF001
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="ADA", free=Decimal("100"), locked=Decimal("0")),
+        Balance(asset="ATOM", free=Decimal("20"), locked=Decimal("0")),
+        Balance(asset="NEAR", free=Decimal("30"), locked=Decimal("0")),
+    ]
+    held = bridge._held_alt_bases("bitvavo")  # noqa: SLF001
     assert held >= {"ADA", "ATOM", "NEAR"}
     assert bridge._max_alt_bases == 3  # noqa: SLF001
+
+
+def test_held_alt_bases_are_per_venue_not_global() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(live_micro_max_alt_bases=3, paper_maker_min_notional_eur=10.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("ADAEUR", Decimal("0.5"))
+    portfolio.set_mark_price("ATOMEUR", Decimal("2"))
+    portfolio.set_mark_price("NEAREUR", Decimal("2"))
+    portfolio.set_mark_price("SOLEUR", Decimal("80"))
+    engine = LiveMicroEngine(settings)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=engine,
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="ADA", free=Decimal("100"), locked=Decimal("0")),
+        Balance(asset="ATOM", free=Decimal("20"), locked=Decimal("0")),
+        Balance(asset="NEAR", free=Decimal("30"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["okx"] = [  # noqa: SLF001
+        Balance(asset="SOL", free=Decimal("1"), locked=Decimal("0")),
+    ]
+    assert len(bridge._held_alt_bases("bitvavo")) == 3  # noqa: SLF001
+    assert bridge._held_alt_bases("okx") == {"SOL"}  # noqa: SLF001
+    assert len(bridge._held_alt_bases("okx")) < bridge._max_alt_bases  # noqa: SLF001
+
+
+def test_policy_max_open_orders_per_venue_setting() -> None:
+    pol = MicroLivePolicy(
+        _unlocked(
+            live_micro_max_open_orders=2,
+            live_micro_max_open_orders_per_venue=8,
+            live_micro_venues="bitvavo,okx",
+        )
+    )
+    assert pol.max_open_orders() == 8
+    ok, reason = pol.validate_order(
+        venue="okx",
+        symbol="SOLEUR",
+        notional_eur=Decimal("10"),
+        open_orders=7,
+        side="buy",
+    )
+    assert ok is True
+    assert reason == "ok"
+    blocked, reason = pol.validate_order(
+        venue="okx",
+        symbol="SOLEUR",
+        notional_eur=Decimal("10"),
+        open_orders=8,
+        side="buy",
+    )
+    assert blocked is False
+    assert "max open orders" in reason
 
 
 def test_attach_micro_bridge_does_not_pollute_paper_runner_source() -> None:

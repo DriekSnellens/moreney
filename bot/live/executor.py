@@ -101,9 +101,17 @@ class MultiVenueLiveExecutor(BaseExecutor):
     def open_orders_for(self, venue: str) -> int:
         return int(self._open_orders_by_venue.get(venue.strip().lower(), 0))
 
+    def note_open_orders_for(self, venue: str, count: int) -> None:
+        key = venue.strip().lower()
+        if not key:
+            return
+        self._open_orders_by_venue[key] = max(0, int(count))
+        self._open_orders = sum(self._open_orders_by_venue.values())
+        self._open_orders_checked_mono = 0.0
+
     def note_open_orders(self, count: int) -> None:
+        """Legacy global note — prefer ``note_open_orders_for``."""
         self._open_orders = max(0, int(count))
-        # Local note is advisory until the next forced exchange refresh.
         self._open_orders_checked_mono = 0.0
 
     async def execute(self, order: OrderRequest) -> ExecutionResult:
@@ -166,9 +174,14 @@ class MultiVenueLiveExecutor(BaseExecutor):
         status_val = (
             result.status.value if hasattr(result.status, "value") else str(result.status)
         )
-        # Only count still-open orders toward the policy cap.
+        # Only count still-open orders toward the per-venue policy cap.
         if filled <= 0 and str(status_val).lower() not in {"filled", "closed"}:
-            self._open_orders += 1
+            key = venue.strip().lower()
+            if key:
+                self._open_orders_by_venue[key] = (
+                    self._open_orders_by_venue.get(key, 0) + 1
+                )
+            self._open_orders = sum(self._open_orders_by_venue.values())
         return result
 
     def status(self) -> dict[str, Any]:
@@ -181,5 +194,6 @@ class MultiVenueLiveExecutor(BaseExecutor):
             "policy": self._policy.status(),
             "registry": self._registry.status(),
             "open_orders_tracked": self._open_orders,
+            "open_orders_by_venue": dict(self._open_orders_by_venue),
             "withdrawals_supported": False,
         }
