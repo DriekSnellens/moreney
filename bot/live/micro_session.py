@@ -462,6 +462,16 @@ async def run_session(
             logger.info("micro session drawdown baseline reset peak=%s", peak)
         except Exception:  # noqa: BLE001
             logger.exception("micro session drawdown baseline reset failed")
+    try:
+        await bridge.refresh_portfolio_value()
+        bridge.mark_session_baseline()
+        logger.info(
+            "micro session baseline portfolio=%s realized=%s",
+            bridge.starting_portfolio_eur,
+            bridge.session_start_realized_eur,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("micro session baseline mark failed")
     bridge._kill_switch = kill_switch  # noqa: SLF001 — diagnostics only
     if kill_switch is not None:
         try:

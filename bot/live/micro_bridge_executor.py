@@ -144,6 +144,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         }
         self.portfolio_value_eur: Decimal | None = None
         self.starting_portfolio_eur: Decimal | None = None
+        self.session_start_realized_eur: Decimal | None = None
         # FIFO lots for realized PnL: base -> [(qty, unit_cost_eur)]
         self._cost_lots: dict[str, list[list[Decimal]]] = {}
         self._lots_seeded_venues: set[str] = set()
@@ -668,6 +669,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "starting_portfolio_eur": (
                 str(self.starting_portfolio_eur)
                 if self.starting_portfolio_eur is not None
+                else None
+            ),
+            "session_start_realized_eur": (
+                str(self.session_start_realized_eur)
+                if self.session_start_realized_eur is not None
                 else None
             ),
             # Operator PnL = realized trade profit after fees (not mark-to-market).
@@ -1579,6 +1585,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         portfolio_value = await self.refresh_portfolio_value()
         if self.starting_portfolio_eur is None and portfolio_value is not None:
             self.starting_portfolio_eur = portfolio_value
+        if self.session_start_realized_eur is None:
+            self.session_start_realized_eur = self.realized_trade_pnl_eur
         if self._session_started_ms is None:
             self._session_started_ms = time.time() * 1000.0
         # Seed EVERY execute venue (not only the first sync) so OKX lots exist.
@@ -1992,6 +2000,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if pos is None or pos.quantity <= 0:
             return
         pos.average_entry_price = unit
+
+    def mark_session_baseline(self) -> None:
+        """Reset session MTM/realized baselines at micro session start."""
+        self.starting_portfolio_eur = self.portfolio_value_eur
+        self.session_start_realized_eur = self.realized_trade_pnl_eur
+        self._session_started_ms = time.time() * 1000.0
 
     def reset_paper_realized_after_inventory_sync(self) -> None:
         """Inventory sync is not a trade — clear phantom paper realized PnL."""

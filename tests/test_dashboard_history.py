@@ -15,6 +15,7 @@ from bot.live.dashboard_history import (
     extract_metrics,
     load_history,
     record_snapshot,
+    weekly_realized_delta,
 )
 from bot.live.micro_engine import reset_micro_engine
 from bot.live.micro_session_manager import reset_micro_session_manager
@@ -75,6 +76,24 @@ def test_chart_series_from_history() -> None:
     assert series["portfolio"] == [4100.0]
 
 
+def test_weekly_realized_delta() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    history = [
+        {
+            "t": (now - timedelta(days=3)).isoformat(),
+            "realized_pnl_eur": "-10",
+        },
+        {
+            "t": (now - timedelta(days=1)).isoformat(),
+            "realized_pnl_eur": "-5",
+        },
+    ]
+    delta = weekly_realized_delta(history, current_realized=Decimal("7.50"))
+    assert delta == Decimal("17.50")
+
+
 def test_render_dashboard_includes_charts_and_pwa() -> None:
     html = render_live_dashboard(
         {
@@ -88,6 +107,8 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "manifest.webmanifest" in html
     assert "serviceWorker" in html
     assert "Sessie PnL" in html
+    assert "Week gerealiseerd" in html
+    assert "Sessie gerealiseerd" in html
 
 
 def test_pwa_and_metrics_routes() -> None:

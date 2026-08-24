@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -166,6 +166,39 @@ def seed_from_session_status(status: dict[str, Any]) -> None:
     record_snapshot({"session": status})
 
 
+def weekly_realized_delta(
+    history: list[dict[str, Any]],
+    *,
+    current_realized: Decimal | None,
+    days: int = 7,
+) -> Decimal | None:
+    """Change in cumulative realized PnL over the last ``days`` (from history)."""
+    if current_realized is None or not history:
+        return None
+    cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    baseline: Decimal | None = None
+    for row in history:
+        t_raw = row.get("t")
+        if not t_raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(t_raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        if ts < cutoff:
+            continue
+        realized = _to_decimal(row.get("realized_pnl_eur"))
+        if realized is not None:
+            baseline = realized if baseline is None else min(baseline, realized)
+    if baseline is None:
+        baseline = _to_decimal(history[0].get("realized_pnl_eur"))
+    if baseline is None:
+        return None
+    return current_realized - baseline
+
+
 def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Compact KPI dict for JSON polling."""
     session = payload.get("session") or {}
@@ -192,6 +225,14 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur")
     )
     session_pnl = (portfolio - start) if portfolio is not None and start is not None else None
+    session_start_realized = _to_decimal(
+        bridge.get("session_start_realized_eur")
+    )
+    session_realized = (
+        (realized - session_start_realized)
+        if realized is not None and session_start_realized is not None
+        else None
+    )
     tx = (
         session.get("session_live_transaction_count")
         or bridge.get("session_live_transaction_count")
@@ -204,11 +245,19 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         tx_n = 0
 
+    hist = load_history(limit=7 * 24 * 60)
+    weekly_realized = weekly_realized_delta(hist, current_realized=realized)
+
     return {
         "updated_at": session.get("updated_at"),
         "running": bool(session.get("running") or session.get("task_running")),
         "portfolio_eur": float(portfolio) if portfolio is not None else None,
         "realized_pnl_eur": float(realized) if realized is not None else None,
+        "session_realized_eur": float(session_realized) if session_realized is not None else None,
+        "weekly_realized_eur": float(weekly_realized) if weekly_realized is not None else None,
+        "weekly_target_low_eur": 140.0,
+        "weekly_target_high_eur": 350.0,
+        "weekly_pace_realistic_eur": 35.0,
         "unrealized_eur": float(unrealized) if unrealized is not None else None,
         "session_pnl_eur": float(session_pnl) if session_pnl is not None else None,
         "free_eur": float(free) if free is not None else None,

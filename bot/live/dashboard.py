@@ -895,6 +895,16 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">FIFO na fees — alleen gesloten trades (≠ MTM-band)</p>
       </article>
       <article class="card">
+        <p class="label">Sessie gerealiseerd</p>
+        <p class="value" id="kpi-session-realized">—</p>
+        <p class="hint">Gesloten trades sinds sessiestart (Engine A)</p>
+      </article>
+      <article class="card">
+        <p class="label">Week gerealiseerd</p>
+        <p class="value" id="kpi-weekly-realized">—</p>
+        <p class="hint">7d Δ · stretch €140–350 · eerste doel ≥€35</p>
+      </article>
+      <article class="card">
         <p class="label">Ongerealiseerd MTM</p>
         <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
         <p class="hint">Mark vs kost op open bags</p>
@@ -1019,6 +1029,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
       set('kpi-session-pnl', eurFmt(m.session_pnl_eur, true));
       set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
+      set('kpi-session-realized', eurFmt(m.session_realized_eur, true));
+      set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
       set('kpi-unrealized', eurFmt(m.unrealized_eur, true));
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
