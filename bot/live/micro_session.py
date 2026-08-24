@@ -227,10 +227,18 @@ def _session_settings(
             "risk_min_net_profit_usd": 0.08,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
-            # Clips nearer the €150 ceiling → soft-partial € worth fees.
+            # Size vs aggregate multi-venue equity so clips stay near the €150
+            # ceiling (2×€2k pockets must not inflate to ~€260 and fail NET return).
             "arbitrage_position_pct": min(
                 6.5,
-                max(3.0, (min(150.0, max(50.0, budget_f * 0.08)) / max(budget_f, 1.0)) * 100.0),
+                max(
+                    3.0,
+                    (
+                        min(150.0, max(50.0, budget_f * 0.08))
+                        / max(budget_f * max(len(execute_venues), 1), 1.0)
+                    )
+                    * 100.0,
+                ),
             ),
             "live_micro_ignore_paper_daily_loss": True,
             # Soft daily stop: 10% of pocket (total risk budget remains the pocket).

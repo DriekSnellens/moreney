@@ -78,6 +78,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.arbitrage_max_emits_per_cycle == 6
     assert cfg.paper_maker_max_open_quotes == 12
     assert cfg.live_micro_execute_venues == "bitvavo"
+    dual = _session_settings(
+        Settings(live_micro_execute_venues="bitvavo,okx"),
+        budget_eur=Decimal("2000"),
+        symbols=["SOLEUR"],
+        persist_path=tmp_path / "dual.json",
+    )
+    # Aggregate equity ~€4k must still size clips near the €150 ceiling.
+    assert dual.arbitrage_position_pct == 3.75
+    assert dual.arbitrage_max_emits_per_cycle == 6
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
