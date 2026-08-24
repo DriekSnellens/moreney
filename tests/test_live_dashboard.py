@@ -116,14 +116,19 @@ def test_render_live_dashboard_contains_controls() -> None:
         }
     ).body.decode()
     assert "Moreney" in html
+    assert "dash-top" in html
+    assert "grid-kpi" in html
     assert "Portfolio" in html
-    assert "Vrij te besteden" in html
-    assert "Gerealiseerd (live)" in html
-    assert "Ongerealiseerd MTM" in html
-    assert "Sessie-transacties" in html
+    assert "Vrij EUR" in html
+    assert "Gerealiseerd (totaal)" in html
+    assert "Ongerealiseerd" in html
+    assert "Transacties" in html
     assert "Sessie PnL" in html
-    assert "Onderzoeksdoel" in html
+    assert "Week gerealiseerd" in html
+    assert "Doel €20–50/dag" in html
     assert "€20–50" in html
+    assert "chart-pnl-first" in html
+    assert "chart-pnl" in html
     assert "7" in html
     assert "42" in html
     assert "long-hold" in html
@@ -177,9 +182,10 @@ def test_live_dashboard_routes_and_paper_redirects() -> None:
     with TestClient(app) as client:
         live = client.get("/live/dashboard")
         assert live.status_code == 200
-        assert "Vrij te besteden" in live.text
+        assert "Vrij EUR" in live.text
         assert "Portfolio" in live.text
-        assert "Sessie-transacties" in live.text
+        assert "grid-kpi" in live.text
+        assert "Transacties" in live.text
         assert client.get("/", follow_redirects=False).status_code == 200
         assert client.get("/dashboard", follow_redirects=False).status_code == 200
         assert client.get("/live/manifest.webmanifest").status_code == 200

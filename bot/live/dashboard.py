@@ -157,29 +157,51 @@ def _css() -> str:
     .wrap {
       max-width: 1100px;
       margin: 0 auto;
-      padding: clamp(1.5rem, 4vw, 3rem) 1.25rem 2.5rem;
+      padding:
+        max(.85rem, env(safe-area-inset-top))
+        max(.85rem, env(safe-area-inset-right))
+        max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom)))
+        max(.85rem, env(safe-area-inset-left));
     }
     header {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
-      gap: 1rem;
-      margin-bottom: clamp(1.5rem, 4vw, 2.5rem);
+      align-items: center;
+      gap: .75rem;
+      margin-bottom: .85rem;
     }
     .brand {
       margin: 0;
       font-family: var(--display);
-      font-size: clamp(1.8rem, 4vw, 2.4rem);
+      font-size: clamp(1.35rem, 5vw, 2.4rem);
       font-weight: 600;
       letter-spacing: -0.03em;
     }
     .status {
-      font-size: .85rem;
+      font-size: .72rem;
       color: var(--muted);
-      letter-spacing: .04em;
+      letter-spacing: .06em;
       text-transform: uppercase;
+      white-space: nowrap;
     }
     .status.on { color: var(--good); }
+    .dash-top {
+      display: flex;
+      flex-direction: column;
+      gap: .85rem;
+      margin-bottom: .5rem;
+    }
+    .grid-kpi {
+      display: grid;
+      gap: .65rem;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    @media (min-width: 720px) {
+      .grid-kpi { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; }
+    }
+    @media (min-width: 1024px) {
+      .grid-kpi { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
     .grid {
       display: grid;
       gap: 1rem;
@@ -188,32 +210,44 @@ def _css() -> str:
     @media (min-width: 900px) {
       .grid { grid-template-columns: repeat(3, 1fr); }
     }
-    @media (min-width: 600px) and (max-width: 899px) {
-      .grid { grid-template-columns: repeat(2, 1fr); }
-    }
     .card {
       background: color-mix(in srgb, var(--bg1) 88%, transparent);
       border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 1.35rem 1.25rem 1.2rem;
-      min-height: 9.5rem;
+      border-radius: 16px;
+      padding: .85rem .8rem .75rem;
+      min-height: 0;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      justify-content: flex-start;
       backdrop-filter: blur(8px);
+    }
+    .card.hero {
+      border-color: color-mix(in srgb, #f0b429 35%, var(--line));
+      background: color-mix(in srgb, #f0b429 6%, var(--bg1));
+    }
+    .card.hero-a {
+      border-color: color-mix(in srgb, var(--good) 35%, var(--line));
+      background: color-mix(in srgb, var(--good) 6%, var(--bg1));
+    }
+    @media (min-width: 720px) {
+      .card { padding: 1.1rem 1rem 1rem; border-radius: 18px; }
     }
     .label {
       margin: 0;
       color: var(--muted);
-      font-size: .82rem;
+      font-size: .68rem;
       font-weight: 600;
-      letter-spacing: .06em;
+      letter-spacing: .05em;
       text-transform: uppercase;
+      line-height: 1.25;
+    }
+    @media (min-width: 720px) {
+      .label { font-size: .78rem; letter-spacing: .06em; }
     }
     .value {
-      margin: .85rem 0 0;
+      margin: .45rem 0 0;
       font-family: var(--mono);
-      font-size: clamp(1.55rem, 3.6vw, 2.15rem);
+      font-size: clamp(1.15rem, 4.8vw, 2rem);
       font-weight: 600;
       letter-spacing: -0.03em;
       line-height: 1.1;
@@ -222,20 +256,24 @@ def _css() -> str:
     .value.good { color: var(--good); }
     .value.bad { color: var(--bad); }
     .hint {
-      margin: .55rem 0 0;
+      margin: .35rem 0 0;
       color: var(--muted);
-      font-size: .8rem;
+      font-size: .68rem;
+      line-height: 1.3;
+    }
+    @media (min-width: 720px) {
+      .hint { font-size: .76rem; margin-top: .45rem; }
     }
     .target-band {
-      margin: 0 0 1.25rem;
-      padding: 1rem 1.15rem;
-      border-radius: 16px;
+      margin: 0;
+      padding: .75rem .85rem;
+      border-radius: 14px;
       border: 1px solid color-mix(in srgb, #f0b429 35%, var(--line));
       background: color-mix(in srgb, #f0b429 8%, var(--bg1));
     }
     .target-band h2 {
-      margin: 0 0 .45rem;
-      font-size: .95rem;
+      margin: 0 0 .35rem;
+      font-size: .78rem;
       font-weight: 600;
       letter-spacing: .04em;
       text-transform: uppercase;
@@ -243,9 +281,14 @@ def _css() -> str:
     }
     .target-band p {
       margin: 0;
-      font-size: .88rem;
-      line-height: 1.45;
+      font-size: .78rem;
+      line-height: 1.35;
       color: var(--muted);
+    }
+    @media (min-width: 720px) {
+      .target-band { padding: 1rem 1.15rem; border-radius: 16px; }
+      .target-band h2 { font-size: .88rem; }
+      .target-band p { font-size: .85rem; line-height: 1.45; }
     }
     .target-band .band-row {
       display: flex;
@@ -316,10 +359,33 @@ def _css() -> str:
       margin-right: .35rem;
     }
     footer {
-      margin-top: 1.75rem;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 20;
+      margin: 0;
+      padding: .55rem max(.85rem, env(safe-area-inset-right))
+        max(.55rem, env(safe-area-inset-bottom))
+        max(.85rem, env(safe-area-inset-left));
       display: flex;
       flex-wrap: wrap;
-      gap: .6rem;
+      gap: .5rem;
+      justify-content: center;
+      background: color-mix(in srgb, var(--bg0) 92%, transparent);
+      border-top: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+    }
+    @media (min-width: 900px) {
+      footer {
+        position: static;
+        margin-top: 1.5rem;
+        padding: 0;
+        background: transparent;
+        border-top: 0;
+        backdrop-filter: none;
+        justify-content: flex-start;
+      }
     }
     .btn {
       appearance: none;
@@ -333,9 +399,68 @@ def _css() -> str:
       cursor: pointer;
     }
     .btn:hover { color: var(--text); border-color: #3a4b63; }
+    .cash-grid {
+      display: grid;
+      gap: .5rem;
+      grid-template-columns: 1fr 1fr;
+      margin: 0;
+    }
+    .cash-grid .mini {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: .55rem .65rem;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+    }
+    .cash-grid .mini .label { font-size: .65rem; }
+    .cash-grid .mini .value { margin: .25rem 0 0; font-size: 1rem; }
+    .charts {
+      display: flex;
+      flex-direction: column;
+      gap: .65rem;
+      margin: 0;
+    }
+    @media (min-width: 900px) {
+      .charts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+    }
+    .chart-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: .75rem .75rem .65rem;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+    }
+    @media (min-width: 720px) {
+      .chart-card { padding: 1rem; border-radius: 18px; }
+    }
+    .chart-card h2 {
+      margin: 0 0 .5rem;
+      font-size: .68rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .chart-wrap {
+      position: relative;
+      height: clamp(170px, 46vw, 240px);
+      min-height: 170px;
+    }
+    @media (min-width: 900px) {
+      .chart-wrap { height: min(42vw, 220px); min-height: 180px; }
+    }
+    .chart-wrap canvas { width: 100% !important; height: 100% !important; }
+    .dash-secondary {
+      display: flex;
+      flex-direction: column;
+      gap: .85rem;
+      margin-top: .85rem;
+    }
     .idle-banner {
-      margin: 0 0 1.25rem;
-      padding: 1rem 1.15rem;
+      margin: 0;
+      padding: .75rem .85rem;
       border-radius: 14px;
       border: 1px solid #5a3a2a;
       background: linear-gradient(135deg, rgba(255,107,107,.14), rgba(20,28,39,.9));
@@ -345,8 +470,8 @@ def _css() -> str:
       background: linear-gradient(135deg, rgba(61,220,151,.10), rgba(20,28,39,.9));
     }
     .idle-banner h2 {
-      margin: 0 0 .45rem;
-      font-size: .95rem;
+      margin: 0 0 .35rem;
+      font-size: .78rem;
       letter-spacing: .04em;
       text-transform: uppercase;
       color: #ffb4a8;
@@ -355,66 +480,24 @@ def _css() -> str:
     .idle-banner .primary {
       margin: 0;
       font-family: var(--mono);
-      font-size: .95rem;
+      font-size: .82rem;
       line-height: 1.35;
     }
     .idle-banner ul {
-      margin: .55rem 0 0;
+      margin: .45rem 0 0;
       padding-left: 1.1rem;
       color: var(--muted);
       font-family: var(--mono);
-      font-size: .78rem;
+      font-size: .72rem;
     }
-    .cash-grid {
-      display: grid;
-      gap: .6rem;
-      grid-template-columns: 1fr 1fr;
-      margin: 0 0 1.25rem;
-    }
-    .cash-grid .mini {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: .7rem .85rem;
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-    }
-    .cash-grid .mini .label { font-size: .72rem; }
-    .cash-grid .mini .value { margin: .35rem 0 0; font-size: 1.15rem; }
-    .charts {
-      display: grid;
-      gap: 1rem;
-      margin: 0 0 1.25rem;
-    }
-    @media (min-width: 900px) {
-      .charts { grid-template-columns: 1fr 1fr; }
-    }
-    .chart-card {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 1rem 1rem .85rem;
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-    }
-    .chart-card h2 {
-      margin: 0 0 .65rem;
-      font-size: .82rem;
-      font-weight: 600;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    .chart-wrap {
-      position: relative;
-      height: min(42vw, 220px);
-      min-height: 180px;
-    }
-    .chart-wrap canvas { width: 100% !important; height: 100% !important; }
     .install-banner {
       display: none;
-      margin: 0 0 1rem;
-      padding: .85rem 1rem;
+      margin: 0;
+      padding: .75rem .85rem;
       border-radius: 14px;
       border: 1px dashed color-mix(in srgb, var(--good) 45%, var(--line));
       background: color-mix(in srgb, var(--good) 8%, transparent);
-      font-size: .88rem;
+      font-size: .82rem;
     }
     .install-banner.show { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
     .install-banner button {
@@ -427,24 +510,29 @@ def _css() -> str:
       cursor: pointer;
     }
     details.fold {
-      margin-top: 1rem;
+      margin: 0;
       border: 1px solid var(--line);
-      border-radius: 18px;
+      border-radius: 16px;
       background: color-mix(in srgb, var(--bg1) 88%, transparent);
     }
     details.fold > summary {
       cursor: pointer;
-      padding: .9rem 1.1rem;
+      padding: .75rem .85rem;
       font-weight: 600;
+      font-size: .85rem;
       list-style: none;
     }
     details.fold > summary::-webkit-details-marker { display: none; }
-    details.fold .fold-body { padding: 0 1.1rem 1.1rem; }
+    details.fold .fold-body { padding: 0 .85rem .85rem; }
     .updated-at {
-      margin: .5rem 0 0;
+      margin: 0;
       color: var(--muted);
-      font-size: .75rem;
+      font-size: .68rem;
       font-family: var(--mono);
+      text-align: center;
+    }
+    @media (min-width: 720px) {
+      .updated-at { font-size: .72rem; text-align: left; }
     }
     """
 
@@ -811,29 +899,70 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     band_class = "in-band" if in_target_band else "out-band"
     target_band_html = (
         "<section class='target-band' aria-label='Doelband onderzoek'>"
-        "<h2>Onderzoeksdoel €20–50 / dag</h2>"
-        "<p>Paper-onderzoek: <strong>sessie MTM</strong> (portfolio vs start), "
-        "niet gerealiseerde maker-winst. Op een goede alt-dag met ~75% inventaris "
-        "is 2–5% equity ≈ dit band — vandaag gemeten via de gele lijn / Sessie PnL.</p>"
+        "<h2>Doel €20–50/dag</h2>"
+        "<p><strong>Sessie MTM</strong> (geel) = Engine B · "
+        "<strong>Week gerealiseerd</strong> = Engine A · stretch €140–350/week.</p>"
         "<div class='band-row'>"
-        f"<span>Sessie MTM: <strong class='{band_class}'>"
-        f"{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else '—')}"
-        f"</strong> (doel €20–50)</span>"
-        f"<span>Gerealiseerd: {_esc(_eur(pnl, signed=True))} (FIFO fills)</span>"
-        f"<span>Ongerealiseerd: {_esc(_eur(unrealized, signed=True))}</span>"
+        f"<span>MTM: <strong class='{band_class}'>"
+        f"{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else '—')}</strong></span>"
+        f"<span>Realized: {_esc(_eur(pnl, signed=True))}</span>"
         "</div></section>"
     )
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
-      <article class="chart-card">
-        <h2>Portfolio waarde (EUR)</h2>
-        <div class="chart-wrap"><canvas id="chart-portfolio" role="img" aria-label="Portfolio waarde grafiek"></canvas></div>
+      <article class="chart-card chart-pnl-first">
+        <h2>PnL — MTM &amp; gerealiseerd</h2>
+        <div class="chart-wrap"><canvas id="chart-pnl" role="img" aria-label="PnL grafiek"></canvas></div>
       </article>
       <article class="chart-card">
-        <h2>PnL — sessie MTM vs gerealiseerd</h2>
-        <div class="chart-wrap"><canvas id="chart-pnl" role="img" aria-label="PnL grafiek sessie MTM en gerealiseerd"></canvas></div>
-        <p class="hint">Geel = sessie MTM (onderzoeksband €20–50). Groen = gerealiseerd na fees.</p>
+        <h2>Portfolio (EUR)</h2>
+        <div class="chart-wrap"><canvas id="chart-portfolio" role="img" aria-label="Portfolio grafiek"></canvas></div>
+      </article>
+    </section>
+    """
+
+    kpi_grid_html = f"""
+    <section class="grid-kpi" aria-label="Kern KPIs">
+      <article class="card hero">
+        <p class="label">Sessie PnL (MTM)</p>
+        <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
+        <p class="hint">Engine B · doel €20–50</p>
+      </article>
+      <article class="card hero-a">
+        <p class="label">Week gerealiseerd</p>
+        <p class="value" id="kpi-weekly-realized">—</p>
+        <p class="hint">Engine A · ≥€35/week</p>
+      </article>
+      <article class="card">
+        <p class="label">Sessie gerealiseerd</p>
+        <p class="value" id="kpi-session-realized">—</p>
+        <p class="hint">Gesloten sinds start</p>
+      </article>
+      <article class="card">
+        <p class="label">Portfolio</p>
+        <p class="value" id="kpi-portfolio">{_esc(_eur(portfolio))}</p>
+        <p class="hint">Marktwaarde totaal</p>
+      </article>
+      <article class="card">
+        <p class="label">Gerealiseerd (totaal)</p>
+        <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
+        <p class="hint">FIFO na fees</p>
+      </article>
+      <article class="card">
+        <p class="label">Ongerealiseerd</p>
+        <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
+        <p class="hint">Open bags MTM</p>
+      </article>
+      <article class="card">
+        <p class="label">Vrij EUR</p>
+        <p class="value" id="kpi-free">{_esc(_eur(free))}</p>
+        <p class="hint">Quote cash</p>
+      </article>
+      <article class="card">
+        <p class="label">Transacties</p>
+        <p class="value" id="kpi-tx">{_esc(tx_n)}</p>
+        <p class="hint">Fills deze sessie</p>
       </article>
     </section>
     """
@@ -873,54 +1002,17 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <span>Voeg Moreney toe aan je startscherm voor snelle PnL-updates.</span>
       <button type="button" id="install-btn">Installeren</button>
     </div>
-    {idle_banner}
-    {target_band_html}
-    {cash_html}
-    {charts_html}
-    <p class="updated-at" id="updated-at">—</p>
-    <section class="grid">
-      <article class="card">
-        <p class="label">Portfolio</p>
-        <p class="value" id="kpi-portfolio">{_esc(_eur(portfolio))}</p>
-        <p class="hint">EUR + crypto tegen marktprijs</p>
-      </article>
-      <article class="card">
-        <p class="label">Sessie PnL (MTM)</p>
-        <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
-        <p class="hint">Onderzoeksband €20–50 — portfolio vs sessiestart</p>
-      </article>
-      <article class="card">
-        <p class="label">Gerealiseerd (live)</p>
-        <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">FIFO na fees — alleen gesloten trades (≠ MTM-band)</p>
-      </article>
-      <article class="card">
-        <p class="label">Sessie gerealiseerd</p>
-        <p class="value" id="kpi-session-realized">—</p>
-        <p class="hint">Gesloten trades sinds sessiestart (Engine A)</p>
-      </article>
-      <article class="card">
-        <p class="label">Week gerealiseerd</p>
-        <p class="value" id="kpi-weekly-realized">—</p>
-        <p class="hint">7d Δ · stretch €140–350 · eerste doel ≥€35</p>
-      </article>
-      <article class="card">
-        <p class="label">Ongerealiseerd MTM</p>
-        <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
-        <p class="hint">Mark vs kost op open bags</p>
-      </article>
-      <article class="card">
-        <p class="label">Vrij te besteden</p>
-        <p class="value" id="kpi-free">{_esc(_eur(free))}</p>
-        <p class="hint">Totaal vrij EUR</p>
-      </article>
-      <article class="card">
-        <p class="label">Sessie-transacties</p>
-        <p class="value" id="kpi-tx">{_esc(tx_n)}</p>
-        <p class="hint">Live fills (geen hydrate/backfill: {backfill_n})</p>
-      </article>
-    </section>
-    {detail_html}
+    <div class="dash-top">
+      {kpi_grid_html}
+      {charts_html}
+      {target_band_html}
+      <p class="updated-at" id="updated-at">—</p>
+    </div>
+    <div class="dash-secondary">
+      {cash_html}
+      {idle_banner}
+      {detail_html}
+    </div>
     <footer>
       <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2000,exclude_btc:true}})">Start</button>
       <button type="button" class="btn" onclick="post('/live/micro/session/stop')">Stop</button>
@@ -953,8 +1045,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       animation: {{ duration: 350 }},
       plugins: {{ legend: {{ labels: {{ color: '#93a4bb', boxWidth: 12 }} }} }},
       scales: {{
-        x: {{ ticks: {{ color: '#93a4bb', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }}, grid: {{ color: 'rgba(36,50,71,.45)' }} }},
-        y: {{ ticks: {{ color: '#93a4bb' }}, grid: {{ color: 'rgba(36,50,71,.45)' }} }}
+        x: {{ ticks: {{ color: '#93a4bb', maxRotation: 0, autoSkip: true, maxTicksLimit: window.innerWidth < 720 ? 5 : 8 }}, grid: {{ color: 'rgba(36,50,71,.45)' }} }},
+        y: {{ ticks: {{ color: '#93a4bb', maxTicksLimit: window.innerWidth < 720 ? 5 : 8 }}, grid: {{ color: 'rgba(36,50,71,.45)' }} }}
       }}
     }};
 
