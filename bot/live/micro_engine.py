@@ -96,6 +96,7 @@ class LiveMicroEngine:
             "executor": self._executor.status(),
             "session_order_count": len(self._session_orders),
             "open_orders_tracked": self._executor._open_orders,
+            "open_orders_by_venue": dict(self._executor._open_orders_by_venue),
             "daily_loss_tracked": str(self._executor._daily_loss),
             "unlock_checklist": unlock_checklist(self._settings),
             "withdrawals_supported": False,
@@ -225,11 +226,16 @@ class LiveMicroEngine:
                 "message": str(exc),
             }
 
+        try:
+            await self._executor.refresh_open_order_count(venue)
+        except Exception:  # noqa: BLE001
+            pass
+        venue_open = self._executor.open_orders_for(venue)
         ok, detail = self._policy.validate_order(
             venue=venue,
             symbol=symbol,
             notional_eur=notional_eur,
-            open_orders=self._executor._open_orders,
+            open_orders=venue_open,
             daily_loss_eur=self._executor._daily_loss,
             side=side,
         )

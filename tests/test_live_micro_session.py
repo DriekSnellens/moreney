@@ -87,6 +87,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     # Aggregate equity ~€4k must still size clips near the €150 ceiling.
     assert dual.arbitrage_position_pct == 3.75
     assert dual.arbitrage_max_emits_per_cycle == 6
+    assert dual.live_micro_max_open_orders == 8
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -120,7 +121,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_min_notional_eur >= 55.0
     assert cfg.max_simultaneous_positions == 5
     assert cfg.live_micro_max_alt_bases == 5
-    assert cfg.live_micro_max_open_orders >= 12
+    assert cfg.live_micro_max_open_orders == 8
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 8.0
     assert cfg.paper_max_alt_inventory_pct <= 30.0
@@ -640,6 +641,16 @@ def test_policy_sells_exempt_from_max_open_orders() -> None:
     )
     assert buy_blocked is False
     assert "max open orders" in reason
+    # Same global count must not block the other venue's buys.
+    okx_buy, okx_reason = pol.validate_order(
+        venue="okx",
+        symbol="SOLEUR",
+        notional_eur=Decimal("10"),
+        open_orders=2,
+        side="buy",
+    )
+    assert okx_buy is False
+    assert "max open orders" in okx_reason
     sell_ok, sell_reason = pol.validate_order(
         venue="okx",
         symbol="OPLEUR",

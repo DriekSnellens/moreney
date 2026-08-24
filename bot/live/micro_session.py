@@ -256,9 +256,10 @@ def _session_settings(
             else ",".join(_LIQUID_EUR_SYMBOLS),
             "live_micro_max_alt_bases": 5,
             # Cap live order size (env must not silently allow full pocket).
+            # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
-            "live_micro_max_open_orders": 12,
+            "live_micro_max_open_orders": 8 if cross_venue else 12,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,

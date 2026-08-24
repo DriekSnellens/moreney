@@ -45,6 +45,7 @@ class MultiVenueLiveExecutor(BaseExecutor):
         )
         self._force_enabled = force_enabled
         self._open_orders = 0
+        self._open_orders_by_venue: dict[str, int] = {}
         self._daily_loss = Decimal("0")
         self._open_orders_checked_mono = 0.0
         self._open_orders_cache_sec = 5.0
@@ -57,19 +58,22 @@ class MultiVenueLiveExecutor(BaseExecutor):
     async def refresh_open_order_count(
         self, venue: str | None = None, *, force: bool = False
     ) -> int:
-        """Sync open-order counter from the exchange (cached to limit API load)."""
+        """Sync open-order counters from the exchange (cached to limit API load).
+
+        Returns the global total; use ``open_orders_for(venue)`` for per-venue caps.
+        """
         now = time.monotonic()
+        venue_key = venue.strip().lower() if venue else None
         if (
             not force
             and now - self._open_orders_checked_mono < self._open_orders_cache_sec
+            and (venue_key is None or venue_key in self._open_orders_by_venue)
         ):
+            if venue_key:
+                return self._open_orders_by_venue.get(venue_key, 0)
             return self._open_orders
 
-        venues = (
-            [venue.strip().lower()]
-            if venue
-            else list(self._policy.allowed_venues())
-        )
+        venues = [venue_key] if venue_key else list(self._policy.allowed_venues())
         total = 0
         for name in venues:
             if not name:
@@ -79,12 +83,23 @@ class MultiVenueLiveExecutor(BaseExecutor):
                 continue
             try:
                 orders = await client.fetch_open_orders()
-                total += len(orders or [])
+                count = len(orders or [])
             except Exception:  # noqa: BLE001
                 logger.warning("refresh_open_order_count failed for %s", name)
-        self._open_orders = total
+                count = self._open_orders_by_venue.get(name, 0)
+            self._open_orders_by_venue[name] = count
+            total += count
+        if venue_key is None:
+            self._open_orders = total
+        else:
+            self._open_orders = sum(self._open_orders_by_venue.values())
         self._open_orders_checked_mono = now
-        return total
+        if venue_key:
+            return self._open_orders_by_venue.get(venue_key, 0)
+        return self._open_orders
+
+    def open_orders_for(self, venue: str) -> int:
+        return int(self._open_orders_by_venue.get(venue.strip().lower(), 0))
 
     def note_open_orders(self, count: int) -> None:
         self._open_orders = max(0, int(count))
@@ -105,16 +120,17 @@ class MultiVenueLiveExecutor(BaseExecutor):
         notional = px * qty if px > 0 else qty
 
         try:
-            await self.refresh_open_order_count(venue or None)
+            venue_open = await self.refresh_open_order_count(venue or None)
         except Exception:  # noqa: BLE001
             logger.warning("open-order refresh skipped before place")
+            venue_open = self.open_orders_for(venue or "")
 
         side = str(getattr(order, "side", "") or "")
         ok, detail = self._policy.validate_order(
             venue=venue or "unknown",
             symbol=symbol,
             notional_eur=notional,
-            open_orders=self._open_orders,
+            open_orders=venue_open,
             daily_loss_eur=self._daily_loss,
             side=side,
         )

@@ -96,7 +96,7 @@ class MicroLivePolicy:
         side_l = str(side or "").strip().lower()
         is_sell = side_l.startswith("s")
         if (not is_sell) and open_orders >= self.max_open_orders():
-            return False, "max open orders reached"
+            return False, "max open orders reached for venue"
         if daily_loss_eur >= self.max_daily_loss_eur():
             return False, "daily loss limit reached"
         return True, "ok"

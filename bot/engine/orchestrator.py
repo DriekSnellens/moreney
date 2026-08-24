@@ -512,11 +512,28 @@ class TradingEngine:
             return False
         if self._maker_slot_taken(opportunity):
             return True
+        max_open = self._max_open_quotes_per_venue()
+        meta = opportunity.metadata or {}
+        buy = str(meta.get("buy_exchange") or "").strip().lower()
+        sell = str(meta.get("sell_exchange") or "").strip().lower()
+        sell_only = bool(meta.get("sell_only"))
+        buy_only = bool(meta.get("buy_only"))
+        if sell_only and sell:
+            return self._open_maker_quote_count_for(sell) >= max_open
+        if buy_only and buy:
+            return self._open_maker_quote_count_for(buy) >= max_open
+        if buy and self._open_maker_quote_count_for(buy) >= max_open:
+            return True
+        if sell and self._open_maker_quote_count_for(sell) >= max_open:
+            return True
+        return False
+
+    def _max_open_quotes_per_venue(self) -> int:
         max_open = 4
         settings = self._executor_settings()
         if settings is not None:
             max_open = int(getattr(settings, "paper_maker_max_open_quotes", 4) or 4)
-        return self._open_maker_quote_count() >= max_open
+        return max_open
 
     def _executor_settings(self) -> Any:
         return getattr(self._executor, "_settings", None) or getattr(
@@ -535,6 +552,16 @@ class TradingEngine:
 
     def _open_maker_quote_count(self) -> int:
         return len({o.opportunity_id for o in self._open_maker_orders() if o.opportunity_id})
+
+    def _open_maker_quote_count_for(self, venue: str) -> int:
+        key = venue.strip().lower()
+        if not key:
+            return self._open_maker_quote_count()
+        return sum(
+            1
+            for o in self._open_maker_orders()
+            if str((o.metadata or {}).get("venue") or "").strip().lower() == key
+        )
 
     def _maker_slot_taken(self, opportunity: TradeOpportunity) -> bool:
         buy = str((opportunity.metadata or {}).get("buy_exchange") or "")
