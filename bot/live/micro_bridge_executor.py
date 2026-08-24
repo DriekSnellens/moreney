@@ -188,6 +188,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._soft_partial = Decimal(
             str(getattr(settings, "paper_trail_soft_partial_pct", 0.25) or 0.25)
         )
+        self._trail_partial_min_frac = Decimal(
+            str(getattr(settings, "live_micro_trail_partial_min_frac", 0.45) or 0.45)
+        )
         self._hard_arm_floor = Decimal(
             str(
                 getattr(settings, "paper_trail_hard_arm_pct", None)
@@ -2611,7 +2614,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             else:
                 continue
 
-            if sell_qty <= 0 or sell_qty * mark < _MIN_LIVE_NOTIONAL:
+            maker_min = Decimal(
+                str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+            )
+            partial_min = max(
+                _MIN_LIVE_NOTIONAL,
+                maker_min * self._trail_partial_min_frac,
+            )
+            notional_floor = (
+                partial_min
+                if reason in {"trail_soft_partial", "trail_hard_partial"}
+                else _MIN_LIVE_NOTIONAL
+            )
+            if sell_qty <= 0 or sell_qty * mark < notional_floor:
                 self._bump_skip("trail_dust")
                 if reason == "trail_drawdown":
                     st["triggered"] = False

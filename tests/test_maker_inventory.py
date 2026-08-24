@@ -873,6 +873,46 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
     assert len(selected) == 3
 
 
+def test_okx_deploy_bases_ranked_first_on_okx() -> None:
+    from bot.core.enums import OpportunitySide
+    from bot.core.models import TradeOpportunity
+    from uuid import uuid4
+
+    strategy = MakerInventoryStrategy(
+        _maker_settings(
+            arbitrage_max_emits_per_cycle=1,
+            live_micro_okx_deploy_bases="ADA,NEAR",
+        )
+    )
+    strategy._venue_free_quote = {"okx": Decimal("1500"), "bitvavo": Decimal("800")}
+
+    def _opp(venue: str, sym: str, net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol=sym,
+            side=OpportunitySide.BUY,
+            quantity=Decimal("10"),
+            entry_price=Decimal("1"),
+            expected_exit_price=Decimal("1.01"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": venue,
+                "sell_exchange": venue,
+                "net_profit_eur": net,
+                "post_only": True,
+            },
+        )
+
+    ranked = [
+        _opp("okx", "APTEUR", "3.0"),
+        _opp("okx", "ADAEUR", "1.0"),
+    ]
+    selected = strategy._select_balanced_emits(ranked)  # noqa: SLF001
+    assert selected[0].symbol == "ADAEUR"
+
+
 def test_global_overweight_does_not_block_okx_buys() -> None:
     from bot.paper.capital_policy import QuoteSkew
 

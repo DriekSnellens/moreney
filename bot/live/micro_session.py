@@ -164,8 +164,8 @@ def _session_settings(
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
             "paper_trail_soft_arm_pct": 0.009,  # ~0.9%: still ≫ ~45 bps fee+buffer floor
-            "paper_trail_soft_drawdown_pct": 0.008,
-            "paper_trail_soft_partial_pct": 0.40,
+            "paper_trail_soft_drawdown_pct": 0.006,
+            "paper_trail_soft_partial_pct": 0.50,
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,
@@ -200,11 +200,26 @@ def _session_settings(
             "paper_maker_max_age_ms": 180_000.0,
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
-            "paper_max_alt_inventory_pct": 30.0,
-            "paper_min_alt_inventory_pct": 8.0,
-            "paper_inventory_ask_improve_bps": 0.0,
-            # Join near touch; fair-value dip only a tiny edge, not a deep park.
-            "paper_inventory_buy_dip_bps": 2.0,
+            # Deploy toward ~40–45% alts (per-venue skew); not 75% odds scenario.
+            "paper_max_alt_inventory_pct": 45.0,
+            "paper_min_alt_inventory_pct": 18.0,
+            "paper_inventory_ask_improve_bps": 2.0,
+            # Underweight venues buy sooner (OKX cash deployment).
+            "paper_inventory_buy_dip_bps": 3.0,
+            "live_micro_okx_deploy_bases": str(
+                getattr(
+                    base,
+                    "live_micro_okx_deploy_bases",
+                    "ADA,NEAR,DOT,XRP,LINK,ATOM",
+                )
+                or "ADA,NEAR,DOT,XRP,LINK,ATOM"
+            ),
+            "live_micro_okx_cash_bias_ratio": float(
+                getattr(base, "live_micro_okx_cash_bias_ratio", 1.2) or 1.2
+            ),
+            "live_micro_trail_partial_min_frac": float(
+                getattr(base, "live_micro_trail_partial_min_frac", 0.45) or 0.45
+            ),
             "paper_markout_enabled": True,
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.

@@ -96,7 +96,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_max_holding_sec == 0.0
     assert cfg.paper_maker_allow_buy_only is True
     assert cfg.paper_maker_one_leg_exit is False
-    assert cfg.paper_inventory_ask_improve_bps == 0.0
+    assert cfg.paper_inventory_ask_improve_bps == 2.0
     assert cfg.paper_inventory_buy_dip_bps >= 2.0
     assert cfg.paper_ladder_buy_pcts.startswith("0,")
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
@@ -125,8 +125,10 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_max_open_orders == 8
     assert cfg.live_micro_max_open_orders_per_venue == 8
     assert cfg.live_micro_resting_max_age_sec >= 480.0
-    assert cfg.paper_min_alt_inventory_pct >= 8.0
-    assert cfg.paper_max_alt_inventory_pct <= 30.0
+    assert cfg.paper_min_alt_inventory_pct >= 18.0
+    assert cfg.paper_max_alt_inventory_pct <= 45.0
+    assert cfg.paper_trail_soft_partial_pct >= 0.50
+    assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols

@@ -158,6 +158,16 @@ class MakerInventoryStrategy(BaseStrategy):
             for part in str(getattr(settings, "paper_maker_venues", "") or "").split(",")
             if part.strip()
         }
+        self._okx_deploy_bases = {
+            infer_base_asset(part.strip().upper(), self._quote)
+            for part in str(
+                getattr(settings, "live_micro_okx_deploy_bases", "") or ""
+            ).split(",")
+            if part.strip()
+        }
+        self._okx_cash_bias_ratio = Decimal(
+            str(getattr(settings, "live_micro_okx_cash_bias_ratio", 1.2) or 1.2)
+        )
         self._profitability = profitability or self._build_profitability_engine(settings)
         self._pairs_evaluated = 0
         self._depth_edges_found = 0
@@ -623,7 +633,7 @@ class MakerInventoryStrategy(BaseStrategy):
         rich, poor = ordered[0], ordered[1]
         rich_c = cash.get(rich, _ZERO)
         poor_c = cash.get(poor, _ZERO)
-        bias_ratio = Decimal("1.5")
+        bias_ratio = self._okx_cash_bias_ratio if self._okx_cash_bias_ratio > 0 else Decimal("1.5")
         if poor_c <= 0:
             return ordered
         if rich_c < poor_c * bias_ratio:
@@ -634,6 +644,23 @@ class MakerInventoryStrategy(BaseStrategy):
             weight = 2 if venue == rich else 1
             rotation.extend([venue] * weight)
         return rotation
+
+    def _venue_opps_ordered(
+        self, venue: str, opps: list[TradeOpportunity]
+    ) -> list[TradeOpportunity]:
+        """OKX: prefer liquid deploy bases when venue has spare EUR."""
+        key = str(venue or "").strip().lower()
+        if key != "okx" or not self._okx_deploy_bases or not opps:
+            return opps
+        preferred: list[TradeOpportunity] = []
+        other: list[TradeOpportunity] = []
+        for opp in opps:
+            base = infer_base_asset(str(opp.symbol or "").upper(), self._quote)
+            if base in self._okx_deploy_bases:
+                preferred.append(opp)
+            else:
+                other.append(opp)
+        return preferred + other if preferred else opps
 
     def _select_balanced_emits(
         self, opportunities: list[TradeOpportunity]
@@ -666,7 +693,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 venue = rotation[rot_idx % len(rotation)]
                 rot_idx += 1
                 attempts += 1
-                for opp in by_venue.get(venue, []):
+                for opp in self._venue_opps_ordered(venue, by_venue.get(venue, [])):
                     oid = getattr(opp, "id", None) or id(opp)
                     if oid in selected_ids:
                         continue
