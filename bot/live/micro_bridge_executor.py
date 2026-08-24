@@ -420,11 +420,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ),
                 }
             )
+
+        def _jsonify(value: Any) -> Any:
+            if isinstance(value, Decimal):
+                return str(value)
+            if isinstance(value, dict):
+                return {str(k): _jsonify(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_jsonify(v) for v in value]
+            return value
+
         return {
             "version": 1,
             "saved_at": time.time(),
             "session_started_ms": self._session_started_ms,
-            "trail": self._trail,
+            "trail": _jsonify(self._trail),
             "resting": resting,
             "mirrored_trade_ids": sorted(self._mirrored_trade_ids),
             "session_lots": self._serialize_lots(self._session_lots),
