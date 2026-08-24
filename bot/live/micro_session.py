@@ -181,8 +181,8 @@ def _session_settings(
             # First leg joins the bid (0%); mild backups only.
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 3600.0,  # 1h recycle after profit clears extra buffer
-            "paper_time_stop_min_profit_bps": 25.0,
+            "paper_time_stop_sec": 3600.0,  # after 1h, recovery-arm at BE (no flat dump)
+            "paper_time_stop_min_profit_bps": 25.0,  # diagnostics / floor helper only
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,

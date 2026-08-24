@@ -903,6 +903,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "atr_pct": str(st.get("atr") or ""),
                 "session_qty": str(st.get("session_qty") or ""),
                 "triggered": bool(st.get("triggered")),
+                "recovery_armed": bool(st.get("recovery_armed")),
                 "age_sec": round(age, 1) if age is not None else None,
             }
         for venue in sorted(self._execute_venues):
@@ -1975,7 +1976,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return be
 
     def _time_stop_floor_price(self, venue: str, base: str) -> Decimal | None:
-        """Time-stop must clear a little profit above fee-aware break-even."""
+        """Legacy helper: BE + optional min-profit buffer (tests / diagnostics)."""
         be = self._break_even_sell_price(venue, base)
         if be is None:
             return None
@@ -1985,6 +1986,50 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if extra_bps > 0:
             be *= Decimal("1") + extra_bps / Decimal("10000")
         return be
+
+    def _recovery_arm_trail(
+        self,
+        st: dict[str, Any],
+        *,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        be: Decimal,
+    ) -> bool:
+        """Arm trail when an aged bag finally reaches BE — do not dump flat.
+
+        Lets the position grow; exits later via trail drawdown or falling back to BE.
+        Returns True when this call newly armed the trail.
+        """
+        if st.get("soft_armed"):
+            return False
+        if mark < be:
+            return False
+        st["soft_armed"] = True
+        st["armed"] = True
+        st["peak"] = mark
+        st["recovery_armed"] = True
+        st["newly_soft"] = False
+        st["newly_armed"] = True
+        st["time_stop_due"] = False
+        soft_arm, soft_dd, _hard_arm, _hard_dd = self._scaled_arms(base, be)
+        st["drawdown"] = str(soft_dd)
+        st["soft_arm"] = str(soft_arm)
+        self._push_alert(
+            "recovery_arm",
+            f"{base} recovery-arm at BE mark={mark} be={be} "
+            f"(trail dd={float(soft_dd * 100):.1f}%)",
+            base=base,
+        )
+        logger.info(
+            "TRAIL_RECOVERY_ARM venue=%s base=%s mark=%s be=%s soft_dd=%.2f%%",
+            venue,
+            base,
+            mark,
+            be,
+            float(soft_dd * 100),
+        )
+        return True
 
     async def _profitable_exit_quote(
         self, venue: str, base: str, mark: Decimal
@@ -2333,7 +2378,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     async def check_trailing_take_profits(
         self, venue: str = "bitvavo"
     ) -> dict[str, Any]:
-        """Soft/hard arm partials + peak drawdown on session buys; time-stop BE."""
+        """Soft/hard trail + recovery-arm at BE (no flat BE dump after time-stop)."""
         if not self._trail_enabled and not self._time_stop_enabled:
             return {"ok": True, "enabled": False, "triggered": []}
         venue = venue.strip().lower()
@@ -2377,61 +2422,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 else (free + locked)
             )
             if cost is None or cost <= 0 or session_qty <= 0:
-                if self._time_stop_enabled:
-                    blend = self._unit_cost(venue, asset)
-                    if blend is None or blend <= 0:
-                        continue
-                    # Time-stop also requires trusted fee-aware cost — never guess.
-                    if not self._has_trusted_cost(venue, asset):
-                        self._bump_skip("trail_no_trusted_cost")
-                        continue
-                    symbol = f"{asset}{self._quote}"
-                    mark = await self._mark_price(venue, symbol)
-                    if mark is None or mark <= 0:
-                        continue
-                    self._note_position_opened(venue, asset)
-                    opened = self._position_opened_mono.get(trail_key)
-                    if opened is None or (
-                        time.monotonic() - opened < self._time_stop_sec
-                    ):
-                        continue
-                    floor = self._time_stop_floor_price(venue, asset)
-                    if floor is None or mark < floor:
-                        self._bump_skip("time_stop_below_be")
-                        continue
-                    free = await self._refresh_free(venue, symbol, asset, locked)
-                    sell_qty = free
-                    if sell_qty <= 0 or sell_qty * mark < _MIN_LIVE_NOTIONAL:
-                        continue
-                    result = await self._submit_exit_sell(
-                        venue=venue,
-                        symbol=symbol,
-                        qty=sell_qty,
-                        mark=mark,
-                        reason="time_stop_breakeven",
-                        limit_price=max(floor, mark * Decimal("0.999")),
-                        post_only=True,
-                    )
-                    triggered.append(
-                        {
-                            "venue": venue,
-                            "base": asset,
-                            "symbol": symbol,
-                            "reason": "time_stop_breakeven",
-                            "qty": str(sell_qty),
-                            "mark": str(mark),
-                            "cost": str(blend),
-                            "floor": str(floor),
-                            "status": result.status.value,
-                            "order_id": str(result.order_id)
-                            if result.order_id
-                            else None,
-                            "error": result.message,
-                        }
-                    )
-                    if result.status != OrderStatus.REJECTED:
-                        self._position_opened_mono.pop(trail_key, None)
-                continue
+                # Aged bags with trusted cost: allow recovery-arm / trail exits even
+                # when session lots are empty (never dump flat at BE).
+                blend = self._unit_cost(venue, asset)
+                if not (
+                    self._time_stop_enabled
+                    and blend is not None
+                    and blend > 0
+                    and self._has_trusted_cost(venue, asset)
+                    and (free + locked) > 0
+                ):
+                    continue
+                self._note_position_opened(venue, asset)
+                opened = self._position_opened_mono.get(trail_key)
+                if opened is None or (
+                    time.monotonic() - opened < self._time_stop_sec
+                ):
+                    continue
+                cost = blend
+                session_qty = free + locked
 
             # Untrusted / mark-seeded cost must never arm or exit a trail.
             if not self._has_trusted_cost(venue, asset):
@@ -2444,6 +2453,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             self._note_position_opened(venue, asset)
             st = self._trail_update_state(venue, asset, cost=cost, mark=mark)
+            be = self._break_even_sell_price(venue, asset)
+
+            # Aged bag finally at/above BE → recovery-arm trail (let it grow).
+            if (
+                st.get("time_stop_due")
+                and be is not None
+                and mark >= be
+                and not st.get("soft_armed")
+            ):
+                self._recovery_arm_trail(
+                    st, venue=venue, base=asset, mark=mark, be=be
+                )
+                continue
+            if st.get("time_stop_due") and (be is None or mark < be):
+                self._bump_skip("time_stop_below_be")
+                continue
+
             if st.get("soft_armed") and not st.get("triggered"):
                 armed_now.append(f"{venue}:{asset}")
 
@@ -2454,6 +2480,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             if (
                 st.get("newly_soft")
+                and not st.get("recovery_armed")
                 and self._trail_partial_enabled
                 and not st.get("soft_partial_done")
             ):
@@ -2492,17 +2519,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     else free,
                 )
                 reason = "trail_drawdown"
-            elif st.get("time_stop_due"):
-                floor = self._time_stop_floor_price(venue, asset)
-                if floor is not None and mark >= floor:
-                    free = await self._refresh_free(venue, symbol, asset, locked)
-                    sell_qty = free
-                    reason = "time_stop_breakeven"
-                    limit_px = max(floor, mark * Decimal("0.999"))
-                    post_only = True
-                else:
-                    self._bump_skip("time_stop_below_be")
-                    continue
+            elif (
+                st.get("recovery_armed")
+                and be is not None
+                and Decimal(str(st.get("peak") or 0)) > be
+                and mark <= be
+            ):
+                # Grew above BE after recovery-arm, then fell back to BE → exit.
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                sell_qty = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
+                reason = "trail_recovery_be"
+                limit_px = max(be, mark * Decimal("0.999"))
+                post_only = True
             else:
                 continue
 
@@ -2605,7 +2638,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     mark,
                     result.status.value,
                 )
-                if reason in {"trail_drawdown", "time_stop_breakeven"}:
+                if reason in {"trail_drawdown", "trail_recovery_be", "time_stop_breakeven"}:
                     self._trail.pop(trail_key, None)
                     self._position_opened_mono.pop(trail_key, None)
 

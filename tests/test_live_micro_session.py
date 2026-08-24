@@ -798,6 +798,66 @@ def test_time_stop_requires_profit_above_break_even() -> None:
     assert be is not None and floor > be
 
 
+def test_recovery_arm_at_be_does_not_dump_flat() -> None:
+    """Aged underwater bags that recover to BE arm a trail instead of selling flat."""
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_session_buys_only=False,
+        paper_trail_soft_arm_pct=0.12,
+        paper_trail_soft_drawdown_pct=0.03,
+        paper_time_stop_enabled=True,
+        paper_time_stop_sec=600.0,
+        paper_trail_atr_enabled=False,
+        paper_maker_sell_profit_buffer_bps=10.0,
+        paper_trail_partial_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "ADA")  # noqa: SLF001
+    assert be is not None
+    st: dict = {
+        "venue": "bitvavo",
+        "base": "ADA",
+        "soft_armed": False,
+        "hard_armed": False,
+        "armed": False,
+        "peak": Decimal("0"),
+        "recovery_armed": False,
+    }
+    armed = bridge._recovery_arm_trail(  # noqa: SLF001
+        st, venue="bitvavo", base="ADA", mark=be, be=be
+    )
+    assert armed is True
+    assert st["soft_armed"] is True
+    assert st["recovery_armed"] is True
+    assert st["newly_soft"] is False  # no immediate partial
+    assert Decimal(str(st["peak"])) == be
+    bridge._trail["bitvavo:ADA"] = st  # noqa: SLF001
+
+    # Grew above BE, then trail drawdown fires.
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "ADA", cost=Decimal("1.00"), mark=be * Decimal("1.05")
+    )
+    assert st["soft_armed"] is True
+    assert st.get("recovery_armed") is True
+    peak = Decimal(str(st["peak"]))
+    assert peak > be
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo",
+        "ADA",
+        cost=Decimal("1.00"),
+        mark=peak * Decimal("0.96"),  # >3% soft drawdown
+    )
+    assert st["triggered"] is True
+
+
 def test_resolve_venue_uses_exchange_meta_not_eur_bitvavo_default() -> None:
     settings = _unlocked()
     bridge = MicroBudgetLiveExecutor(
