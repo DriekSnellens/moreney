@@ -196,6 +196,7 @@ async def lifespan(_app: FastAPI):
         retention_days=int(settings.marketdata_retention_days),
         execute_delete=True,
     )
+    get_settings.cache_clear()
     get_kill_switch()
     get_micro_engine().arm()
     md = get_market_data_service()
@@ -206,6 +207,8 @@ async def lifespan(_app: FastAPI):
         resume = await get_micro_session_manager().resume_if_interrupted()
         if resume and resume.get("started"):
             logger.info("auto-resumed continuous micro session after process start")
+        elif resume and not resume.get("started"):
+            logger.warning("micro session auto-resume did not start: %s", resume)
     except Exception:  # noqa: BLE001
         logger.exception("failed to auto-resume interrupted micro session")
     yield

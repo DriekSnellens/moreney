@@ -114,6 +114,8 @@ class MicroSessionManager:
         kwargs = self.interrupted_continuous_resume()
         if kwargs is None:
             return None
+        # Ensure env-backed flags (LIVE_TRADING_ENABLED etc.) are re-read after boot.
+        get_settings.cache_clear()
         logger.warning(
             "resuming interrupted continuous micro session budget_eur=%s",
             kwargs.get("budget_eur"),
