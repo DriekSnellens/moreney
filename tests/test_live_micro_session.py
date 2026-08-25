@@ -127,7 +127,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 18.0
     assert cfg.paper_max_alt_inventory_pct <= 45.0
-    assert cfg.paper_trail_soft_partial_pct >= 0.50
+    assert cfg.paper_trail_soft_partial_pct == 0.0
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
@@ -642,6 +642,39 @@ def test_soft_partial_retries_while_armed_not_only_newly_soft(tmp_path: Path) ->
     assert st["soft_armed"] is True
     assert st["newly_soft"] is False
     assert st.get("soft_partial_done") is False
+
+
+def test_soft_partial_zero_skips_early_clip(tmp_path: Path) -> None:
+    """soft_partial=0 keeps the full bag for soft-trail drawdown exit."""
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.009,
+        paper_trail_soft_drawdown_pct=0.006,
+        paper_trail_hard_arm_pct=0.06,
+        paper_trail_hard_drawdown_pct=0.03,
+        paper_trail_partial_enabled=True,
+        paper_trail_soft_partial_pct=0.0,
+        paper_trail_atr_enabled=False,
+        paper_trail_session_buys_only=False,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge0.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    assert bridge._soft_partial == Decimal("0")  # noqa: SLF001
+    cost = Decimal("100")
+    st = bridge._trail_update_state("okx", "SOL", cost=cost, mark=Decimal("101"))  # noqa: SLF001
+    assert st["soft_armed"] is True
+    # Drawdown from peak without early clip path.
+    peak = Decimal(str(st["peak"]))
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "okx", "SOL", cost=cost, mark=peak * Decimal("0.993")
+    )
+    assert st.get("triggered") is True
 
 
 def test_session_lots_only_for_trail_cost() -> None:

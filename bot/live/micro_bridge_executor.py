@@ -186,8 +186,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._soft_dd_floor = Decimal(
             str(getattr(settings, "paper_trail_soft_drawdown_pct", 0.08) or 0.08)
         )
+        # 0.0 is valid: skip early soft clip and let the soft trail exit the full bag.
+        _soft_partial_raw = getattr(settings, "paper_trail_soft_partial_pct", 0.25)
         self._soft_partial = Decimal(
-            str(getattr(settings, "paper_trail_soft_partial_pct", 0.25) or 0.25)
+            str(0.25 if _soft_partial_raw is None else _soft_partial_raw)
         )
         self._trail_partial_min_frac = Decimal(
             str(getattr(settings, "live_micro_trail_partial_min_frac", 0.45) or 0.45)
@@ -2602,11 +2604,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 st.get("soft_armed")
                 and not st.get("recovery_armed")
                 and self._trail_partial_enabled
+                and self._soft_partial > 0
                 and not st.get("soft_partial_done")
             ):
                 # Retry every cycle until a soft partial lands (not only the
                 # arming tick — large bags used to fail max-notional once and
                 # never retry because newly_soft is one-shot).
+                # soft_partial=0 → skip; full bag waits for soft/hard drawdown exit.
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 cap = min(
                     free,

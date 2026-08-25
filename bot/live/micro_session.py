@@ -165,7 +165,7 @@ def _session_settings(
             "paper_trail_session_buys_only": False,
             "paper_trail_soft_arm_pct": 0.009,  # ~0.9%: still ≫ ~45 bps fee+buffer floor
             "paper_trail_soft_drawdown_pct": 0.006,
-            "paper_trail_soft_partial_pct": 0.50,
+            "paper_trail_soft_partial_pct": 0.0,  # no early clip; full bag rides soft trail
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,

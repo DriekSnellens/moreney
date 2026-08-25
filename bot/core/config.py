@@ -138,7 +138,7 @@ class Settings(BaseSettings):
     # Soft / hard schedule (preferred over single partial).
     paper_trail_soft_arm_pct: float = Field(default=0.02, ge=0.005, le=2.0)
     paper_trail_soft_drawdown_pct: float = Field(default=0.012, ge=0.005, le=0.50)
-    paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
+    paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.0, le=0.90)
     paper_trail_hard_arm_pct: float = Field(default=0.06, ge=0.01, le=5.0)
     paper_trail_hard_drawdown_pct: float = Field(default=0.03, ge=0.005, le=0.90)
     paper_trail_hard_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
