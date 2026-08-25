@@ -1706,6 +1706,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     total += qty * mark
         if total > 0:
             self.portfolio_value_eur = total
+            # Keep risk drawdown peak tied to real venue MTM (not paper ghosts).
+            try:
+                self._portfolio.set_live_mtm_cap(total)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to set live MTM drawdown cap")
         return self.portfolio_value_eur
 
     async def _live_free(self, venue: str, asset: str) -> Decimal:

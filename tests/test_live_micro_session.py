@@ -515,6 +515,34 @@ def test_reset_drawdown_baseline_rewinds_peak() -> None:
     assert portfolio._state.stats.maximum_drawdown == 0  # noqa: SLF001
 
 
+def test_live_mtm_cap_blocks_ghost_peak_drawdown() -> None:
+    """Paper mark spikes must not raise peak above live venue MTM."""
+    from bot.portfolio.models import AssetBalance
+
+    portfolio = PaperPortfolio(Settings(paper_starting_eur=4000.0), starting_eur=Decimal("4000"))
+    portfolio._state.balances["EUR"] = AssetBalance(  # noqa: SLF001
+        asset="EUR", available=Decimal("4000"), reserved=Decimal("0")
+    )
+    portfolio.set_live_mtm_cap(Decimal("4200"))
+    portfolio.reset_drawdown_baseline()
+    assert portfolio._state.stats.peak_equity == Decimal("4000")  # noqa: SLF001
+
+    # Ghost spike: paper equity jumps via absurd mark on a bag.
+    portfolio._state.balances["SOL"] = AssetBalance(  # noqa: SLF001
+        asset="SOL", available=Decimal("100"), reserved=Decimal("0")
+    )
+    portfolio.set_mark_price("SOLEUR", Decimal("50"))  # +€5000 ghost
+    portfolio._update_drawdown()  # noqa: SLF001
+    assert portfolio._state.stats.peak_equity <= Decimal("4200") * Decimal("1.02")  # noqa: SLF001
+
+    # Ghost gone — equity back near cash; must not look like a 40% crash.
+    portfolio._state.balances["SOL"] = AssetBalance(  # noqa: SLF001
+        asset="SOL", available=Decimal("0"), reserved=Decimal("0")
+    )
+    portfolio._update_drawdown()  # noqa: SLF001
+    assert portfolio._state.stats.current_drawdown < Decimal("0.12")  # noqa: SLF001
+
+
 def test_trail_partial_flags_newly_armed() -> None:
     settings = _unlocked(
         paper_trail_take_profit_enabled=True,

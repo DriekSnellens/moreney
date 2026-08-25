@@ -479,20 +479,47 @@ class PaperPortfolio:
     def _update_drawdown(self) -> None:
         equity = self._state.total_equity
         stats = self._state.stats
-        if equity > stats.peak_equity:
-            stats.peak_equity = equity
+        # Live micro: paper marks can ghost-spike far above real venue MTM and
+        # false-trip the kill switch (e.g. peak €6887 vs live ~€4200 → "40% DD").
+        cap = getattr(self, "_live_mtm_cap", None)
+        trackable = equity
+        if isinstance(cap, Decimal) and cap > 0:
+            soft = cap * Decimal("1.02")
+            if trackable > soft:
+                trackable = soft
+            if stats.peak_equity > soft:
+                stats.peak_equity = cap
+        if trackable > stats.peak_equity:
+            stats.peak_equity = trackable
         peak = stats.peak_equity
         if peak > 0:
             dd = (peak - equity) / peak
+            # If equity ghost-spiked above a capped peak, treat DD as flat.
             stats.current_drawdown = max(dd, _ZERO)
             if stats.current_drawdown > stats.maximum_drawdown:
                 stats.maximum_drawdown = stats.current_drawdown
         else:
             stats.current_drawdown = _ZERO
 
+    def set_live_mtm_cap(self, live_eur: Decimal | None) -> None:
+        """Bound drawdown peak to real multi-venue portfolio MTM (live micro)."""
+        if live_eur is None or live_eur <= 0:
+            self._live_mtm_cap = None
+            return
+        self._live_mtm_cap = Decimal(str(live_eur))
+        soft = self._live_mtm_cap * Decimal("1.02")
+        if self._state.stats.peak_equity > soft:
+            self._state.stats.peak_equity = self._live_mtm_cap
+        self._update_drawdown()
+
     def reset_drawdown_baseline(self) -> Decimal:
         """Set peak equity to current MTM so session drawdown starts fresh."""
         equity = self._state.total_equity
+        cap = getattr(self, "_live_mtm_cap", None)
+        if isinstance(cap, Decimal) and cap > 0:
+            equity = min(equity, cap) if equity > 0 else cap
+            if equity <= 0:
+                equity = cap
         stats = self._state.stats
         stats.peak_equity = equity
         stats.current_drawdown = _ZERO
