@@ -2428,6 +2428,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._resting = still
         return cancelled
 
+    def _max_order_notional_eur(self) -> Decimal:
+        raw = getattr(self._settings, "live_micro_max_notional_eur", 150) or 150
+        try:
+            val = Decimal(str(raw))
+        except Exception:  # noqa: BLE001
+            val = Decimal("150")
+        return val if val > 0 else Decimal("150")
+
+    def _clip_qty_to_max_notional(
+        self, qty: Decimal, price: Decimal
+    ) -> tuple[Decimal, bool]:
+        """Cap exit size so policy max-notional cannot reject profitable sells.
+
+        Returns (clipped_qty, was_clipped).
+        """
+        if qty <= 0 or price <= 0:
+            return qty, False
+        max_n = self._max_order_notional_eur()
+        notional = qty * price
+        if notional <= max_n:
+            return qty, False
+        clipped = (max_n / price).quantize(Decimal("0.00000001"))
+        if clipped <= 0:
+            return _ZERO, True
+        return clipped, True
+
     async def _submit_exit_sell(
         self,
         *,
@@ -2573,11 +2599,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             post_only = False
 
             if (
-                st.get("newly_soft")
+                st.get("soft_armed")
                 and not st.get("recovery_armed")
                 and self._trail_partial_enabled
                 and not st.get("soft_partial_done")
             ):
+                # Retry every cycle until a soft partial lands (not only the
+                # arming tick — large bags used to fail max-notional once and
+                # never retry because newly_soft is one-shot).
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 cap = min(
                     free,
@@ -2590,7 +2619,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 st["soft_partial_done"] = True
                 st["partial_done"] = True
             elif (
-                st.get("newly_hard")
+                st.get("hard_armed")
                 and self._trail_partial_enabled
                 and not st.get("hard_partial_done")
             ):
@@ -2645,6 +2674,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if reason in {"trail_soft_partial", "trail_hard_partial"}
                 else _MIN_LIVE_NOTIONAL
             )
+            # Clip to live_micro_max_notional so €300+ bags still trail out in slices.
+            sell_qty, clipped = self._clip_qty_to_max_notional(sell_qty, mark)
+            if clipped:
+                self._bump_skip("trail_exit_clipped")
             if sell_qty <= 0 or sell_qty * mark < notional_floor:
                 self._bump_skip("trail_dust")
                 if reason == "trail_drawdown":
@@ -2692,15 +2725,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 limit_px = exit_px
             # Keep limit at least at the profitable quote (never below BE path).
             limit_px = max(limit_px, exit_px)
+            # Re-clip against the actual limit (may be above mark).
+            sell_qty, clipped2 = self._clip_qty_to_max_notional(sell_qty, limit_px)
+            if clipped2:
+                self._bump_skip("trail_exit_clipped")
+            if sell_qty <= 0 or sell_qty * limit_px < notional_floor:
+                self._bump_skip("trail_dust")
+                if reason == "trail_drawdown":
+                    st["triggered"] = False
+                if reason == "trail_soft_partial":
+                    st["soft_partial_done"] = False
+                    st["partial_done"] = False
+                if reason == "trail_hard_partial":
+                    st["hard_partial_done"] = False
+                continue
             self._exit_cooldown_mono[cooldown_key] = time.monotonic()
             logger.info(
-                "TRAIL_EXIT_QUOTE venue=%s base=%s reason=%s quote=%s px=%s post_only=%s",
+                "TRAIL_EXIT_QUOTE venue=%s base=%s reason=%s quote=%s px=%s post_only=%s qty=%s",
                 venue,
                 asset,
                 reason,
                 quote_reason,
                 limit_px,
                 post_only,
+                sell_qty,
             )
 
             result = await self._submit_exit_sell(
@@ -2745,8 +2793,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     result.status.value,
                 )
                 if reason in {"trail_drawdown", "trail_recovery_be", "time_stop_breakeven"}:
-                    self._trail.pop(trail_key, None)
-                    self._position_opened_mono.pop(trail_key, None)
+                    # Keep trail state when only a max-notional slice exited so the
+                    # rest of the bag can keep trailing / clipping out.
+                    rem_free = await self._live_free(venue, asset)
+                    if rem_free * mark < notional_floor:
+                        self._trail.pop(trail_key, None)
+                        self._position_opened_mono.pop(trail_key, None)
+                    else:
+                        st["triggered"] = False
+                        st["soft_partial_done"] = False
+                        st["partial_done"] = False
 
         return {
             "ok": True,
@@ -3173,6 +3229,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     reason="SELL_BELOW_BREAK_EVEN",
                     message=f"limit {px} below break-even {be}",
                 )
+            # Slice large exits to policy max notional (trail bags often > €150).
+            qty, clipped = self._clip_qty_to_max_notional(qty, px)
+            if clipped:
+                self._bump_skip("sell_clipped_max_notional")
+                order_request = order_request.model_copy(update={"quantity": qty})
             notional = qty * px
             if notional < _MIN_LIVE_NOTIONAL:
                 self._bump_skip("sell_below_min_notional")

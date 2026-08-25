@@ -570,6 +570,67 @@ def test_trail_partial_flags_newly_armed() -> None:
     assert st["newly_soft"] is False
 
 
+def test_clip_qty_to_max_notional_for_large_trail_bags(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_max_notional_eur=150,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    qty, clipped = bridge._clip_qty_to_max_notional(Decimal("4"), Decimal("85"))  # noqa: SLF001
+    assert clipped is True
+    assert qty * Decimal("85") <= Decimal("150")
+    assert qty > 0
+    qty2, clipped2 = bridge._clip_qty_to_max_notional(Decimal("1"), Decimal("85"))  # noqa: SLF001
+    assert clipped2 is False
+    assert qty2 == Decimal("1")
+
+
+def test_soft_partial_retries_while_armed_not_only_newly_soft(tmp_path: Path) -> None:
+    """Soft partial stays eligible after the arming tick; large bags clip to max."""
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.12,
+        paper_trail_soft_drawdown_pct=0.08,
+        paper_trail_hard_arm_pct=0.30,
+        paper_trail_hard_drawdown_pct=0.12,
+        paper_trail_partial_enabled=True,
+        paper_trail_soft_partial_pct=0.50,
+        paper_trail_atr_enabled=False,
+        paper_trail_session_buys_only=False,
+        live_micro_max_notional_eur=150,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    cost = Decimal("1.00")
+    st = bridge._trail_update_state("okx", "ZZZ", cost=cost, mark=Decimal("1.11"))  # noqa: SLF001
+    assert st["soft_armed"] is False
+    st = bridge._trail_update_state("okx", "ZZZ", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
+    assert st["soft_armed"] is True
+    assert st["newly_soft"] is True
+    assert st.get("soft_partial_done") is False
+    st = bridge._trail_update_state("okx", "ZZZ", cost=cost, mark=Decimal("1.13"))  # noqa: SLF001
+    assert st["soft_armed"] is True
+    assert st["newly_soft"] is False
+    assert st.get("soft_partial_done") is False
+    half = Decimal("200")
+    clipped_qty, clipped = bridge._clip_qty_to_max_notional(half, Decimal("1.13"))  # noqa: SLF001
+    assert clipped is True
+    assert clipped_qty * Decimal("1.13") <= Decimal("150")
+    assert clipped_qty > 0
+
+
 def test_session_lots_only_for_trail_cost() -> None:
     settings = _unlocked(paper_trail_session_buys_only=True)
     bridge = MicroBudgetLiveExecutor(
