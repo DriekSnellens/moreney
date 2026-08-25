@@ -144,6 +144,29 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "sell onder break-even" in html
 
 
+def test_render_live_dashboard_stale_banner() -> None:
+    html = render_live_dashboard(
+        {
+            "session": {
+                "running": False,
+                "task_running": False,
+                "stale": True,
+                "updated_at": "2026-08-24T21:08:08+00:00",
+                "portfolio_value_eur": "4179",
+                "bridge": {},
+            },
+            "observe": {},
+            "engine": {},
+            "unlock": {},
+            "readiness": {},
+            "alerts": {},
+        }
+    ).body.decode()
+    assert "Cijfers niet actueel" in html
+    assert "stale-banner" in html
+    assert "gestopt" in html
+
+
 def test_render_live_dashboard_cross_venue_panel() -> None:
     html = render_live_dashboard(
         {

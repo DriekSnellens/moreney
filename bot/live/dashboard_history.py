@@ -250,7 +250,13 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "updated_at": session.get("updated_at"),
-        "running": bool(session.get("running") or session.get("task_running")),
+        "running": bool(session.get("task_running"))
+        if session.get("task_running") is not None
+        else bool(session.get("running") or session.get("task_running")),
+        "task_running": bool(session.get("task_running"))
+        if session.get("task_running") is not None
+        else None,
+        "stale": bool(session.get("stale")),
         "portfolio_eur": float(portfolio) if portfolio is not None else None,
         "realized_pnl_eur": float(realized) if realized is not None else None,
         "session_realized_eur": float(session_realized) if session_realized is not None else None,

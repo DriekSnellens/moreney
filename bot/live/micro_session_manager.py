@@ -35,21 +35,90 @@ class MicroSessionManager:
             "message": "idle",
         }
 
+    def _task_alive(self) -> bool:
+        return bool(self._task and not self._task.done())
+
+    @staticmethod
+    def _with_liveness(data: dict[str, Any], *, task_alive: bool) -> dict[str, Any]:
+        """Annotate status so a dead task cannot look like a live session.
+
+        After uvicorn restarts the status file may still say ``running: true``
+        while no asyncio task is ticking — portfolio/PnL then freeze and the
+        dashboard shows stale numbers. Surface that clearly.
+        """
+        out = dict(data)
+        out["task_running"] = task_alive
+        claimed_running = bool(out.get("running") or out.get("task_running"))
+        if claimed_running and not task_alive:
+            out["running"] = False
+            out["stale"] = True
+            out["stale_reason"] = "session_task_not_running"
+            if not out.get("message") or out.get("message") == "running":
+                out["message"] = "stale_status_task_not_running"
+        else:
+            out["stale"] = False
+            out.pop("stale_reason", None)
+        return out
+
     def status(self) -> dict[str, Any]:
         # Prefer in-memory; fall back to last status file after process restart.
+        task_alive = self._task_alive()
         if self._status.get("updated_at"):
-            out = dict(self._status)
-            out["task_running"] = bool(self._task and not self._task.done())
-            return out
+            return self._with_liveness(self._status, task_alive=task_alive)
         if _STATUS_PATH.exists():
             try:
                 data = json.loads(_STATUS_PATH.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    data["task_running"] = bool(self._task and not self._task.done())
-                    return data
+                    return self._with_liveness(data, task_alive=task_alive)
             except Exception:  # noqa: BLE001
                 logger.exception("failed reading micro session status file")
-        return dict(self._status)
+        return self._with_liveness(self._status, task_alive=task_alive)
+
+    def interrupted_continuous_resume(self) -> dict[str, Any] | None:
+        """Return start kwargs if a continuous session was killed mid-run.
+
+        Used on process boot so a uvicorn restart does not leave the dashboard
+        on frozen portfolio figures overnight.
+        """
+        if self._task_alive():
+            return None
+        raw: dict[str, Any] | None = None
+        if _STATUS_PATH.exists():
+            try:
+                data = json.loads(_STATUS_PATH.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    raw = data
+            except Exception:  # noqa: BLE001
+                logger.exception("failed reading micro session status for resume")
+        if raw is None and self._status.get("updated_at"):
+            raw = dict(self._status)
+        if not raw:
+            return None
+        was_running = bool(raw.get("running"))
+        continuous = bool(raw.get("continuous")) or raw.get("minutes") in (None, "", 0, 0.0)
+        if not (was_running and continuous):
+            return None
+        budget = raw.get("budget_eur")
+        try:
+            budget_f = float(budget) if budget is not None else 2000.0
+        except (TypeError, ValueError):
+            budget_f = 2000.0
+        return {
+            "minutes": None,
+            "budget_eur": budget_f,
+            "exclude_btc": bool(raw.get("exclude_btc", True)),
+        }
+
+    async def resume_if_interrupted(self) -> dict[str, Any] | None:
+        """Restart a continuous session that died with the process."""
+        kwargs = self.interrupted_continuous_resume()
+        if kwargs is None:
+            return None
+        logger.warning(
+            "resuming interrupted continuous micro session budget_eur=%s",
+            kwargs.get("budget_eur"),
+        )
+        return await self.start(**kwargs)
 
     def _publish(self, patch: dict[str, Any]) -> None:
         self._status.update(patch)

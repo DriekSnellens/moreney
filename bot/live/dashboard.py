@@ -469,6 +469,10 @@ def _css() -> str:
       border-color: #2a5a40;
       background: linear-gradient(135deg, rgba(61,220,151,.10), rgba(20,28,39,.9));
     }
+    .idle-banner.stale {
+      border-color: #7a5a20;
+      background: linear-gradient(135deg, rgba(240,180,41,.16), rgba(20,28,39,.9));
+    }
     .idle-banner h2 {
       margin: 0 0 .35rem;
       font-size: .78rem;
@@ -477,6 +481,7 @@ def _css() -> str:
       color: #ffb4a8;
     }
     .idle-banner.ok h2 { color: var(--good); }
+    .idle-banner.stale h2 { color: #f0b429; }
     .idle-banner .primary {
       margin: 0;
       font-family: var(--mono);
@@ -548,7 +553,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     observe = payload.get("observe") or {}
     bridge = session.get("bridge") or {}
 
-    running = bool(session.get("running") or session.get("task_running"))
+    task_running = session.get("task_running")
+    if task_running is None:
+        running = bool(session.get("running"))
+    else:
+        running = bool(task_running)
+    stale = bool(session.get("stale"))
     free_by_observe = _free_eur_by_venue(observe)
     free = None
     if free_by_observe:
@@ -822,6 +832,16 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         )
         + "</section>"
     )
+    updated_raw = session.get("updated_at")
+    stale_banner = ""
+    if stale:
+        stale_banner = (
+            "<section class='idle-banner stale' id='stale-banner'>"
+            "<h2>Cijfers niet actueel</h2>"
+            "<p class='primary'>Sessie-loop staat stil — portfolio/PnL zijn bevroren. "
+            f"Laatst bijgewerkt: {_esc(updated_raw or 'onbekend')}. Druk op Start of herstart de bot.</p>"
+            "</section>"
+        )
     why_html = (
         "<section class='positions'><h2>Idle detail (codes)</h2>"
         + (
@@ -1002,6 +1022,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <span>Voeg Moreney toe aan je startscherm voor snelle PnL-updates.</span>
       <button type="button" id="install-btn">Installeren</button>
     </div>
+    {stale_banner}
     <div class="dash-top">
       {kpi_grid_html}
       {charts_html}
@@ -1127,7 +1148,13 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
       const ts = document.getElementById('updated-at');
-      if (ts && m.updated_at) ts.textContent = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');
+      if (ts && m.updated_at) {{
+        let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');
+        if (m.stale) label += ' · NIET ACTUEEL (sessie stil)';
+        ts.textContent = label;
+      }}
+      const staleEl = document.getElementById('stale-banner');
+      if (staleEl) staleEl.hidden = !m.stale;
     }}
 
     async function refreshMetrics() {{

@@ -7,6 +7,7 @@ Withdrawals remain disabled / non-automatic.
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,7 @@ _market_data_service: MarketDataService | None = None
 _paper_runner: PaperRunner | None = None
 _last_paper_cycle: dict[str, Any] | None = None
 _dashboard_basic = HTTPBasic(auto_error=False)
+logger = logging.getLogger(__name__)
 
 
 def get_kill_switch() -> KillSwitch:
@@ -198,6 +200,14 @@ async def lifespan(_app: FastAPI):
     get_micro_engine().arm()
     md = get_market_data_service()
     # Live-only API process: do not start the legacy paper runner loop.
+    # If uvicorn restarted mid continuous micro session, resume so portfolio
+    # marks keep updating (otherwise the dashboard freezes on the status file).
+    try:
+        resume = await get_micro_session_manager().resume_if_interrupted()
+        if resume and resume.get("started"):
+            logger.info("auto-resumed continuous micro session after process start")
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to auto-resume interrupted micro session")
     yield
     await md.stop()
 
