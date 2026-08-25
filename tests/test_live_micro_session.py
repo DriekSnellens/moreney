@@ -591,8 +591,26 @@ def test_clip_qty_to_max_notional_for_large_trail_bags(tmp_path: Path) -> None:
     assert qty2 == Decimal("1")
 
 
+def test_policy_allows_sell_above_max_notional() -> None:
+    """Exit sells must clear a full bag in one order (avoid fee-heavy slices)."""
+    from bot.live.micro import MicroLivePolicy
+
+    pol = MicroLivePolicy(
+        _unlocked(live_micro_max_notional_eur=150, live_micro_venues="bitvavo,okx")
+    )
+    ok_buy, reason_buy = pol.validate_order(
+        venue="okx", symbol="SOLEUR", notional_eur=Decimal("320"), side="buy"
+    )
+    assert ok_buy is False
+    assert "exceeds max" in reason_buy
+    ok_sell, reason_sell = pol.validate_order(
+        venue="okx", symbol="SOLEUR", notional_eur=Decimal("320"), side="sell"
+    )
+    assert ok_sell is True, reason_sell
+
+
 def test_soft_partial_retries_while_armed_not_only_newly_soft(tmp_path: Path) -> None:
-    """Soft partial stays eligible after the arming tick; large bags clip to max."""
+    """Soft partial stays eligible after the arming tick."""
     settings = _unlocked(
         paper_trail_take_profit_enabled=True,
         paper_trail_soft_arm_pct=0.12,
@@ -624,11 +642,6 @@ def test_soft_partial_retries_while_armed_not_only_newly_soft(tmp_path: Path) ->
     assert st["soft_armed"] is True
     assert st["newly_soft"] is False
     assert st.get("soft_partial_done") is False
-    half = Decimal("200")
-    clipped_qty, clipped = bridge._clip_qty_to_max_notional(half, Decimal("1.13"))  # noqa: SLF001
-    assert clipped is True
-    assert clipped_qty * Decimal("1.13") <= Decimal("150")
-    assert clipped_qty > 0
 
 
 def test_session_lots_only_for_trail_cost() -> None:

@@ -95,7 +95,12 @@ class MicroLivePolicy:
         if "*" not in allowed and sym not in allowed:
             return False, f"symbol {symbol} not in micro allowlist"
         if notional_eur > self.max_notional_eur():
-            return False, f"notional {notional_eur} exceeds max {self.max_notional_eur()}"
+            # Buys stay size-capped; profitable exits must be able to clear a
+            # full bag in one order (slicing burns extra maker/taker fees).
+            side_l = str(side or "").strip().lower()
+            is_sell = side_l.startswith("s")
+            if not is_sell:
+                return False, f"notional {notional_eur} exceeds max {self.max_notional_eur()}"
         # Profitable exits must never be blocked by resting buy ladders.
         side_l = str(side or "").strip().lower()
         is_sell = side_l.startswith("s")
