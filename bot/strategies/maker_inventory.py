@@ -138,6 +138,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._max_edge_bps = Decimal(str(settings.paper_maker_max_edge_bps))
         self._max_fee_bps = Decimal(str(settings.paper_maker_max_fee_bps))
         self._same_venue = bool(settings.paper_maker_same_venue)
+        self._cross_venue_paused = False
         self._adverse_bps = Decimal(str(getattr(settings, "paper_maker_adverse_bps", 0) or 0))
         self._spread_fee_buffer_bps = Decimal(
             str(getattr(settings, "paper_maker_spread_fee_buffer_bps", 1) or 1)
@@ -286,6 +287,14 @@ class MakerInventoryStrategy(BaseStrategy):
     def set_reduce_only(self, enabled: bool) -> None:
         """External guardrail (HMM toxic flow / operator): block new BUY quotes."""
         self._external_reduce_only = bool(enabled)
+
+    def set_cross_venue_paused(self, paused: bool) -> None:
+        """Pause OKX↔Bitvavo emits when live fill rate is chronically poor."""
+        self._cross_venue_paused = bool(paused)
+
+    @property
+    def cross_venue_paused(self) -> bool:
+        return bool(self._cross_venue_paused)
 
     def set_hmm_regime(self, regime_id: int | None, *, is_toxic: bool = False) -> None:
         """Apply HMM regime: toxic → REDUCE_ONLY; up-trend/bullish → tighter asks."""
@@ -487,6 +496,15 @@ class MakerInventoryStrategy(BaseStrategy):
                 same = buy_snap.exchange == sell_snap.exchange
                 cross = self._is_cross_venue(buy_snap.exchange, sell_snap.exchange)
                 if same and not self._same_venue:
+                    continue
+                if cross and self._cross_venue_paused:
+                    self._reject(
+                        symbol,
+                        "cross_venue_fill_gate",
+                        "Cross-venue paused: live fill rate below gate",
+                        buy_exchange=buy_snap.exchange,
+                        sell_exchange=sell_snap.exchange,
+                    )
                     continue
                 pair_sell_only = dump_or_reduce
                 if not pair_sell_only and self._venue_blocks_buy(buy_venue):

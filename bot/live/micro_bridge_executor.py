@@ -545,6 +545,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """Regime guard: when True, reject new BUY orders (sells/trails still run)."""
         self._buys_blocked = bool(blocked) or self._daily_kill_active
 
+    def underwater_bag_count(self, *, min_notional_eur: Decimal | float = 25) -> int:
+        """Count micro bags with mark < cost and meaningful notional (cash throttle)."""
+        floor = Decimal(str(min_notional_eur or 0))
+        n = 0
+        for trail_key, st in self._trail.items():
+            if not isinstance(st, dict):
+                continue
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0 or mark >= cost:
+                continue
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            if self._is_long_hold(base):
+                continue
+            venue = str(st.get("venue") or trail_key.split(":", 1)[0])
+            qty = self._balance_qty(venue, base)
+            if qty * mark < floor:
+                continue
+            n += 1
+        return n
+
     def _push_alert(self, kind: str, message: str, **extra: Any) -> None:
         base = str(extra.get("base") or "")
         # Dedupe noisy near-arm / same-kind alerts within 5 minutes.

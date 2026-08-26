@@ -76,8 +76,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
-    assert cfg.arbitrage_max_emits_per_cycle == 6
-    assert cfg.paper_maker_max_open_quotes == 12
+    assert cfg.arbitrage_max_emits_per_cycle == 4
+    assert cfg.paper_maker_max_open_quotes == 8
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
         Settings(live_micro_execute_venues="bitvavo,okx"),
@@ -87,7 +87,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     )
     # Aggregate equity ~€4k must still size clips near the €150 ceiling.
     assert dual.arbitrage_position_pct == 3.75
-    assert dual.arbitrage_max_emits_per_cycle == 6
+    assert dual.arbitrage_max_emits_per_cycle == 4
     assert dual.live_micro_max_open_orders == 8
     assert dual.live_micro_max_open_orders_per_venue == 8
     assert cfg.live_micro_cross_venue_enabled is True
@@ -107,13 +107,13 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.40
-    assert cfg.paper_trail_soft_arm_pct == 0.009
+    assert cfg.paper_trail_soft_arm_pct == 0.010
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is False
-    assert cfg.live_micro_max_per_corr_group == 3
+    assert cfg.live_micro_max_per_corr_group == 2
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is True
     assert cfg.paper_time_stop_enabled is True
@@ -121,14 +121,18 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return >= 0.0010
     assert cfg.paper_maker_min_notional_eur >= 55.0
-    assert cfg.max_simultaneous_positions == 5
-    assert cfg.live_micro_max_alt_bases == 5
+    assert cfg.max_simultaneous_positions == 3
+    assert cfg.live_micro_max_alt_bases == 3
     assert cfg.live_micro_max_open_orders == 8
     assert cfg.live_micro_max_open_orders_per_venue == 8
     assert cfg.live_micro_resting_max_age_sec >= 480.0
-    assert cfg.paper_min_alt_inventory_pct >= 18.0
-    assert cfg.paper_max_alt_inventory_pct <= 45.0
-    assert cfg.paper_trail_soft_partial_pct == 0.0
+    assert cfg.paper_min_alt_inventory_pct >= 15.0
+    assert cfg.paper_max_alt_inventory_pct <= 35.0
+    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.paper_trail_soft_drawdown_pct == 0.004
+    assert cfg.paper_maker_keep_vs_best_frac == 0.60
+    assert cfg.live_micro_underwater_buy_block == 3
+    assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is True
     assert cfg.paper_seed_usdt_pct == 0.0
@@ -566,9 +570,10 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
-    assert cfg.paper_trail_soft_arm_pct == 0.009
+    assert cfg.paper_trail_soft_arm_pct == 0.010
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.40
+    assert cfg.paper_trail_soft_partial_pct == 0.30
     assert cfg.live_micro_max_notional_eur <= 150.0
     assert cfg.paper_markout_enabled is True
     assert cfg.live_disable_research_hooks is True
@@ -1242,6 +1247,59 @@ def test_trail_ignores_mark_spike_before_soft_arm() -> None:
     assert bridge.skips.get("trail_mark_spike", 0) >= 1
     st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.025"))  # noqa: SLF001
     assert st["soft_armed"] is True
+
+
+def test_underwater_bag_count_ignores_dust_and_long_hold(tmp_path: Path) -> None:
+    from bot.portfolio.models import AssetBalance
+
+    settings = _unlocked(
+        live_micro_bridge_persist_path=str(tmp_path / "uw.json"),
+        live_micro_long_hold_bases="ETH",
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio._state.balances["SOL"] = AssetBalance(  # noqa: SLF001
+        asset="SOL", available=Decimal("2"), reserved=Decimal("0")
+    )
+    portfolio._state.balances["ADA"] = AssetBalance(  # noqa: SLF001
+        asset="ADA", available=Decimal("0.1"), reserved=Decimal("0")
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._trail["okx:SOL"] = {  # noqa: SLF001
+        "venue": "okx",
+        "base": "SOL",
+        "cost": "100",
+        "last_mark": "90",
+    }
+    bridge._trail["okx:ADA"] = {  # noqa: SLF001
+        "venue": "okx",
+        "base": "ADA",
+        "cost": "1",
+        "last_mark": "0.5",
+    }
+    bridge._trail["bitvavo:ETH"] = {  # noqa: SLF001
+        "venue": "bitvavo",
+        "base": "ETH",
+        "cost": "3000",
+        "last_mark": "2000",
+    }
+    # SOL 2*90=180 above floor; ADA dust; ETH long-hold excluded.
+    assert bridge.underwater_bag_count(min_notional_eur=25) == 1
+
+
+def test_maker_cross_venue_paused_skips_cross_pairs() -> None:
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    settings = _unlocked(paper_maker_same_venue=True)
+    strat = MakerInventoryStrategy(settings)
+    assert strat.cross_venue_paused is False
+    strat.set_cross_venue_paused(True)
+    assert strat.cross_venue_paused is True
 
 
 def test_portfolio_sync_does_not_invent_one_eur_entry() -> None:

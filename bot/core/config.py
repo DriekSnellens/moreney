@@ -432,6 +432,12 @@ class Settings(BaseSettings):
     live_micro_resting_max_age_sec: float = Field(default=90.0, ge=5, le=600)
     # Cap distinct alt bases for micro trend/trail concentration (0 = unlimited).
     live_micro_max_alt_bases: int = Field(default=0, ge=0, le=20)
+    # Block new buys when this many bags (notional ≥ min) sit below cost.
+    live_micro_underwater_buy_block: int = Field(default=3, ge=0, le=20)
+    live_micro_underwater_min_notional_eur: float = Field(default=25.0, ge=0)
+    # Pause cross-venue emits after enough live attempts with poor fill rate.
+    live_micro_cross_venue_min_fill_rate: float = Field(default=0.30, ge=0.0, le=1.0)
+    live_micro_cross_venue_min_attempts: int = Field(default=8, ge=1, le=200)
     # Comma-separated venues that may place live orders (e.g. bitvavo or bitvavo,okx).
     live_micro_execute_venues: str = "bitvavo"
     # Scan OKX+Bitvavo books for dislocations; unfunded venues skip live legs.

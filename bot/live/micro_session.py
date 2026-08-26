@@ -144,9 +144,9 @@ def _session_settings(
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
             # Room for both Bitvavo and OKX resting quotes in the same cycle.
-            "paper_maker_max_open_quotes": 12 if cross_venue else 8,
-            # Default config is 2 emits — Bitvavo monopolizes; give OKX fair slots.
-            "arbitrage_max_emits_per_cycle": 6 if cross_venue else 3,
+            "paper_maker_max_open_quotes": 8 if cross_venue else 6,
+            # Fewer concurrent sprays → larger / better trails.
+            "arbitrage_max_emits_per_cycle": 4 if cross_venue else 2,
             "paper_cycle_interval_ms": 1200.0,
             # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
             "paper_maker_min_notional_eur": min(70.0, max(55.0, budget_f * 0.03)),
@@ -163,9 +163,9 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            "paper_trail_soft_arm_pct": 0.009,  # ~0.9%: still ≫ ~45 bps fee+buffer floor
-            "paper_trail_soft_drawdown_pct": 0.006,
-            "paper_trail_soft_partial_pct": 0.0,  # no early clip; full bag rides soft trail
+            "paper_trail_soft_arm_pct": 0.010,  # ~1.0%: still ≫ fee+buffer floor
+            "paper_trail_soft_drawdown_pct": 0.004,  # faster soft trail while ≥ BE
+            "paper_trail_soft_partial_pct": 0.30,  # early harvest ≥BE; remainder trails
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,
@@ -191,7 +191,7 @@ def _session_settings(
             "paper_buy_momentum_samples": 12,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             "live_micro_corr_group": "ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
-            "live_micro_max_per_corr_group": 3,
+            "live_micro_max_per_corr_group": 2,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.006,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
@@ -200,12 +200,17 @@ def _session_settings(
             "paper_maker_max_age_ms": 180_000.0,
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
-            # Deploy toward ~40–45% alts (per-venue skew); not 75% odds scenario.
-            "paper_max_alt_inventory_pct": 45.0,
-            "paper_min_alt_inventory_pct": 18.0,
+            # Prefer cash when bags pile up (skew → sell-only sooner).
+            "paper_max_alt_inventory_pct": 35.0,
+            "paper_min_alt_inventory_pct": 15.0,
             "paper_inventory_ask_improve_bps": 2.0,
             # Underweight venues buy sooner (OKX cash deployment).
             "paper_inventory_buy_dip_bps": 3.0,
+            "paper_maker_keep_vs_best_frac": 0.60,  # only near-best NET emits
+            "live_micro_underwater_buy_block": 3,
+            "live_micro_underwater_min_notional_eur": 25.0,
+            "live_micro_cross_venue_min_fill_rate": 0.30,
+            "live_micro_cross_venue_min_attempts": 8,
             "live_micro_okx_deploy_bases": str(
                 getattr(
                     base,
@@ -261,15 +266,15 @@ def _session_settings(
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
             # Fewer concurrent bases → larger trails → more realized €/day.
-            "risk_max_open_positions": 5,
-            "max_simultaneous_positions": 5,
-            "opportunity_max_executions_per_cycle": 8,
-            "opportunity_max_candidates_per_cycle": 16,
+            "risk_max_open_positions": 3,
+            "max_simultaneous_positions": 3,
+            "opportunity_max_executions_per_cycle": 6,
+            "opportunity_max_candidates_per_cycle": 12,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else ",".join(_LIQUID_EUR_SYMBOLS),
-            "live_micro_max_alt_bases": 5,
+            "live_micro_max_alt_bases": 3,
             # Cap live order size (env must not silently allow full pocket).
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
@@ -568,13 +573,63 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
-            # Regime: block new buys while HMM says reduce-only / toxic.
+            # Regime / cash-first: block new buys while reduce-only, toxic,
+            # or too many bags sit below cost (never-loss holds; don't add more).
             try:
                 st_now = runner.status()
                 reduce_only = bool(st_now.get("reduce_only"))
                 hmm = st_now.get("hmm_regime") or {}
                 toxic = bool(hmm.get("is_toxic_flow"))
-                bridge.set_buys_blocked(reduce_only or toxic)
+                scan = (st_now.get("last_cycle") or {}).get("scan") or {}
+                dump_n = len(scan.get("dump_symbols") or [])
+                uw_block = int(
+                    getattr(cfg, "live_micro_underwater_buy_block", 3) or 0
+                )
+                uw_floor = Decimal(
+                    str(
+                        getattr(cfg, "live_micro_underwater_min_notional_eur", 25)
+                        or 25
+                    )
+                )
+                underwater_n = bridge.underwater_bag_count(min_notional_eur=uw_floor)
+                cash_throttle = uw_block > 0 and underwater_n >= uw_block
+                dump_breadth = dump_n >= 2
+                block_buys = reduce_only or toxic or cash_throttle or dump_breadth
+                was_blocked = bool(getattr(bridge, "_buys_blocked", False))
+                bridge.set_buys_blocked(block_buys)
+                if cash_throttle and not was_blocked:
+                    bridge._push_alert(  # noqa: SLF001
+                        "underwater_buy_block",
+                        f"buys blocked: {underwater_n} bags below cost "
+                        f"(threshold {uw_block})",
+                    )
+
+                # Cross-venue: pause when live fill rate is chronically poor.
+                maker = runner._maker_strategy()  # noqa: SLF001
+                if maker is not None and hasattr(maker, "set_cross_venue_paused"):
+                    funnel = st_now.get("pipeline_funnel") or {}
+                    cv = funnel.get("cross_venue") or {}
+                    cv_orders = int(cv.get("live_orders") or 0)
+                    cv_fills = int(cv.get("live_fills") or 0)
+                    min_att = int(
+                        getattr(cfg, "live_micro_cross_venue_min_attempts", 8) or 8
+                    )
+                    min_rate = float(
+                        getattr(cfg, "live_micro_cross_venue_min_fill_rate", 0.30)
+                        or 0.30
+                    )
+                    pause_cv = False
+                    if cv_orders >= min_att:
+                        rate = cv_fills / max(cv_orders, 1)
+                        pause_cv = rate < min_rate
+                    prev_pause = bool(getattr(maker, "cross_venue_paused", False))
+                    maker.set_cross_venue_paused(pause_cv)
+                    if pause_cv and not prev_pause:
+                        bridge._push_alert(  # noqa: SLF001
+                            "cross_venue_fill_gate",
+                            f"cross-venue paused fills={cv_fills}/{cv_orders} "
+                            f"(need ≥{min_rate:.0%})",
+                        )
             except Exception:  # noqa: BLE001
                 pass
             if time.monotonic() - last_resting >= 8.0:
