@@ -190,7 +190,6 @@ class MicroSessionManager:
                     "finished_at": None,
                     "report": None,
                     "bridge": None,
-                    "paper": None,
                     "live_trades_executed": 0,
                     "live_trades_attempted": 0,
                     "elapsed_seconds": 0,
