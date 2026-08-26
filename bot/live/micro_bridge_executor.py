@@ -2526,7 +2526,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             active_dd=active_dd,
         )
         st["drawdown"] = str(active_dd)
-        if peak > 0 and mark <= peak * (Decimal("1") - active_dd):
+        # Never arm a drawdown exit while still below unit cost — never-loss
+        # would reject the sell and only spam trail_fire / BE skips.
+        if (
+            peak > 0
+            and mark >= cost
+            and mark <= peak * (Decimal("1") - active_dd)
+        ):
             st["triggered"] = True
             self._push_alert(
                 "trail_fire",
