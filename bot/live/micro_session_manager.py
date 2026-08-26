@@ -28,6 +28,7 @@ _LEGACY_PAPER_STATUS_KEYS = (
     "ending_equity_eur",
     "paper_status_start",
     "paper_status_end",
+    "paper",
 )
 
 
