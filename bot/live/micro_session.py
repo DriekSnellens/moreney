@@ -163,9 +163,9 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            "paper_trail_soft_arm_pct": 0.010,  # ~1.0%: still ≫ fee+buffer floor
+            "paper_trail_soft_arm_pct": 0.020,  # trail-lab best IS/OOS (synthetic+live costs)
             "paper_trail_soft_drawdown_pct": 0.004,  # faster soft trail while ≥ BE
-            "paper_trail_soft_partial_pct": 0.30,  # early harvest ≥BE; remainder trails
+            "paper_trail_soft_partial_pct": 0.50,  # trail-lab: earlier/larger harvest ≥BE
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,

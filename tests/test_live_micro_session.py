@@ -107,7 +107,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.40
-    assert cfg.paper_trail_soft_arm_pct == 0.010
+    assert cfg.paper_trail_soft_arm_pct == 0.020
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
@@ -128,7 +128,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 35.0
-    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.paper_trail_soft_partial_pct == 0.50
     assert cfg.paper_trail_soft_drawdown_pct == 0.004
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 3
@@ -570,10 +570,10 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
-    assert cfg.paper_trail_soft_arm_pct == 0.010
+    assert cfg.paper_trail_soft_arm_pct == 0.020
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.40
-    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.paper_trail_soft_partial_pct == 0.50
     assert cfg.live_micro_max_notional_eur <= 150.0
     assert cfg.paper_markout_enabled is True
     assert cfg.live_disable_research_hooks is True
