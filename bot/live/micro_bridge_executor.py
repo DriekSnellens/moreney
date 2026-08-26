@@ -968,6 +968,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "session_qty": str(st.get("session_qty") or ""),
                 "triggered": bool(st.get("triggered")),
                 "recovery_armed": bool(st.get("recovery_armed")),
+                "below_be": bool(st.get("below_be")),
                 "age_sec": round(age, 1) if age is not None else None,
             }
         for venue in sorted(self._execute_venues):
@@ -2106,6 +2107,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             be *= Decimal("1") + extra_bps / Decimal("10000")
         return be
 
+    def _maybe_recovery_arm_from_loss(
+        self,
+        st: dict[str, Any],
+        *,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        be: Decimal | None,
+    ) -> bool:
+        """Track underwater bags; on loss→BE cross arm recovery (no immediate sell).
+
+        Rising through BE must not sell. Exit later on trail drawdown or when
+        price falls back to the BE floor after having traded above it.
+        """
+        if be is None or be <= 0:
+            return False
+        if mark < be:
+            st["below_be"] = True
+            return False
+        if not st.get("below_be"):
+            return False
+        st["below_be"] = False
+        return self._recovery_arm_trail(
+            st, venue=venue, base=base, mark=mark, be=be
+        )
+
     def _recovery_arm_trail(
         self,
         st: dict[str, Any],
@@ -2115,29 +2142,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mark: Decimal,
         be: Decimal,
     ) -> bool:
-        """Arm trail when an aged bag finally reaches BE — do not dump flat.
+        """Arm trail when a bag recovers to BE from a loss — do not dump flat.
 
         Lets the position grow; exits later via trail drawdown or falling back to BE.
-        Returns True when this call newly armed the trail.
+        Returns True when this call newly sets recovery_armed.
         """
-        if st.get("soft_armed"):
-            return False
         if mark < be:
             return False
-        st["soft_armed"] = True
-        st["armed"] = True
-        st["peak"] = mark
+        already = bool(st.get("recovery_armed"))
+        if already and st.get("soft_armed"):
+            return False
+        if not st.get("soft_armed"):
+            st["soft_armed"] = True
+            st["armed"] = True
+            peak = Decimal(str(st.get("peak") or 0))
+            st["peak"] = mark if peak <= 0 else max(peak, mark)
+            st["newly_soft"] = False  # never soft-partial on the BE touch itself
+            st["newly_armed"] = True
+            st["time_stop_due"] = False
+            soft_arm, soft_dd, _hard_arm, _hard_dd = self._scaled_arms(base, be)
+            st["drawdown"] = str(soft_dd)
+            st["soft_arm"] = str(soft_arm)
         st["recovery_armed"] = True
-        st["newly_soft"] = False
-        st["newly_armed"] = True
-        st["time_stop_due"] = False
-        soft_arm, soft_dd, _hard_arm, _hard_dd = self._scaled_arms(base, be)
-        st["drawdown"] = str(soft_dd)
-        st["soft_arm"] = str(soft_arm)
+        if already:
+            return False
+        soft_dd = Decimal(str(st.get("drawdown") or self._soft_dd_floor))
         self._push_alert(
             "recovery_arm",
             f"{base} recovery-arm at BE mark={mark} be={be} "
-            f"(trail dd={float(soft_dd * 100):.1f}%)",
+            f"(trail dd={float(soft_dd * 100):.1f}%; sell only on pullback to BE)",
             base=base,
         )
         logger.info(
@@ -2386,6 +2419,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "hard_partial_done": False,
                 "partial_done": False,
                 "time_stop_due": False,
+                "recovery_armed": False,
+                "below_be": False,
                 "soft_arm": str(soft_arm),
                 "hard_arm": str(hard_arm),
                 "drawdown": str(soft_dd),
@@ -2756,12 +2791,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             st = self._trail_update_state(venue, asset, cost=cost, mark=mark)
             be = self._break_even_sell_price(venue, asset)
 
+            # Loss → BE (rising through): arm recovery trail, do not sell yet.
+            self._maybe_recovery_arm_from_loss(
+                st, venue=venue, base=asset, mark=mark, be=be
+            )
+
             # Aged bag finally at/above BE → recovery-arm trail (let it grow).
             if (
                 st.get("time_stop_due")
                 and be is not None
                 and mark >= be
-                and not st.get("soft_armed")
+                and not st.get("recovery_armed")
             ):
                 self._recovery_arm_trail(
                     st, venue=venue, base=asset, mark=mark, be=be
@@ -2779,17 +2819,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             limit_px: Decimal | None = None
             post_only = False
 
+            soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
+            gain_now = Decimal(str(st.get("gain") or 0))
             if (
                 st.get("soft_armed")
                 and not st.get("recovery_armed")
                 and self._trail_partial_enabled
                 and self._soft_partial > 0
                 and not st.get("soft_partial_done")
+                and gain_now >= soft_arm_now
             ):
                 # Retry every cycle until a soft partial lands (not only the
                 # arming tick — large bags used to fail max-notional once and
                 # never retry because newly_soft is one-shot).
                 # soft_partial=0 → skip; full bag waits for soft/hard drawdown exit.
+                # Recovery-from-loss bags never soft-partial at BE; they ride for
+                # profit and only floor-exit on pullback to BE / trail drawdown.
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 cap = min(
                     free,

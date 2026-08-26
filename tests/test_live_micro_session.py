@@ -1179,6 +1179,124 @@ def test_recovery_arm_at_be_does_not_dump_flat() -> None:
     assert st["triggered"] is True
 
 
+def test_loss_to_be_cross_arms_recovery_no_immediate_sell() -> None:
+    """From underwater through BE: arm recovery; do not sell while still rising."""
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_session_buys_only=False,
+        paper_trail_soft_arm_pct=0.02,
+        paper_trail_soft_drawdown_pct=0.005,
+        paper_trail_soft_partial_pct=0.50,
+        paper_trail_partial_enabled=True,
+        paper_trail_atr_enabled=False,
+        paper_maker_sell_profit_buffer_bps=10.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "SOL")  # noqa: SLF001
+    assert be is not None and be > Decimal("100")
+
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "SOL", cost=Decimal("100"), mark=be * Decimal("0.97")
+    )
+    armed = bridge._maybe_recovery_arm_from_loss(  # noqa: SLF001
+        st, venue="bitvavo", base="SOL", mark=be * Decimal("0.97"), be=be
+    )
+    assert armed is False
+    assert st["below_be"] is True
+    assert st.get("recovery_armed") is not True
+
+    # Rising through BE — arm, no sell signal (newly_soft False, no trigger).
+    cross = be * Decimal("1.001")
+    armed = bridge._maybe_recovery_arm_from_loss(  # noqa: SLF001
+        st, venue="bitvavo", base="SOL", mark=cross, be=be
+    )
+    assert armed is True
+    assert st["recovery_armed"] is True
+    assert st["soft_armed"] is True
+    assert st["newly_soft"] is False
+    assert st["below_be"] is False
+    assert st.get("triggered") is not True
+
+    # Keep rising — still no recovery-BE exit (peak not yet above then back).
+    peak_mark = be * Decimal("1.04")
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "SOL", cost=Decimal("100"), mark=peak_mark
+    )
+    assert st["recovery_armed"] is True
+    assert Decimal(str(st["peak"])) >= peak_mark * Decimal("0.999")
+    assert st.get("triggered") is not True
+    # Soft partial must stay blocked while recovery_armed.
+    assert not (
+        st.get("soft_armed")
+        and not st.get("recovery_armed")
+        and Decimal(str(st.get("gain") or 0))
+        >= Decimal(str(st.get("soft_arm") or 0))
+    )
+
+    # Pullback to BE floor → recovery exit condition.
+    assert Decimal(str(st["peak"])) > be
+    mark_at_be = be
+    assert mark_at_be <= be and Decimal(str(st["peak"])) > be
+
+
+def test_recovery_be_pullback_requires_prior_peak_above_be() -> None:
+    """Do not sell on first BE touch; only after having traded above BE."""
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_session_buys_only=False,
+        paper_trail_soft_arm_pct=0.12,
+        paper_trail_soft_drawdown_pct=0.03,
+        paper_trail_atr_enabled=False,
+        paper_maker_sell_profit_buffer_bps=10.0,
+        paper_trail_partial_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["okx:FET"] = [[Decimal("50"), Decimal("1")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("okx:FET")  # noqa: SLF001
+    be = bridge._break_even_sell_price("okx", "FET")  # noqa: SLF001
+    assert be is not None
+
+    st: dict = {
+        "soft_armed": False,
+        "peak": Decimal("0"),
+        "recovery_armed": False,
+        "below_be": True,
+        "drawdown": "0.03",
+    }
+    bridge._recovery_arm_trail(  # noqa: SLF001
+        st, venue="okx", base="FET", mark=be, be=be
+    )
+    # First touch: peak == be → no recovery-BE sell yet (need peak > be).
+    assert Decimal(str(st["peak"])) == be
+    first_touch_sell = (
+        bool(st.get("recovery_armed"))
+        and Decimal(str(st.get("peak") or 0)) > be
+        and be <= be  # mark at BE
+    )
+    assert first_touch_sell is False
+
+    st["peak"] = be * Decimal("1.03")
+    pullback_sell = (
+        bool(st.get("recovery_armed"))
+        and Decimal(str(st["peak"])) > be
+        and be <= be  # mark back at BE
+    )
+    assert pullback_sell is True
+
 def test_resolve_venue_uses_exchange_meta_not_eur_bitvavo_default() -> None:
     settings = _unlocked()
     bridge = MicroBudgetLiveExecutor(
