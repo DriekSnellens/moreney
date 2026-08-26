@@ -47,20 +47,6 @@ class LiveReadinessService:
             force_enabled=False,
         )
 
-    def _paper_status(self) -> dict[str, Any]:
-        getter = self._paper_runner_getter
-        if getter is None:
-            try:
-                from bot.main import get_paper_runner
-
-                getter = get_paper_runner
-            except Exception:  # noqa: BLE001
-                return {}
-        try:
-            return getter().status()
-        except Exception:  # noqa: BLE001
-            return {}
-
     def _get_funding(self) -> FundingPortfolioService:
         if self._funding is not None:
             return self._funding
@@ -84,34 +70,32 @@ class LiveReadinessService:
         return LivePhase.GO_NO_GO
 
     def phase0(self) -> dict[str, Any]:
-        status = self._paper_status()
-        # Enrich with credential readiness for optional Phase 0 item (no secrets).
+        # Live go/no-go: credentials + kill switch only. Do not consult the idle
+        # PaperRunner (legacy ghost equity / trade_count false positives).
+        status: dict[str, Any] = {}
         try:
             status = {
-                **status,
                 "live_readiness": {
-                    **(status.get("live_readiness") or {}),
                     "credentials": self._observe.credentials(),
                 },
             }
         except Exception:  # noqa: BLE001
             pass
         ks = None
-        if isinstance(status.get("kill_switch"), dict):
-            ks = status["kill_switch"].get("state")
+        try:
+            from bot.main import get_kill_switch
+
+            ks = get_kill_switch().state.value
+        except Exception:  # noqa: BLE001
+            pass
         result = evaluate_go_no_go(
-            self._settings, paper_status=status, kill_switch_state=ks
+            self._settings, runner_status=status, kill_switch_state=ks
         )
         return result.to_dict()
 
     async def phase1_observe(self, *, probe: bool = False) -> dict[str, Any]:
         snap = await self._observe.snapshot(probe=probe)
-        paper = self._paper_status()
-        inv = (paper.get("inventory") or {}).get("venues") or {}
-        snap["paper_compare"] = self._observe.compare_to_paper(
-            live_snaps=snap.get("balances") or [],
-            paper_venues=inv,
-        )
+        # No paper_compare — live balances are the only inventory truth.
         self._audit.record("observe_snapshot", {
             "venues_online": snap.get("venues_online"),
             "venues_total": snap.get("venues_total"),

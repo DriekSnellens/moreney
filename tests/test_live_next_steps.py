@@ -70,12 +70,9 @@ def test_dry_run_never_submits() -> None:
 
 def test_paper_status_includes_live_readiness() -> None:
     client = TestClient(app)
-    body = client.get("/paper/status").json()
-    assert "live_readiness" in body
-    lr = body["live_readiness"]
-    assert "go_no_go_ready" in lr
-    assert lr["can_place_live_orders"] is False
-    assert lr["withdrawals_supported"] is False
+    body = client.get("/paper/status")
+    # Legacy paper trading APIs removed — live surfaces only.
+    assert body.status_code == 410
 
 
 def test_live_credentials_and_dry_run_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:

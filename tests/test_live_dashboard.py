@@ -220,3 +220,34 @@ def test_live_dashboard_routes_and_paper_redirects() -> None:
         api = client.get("/api").json()
         assert api["live_dashboard"] == "/live/dashboard"
         assert "paper_dashboard" not in api
+
+
+def test_micro_session_status_strips_legacy_paper_pnl() -> None:
+    from bot.live.micro_session_manager import MicroSessionManager
+
+    mgr = MicroSessionManager()
+    mgr._publish(  # noqa: SLF001
+        {
+            "running": True,
+            "pnl_paper_pocket_eur": "6.12",
+            "paper_cycles": 99,
+            "starting_equity_eur": "4000",
+            "current_equity_eur": "4006",
+            "realized_trade_pnl_eur": "12.62",
+            "strategy_cycles": 10,
+            "report": {
+                "pnl_paper_pocket_eur": "6.12",
+                "paper_status_end": {"trade_count": 1},
+                "realized_trade_pnl_eur": "12.62",
+            },
+        }
+    )
+    st = mgr.status()
+    assert "pnl_paper_pocket_eur" not in st
+    assert "paper_cycles" not in st
+    assert "starting_equity_eur" not in st
+    assert "current_equity_eur" not in st
+    assert st.get("realized_trade_pnl_eur") == "12.62"
+    assert st.get("strategy_cycles") == 10
+    assert "pnl_paper_pocket_eur" not in (st.get("report") or {})
+    assert "paper_status_end" not in (st.get("report") or {})

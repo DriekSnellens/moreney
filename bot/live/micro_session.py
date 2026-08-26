@@ -498,9 +498,6 @@ async def run_session(
         continuous,
         cfg.market_data_mode,
     )
-    start_equity = Decimal(str(runner.portfolio.state.total_equity))
-    start_status = runner.status()
-
     def _tick() -> None:
         if status_callback is None:
             return
@@ -511,7 +508,7 @@ async def run_session(
             if deadline is None
             else round(max(0.0, deadline - time.monotonic()), 1)
         )
-        equity = Decimal(str(runner.portfolio.state.total_equity))
+        # Live-only KPIs: never publish paper-pocket equity (ghost MTM / false +PnL).
         status_callback(
             {
                 "continuous": continuous,
@@ -520,13 +517,10 @@ async def run_session(
                 "symbols_sample": scan_symbols[:12],
                 "elapsed_seconds": round(elapsed, 1),
                 "remaining_seconds": remaining,
-                "paper_cycles": st.get("cycle_count"),
+                "strategy_cycles": st.get("cycle_count"),
                 "strategy": st.get("strategy"),
                 "approved_opportunities": st.get("approved_opportunities"),
                 "executed_opportunities": st.get("executed_opportunities"),
-                "starting_equity_eur": str(start_equity),
-                "current_equity_eur": str(equity),
-                "pnl_paper_pocket_eur": str(equity - start_equity),
                 "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
                 "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),
                 "portfolio_value_eur": (
@@ -698,7 +692,6 @@ async def run_session(
                 logger.exception("market data stop failed")
         live.disarm()
 
-    end_equity = Decimal(str(runner.portfolio.state.total_equity))
     end_status = runner.status()
     live_executed = [
         t for t in bridge.live_trades if (t.get("result") or {}).get("executed")
@@ -721,40 +714,37 @@ async def run_session(
             "risk",
             "micro_budget_live_executor",
         ],
-        "paper_cycles": end_status.get("cycle_count"),
-        "starting_equity_eur": str(start_equity),
-        "ending_equity_eur": str(end_equity),
-        "pnl_paper_pocket_eur": str(end_equity - start_equity),
+        "strategy_cycles": end_status.get("cycle_count"),
+        "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
+        "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),
+        "portfolio_value_eur": (
+            str(bridge.portfolio_value_eur)
+            if bridge.portfolio_value_eur is not None
+            else None
+        ),
+        "starting_portfolio_eur": (
+            str(bridge.starting_portfolio_eur)
+            if bridge.starting_portfolio_eur is not None
+            else None
+        ),
         "bridge": bridge.snapshot_bridge(),
         "live_trades_attempted": len(bridge.live_trades),
         "live_trades_executed": len(live_executed),
         "trades": bridge.live_trades,
-        "paper_status_start": {
-            k: start_status.get(k)
-            for k in (
-                "strategy",
-                "trade_count",
-                "approved_opportunities",
-                "executed_opportunities",
-                "global_engine",
-            )
-        },
-        "paper_status_end": {
+        "runner_status": {
             k: end_status.get(k)
             for k in (
                 "strategy",
-                "trade_count",
                 "approved_opportunities",
                 "executed_opportunities",
-                "global_engine",
                 "pipeline_funnel",
                 "why_not_trade",
             )
         },
         "finished_at": datetime.now(UTC).isoformat(),
         "note": (
-            "Micro = € capital pocket (recycles). Continuous until stop. "
-            "Marketable Bitvavo legs live; non-Bitvavo venues skipped."
+            "Micro = live € capital pocket (recycles). Continuous until stop. "
+            "KPIs are bridge realized/MTM only — no paper-pocket equity."
         ),
     }
 
@@ -762,10 +752,10 @@ async def run_session(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     logger.info(
-        "Full-bot micro done pnl=%s live_fills=%s cycles=%s",
-        report["pnl_paper_pocket_eur"],
+        "Full-bot micro done realized=%s live_fills=%s cycles=%s",
+        report["realized_trade_pnl_eur"],
         report["live_trades_executed"],
-        report["paper_cycles"],
+        report["strategy_cycles"],
     )
     return report
 
@@ -807,7 +797,7 @@ def main() -> None:
             report_path=args.report,
         )
     )
-    summary = {k: report[k] for k in report if k not in {"trades", "paper_status_end"}}
+    summary = {k: report[k] for k in report if k not in {"trades", "runner_status"}}
     print(json.dumps(summary, indent=2, default=str))
     print(f"trades_detail_count={len(report.get('trades') or [])}")
     print(f"report={args.report}")

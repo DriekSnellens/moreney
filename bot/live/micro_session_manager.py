@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 _STATUS_PATH = Path("./data/live_micro_session_status.json")
 _REPORT_PATH = Path("./data/live_micro_session_report.json")
 
+# Legacy paper-pocket fields that caused false +PnL / false kill signals.
+_LEGACY_PAPER_STATUS_KEYS = (
+    "pnl_paper_pocket_eur",
+    "paper_cycles",
+    "starting_equity_eur",
+    "current_equity_eur",
+    "ending_equity_eur",
+    "paper_status_start",
+    "paper_status_end",
+)
+
 
 class MicroSessionManager:
     """Single background full-bot micro session with live status for the dashboard."""
@@ -39,6 +50,19 @@ class MicroSessionManager:
         return bool(self._task and not self._task.done())
 
     @staticmethod
+    def _strip_legacy_paper(data: dict[str, Any]) -> dict[str, Any]:
+        out = dict(data)
+        for key in _LEGACY_PAPER_STATUS_KEYS:
+            out.pop(key, None)
+        report = out.get("report")
+        if isinstance(report, dict):
+            cleaned = dict(report)
+            for key in _LEGACY_PAPER_STATUS_KEYS:
+                cleaned.pop(key, None)
+            out["report"] = cleaned
+        return out
+
+    @staticmethod
     def _with_liveness(data: dict[str, Any], *, task_alive: bool) -> dict[str, Any]:
         """Annotate status so a dead task cannot look like a live session.
 
@@ -46,7 +70,7 @@ class MicroSessionManager:
         while no asyncio task is ticking — portfolio/PnL then freeze and the
         dashboard shows stale numbers. Surface that clearly.
         """
-        out = dict(data)
+        out = MicroSessionManager._strip_legacy_paper(data)
         out["task_running"] = task_alive
         claimed_running = bool(out.get("running") or out.get("task_running"))
         if claimed_running and not task_alive:
@@ -124,6 +148,7 @@ class MicroSessionManager:
 
     def _publish(self, patch: dict[str, Any]) -> None:
         self._status.update(patch)
+        self._status = self._strip_legacy_paper(self._status)
         self._status["updated_at"] = datetime.now(UTC).isoformat()
         try:
             _STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -204,13 +229,15 @@ class MicroSessionManager:
                             "report": {
                                 k: report.get(k)
                                 for k in report
-                                if k not in {"trades", "paper_status_end"}
+                                if k not in {"trades", "runner_status"}
                             },
                             "bridge": report.get("bridge"),
                             "live_trades_executed": report.get("live_trades_executed"),
                             "live_trades_attempted": report.get("live_trades_attempted"),
-                            "pnl_paper_pocket_eur": report.get("pnl_paper_pocket_eur"),
-                            "paper_cycles": report.get("paper_cycles"),
+                            "realized_trade_pnl_eur": report.get(
+                                "realized_trade_pnl_eur"
+                            ),
+                            "strategy_cycles": report.get("strategy_cycles"),
                             "reason": report.get("reason"),
                             "detail": report.get("detail"),
                         }

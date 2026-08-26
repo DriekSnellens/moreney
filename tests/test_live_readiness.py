@@ -18,10 +18,10 @@ from bot.live.executor import MultiVenueLiveExecutor
 from bot.live.gates import evaluate_go_no_go
 from bot.live.micro import MicroLivePolicy
 from bot.live.phases import LivePhase
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 from bot.live.registry import MultiVenueRegistry
 from bot.live.service import LiveReadinessService, reset_live_service
 from bot.main import app, reset_risk_singletons
-from bot.research.shadow_validation.protocol import PRODUCTION_EXECUTION_ENABLED
 
 
 @pytest.fixture(autouse=True)
@@ -39,13 +39,13 @@ def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reset_risk_singletons()
 
 
-def test_production_execution_still_false() -> None:
-    assert PRODUCTION_EXECUTION_ENABLED is False
+def test_production_execution_is_live_micro() -> None:
+    assert PRODUCTION_EXECUTION_ENABLED is True
 
 
 def test_phase0_go_no_go_passes_defaults() -> None:
-    settings = Settings(execution_mode=ExecutionMode.PAPER, funding_main_venue="bitvavo")
-    result = evaluate_go_no_go(settings, paper_status={"trade_count": 5}, kill_switch_state="running")
+    settings = Settings(funding_main_venue="bitvavo")
+    result = evaluate_go_no_go(settings, kill_switch_state="running")
     assert result.ready is True
     assert not result.blocking
 
@@ -124,7 +124,9 @@ def test_audit_redacts_secrets(tmp_path: Path) -> None:
 def test_registry_credential_status_no_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BITVAVO_API_KEY", "abc")
     monkeypatch.setenv("BITVAVO_API_SECRET", "xyz")
-    reg = MultiVenueRegistry(Settings(funding_venues="bitvavo,kraken"))
+    reg = MultiVenueRegistry(
+        Settings(live_trading_venues="bitvavo,kraken", funding_venues="bitvavo,kraken")
+    )
     status = reg.status()
     blob = str(status)
     assert "abc" not in blob
@@ -159,7 +161,7 @@ async def test_full_status_and_api(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert readiness.status_code == 200
     body = readiness.json()
     assert "phase0_go_no_go" in body
-    assert body["production_execution_enabled"] is False
+    assert body["production_execution_enabled"] is True
 
     assert client.get("/live/observe").status_code == 200
     assert client.get("/live/alerts").status_code == 200
