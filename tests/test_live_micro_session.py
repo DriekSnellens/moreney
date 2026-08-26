@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -467,15 +468,94 @@ def test_trail_hard_arm_widens_drawdown() -> None:
     )
     cost = Decimal("1.00")
     bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.12"))  # noqa: SLF001
-    st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.30"))  # noqa: SLF001
+    # Climb in <8% steps so peak tracking trusts the marks.
+    for px in ("1.18", "1.24", "1.30"):
+        st = bridge._trail_update_state(  # noqa: SLF001
+            "bitvavo", "ADA", cost=cost, mark=Decimal(px)
+        )
     assert st["newly_hard"] is True
     assert st["hard_armed"] is True
-    bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.50"))  # noqa: SLF001
+    for px in ("1.36", "1.42", "1.48", "1.50"):
+        bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal(px))  # noqa: SLF001
     # 12% off 1.50 = 1.32 — still holding under hard dd
     st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.33"))  # noqa: SLF001
     assert st["triggered"] is False
     st = bridge._trail_update_state("bitvavo", "ADA", cost=cost, mark=Decimal("1.32"))  # noqa: SLF001
     assert st["triggered"] is True
+
+
+def test_trail_ignores_peak_spike_after_soft_arm() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.009,
+        paper_trail_soft_drawdown_pct=0.006,
+        paper_trail_hard_arm_pct=0.06,
+        paper_trail_hard_drawdown_pct=0.03,
+        paper_trail_atr_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    cost = Decimal("85.0")
+    bridge._trail_update_state("okx", "SOL", cost=cost, mark=Decimal("86.0"))  # noqa: SLF001
+    st = bridge._trail_update_state("okx", "SOL", cost=cost, mark=Decimal("99.5"))  # noqa: SLF001
+    assert Decimal(str(st["peak"])) == Decimal("86.0")
+    assert bridge.skips.get("trail_peak_spike", 0) >= 1
+    # Underwater with polluted peak → rewind, do not stay falsely triggered.
+    st = bridge._trail["okx:SOL"]
+    st["peak"] = Decimal("99.5")
+    st["soft_armed"] = True
+    st["hard_armed"] = True
+    st = bridge._trail_update_state("okx", "SOL", cost=cost, mark=Decimal("83.0"))  # noqa: SLF001
+    assert Decimal(str(st["peak"])) == Decimal("83.0")
+    assert st["triggered"] is False
+    assert bridge.skips.get("trail_peak_rewound", 0) >= 1
+
+
+def test_trail_sanitize_persisted_ghost_peak(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.009,
+        paper_trail_hard_arm_pct=0.06,
+        paper_trail_hard_drawdown_pct=0.03,
+        paper_trail_atr_enabled=False,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
+    path = tmp_path / "bridge.json"
+    path.write_text(
+        json.dumps(
+            {
+                "trail": {
+                    "bitvavo:APT": {
+                        "venue": "bitvavo",
+                        "base": "APT",
+                        "soft_armed": True,
+                        "hard_armed": True,
+                        "cost": "0.535",
+                        "last_mark": "0.485",
+                        "peak": "1.25",
+                        "soft_arm": "0.009",
+                        "hard_arm": "0.06",
+                        "drawdown": "0.03",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    st = bridge._trail["bitvavo:APT"]
+    assert Decimal(str(st["peak"])) == Decimal("0.485")
 
 
 def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) -> None:

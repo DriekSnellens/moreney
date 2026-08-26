@@ -525,6 +525,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             len(self._resting),
             self.session_live_transaction_count,
         )
+        self._sanitize_persisted_trails()
         return True
 
     def persist_runtime_state(self) -> None:
@@ -2218,6 +2219,123 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return True
         return mom >= self._momentum_min
 
+    @staticmethod
+    def _is_trail_mark_spike(
+        *,
+        prev_mark: Decimal,
+        mark: Decimal,
+        cost: Decimal,
+        soft_arm: Decimal,
+    ) -> bool:
+        """True when a print looks like a bad ticker spike (arming filter)."""
+        if mark <= 0:
+            return False
+        if prev_mark > 0 and mark >= prev_mark * Decimal("1.08"):
+            return True
+        if cost > 0:
+            gain = (mark - cost) / cost
+            if gain >= max(soft_arm * Decimal("5"), Decimal("0.10")):
+                return True
+        return False
+
+    @staticmethod
+    def _is_trail_peak_spike(*, prev_mark: Decimal, mark: Decimal) -> bool:
+        """One-tick jump too large to trust as a new trail peak."""
+        return prev_mark > 0 and mark >= prev_mark * Decimal("1.08")
+
+    def _maybe_raise_trail_peak(
+        self,
+        st: dict[str, Any],
+        *,
+        base: str,
+        cost: Decimal,
+        mark: Decimal,
+        prev_mark: Decimal,
+        soft_arm: Decimal,
+        peak: Decimal,
+    ) -> Decimal:
+        """Raise peak only on believable marks — never on one-tick spikes."""
+        del soft_arm  # arming uses soft_arm; peak raises use one-tick filter only
+        if mark <= peak:
+            return peak
+        if self._is_trail_peak_spike(prev_mark=prev_mark, mark=mark):
+            logger.warning(
+                "TRAIL_PEAK_SPIKE_IGNORED base=%s cost=%s prev=%s mark=%s peak=%s",
+                base,
+                cost,
+                prev_mark,
+                mark,
+                peak,
+            )
+            self._bump_skip("trail_peak_spike")
+            return peak
+        st["peak"] = mark
+        return mark
+
+    def _sanitize_trail_peak(
+        self,
+        st: dict[str, Any],
+        *,
+        base: str,
+        cost: Decimal,
+        mark: Decimal,
+        soft_arm: Decimal,
+        hard_arm: Decimal,
+        active_dd: Decimal,
+    ) -> Decimal:
+        """Rewind ghost peaks that keep trail permanently triggered under BE."""
+        peak = Decimal(str(st.get("peak") or 0))
+        if peak <= 0 or cost <= 0 or mark <= 0:
+            return peak
+        changed = False
+        max_gain = max(hard_arm * Decimal("4"), Decimal("0.25"))
+        max_peak = cost * (Decimal("1") + max_gain)
+        if peak > max_peak:
+            peak = max_peak
+            changed = True
+        # Peak so far above mark that trigger is sticky / exit would be < BE.
+        sticky = peak > mark * (Decimal("1") + active_dd + Decimal("0.02"))
+        if sticky and mark < cost * (Decimal("1") + soft_arm):
+            peak = mark
+            changed = True
+        if changed:
+            st["peak"] = peak
+            self._bump_skip("trail_peak_rewound")
+            logger.warning(
+                "TRAIL_PEAK_REWOUND base=%s cost=%s mark=%s peak=%s",
+                base,
+                cost,
+                mark,
+                peak,
+            )
+        return peak
+
+    def _sanitize_persisted_trails(self) -> None:
+        """Clamp polluted peaks loaded from disk before the first live cycle."""
+        for trail_key, st in list(self._trail.items()):
+            if not isinstance(st, dict):
+                continue
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0:
+                continue
+            soft_arm, soft_dd, hard_arm, hard_dd = self._scaled_arms(
+                str(st.get("base") or trail_key.split(":")[-1]), cost
+            )
+            active_dd = hard_dd if st.get("hard_armed") else soft_dd
+            self._sanitize_trail_peak(
+                st,
+                base=str(st.get("base") or ""),
+                cost=cost,
+                mark=mark,
+                soft_arm=soft_arm,
+                hard_arm=hard_arm,
+                active_dd=active_dd,
+            )
+
     def _trail_update_state(
         self, venue: str, base: str, *, cost: Decimal, mark: Decimal
     ) -> dict[str, Any]:
@@ -2271,11 +2389,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         st["gain"] = str(gain)
 
         # Reject one-tick mark spikes (bad ticker/print) before arming trail.
-        mark_spike = False
-        if prev_mark > 0 and mark >= prev_mark * Decimal("1.08"):
-            mark_spike = True
-        elif gain >= max(soft_arm * Decimal("5"), Decimal("0.10")):
-            mark_spike = True
+        mark_spike = self._is_trail_mark_spike(
+            prev_mark=prev_mark, mark=mark, cost=cost, soft_arm=soft_arm
+        )
         if mark_spike and not st.get("soft_armed") and gain >= soft_arm:
             logger.warning(
                 "TRAIL_MARK_SPIKE_IGNORED base=%s cost=%s prev=%s mark=%s gain=%.2f%%",
@@ -2319,24 +2435,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
 
         if st.get("soft_armed") and not st.get("hard_armed") and gain >= hard_arm:
-            st["hard_armed"] = True
-            st["newly_hard"] = True
-            st["drawdown"] = str(hard_dd)
-            if mark > Decimal(str(st.get("peak") or 0)):
-                st["peak"] = mark
-            self._push_alert(
-                "hard_arm",
-                f"{base} hard-arm +{float(gain * 100):.1f}%",
-                base=base,
-            )
-            logger.info(
-                "TRAIL_HARD_ARM base=%s cost=%s mark=%s gain=%.2f%% arm=%.2f%%",
-                base,
-                cost,
-                mark,
-                float(gain * 100),
-                float(hard_arm * 100),
-            )
+            peak_spike = self._is_trail_peak_spike(prev_mark=prev_mark, mark=mark)
+            if peak_spike:
+                logger.warning(
+                    "TRAIL_HARD_ARM_SPIKE_IGNORED base=%s prev=%s mark=%s",
+                    base,
+                    prev_mark,
+                    mark,
+                )
+                self._bump_skip("trail_peak_spike")
+            else:
+                st["hard_armed"] = True
+                st["newly_hard"] = True
+                st["drawdown"] = str(hard_dd)
+                peak_now = Decimal(str(st.get("peak") or 0))
+                self._maybe_raise_trail_peak(
+                    st,
+                    base=base,
+                    cost=cost,
+                    mark=mark,
+                    prev_mark=prev_mark,
+                    soft_arm=soft_arm,
+                    peak=peak_now,
+                )
+                self._push_alert(
+                    "hard_arm",
+                    f"{base} hard-arm +{float(gain * 100):.1f}%",
+                    base=base,
+                )
+                logger.info(
+                    "TRAIL_HARD_ARM base=%s cost=%s mark=%s gain=%.2f%% arm=%.2f%%",
+                    base,
+                    cost,
+                    mark,
+                    float(gain * 100),
+                    float(hard_arm * 100),
+                )
 
         if not st.get("soft_armed"):
             if self._time_stop_enabled:
@@ -2348,10 +2482,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return st
 
         peak = Decimal(str(st.get("peak") or 0))
-        if mark > peak:
-            st["peak"] = mark
-            peak = mark
+        peak = self._maybe_raise_trail_peak(
+            st,
+            base=base,
+            cost=cost,
+            mark=mark,
+            prev_mark=prev_mark,
+            soft_arm=soft_arm,
+            peak=peak,
+        )
         active_dd = hard_dd if st.get("hard_armed") else soft_dd
+        peak = self._sanitize_trail_peak(
+            st,
+            base=base,
+            cost=cost,
+            mark=mark,
+            soft_arm=soft_arm,
+            hard_arm=hard_arm,
+            active_dd=active_dd,
+        )
         st["drawdown"] = str(active_dd)
         if peak > 0 and mark <= peak * (Decimal("1") - active_dd):
             st["triggered"] = True
