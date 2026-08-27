@@ -663,12 +663,15 @@ async def logout() -> Response:
     return response
 
 
-@app.get("/", response_class=HTMLResponse)
-@app.get("/live/dashboard", response_class=HTMLResponse)
-@app.get("/live/micro/dashboard", response_class=HTMLResponse)
-@app.get("/dashboard", response_class=HTMLResponse)
-async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    """Primary live operator dashboard."""
+@app.get("/", response_class=HTMLResponse, response_model=None)
+@app.get("/live/dashboard", response_class=HTMLResponse, response_model=None)
+@app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
+@app.get("/dashboard", response_class=HTMLResponse, response_model=None)
+async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse | RedirectResponse:
+    """Live operator dashboard; paper lab instances redirect to the simple lab UI."""
+    settings = get_settings()
+    if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
+        return RedirectResponse(url="/paper/dashboard", status_code=303)
     return render_live_dashboard(await _live_dashboard_payload())
 
 
@@ -717,27 +720,33 @@ async def paper_dashboard(
     request: Request,
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse | RedirectResponse:
-    """Paper dashboard on paper lab instances; live process redirects away."""
+    """Simple Paper Lab UI (params + status). Live process redirects away."""
+    del request  # path handled by dual route registration
     settings = get_settings()
     if not (
         settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled
     ):
         return RedirectResponse(url="/live/dashboard", status_code=303)
-    from bot.paper.dashboard import render_dashboard, render_dashboard_lite
+    from bot.paper.lab_dashboard import render_lab_dashboard
 
     runner = get_paper_runner()
-    payload = {
-        "status": runner.status(),
-        "performance": runner.tracker.snapshot().model_dump(mode="json"),
-        "portfolio": {
-            "equity": str(runner.portfolio.state.total_equity),
-            "starting_capital": str(settings.paper_starting_eur),
-        },
-        "market_data": get_market_data_service().status(),
-    }
-    if request.url.path.endswith("dashboard-lite"):
-        return render_dashboard_lite(payload)
-    return render_dashboard(payload)
+    return render_lab_dashboard(
+        settings=settings,
+        status=runner.status(),
+        performance=runner.tracker.snapshot().model_dump(mode="json"),
+    )
+
+
+@app.get("/paper/lab/params")
+async def paper_lab_params(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    settings = get_settings()
+    if not (
+        settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled
+    ):
+        raise HTTPException(status_code=403, detail="Paper lab only")
+    from bot.paper.lab_dashboard import lab_params_payload
+
+    return lab_params_payload(settings)
 
 
 @app.get("/strategy-lab/api")
