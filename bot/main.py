@@ -200,18 +200,33 @@ async def lifespan(_app: FastAPI):
     get_kill_switch()
     get_micro_engine().arm()
     md = get_market_data_service()
-    # Live-only API process: do not start the legacy paper runner loop.
-    # If uvicorn restarted mid continuous micro session, resume so portfolio
-    # marks keep updating (otherwise the dashboard freezes on the status file).
-    try:
-        resume = await get_micro_session_manager().resume_if_interrupted()
-        if resume and resume.get("started"):
-            logger.info("auto-resumed continuous micro session after process start")
-        elif resume and not resume.get("started"):
-            logger.warning("micro session auto-resume did not start: %s", resume)
-    except Exception:  # noqa: BLE001
-        logger.exception("failed to auto-resume interrupted micro session")
+    paper_runner = None
+    # Paper lab instances: auto-start PaperRunner only (never live orders).
+    if settings.paper_trading_enabled and settings.paper_auto_start:
+        paper_runner = get_paper_runner()
+        await paper_runner.start()
+        logger.info(
+            "paper auto-start enabled persist=%s port=%s",
+            settings.paper_persist_path,
+            settings.api_port,
+        )
+    # Live micro: resume continuous session after uvicorn restart. Skip on
+    # pure paper lab processes so they never touch live micro state.
+    elif bool(settings.live_micro_enabled or settings.live_trading_enabled):
+        try:
+            resume = await get_micro_session_manager().resume_if_interrupted()
+            if resume and resume.get("started"):
+                logger.info("auto-resumed continuous micro session after process start")
+            elif resume and not resume.get("started"):
+                logger.warning("micro session auto-resume did not start: %s", resume)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume interrupted micro session")
     yield
+    if paper_runner is not None:
+        try:
+            await paper_runner.shutdown()
+        except Exception:  # noqa: BLE001
+            logger.exception("paper runner shutdown failed")
     await md.stop()
 
 
@@ -221,11 +236,15 @@ app = FastAPI(
         "Production-oriented cryptocurrency trading API. "
         "Strategies emit opportunities; profitability and risk gate execution. "
         "No withdrawal functionality is exposed. No leverage in this version. "
-        "Live Bitvavo micro sessions are the production path; paper/research APIs removed."
+        "Live micro (:8020) and isolated paper lab instances share this codebase."
     ),
     version=__version__,
     lifespan=lifespan,
 )
+
+from bot.paper.api import router as paper_api_router  # noqa: E402
+
+app.include_router(paper_api_router)
 
 @app.exception_handler(DashboardLoginRedirect)
 async def _dashboard_login_redirect(_request: Request, exc: DashboardLoginRedirect):
@@ -254,14 +273,22 @@ async def status() -> dict[str, Any]:
     ks = get_kill_switch().status()
     funding_flags = get_funding_service().public_status_flags()
     micro = get_micro_session_manager().status()
+    paper_running = False
+    if settings.paper_trading_enabled:
+        try:
+            paper_running = bool(get_paper_runner().running)
+        except Exception:  # noqa: BLE001
+            paper_running = False
     return {
         "version": __version__,
         "environment": settings.app_env,
         "execution_mode": settings.execution_mode.value,
         "exchange": settings.exchange_name,
-        "paper_mode": False,
-        "paper_trading_enabled": False,
-        "paper_running": False,
+        "paper_mode": settings.execution_mode == ExecutionMode.PAPER,
+        "paper_trading_enabled": bool(settings.paper_trading_enabled),
+        "paper_running": paper_running,
+        "paper_persist_path": settings.paper_persist_path,
+        "api_port": settings.api_port,
         "micro_session_running": bool(micro.get("running")),
         "market_data_mode": settings.market_data_mode,
         "live_trading_enabled": bool(settings.live_trading_enabled or settings.live_micro_enabled),
@@ -677,22 +704,40 @@ async def live_pwa_icon() -> Response:
 
 
 @app.get("/fleet", response_class=HTMLResponse)
-@app.get("/paper/dashboard", response_class=HTMLResponse)
-@app.get("/paper/dashboard-lite", response_class=HTMLResponse)
 @app.get("/strategy-lab", response_class=HTMLResponse)
 @app.get("/lab", response_class=HTMLResponse)
-async def legacy_paper_dashboards_redirect() -> RedirectResponse:
-    """Paper / fleet / lab HTML dashboards removed — live only."""
+async def legacy_research_dashboards_redirect() -> RedirectResponse:
+    """Research HTML surfaces redirect to the live operator dashboard."""
     return RedirectResponse(url="/live/dashboard", status_code=303)
 
 
-@app.api_route("/paper/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def paper_apis_removed(path: str) -> dict[str, Any]:
-    """Legacy paper trading surface removed from the live bot."""
-    raise HTTPException(
-        status_code=410,
-        detail="Paper trading APIs removed — use /live/micro/session and /live/dashboard",
-    )
+@app.get("/paper/dashboard", response_class=HTMLResponse, response_model=None)
+@app.get("/paper/dashboard-lite", response_class=HTMLResponse, response_model=None)
+async def paper_dashboard(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse | RedirectResponse:
+    """Paper dashboard on paper lab instances; live process redirects away."""
+    settings = get_settings()
+    if not (
+        settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled
+    ):
+        return RedirectResponse(url="/live/dashboard", status_code=303)
+    from bot.paper.dashboard import render_dashboard, render_dashboard_lite
+
+    runner = get_paper_runner()
+    payload = {
+        "status": runner.status(),
+        "performance": runner.tracker.snapshot().model_dump(mode="json"),
+        "portfolio": {
+            "equity": str(runner.portfolio.state.total_equity),
+            "starting_capital": str(settings.paper_starting_eur),
+        },
+        "market_data": get_market_data_service().status(),
+    }
+    if request.url.path.endswith("dashboard-lite"):
+        return render_dashboard_lite(payload)
+    return render_dashboard(payload)
 
 
 @app.get("/strategy-lab/api")
