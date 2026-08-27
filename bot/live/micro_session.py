@@ -149,7 +149,10 @@ def _session_settings(
             "arbitrage_max_emits_per_cycle": 4 if cross_venue else 2,
             "paper_cycle_interval_ms": 1200.0,
             # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
+            # First entry matches min notional; adds after soft-arm scale up.
             "paper_maker_min_notional_eur": min(70.0, max(55.0, budget_f * 0.03)),
+            "live_micro_first_clip_eur": min(70.0, max(55.0, budget_f * 0.03)),
+            "live_micro_add_clip_eur": 120.0,
             # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.08,
             "paper_maker_min_net_return": 0.0010,
@@ -206,12 +209,14 @@ def _session_settings(
             "paper_min_alt_inventory_pct": 15.0,
             "paper_inventory_ask_improve_bps": 2.0,
             # Underweight venues buy sooner (OKX cash deployment).
-            "paper_inventory_buy_dip_bps": 3.0,
+            # Prefer cash / rising entries — do not force underweight dip buys.
+            "paper_inventory_buy_dip_bps": 0.0,
             "paper_maker_keep_vs_best_frac": 0.60,  # only near-best NET emits
             "live_micro_underwater_buy_block": 3,
             "live_micro_underwater_min_notional_eur": 25.0,
             "live_micro_cross_venue_min_fill_rate": 0.30,
             "live_micro_cross_venue_min_attempts": 8,
+            "live_micro_block_cross_venue_duplicate_bases": True,
             "live_micro_okx_deploy_bases": str(
                 getattr(
                     base,
@@ -275,7 +280,7 @@ def _session_settings(
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else ",".join(_LIQUID_EUR_SYMBOLS),
-            "live_micro_max_alt_bases": 3,
+            "live_micro_max_alt_bases": 2,
             # Cap live order size (env must not silently allow full pocket).
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
             "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),

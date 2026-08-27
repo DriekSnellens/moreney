@@ -284,6 +284,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._max_alt_bases = int(
             getattr(settings, "live_micro_max_alt_bases", 0) or 0
         )
+        self._block_cross_venue_duplicate_bases = bool(
+            getattr(settings, "live_micro_block_cross_venue_duplicate_bases", True)
+        )
+        self._first_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_first_clip_eur", 0) or 0)
+        )
+        self._add_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_add_clip_eur", 0) or 0)
+        )
         self._MarkSeries = MarkSeries
         self._try_load_persisted_state()
 
@@ -743,6 +752,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             },
             "alerts": list(self._alerts[-10:]),
             "max_alt_bases": self._max_alt_bases,
+            "block_cross_venue_duplicate_bases": self._block_cross_venue_duplicate_bases,
+            "first_clip_eur": str(self._first_clip_eur),
+            "add_clip_eur": str(self._add_clip_eur),
             "held_alt_bases": sorted(self._held_alt_bases()),
             "held_alt_bases_by_venue": {
                 v: sorted(self._held_alt_bases(v)) for v in sorted(self._execute_venues)
@@ -894,6 +906,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hints.append(f"FEES_EAT_EDGE n={self.skips.get('fees_eat_edge')}")
         if self.skips.get("momentum_block", 0) > 0:
             hints.append(f"MOMENTUM_BLOCK n={self.skips.get('momentum_block')}")
+        if self.skips.get("cross_venue_duplicate_base", 0) > 0:
+            hints.append(
+                f"CROSS_VENUE_DUPLICATE_BASE n={self.skips.get('cross_venue_duplicate_base')}"
+            )
         if self.skips.get("corr_group_cap", 0) > 0:
             hints.append(f"CORR_GROUP_CAP n={self.skips.get('corr_group_cap')}")
         if self.skips.get("policy_blocked", 0) > 0:
@@ -2284,6 +2300,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     def _is_new_base_buy(self, venue: str, base: str) -> bool:
         return base.upper() not in self._held_alt_bases(venue)
+
+    def _is_cross_venue_duplicate_base(self, venue: str, base: str) -> bool:
+        """True when opening a base already held on another execute venue."""
+        if not self._block_cross_venue_duplicate_bases:
+            return False
+        b = str(base or "").upper()
+        if not b or b in self._exclude_bases or self._is_long_hold(b):
+            return False
+        if b in self._held_alt_bases(venue):
+            return False  # same-venue top-up / add
+        return b in self._held_alt_bases(None)
+
+    def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
+        """Max buy notional: first_clip until soft-armed, then add_clip."""
+        first = self._first_clip_eur
+        add = self._add_clip_eur
+        if first <= 0 and add <= 0:
+            return None
+        st = self._trail.get(self._lots_key(venue, base)) or {}
+        if st.get("soft_armed") and add > 0:
+            return add
+        if first > 0:
+            return first
+        return add if add > 0 else None
+
     @staticmethod
     def _is_trail_mark_spike(
         *,
@@ -3264,6 +3305,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"(max {self._max_alt_bases} bases for trail concentration)"
                     ),
                 )
+        # One base → one venue: don't open FET on OKX when Bitvavo already holds FET.
+        if (
+            side_is_buy
+            and self._is_cross_venue_duplicate_base(venue, base)
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+        ):
+            self._bump_skip("cross_venue_duplicate_base")
+            return await self._reject_before_live(
+                order_request,
+                reason="CROSS_VENUE_DUPLICATE_BASE",
+                message=(
+                    f"{base} already held on another venue "
+                    f"(block opening on {venue})"
+                ),
+            )
         # Correlation cluster: max N from ADA/ATOM/NEAR/SOL/XRP group.
         if (
             side_is_buy
@@ -3328,6 +3385,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         order_request,
                         reason="INSUFFICIENT_LIVE_QUOTE",
                         message=f"live {self._quote} free {live_eur} pocket {remaining}",
+                    )
+                order_request = order_request.model_copy(update={"quantity": qty})
+            # Smaller first clip; scale up only after soft-arm on this bag.
+            clip_cap = self._buy_clip_cap_eur(venue, base)
+            if (
+                clip_cap is not None
+                and clip_cap > 0
+                and notional > clip_cap
+                and not meta.get("dust_top_up")
+            ):
+                qty = (clip_cap / px).quantize(Decimal("0.00000001"))
+                notional = qty * px
+                if qty <= 0 or notional < _MIN_LIVE_NOTIONAL:
+                    self._bump_skip("clip_too_small")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="CLIP_TOO_SMALL",
+                        message=f"buy clip cap €{clip_cap} below min live notional",
                     )
                 order_request = order_request.model_copy(update={"quantity": qty})
             # Ladder entries: first leg joins the strategy bid (touch), deeper

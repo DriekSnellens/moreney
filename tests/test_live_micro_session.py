@@ -98,7 +98,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_allow_buy_only is True
     assert cfg.paper_maker_one_leg_exit is False
     assert cfg.paper_inventory_ask_improve_bps == 2.0
-    assert cfg.paper_inventory_buy_dip_bps >= 2.0
+    assert cfg.paper_inventory_buy_dip_bps == 0.0
     assert cfg.paper_ladder_buy_pcts.startswith("0,")
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
@@ -124,7 +124,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_min_net_return >= 0.0010
     assert cfg.paper_maker_min_notional_eur >= 55.0
     assert cfg.max_simultaneous_positions == 3
-    assert cfg.live_micro_max_alt_bases == 3
+    assert cfg.live_micro_max_alt_bases == 2
+    assert cfg.live_micro_block_cross_venue_duplicate_bases is True
+    assert float(cfg.live_micro_first_clip_eur) >= 55.0
+    assert float(cfg.live_micro_add_clip_eur) >= 100.0
+    assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
     assert cfg.live_micro_max_open_orders == 8
     assert cfg.live_micro_max_open_orders_per_venue == 8
     assert cfg.live_micro_resting_max_age_sec >= 480.0
@@ -948,6 +952,87 @@ def test_held_alt_bases_are_per_venue_not_global() -> None:
     assert len(bridge._held_alt_bases("bitvavo")) == 3  # noqa: SLF001
     assert bridge._held_alt_bases("okx") == {"SOL"}  # noqa: SLF001
     assert len(bridge._held_alt_bases("okx")) < bridge._max_alt_bases  # noqa: SLF001
+    # Global union still sees all four — used for cross-venue duplicate checks.
+    assert bridge._held_alt_bases(None) >= {"ADA", "ATOM", "NEAR", "SOL"}  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("okx", "ADA") is True  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("bitvavo", "ADA") is False  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("okx", "DOT") is False  # noqa: SLF001
+
+
+def test_buy_clip_cap_uses_first_then_add_after_soft_arm() -> None:
+    settings = _unlocked(
+        live_micro_first_clip_eur=55.0,
+        live_micro_add_clip_eur=120.0,
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.02,
+        paper_trail_atr_enabled=False,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    assert bridge._buy_clip_cap_eur("bitvavo", "SOL") == Decimal("55")  # noqa: SLF001
+    cost = Decimal("100")
+    bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "SOL", cost=cost, mark=Decimal("102.5")
+    )
+    assert bridge._buy_clip_cap_eur("bitvavo", "SOL") == Decimal("120")  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_cross_venue_duplicate_base_rejects_buy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_block_cross_venue_duplicate_bases=True,
+        paper_buy_momentum_enabled=False,
+        paper_maker_min_notional_eur=10.0,
+        live_micro_max_alt_bases=5,
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("FETEUR", Decimal("1"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+        allowed_bases={"FET", "SOL"},
+    )
+    bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="FET", free=Decimal("100"), locked=Decimal("0")),
+        Balance(asset="EUR", free=Decimal("200"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["okx"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("200"), locked=Decimal("0")),
+    ]
+
+    async def fake_live_free(venue: str, asset: str) -> Decimal:
+        if asset.upper() == "EUR":
+            return Decimal("200")
+        return Decimal("0")
+
+    monkeypatch.setattr(bridge, "_live_free", fake_live_free)
+    monkeypatch.setattr(
+        bridge, "_venue_budget_remaining", lambda _v: Decimal("200")
+    )
+    req = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="FETEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("50"),
+        limit_price=Decimal("1"),
+        metadata={"venue": "okx"},
+    )
+    result = await bridge.execute(req)
+    assert result.status == OrderStatus.REJECTED
+    assert bridge.skips.get("cross_venue_duplicate_base", 0) >= 1
 
 
 def test_policy_max_open_orders_per_venue_setting() -> None:
