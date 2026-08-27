@@ -2265,17 +2265,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             held = set(held) | {adding.upper()}
         return len(held & self._corr_group)
 
-    def _momentum_ok(self, symbol: str) -> bool:
+    def _momentum_ok(self, symbol: str, *, require_history: bool = False) -> bool:
+        """True when rolling mark return is at/above the configured floor.
+
+        ``require_history`` (new-base entries): block until enough samples exist
+        so cold symbols cannot slip through as "unknown momentum".
+        """
         if not self._momentum_enabled:
             return True
         series = self._series_for(symbol)
-        if len(series) < max(3, min(6, self._momentum_samples // 2)):
-            return True  # not enough history yet — don't freeze entries
+        need = max(3, min(6, self._momentum_samples // 2))
+        if len(series) < need:
+            return not require_history
         mom = series.momentum_return()
         if mom is None:
-            return True
+            return not require_history
         return mom >= self._momentum_min
 
+    def _is_new_base_buy(self, venue: str, base: str) -> bool:
+        return base.upper() not in self._held_alt_bases(venue)
     @staticmethod
     def _is_trail_mark_spike(
         *,
@@ -3284,15 +3292,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
             and not meta.get("trail_take_profit")
+            and self._is_new_base_buy(venue, base)
         ):
-            if not self._momentum_ok(symbol):
+            # New crypto only: require rising mark momentum before first entry.
+            if not self._momentum_ok(symbol, require_history=True):
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
                     order_request,
                     reason="MOMENTUM_BLOCK",
                     message=(
-                        f"mark momentum below {self._momentum_min} "
-                        f"over ~{self._momentum_samples} samples"
+                        f"new base {base} needs rising momentum "
+                        f"(>={self._momentum_min} over ~{self._momentum_samples} samples)"
                     ),
                 )
 

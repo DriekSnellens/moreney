@@ -112,7 +112,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
-    assert cfg.paper_buy_momentum_enabled is False
+    assert cfg.paper_buy_momentum_enabled is True
+    assert cfg.paper_buy_momentum_min_return >= 0.001
+    assert cfg.paper_buy_momentum_samples >= 8
     assert cfg.live_micro_max_per_corr_group == 2
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is True
@@ -129,7 +131,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 35.0
     assert cfg.paper_trail_soft_partial_pct == 0.50
-    assert cfg.paper_trail_soft_drawdown_pct == 0.004
+    assert cfg.paper_trail_soft_drawdown_pct == 0.005
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 3
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
@@ -146,6 +148,56 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert "SOLEUR" in liquid
     assert "LINKEUR" in liquid
     assert "BNBEUR" not in liquid
+
+
+def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) -> None:
+    cfg = _session_settings(
+        Settings(
+            live_trading_enabled=True,
+            live_micro_enabled=True,
+            live_orders_unlocked=True,
+            live_allow_without_research_unlock=True,
+        ),
+        budget_eur=Decimal("2000"),
+        symbols=["SOLEUR", "FETEUR"],
+        persist_path=tmp_path / "mom_settings.json",
+    )
+    assert cfg.paper_buy_momentum_enabled is True
+    assert float(cfg.paper_buy_momentum_min_return) >= 0.0015
+
+
+def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_min_return=0.0015,
+        paper_buy_momentum_samples=12,
+        live_micro_bridge_persist_path=str(tmp_path / "mom.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    symbol = "NEWEUR"
+    # Falling marks → not rising.
+    series = bridge._series_for(symbol)  # noqa: SLF001
+    for px in (100, 99.8, 99.5, 99.2, 99.0, 98.8):
+        series.push(Decimal(str(px)))
+    assert bridge._is_new_base_buy("okx", "NEW") is True  # noqa: SLF001
+    assert bridge._momentum_ok(symbol, require_history=True) is False  # noqa: SLF001
+
+    # Rising marks clear the gate.
+    series2 = bridge._series_for("RISEEUR")  # noqa: SLF001
+    for px in (100, 100.1, 100.2, 100.4, 100.6, 100.8):
+        series2.push(Decimal(str(px)))
+    assert bridge._momentum_ok("RISEEUR", require_history=True) is True  # noqa: SLF001
+
+    # Cold symbol with require_history stays blocked.
+    assert bridge._momentum_ok("COLDEUR", require_history=True) is False  # noqa: SLF001
+    # Existing-bag path may still allow sparse history.
+    assert bridge._momentum_ok("COLDEUR", require_history=False) is True  # noqa: SLF001
 
 
 def test_portfolio_sync_live_balances_caps_quote() -> None:

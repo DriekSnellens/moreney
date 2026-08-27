@@ -164,7 +164,7 @@ def _session_settings(
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
             "paper_trail_soft_arm_pct": 0.020,  # trail-lab best IS/OOS (synthetic+live costs)
-            "paper_trail_soft_drawdown_pct": 0.004,  # faster soft trail while ≥ BE
+            "paper_trail_soft_drawdown_pct": 0.005,  # floor (≥ config min); pullback harvest ≥BE
             "paper_trail_soft_partial_pct": 0.50,  # trail-lab: earlier/larger harvest ≥BE
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
@@ -186,8 +186,9 @@ def _session_settings(
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,
-            "paper_buy_momentum_enabled": False,
-            "paper_buy_momentum_min_return": 0.0,
+            # New-base entries only on rising mark momentum (fits never-loss trail).
+            "paper_buy_momentum_enabled": True,
+            "paper_buy_momentum_min_return": 0.0015,  # ≥+0.15% over rolling samples
             "paper_buy_momentum_samples": 12,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             "live_micro_corr_group": "ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
