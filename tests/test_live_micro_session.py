@@ -1767,7 +1767,7 @@ def test_underwater_bag_count_per_venue() -> None:
     assert bridge.underwater_bag_count(min_notional_eur=25) == 2
 
 
-def test_underwater_venue_block_only_affects_that_venue() -> None:
+def test_underwater_base_block_only_affects_that_base() -> None:
     bridge = MicroBudgetLiveExecutor(
         _unlocked(),
         portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("500")),
@@ -1776,10 +1776,49 @@ def test_underwater_venue_block_only_affects_that_venue() -> None:
         live_maker=True,
     )
     bridge.set_buys_blocked(False)
-    bridge.set_underwater_venue_blocks({"bitvavo"}, new_bases_only=True)
-    assert bridge._venue_underwater_blocked("bitvavo") is True  # noqa: SLF001
-    assert bridge._venue_underwater_blocked("okx") is False  # noqa: SLF001
+    bridge.set_underwater_base_blocks({"bitvavo": {"SOL"}}, new_bases_only=True)
+    assert bridge._base_underwater_blocked("bitvavo", "SOL") is True  # noqa: SLF001
+    assert bridge._base_underwater_blocked("bitvavo", "ATOM") is False  # noqa: SLF001
+    assert bridge._base_underwater_blocked("okx", "SOL") is False  # noqa: SLF001
     assert bridge._buys_blocked is False  # noqa: SLF001
+
+
+def test_underwater_bases_by_venue() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked()
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("SOLEUR", Decimal("90"))
+    portfolio.set_mark_price("ADAEUR", Decimal("0.30"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._trail["bitvavo:SOL"] = {  # noqa: SLF001
+        "venue": "bitvavo",
+        "base": "SOL",
+        "cost": "100",
+        "last_mark": "90",
+    }
+    bridge._trail["okx:ADA"] = {  # noqa: SLF001
+        "venue": "okx",
+        "base": "ADA",
+        "cost": "0.35",
+        "last_mark": "0.30",
+    }
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="SOL", free=Decimal("1"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["okx"] = [  # noqa: SLF001
+        Balance(asset="ADA", free=Decimal("100"), locked=Decimal("0")),
+    ]
+    by_venue = bridge.underwater_bases(min_notional_eur=25)
+    assert by_venue.get("bitvavo") == {"SOL"}
+    assert by_venue.get("okx") == {"ADA"}
 
 
 def test_maker_cross_venue_paused_skips_cross_pairs() -> None:

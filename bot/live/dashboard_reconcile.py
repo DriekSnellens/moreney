@@ -251,7 +251,7 @@ async def reconcile_dashboard_since(
     bridge._session_started_ms = since_ms
     bridge.skips.clear()
     bridge.set_buys_blocked(False)
-    bridge.set_underwater_venue_blocks(set())
+    bridge.set_underwater_base_blocks({})
 
     hist_path = history_path_override or history_path()
     clear_history(path=hist_path)

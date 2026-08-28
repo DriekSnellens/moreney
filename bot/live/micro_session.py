@@ -632,39 +632,51 @@ async def run_session(
                         or 25
                     )
                 )
-                uw_blocked_venues: set[str] = set()
-                for v in sorted(getattr(bridge, "_execute_venues", ()) or ()):
-                    uw_n = bridge.underwater_bag_count(
-                        min_notional_eur=uw_floor, venue=v
-                    )
-                    if uw_block > 0 and uw_n >= uw_block:
-                        uw_blocked_venues.add(v.strip().lower())
+                uw_blocked_bases: dict[str, set[str]] = {}
+                if uw_block > 0:
+                    for v in sorted(getattr(bridge, "_execute_venues", ()) or ()):
+                        for base in bridge.underwater_bases(
+                            min_notional_eur=uw_floor, venue=v
+                        ).get(v.strip().lower(), set()):
+                            uw_blocked_bases.setdefault(v.strip().lower(), set()).add(
+                                base
+                            )
                 block_buys_full = reduce_only or toxic
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )
-                prev_uw = set(getattr(bridge, "_underwater_blocked_venues", set()) or ())
+                prev_uw = {
+                    v: set(bases)
+                    for v, bases in (
+                        getattr(bridge, "_underwater_blocked_bases", {}) or {}
+                    ).items()
+                }
                 if block_buys_full:
                     bridge.set_buys_blocked(True, new_bases_only=False)
-                    bridge.set_underwater_venue_blocks(set())
-                elif uw_blocked_venues:
+                    bridge.set_underwater_base_blocks({})
+                elif uw_blocked_bases:
                     bridge.set_buys_blocked(False)
-                    bridge.set_underwater_venue_blocks(
-                        uw_blocked_venues, new_bases_only=new_base_only
+                    bridge.set_underwater_base_blocks(
+                        uw_blocked_bases, new_bases_only=new_base_only
                     )
                 else:
                     bridge.set_buys_blocked(False)
-                    bridge.set_underwater_venue_blocks(set())
-                new_uw = uw_blocked_venues - prev_uw
+                    bridge.set_underwater_base_blocks({})
+                new_uw = {
+                    (v, b)
+                    for v, bases in uw_blocked_bases.items()
+                    for b in bases
+                } - {
+                    (v, b)
+                    for v, bases in prev_uw.items()
+                    for b in bases
+                }
                 if new_uw and not block_buys_full:
-                    for v in sorted(new_uw):
-                        uw_n = bridge.underwater_bag_count(
-                            min_notional_eur=uw_floor, venue=v
-                        )
+                    for v, base in sorted(new_uw):
                         bridge._push_alert(  # noqa: SLF001
                             "underwater_buy_block",
-                            f"{v} buys blocked: {uw_n} bags below cost "
-                            f"(threshold {uw_block}; other venues unaffected)",
+                            f"{v}:{base} new-base buys blocked while below cost "
+                            f"(other bases on {v} still scan)",
                         )
 
                 # Cross-venue: pause when live fill rate is chronically poor.

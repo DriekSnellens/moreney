@@ -292,7 +292,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._buys_blocked = False
         self._buys_blocked_new_bases_only = False
-        self._underwater_blocked_venues: set[str] = set()
+        self._underwater_blocked_bases: dict[str, set[str]] = {}
         self._underwater_new_bases_only = True
         self._daily_kill_active = False
         self._daily_kill_eur = Decimal(
@@ -635,20 +635,65 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             bool(new_bases_only) and bool(blocked) and not self._daily_kill_active
         )
 
+    def set_underwater_base_blocks(
+        self,
+        blocked_bases: dict[str, set[str] | frozenset[str] | list[str]] | None,
+        *,
+        new_bases_only: bool = True,
+    ) -> None:
+        """Block buys only on specific underwater bases — other coins keep scanning."""
+        self._underwater_blocked_bases = {
+            v.strip().lower(): {str(b).upper() for b in bases if str(b).strip()}
+            for v, bases in (blocked_bases or {}).items()
+            if str(v).strip() and bases
+        }
+        self._underwater_new_bases_only = bool(new_bases_only)
+
     def set_underwater_venue_blocks(
         self,
         blocked_venues: set[str] | frozenset[str],
         *,
         new_bases_only: bool = True,
     ) -> None:
-        """Per-venue underwater throttle — block buys only on venues with underwater bags."""
-        self._underwater_blocked_venues = {
-            v.strip().lower() for v in blocked_venues if str(v).strip()
-        }
-        self._underwater_new_bases_only = bool(new_bases_only)
+        """Legacy alias — prefer set_underwater_base_blocks (whole-venue block removed)."""
+        self.set_underwater_base_blocks({}, new_bases_only=new_bases_only)
 
-    def _venue_underwater_blocked(self, venue: str) -> bool:
-        return venue.strip().lower() in self._underwater_blocked_venues
+    def _base_underwater_blocked(self, venue: str, base: str) -> bool:
+        v = venue.strip().lower()
+        b = str(base or "").upper()
+        return bool(b) and b in self._underwater_blocked_bases.get(v, set())
+
+    def underwater_bases(
+        self,
+        *,
+        min_notional_eur: Decimal | float = 25,
+        venue: str | None = None,
+    ) -> dict[str, set[str]]:
+        """Underwater micro bases by venue (mark < cost, notional ≥ floor)."""
+        floor = Decimal(str(min_notional_eur or 0))
+        venue_filter = venue.strip().lower() if venue else None
+        out: dict[str, set[str]] = {}
+        for trail_key, st in self._trail.items():
+            if not isinstance(st, dict):
+                continue
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0 or mark >= cost:
+                continue
+            base = str(st.get("base") or trail_key.split(":", 1)[-1]).upper()
+            if self._is_long_hold(base):
+                continue
+            bag_venue = str(st.get("venue") or trail_key.split(":", 1)[0]).strip().lower()
+            if venue_filter is not None and bag_venue != venue_filter:
+                continue
+            qty = self._balance_qty(bag_venue, base)
+            if qty * mark < floor:
+                continue
+            out.setdefault(bag_venue, set()).add(base)
+        return out
 
     def underwater_bag_count(
         self,
@@ -936,8 +981,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "atr_enabled": self._atr_enabled,
                 "time_stop_sec": self._time_stop_sec if self._time_stop_enabled else None,
                 "ladder_buy": self._ladder_enabled,
-                "buys_blocked": self._buys_blocked or bool(self._underwater_blocked_venues),
-                "underwater_blocked_venues": sorted(self._underwater_blocked_venues),
+                "buys_blocked": self._buys_blocked,
+                "underwater_blocked_bases": {
+                    v: sorted(bases)
+                    for v, bases in sorted(self._underwater_blocked_bases.items())
+                },
                 "daily_kill_active": self._daily_kill_active,
                 "dust_policy": self._dust_policy,
                 "momentum_enabled": self._momentum_enabled,
@@ -1013,11 +1061,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 hints.append("BUYS_BLOCKED_REGIME (new bases only)")
             else:
                 hints.append("BUYS_BLOCKED_REGIME")
-        if self._underwater_blocked_venues:
+        if self._underwater_blocked_bases:
             mode = "new bases only" if self._underwater_new_bases_only else "all buys"
+            bits = [
+                f"{v}:{','.join(sorted(bases))}"
+                for v, bases in sorted(self._underwater_blocked_bases.items())
+                if bases
+            ]
             hints.append(
-                "UNDERWATER_VENUE_BLOCK "
-                + ",".join(sorted(self._underwater_blocked_venues))
+                "UNDERWATER_BASE_BLOCK "
+                + "; ".join(bits)
                 + f" ({mode})"
             )
 
@@ -1145,7 +1198,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Lifetime skip totals are noisy after wind-down — only surface when active.
         policy_n = int(self.skips.get("policy_blocked", 0) or 0)
         if policy_n > 0 and (
-            self._buys_blocked or bool(self._underwater_blocked_venues)
+            self._buys_blocked or bool(self._underwater_blocked_bases)
         ):
             hints.append(f"POLICY_BLOCKED n={policy_n}")
         exec_n = int(self.skips.get("execution_error", 0) or 0)
@@ -2405,7 +2458,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.skips.clear()
         self._daily_kill_active = False
         self.set_buys_blocked(False)
-        self.set_underwater_venue_blocks(set())
+        self.set_underwater_base_blocks({})
         self._session_started_ms = time.time() * 1000.0
         self.reset_paper_realized_after_inventory_sync()
         clear_history()
@@ -2436,7 +2489,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.skips.clear()
         self._daily_kill_active = False
         self.set_buys_blocked(False)
-        self.set_underwater_venue_blocks(set())
+        self.set_underwater_base_blocks({})
         self.starting_portfolio_eur = self.portfolio_value_eur
         self._session_started_ms = time.time() * 1000.0
 
@@ -2482,7 +2535,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             bool(self.skips)
             or self._daily_kill_active
             or self._buys_blocked
-            or bool(self._underwater_blocked_venues)
+            or bool(self._underwater_blocked_bases)
         )
         if not dirty:
             return False
@@ -3945,7 +3998,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 is_sub_min
                 and policy in {"top_up", "top_up_or_exit"}
                 and not self._buys_blocked
-                and not self._venue_underwater_blocked(venue)
+                and not self._base_underwater_blocked(venue, asset)
                 and not self._daily_kill_active
             ):
                 can_add = asset not in held and (
@@ -4112,28 +4165,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if (
             side_is_buy
             and self._regime_block_buys
-            and self._venue_underwater_blocked(venue)
+            and self._base_underwater_blocked(venue, base)
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
         ):
             new_base = self._is_new_base_buy(venue, base)
             if self._underwater_new_bases_only:
                 if new_base:
-                    self._bump_skip("underwater_venue_block")
+                    self._bump_skip("underwater_base_block")
                     return await self._reject_before_live(
                         order_request,
-                        reason="UNDERWATER_VENUE_BLOCK",
+                        reason="UNDERWATER_BASE_BLOCK",
                         message=(
-                            f"new-base buys blocked on {venue} while bags below cost "
-                            "(other venues still allowed)"
+                            f"new-base buy blocked for {venue}:{base} while below cost "
+                            "(other bases on venue still allowed)"
                         ),
                     )
             else:
-                self._bump_skip("underwater_venue_block")
+                self._bump_skip("underwater_base_block")
                 return await self._reject_before_live(
                     order_request,
-                    reason="UNDERWATER_VENUE_BLOCK",
-                    message=f"buys blocked on {venue} while bags below cost",
+                    reason="UNDERWATER_BASE_BLOCK",
+                    message=f"buys blocked for {venue}:{base} while below cost",
                 )
         if side_is_buy and remaining < _MIN_LIVE_NOTIONAL:
             self._bump_skip("budget_exhausted")

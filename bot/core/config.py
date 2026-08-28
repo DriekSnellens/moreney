@@ -450,8 +450,8 @@ class Settings(BaseSettings):
     # First entry / pre-soft-arm buy clip (€). Adds after soft-arm use add_clip.
     live_micro_first_clip_eur: float = Field(default=55.0, ge=10.0, le=500.0)
     live_micro_add_clip_eur: float = Field(default=120.0, ge=10.0, le=500.0)
-    # Block new buys when this many bags (notional ≥ min) sit below cost.
-    live_micro_underwater_buy_block: int = Field(default=3, ge=0, le=20)
+    # When >0: block new-base buys per underwater base (not whole venue).
+    live_micro_underwater_buy_block: int = Field(default=1, ge=0, le=20)
     live_micro_underwater_min_notional_eur: float = Field(default=25.0, ge=0)
     # When underwater throttle fires: block only new-base buys (still allow adds/top-ups).
     live_micro_underwater_block_new_bases_only: bool = True
