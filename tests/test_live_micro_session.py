@@ -151,8 +151,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
-    assert cfg.paper_trail_recovery_be_partial_pct == 0.0
-    assert cfg.paper_trail_be_harvest_partial_pct == 0.0
+    assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
+    assert cfg.paper_trail_be_harvest_partial_pct >= 0.30
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005

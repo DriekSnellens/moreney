@@ -2847,10 +2847,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 st["partial_done"] = True
         if reason in {"trail_be_harvest", "trail_recovery_be_partial"}:
             st["recovery_be_partial_done"] = True
-            st["soft_armed"] = False
-            st["triggered"] = False
-            st["peak"] = Decimal("0")
-            st["post_harvest_block_adds"] = True
 
     def _be_harvest_already_done(self, st: dict[str, Any]) -> bool:
         return bool(
@@ -3467,6 +3463,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and self._cut_loss_eligible(st, venue=venue, base=asset)
                 and be is not None
                 and mark < be
+                and self._momentum_enabled
+                and self._momentum_down(symbol)
                 and mark <= early_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
@@ -4161,18 +4159,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"buy blocked: already holding {venue}:{base}; "
                     "scan other bases with momentum"
                 ),
-            )
-        st = self._trail.get(self._lots_key(venue, base)) or {}
-        if (
-            side_is_buy
-            and st.get("post_harvest_block_adds")
-            and not meta.get("dust_top_up")
-        ):
-            self._bump_skip("post_harvest_add_block")
-            return await self._reject_before_live(
-                order_request,
-                reason="POST_HARVEST_ADD_BLOCK",
-                message=f"add blocked after harvest on {venue}:{base}",
             )
         if (
             side_is_buy

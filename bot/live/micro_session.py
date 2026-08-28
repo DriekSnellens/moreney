@@ -174,8 +174,8 @@ def _session_settings(
             "paper_trail_soft_drawdown_pct": 0.002,
             "paper_trail_soft_partial_pct": 0.0,
             # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
-            "paper_trail_recovery_be_partial_pct": 0.0,
-            "paper_trail_be_harvest_partial_pct": 0.0,
+            "paper_trail_recovery_be_partial_pct": 0.35,
+            "paper_trail_be_harvest_partial_pct": 0.35,
             "paper_trail_be_harvest_min_gain_pct": 0.0005,
             "live_micro_be_harvest_cooldown_sec": 15.0,
             "paper_trail_hard_arm_pct": 0.06,
