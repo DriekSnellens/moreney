@@ -179,7 +179,7 @@ class Settings(BaseSettings):
     paper_buy_momentum_min_return: float = Field(default=0.0, ge=-0.5, le=0.5)
     paper_buy_momentum_samples: int = Field(default=12, ge=3, le=200)
     # Correlation group cap (comma bases).
-    live_micro_corr_group: str = "ADA,ATOM,NEAR,SOL,XRP,DOT"
+    live_micro_corr_group: str = "BTC,ADA,ATOM,NEAR,SOL,XRP,DOT"
     live_micro_max_per_corr_group: int = Field(default=2, ge=1, le=10)
     # Daily realized loss kill-switch for new buys (EUR).
     paper_daily_kill_eur: float = Field(default=50.0, ge=0)
@@ -484,7 +484,7 @@ class Settings(BaseSettings):
     # Durable trail/resting/session counters across micro session restarts.
     live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
     # OKX: prefer deploying free EUR into these liquid bases (not Bitvavo max-base bags).
-    live_micro_okx_deploy_bases: str = "ADA,NEAR,DOT,XRP,LINK,ATOM"
+    live_micro_okx_deploy_bases: str = "BTC,ADA,NEAR,DOT,XRP,LINK,ATOM"
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.2 = 20% richer).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.2, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).

@@ -109,7 +109,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             v.strip().lower() for v in (execute_venues or {"bitvavo"}) if v.strip()
         }
         self._exclude_bases = {
-            b.strip().upper() for b in (exclude_bases or {"BTC"}) if b.strip()
+            b.strip().upper() for b in (exclude_bases or set()) if b.strip()
         }
         self._allowed_bases = (
             {b.strip().upper() for b in allowed_bases if b and str(b).strip()}
@@ -4056,7 +4056,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         symbol = order_request.symbol.upper().replace("/", "").replace("-", "")
         base = infer_base_asset(symbol)
-        if base in self._exclude_bases or symbol.startswith("BTC"):
+        if base in self._exclude_bases:
             self._bump_skip("excluded_base")
             return await self._reject_before_live(
                 order_request, reason="EXCLUDED_BASE", message=f"base {base} excluded"

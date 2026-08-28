@@ -2921,7 +2921,7 @@ def _micro_session_panel_html(session: dict[str, Any]) -> str:
         </span>
       </div>
       <p class="forecast-note">
-        Volledige bot-pipeline met hard kapitaallimiet. BTC standaard uit.
+        Volledige bot-pipeline met hard kapitaallimiet. BTC mag gekocht en verkocht worden.
         API: <code>/live/micro/session</code>
       </p>
       <div class="metric-grid compact">
@@ -2936,7 +2936,7 @@ def _micro_session_panel_html(session: dict[str, Any]) -> str:
       </div>
       <p class="forecast-note">Laatste live: {_esc(last_txt)}</p>
       <div class="controls">
-        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:true}})">Start continuous / €2024</button>
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:false}})">Start continuous / €2024</button>
         <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop sessie</button>
       </div>
     </section>

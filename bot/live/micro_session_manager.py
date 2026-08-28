@@ -132,7 +132,7 @@ class MicroSessionManager:
         return {
             "minutes": None,
             "budget_eur": budget_f,
-            "exclude_btc": bool(raw.get("exclude_btc", True)),
+            "exclude_btc": bool(raw.get("exclude_btc", False)),
         }
 
     async def resume_if_interrupted(self) -> dict[str, Any] | None:
@@ -166,7 +166,7 @@ class MicroSessionManager:
         *,
         minutes: float | None = None,
         budget_eur: float = 2000.0,
-        exclude_btc: bool = True,
+        exclude_btc: bool = False,
         symbols: list[str] | None = None,
         settings: Settings | None = None,
     ) -> dict[str, Any]:

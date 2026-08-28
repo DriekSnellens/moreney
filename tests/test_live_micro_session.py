@@ -161,17 +161,21 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
+    assert "BTC" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
     # Liquid day-trade allowlist.
     from bot.live.micro_session import _liquid_symbols
 
-    liquid = _liquid_symbols(Settings(), exclude_btc=True)
+    liquid = _liquid_symbols(_unlocked(live_micro_symbols="*"), exclude_btc=True)
     assert len(liquid) >= 18
     assert "ETHEUR" in liquid
     assert "SOLEUR" in liquid
     assert "LINKEUR" in liquid
+    assert "BTCEUR" not in liquid
+    with_btc = _liquid_symbols(_unlocked(live_micro_symbols="*"), exclude_btc=False)
+    assert "BTCEUR" in with_btc
     assert "PEPEEUR" not in liquid
     assert "SHIBEUR" not in liquid
     assert "BNBEUR" not in liquid
@@ -373,6 +377,32 @@ async def test_bridge_excludes_btc_and_tracks_skip() -> None:
     result = await bridge.execute(req)
     assert result.status == OrderStatus.REJECTED
     assert bridge.skips.get("excluded_base", 0) >= 1
+
+
+@pytest.mark.asyncio
+async def test_bridge_allows_btc_when_not_excluded() -> None:
+    settings = _unlocked()
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("25"))
+    engine = LiveMicroEngine(settings)
+    engine.arm()
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=engine,
+        budget_eur=Decimal("25"),
+        exclude_bases=set(),
+    )
+    req = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="BTCEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("0.001"),
+        limit_price=Decimal("60000"),
+        metadata={"venue": "bitvavo"},
+    )
+    result = await bridge.execute(req)
+    assert bridge.skips.get("excluded_base", 0) == 0
+    assert result.message is None or "excluded" not in str(result.message).lower()
 
 
 @pytest.mark.asyncio

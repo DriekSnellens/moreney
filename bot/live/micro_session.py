@@ -35,6 +35,7 @@ _ZERO = Decimal("0")
 
 # Top liquid Bitvavo/OKX EUR alts — market-first scan (not portfolio-driven).
 _LIQUID_EUR_SYMBOLS = (
+    "BTCEUR",
     "ETHEUR",
     "SOLEUR",
     "XRPEUR",
@@ -123,6 +124,11 @@ def _session_settings(
     execute_venues = _parse_execute_venues(base)
     md_symbols = _cross_venue_market_symbols(symbols) if cross_venue else list(symbols)
     maker_venues = "okx,bitvavo" if cross_venue else "bitvavo"
+    okx_deploy = str(
+        getattr(base, "live_micro_okx_deploy_bases", "") or "ADA,NEAR,DOT,XRP,LINK,ATOM"
+    )
+    if "BTC" not in {p.strip().upper() for p in okx_deploy.split(",") if p.strip()}:
+        okx_deploy = f"BTC,{okx_deploy}" if okx_deploy else "BTC"
     return base.model_copy(
         update={
             # Internal engine host only — env keeps PAPER_TRADING_ENABLED=false so
@@ -203,7 +209,7 @@ def _session_settings(
             "paper_buy_momentum_min_return": 0.001,  # ≥+0.10% over rolling samples
             "paper_buy_momentum_samples": 12,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
-            "live_micro_corr_group": "ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
+            "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
             "live_micro_max_per_corr_group": 2,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.006,
@@ -241,14 +247,7 @@ def _session_settings(
             "live_micro_block_cross_venue_duplicate_bases": True,
             "live_micro_consolidate_duplicate_bases": True,
             "live_micro_consolidate_primary_venue": "bitvavo",
-            "live_micro_okx_deploy_bases": str(
-                getattr(
-                    base,
-                    "live_micro_okx_deploy_bases",
-                    "ADA,NEAR,DOT,XRP,LINK,ATOM",
-                )
-                or "ADA,NEAR,DOT,XRP,LINK,ATOM"
-            ),
+            "live_micro_okx_deploy_bases": okx_deploy,
             "live_micro_okx_cash_bias_ratio": float(
                 getattr(base, "live_micro_okx_cash_bias_ratio", 1.5) or 1.5
             ),
@@ -345,7 +344,7 @@ def attach_micro_bridge(
         live_engine=live_engine,
         budget_eur=budget_eur,
         execute_venues=execute_venues,
-        exclude_bases=exclude_bases or {"BTC"},
+        exclude_bases=set() if exclude_bases is None else exclude_bases,
         allowed_bases=allowed_bases,
         live_maker=True,
     )
@@ -373,7 +372,7 @@ async def run_session(
     symbols: list[str] | None = None,
     settings: Settings | None = None,
     report_path: str | Path | None = None,
-    exclude_btc: bool = True,
+    exclude_btc: bool = False,
     market_data: MarketDataService | None = None,
     own_market_data: bool | None = None,
     status_callback: Any | None = None,
@@ -451,8 +450,10 @@ async def run_session(
     allowed_bases = {
         infer_base_asset(sym)
         for sym in scan_symbols
-        if sym and not str(sym).upper().startswith("BTC")
+        if sym
     }
+    if exclude_btc:
+        allowed_bases = {b for b in allowed_bases if b != "BTC"}
     bridge = attach_micro_bridge(
         runner,
         live_engine=live,
@@ -848,9 +849,10 @@ def main() -> None:
         "--symbols",
         type=str,
         default="",
-        help="Optional CSV; default = all market_data_symbols except BTC*",
+        help="Optional CSV; default = liquid EUR symbols including BTC",
     )
-    parser.add_argument("--include-btc", action="store_true")
+    parser.add_argument("--include-btc", action="store_true", help="Deprecated: BTC is included by default")
+    parser.add_argument("--exclude-btc", action="store_true")
     parser.add_argument("--report", type=str, default="./data/live_micro_session_report.json")
     args = parser.parse_args()
     get_settings.cache_clear()
@@ -865,7 +867,7 @@ def main() -> None:
             minutes=minutes,
             budget_eur=Decimal(str(args.budget_eur)),
             symbols=symbols,
-            exclude_btc=not args.include_btc,
+            exclude_btc=bool(args.exclude_btc),
             report_path=args.report,
         )
     )
