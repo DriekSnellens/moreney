@@ -3133,8 +3133,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 continue
             if st.get("time_stop_due") and (be is None or mark < be):
-                self._bump_skip("time_stop_below_be")
-                continue
+                cut_floor_early = self._cut_loss_floor_price(venue, asset)
+                if not (
+                    cut_floor_early is not None
+                    and self._cut_loss_eligible(st, venue=venue, base=asset)
+                    and mark <= cut_floor_early
+                ):
+                    self._bump_skip("time_stop_below_be")
+                    continue
 
             if st.get("soft_armed") and not st.get("triggered"):
                 armed_now.append(f"{venue}:{asset}")
