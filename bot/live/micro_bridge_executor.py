@@ -338,7 +338,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_block_underwater_adds", True)
         )
         self._block_buys_when_holding_base = bool(
-            getattr(settings, "live_micro_block_buys_when_holding_base", True)
+            getattr(settings, "live_micro_block_buys_when_holding_base", False)
         )
         self._MarkSeries = MarkSeries
         self._try_load_persisted_state()

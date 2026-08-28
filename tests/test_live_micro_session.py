@@ -90,7 +90,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert dual.arbitrage_max_emits_per_cycle == 4
     assert dual.live_micro_max_open_orders == 2
     assert dual.live_micro_max_open_orders_per_venue == 1
-    assert cfg.live_micro_cross_venue_enabled is False
+    assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
     assert cfg.paper_venue_inventory is True
@@ -147,7 +147,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
-    assert cfg.live_micro_block_buys_when_holding_base is True
+    assert cfg.live_micro_block_buys_when_holding_base is False
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0

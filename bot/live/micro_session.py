@@ -224,7 +224,8 @@ def _session_settings(
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
-            "live_micro_block_buys_when_holding_base": True,
+            # Anti-stack uses duplicate-resting + clip floor; allow other bases while SOL held.
+            "live_micro_block_buys_when_holding_base": False,
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
@@ -264,10 +265,10 @@ def _session_settings(
             "lead_lag_enabled": False,
             "toxicity_shadow_enabled": False,
             "global_funding_strategy_enabled": False,
-            # Multi-venue scan: live legs only on execute_venues (Bitvavo until OKX funded).
+            # Multi-venue: OKX deploys spare EUR; Bitvavo keeps primary rotation slot.
             "global_max_venue_exposure_pct": 50.0 if cross_venue else 100.0,
             "live_micro_execute_venues": ",".join(sorted(execute_venues)),
-            "live_micro_cross_venue_enabled": False,
+            "live_micro_cross_venue_enabled": cross_venue,
             "arbitrage_min_profit_eur": 0.08,
             "arbitrage_min_profit_pct": 0.0010,
             "profitability_min_net_profit_usd": 0.05,
