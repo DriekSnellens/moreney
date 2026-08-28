@@ -1885,3 +1885,37 @@ def test_buy_fill_marks_new_session_base() -> None:
         venue="okx",
     )
     assert bridge._trail["okx:NEAR"]["new_session_base"] is True  # noqa: SLF001
+
+
+def test_daily_kill_uses_session_realized_delta() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(paper_daily_kill_eur=50.0),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge.session_start_realized_eur = Decimal("-90")
+    bridge.realized_trade_pnl_eur = Decimal("-94")
+    bridge._check_daily_kill()  # noqa: SLF001
+    assert bridge._daily_kill_active is False  # noqa: SLF001
+    bridge.realized_trade_pnl_eur = Decimal("-141")
+    bridge._check_daily_kill()  # noqa: SLF001
+    assert bridge._daily_kill_active is True  # noqa: SLF001
+
+
+def test_reset_trading_cycle_after_wind_down() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge.realized_trade_pnl_eur = Decimal("-94")
+    bridge._daily_kill_active = True  # noqa: SLF001
+    bridge._buys_blocked = True  # noqa: SLF001
+    assert bridge.maybe_reset_after_wind_down() is True  # noqa: SLF001
+    assert bridge._daily_kill_active is False  # noqa: SLF001
+    assert bridge._buys_blocked is False  # noqa: SLF001
+    assert bridge.session_start_realized_eur == Decimal("-94")  # noqa: SLF001

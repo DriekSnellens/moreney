@@ -666,13 +666,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _check_daily_kill(self) -> None:
         if self._daily_kill_eur <= 0:
             return
-        if self.realized_trade_pnl_eur <= -self._daily_kill_eur:
+        baseline = self.session_start_realized_eur
+        if baseline is not None:
+            pnl = self.realized_trade_pnl_eur - baseline
+        else:
+            pnl = self.realized_trade_pnl_eur
+        if pnl <= -self._daily_kill_eur:
             if not self._daily_kill_active:
                 self._daily_kill_active = True
                 self._buys_blocked = True
                 self._push_alert(
                     "daily_kill",
-                    f"realized PnL {self.realized_trade_pnl_eur} <= -{self._daily_kill_eur}; buys blocked",
+                    f"session realized {pnl} <= -{self._daily_kill_eur}; buys blocked",
                 )
 
     def _invalidate_bal_cache(self, venue: str | None = None) -> None:
@@ -2178,6 +2183,48 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.starting_portfolio_eur = self.portfolio_value_eur
         self.session_start_realized_eur = self.realized_trade_pnl_eur
         self._session_started_ms = time.time() * 1000.0
+        self._daily_kill_active = False
+
+    def reset_trading_cycle(self) -> dict[str, Any]:
+        """Fresh cycle after wind-down: re-baseline session PnL and unblock buys."""
+        self.mark_session_baseline()
+        self.set_buys_blocked(False)
+        prune: list[str] = []
+        for trail_key, st in list(self._trail.items()):
+            venue = str(st.get("venue") or trail_key.split(":", 1)[0])
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            qty = self._balance_qty(venue, base)
+            mark = Decimal(str(st.get("last_mark") or 0))
+            if qty * mark < _MIN_LIVE_NOTIONAL:
+                prune.append(trail_key)
+        for key in prune:
+            self._trail.pop(key, None)
+            self._position_opened_mono.pop(key, None)
+        logger.info(
+            "TRADING_CYCLE_RESET portfolio=%s realized=%s pruned_trails=%s",
+            self.starting_portfolio_eur,
+            self.session_start_realized_eur,
+            len(prune),
+        )
+        return {
+            "ok": True,
+            "starting_portfolio_eur": str(self.starting_portfolio_eur or ""),
+            "session_start_realized_eur": str(self.session_start_realized_eur or ""),
+            "pruned_trails": len(prune),
+        }
+
+    def maybe_reset_after_wind_down(self) -> bool:
+        """When micro inventory is gone, start a clean trading cycle."""
+        if self._held_alt_bases():
+            return False
+        mtm = self._mtm_summary()
+        locked = Decimal(str(mtm.get("micro_locked_notional_eur") or 0))
+        if locked >= _MIN_LIVE_NOTIONAL:
+            return False
+        if not (self._daily_kill_active or self._buys_blocked):
+            return False
+        self.reset_trading_cycle()
+        return True
 
     def reset_paper_realized_after_inventory_sync(self) -> None:
         """Inventory sync is not a trade — clear phantom paper realized PnL."""

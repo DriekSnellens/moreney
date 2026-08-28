@@ -677,6 +677,11 @@ async def run_session(
                             "trailing take-profit check failed venue=%s", trail_venue
                         )
                 last_trail = time.monotonic()
+                try:
+                    if bridge.maybe_reset_after_wind_down():  # noqa: SLF001
+                        logger.info("Trading cycle reset after wind-down")
+                except Exception:  # noqa: BLE001
+                    logger.exception("wind-down cycle reset failed")
             if time.monotonic() - last_dust >= 60.0:
                 for dust_venue in sorted(bridge._execute_venues):  # noqa: SLF001
                     try:
