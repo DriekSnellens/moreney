@@ -337,6 +337,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._block_underwater_adds = bool(
             getattr(settings, "live_micro_block_underwater_adds", True)
         )
+        self._block_buys_when_holding_base = bool(
+            getattr(settings, "live_micro_block_buys_when_holding_base", True)
+        )
         self._MarkSeries = MarkSeries
         self._try_load_persisted_state()
 
@@ -2069,8 +2072,73 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self.persist_runtime_state()
 
+    async def _prune_resting_buys(self, venue: str) -> int:
+        """Keep at most one resting buy per symbol; drop buys for held bases."""
+        client = self._trading_client(venue)
+        if client is None:
+            return 0
+        venue_l = venue.strip().lower()
+        held = self._held_alt_bases(venue)
+        by_symbol: dict[str, list[dict[str, Any]]] = {}
+        cancelled = 0
+        still: list[dict[str, Any]] = []
+
+        for row in list(self._resting):
+            row_venue = str(row.get("venue") or "").strip().lower()
+            if row_venue and row_venue != venue_l:
+                still.append(row)
+                continue
+            side_raw = str(row.get("side") or "buy").lower()
+            if not side_raw.startswith("b"):
+                still.append(row)
+                continue
+            sym = str(row.get("symbol") or "").upper()
+            if not sym:
+                continue
+            base = infer_base_asset(sym)
+            if self._block_buys_when_holding_base and base in held:
+                oid = str(row.get("exchange_order_id") or "")
+                if oid:
+                    try:
+                        await client.cancel_order(oid, sym)
+                        cancelled += 1
+                        self._invalidate_bal_cache()
+                        self._bump_skip("held_base_resting_cancelled")
+                    except Exception:  # noqa: BLE001
+                        still.append(row)
+                        continue
+                continue
+            by_symbol.setdefault(sym, []).append(row)
+
+        for sym, rows in by_symbol.items():
+            if len(rows) <= 1:
+                still.extend(rows)
+                continue
+            rows.sort(
+                key=lambda r: Decimal(str(r.get("price") or 0)),
+                reverse=True,
+            )
+            still.append(rows[0])
+            for extra in rows[1:]:
+                oid = str(extra.get("exchange_order_id") or "")
+                if not oid:
+                    continue
+                try:
+                    await client.cancel_order(oid, sym)
+                    cancelled += 1
+                    self._invalidate_bal_cache()
+                    self._bump_skip("duplicate_resting_cancelled")
+                except Exception:  # noqa: BLE001
+                    still.append(extra)
+
+        self._resting = still
+        if cancelled:
+            self.persist_runtime_state()
+        return cancelled
+
     async def manage_resting_orders(self, venue: str = "bitvavo") -> dict[str, Any]:
         """Poll resting live orders: mirror fills, cancel stale quotes, free capital."""
+        pruned = await self._prune_resting_buys(venue)
         client = self._trading_client(venue)
         if client is None:
             return {"ok": False, "reason": "no_client"}
@@ -2263,6 +2331,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "ok": True,
             "mirrored": mirrored,
             "cancelled": cancelled,
+            "pruned": pruned,
             "resting": len(self._resting),
         }
 
@@ -4082,6 +4151,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
         if (
             side_is_buy
+            and self._block_buys_when_holding_base
+            and not self._is_new_base_buy(venue, base)
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+        ):
+            self._bump_skip("holding_base_buy_block")
+            return await self._reject_before_live(
+                order_request,
+                reason="HOLDING_BASE_BUY_BLOCK",
+                message=(
+                    f"buy blocked: already holding {venue}:{base}; "
+                    "sell-only until flat"
+                ),
+            )
+        if (
+            side_is_buy
             and self._resting_buys_for(venue, symbol) >= 1
             and not meta.get("dust_top_up")
         ):
@@ -4108,24 +4193,29 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         message=f"live {self._quote} free {live_eur} pocket {remaining}",
                     )
                 order_request = order_request.model_copy(update={"quantity": qty})
-            # Smaller first clip; scale up only after soft-arm on this bag.
+            # One consolidated clip per entry — floor to first_clip, cap at add_clip.
             clip_cap = self._buy_clip_cap_eur(venue, base)
             if (
                 clip_cap is not None
                 and clip_cap > 0
-                and notional > clip_cap
                 and not meta.get("dust_top_up")
             ):
-                qty = (clip_cap / px).quantize(Decimal("0.00000001"))
-                notional = qty * px
-                if qty <= 0 or notional < _MIN_LIVE_NOTIONAL:
-                    self._bump_skip("clip_too_small")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="CLIP_TOO_SMALL",
-                        message=f"buy clip cap €{clip_cap} below min live notional",
-                    )
-                order_request = order_request.model_copy(update={"quantity": qty})
+                target = min(clip_cap, spend_cap)
+                if notional < target and target >= _MIN_LIVE_NOTIONAL:
+                    qty = (target / px).quantize(Decimal("0.00000001"))
+                    notional = qty * px
+                    order_request = order_request.model_copy(update={"quantity": qty})
+                elif notional > clip_cap:
+                    qty = (clip_cap / px).quantize(Decimal("0.00000001"))
+                    notional = qty * px
+                    if qty <= 0 or notional < _MIN_LIVE_NOTIONAL:
+                        self._bump_skip("clip_too_small")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="CLIP_TOO_SMALL",
+                            message=f"buy clip cap €{clip_cap} below min live notional",
+                        )
+                    order_request = order_request.model_copy(update={"quantity": qty})
             # Ladder entries: first leg joins the strategy bid (touch), deeper
             # legs only as backup. Using mark*(1-dip) previously parked all
             # bids ~1% below market so they never filled.

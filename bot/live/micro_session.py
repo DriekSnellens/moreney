@@ -143,8 +143,8 @@ def _session_settings(
             "paper_maker_venues": maker_venues,
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
-            # Room for both Bitvavo and OKX resting quotes in the same cycle.
-            "paper_maker_max_open_quotes": 8 if cross_venue else 6,
+            # One quote per venue per cycle — avoids stacked duplicate resting bids.
+            "paper_maker_max_open_quotes": 2 if cross_venue else 1,
             # Fewer concurrent sprays → larger / better trails.
             "arbitrage_max_emits_per_cycle": 4 if cross_venue else 2,
             "paper_cycle_interval_ms": 1200.0,
@@ -224,6 +224,7 @@ def _session_settings(
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
+            "live_micro_block_buys_when_holding_base": True,
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
@@ -314,8 +315,8 @@ def _session_settings(
             "live_micro_reset_drawdown_on_start": bool(
                 getattr(base, "live_micro_reset_drawdown_on_start", True)
             ),
-            "live_micro_max_open_orders": 8 if cross_venue else 12,
-            "live_micro_max_open_orders_per_venue": 8 if cross_venue else 0,
+            "live_micro_max_open_orders": 2 if cross_venue else 1,
+            "live_micro_max_open_orders_per_venue": 1,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
@@ -485,6 +486,17 @@ async def run_session(
             logger.info("Full-bot micro initial sync okx: %s", okx_sync)
     except Exception:  # noqa: BLE001
         logger.exception("Full-bot micro initial sync failed")
+    try:
+        for prune_venue in sorted(_parse_execute_venues(cfg)):
+            pruned = await bridge._prune_resting_buys(prune_venue)  # noqa: SLF001
+            if pruned:
+                logger.info(
+                    "Full-bot micro pruned duplicate/held resting buys venue=%s n=%s",
+                    prune_venue,
+                    pruned,
+                )
+    except Exception:  # noqa: BLE001
+        logger.exception("Full-bot micro initial resting prune failed")
 
     # Inventory sync is not trading — clear phantom paper PnL and resume if a
     # false paper daily-loss pause was inherited from a prior fill mirror.

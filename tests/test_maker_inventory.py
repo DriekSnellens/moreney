@@ -874,7 +874,8 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
     )
     assert okx_count >= 1
     assert bv_count >= 1
-    assert len(selected) == 3
+    # One symbol per venue — duplicate ADAEUR quotes collapse to one per exchange.
+    assert len(selected) == 2
 
 
 def test_okx_deploy_bases_ranked_first_on_okx() -> None:

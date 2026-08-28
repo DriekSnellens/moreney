@@ -713,6 +713,7 @@ class MakerInventoryStrategy(BaseStrategy):
 
         selected: list[TradeOpportunity] = []
         selected_ids: set[Any] = set()
+        selected_symbol_by_venue: dict[str, set[str]] = {}
         venues = sorted(by_venue.keys())
         rotation = self._venue_emit_rotation(venues)
         if not rotation:
@@ -730,8 +731,13 @@ class MakerInventoryStrategy(BaseStrategy):
                     oid = getattr(opp, "id", None) or id(opp)
                     if oid in selected_ids:
                         continue
+                    sym = str(opp.symbol or "").upper()
+                    seen_syms = selected_symbol_by_venue.setdefault(venue, set())
+                    if sym in seen_syms:
+                        continue
                     selected.append(opp)
                     selected_ids.add(oid)
+                    seen_syms.add(sym)
                     added = True
                     break
             if not added:
@@ -743,8 +749,14 @@ class MakerInventoryStrategy(BaseStrategy):
             oid = getattr(opp, "id", None) or id(opp)
             if oid in selected_ids:
                 continue
+            venue = self._primary_venue(opp)
+            sym = str(opp.symbol or "").upper()
+            seen_syms = selected_symbol_by_venue.setdefault(venue, set())
+            if sym in seen_syms:
+                continue
             selected.append(opp)
             selected_ids.add(oid)
+            seen_syms.add(sym)
         # Keep global rank order so the best NET still leads the emit list.
         rank = {id(o): i for i, o in enumerate(opportunities)}
         selected.sort(key=lambda o: rank.get(id(o), 10**9))

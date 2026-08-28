@@ -457,6 +457,8 @@ class Settings(BaseSettings):
     live_micro_underwater_block_new_bases_only: bool = True
     # Block buy adds to a base already held below fee-aware break-even.
     live_micro_block_underwater_adds: bool = True
+    # Sell-only while a base is already held on the venue (no stacking / no adds).
+    live_micro_block_buys_when_holding_base: bool = True
     # Maker emit scheduling: primary venue gets first slot each round-robin cycle.
     live_micro_primary_execute_venue: str = "bitvavo"
     # Cut-loss: exit when mark falls this far below fee-aware BE (last-resort fail-safe).

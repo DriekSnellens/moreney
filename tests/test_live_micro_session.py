@@ -77,7 +77,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
     assert cfg.arbitrage_max_emits_per_cycle == 4
-    assert cfg.paper_maker_max_open_quotes == 8
+    assert cfg.paper_maker_max_open_quotes <= 2
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
         Settings(live_micro_execute_venues="bitvavo,okx"),
@@ -88,8 +88,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     # Aggregate equity ~€4k must still size clips near the €150 ceiling.
     assert dual.arbitrage_position_pct == 3.75
     assert dual.arbitrage_max_emits_per_cycle == 4
-    assert dual.live_micro_max_open_orders == 8
-    assert dual.live_micro_max_open_orders_per_venue == 8
+    assert dual.live_micro_max_open_orders == 2
+    assert dual.live_micro_max_open_orders_per_venue == 1
     assert cfg.live_micro_cross_venue_enabled is False
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -137,8 +137,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_first_clip_eur) >= 55.0
     assert float(cfg.live_micro_add_clip_eur) >= 100.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
-    assert cfg.live_micro_max_open_orders == 8
-    assert cfg.live_micro_max_open_orders_per_venue == 8
+    assert cfg.live_micro_max_open_orders <= 2
+    assert cfg.live_micro_max_open_orders_per_venue == 1
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 35.0
@@ -147,6 +147,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
+    assert cfg.live_micro_block_buys_when_holding_base is True
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
@@ -2152,3 +2153,140 @@ def test_venue_emit_rotation_bitvavo_first_alternation() -> None:
     strat._venue_free_quote = {"bitvavo": Decimal("1000"), "okx": Decimal("2000")}  # noqa: SLF001
     rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
     assert rot[:4] == ["bitvavo", "okx", "bitvavo", "okx"]
+
+
+@pytest.mark.asyncio
+async def test_holding_base_buy_block_rejects_add(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_block_buys_when_holding_base=True,
+        paper_buy_momentum_enabled=False,
+        live_micro_first_clip_eur=55.0,
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("SOLEUR", Decimal("90"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="SOL", free=Decimal("2"), locked=Decimal("0")),
+        Balance(asset="EUR", free=Decimal("500"), locked=Decimal("0")),
+    ]
+    bridge._session_lots["bitvavo:SOL"] = [  # noqa: SLF001
+        [Decimal("2"), Decimal("88")],
+    ]
+
+    async def fake_live_free(venue: str, asset: str) -> Decimal:
+        if asset.upper() == "EUR":
+            return Decimal("500")
+        return Decimal("2")
+
+    monkeypatch.setattr(bridge, "_live_free", fake_live_free)
+    monkeypatch.setattr(
+        bridge, "_venue_budget_remaining", lambda _v: Decimal("500")
+    )
+    req = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="SOLEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("0.5"),
+        limit_price=Decimal("90"),
+        metadata={"venue": "bitvavo", "post_only": True},
+    )
+    result = await bridge.execute(req)
+    assert result.status == OrderStatus.REJECTED
+    assert bridge.skips.get("holding_base_buy_block", 0) >= 1
+
+
+@pytest.mark.asyncio
+async def test_prune_resting_buys_keeps_best_bid_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _unlocked(live_micro_block_buys_when_holding_base=False)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    cancelled: list[str] = []
+    bridge._resting = [  # noqa: SLF001
+        {
+            "venue": "bitvavo",
+            "symbol": "SOLEUR",
+            "side": "buy",
+            "exchange_order_id": "low",
+            "price": Decimal("89"),
+            "quantity": Decimal("0.2"),
+        },
+        {
+            "venue": "bitvavo",
+            "symbol": "SOLEUR",
+            "side": "buy",
+            "exchange_order_id": "high",
+            "price": Decimal("90"),
+            "quantity": Decimal("0.2"),
+        },
+    ]
+
+    class FakeClient:
+        async def cancel_order(self, oid: str, symbol: str) -> None:
+            cancelled.append(oid)
+
+    monkeypatch.setattr(bridge, "_trading_client", lambda _v: FakeClient())
+    n = await bridge._prune_resting_buys("bitvavo")  # noqa: SLF001
+    assert n == 1
+    assert cancelled == ["low"]
+    assert len(bridge._resting) == 1  # noqa: SLF001
+    assert bridge._resting[0]["exchange_order_id"] == "high"  # noqa: SLF001
+
+
+def test_select_balanced_emits_one_symbol_per_venue() -> None:
+    from bot.core.models import TradeOpportunity
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    strat = MakerInventoryStrategy(
+        _unlocked(
+            arbitrage_max_emits_per_cycle=4,
+            live_micro_primary_execute_venue="bitvavo",
+        )
+    )
+
+    def _opp(symbol: str, venue: str, net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol=symbol,
+            side=OpportunitySide.BUY,
+            quantity=Decimal("1"),
+            entry_price=Decimal("90"),
+            expected_exit_price=Decimal("91"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": venue,
+                "sell_exchange": venue,
+                "net_profit_eur": net,
+            },
+        )
+
+    opps = [
+        _opp("SOLEUR", "bitvavo", "0.10"),
+        _opp("SOLEUR", "bitvavo", "0.08"),
+        _opp("ADAEUR", "bitvavo", "0.07"),
+    ]
+    selected = strat._select_balanced_emits(opps)  # noqa: SLF001
+    bitvavo_syms = [
+        str(o.symbol).upper()
+        for o in selected
+        if (o.metadata or {}).get("buy_exchange") == "bitvavo"
+    ]
+    assert bitvavo_syms.count("SOLEUR") <= 1
