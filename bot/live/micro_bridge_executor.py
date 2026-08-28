@@ -194,6 +194,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._recovery_be_partial = Decimal(
             str(getattr(settings, "paper_trail_recovery_be_partial_pct", 0) or 0)
         )
+        _be_harvest_raw = getattr(settings, "paper_trail_be_harvest_partial_pct", None)
+        if _be_harvest_raw is None or _be_harvest_raw == 0:
+            _be_harvest_raw = getattr(
+                settings, "paper_trail_recovery_be_partial_pct", 0
+            )
+        self._be_harvest_partial = Decimal(str(_be_harvest_raw or 0))
+        self._be_harvest_min_gain = Decimal(
+            str(getattr(settings, "paper_trail_be_harvest_min_gain_pct", 0.0005) or 0)
+        )
+        self._be_harvest_cooldown = float(
+            getattr(settings, "live_micro_be_harvest_cooldown_sec", 15.0) or 15.0
+        )
         self._okx_buy_improve_bps = Decimal(
             str(getattr(settings, "live_micro_okx_buy_improve_bps", 0) or 0)
         ) / Decimal("10000")
@@ -1028,6 +1040,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "hard_armed": bool(st.get("hard_armed")),
                 "partial_done": bool(st.get("soft_partial_done")),
                 "hard_partial_done": bool(st.get("hard_partial_done")),
+                "be_harvest_partial_done": bool(
+                    st.get("be_harvest_partial_done")
+                    or st.get("recovery_be_partial_done")
+                ),
                 "peak": str(st.get("peak") or ""),
                 "cost": str(cost) if cost > 0 else "",
                 "mark": str(mark) if mark > 0 else "",
@@ -2419,6 +2435,64 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return cap
         return need
 
+    def _partial_done_key(self, reason: str) -> str | None:
+        return {
+            "trail_soft_partial": "soft_partial_done",
+            "trail_hard_partial": "hard_partial_done",
+            "trail_be_harvest": "be_harvest_partial_done",
+            "trail_recovery_be_partial": "be_harvest_partial_done",
+            "trail_consolidation_wind_down": "consolidation_wind_down_done",
+        }.get(reason)
+
+    def _clear_partial_done(self, st: dict[str, Any], reason: str) -> None:
+        key = self._partial_done_key(reason)
+        if key:
+            st[key] = False
+            if key == "soft_partial_done":
+                st["partial_done"] = False
+        if reason == "trail_drawdown":
+            st["triggered"] = False
+
+    def _set_partial_done(self, st: dict[str, Any], reason: str) -> None:
+        key = self._partial_done_key(reason)
+        if key:
+            st[key] = True
+            if key == "soft_partial_done":
+                st["partial_done"] = True
+        if reason in {"trail_be_harvest", "trail_recovery_be_partial"}:
+            st["recovery_be_partial_done"] = True
+
+    def _be_harvest_already_done(self, st: dict[str, Any]) -> bool:
+        return bool(
+            st.get("be_harvest_partial_done") or st.get("recovery_be_partial_done")
+        )
+
+    def _exit_cooldown_sec(self, reason: str) -> float:
+        if reason in {
+            "trail_be_harvest",
+            "trail_recovery_be_partial",
+            "trail_soft_partial",
+            "trail_hard_partial",
+        }:
+            return self._be_harvest_cooldown
+        return 45.0
+
+    def _soft_partial_would_fire(
+        self,
+        st: dict[str, Any],
+        *,
+        gain_now: Decimal,
+        soft_arm_now: Decimal,
+    ) -> bool:
+        return bool(
+            st.get("soft_armed")
+            and not st.get("recovery_armed")
+            and self._trail_partial_enabled
+            and self._soft_partial > 0
+            and not st.get("soft_partial_done")
+            and gain_now >= soft_arm_now
+        )
+
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
         """Max buy notional: first_clip until soft-armed, then add_clip."""
         first = self._first_clip_eur
@@ -2574,6 +2648,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "soft_partial_done": False,
                 "hard_partial_done": False,
                 "recovery_be_partial_done": False,
+                "be_harvest_partial_done": False,
                 "consolidation_wind_down_done": False,
                 "partial_done": False,
                 "time_stop_due": False,
@@ -3014,8 +3089,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     notional_floor=partial_min,
                 )
                 reason = "trail_soft_partial"
-                st["soft_partial_done"] = True
-                st["partial_done"] = True
             elif (
                 st.get("hard_armed")
                 and self._trail_partial_enabled
@@ -3042,7 +3115,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     notional_floor=partial_min,
                 )
                 reason = "trail_hard_partial"
-                st["hard_partial_done"] = True
             elif (
                 self._consolidate_duplicates
                 and self._is_consolidation_secondary(venue, asset)
@@ -3060,7 +3132,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 sell_qty = cap
                 reason = "trail_consolidation_wind_down"
-                st["consolidation_wind_down_done"] = True
             elif st.get("triggered"):
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 sell_qty = min(
@@ -3071,13 +3142,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 reason = "trail_drawdown"
             elif (
-                st.get("recovery_armed")
-                and be is not None
+                be is not None
                 and mark >= be
-                and self._recovery_be_partial > 0
-                and not st.get("recovery_be_partial_done")
+                and self._be_harvest_partial > 0
+                and not self._be_harvest_already_done(st)
+                and gain_now >= self._be_harvest_min_gain
+                and not self._soft_partial_would_fire(
+                    st, gain_now=gain_now, soft_arm_now=soft_arm_now
+                )
             ):
-                # Lock part of a BE recovery while still above fee-aware BE.
+                # Fee-positive harvest at BE+ (recovery bags, small MTM wins).
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 cap = min(
                     free,
@@ -3094,12 +3168,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 sell_qty = self._trail_partial_qty(
                     cap=cap,
-                    partial_pct=self._recovery_be_partial,
+                    partial_pct=self._be_harvest_partial,
                     mark=mark,
                     notional_floor=partial_min,
                 )
-                reason = "trail_recovery_be_partial"
-                st["recovery_be_partial_done"] = True
+                reason = "trail_be_harvest"
             elif (
                 st.get("recovery_armed")
                 and be is not None
@@ -3133,6 +3206,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 in {
                     "trail_soft_partial",
                     "trail_hard_partial",
+                    "trail_be_harvest",
                     "trail_recovery_be_partial",
                 }
                 else _MIN_LIVE_NOTIONAL
@@ -3141,70 +3215,33 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # max_notional (that only burns extra fees on exits).
             if sell_qty <= 0 or sell_qty * mark < notional_floor:
                 self._bump_skip("trail_dust")
-                if reason == "trail_drawdown":
-                    st["triggered"] = False
-                if reason == "trail_soft_partial":
-                    st["soft_partial_done"] = False
-                    st["partial_done"] = False
-                if reason == "trail_hard_partial":
-                    st["hard_partial_done"] = False
-                if reason == "trail_recovery_be_partial":
-                    st["recovery_be_partial_done"] = False
                 continue
 
-            # Never trail-exit at a loss (fees included). Hold until profitable.
-            ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, mark)
-            if not ok_sell:
-                self._bump_skip(gate_reason)
-                if reason == "trail_drawdown":
-                    st["triggered"] = False
-                if reason == "trail_soft_partial":
-                    st["soft_partial_done"] = False
-                    st["partial_done"] = False
-                if reason == "trail_hard_partial":
-                    st["hard_partial_done"] = False
-                if reason == "trail_recovery_be_partial":
-                    st["recovery_be_partial_done"] = False
-                if reason == "trail_consolidation_wind_down":
-                    st["consolidation_wind_down_done"] = False
-                continue
-
-            cooldown_key = f"{venue}:{asset}:{reason}"
-            last_try = self._exit_cooldown_mono.get(cooldown_key, 0.0)
-            if time.monotonic() - last_try < 45.0:
-                self._bump_skip("exit_cooldown")
-                continue
-
-            exit_px, post_only, quote_reason = await self._profitable_exit_quote(
+            exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
                 venue, asset, mark
             )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")
-                if reason == "trail_drawdown":
-                    st["triggered"] = False
-                if reason == "trail_soft_partial":
-                    st["soft_partial_done"] = False
-                    st["partial_done"] = False
-                if reason == "trail_hard_partial":
-                    st["hard_partial_done"] = False
-                if reason == "trail_recovery_be_partial":
-                    st["recovery_be_partial_done"] = False
                 continue
+
+            ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
+            if not ok_sell:
+                self._bump_skip(gate_reason)
+                continue
+
+            cooldown_key = f"{venue}:{asset}:{reason}"
+            last_try = self._exit_cooldown_mono.get(cooldown_key, 0.0)
+            if time.monotonic() - last_try < self._exit_cooldown_sec(reason):
+                self._bump_skip("exit_cooldown")
+                continue
+
             if limit_px is None or limit_px < exit_px:
                 limit_px = exit_px
-            # Keep limit at least at the profitable quote (never below BE path).
             limit_px = max(limit_px, exit_px)
+            if reason != "trail_recovery_be":
+                post_only = exit_post_only
             if sell_qty <= 0 or sell_qty * limit_px < notional_floor:
                 self._bump_skip("trail_dust")
-                if reason == "trail_drawdown":
-                    st["triggered"] = False
-                if reason == "trail_soft_partial":
-                    st["soft_partial_done"] = False
-                    st["partial_done"] = False
-                if reason == "trail_hard_partial":
-                    st["hard_partial_done"] = False
-                if reason == "trail_recovery_be_partial":
-                    st["recovery_be_partial_done"] = False
                 continue
             self._exit_cooldown_mono[cooldown_key] = time.monotonic()
             logger.info(
@@ -3241,19 +3278,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             }
             triggered.append(row)
             if result.status == OrderStatus.REJECTED:
-                if reason == "trail_drawdown":
-                    st["triggered"] = False
-                if reason == "trail_soft_partial":
-                    st["soft_partial_done"] = False
-                    st["partial_done"] = False
-                if reason == "trail_hard_partial":
-                    st["hard_partial_done"] = False
-                if reason == "trail_recovery_be_partial":
-                    st["recovery_be_partial_done"] = False
-                if reason == "trail_consolidation_wind_down":
-                    st["consolidation_wind_down_done"] = False
+                self._clear_partial_done(st, reason)
                 self._bump_skip(f"{reason}_reject")
-            else:
+            elif result.status in {
+                OrderStatus.FILLED,
+                OrderStatus.PARTIALLY_FILLED,
+            }:
+                self._set_partial_done(st, reason)
                 logger.info(
                     "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
                     venue,
@@ -3275,8 +3306,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         self._trail.pop(trail_key, None)
                         self._position_opened_mono.pop(trail_key, None)
                     else:
-                        # Soft/hard partial may have left inventory; keep trailing it.
                         st["triggered"] = False
+            else:
+                logger.info(
+                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
+                    venue,
+                    asset,
+                    reason,
+                    sell_qty,
+                    mark,
+                    result.status.value,
+                )
 
         return {
             "ok": True,

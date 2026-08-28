@@ -144,6 +144,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
+    assert cfg.paper_trail_be_harvest_partial_pct >= 0.30
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is True
@@ -1669,3 +1671,95 @@ def test_portfolio_sync_does_not_invent_one_eur_entry() -> None:
     pos = portfolio.state.positions.get("ADAEUR")
     assert pos is not None
     assert pos.average_entry_price == Decimal("0")
+
+
+def test_be_harvest_partial_pct_loaded() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(
+            paper_trail_be_harvest_partial_pct=0.40,
+            paper_trail_recovery_be_partial_pct=0.35,
+        ),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    assert bridge._be_harvest_partial == Decimal("0.40")  # noqa: SLF001
+    assert bridge._be_harvest_cooldown == 15.0  # noqa: SLF001
+
+
+def test_be_harvest_falls_back_to_recovery_partial() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(paper_trail_recovery_be_partial_pct=0.35),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    assert bridge._be_harvest_partial == Decimal("0.35")  # noqa: SLF001
+
+
+def test_be_harvest_eligible_for_recovery_armed_below_soft_arm() -> None:
+    settings = _unlocked(
+        paper_trail_take_profit_enabled=True,
+        paper_trail_soft_arm_pct=0.02,
+        paper_trail_be_harvest_partial_pct=0.35,
+        paper_trail_be_harvest_min_gain_pct=0.0005,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    st = {
+        "soft_armed": True,
+        "recovery_armed": True,
+        "soft_partial_done": False,
+        "be_harvest_partial_done": False,
+        "recovery_be_partial_done": False,
+        "gain": "0.008",
+        "soft_arm": "0.02",
+    }
+    gain = Decimal("0.008")
+    soft_arm = Decimal("0.02")
+    assert bridge._soft_partial_would_fire(  # noqa: SLF001
+        st, gain_now=gain, soft_arm_now=soft_arm
+    ) is False
+    assert bridge._be_harvest_already_done(st) is False  # noqa: SLF001
+    assert gain >= bridge._be_harvest_min_gain  # noqa: SLF001
+
+
+def test_partial_done_set_only_via_fill_helper() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    st: dict = {"soft_partial_done": False, "partial_done": False}
+    assert bridge._partial_done_key("trail_be_harvest") == "be_harvest_partial_done"  # noqa: SLF001
+    bridge._set_partial_done(st, "trail_be_harvest")  # noqa: SLF001
+    assert st["be_harvest_partial_done"] is True
+    assert st["recovery_be_partial_done"] is True
+    bridge._clear_partial_done(st, "trail_be_harvest")  # noqa: SLF001
+    assert st["be_harvest_partial_done"] is False
+    bridge._set_partial_done(st, "trail_soft_partial")  # noqa: SLF001
+    assert st["soft_partial_done"] is True
+    assert st["partial_done"] is True
+    bridge._clear_partial_done(st, "trail_drawdown")  # noqa: SLF001
+    assert st.get("triggered") is False
+
+
+def test_be_harvest_cooldown_shorter_than_full_exit() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(live_micro_be_harvest_cooldown_sec=12.0),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    assert bridge._exit_cooldown_sec("trail_be_harvest") == 12.0  # noqa: SLF001
+    assert bridge._exit_cooldown_sec("trail_drawdown") == 45.0  # noqa: SLF001

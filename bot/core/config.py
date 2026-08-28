@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.0, le=0.90)
     # One-time partial when a recovery-armed bag trades at/above fee-aware BE.
     paper_trail_recovery_be_partial_pct: float = Field(default=0.0, ge=0.0, le=0.90)
+    # Fee-positive harvest at/above BE (incl. recovery bags below soft-arm).
+    paper_trail_be_harvest_partial_pct: float = Field(default=0.0, ge=0.0, le=0.90)
+    paper_trail_be_harvest_min_gain_pct: float = Field(default=0.0005, ge=0.0, le=0.10)
+    live_micro_be_harvest_cooldown_sec: float = Field(default=15.0, ge=5.0, le=120.0)
     paper_trail_hard_arm_pct: float = Field(default=0.06, ge=0.01, le=5.0)
     paper_trail_hard_drawdown_pct: float = Field(default=0.03, ge=0.005, le=0.90)
     paper_trail_hard_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
