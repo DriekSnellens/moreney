@@ -107,7 +107,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.40
-    assert cfg.paper_trail_soft_arm_pct == 0.020
+    assert cfg.paper_trail_soft_arm_pct == 0.0125
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
@@ -123,6 +123,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return <= 0.0006
     assert cfg.paper_maker_min_profit_eur <= 0.06
+    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 80.0
+    assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.03
+    assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.0003
     assert cfg.paper_maker_min_notional_eur >= 55.0
     assert cfg.max_simultaneous_positions == 3
     assert cfg.live_micro_max_alt_bases == 2
@@ -148,7 +151,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
-    assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.003
+    assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
+    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.01
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
@@ -159,10 +163,12 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     from bot.live.micro_session import _liquid_symbols
 
     liquid = _liquid_symbols(Settings(), exclude_btc=True)
-    assert len(liquid) >= 20
+    assert len(liquid) >= 18
     assert "ETHEUR" in liquid
     assert "SOLEUR" in liquid
     assert "LINKEUR" in liquid
+    assert "PEPEEUR" not in liquid
+    assert "SHIBEUR" not in liquid
     assert "BNBEUR" not in liquid
 
 
@@ -179,7 +185,7 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) >= 0.0015
+    assert float(cfg.paper_buy_momentum_min_return) >= 0.001
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
@@ -674,7 +680,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
-    assert cfg.paper_trail_soft_arm_pct == 0.020
+    assert cfg.paper_trail_soft_arm_pct == 0.0125
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.40
     assert cfg.paper_trail_soft_partial_pct == 0.50
@@ -1915,9 +1921,9 @@ def test_cut_loss_eligible_respects_new_bases_only_flag() -> None:
 def test_momentum_down_and_exit_target_at_be_plus_half_pct() -> None:
     settings = _unlocked(
         paper_buy_momentum_enabled=True,
-        paper_buy_momentum_min_return=0.0015,
+        paper_buy_momentum_min_return=0.001,
         paper_buy_momentum_samples=12,
-        live_micro_momentum_exit_min_return=0.003,
+        live_micro_momentum_exit_min_return=0.002,
         live_micro_momentum_exit_above_be_pct=0.005,
         paper_maker_sell_profit_buffer_bps=15.0,
     )
@@ -1941,9 +1947,9 @@ def test_momentum_down_and_exit_target_at_be_plus_half_pct() -> None:
     assert bridge._momentum_down("ADAEUR") is True  # noqa: SLF001
     assert bridge._momentum_ok("ADAEUR", require_history=True) is False  # noqa: SLF001
 
-    # Buy threshold (0.15%) unchanged — small dip is not a sell signal.
+    # Buy threshold (0.10%) unchanged — small dip is not a sell signal.
     mild = bridge._series_for("MILDEUR")  # noqa: SLF001
-    for px in (1.0, 0.9995, 0.999, 0.9985, 0.998, 0.9975):
+    for px in (1.0, 0.9998, 0.9996, 0.9994, 0.9992, 0.9990):
         mild.push(Decimal(str(px)))
     assert bridge._momentum_down("MILDEUR") is False  # noqa: SLF001
 
@@ -2028,3 +2034,51 @@ def test_wind_down_clears_stale_skips_without_buy_block() -> None:
     assert bridge._buys_blocked is False  # noqa: SLF001
     assert bridge.maybe_reset_after_wind_down() is True  # noqa: SLF001
     assert bridge.skips == {}
+
+
+def test_early_cut_loss_floor_one_pct_below_be() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(
+            live_micro_early_cut_loss_below_be_pct=0.01,
+            live_micro_cut_loss_below_be_pct=0.04,
+        ),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "ADA")  # noqa: SLF001
+    early = bridge._early_cut_loss_floor_price("bitvavo", "ADA")  # noqa: SLF001
+    assert be is not None and early is not None
+    assert early == be * Decimal("0.99")
+
+
+def test_portfolio_gate_sync_clears_ghost_strategy_exposure() -> None:
+    from bot.core.enums import OpportunitySide
+    from bot.core.models import PortfolioSnapshot, Position
+    from bot.opportunity.portfolio_gate import PortfolioExposureGate
+
+    settings = _unlocked(global_max_strategy_exposure_pct=50.0)
+    gate = PortfolioExposureGate(settings)
+    gate._strategy_exposure["maker_inventory"] = Decimal("9999")  # noqa: SLF001
+    portfolio = PortfolioSnapshot(
+        equity_usd=Decimal("2000"),
+        positions=[],
+    )
+    gate.sync_from_portfolio(portfolio)
+    assert gate.snapshot()["strategy"] == {}
+    portfolio_with_bag = PortfolioSnapshot(
+        equity_usd=Decimal("2000"),
+        positions=[
+            Position(
+                symbol="ADAEUR",
+                quantity=Decimal("100"),
+                average_entry_price=Decimal("1"),
+                side=OpportunitySide.BUY,
+            )
+        ],
+    )
+    gate.sync_from_portfolio(portfolio_with_bag)
+    assert gate.snapshot()["strategy"]["maker_inventory"] == "100"

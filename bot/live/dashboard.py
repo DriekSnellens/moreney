@@ -681,6 +681,15 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         or session.get("netto_winst_eur")
         or bridge.get("netto_winst_eur")
     )
+    session_start_realized = _dec(
+        bridge.get("session_start_realized_eur")
+        or session.get("session_start_realized_eur")
+    )
+    session_realized = None
+    if pnl is not None and session_start_realized is not None:
+        session_realized = pnl - session_start_realized
+    elif pnl is not None and session_start_realized is None:
+        session_realized = pnl
 
     tx = (
         session.get("session_live_transaction_count")
@@ -721,6 +730,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         pnl_class = "good"
     elif pnl is not None and pnl < 0:
         pnl_class = "bad"
+    session_realized_class = ""
+    if session_realized is not None and session_realized > 0:
+        session_realized_class = "good"
+    elif session_realized is not None and session_realized < 0:
+        session_realized_class = "bad"
     winn_class = ""
     if winnable is not None and winnable > 0:
         winn_class = "good"
@@ -1025,18 +1039,19 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     target_low = Decimal("20")
     target_high = Decimal("50")
     in_target_band = (
-        session_pnl is not None and target_low <= session_pnl <= target_high
+        session_realized is not None and target_low <= session_realized <= target_high
     )
     band_class = "in-band" if in_target_band else "out-band"
     target_band_html = (
         "<section class='target-band' aria-label='Doelband onderzoek'>"
         "<h2>Doel €20–50/dag</h2>"
-        "<p><strong>Sessie MTM</strong> (geel) = Engine B · "
-        "<strong>Week gerealiseerd</strong> = Engine A · stretch €140–350/week.</p>"
+        "<p><strong>Sessie gerealiseerd</strong> (primair) = gesloten winst na fees · "
+        "<strong>Sessie MTM</strong> (secundair) = mark-to-market · "
+        "stretch €140–350/week gerealiseerd.</p>"
         "<div class='band-row'>"
-        f"<span>MTM: <strong class='{band_class}'>"
-        f"{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else '—')}</strong></span>"
-        f"<span>Realized: {_esc(_eur(pnl, signed=True))}</span>"
+        f"<span>Gerealiseerd: <strong class='{band_class}'>"
+        f"{_esc(_eur(session_realized, signed=True) if session_realized is not None else '—')}</strong></span>"
+        f"<span>MTM: {_esc(_eur(session_pnl, signed=True) if session_pnl is not None else '—')}</span>"
         "</div></section>"
     )
 
@@ -1056,19 +1071,19 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     kpi_grid_html = f"""
     <section class="grid-kpi" aria-label="Kern KPIs">
       <article class="card hero">
-        <p class="label">Sessie PnL (MTM)</p>
-        <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
-        <p class="hint">Engine B · doel €20–50</p>
+        <p class="label">Sessie gerealiseerd</p>
+        <p class="value {session_realized_class}" id="kpi-session-realized">{_esc(_eur(session_realized, signed=True) if session_realized is not None else "—")}</p>
+        <p class="hint">Primair · gesloten sinds start</p>
       </article>
       <article class="card hero-a">
         <p class="label">Week gerealiseerd</p>
         <p class="value" id="kpi-weekly-realized">—</p>
-        <p class="hint">Engine A · ≥€35/week</p>
+        <p class="hint">≥€35/week</p>
       </article>
       <article class="card">
-        <p class="label">Sessie gerealiseerd</p>
-        <p class="value" id="kpi-session-realized">—</p>
-        <p class="hint">Gesloten sinds start</p>
+        <p class="label">Sessie PnL (MTM)</p>
+        <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
+        <p class="hint">Secundair · mark-to-market</p>
       </article>
       <article class="card">
         <p class="label">Portfolio</p>

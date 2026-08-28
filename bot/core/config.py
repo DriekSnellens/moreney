@@ -122,6 +122,10 @@ class Settings(BaseSettings):
     paper_maker_min_profit_equity_bps: float = Field(default=0.0, ge=0)
     # Hard NET return floor (0.0025 = 0.25%).
     paper_maker_min_net_return: float = Field(default=0.0025, ge=0)
+    # Tiered floors for smaller clips (0 = disabled).
+    paper_maker_small_clip_max_eur: float = Field(default=0.0, ge=0)
+    paper_maker_small_clip_min_profit_eur: float = Field(default=0.0, ge=0)
+    paper_maker_small_clip_min_net_return: float = Field(default=0.0, ge=0)
     # Ignore quotes whose notional is below this euro dust floor.
     paper_maker_min_notional_eur: float = Field(default=10.0, ge=0)
     # When True, same-venue maker may emit buy-only quotes without sell inventory.
@@ -454,6 +458,8 @@ class Settings(BaseSettings):
     # Cut-loss: exit when mark falls this far below fee-aware BE (last-resort fail-safe).
     live_micro_cut_loss_below_be_pct: float = Field(default=0.04, ge=0.0, le=0.25)
     live_micro_cut_loss_new_bases_only: bool = False
+    # Early stop: downward momentum + below BE → exit at BE minus this pct (e.g. 1%).
+    live_micro_early_cut_loss_below_be_pct: float = Field(default=0.01, ge=0.0, le=0.10)
     # Downward momentum: rolling return ≤ −this → exit (default 0.3%).
     live_micro_momentum_exit_min_return: float = Field(default=0.003, ge=0.0, le=0.10)
     # Defensive exit floor: never sell below BE + this cushion (default 0.5%).

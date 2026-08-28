@@ -40,10 +40,18 @@ class PortfolioExposureGate:
 
     def sync_from_portfolio(self, portfolio: PortfolioSnapshot) -> None:
         self._exposure = {}
+        inventory_notional = _ZERO
         for pos in portfolio.positions:
             group = correlation_group_for_symbol(pos.symbol or "")
             notional = abs(pos.quantity * pos.average_entry_price)
             self._exposure[group] = self._exposure.get(group, _ZERO) + notional
+            inventory_notional += notional
+        # Rebuild strategy/venue exposure from actual holdings — record_fill only
+        # adds within-batch; without reset, closed bags left ghost strategy %.
+        self._strategy_exposure = {}
+        if inventory_notional > 0:
+            self._strategy_exposure["maker_inventory"] = inventory_notional
+        self._venue_exposure = {}
 
     def record_fill(self, scored: ScoredOpportunity, notional: Decimal) -> None:
         group = scored.correlation_group or correlation_group_for_symbol(

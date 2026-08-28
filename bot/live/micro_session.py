@@ -52,8 +52,6 @@ _LIQUID_EUR_SYMBOLS = (
     "SUIEUR",
     "APTEUR",
     "FETEUR",
-    "PEPEEUR",
-    "SHIBEUR",
     "POLEUR",
 )
 
@@ -158,6 +156,9 @@ def _session_settings(
             # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.05,
             "paper_maker_min_net_return": 0.0005,
+            "paper_maker_small_clip_max_eur": 80.0,
+            "paper_maker_small_clip_min_profit_eur": 0.03,
+            "paper_maker_small_clip_min_net_return": 0.0003,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
@@ -168,7 +169,7 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            "paper_trail_soft_arm_pct": 0.020,  # trail-lab best IS/OOS (synthetic+live costs)
+            "paper_trail_soft_arm_pct": 0.0125,  # earlier soft harvest on €2k pockets
             "paper_trail_soft_drawdown_pct": 0.005,  # floor (≥ config min); pullback harvest ≥BE
             "paper_trail_soft_partial_pct": 0.50,  # trail-lab: earlier/larger harvest ≥BE
             # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
@@ -198,7 +199,7 @@ def _session_settings(
             "paper_regime_block_buys": True,
             # New-base entries only on rising mark momentum (fits never-loss trail).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0015,  # ≥+0.15% over rolling samples
+            "paper_buy_momentum_min_return": 0.001,  # ≥+0.10% over rolling samples
             "paper_buy_momentum_samples": 12,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             "live_micro_corr_group": "ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
@@ -225,7 +226,8 @@ def _session_settings(
             "live_micro_underwater_min_notional_eur": 25.0,
             "live_micro_cut_loss_below_be_pct": 0.04,
             "live_micro_cut_loss_new_bases_only": False,
-            "live_micro_momentum_exit_min_return": 0.003,
+            "live_micro_early_cut_loss_below_be_pct": 0.01,
+            "live_micro_momentum_exit_min_return": 0.002,
             "live_micro_momentum_exit_above_be_pct": 0.005,
             "global_max_strategy_exposure_pct": 100.0,
             "global_max_venue_exposure_pct": 100.0,
@@ -243,7 +245,7 @@ def _session_settings(
                 or "ADA,NEAR,DOT,XRP,LINK,ATOM"
             ),
             "live_micro_okx_cash_bias_ratio": float(
-                getattr(base, "live_micro_okx_cash_bias_ratio", 1.2) or 1.2
+                getattr(base, "live_micro_okx_cash_bias_ratio", 1.5) or 1.5
             ),
             "live_micro_trail_partial_min_frac": float(
                 getattr(base, "live_micro_trail_partial_min_frac", 0.45) or 0.45
@@ -264,10 +266,10 @@ def _session_settings(
             "live_micro_cross_venue_enabled": False,
             "arbitrage_min_profit_eur": 0.08,
             "arbitrage_min_profit_pct": 0.0010,
-            "profitability_min_net_profit_usd": 0.05,
-            "profitability_min_net_return": 0.0005,
+            "profitability_min_net_profit_usd": 0.03,
+            "profitability_min_net_return": 0.0003,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.05,
+            "risk_min_net_profit_usd": 0.03,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
             # Size vs aggregate multi-venue equity so clips stay near the €150

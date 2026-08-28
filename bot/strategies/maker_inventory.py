@@ -107,6 +107,15 @@ class MakerInventoryStrategy(BaseStrategy):
             min_notional_eur=Decimal(
                 str(getattr(settings, "paper_maker_min_notional_eur", 10) or 0)
             ),
+            small_clip_max_eur=Decimal(
+                str(getattr(settings, "paper_maker_small_clip_max_eur", 0) or 0)
+            ),
+            small_clip_min_profit_eur=Decimal(
+                str(getattr(settings, "paper_maker_small_clip_min_profit_eur", 0) or 0)
+            ),
+            small_clip_min_net_return=Decimal(
+                str(getattr(settings, "paper_maker_small_clip_min_net_return", 0) or 0)
+            ),
         )
         self._skew_policy = InventorySkewPolicy(
             max_alt_pct=Decimal(
@@ -560,8 +569,14 @@ class MakerInventoryStrategy(BaseStrategy):
         # Venue quality now comes from calibrated EV / markout, not a cash bonus.
         return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001"))
 
-    def _effective_min_profit(self, equity: Decimal | None) -> Decimal:
-        floor = self._min_profit_eur
+    def _effective_min_profit(
+        self, equity: Decimal | None, *, notional: Decimal | None = None
+    ) -> Decimal:
+        if notional is not None and notional > 0:
+            tiered, _ = self._dust.thresholds_for(notional)
+            floor = tiered
+        else:
+            floor = self._min_profit_eur
         if equity is None or equity <= 0 or self._min_profit_equity_bps <= 0:
             return floor
         scaled = equity * self._min_profit_equity_bps / _BPS
@@ -1268,7 +1283,9 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        min_eur = self._effective_min_profit(equity)
+        min_eur = self._effective_min_profit(
+            equity, notional=candidate.quantity * candidate.buy_price
+        )
         if not sell_only and not buy_only and net < min_eur:
             self._reject(
                 candidate.symbol,
@@ -1279,11 +1296,12 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_profit_eur=str(net),
             )
             return None
-        if not sell_only and not buy_only and net_return < self._min_profit_pct:
+        _, min_return = self._dust.thresholds_for(candidate.quantity * candidate.buy_price)
+        if not sell_only and not buy_only and net_return < min_return:
             self._reject(
                 candidate.symbol,
                 "min_profit_pct",
-                f"NET return {net_return} below minimum {self._min_profit_pct}",
+                f"NET return {net_return} below minimum {min_return}",
                 buy_exchange=candidate.buy_exchange,
                 sell_exchange=candidate.sell_exchange,
                 net_return=str(net_return),

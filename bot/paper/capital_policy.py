@@ -220,10 +220,31 @@ class NetProfitDustFilter:
         min_net_profit_eur: Decimal = Decimal("0.15"),
         min_net_return: Decimal = Decimal("0.0025"),
         min_notional_eur: Decimal = Decimal("10"),
+        small_clip_max_eur: Decimal = Decimal("0"),
+        small_clip_min_profit_eur: Decimal = Decimal("0"),
+        small_clip_min_net_return: Decimal = Decimal("0"),
     ) -> None:
         self.min_net_profit_eur = max(_ZERO, min_net_profit_eur)
         self.min_net_return = max(_ZERO, min_net_return)
         self.min_notional_eur = max(_ZERO, min_notional_eur)
+        self.small_clip_max_eur = max(_ZERO, small_clip_max_eur)
+        self.small_clip_min_profit_eur = max(_ZERO, small_clip_min_profit_eur)
+        self.small_clip_min_net_return = max(_ZERO, small_clip_min_net_return)
+
+    def thresholds_for(self, notional: Decimal) -> tuple[Decimal, Decimal]:
+        """Return (min_profit_eur, min_net_return) for the given clip notional."""
+        if (
+            self.small_clip_max_eur > 0
+            and notional <= self.small_clip_max_eur
+            and self.small_clip_min_profit_eur > 0
+        ):
+            min_return = (
+                self.small_clip_min_net_return
+                if self.small_clip_min_net_return > 0
+                else self.min_net_return
+            )
+            return self.small_clip_min_profit_eur, min_return
+        return self.min_net_profit_eur, self.min_net_return
 
     def reject_reason(
         self,
@@ -238,13 +259,14 @@ class NetProfitDustFilter:
             return (
                 f"notional {notional} EUR below dust floor {self.min_notional_eur} EUR"
             )
-        if self.min_net_profit_eur > 0 and net_profit_eur < self.min_net_profit_eur:
+        min_profit, min_return = self.thresholds_for(notional)
+        if min_profit > 0 and net_profit_eur < min_profit:
             return (
-                f"NET {net_profit_eur} EUR below floor {self.min_net_profit_eur} EUR"
+                f"NET {net_profit_eur} EUR below floor {min_profit} EUR"
             )
-        if self.min_net_return > 0 and net_return < self.min_net_return:
+        if min_return > 0 and net_return < min_return:
             return (
-                f"NET return {net_return} below floor {self.min_net_return}"
+                f"NET return {net_return} below floor {min_return}"
             )
         return None
 

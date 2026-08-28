@@ -209,6 +209,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._cut_loss_below_be_pct = Decimal(
             str(getattr(settings, "live_micro_cut_loss_below_be_pct", 0) or 0)
         )
+        self._early_cut_loss_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_early_cut_loss_below_be_pct", 0) or 0)
+        )
         self._cut_loss_new_bases_only = bool(
             getattr(settings, "live_micro_cut_loss_new_bases_only", False)
         )
@@ -906,6 +909,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "dust_policy": self._dust_policy,
                 "momentum_enabled": self._momentum_enabled,
                 "cut_loss_below_be_pct": str(self._cut_loss_below_be_pct),
+                "early_cut_loss_below_be_pct": str(self._early_cut_loss_below_be_pct),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "momentum_exit_min_return": str(self._momentum_exit_min),
@@ -2559,6 +2563,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return None
         return be * (Decimal("1") - self._cut_loss_below_be_pct)
 
+    def _early_cut_loss_floor_price(self, venue: str, base: str) -> Decimal | None:
+        """Momentum early stop: BE minus smaller pct (e.g. 1% under BE)."""
+        if self._early_cut_loss_below_be_pct <= 0:
+            return None
+        be = self._break_even_sell_price(venue, base)
+        if be is None or be <= 0:
+            return None
+        return be * (Decimal("1") - self._early_cut_loss_below_be_pct)
+
+    def _cut_loss_floor_for_reason(
+        self, venue: str, base: str, reason: str
+    ) -> Decimal | None:
+        if reason == "trail_early_cut_loss":
+            return self._early_cut_loss_floor_price(venue, base)
+        return self._cut_loss_floor_price(venue, base)
+
     def _cut_loss_eligible(
         self, st: dict[str, Any], *, venue: str, base: str
     ) -> bool:
@@ -2571,10 +2591,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return True
 
     async def _cut_loss_exit_quote(
-        self, venue: str, base: str, mark: Decimal
+        self,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        *,
+        floor: Decimal | None = None,
     ) -> tuple[Decimal | None, bool, str]:
         """Taker exit at/below cut-loss floor — frees capital on stuck new entries."""
-        floor = self._cut_loss_floor_price(venue, base)
+        if floor is None:
+            floor = self._cut_loss_floor_price(venue, base)
         if floor is None:
             return None, False, "no_cut_loss_floor"
         if mark > floor:
@@ -3339,9 +3365,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
+            early_floor = self._early_cut_loss_floor_price(venue, asset)
+            if (
+                early_floor is not None
+                and self._cut_loss_eligible(st, venue=venue, base=asset)
+                and be is not None
+                and mark < be
+                and self._momentum_enabled
+                and self._momentum_down(symbol)
+                and mark <= early_floor
+            ):
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                sell_qty = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
+                reason = "trail_early_cut_loss"
             cut_floor = self._cut_loss_floor_price(venue, asset)
             if (
-                cut_floor is not None
+                not reason
+                and cut_floor is not None
                 and self._cut_loss_eligible(st, venue=venue, base=asset)
                 and mark <= cut_floor
             ):
@@ -3354,7 +3399,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 reason = "trail_cut_loss"
             elif (
-                be is not None
+                not reason
+                and be is not None
                 and self._momentum_enabled
                 and self._momentum_down(symbol)
                 and not st.get("momentum_be_exit_done")
@@ -3533,9 +3579,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_skip("trail_dust")
                 continue
 
-            if reason == "trail_cut_loss":
+            if reason in {"trail_cut_loss", "trail_early_cut_loss"}:
+                cut_floor = self._cut_loss_floor_for_reason(venue, asset, reason)
                 exit_px, exit_post_only, quote_reason = await self._cut_loss_exit_quote(
-                    venue, asset, mark
+                    venue, asset, mark, floor=cut_floor
                 )
             else:
                 exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
@@ -3551,7 +3598,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     exit_px = max(exit_px, mom_target)
                     limit_px = max(limit_px or _ZERO, mom_target)
 
-            if reason != "trail_cut_loss":
+            if reason not in {"trail_cut_loss", "trail_early_cut_loss"}:
                 ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
                 if not ok_sell:
                     self._bump_skip(gate_reason)
@@ -3565,7 +3612,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             if limit_px is None or limit_px < exit_px:
                 limit_px = exit_px
-            if reason == "trail_cut_loss":
+            if reason in {"trail_cut_loss", "trail_early_cut_loss"}:
                 limit_px = exit_px
                 post_only = exit_post_only
             elif reason != "trail_recovery_be":
@@ -3634,6 +3681,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "trail_recovery_be",
                     "trail_consolidation_wind_down",
                     "trail_cut_loss",
+                    "trail_early_cut_loss",
                     "trail_momentum_be_exit",
                     "time_stop_breakeven",
                 }:
@@ -4107,7 +4155,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Hard floor: NEVER sell below fee-adjusted cost + profit buffer.
             # Cut-loss exits (new-base stop) may sell below BE when floor is breached.
             exit_reason = str(meta.get("exit_reason") or strategy or "")
-            cut_loss_exit = exit_reason == "trail_cut_loss"
+            cut_loss_exit = exit_reason in {"trail_cut_loss", "trail_early_cut_loss"}
             be = self._break_even_sell_price(venue, base)
             if be is None:
                 self._bump_skip("sell_no_trusted_cost")
@@ -4120,7 +4168,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ),
                 )
             if cut_loss_exit:
-                floor = self._cut_loss_floor_price(venue, base)
+                floor = self._cut_loss_floor_for_reason(venue, base, exit_reason)
                 if floor is None:
                     self._bump_skip("cut_loss_not_configured")
                     return await self._reject_before_live(
