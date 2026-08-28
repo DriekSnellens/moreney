@@ -213,7 +213,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_cut_loss_new_bases_only", False)
         )
         self._momentum_exit_above_be_pct = Decimal(
-            str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.02) or 0)
+            str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.005) or 0)
+        )
+        self._momentum_exit_min = Decimal(
+            str(getattr(settings, "live_micro_momentum_exit_min_return", 0.005) or 0)
         )
         self._okx_buy_improve_bps = Decimal(
             str(getattr(settings, "live_micro_okx_buy_improve_bps", 0) or 0)
@@ -801,10 +804,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "samples": len(series),
             }
         mom_f = float(mom)
-        threshold = float(self._momentum_min)
-        if mom_f >= threshold:
+        up_threshold = float(self._momentum_min)
+        down_threshold = float(self._momentum_exit_min)
+        if mom_f >= up_threshold:
             direction, arrow = "up", "↑"
-        elif mom_f <= -threshold:
+        elif mom_f <= -down_threshold:
             direction, arrow = "down", "↓"
         else:
             direction, arrow = "flat", "→"
@@ -904,6 +908,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "cut_loss_below_be_pct": str(self._cut_loss_below_be_pct),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
+                "momentum_exit_min_return": str(self._momentum_exit_min),
                 "corr_group": sorted(self._corr_group),
                 "max_per_corr_group": self._max_per_corr,
                 "states": self._trail_states_public(),
@@ -2597,7 +2602,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mom = series.momentum_return()
         if mom is None:
             return False
-        return mom <= -self._momentum_min
+        return mom <= -self._momentum_exit_min
 
     def _is_new_base_buy(self, venue: str, base: str) -> bool:
         return base.upper() not in self._held_alt_bases(venue)
@@ -3310,7 +3315,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not st.get("momentum_be_exit_done")
             ):
                 mom_target = self._momentum_exit_target_price(venue, asset)
-                if mom_target is not None and mark >= mom_target:
+                if mom_target is not None and mark >= be:
                     free = await self._refresh_free(venue, symbol, asset, locked)
                     sell_qty = min(
                         free,
@@ -3319,7 +3324,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         else free,
                     )
                     reason = "trail_momentum_be_exit"
-                    limit_px = mom_target
+                    limit_px = mom_target if mark >= mom_target else None
             elif (
                 st.get("soft_armed")
                 and not st.get("recovery_armed")

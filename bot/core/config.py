@@ -454,8 +454,10 @@ class Settings(BaseSettings):
     # Cut-loss: exit when mark falls this far below fee-aware BE (last-resort fail-safe).
     live_micro_cut_loss_below_be_pct: float = Field(default=0.04, ge=0.0, le=0.25)
     live_micro_cut_loss_new_bases_only: bool = False
-    # Downward momentum: exit at/above BE + this cushion when mark allows (before cut-loss).
-    live_micro_momentum_exit_above_be_pct: float = Field(default=0.02, ge=0.0, le=0.10)
+    # Downward momentum: rolling return ≤ −this → exit (default 0.5%).
+    live_micro_momentum_exit_min_return: float = Field(default=0.005, ge=0.0, le=0.10)
+    # Defensive exit floor: never sell below BE + this cushion (default 0.5%).
+    live_micro_momentum_exit_above_be_pct: float = Field(default=0.005, ge=0.0, le=0.10)
     # OKX maker buys: improve bid toward touch (bps) when post-only safe.
     live_micro_okx_buy_improve_bps: float = Field(default=0.0, ge=0.0, le=10.0)
     # Pause cross-venue emits after enough live attempts with poor fill rate.
