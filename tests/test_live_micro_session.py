@@ -1753,6 +1753,62 @@ def test_partial_done_set_only_via_fill_helper() -> None:
     assert st.get("triggered") is False
 
 
+def test_bag_winnable_zero_below_break_even() -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=15.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:FET"] = [[Decimal("10"), Decimal("0.14")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:FET")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "FET")  # noqa: SLF001
+    assert be is not None
+    below = bridge._bag_winnable_eur(  # noqa: SLF001
+        "bitvavo", "FET", cost=Decimal("0.14"), mark=be * Decimal("0.99"), qty=Decimal("10")
+    )
+    assert below == Decimal("0")
+    above = bridge._bag_winnable_eur(  # noqa: SLF001
+        "bitvavo", "FET", cost=Decimal("0.14"), mark=be * Decimal("1.01"), qty=Decimal("10")
+    )
+    assert above > 0
+
+
+def test_mtm_summary_includes_winnable(tmp_path: Path) -> None:
+    from bot.portfolio.models import AssetBalance
+
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=15.0,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
+    portfolio._state.balances["SOL"] = AssetBalance(  # noqa: SLF001
+        asset="SOL", available=Decimal("1"), reserved=Decimal("0")
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._trail.clear()  # noqa: SLF001
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("85")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    bridge._trail["bitvavo:SOL"] = {  # noqa: SLF001
+        "venue": "bitvavo",
+        "base": "SOL",
+        "cost": Decimal("85"),
+        "last_mark": Decimal("87"),
+        "session_qty": "1",
+    }
+    mtm = bridge._mtm_summary()  # noqa: SLF001
+    assert Decimal(mtm["winnable_mtm_eur"]) > 0
+    assert Decimal(mtm["unrealized_mtm_eur"]) > Decimal(mtm["winnable_mtm_eur"])
+
+
 def test_be_harvest_cooldown_shorter_than_full_exit() -> None:
     bridge = MicroBudgetLiveExecutor(
         _unlocked(live_micro_be_harvest_cooldown_sec=12.0),

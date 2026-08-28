@@ -48,6 +48,7 @@ def test_render_live_dashboard_contains_controls() -> None:
                     "session_live_transaction_count": 7,
                     "backfill_mirrored_count": 42,
                     "unrealized_mtm_eur": "-25.50",
+                    "winnable_mtm_eur": "3.25",
                     "blocked_sells_session": "21",
                     "locked_notional_eur": "450.00",
                     "micro_locked_notional_eur": "120.00",
@@ -121,7 +122,7 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "Portfolio" in html
     assert "Vrij EUR" in html
     assert "Gerealiseerd (totaal)" in html
-    assert "Ongerealiseerd" in html
+    assert "Winnable" in html
     assert "Transacties" in html
     assert "Sessie PnL" in html
     assert "Week gerealiseerd" in html

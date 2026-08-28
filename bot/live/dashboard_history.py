@@ -52,6 +52,9 @@ def extract_metrics(payload: dict[str, Any]) -> dict[str, str] | None:
     unrealized = _to_decimal(
         bridge.get("unrealized_mtm_eur") or diag.get("unrealized_mtm_eur")
     )
+    winnable = _to_decimal(
+        bridge.get("winnable_mtm_eur") or diag.get("winnable_mtm_eur")
+    )
     free = _to_decimal(bridge.get("free_quote_eur") or bridge.get("remaining_eur"))
     if free is None:
         total_free = Decimal("0")
@@ -89,6 +92,8 @@ def extract_metrics(payload: dict[str, Any]) -> dict[str, str] | None:
         out["realized_pnl_eur"] = str(realized)
     if unrealized is not None:
         out["unrealized_eur"] = str(unrealized)
+    if winnable is not None:
+        out["winnable_eur"] = str(winnable)
     if free is not None:
         out["free_eur"] = str(free)
     start = _to_decimal(
@@ -220,6 +225,9 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     unrealized = _to_decimal(
         bridge.get("unrealized_mtm_eur") or diag.get("unrealized_mtm_eur")
     )
+    winnable = _to_decimal(
+        bridge.get("winnable_mtm_eur") or diag.get("winnable_mtm_eur")
+    )
     free = _to_decimal(bridge.get("free_quote_eur") or bridge.get("remaining_eur"))
     start = _to_decimal(
         session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur")
@@ -265,6 +273,7 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "weekly_target_high_eur": 350.0,
         "weekly_pace_realistic_eur": 35.0,
         "unrealized_eur": float(unrealized) if unrealized is not None else None,
+        "winnable_eur": float(winnable) if winnable is not None else None,
         "session_pnl_eur": float(session_pnl) if session_pnl is not None else None,
         "free_eur": float(free) if free is not None else None,
         "tx_count": tx_n,
@@ -276,6 +285,7 @@ def chart_series_from_history(history: list[dict[str, Any]]) -> dict[str, Any]:
     portfolio: list[float | None] = []
     realized: list[float | None] = []
     unrealized: list[float | None] = []
+    winnable: list[float | None] = []
     session_pnl: list[float | None] = []
 
     def _f(key: str, row: dict[str, Any]) -> float | None:
@@ -293,6 +303,7 @@ def chart_series_from_history(history: list[dict[str, Any]]) -> dict[str, Any]:
         portfolio.append(_f("portfolio_eur", row))
         realized.append(_f("realized_pnl_eur", row))
         unrealized.append(_f("unrealized_eur", row))
+        winnable.append(_f("winnable_eur", row))
         session_pnl.append(_f("session_pnl_eur", row))
 
     return {
@@ -300,5 +311,6 @@ def chart_series_from_history(history: list[dict[str, Any]]) -> dict[str, Any]:
         "portfolio": portfolio,
         "realized": realized,
         "unrealized": unrealized,
+        "winnable": winnable,
         "session_pnl": session_pnl,
     }

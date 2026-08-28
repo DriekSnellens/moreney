@@ -47,6 +47,7 @@ def test_record_and_load_history(tmp_path: Path) -> None:
             "starting_portfolio_eur": "4180.00",
             "bridge": {
                 "unrealized_mtm_eur": "-12.00",
+                "winnable_mtm_eur": "0.00",
                 "free_quote_eur": "1600.00",
             },
         }
@@ -57,6 +58,7 @@ def test_record_and_load_history(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["portfolio_eur"] == "4100.50"
     assert rows[0]["realized_pnl_eur"] == "-5.25"
+    assert rows[0]["winnable_eur"] == "0.00"
     assert Decimal(rows[0]["session_pnl_eur"]) == Decimal("-79.50")
 
 

@@ -358,8 +358,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self.skips.get("time_stop_below_be", 0) or 0
         )
 
+    def _bag_winnable_eur(
+        self,
+        venue: str,
+        base: str,
+        *,
+        cost: Decimal,
+        mark: Decimal,
+        qty: Decimal,
+    ) -> Decimal:
+        """EUR profit sellable now: mark above fee-aware break-even only."""
+        if qty <= 0 or mark <= 0 or cost <= 0:
+            return _ZERO
+        be = self._break_even_sell_price(venue, base)
+        if be is None or mark < be:
+            return _ZERO
+        return (mark - be) * qty
+
     def _mtm_summary(self) -> dict[str, str]:
         unrealized = _ZERO
+        winnable = _ZERO
         locked = _ZERO
         micro_locked = _ZERO
         long_hold_locked = _ZERO
@@ -383,6 +401,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             notional = qty * mark
             locked += notional
             unrealized += (mark - cost) * qty
+            winnable += self._bag_winnable_eur(
+                venue, base, cost=cost, mark=mark, qty=qty
+            )
             if self._is_long_hold(base):
                 long_hold_locked += notional
             else:
@@ -416,8 +437,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 long_hold_locked += notional
                 if cost > 0:
                     unrealized += (mark - cost) * qty
+                    winnable += self._bag_winnable_eur(
+                        venue, asset, cost=cost, mark=mark, qty=qty
+                    )
         return {
             "unrealized_mtm_eur": str(unrealized.quantize(Decimal("0.01"))),
+            "winnable_mtm_eur": str(winnable.quantize(Decimal("0.01"))),
             "locked_notional_eur": str(locked.quantize(Decimal("0.01"))),
             "micro_locked_notional_eur": str(micro_locked.quantize(Decimal("0.01"))),
             "long_hold_notional_eur": str(long_hold_locked.quantize(Decimal("0.01"))),
@@ -1030,6 +1055,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 qty = Decimal(str(st.get("session_qty") or 0))
             notional = (qty * mark) if qty > 0 and mark > 0 else _ZERO
             unrealized = (mark - cost) * qty if qty > 0 and cost > 0 and mark > 0 else _ZERO
+            winnable = self._bag_winnable_eur(
+                venue, base, cost=cost, mark=mark, qty=qty
+            )
+            be = self._break_even_sell_price(venue, base)
             role = "long_hold" if self._is_long_hold(base) else "micro_recycle"
             out[trail_key] = {
                 "venue": venue,
@@ -1050,6 +1079,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "qty": str(qty) if qty > 0 else "",
                 "notional_eur": str(notional.quantize(Decimal("0.01"))) if notional > 0 else "",
                 "unrealized_eur": str(unrealized.quantize(Decimal("0.01"))) if qty > 0 else "",
+                "winnable_eur": str(winnable.quantize(Decimal("0.01"))) if qty > 0 else "",
+                "at_break_even": bool(be is not None and mark >= be),
                 "gain_pct": f"{float(gain * 100):.2f}",
                 "pct_to_arm": f"{float(to_arm * 100):.2f}",
                 "soft_arm_pct": f"{float(soft_arm * 100):.2f}",
@@ -1084,6 +1115,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 gain = ((mark - cost) / cost) if cost > 0 else _ZERO
                 notional = qty * mark
                 unrealized = (mark - cost) * qty if cost > 0 else _ZERO
+                winnable = self._bag_winnable_eur(
+                    venue, asset, cost=cost, mark=mark, qty=qty
+                )
+                be = self._break_even_sell_price(venue, asset)
                 opened_at = self._position_opened_at.get(trail_key)
                 age = max(0.0, time.time() - opened_at) if opened_at else None
                 out[trail_key] = {
@@ -1101,6 +1136,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "qty": str(qty),
                     "notional_eur": str(notional.quantize(Decimal("0.01"))),
                     "unrealized_eur": str(unrealized.quantize(Decimal("0.01"))),
+                    "winnable_eur": str(winnable.quantize(Decimal("0.01"))),
+                    "at_break_even": bool(be is not None and mark >= be),
                     "gain_pct": f"{float(gain * 100):.2f}",
                     "pct_to_arm": "—",
                     "soft_arm_pct": "—",

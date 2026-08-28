@@ -593,9 +593,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         tx_n = 0
     backfill_n = int(bridge.get("backfill_mirrored_count") or 0)
     diag = bridge.get("diagnostics") or {}
-    unrealized = _dec(
-        bridge.get("unrealized_mtm_eur")
-        or diag.get("unrealized_mtm_eur")
+    winnable = _dec(
+        bridge.get("winnable_mtm_eur")
+        or diag.get("winnable_mtm_eur")
     )
     blocked_sells = int(
         bridge.get("blocked_sells_session")
@@ -617,11 +617,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         pnl_class = "good"
     elif pnl is not None and pnl < 0:
         pnl_class = "bad"
-    unreal_class = ""
-    if unrealized is not None and unrealized > 0:
-        unreal_class = "good"
-    elif unrealized is not None and unrealized < 0:
-        unreal_class = "bad"
+    winn_class = ""
+    if winnable is not None and winnable > 0:
+        winn_class = "good"
+    elif winnable is not None and winnable < 0:
+        winn_class = "bad"
 
     trail = bridge.get("trail_take_profit") or {}
     states = trail.get("states") or {}
@@ -636,20 +636,21 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         to_arm = st.get("pct_to_arm") or "—"
         role = str(st.get("role") or "micro_recycle")
         notional = st.get("notional_eur") or "—"
-        unreal = st.get("unrealized_eur") or "—"
+        winn = st.get("winnable_eur") or "—"
         soft = "ja" if st.get("soft_armed") else "nee"
         hard = "ja" if st.get("hard_armed") else "nee"
         partial = "ja" if st.get("partial_done") else "—"
         gain_cls = ""
         status = "—"
         status_cls = ""
-        unreal_cls = ""
+        winn_cls = ""
+        w = 0.0
         try:
-            u = float(str(unreal).replace(",", "."))
-            if u > 0:
-                unreal_cls = "good"
-            elif u < 0:
-                unreal_cls = "bad"
+            w = float(str(winn).replace(",", "."))
+            if w > 0:
+                winn_cls = "good"
+            elif w < 0:
+                winn_cls = "bad"
         except ValueError:
             pass
         try:
@@ -661,6 +662,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             if role == "long_hold":
                 status = "long-hold — buiten micro-recycle"
                 status_cls = ""
+            elif w > 0:
+                status = "boven BE — harvestbaar"
+                status_cls = "good"
             elif g < 0:
                 status = "onder kost — houdt vast"
                 status_cls = "bad"
@@ -685,7 +689,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             f"<td>{_esc(base)} {role_tag}</td>"
             f"<td class='{status_cls}'>{_esc(status)}</td>"
             f"<td>{_esc(_eur(notional))}</td>"
-            f"<td class='{unreal_cls}'>{_esc(_eur(unreal, signed=True))}</td>"
+            f"<td class='{winn_cls}'>{_esc(_eur(winn, signed=True))}</td>"
             f"<td>{_esc(st.get('cost') or '—')}</td>"
             f"<td>{_esc(st.get('mark') or '—')}</td>"
             f"<td class='{gain_cls}'>{_esc(gain)}%</td>"
@@ -701,9 +705,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     if pos_rows:
         positions_html = (
             "<section class='positions'><h2>Posities / trail</h2>"
-            "<p class='hint'>Winst% = mark vs kost (ongerealiseerd). Long-hold (ETH) telt niet mee voor micro-recycle.</p>"
+            "<p class='hint'>Winnable = winst boven fee-aware break-even (nu verkoopbaar). Onder BE = €0.</p>"
             "<table class='pos'><thead><tr>"
-            "<th>Venue</th><th>Coin</th><th>Status</th><th>Vast €</th><th>Ongereal. €</th>"
+            "<th>Venue</th><th>Coin</th><th>Status</th><th>Vast €</th><th>Winnable €</th>"
             "<th>Cost</th><th>Mark</th><th>Winst%</th>"
             "<th>Tot arm</th><th>Soft/Hard</th><th>Arms%</th><th>Peak</th>"
             "<th>Partial</th><th>Sess qty</th><th>Age s</th>"
@@ -970,9 +974,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">FIFO na fees</p>
       </article>
       <article class="card">
-        <p class="label">Ongerealiseerd</p>
-        <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
-        <p class="hint">Open bags MTM</p>
+        <p class="label">Winnable</p>
+        <p class="value {winn_class}" id="kpi-winnable">{_esc(_eur(winnable, signed=True))}</p>
+        <p class="hint">Boven break-even (fees)</p>
       </article>
       <article class="card">
         <p class="label">Vrij EUR</p>
@@ -1123,9 +1127,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
               borderWidth: 2,
             }},
             {{
-              label: 'Ongerealiseerd',
-              data: data.unrealized || [],
-              borderColor: '#ff6b6b',
+              label: 'Winnable',
+              data: data.winnable || [],
+              borderColor: '#3ddc97',
               borderDash: [4, 4],
               tension: 0.25,
               pointRadius: 0,
@@ -1144,7 +1148,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
       set('kpi-session-realized', eurFmt(m.session_realized_eur, true));
       set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
-      set('kpi-unrealized', eurFmt(m.unrealized_eur, true));
+      set('kpi-winnable', eurFmt(m.winnable_eur, true));
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
       const ts = document.getElementById('updated-at');
