@@ -355,17 +355,25 @@ class MakerInventoryStrategy(BaseStrategy):
     @staticmethod
     def _build_profitability_engine(settings: Settings) -> DefaultProfitabilityEngine:
         adverse = float(getattr(settings, "paper_maker_adverse_bps", 0) or 0)
+        min_profit = float(
+            getattr(settings, "profitability_min_net_profit_usd", 0) or 0
+        )
+        if min_profit <= 0:
+            min_profit = float(settings.paper_maker_min_profit_eur)
+        min_return = float(getattr(settings, "profitability_min_net_return", 0) or 0)
+        if min_return <= 0:
+            min_return = float(
+                getattr(
+                    settings,
+                    "paper_maker_min_net_return",
+                    settings.arbitrage_min_profit_pct,
+                )
+                or settings.arbitrage_min_profit_pct
+            )
         maker_settings = settings.model_copy(
             update={
-                "profitability_min_net_profit_usd": settings.paper_maker_min_profit_eur,
-                "profitability_min_net_return": float(
-                    getattr(
-                        settings,
-                        "paper_maker_min_net_return",
-                        settings.arbitrage_min_profit_pct,
-                    )
-                    or settings.arbitrage_min_profit_pct
-                ),
+                "profitability_min_net_profit_usd": min_profit,
+                "profitability_min_net_return": min_return,
                 "profitability_apply_funding": False,
                 "profitability_slippage_bps": 0.0,
                 "profitability_thin_book_penalty_bps": 0.0,

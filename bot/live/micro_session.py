@@ -266,10 +266,10 @@ def _session_settings(
             "live_micro_cross_venue_enabled": False,
             "arbitrage_min_profit_eur": 0.08,
             "arbitrage_min_profit_pct": 0.0010,
-            "profitability_min_net_profit_usd": 0.03,
-            "profitability_min_net_return": 0.0003,
+            "profitability_min_net_profit_usd": 0.05,
+            "profitability_min_net_return": 0.0005,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.03,
+            "risk_min_net_profit_usd": 0.05,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
             # Size vs aggregate multi-venue equity so clips stay near the €150

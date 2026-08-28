@@ -86,6 +86,11 @@ class PaperPortfolio:
             for b in self._state.balances.values()
         ]
         positions: list[Position] = []
+        min_notional = Decimal(
+            str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+        )
+        tradeable_floor = min_notional * Decimal("0.5")
+        tradeable_open = 0
         for pos in self._state.positions.values():
             if pos.quantity == 0:
                 continue
@@ -100,6 +105,9 @@ class PaperPortfolio:
                     side=OpportunitySide.BUY,
                 )
             )
+            ref_px = mark if mark > 0 else pos.average_entry_price
+            if ref_px > 0 and abs(pos.quantity * ref_px) >= tradeable_floor:
+                tradeable_open += 1
         equity = self._state.total_equity
         return PortfolioSnapshot(
             balances=balances,
@@ -107,7 +115,7 @@ class PaperPortfolio:
             equity_usd=equity,
             peak_equity_usd=self._state.stats.peak_equity,
             daily_realized_pnl_usd=self._state.stats.realized_pnl,
-            open_position_count=len(positions),
+            open_position_count=tradeable_open,
             as_of=datetime.now(UTC),
         )
 

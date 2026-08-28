@@ -2082,3 +2082,54 @@ def test_portfolio_gate_sync_clears_ghost_strategy_exposure() -> None:
     )
     gate.sync_from_portfolio(portfolio_with_bag)
     assert gate.snapshot()["strategy"]["maker_inventory"] == "100"
+
+
+@pytest.mark.asyncio
+async def test_dust_positions_do_not_count_toward_open_cap() -> None:
+    from bot.portfolio.models import AssetBalance, PositionState
+    from bot.portfolio.portfolio import PaperPortfolio
+
+    settings = _unlocked(paper_maker_min_notional_eur=60.0)
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("2000"))
+    portfolio.state.balances["ADA"] = AssetBalance(
+        asset="ADA", available=Decimal("0.0001"), reserved=Decimal("0")
+    )
+    portfolio.state.balances["SOL"] = AssetBalance(
+        asset="SOL", available=Decimal("0.00001"), reserved=Decimal("0")
+    )
+    portfolio.state.balances["NEAR"] = AssetBalance(
+        asset="NEAR", available=Decimal("10"), reserved=Decimal("0")
+    )
+    portfolio.state.positions["ADAEUR"] = PositionState(
+        symbol="ADAEUR",
+        quantity=Decimal("0.0001"),
+        average_entry_price=Decimal("1.0"),
+    )
+    portfolio.state.positions["SOLEUR"] = PositionState(
+        symbol="SOLEUR",
+        quantity=Decimal("0.00001"),
+        average_entry_price=Decimal("150.0"),
+    )
+    portfolio.state.positions["NEAREUR"] = PositionState(
+        symbol="NEAREUR",
+        quantity=Decimal("10"),
+        average_entry_price=Decimal("3.0"),
+    )
+    portfolio.set_mark_price("NEAREUR", Decimal("3.0"))
+    snap = await portfolio.get_snapshot()
+    assert len(snap.positions) == 3
+    assert snap.open_position_count == 1
+
+
+def test_profitability_engine_uses_profitability_min_settings() -> None:
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    settings = _unlocked(
+        paper_maker_min_profit_eur=0.05,
+        profitability_min_net_profit_usd=0.04,
+        profitability_min_net_return=0.0004,
+    )
+    engine = MakerInventoryStrategy._build_profitability_engine(settings)
+    calc = engine._calculator  # noqa: SLF001
+    assert calc._min_net_profit == Decimal("0.04")  # noqa: SLF001
+    assert calc._min_net_return == Decimal("0.0004")  # noqa: SLF001
