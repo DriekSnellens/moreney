@@ -2303,7 +2303,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         locked = Decimal(str(mtm.get("micro_locked_notional_eur") or 0))
         if locked >= _MIN_LIVE_NOTIONAL:
             return False
-        if not (self._daily_kill_active or self._buys_blocked):
+        dirty = bool(self.skips) or self._daily_kill_active or self._buys_blocked
+        if not dirty:
             return False
         self.reset_trading_cycle()
         return True

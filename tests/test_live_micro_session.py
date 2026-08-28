@@ -2012,3 +2012,17 @@ def test_reset_trading_cycle_after_wind_down() -> None:
     assert bridge._buys_blocked is False  # noqa: SLF001
     assert bridge.skips == {}
     assert bridge.session_start_realized_eur == Decimal("-94")  # noqa: SLF001
+
+
+def test_wind_down_clears_stale_skips_without_buy_block() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge.skips["sell_below_break_even"] = 99
+    assert bridge._buys_blocked is False  # noqa: SLF001
+    assert bridge.maybe_reset_after_wind_down() is True  # noqa: SLF001
+    assert bridge.skips == {}
