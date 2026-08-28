@@ -225,8 +225,10 @@ def _session_settings(
             "live_micro_underwater_min_notional_eur": 25.0,
             "live_micro_cut_loss_below_be_pct": 0.04,
             "live_micro_cut_loss_new_bases_only": False,
-            "live_micro_momentum_exit_min_return": 0.005,
+            "live_micro_momentum_exit_min_return": 0.003,
             "live_micro_momentum_exit_above_be_pct": 0.005,
+            "global_max_strategy_exposure_pct": 100.0,
+            "global_max_venue_exposure_pct": 100.0,
             "live_micro_cross_venue_min_fill_rate": 0.30,
             "live_micro_cross_venue_min_attempts": 8,
             "live_micro_block_cross_venue_duplicate_bases": True,
@@ -588,15 +590,14 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
-            # Regime / cash-first: block new buys while reduce-only, toxic,
-            # or too many bags sit below cost (never-loss holds; don't add more).
+            # Regime / cash-first: block new buys while reduce-only or toxic HMM.
+            # Per-symbol vol dump cool-off is handled inside maker_inventory —
+            # do not globally block all buys when memecoins dump.
             try:
                 st_now = runner.status()
                 reduce_only = bool(st_now.get("reduce_only"))
                 hmm = st_now.get("hmm_regime") or {}
                 toxic = bool(hmm.get("is_toxic_flow"))
-                scan = (st_now.get("last_cycle") or {}).get("scan") or {}
-                dump_n = len(scan.get("dump_symbols") or [])
                 uw_block = int(
                     getattr(cfg, "live_micro_underwater_buy_block", 3) or 0
                 )
@@ -608,9 +609,7 @@ async def run_session(
                 )
                 underwater_n = bridge.underwater_bag_count(min_notional_eur=uw_floor)
                 cash_throttle = uw_block > 0 and underwater_n >= uw_block
-                dump_breadth = dump_n >= 2
-                block_buys_full = reduce_only or toxic or dump_breadth
-                cash_throttle = uw_block > 0 and underwater_n >= uw_block
+                block_buys_full = reduce_only or toxic
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )

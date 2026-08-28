@@ -148,7 +148,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
-    assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.005
+    assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.003
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
@@ -1917,7 +1917,7 @@ def test_momentum_down_and_exit_target_at_be_plus_half_pct() -> None:
         paper_buy_momentum_enabled=True,
         paper_buy_momentum_min_return=0.0015,
         paper_buy_momentum_samples=12,
-        live_micro_momentum_exit_min_return=0.005,
+        live_micro_momentum_exit_min_return=0.003,
         live_micro_momentum_exit_above_be_pct=0.005,
         paper_maker_sell_profit_buffer_bps=15.0,
     )
@@ -2006,7 +2006,9 @@ def test_reset_trading_cycle_after_wind_down() -> None:
     bridge.realized_trade_pnl_eur = Decimal("-94")
     bridge._daily_kill_active = True  # noqa: SLF001
     bridge._buys_blocked = True  # noqa: SLF001
+    bridge.skips["sell_below_break_even"] = 447053
     assert bridge.maybe_reset_after_wind_down() is True  # noqa: SLF001
     assert bridge._daily_kill_active is False  # noqa: SLF001
     assert bridge._buys_blocked is False  # noqa: SLF001
+    assert bridge.skips == {}
     assert bridge.session_start_realized_eur == Decimal("-94")  # noqa: SLF001

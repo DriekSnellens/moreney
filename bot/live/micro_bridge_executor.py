@@ -216,7 +216,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.005) or 0)
         )
         self._momentum_exit_min = Decimal(
-            str(getattr(settings, "live_micro_momentum_exit_min_return", 0.005) or 0)
+            str(getattr(settings, "live_micro_momentum_exit_min_return", 0.003) or 0)
         )
         self._okx_buy_improve_bps = Decimal(
             str(getattr(settings, "live_micro_okx_buy_improve_bps", 0) or 0)
@@ -972,7 +972,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self._daily_kill_active:
             hints.append("DAILY_KILL")
         if self._buys_blocked:
-            hints.append("BUYS_BLOCKED_REGIME")
+            if self._buys_blocked_new_bases_only:
+                hints.append("BUYS_BLOCKED_REGIME (new bases only)")
+            else:
+                hints.append("BUYS_BLOCKED_REGIME")
 
         resting_n = len(self._resting)
         if resting_n > 0:
@@ -1031,9 +1034,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         be_skips = int(self.skips.get("sell_below_break_even", 0) or 0)
         ts_skips = int(self.skips.get("time_stop_below_be", 0) or 0)
-        if be_skips or ts_skips:
+        if underwater and (be_skips or ts_skips):
             hints.append(
                 f"SELLS_BLOCKED_NEVER_LOSS sell_be={be_skips} time_stop_be={ts_skips}"
+            )
+        elif not underwater and be_skips > 1000:
+            hints.append(
+                f"SELLS_BLOCKED_NEVER_LOSS (sessie-totaal sell_be={be_skips}; "
+                "geen bags onder water nu)"
             )
         mtm = self._mtm_summary()
         if Decimal(str(mtm.get("micro_locked_notional_eur") or 0)) > 0:
@@ -1090,10 +1098,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         if self.skips.get("corr_group_cap", 0) > 0:
             hints.append(f"CORR_GROUP_CAP n={self.skips.get('corr_group_cap')}")
-        if self.skips.get("policy_blocked", 0) > 0:
-            hints.append(f"POLICY_BLOCKED n={self.skips.get('policy_blocked')}")
-        if self.skips.get("execution_error", 0) > 0:
-            hints.append(f"EXECUTION_ERROR n={self.skips.get('execution_error')}")
+        # Lifetime skip totals are noisy after wind-down — only surface when active.
+        policy_n = int(self.skips.get("policy_blocked", 0) or 0)
+        if policy_n > 0 and self._buys_blocked:
+            hints.append(f"POLICY_BLOCKED n={policy_n}")
+        exec_n = int(self.skips.get("execution_error", 0) or 0)
+        if exec_n > 0:
+            hints.append(f"EXECUTION_ERROR n={exec_n}")
         if self.skips.get("budget_exhausted", 0) > 0:
             hints.append(f"BUDGET_EXHAUSTED n={self.skips.get('budget_exhausted')}")
 
@@ -2259,6 +2270,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """Fresh cycle after wind-down: re-baseline session PnL and unblock buys."""
         self.mark_session_baseline()
         self.set_buys_blocked(False)
+        self.skips.clear()
         prune: list[str] = []
         for trail_key, st in list(self._trail.items()):
             venue = str(st.get("venue") or trail_key.split(":", 1)[0])
