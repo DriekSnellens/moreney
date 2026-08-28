@@ -39,6 +39,7 @@ class MicroSessionManager:
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
         self._stop_requested = False
+        self._bridge_holder: dict[str, Any] = {}
         self._status: dict[str, Any] = {
             "running": False,
             "ok": None,
@@ -219,6 +220,7 @@ class MicroSessionManager:
                         status_callback=self._on_session_tick,
                         should_stop=lambda: self._stop_requested,
                         kill_switch=shared_ks,
+                        bridge_holder=self._bridge_holder,
                     )
                     self._publish(
                         {
@@ -270,6 +272,31 @@ class MicroSessionManager:
             seed_from_session_status(self._status)
         except Exception:  # noqa: BLE001
             pass
+
+    async def reset_dashboard(self) -> dict[str, Any]:
+        """Zero cumulative realized PnL and chart history on the live bridge."""
+        bridge = self._bridge_holder.get("bridge")
+        if bridge is None:
+            return {"ok": False, "reason": "no_active_bridge"}
+        out = bridge.reset_operator_dashboard()
+        self._publish(
+            {
+                "realized_trade_pnl_eur": "0",
+                "netto_winst_eur": "0",
+                "session_live_transaction_count": 0,
+                "session_live_fill_count": 0,
+                "live_transaction_count": 0,
+                "live_fill_count": 0,
+                "bridge": bridge.snapshot_bridge(),
+            }
+        )
+        try:
+            from bot.live.dashboard_history import seed_from_session_status
+
+            seed_from_session_status(self._status)
+        except Exception:  # noqa: BLE001
+            pass
+        return out
 
     async def stop(self) -> dict[str, Any]:
         async with self._lock:

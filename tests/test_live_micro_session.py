@@ -2010,8 +2010,10 @@ def test_reset_trading_cycle_after_wind_down() -> None:
     assert bridge.maybe_reset_after_wind_down() is True  # noqa: SLF001
     assert bridge._daily_kill_active is False  # noqa: SLF001
     assert bridge._buys_blocked is False  # noqa: SLF001
+    assert bridge.realized_trade_pnl_eur == Decimal("0")  # noqa: SLF001
+    assert bridge.session_start_realized_eur == Decimal("0")  # noqa: SLF001
+    assert bridge.session_live_transaction_count == 0  # noqa: SLF001
     assert bridge.skips == {}
-    assert bridge.session_start_realized_eur == Decimal("-94")  # noqa: SLF001
 
 
 def test_wind_down_clears_stale_skips_without_buy_block() -> None:

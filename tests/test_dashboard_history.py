@@ -12,6 +12,7 @@ from bot.core.config import get_settings
 from bot.live.dashboard import render_live_dashboard
 from bot.live.dashboard_history import (
     chart_series_from_history,
+    clear_history,
     extract_metrics,
     load_history,
     record_snapshot,
@@ -128,3 +129,10 @@ def test_pwa_and_metrics_routes() -> None:
         body = metrics.json()
         assert "metrics" in body
         assert "history" in body
+
+
+def test_clear_history(tmp_path: Path) -> None:
+    hist = tmp_path / "hist.jsonl"
+    hist.write_text('{"realized_pnl_eur":"-94"}\n', encoding="utf-8")
+    clear_history(path=hist)
+    assert not hist.exists()

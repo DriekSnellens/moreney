@@ -372,6 +372,7 @@ async def run_session(
     status_callback: Any | None = None,
     should_stop: Any | None = None,
     kill_switch: Any | None = None,
+    bridge_holder: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run full PaperRunner cycles with live Bitvavo fills inside a € capital pocket.
 
@@ -452,6 +453,8 @@ async def run_session(
         exclude_bases={"BTC"} if exclude_btc else set(),
         allowed_bases=allowed_bases,
     )
+    if bridge_holder is not None:
+        bridge_holder["bridge"] = bridge
     execute_venues = sorted(_parse_execute_venues(cfg))
     if runner.portfolio.venue_ledger is None:
         runner.portfolio.init_venue_ledger(execute_venues, starting_quote=_ZERO)
@@ -709,6 +712,8 @@ async def run_session(
             if not runner.running:
                 break
     finally:
+        if bridge_holder is not None:
+            bridge_holder.pop("bridge", None)
         try:
             # Free locked capital: cancel any leftover resting live quotes.
             bridge._resting_max_age_sec = 0.0  # noqa: SLF001

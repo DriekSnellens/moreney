@@ -31,6 +31,18 @@ def history_path() -> Path:
     return _DEFAULT_PATH
 
 
+def clear_history(*, path: Path | None = None) -> None:
+    """Remove dashboard chart history for a clean operator slate."""
+    global _last_record_mono  # noqa: PLW0603
+    target = path or history_path()
+    try:
+        if target.exists():
+            target.unlink()
+    except OSError:
+        logger.exception("dashboard history clear failed path=%s", target)
+    _last_record_mono = 0.0
+
+
 def extract_metrics(payload: dict[str, Any]) -> dict[str, str] | None:
     """Pull chart fields from a live dashboard payload or session snapshot."""
     session = payload.get("session") or payload

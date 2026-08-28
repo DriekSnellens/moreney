@@ -560,6 +560,12 @@ async def live_micro_session_stop() -> dict[str, Any]:
     return await get_micro_session_manager().stop()
 
 
+@app.post("/live/micro/session/reset-dashboard")
+async def live_micro_session_reset_dashboard() -> dict[str, Any]:
+    """Zero cumulative realized PnL and clear dashboard chart history."""
+    return await get_micro_session_manager().reset_dashboard()
+
+
 @app.get("/live/alerts")
 async def live_alerts() -> dict[str, Any]:
     """Phase 4: venue/rebalance alerts (non-executing)."""

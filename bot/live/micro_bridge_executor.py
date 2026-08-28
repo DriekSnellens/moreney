@@ -2266,11 +2266,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._session_started_ms = time.time() * 1000.0
         self._daily_kill_active = False
 
-    def reset_trading_cycle(self) -> dict[str, Any]:
-        """Fresh cycle after wind-down: re-baseline session PnL and unblock buys."""
-        self.mark_session_baseline()
-        self.set_buys_blocked(False)
+    def reset_operator_dashboard(self) -> dict[str, Any]:
+        """Zero cumulative KPIs and chart history for a clean operator slate."""
+        from bot.live.dashboard_history import clear_history
+
+        self.realized_trade_pnl_eur = _ZERO
+        self.session_start_realized_eur = _ZERO
+        self.starting_portfolio_eur = self.portfolio_value_eur
+        self.session_live_fill_count = 0
+        self.session_live_transaction_count = 0
+        self.live_fill_count = 0
+        self.live_transaction_count = 0
+        self.backfill_mirrored_count = 0
+        self.live_trades.clear()
         self.skips.clear()
+        self._daily_kill_active = False
+        self.set_buys_blocked(False)
+        self._session_started_ms = time.time() * 1000.0
+        self.reset_paper_realized_after_inventory_sync()
+        clear_history()
+        self.persist_runtime_state()
+        logger.info(
+            "OPERATOR_DASHBOARD_RESET portfolio=%s realized=0 fills=0",
+            self.starting_portfolio_eur,
+        )
+        return {
+            "ok": True,
+            "realized_trade_pnl_eur": "0",
+            "starting_portfolio_eur": str(self.starting_portfolio_eur or ""),
+            "session_start_realized_eur": "0",
+            "session_live_transaction_count": 0,
+        }
+
+    def reset_trading_cycle(self) -> dict[str, Any]:
+        """Fresh cycle after wind-down: clean dashboard KPIs and unblock buys."""
+        out = self.reset_operator_dashboard()
         prune: list[str] = []
         for trail_key, st in list(self._trail.items()):
             venue = str(st.get("venue") or trail_key.split(":", 1)[0])
@@ -2282,18 +2312,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         for key in prune:
             self._trail.pop(key, None)
             self._position_opened_mono.pop(key, None)
+        self.persist_runtime_state()
         logger.info(
-            "TRADING_CYCLE_RESET portfolio=%s realized=%s pruned_trails=%s",
+            "TRADING_CYCLE_RESET portfolio=%s pruned_trails=%s",
             self.starting_portfolio_eur,
-            self.session_start_realized_eur,
             len(prune),
         )
-        return {
-            "ok": True,
-            "starting_portfolio_eur": str(self.starting_portfolio_eur or ""),
-            "session_start_realized_eur": str(self.session_start_realized_eur or ""),
-            "pruned_trails": len(prune),
-        }
+        out["pruned_trails"] = len(prune)
+        return out
 
     def maybe_reset_after_wind_down(self) -> bool:
         """When micro inventory is gone, start a clean trading cycle."""
@@ -2303,7 +2329,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         locked = Decimal(str(mtm.get("micro_locked_notional_eur") or 0))
         if locked >= _MIN_LIVE_NOTIONAL:
             return False
-        dirty = bool(self.skips) or self._daily_kill_active or self._buys_blocked
+        dirty = (
+            bool(self.skips)
+            or self._daily_kill_active
+            or self._buys_blocked
+            or self.realized_trade_pnl_eur != _ZERO
+            or self.session_live_transaction_count > 0
+        )
         if not dirty:
             return False
         self.reset_trading_cycle()
