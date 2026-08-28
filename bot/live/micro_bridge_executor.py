@@ -210,7 +210,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(getattr(settings, "live_micro_cut_loss_below_be_pct", 0) or 0)
         )
         self._cut_loss_new_bases_only = bool(
-            getattr(settings, "live_micro_cut_loss_new_bases_only", True)
+            getattr(settings, "live_micro_cut_loss_new_bases_only", False)
+        )
+        self._momentum_exit_above_be_pct = Decimal(
+            str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.02) or 0)
         )
         self._okx_buy_improve_bps = Decimal(
             str(getattr(settings, "live_micro_okx_buy_improve_bps", 0) or 0)
@@ -900,6 +903,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "momentum_enabled": self._momentum_enabled,
                 "cut_loss_below_be_pct": str(self._cut_loss_below_be_pct),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
+                "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "corr_group": sorted(self._corr_group),
                 "max_per_corr_group": self._max_per_corr,
                 "states": self._trail_states_public(),
@@ -2485,6 +2489,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False, "sell_below_break_even", be
         return True, "ok", be
 
+    def _momentum_exit_target_price(
+        self, venue: str, base: str
+    ) -> Decimal | None:
+        """Minimum sell target on downward momentum (BE + cushion)."""
+        if self._momentum_exit_above_be_pct <= 0:
+            return None
+        be = self._break_even_sell_price(venue, base)
+        if be is None or be <= 0:
+            return None
+        return be * (Decimal("1") + self._momentum_exit_above_be_pct)
+
     def _cut_loss_floor_price(self, venue: str, base: str) -> Decimal | None:
         """Stop floor: fee-aware BE minus configured pct (e.g. 4% under BE)."""
         if self._cut_loss_below_be_pct <= 0:
@@ -2570,6 +2585,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if mom is None:
             return not require_history
         return mom >= self._momentum_min
+
+    def _momentum_down(self, symbol: str) -> bool:
+        """True when rolling mark return is at/below the negative momentum floor."""
+        if not self._momentum_enabled:
+            return False
+        series = self._series_for(symbol)
+        need = max(3, min(6, self._momentum_samples // 2))
+        if len(series) < need:
+            return False
+        mom = series.momentum_return()
+        if mom is None:
+            return False
+        return mom <= -self._momentum_min
 
     def _is_new_base_buy(self, venue: str, base: str) -> bool:
         return base.upper() not in self._held_alt_bases(venue)
@@ -2672,6 +2700,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "trail_recovery_be_partial",
             "trail_soft_partial",
             "trail_hard_partial",
+            "trail_momentum_be_exit",
         }:
             return self._be_harvest_cooldown
         return 45.0
@@ -3275,6 +3304,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 reason = "trail_cut_loss"
             elif (
+                be is not None
+                and self._momentum_enabled
+                and self._momentum_down(symbol)
+                and not st.get("momentum_be_exit_done")
+            ):
+                mom_target = self._momentum_exit_target_price(venue, asset)
+                if mom_target is not None and mark >= mom_target:
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_momentum_be_exit"
+                    limit_px = mom_target
+            elif (
                 st.get("soft_armed")
                 and not st.get("recovery_armed")
                 and self._trail_partial_enabled
@@ -3449,6 +3495,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_skip(f"exit_quote_{quote_reason}")
                 continue
 
+            if reason == "trail_momentum_be_exit":
+                mom_target = self._momentum_exit_target_price(venue, asset)
+                if mom_target is not None:
+                    exit_px = max(exit_px, mom_target)
+                    limit_px = max(limit_px or _ZERO, mom_target)
+
             if reason != "trail_cut_loss":
                 ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
                 if not ok_sell:
@@ -3516,6 +3568,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 OrderStatus.PARTIALLY_FILLED,
             }:
                 self._set_partial_done(st, reason)
+                if reason == "trail_momentum_be_exit":
+                    st["momentum_be_exit_done"] = True
                 logger.info(
                     "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
                     venue,
@@ -3530,6 +3584,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "trail_recovery_be",
                     "trail_consolidation_wind_down",
                     "trail_cut_loss",
+                    "trail_momentum_be_exit",
                     "time_stop_breakeven",
                 }:
                     # Full exit path — clear trail when remaining is dust.

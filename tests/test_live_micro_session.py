@@ -146,6 +146,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
     assert cfg.paper_trail_be_harvest_partial_pct >= 0.30
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
+    assert cfg.live_micro_cut_loss_new_bases_only is False
+    assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) >= 0.02
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
@@ -1877,20 +1879,65 @@ def test_cut_loss_floor_below_be() -> None:
     assert floor == be * Decimal("0.96")
 
 
-def test_cut_loss_eligible_only_new_session_base() -> None:
-    bridge = MicroBudgetLiveExecutor(
-        _unlocked(live_micro_cut_loss_below_be_pct=0.04),
+def test_cut_loss_eligible_respects_new_bases_only_flag() -> None:
+    bridge_new_only = MicroBudgetLiveExecutor(
+        _unlocked(
+            live_micro_cut_loss_below_be_pct=0.04,
+            live_micro_cut_loss_new_bases_only=True,
+        ),
         portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
         live_engine=LiveMicroEngine(_unlocked()),
         budget_eur=Decimal("100"),
         live_maker=True,
     )
-    bridge._cost_lots["okx:NEAR"] = [[Decimal("1"), Decimal("2")]]  # noqa: SLF001
-    bridge._trusted_cost_keys.add("okx:NEAR")  # noqa: SLF001
+    bridge_all = MicroBudgetLiveExecutor(
+        _unlocked(
+            live_micro_cut_loss_below_be_pct=0.04,
+            live_micro_cut_loss_new_bases_only=False,
+        ),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    for bridge in (bridge_new_only, bridge_all):
+        bridge._cost_lots["okx:NEAR"] = [[Decimal("1"), Decimal("2")]]  # noqa: SLF001
+        bridge._trusted_cost_keys.add("okx:NEAR")  # noqa: SLF001
     old = {"new_session_base": False}
     new = {"new_session_base": True}
-    assert bridge._cut_loss_eligible(old, venue="okx", base="NEAR") is False  # noqa: SLF001
-    assert bridge._cut_loss_eligible(new, venue="okx", base="NEAR") is True  # noqa: SLF001
+    assert bridge_new_only._cut_loss_eligible(old, venue="okx", base="NEAR") is False  # noqa: SLF001
+    assert bridge_new_only._cut_loss_eligible(new, venue="okx", base="NEAR") is True  # noqa: SLF001
+    assert bridge_all._cut_loss_eligible(old, venue="okx", base="NEAR") is True  # noqa: SLF001
+    assert bridge_all._cut_loss_eligible(new, venue="okx", base="NEAR") is True  # noqa: SLF001
+
+
+def test_momentum_down_and_exit_target_at_be_plus_two_pct() -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_min_return=0.0015,
+        paper_buy_momentum_samples=12,
+        live_micro_momentum_exit_above_be_pct=0.02,
+        paper_maker_sell_profit_buffer_bps=15.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "ADA")  # noqa: SLF001
+    target = bridge._momentum_exit_target_price("bitvavo", "ADA")  # noqa: SLF001
+    assert be is not None and target is not None
+    assert target == be * Decimal("1.02")
+
+    series = bridge._series_for("ADAEUR")  # noqa: SLF001
+    for px in (1.05, 1.048, 1.046, 1.044, 1.042, 1.040):
+        series.push(Decimal(str(px)))
+    assert bridge._momentum_down("ADAEUR") is True  # noqa: SLF001
+    assert bridge._momentum_ok("ADAEUR", require_history=True) is False  # noqa: SLF001
 
 
 def test_buy_fill_marks_new_session_base() -> None:
