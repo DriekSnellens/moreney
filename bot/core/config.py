@@ -139,6 +139,8 @@ class Settings(BaseSettings):
     paper_trail_soft_arm_pct: float = Field(default=0.02, ge=0.005, le=2.0)
     paper_trail_soft_drawdown_pct: float = Field(default=0.012, ge=0.005, le=0.50)
     paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.0, le=0.90)
+    # One-time partial when a recovery-armed bag trades at/above fee-aware BE.
+    paper_trail_recovery_be_partial_pct: float = Field(default=0.0, ge=0.0, le=0.90)
     paper_trail_hard_arm_pct: float = Field(default=0.06, ge=0.01, le=5.0)
     paper_trail_hard_drawdown_pct: float = Field(default=0.03, ge=0.005, le=0.90)
     paper_trail_hard_partial_pct: float = Field(default=0.25, ge=0.05, le=0.90)
@@ -440,6 +442,10 @@ class Settings(BaseSettings):
     # Block new buys when this many bags (notional ≥ min) sit below cost.
     live_micro_underwater_buy_block: int = Field(default=3, ge=0, le=20)
     live_micro_underwater_min_notional_eur: float = Field(default=25.0, ge=0)
+    # When underwater throttle fires: block only new-base buys (still allow adds/top-ups).
+    live_micro_underwater_block_new_bases_only: bool = True
+    # OKX maker buys: improve bid toward touch (bps) when post-only safe.
+    live_micro_okx_buy_improve_bps: float = Field(default=0.0, ge=0.0, le=10.0)
     # Pause cross-venue emits after enough live attempts with poor fill rate.
     live_micro_cross_venue_min_fill_rate: float = Field(default=0.30, ge=0.0, le=1.0)
     live_micro_cross_venue_min_attempts: int = Field(default=8, ge=1, le=200)

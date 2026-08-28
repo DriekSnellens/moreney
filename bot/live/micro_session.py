@@ -154,8 +154,8 @@ def _session_settings(
             "live_micro_first_clip_eur": min(70.0, max(55.0, budget_f * 0.03)),
             "live_micro_add_clip_eur": 120.0,
             # More fills while still fee-positive after maker costs.
-            "paper_maker_min_profit_eur": 0.08,
-            "paper_maker_min_net_return": 0.0010,
+            "paper_maker_min_profit_eur": 0.05,
+            "paper_maker_min_net_return": 0.0005,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
@@ -169,6 +169,8 @@ def _session_settings(
             "paper_trail_soft_arm_pct": 0.020,  # trail-lab best IS/OOS (synthetic+live costs)
             "paper_trail_soft_drawdown_pct": 0.005,  # floor (≥ config min); pullback harvest ≥BE
             "paper_trail_soft_partial_pct": 0.50,  # trail-lab: earlier/larger harvest ≥BE
+            # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
+            "paper_trail_recovery_be_partial_pct": 0.35,
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.03,
             "paper_trail_hard_partial_pct": 0.25,
@@ -213,6 +215,8 @@ def _session_settings(
             "paper_inventory_buy_dip_bps": 0.0,
             "paper_maker_keep_vs_best_frac": 0.60,  # only near-best NET emits
             "live_micro_underwater_buy_block": 3,
+            "live_micro_underwater_block_new_bases_only": True,
+            "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
             "live_micro_cross_venue_min_fill_rate": 0.30,
             "live_micro_cross_venue_min_attempts": 8,
@@ -244,13 +248,13 @@ def _session_settings(
             # Multi-venue scan: live legs only on execute_venues (Bitvavo until OKX funded).
             "global_max_venue_exposure_pct": 50.0 if cross_venue else 100.0,
             "live_micro_execute_venues": ",".join(sorted(execute_venues)),
-            "live_micro_cross_venue_enabled": cross_venue,
+            "live_micro_cross_venue_enabled": False,
             "arbitrage_min_profit_eur": 0.08,
             "arbitrage_min_profit_pct": 0.0010,
-            "profitability_min_net_profit_usd": 0.08,
-            "profitability_min_net_return": 0.0010,
+            "profitability_min_net_profit_usd": 0.05,
+            "profitability_min_net_return": 0.0005,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.08,
+            "risk_min_net_profit_usd": 0.05,
             # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
             "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
             # Size vs aggregate multi-venue equity so clips stay near the €150
@@ -594,9 +598,19 @@ async def run_session(
                 underwater_n = bridge.underwater_bag_count(min_notional_eur=uw_floor)
                 cash_throttle = uw_block > 0 and underwater_n >= uw_block
                 dump_breadth = dump_n >= 2
-                block_buys = reduce_only or toxic or cash_throttle or dump_breadth
+                block_buys_full = reduce_only or toxic or dump_breadth
+                cash_throttle = uw_block > 0 and underwater_n >= uw_block
+                new_base_only = bool(
+                    getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
+                )
+                block_buys = block_buys_full or cash_throttle
                 was_blocked = bool(getattr(bridge, "_buys_blocked", False))
-                bridge.set_buys_blocked(block_buys)
+                if block_buys_full:
+                    bridge.set_buys_blocked(True, new_bases_only=False)
+                elif cash_throttle:
+                    bridge.set_buys_blocked(True, new_bases_only=new_base_only)
+                else:
+                    bridge.set_buys_blocked(False)
                 if cash_throttle and not was_blocked:
                     bridge._push_alert(  # noqa: SLF001
                         "underwater_buy_block",

@@ -191,6 +191,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._soft_partial = Decimal(
             str(0.25 if _soft_partial_raw is None else _soft_partial_raw)
         )
+        self._recovery_be_partial = Decimal(
+            str(getattr(settings, "paper_trail_recovery_be_partial_pct", 0) or 0)
+        )
+        self._okx_buy_improve_bps = Decimal(
+            str(getattr(settings, "live_micro_okx_buy_improve_bps", 0) or 0)
+        ) / Decimal("10000")
         self._trail_partial_min_frac = Decimal(
             str(getattr(settings, "live_micro_trail_partial_min_frac", 0.45) or 0.45)
         )
@@ -257,6 +263,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "paper_regime_block_buys", True)
         )
         self._buys_blocked = False
+        self._buys_blocked_new_bases_only = False
         self._daily_kill_active = False
         self._daily_kill_eur = Decimal(
             str(getattr(settings, "paper_daily_kill_eur", 50) or 50)
@@ -550,9 +557,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception as exc:  # noqa: BLE001
             logger.warning("micro bridge persist failed path=%s err=%s", path, exc)
 
-    def set_buys_blocked(self, blocked: bool) -> None:
-        """Regime guard: when True, reject new BUY orders (sells/trails still run)."""
+    def set_buys_blocked(self, blocked: bool, *, new_bases_only: bool = False) -> None:
+        """Regime guard: when True, reject BUY orders (sells/trails still run).
+
+        ``new_bases_only``: underwater throttle — still allow adds to held bases.
+        """
         self._buys_blocked = bool(blocked) or self._daily_kill_active
+        self._buys_blocked_new_bases_only = (
+            bool(new_bases_only) and bool(blocked) and not self._daily_kill_active
+        )
 
     def underwater_bag_count(self, *, min_notional_eur: Decimal | float = 25) -> int:
         """Count micro bags with mark < cost and meaningful notional (cash throttle)."""
@@ -624,6 +637,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     @staticmethod
     def _lots_key(venue: str, base: str) -> str:
         return f"{venue.strip().lower()}:{base.upper()}"
+
+    def _aggressive_buy_price(
+        self, venue: str, px: Decimal, order_book: Any
+    ) -> Decimal:
+        """OKX maker buys: join/improve best bid when post-only safe."""
+        if venue.strip().lower() != "okx" or self._okx_buy_improve_bps <= 0:
+            return px
+        best_bid = _ZERO
+        best_ask = _ZERO
+        if order_book is not None:
+            try:
+                if order_book.bids:
+                    best_bid = Decimal(str(order_book.bids[0].price))
+                if order_book.asks:
+                    best_ask = Decimal(str(order_book.asks[0].price))
+            except Exception:  # noqa: BLE001
+                pass
+        if best_bid <= 0:
+            return px
+        touch = (best_bid * (Decimal("1") + self._okx_buy_improve_bps)).quantize(
+            Decimal("0.00000001")
+        )
+        if best_ask > 0 and touch >= best_ask:
+            touch = (best_ask * Decimal("0.9999")).quantize(Decimal("0.00000001"))
+        return max(px, touch, best_bid)
 
     def _venue_budget_remaining(self, venue: str) -> Decimal:
         """Per-venue deployable EUR — each exchange gets its own pocket cap."""
@@ -2466,6 +2504,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "newly_armed": False,
                 "soft_partial_done": False,
                 "hard_partial_done": False,
+                "recovery_be_partial_done": False,
                 "partial_done": False,
                 "time_stop_due": False,
                 "recovery_armed": False,
@@ -2922,6 +2961,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             elif (
                 st.get("recovery_armed")
                 and be is not None
+                and mark >= be
+                and self._recovery_be_partial > 0
+                and not st.get("recovery_be_partial_done")
+            ):
+                # Lock part of a BE recovery while still above fee-aware BE.
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                cap = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
+                sell_qty = (cap * self._recovery_be_partial).quantize(
+                    Decimal("0.00000001")
+                )
+                reason = "trail_recovery_be_partial"
+                st["recovery_be_partial_done"] = True
+            elif (
+                st.get("recovery_armed")
+                and be is not None
                 and Decimal(str(st.get("peak") or 0)) > be
                 and mark <= be
             ):
@@ -2948,7 +3007,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             notional_floor = (
                 partial_min
-                if reason in {"trail_soft_partial", "trail_hard_partial"}
+                if reason
+                in {
+                    "trail_soft_partial",
+                    "trail_hard_partial",
+                    "trail_recovery_be_partial",
+                }
                 else _MIN_LIVE_NOTIONAL
             )
             # Sell the intended size in one order — do not slice to buy-side
@@ -2962,6 +3026,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["partial_done"] = False
                 if reason == "trail_hard_partial":
                     st["hard_partial_done"] = False
+                if reason == "trail_recovery_be_partial":
+                    st["recovery_be_partial_done"] = False
                 continue
 
             # Never trail-exit at a loss (fees included). Hold until profitable.
@@ -2975,6 +3041,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["partial_done"] = False
                 if reason == "trail_hard_partial":
                     st["hard_partial_done"] = False
+                if reason == "trail_recovery_be_partial":
+                    st["recovery_be_partial_done"] = False
                 continue
 
             cooldown_key = f"{venue}:{asset}:{reason}"
@@ -2995,6 +3063,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["partial_done"] = False
                 if reason == "trail_hard_partial":
                     st["hard_partial_done"] = False
+                if reason == "trail_recovery_be_partial":
+                    st["recovery_be_partial_done"] = False
                 continue
             if limit_px is None or limit_px < exit_px:
                 limit_px = exit_px
@@ -3009,6 +3079,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["partial_done"] = False
                 if reason == "trail_hard_partial":
                     st["hard_partial_done"] = False
+                if reason == "trail_recovery_be_partial":
+                    st["recovery_be_partial_done"] = False
                 continue
             self._exit_cooldown_mono[cooldown_key] = time.monotonic()
             logger.info(
@@ -3052,6 +3124,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["partial_done"] = False
                 if reason == "trail_hard_partial":
                     st["hard_partial_done"] = False
+                if reason == "trail_recovery_be_partial":
+                    st["recovery_be_partial_done"] = False
                 self._bump_skip(f"{reason}_reject")
             else:
                 logger.info(
@@ -3279,12 +3353,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
         ):
-            self._bump_skip("regime_block_buys")
-            return await self._reject_before_live(
-                order_request,
-                reason="REGIME_BLOCK_BUYS",
-                message="buys blocked while regime is reduce-only/toxic",
-            )
+            new_base = self._is_new_base_buy(venue, base)
+            if self._buys_blocked_new_bases_only:
+                if new_base:
+                    self._bump_skip("regime_block_buys")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="REGIME_BLOCK_BUYS_NEW",
+                        message=(
+                            "new-base buys blocked while underwater bags pile up "
+                            "(adds to existing still allowed)"
+                        ),
+                    )
+            else:
+                self._bump_skip("regime_block_buys")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="REGIME_BLOCK_BUYS",
+                    message="buys blocked while regime is reduce-only/toxic",
+                )
         if side_is_buy and remaining < _MIN_LIVE_NOTIONAL:
             self._bump_skip("budget_exhausted")
             return await self._reject_before_live(
@@ -3370,6 +3457,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return await self._reject_before_live(
                 order_request, reason="BAD_SIZE", message="quantity/price required"
             )
+        if side_is_buy and post_only:
+            px = self._aggressive_buy_price(venue, px, order_book)
+            order_request = order_request.model_copy(update={"limit_price": px})
 
         # Size against live Bitvavo free balances (paper pocket can lag fills).
         if side_is_buy:
@@ -3441,6 +3531,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         leg_px = (ref * (Decimal("1") - dip)).quantize(
                             Decimal("0.00000001")
                         )
+                        if (
+                            venue.strip().lower() == "okx"
+                            and dip <= 0
+                            and best_bid > 0
+                        ):
+                            leg_px = max(leg_px, best_bid)
+                            if self._okx_buy_improve_bps > 0:
+                                leg_px = self._aggressive_buy_price(
+                                    venue, leg_px, order_book
+                                )
                         if best_ask > 0 and leg_px >= best_ask:
                             leg_px = (best_ask * Decimal("0.9999")).quantize(
                                 Decimal("0.00000001")

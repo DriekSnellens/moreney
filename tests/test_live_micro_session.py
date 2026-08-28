@@ -90,7 +90,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert dual.arbitrage_max_emits_per_cycle == 4
     assert dual.live_micro_max_open_orders == 8
     assert dual.live_micro_max_open_orders_per_venue == 8
-    assert cfg.live_micro_cross_venue_enabled is True
+    assert cfg.live_micro_cross_venue_enabled is False
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
     assert cfg.paper_venue_inventory is True
@@ -121,7 +121,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_time_stop_enabled is True
     assert cfg.paper_dust_policy == "top_up_or_exit"
     assert cfg.paper_regime_block_buys is True
-    assert cfg.paper_maker_min_net_return >= 0.0010
+    assert cfg.paper_maker_min_net_return <= 0.0006
+    assert cfg.paper_maker_min_profit_eur <= 0.06
     assert cfg.paper_maker_min_notional_eur >= 55.0
     assert cfg.max_simultaneous_positions == 3
     assert cfg.live_micro_max_alt_bases == 2
@@ -138,6 +139,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_soft_drawdown_pct == 0.005
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 3
+    assert cfg.live_micro_underwater_block_new_bases_only is True
+    assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
+    assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is True
@@ -1382,6 +1386,48 @@ def test_loss_to_be_cross_arms_recovery_no_immediate_sell() -> None:
     assert Decimal(str(st["peak"])) > be
     mark_at_be = be
     assert mark_at_be <= be and Decimal(str(st["peak"])) > be
+
+
+def test_recovery_be_partial_pct_loaded() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(paper_trail_recovery_be_partial_pct=0.35),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    assert bridge._recovery_be_partial == Decimal("0.35")  # noqa: SLF001
+
+
+def test_underwater_throttle_blocks_new_bases_only() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge.set_buys_blocked(True, new_bases_only=True)
+    assert bridge._buys_blocked is True  # noqa: SLF001
+    assert bridge._buys_blocked_new_bases_only is True  # noqa: SLF001
+
+
+def test_okx_aggressive_buy_price_joins_bid() -> None:
+    from types import SimpleNamespace
+
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(live_micro_okx_buy_improve_bps=1.0),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    book = SimpleNamespace(
+        bids=[SimpleNamespace(price=Decimal("100"))],
+        asks=[SimpleNamespace(price=Decimal("100.05"))],
+    )
+    px = bridge._aggressive_buy_price("okx", Decimal("99.5"), book)  # noqa: SLF001
+    assert px >= Decimal("100")
 
 
 def test_recovery_be_pullback_requires_prior_peak_above_be() -> None:
