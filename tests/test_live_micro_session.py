@@ -145,6 +145,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
     assert cfg.paper_trail_be_harvest_partial_pct >= 0.30
+    assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
@@ -1819,3 +1820,68 @@ def test_be_harvest_cooldown_shorter_than_full_exit() -> None:
     )
     assert bridge._exit_cooldown_sec("trail_be_harvest") == 12.0  # noqa: SLF001
     assert bridge._exit_cooldown_sec("trail_drawdown") == 45.0  # noqa: SLF001
+
+
+def test_cut_loss_floor_below_be() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(
+            live_micro_cut_loss_below_be_pct=0.04,
+            paper_maker_sell_profit_buffer_bps=15.0,
+        ),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "ADA")  # noqa: SLF001
+    floor = bridge._cut_loss_floor_price("bitvavo", "ADA")  # noqa: SLF001
+    assert be is not None and floor is not None
+    assert floor == be * Decimal("0.96")
+
+
+def test_cut_loss_eligible_only_new_session_base() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(live_micro_cut_loss_below_be_pct=0.04),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["okx:NEAR"] = [[Decimal("1"), Decimal("2")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("okx:NEAR")  # noqa: SLF001
+    old = {"new_session_base": False}
+    new = {"new_session_base": True}
+    assert bridge._cut_loss_eligible(old, venue="okx", base="NEAR") is False  # noqa: SLF001
+    assert bridge._cut_loss_eligible(new, venue="okx", base="NEAR") is True  # noqa: SLF001
+
+
+def test_buy_fill_marks_new_session_base() -> None:
+    from bot.core.enums import OrderSide
+
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(live_micro_cut_loss_below_be_pct=0.04),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._record_realized_fill(  # noqa: SLF001
+        side=OrderSide.BUY,
+        symbol="NEAREUR",
+        qty=Decimal("5"),
+        price=Decimal("2"),
+        fee=Decimal("0.01"),
+        venue="okx",
+    )
+    assert bridge._trail["okx:NEAR"]["new_session_base"] is True  # noqa: SLF001
+    bridge._record_realized_fill(  # noqa: SLF001
+        side=OrderSide.BUY,
+        symbol="NEAREUR",
+        qty=Decimal("1"),
+        price=Decimal("1.9"),
+        fee=Decimal("0.001"),
+        venue="okx",
+    )
+    assert bridge._trail["okx:NEAR"]["new_session_base"] is True  # noqa: SLF001

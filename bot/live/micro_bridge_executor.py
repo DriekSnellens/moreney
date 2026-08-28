@@ -206,6 +206,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._be_harvest_cooldown = float(
             getattr(settings, "live_micro_be_harvest_cooldown_sec", 15.0) or 15.0
         )
+        self._cut_loss_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_cut_loss_below_be_pct", 0) or 0)
+        )
+        self._cut_loss_new_bases_only = bool(
+            getattr(settings, "live_micro_cut_loss_new_bases_only", True)
+        )
         self._okx_buy_improve_bps = Decimal(
             str(getattr(settings, "live_micro_okx_buy_improve_bps", 0) or 0)
         ) / Decimal("10000")
@@ -827,6 +833,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "daily_kill_active": self._daily_kill_active,
                 "dust_policy": self._dust_policy,
                 "momentum_enabled": self._momentum_enabled,
+                "cut_loss_below_be_pct": str(self._cut_loss_below_be_pct),
+                "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "corr_group": sorted(self._corr_group),
                 "max_per_corr_group": self._max_per_corr,
                 "states": self._trail_states_public(),
@@ -1090,6 +1098,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "triggered": bool(st.get("triggered")),
                 "recovery_armed": bool(st.get("recovery_armed")),
                 "below_be": bool(st.get("below_be")),
+                "new_session_base": bool(st.get("new_session_base")),
                 "age_sec": round(age, 1) if age is not None else None,
             }
         for venue in sorted(self._execute_venues):
@@ -1593,6 +1602,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         lot_key = self._lots_key(venue or "bitvavo", base)
         lots = self._cost_lots.setdefault(lot_key, [])
         if side == OrderSide.BUY:
+            was_new_base = len(lots) == 0
             lot_qty, unit = _buy_lot_qty_and_unit(
                 amount=qty,
                 price=price,
@@ -1603,6 +1613,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             lots.append([lot_qty, unit])
             self._session_lots.setdefault(lot_key, []).append([lot_qty, unit])
+            if was_new_base and self._cut_loss_below_be_pct > 0:
+                self._trail.setdefault(lot_key, {})["new_session_base"] = True
             self._note_position_opened(venue or "bitvavo", base)
             self._mark_cost_trusted(venue or "bitvavo", base)
             return
@@ -2365,6 +2377,48 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False, "sell_below_break_even", be
         return True, "ok", be
 
+    def _cut_loss_floor_price(self, venue: str, base: str) -> Decimal | None:
+        """Stop floor: fee-aware BE minus configured pct (e.g. 4% under BE)."""
+        if self._cut_loss_below_be_pct <= 0:
+            return None
+        be = self._break_even_sell_price(venue, base)
+        if be is None or be <= 0:
+            return None
+        return be * (Decimal("1") - self._cut_loss_below_be_pct)
+
+    def _cut_loss_eligible(
+        self, st: dict[str, Any], *, venue: str, base: str
+    ) -> bool:
+        if self._cut_loss_below_be_pct <= 0 or self._is_long_hold(base):
+            return False
+        if self._cut_loss_new_bases_only and not st.get("new_session_base"):
+            return False
+        if not self._has_trusted_cost(venue, base):
+            return False
+        return True
+
+    async def _cut_loss_exit_quote(
+        self, venue: str, base: str, mark: Decimal
+    ) -> tuple[Decimal | None, bool, str]:
+        """Taker exit at/below cut-loss floor — frees capital on stuck new entries."""
+        floor = self._cut_loss_floor_price(venue, base)
+        if floor is None:
+            return None, False, "no_cut_loss_floor"
+        if mark > floor:
+            return None, False, "above_cut_loss_floor"
+        best_bid = _ZERO
+        client = self._trading_client(venue)
+        symbol = f"{base.upper()}{self._quote}"
+        if client is not None:
+            try:
+                ticker = await client.fetch_ticker(symbol)
+                best_bid = Decimal(str(getattr(ticker, "bid", None) or 0))
+            except Exception:  # noqa: BLE001
+                pass
+        if best_bid <= 0:
+            best_bid = mark
+        return best_bid, False, "hit_bid_cut_loss"
+
     def _scaled_arms(self, base: str, cost: Decimal) -> tuple[Decimal, Decimal, Decimal, Decimal]:
         from bot.live.trail_policy import scale_thresholds
 
@@ -2691,6 +2745,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "time_stop_due": False,
                 "recovery_armed": False,
                 "below_be": False,
+                "new_session_base": False,
                 "soft_arm": str(soft_arm),
                 "hard_arm": str(hard_arm),
                 "drawdown": str(soft_dd),
@@ -3091,7 +3146,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
+            cut_floor = self._cut_loss_floor_price(venue, asset)
             if (
+                cut_floor is not None
+                and self._cut_loss_eligible(st, venue=venue, base=asset)
+                and mark <= cut_floor
+            ):
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                sell_qty = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
+                reason = "trail_cut_loss"
+            elif (
                 st.get("soft_armed")
                 and not st.get("recovery_armed")
                 and self._trail_partial_enabled
@@ -3254,17 +3323,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_skip("trail_dust")
                 continue
 
-            exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
-                venue, asset, mark
-            )
+            if reason == "trail_cut_loss":
+                exit_px, exit_post_only, quote_reason = await self._cut_loss_exit_quote(
+                    venue, asset, mark
+                )
+            else:
+                exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
+                    venue, asset, mark
+                )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")
                 continue
 
-            ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
-            if not ok_sell:
-                self._bump_skip(gate_reason)
-                continue
+            if reason != "trail_cut_loss":
+                ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
+                if not ok_sell:
+                    self._bump_skip(gate_reason)
+                    continue
 
             cooldown_key = f"{venue}:{asset}:{reason}"
             last_try = self._exit_cooldown_mono.get(cooldown_key, 0.0)
@@ -3274,9 +3349,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             if limit_px is None or limit_px < exit_px:
                 limit_px = exit_px
-            limit_px = max(limit_px, exit_px)
-            if reason != "trail_recovery_be":
+            if reason == "trail_cut_loss":
+                limit_px = exit_px
                 post_only = exit_post_only
+            elif reason != "trail_recovery_be":
+                limit_px = max(limit_px, exit_px)
+                post_only = exit_post_only
+            else:
+                limit_px = max(limit_px, exit_px)
             if sell_qty <= 0 or sell_qty * limit_px < notional_floor:
                 self._bump_skip("trail_dust")
                 continue
@@ -3335,6 +3415,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "trail_drawdown",
                     "trail_recovery_be",
                     "trail_consolidation_wind_down",
+                    "trail_cut_loss",
                     "time_stop_breakeven",
                 }:
                     # Full exit path — clear trail when remaining is dust.
@@ -3805,7 +3886,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 qty = live_base.quantize(Decimal("0.00000001"))
                 order_request = order_request.model_copy(update={"quantity": qty})
             # Hard floor: NEVER sell below fee-adjusted cost + profit buffer.
-            # Applies to trail exits too — no loss-taking sells.
+            # Cut-loss exits (new-base stop) may sell below BE when floor is breached.
+            exit_reason = str(meta.get("exit_reason") or strategy or "")
+            cut_loss_exit = exit_reason == "trail_cut_loss"
             be = self._break_even_sell_price(venue, base)
             if be is None:
                 self._bump_skip("sell_no_trusted_cost")
@@ -3817,7 +3900,29 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         "refusing sell until buy fill or trade history is known"
                     ),
                 )
-            if be > px:
+            if cut_loss_exit:
+                floor = self._cut_loss_floor_price(venue, base)
+                if floor is None:
+                    self._bump_skip("cut_loss_not_configured")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="CUT_LOSS_DISABLED",
+                        message=f"cut-loss not enabled for {venue}:{base}",
+                    )
+                mark_ref = px
+                if order_book is not None and order_book.bids:
+                    try:
+                        mark_ref = Decimal(str(order_book.bids[0].price))
+                    except Exception:  # noqa: BLE001
+                        pass
+                if mark_ref > floor:
+                    self._bump_skip("cut_loss_above_floor")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="CUT_LOSS_ABOVE_FLOOR",
+                        message=f"mark {mark_ref} above cut-loss floor {floor}",
+                    )
+            elif be > px:
                 px = be
                 order_request = order_request.model_copy(update={"limit_price": px})
             if order_book is not None:
@@ -3829,9 +3934,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     )
                 except Exception:  # noqa: BLE001
                     best_bid = _ZERO
+                if cut_loss_exit:
+                    if best_bid > 0:
+                        px = best_bid
+                        order_request = order_request.model_copy(update={"limit_price": px})
+                        meta = dict(order_request.metadata or {})
+                        meta["post_only"] = False
+                        order_request = order_request.model_copy(update={"metadata": meta})
                 # If bid is already above break-even, crossing is a profitable fill.
                 # Only block when the bid itself is still below break-even.
-                if best_bid > 0 and best_bid < be:
+                elif best_bid > 0 and best_bid < be:
                     self._bump_skip("sell_below_break_even")
                     return await self._reject_before_live(
                         order_request,
@@ -3841,7 +3953,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                             "holding for profitable exit"
                         ),
                     )
-                if best_bid > 0 and px < best_bid and best_bid >= be:
+                if not cut_loss_exit and best_bid > 0 and px < best_bid and best_bid >= be:
                     # Lift limit to the bid so the exit actually fills.
                     px = best_bid
                     order_request = order_request.model_copy(update={"limit_price": px})
@@ -3849,7 +3961,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     meta["post_only"] = False
                     order_request = order_request.model_copy(update={"metadata": meta})
             # Even without a book, refuse a sell priced below break-even.
-            if px < be:
+            if not cut_loss_exit and px < be:
                 self._bump_skip("sell_below_break_even")
                 return await self._reject_before_live(
                     order_request,

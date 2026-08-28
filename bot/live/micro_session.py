@@ -221,6 +221,8 @@ def _session_settings(
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
+            "live_micro_cut_loss_below_be_pct": 0.04,
+            "live_micro_cut_loss_new_bases_only": False,
             "live_micro_cross_venue_min_fill_rate": 0.30,
             "live_micro_cross_venue_min_attempts": 8,
             "live_micro_block_cross_venue_duplicate_bases": True,

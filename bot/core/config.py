@@ -451,6 +451,9 @@ class Settings(BaseSettings):
     live_micro_underwater_min_notional_eur: float = Field(default=25.0, ge=0)
     # When underwater throttle fires: block only new-base buys (still allow adds/top-ups).
     live_micro_underwater_block_new_bases_only: bool = True
+    # Cut-loss for new-base entries: exit when mark falls this far below fee-aware BE.
+    live_micro_cut_loss_below_be_pct: float = Field(default=0.04, ge=0.0, le=0.25)
+    live_micro_cut_loss_new_bases_only: bool = True
     # OKX maker buys: improve bid toward touch (bps) when post-only safe.
     live_micro_okx_buy_improve_bps: float = Field(default=0.0, ge=0.0, le=10.0)
     # Pause cross-venue emits after enough live attempts with poor fill rate.

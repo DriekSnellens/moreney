@@ -665,6 +665,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             elif w > 0:
                 status = "boven BE — harvestbaar"
                 status_cls = "good"
+            elif st.get("new_session_base") and g < 0:
+                status = "nieuwe base — cut-loss −4% BE"
+                status_cls = "bad"
             elif g < 0:
                 status = "onder kost — houdt vast"
                 status_cls = "bad"
