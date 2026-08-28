@@ -1698,6 +1698,56 @@ def test_underwater_bag_count_ignores_dust_and_long_hold(tmp_path: Path) -> None
     assert bridge.underwater_bag_count(min_notional_eur=25) == 1
 
 
+def test_underwater_bag_count_per_venue() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._trail["bitvavo:SOL"] = {  # noqa: SLF001
+        "venue": "bitvavo",
+        "base": "SOL",
+        "cost": "100",
+        "last_mark": "90",
+    }
+    bridge._trail["okx:NEAR"] = {  # noqa: SLF001
+        "venue": "okx",
+        "base": "NEAR",
+        "cost": "5",
+        "last_mark": "4",
+    }
+    bridge._venue_raw_balances["bitvavo"] = []  # noqa: SLF001
+    bridge._venue_raw_balances["okx"] = []  # noqa: SLF001
+    from bot.core.models import Balance
+
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="SOL", free=Decimal("2"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["okx"] = [  # noqa: SLF001
+        Balance(asset="NEAR", free=Decimal("30"), locked=Decimal("0")),
+    ]
+    assert bridge.underwater_bag_count(min_notional_eur=25, venue="bitvavo") == 1
+    assert bridge.underwater_bag_count(min_notional_eur=25, venue="okx") == 1
+    assert bridge.underwater_bag_count(min_notional_eur=25) == 2
+
+
+def test_underwater_venue_block_only_affects_that_venue() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge.set_buys_blocked(False)
+    bridge.set_underwater_venue_blocks({"bitvavo"}, new_bases_only=True)
+    assert bridge._venue_underwater_blocked("bitvavo") is True  # noqa: SLF001
+    assert bridge._venue_underwater_blocked("okx") is False  # noqa: SLF001
+    assert bridge._buys_blocked is False  # noqa: SLF001
+
+
 def test_maker_cross_venue_paused_skips_cross_pairs() -> None:
     from bot.strategies.maker_inventory import MakerInventoryStrategy
 

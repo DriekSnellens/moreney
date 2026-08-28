@@ -628,26 +628,40 @@ async def run_session(
                         or 25
                     )
                 )
-                underwater_n = bridge.underwater_bag_count(min_notional_eur=uw_floor)
-                cash_throttle = uw_block > 0 and underwater_n >= uw_block
+                uw_blocked_venues: set[str] = set()
+                for v in sorted(getattr(bridge, "_execute_venues", ()) or ()):
+                    uw_n = bridge.underwater_bag_count(
+                        min_notional_eur=uw_floor, venue=v
+                    )
+                    if uw_block > 0 and uw_n >= uw_block:
+                        uw_blocked_venues.add(v.strip().lower())
                 block_buys_full = reduce_only or toxic
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )
-                block_buys = block_buys_full or cash_throttle
-                was_blocked = bool(getattr(bridge, "_buys_blocked", False))
+                prev_uw = set(getattr(bridge, "_underwater_blocked_venues", set()) or ())
                 if block_buys_full:
                     bridge.set_buys_blocked(True, new_bases_only=False)
-                elif cash_throttle:
-                    bridge.set_buys_blocked(True, new_bases_only=new_base_only)
+                    bridge.set_underwater_venue_blocks(set())
+                elif uw_blocked_venues:
+                    bridge.set_buys_blocked(False)
+                    bridge.set_underwater_venue_blocks(
+                        uw_blocked_venues, new_bases_only=new_base_only
+                    )
                 else:
                     bridge.set_buys_blocked(False)
-                if cash_throttle and not was_blocked:
-                    bridge._push_alert(  # noqa: SLF001
-                        "underwater_buy_block",
-                        f"buys blocked: {underwater_n} bags below cost "
-                        f"(threshold {uw_block})",
-                    )
+                    bridge.set_underwater_venue_blocks(set())
+                new_uw = uw_blocked_venues - prev_uw
+                if new_uw and not block_buys_full:
+                    for v in sorted(new_uw):
+                        uw_n = bridge.underwater_bag_count(
+                            min_notional_eur=uw_floor, venue=v
+                        )
+                        bridge._push_alert(  # noqa: SLF001
+                            "underwater_buy_block",
+                            f"{v} buys blocked: {uw_n} bags below cost "
+                            f"(threshold {uw_block}; other venues unaffected)",
+                        )
 
                 # Cross-venue: pause when live fill rate is chronically poor.
                 maker = runner._maker_strategy()  # noqa: SLF001
