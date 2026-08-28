@@ -578,6 +578,7 @@ async def live_dashboard_reconcile(
 
     mgr = get_micro_session_manager()
     if since:
+        since = since.strip().replace(" ", "+")
         try:
             anchor = datetime.fromisoformat(since.replace("Z", "+00:00"))
         except ValueError as exc:
