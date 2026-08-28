@@ -2066,16 +2066,47 @@ def test_reset_trading_cycle_after_wind_down() -> None:
         live_maker=True,
     )
     bridge.realized_trade_pnl_eur = Decimal("-94")
+    bridge.session_start_realized_eur = Decimal("-100")
+    bridge.session_live_transaction_count = 7  # noqa: SLF001
     bridge._daily_kill_active = True  # noqa: SLF001
     bridge._buys_blocked = True  # noqa: SLF001
     bridge.skips["sell_below_break_even"] = 447053
     assert bridge.maybe_reset_after_wind_down() is True  # noqa: SLF001
     assert bridge._daily_kill_active is False  # noqa: SLF001
     assert bridge._buys_blocked is False  # noqa: SLF001
-    assert bridge.realized_trade_pnl_eur == Decimal("0")  # noqa: SLF001
-    assert bridge.session_start_realized_eur == Decimal("0")  # noqa: SLF001
-    assert bridge.session_live_transaction_count == 0  # noqa: SLF001
+    assert bridge.realized_trade_pnl_eur == Decimal("-94")  # noqa: SLF001
+    assert bridge.session_start_realized_eur == Decimal("-100")  # noqa: SLF001
+    assert bridge.session_live_transaction_count == 7  # noqa: SLF001
     assert bridge.skips == {}
+
+
+def test_wind_down_preserves_realized_and_skips_history_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bot.live.dashboard_history import clear_history, history_path, record_snapshot
+
+    hist = tmp_path / "dashboard_history.jsonl"
+    monkeypatch.setattr(
+        "bot.live.dashboard_history.history_path", lambda: hist
+    )
+    hist.write_text('{"t":"2026-08-28T14:00:00","realized_pnl_eur":"12.5"}\n', encoding="utf-8")
+
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge.realized_trade_pnl_eur = Decimal("12.5")
+    bridge.skips["trail_dust"] = 3
+    out = bridge.reset_trading_cycle()
+    assert out.get("preserved_kpis") is True
+    assert bridge.realized_trade_pnl_eur == Decimal("12.5")
+    assert bridge.skips == {}
+    assert hist.exists()
+    assert "12.5" in hist.read_text(encoding="utf-8")
+    clear_history(path=hist)
 
 
 def test_wind_down_clears_stale_skips_without_buy_block() -> None:
