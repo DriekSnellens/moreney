@@ -130,7 +130,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.0003
     assert cfg.paper_maker_min_notional_eur >= 55.0
     assert cfg.max_simultaneous_positions == 3
-    assert cfg.live_micro_max_alt_bases == 2
+    assert cfg.live_micro_max_alt_bases == 4
     assert cfg.live_micro_block_cross_venue_duplicate_bases is True
     assert cfg.live_micro_consolidate_duplicate_bases is True
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
