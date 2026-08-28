@@ -135,12 +135,14 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "Gerealiseerd (totaal)" in html
     assert "Winnable" in html
     assert "Transacties" in html
-    assert "Sessie PnL" in html
+    assert "Unrealized" in html
     assert "Week gerealiseerd" in html
     assert "Doel €20–50/dag" in html
     assert "€20–50" in html
     assert "chart-pnl-first" in html
     assert "chart-pnl" in html
+    assert "Sessie PnL" not in html
+    assert "Sessie MTM" not in html
     assert "7" in html
     assert "42" in html
     assert "long-hold" in html

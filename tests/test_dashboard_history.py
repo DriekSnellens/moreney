@@ -109,7 +109,10 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "chart-pnl" in html
     assert "manifest.webmanifest" in html
     assert "serviceWorker" in html
-    assert "Sessie PnL" in html
+    assert "Sessie PnL" not in html
+    assert "Sessie MTM" not in html
+    assert "Unrealized" in html
+    assert "Winnable" in html
     assert "Week gerealiseerd" in html
     assert "Sessie gerealiseerd" in html
 

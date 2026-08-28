@@ -705,6 +705,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         tx_n = 0
     backfill_n = int(bridge.get("backfill_mirrored_count") or 0)
     diag = bridge.get("diagnostics") or {}
+    unrealized = _dec(
+        bridge.get("unrealized_mtm_eur") or diag.get("unrealized_mtm_eur")
+    )
     winnable = _dec(
         bridge.get("winnable_mtm_eur")
         or diag.get("winnable_mtm_eur")
@@ -740,6 +743,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         winn_class = "good"
     elif winnable is not None and winnable < 0:
         winn_class = "bad"
+    unreal_class = ""
+    if unrealized is not None and unrealized > 0:
+        unreal_class = "good"
+    elif unrealized is not None and unrealized < 0:
+        unreal_class = "bad"
 
     trail = bridge.get("trail_take_profit") or {}
     states = trail.get("states") or {}
@@ -1026,15 +1034,6 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     history = payload.get("history") or load_history(limit=720)
     chart_json = _chart_bootstrap(history if isinstance(history, list) else [])
-    session_pnl = None
-    start_pf = _dec(session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur"))
-    if portfolio is not None and start_pf is not None:
-        session_pnl = portfolio - start_pf
-    session_pnl_class = ""
-    if session_pnl is not None and session_pnl > 0:
-        session_pnl_class = "good"
-    elif session_pnl is not None and session_pnl < 0:
-        session_pnl_class = "bad"
 
     target_low = Decimal("20")
     target_high = Decimal("50")
@@ -1045,20 +1044,20 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     target_band_html = (
         "<section class='target-band' aria-label='Doelband onderzoek'>"
         "<h2>Doel €20–50/dag</h2>"
-        "<p><strong>Sessie gerealiseerd</strong> (primair) = gesloten winst na fees · "
-        "<strong>Sessie MTM</strong> (secundair) = mark-to-market · "
+        "<p><strong>Sessie gerealiseerd</strong> = gesloten winst na fees · "
+        "<strong>Winnable</strong> = open bags boven break-even · "
         "stretch €140–350/week gerealiseerd.</p>"
         "<div class='band-row'>"
         f"<span>Gerealiseerd: <strong class='{band_class}'>"
         f"{_esc(_eur(session_realized, signed=True) if session_realized is not None else '—')}</strong></span>"
-        f"<span>MTM: {_esc(_eur(session_pnl, signed=True) if session_pnl is not None else '—')}</span>"
+        f"<span>Winnable: {_esc(_eur(winnable, signed=True) if winnable is not None else '—')}</span>"
         "</div></section>"
     )
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
       <article class="chart-card chart-pnl-first">
-        <h2>PnL — MTM &amp; gerealiseerd</h2>
+        <h2>PnL — gerealiseerd, unrealized &amp; winnable</h2>
         <div class="chart-wrap"><canvas id="chart-pnl" role="img" aria-label="PnL grafiek"></canvas></div>
       </article>
       <article class="chart-card">
@@ -1081,9 +1080,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">≥€35/week</p>
       </article>
       <article class="card">
-        <p class="label">Sessie PnL (MTM)</p>
-        <p class="value {session_pnl_class}" id="kpi-session-pnl">{_esc(_eur(session_pnl, signed=True) if session_pnl is not None else "—")}</p>
-        <p class="hint">Secundair · mark-to-market</p>
+        <p class="label">Winnable</p>
+        <p class="value {winn_class}" id="kpi-winnable">{_esc(_eur(winnable, signed=True))}</p>
+        <p class="hint">Boven break-even (fees)</p>
+      </article>
+      <article class="card">
+        <p class="label">Unrealized</p>
+        <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
+        <p class="hint">Open bags vs kostprijs</p>
       </article>
       <article class="card">
         <p class="label">Portfolio</p>
@@ -1094,11 +1098,6 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="label">Gerealiseerd (totaal)</p>
         <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
         <p class="hint">FIFO na fees</p>
-      </article>
-      <article class="card">
-        <p class="label">Winnable</p>
-        <p class="value {winn_class}" id="kpi-winnable">{_esc(_eur(winnable, signed=True))}</p>
-        <p class="hint">Boven break-even (fees)</p>
       </article>
       <article class="card">
         <p class="label">Vrij EUR</p>
@@ -1246,8 +1245,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
               borderWidth: 2,
             }},
             {{
-              label: 'Sessie MTM',
-              data: data.session_pnl || [],
+              label: 'Unrealized',
+              data: data.unrealized || [],
               borderColor: '#f0b429',
               tension: 0.25,
               pointRadius: 0,
@@ -1256,7 +1255,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             {{
               label: 'Winnable',
               data: data.winnable || [],
-              borderColor: '#3ddc97',
+              borderColor: '#78a0dc',
               borderDash: [4, 4],
               tension: 0.25,
               pointRadius: 0,
@@ -1294,11 +1293,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     function applyMetrics(m) {{
       const set = (id, text) => {{ const el = document.getElementById(id); if (el) el.textContent = text; }};
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
-      set('kpi-session-pnl', eurFmt(m.session_pnl_eur, true));
       set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
       set('kpi-session-realized', eurFmt(m.session_realized_eur, true));
       set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
       set('kpi-winnable', eurFmt(m.winnable_eur, true));
+      set('kpi-unrealized', eurFmt(m.unrealized_eur, true));
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
       if (m.portfolio_holdings) renderPortfolioHoldings(m.portfolio_holdings);
