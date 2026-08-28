@@ -169,9 +169,9 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            # Arm at net profit (BE); sell full bag on 0.2% peak retrace.
+            # Arm at net profit (BE); full exit on 0.4% peak retrace (was 0.2%).
             "paper_trail_soft_arm_pct": 0.001,
-            "paper_trail_soft_drawdown_pct": 0.002,
+            "paper_trail_soft_drawdown_pct": 0.004,
             "paper_trail_soft_partial_pct": 0.0,
             # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
             "paper_trail_recovery_be_partial_pct": 0.35,

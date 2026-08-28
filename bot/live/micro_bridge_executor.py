@@ -3091,6 +3091,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 st["peak"] = mark
                 st["newly_soft"] = True
                 st["newly_armed"] = True
+                # One BE-harvest attempt per soft-arm cycle (no 15s chunk spam).
+                st["be_harvest_partial_done"] = False
+                st["recovery_be_partial_done"] = False
                 st["drawdown"] = str(soft_dd)
                 arm_label = (
                     "net-profit"
@@ -3750,8 +3753,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             }
             triggered.append(row)
             if result.status == OrderStatus.REJECTED:
-                self._clear_partial_done(st, reason)
+                if reason != "trail_be_harvest":
+                    self._clear_partial_done(st, reason)
                 self._bump_skip(f"{reason}_reject")
+            elif reason == "trail_be_harvest":
+                # Lock after submit — resting fills must not re-trigger 35% spam.
+                self._set_partial_done(st, reason)
+                logger.info(
+                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
+                    venue,
+                    asset,
+                    reason,
+                    sell_qty,
+                    mark,
+                    result.status.value,
+                )
             elif result.status in {
                 OrderStatus.FILLED,
                 OrderStatus.PARTIALLY_FILLED,

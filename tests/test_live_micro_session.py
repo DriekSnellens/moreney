@@ -108,7 +108,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.40
     assert cfg.paper_trail_soft_arm_pct == 0.001
-    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_drawdown_pct == 0.004
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
@@ -143,7 +143,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 35.0
     assert cfg.paper_trail_soft_partial_pct == 0.0
-    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_drawdown_pct == 0.004
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
@@ -686,7 +686,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_soft_arm_pct == 0.001
-    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_drawdown_pct == 0.004
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.40
     assert cfg.paper_trail_soft_partial_pct == 0.0
@@ -2290,3 +2290,49 @@ def test_select_balanced_emits_one_symbol_per_venue() -> None:
         if (o.metadata or {}).get("buy_exchange") == "bitvavo"
     ]
     assert bitvavo_syms.count("SOLEUR") <= 1
+
+
+def test_be_harvest_marks_done_on_submit_not_only_fill() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(
+            paper_trail_be_harvest_partial_pct=0.35,
+            paper_trail_recovery_be_partial_pct=0.35,
+        ),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    st: dict = {"be_harvest_partial_done": False, "recovery_be_partial_done": False}
+    bridge._set_partial_done(st, "trail_be_harvest")  # noqa: SLF001
+    assert bridge._be_harvest_already_done(st) is True  # noqa: SLF001
+
+
+def test_soft_arm_resets_be_harvest_for_one_shot_per_cycle() -> None:
+    settings = _unlocked(
+        paper_trail_soft_arm_pct=0.001,
+        paper_trail_soft_drawdown_pct=0.004,
+        paper_trail_atr_enabled=False,
+        live_micro_bridge_persist_path="./data/test_trail_one_shot.json",
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._trail = {}  # noqa: SLF001
+    bridge._session_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("90")]]  # noqa: SLF001
+    bridge._mark_cost_trusted("bitvavo", "SOL")  # noqa: SLF001
+    cost = Decimal("90")
+    st = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "SOL", cost=cost, mark=Decimal("90.15")
+    )
+    assert st.get("newly_soft") is True
+    assert st.get("be_harvest_partial_done") is False
+    st["be_harvest_partial_done"] = True
+    st2 = bridge._trail_update_state(  # noqa: SLF001
+        "bitvavo", "SOL", cost=cost, mark=Decimal("90.20")
+    )
+    assert st2.get("be_harvest_partial_done") is True
