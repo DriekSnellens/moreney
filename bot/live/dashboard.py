@@ -301,6 +301,66 @@ def _css() -> str:
     .target-band .band-row span { color: var(--text); }
     .target-band .in-band { color: var(--good); }
     .target-band .out-band { color: var(--muted); }
+    .portfolio-strip {
+      margin: 0;
+      padding: .75rem .85rem;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg1) 92%, transparent);
+    }
+    .portfolio-strip h2 {
+      margin: 0 0 .55rem;
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .hold-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .45rem .55rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .hold-item {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      padding: .35rem .55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg0) 55%, transparent);
+      font-family: var(--mono);
+      font-size: .78rem;
+    }
+    .hold-item .mom {
+      font-size: .85rem;
+      font-weight: 600;
+      line-height: 1;
+      min-width: .85rem;
+      text-align: center;
+    }
+    .hold-item .mom-up { color: var(--good); }
+    .hold-item .mom-down { color: var(--bad); }
+    .hold-item .mom-flat { color: var(--muted); }
+    .hold-item .coin { font-weight: 600; color: var(--text); }
+    .hold-item .amt { color: var(--muted); font-size: .72rem; }
+    .hold-item .venue {
+      color: var(--muted);
+      font-size: .65rem;
+      text-transform: lowercase;
+    }
+    .portfolio-empty {
+      margin: 0;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    @media (min-width: 720px) {
+      .portfolio-strip { padding: 1rem 1.15rem; border-radius: 16px; }
+      .hold-item { font-size: .82rem; padding: .4rem .65rem; }
+    }
     .positions {
       margin-top: 1.5rem;
       border: 1px solid var(--line);
@@ -547,6 +607,49 @@ def _chart_bootstrap(history: list[dict[str, Any]]) -> str:
     return json.dumps(chart_series_from_history(history))
 
 
+def _render_portfolio_strip(holdings: list[Any]) -> str:
+    """Simple held-items row with momentum arrows."""
+    if not holdings:
+        return (
+            "<section class='portfolio-strip' id='portfolio-strip'>"
+            "<h2>Portfolio</h2>"
+            "<p class='portfolio-empty'>Geen posities — alle cash</p>"
+            "</section>"
+        )
+    chips: list[str] = []
+    for row in holdings:
+        if not isinstance(row, dict):
+            continue
+        base = str(row.get("base") or "—")
+        venue = str(row.get("venue") or "")
+        notional = _eur(row.get("notional_eur"))
+        direction = str(row.get("momentum_direction") or "flat")
+        arrow = str(row.get("momentum_arrow") or "→")
+        ret = row.get("momentum_return_pct")
+        title = f"momentum {ret}%" if ret is not None else "momentum —"
+        role = str(row.get("role") or "")
+        venue_tag = f"<span class='venue'>{_esc(venue)}</span>" if venue else ""
+        chips.append(
+            "<li class='hold-item'>"
+            f"<span class='mom mom-{direction}' title='{_esc(title)}'>{_esc(arrow)}</span>"
+            f"<span class='coin'>{_esc(base)}</span>"
+            f"{venue_tag}"
+            f"<span class='amt'>{_esc(notional)}</span>"
+            + (
+                "<span class='venue'>long-hold</span>"
+                if role == "long_hold"
+                else ""
+            )
+            + "</li>"
+        )
+    return (
+        "<section class='portfolio-strip' id='portfolio-strip'>"
+        "<h2>Portfolio</h2>"
+        f"<ul class='hold-list' id='portfolio-holdings'>{''.join(chips)}</ul>"
+        "</section>"
+    )
+
+
 def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     """Portfolio value, free cash, net session PnL, buy/sell transaction count."""
     session = payload.get("session") or {}
@@ -611,6 +714,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     long_hold_locked = _dec(
         bridge.get("long_hold_notional_eur") or diag.get("long_hold_notional_eur")
     )
+    holdings = bridge.get("portfolio_holdings") or []
 
     pnl_class = ""
     if pnl is not None and pnl > 0:
@@ -994,6 +1098,10 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
     """
 
+    portfolio_strip_html = _render_portfolio_strip(
+        holdings if isinstance(holdings, list) else []
+    )
+
     detail_html = (
         f"<details class='fold'><summary>Posities, cross-venue &amp; detail</summary>"
         f"<div class='fold-body'>{positions_html}{cross_venue_html}{why_html}{trades_html}{alerts_html}</div></details>"
@@ -1031,6 +1139,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </div>
     {stale_banner}
     <div class="dash-top">
+      {portfolio_strip_html}
       {kpi_grid_html}
       {charts_html}
       {target_band_html}
@@ -1144,6 +1253,29 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       }});
     }}
 
+    function renderPortfolioHoldings(items) {{
+      const strip = document.getElementById('portfolio-strip');
+      if (!strip) return;
+      if (!items || !items.length) {{
+        strip.innerHTML = '<h2>Portfolio</h2><p class="portfolio-empty">Geen posities — alle cash</p>';
+        return;
+      }}
+      const chips = items.map((row) => {{
+        const dir = row.momentum_direction || 'flat';
+        const arrow = row.momentum_arrow || '→';
+        const ret = row.momentum_return_pct;
+        const title = ret != null ? ('momentum ' + ret + '%') : 'momentum —';
+        const venue = row.venue ? ('<span class="venue">' + row.venue + '</span>') : '';
+        const lh = row.role === 'long_hold' ? '<span class="venue">long-hold</span>' : '';
+        const amt = eurFmt(parseFloat(row.notional_eur));
+        return '<li class="hold-item">'
+          + '<span class="mom mom-' + dir + '" title="' + title + '">' + arrow + '</span>'
+          + '<span class="coin">' + (row.base || '—') + '</span>'
+          + venue + '<span class="amt">' + amt + '</span>' + lh + '</li>';
+      }}).join('');
+      strip.innerHTML = '<h2>Portfolio</h2><ul class="hold-list" id="portfolio-holdings">' + chips + '</ul>';
+    }}
+
     function applyMetrics(m) {{
       const set = (id, text) => {{ const el = document.getElementById(id); if (el) el.textContent = text; }};
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
@@ -1154,6 +1286,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-winnable', eurFmt(m.winnable_eur, true));
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
+      if (m.portfolio_holdings) renderPortfolioHoldings(m.portfolio_holdings);
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');

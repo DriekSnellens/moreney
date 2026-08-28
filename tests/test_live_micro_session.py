@@ -149,7 +149,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
-    assert cfg.paper_markout_enabled is True
+    assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
     # Liquid day-trade allowlist.
@@ -211,6 +211,42 @@ def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
     assert bridge._momentum_ok("COLDEUR", require_history=True) is False  # noqa: SLF001
     # Existing-bag path may still allow sparse history.
     assert bridge._momentum_ok("COLDEUR", require_history=False) is True  # noqa: SLF001
+
+
+def test_portfolio_holdings_overview_includes_momentum(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_min_return=0.0015,
+        paper_buy_momentum_samples=12,
+        live_micro_bridge_persist_path=str(tmp_path / "holdings.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    symbol = "ADAEUR"
+    series = bridge._series_for(symbol)  # noqa: SLF001
+    for px in (1.0, 1.002, 1.004, 1.006, 1.008, 1.010):
+        series.push(Decimal(str(px)))
+    bridge._trail["bitvavo:ADA"] = {  # noqa: SLF001
+        "venue": "bitvavo",
+        "base": "ADA",
+        "cost": Decimal("1.0"),
+        "last_mark": Decimal("1.01"),
+        "session_qty": Decimal("100"),
+    }
+    bridge._venue_raw_balances["bitvavo"] = []  # noqa: SLF001
+    snap = bridge.snapshot_bridge()
+    holdings = snap.get("portfolio_holdings") or []
+    assert len(holdings) == 1
+    row = holdings[0]
+    assert row["base"] == "ADA"
+    assert row["momentum_direction"] == "up"
+    assert row["momentum_arrow"] == "↑"
+    assert float(row["notional_eur"]) > 0
 
 
 def test_portfolio_sync_live_balances_caps_quote() -> None:
@@ -640,7 +676,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.paper_trail_partial_pct == 0.40
     assert cfg.paper_trail_soft_partial_pct == 0.50
     assert cfg.live_micro_max_notional_eur <= 150.0
-    assert cfg.paper_markout_enabled is True
+    assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0
     assert cfg.live_micro_reset_drawdown_on_start is True

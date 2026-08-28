@@ -277,6 +277,7 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "session_pnl_eur": float(session_pnl) if session_pnl is not None else None,
         "free_eur": float(free) if free is not None else None,
         "tx_count": tx_n,
+        "portfolio_holdings": bridge.get("portfolio_holdings") or [],
     }
 
 

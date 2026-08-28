@@ -90,6 +90,17 @@ def test_render_live_dashboard_contains_controls() -> None:
                             }
                         }
                     },
+                    "portfolio_holdings": [
+                        {
+                            "base": "ETH",
+                            "venue": "bitvavo",
+                            "notional_eur": "330.00",
+                            "momentum_direction": "down",
+                            "momentum_arrow": "↓",
+                            "momentum_return_pct": "-0.18",
+                            "role": "long_hold",
+                        }
+                    ],
                 },
             },
             "engine": {"armed": False, "can_place_orders": False, "block_reason": "locked"},
@@ -140,6 +151,10 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "bitvavo vrij EUR" in html
     assert "okx vrij EUR" in html
     assert "chart-portfolio" in html
+    assert "portfolio-strip" in html
+    assert "portfolio-holdings" in html
+    assert "↓" in html
+    assert "ETH" in html
     assert "manifest.webmanifest" in html
     assert "long-hold — buiten micro-recycle" in html
     assert "sell onder break-even" in html

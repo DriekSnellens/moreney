@@ -786,6 +786,66 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return _ZERO
         return free if free <= self._budget else self._budget
 
+    def _momentum_display(self, symbol: str) -> dict[str, Any]:
+        """Rolling mark momentum for dashboard arrows (↑ / ↓ / →)."""
+        series = self._series_for(symbol)
+        mom = series.momentum_return()
+        if len(series) < 2 or mom is None:
+            return {
+                "direction": "flat",
+                "arrow": "→",
+                "return_pct": None,
+                "samples": len(series),
+            }
+        mom_f = float(mom)
+        threshold = float(self._momentum_min)
+        if mom_f >= threshold:
+            direction, arrow = "up", "↑"
+        elif mom_f <= -threshold:
+            direction, arrow = "down", "↓"
+        else:
+            direction, arrow = "flat", "→"
+        return {
+            "direction": direction,
+            "arrow": arrow,
+            "return_pct": f"{mom_f * 100:.2f}",
+            "samples": len(series),
+        }
+
+    def _portfolio_holdings_overview(self) -> list[dict[str, Any]]:
+        """Compact held-inventory list for the live dashboard."""
+        items: list[dict[str, Any]] = []
+        for trail_key, st in self._trail_states_public().items():
+            base = str(st.get("base") or "")
+            venue = str(st.get("venue") or "")
+            try:
+                notional = Decimal(str(st.get("notional_eur") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if not base or notional <= 0:
+                continue
+            symbol = f"{base}{self._quote}"
+            mom = self._momentum_display(symbol)
+            items.append(
+                {
+                    "key": trail_key,
+                    "base": base,
+                    "venue": venue,
+                    "notional_eur": str(notional.quantize(Decimal("0.01"))),
+                    "gain_pct": st.get("gain_pct"),
+                    "role": st.get("role") or "micro_recycle",
+                    "momentum_direction": mom["direction"],
+                    "momentum_arrow": mom["arrow"],
+                    "momentum_return_pct": mom["return_pct"],
+                    "momentum_samples": mom["samples"],
+                }
+            )
+        items.sort(
+            key=lambda row: Decimal(str(row.get("notional_eur") or 0)),
+            reverse=True,
+        )
+        return items
+
     def snapshot_bridge(self) -> dict[str, Any]:
         return {
             "budget_eur": str(self._budget),
@@ -857,6 +917,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "held_alt_bases_by_venue": {
                 v: sorted(self._held_alt_bases(v)) for v in sorted(self._execute_venues)
             },
+            "portfolio_holdings": self._portfolio_holdings_overview(),
             "last_sync": self._last_sync,
             "last_sync_by_venue": dict(self._last_sync_by_venue),
             "diagnostics": {

@@ -127,6 +127,8 @@ def _session_settings(
     maker_venues = "okx,bitvavo" if cross_venue else "bitvavo"
     return base.model_copy(
         update={
+            # Internal engine host only — env keeps PAPER_TRADING_ENABLED=false so
+            # the API never exposes paper lab UI or auto-start on :8020.
             "execution_mode": ExecutionMode.PAPER,
             "paper_trading_enabled": True,
             "paper_auto_start": False,
@@ -242,7 +244,7 @@ def _session_settings(
             "live_micro_trail_partial_min_frac": float(
                 getattr(base, "live_micro_trail_partial_min_frac", 0.45) or 0.45
             ),
-            "paper_markout_enabled": True,
+            "paper_markout_enabled": False,
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.
             "live_disable_research_hooks": True,
