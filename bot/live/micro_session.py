@@ -70,14 +70,17 @@ def _non_btc_symbols(settings: Settings) -> list[str]:
 
 def _liquid_symbols(settings: Settings, *, exclude_btc: bool = True) -> list[str]:
     raw = str(getattr(settings, "live_micro_symbols", "") or "").strip()
-    if raw and raw != "*":
+    # "*" or the config stub "BTCEUR,ETHEUR" → full liquid EUR book, including BTC.
+    if raw in {"", "*", "BTCEUR,ETHEUR"}:
+        out = list(_LIQUID_EUR_SYMBOLS)
+    else:
         out = [
             s.strip().upper().replace("-", "").replace("/", "")
             for s in raw.split(",")
             if s.strip()
         ]
-    else:
-        out = list(_LIQUID_EUR_SYMBOLS)
+        if "BTCEUR" not in out and not exclude_btc:
+            out = ["BTCEUR", *out]
     if exclude_btc:
         out = [s for s in out if not s.upper().startswith("BTC")]
     return out

@@ -176,6 +176,10 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert "BTCEUR" not in liquid
     with_btc = _liquid_symbols(_unlocked(live_micro_symbols="*"), exclude_btc=False)
     assert "BTCEUR" in with_btc
+    defaulted = _liquid_symbols(Settings(), exclude_btc=False)
+    assert "BTCEUR" in defaulted
+    assert "SOLEUR" in defaulted
+    assert len(defaulted) >= 19
     assert "PEPEEUR" not in liquid
     assert "SHIBEUR" not in liquid
     assert "BNBEUR" not in liquid
