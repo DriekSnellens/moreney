@@ -294,6 +294,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._block_cross_venue_duplicate_bases = bool(
             getattr(settings, "live_micro_block_cross_venue_duplicate_bases", True)
         )
+        self._consolidate_duplicates = bool(
+            getattr(settings, "live_micro_consolidate_duplicate_bases", True)
+        )
+        self._consolidate_primary = str(
+            getattr(settings, "live_micro_consolidate_primary_venue", "bitvavo")
+            or "bitvavo"
+        ).strip().lower()
         self._first_clip_eur = Decimal(
             str(getattr(settings, "live_micro_first_clip_eur", 0) or 0)
         )
@@ -791,6 +798,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "alerts": list(self._alerts[-10:]),
             "max_alt_bases": self._max_alt_bases,
             "block_cross_venue_duplicate_bases": self._block_cross_venue_duplicate_bases,
+            "consolidate_duplicate_bases": self._consolidate_duplicates,
+            "consolidate_primary_venue": self._consolidate_primary,
+            "duplicate_bases_by_venue": self._duplicate_bases_by_venue(),
             "first_clip_eur": str(self._first_clip_eur),
             "add_clip_eur": str(self._add_clip_eur),
             "held_alt_bases": sorted(self._held_alt_bases()),
@@ -947,6 +957,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self.skips.get("cross_venue_duplicate_base", 0) > 0:
             hints.append(
                 f"CROSS_VENUE_DUPLICATE_BASE n={self.skips.get('cross_venue_duplicate_base')}"
+            )
+        dupes = self._duplicate_bases_by_venue()
+        if dupes:
+            hints.append(
+                "DUPLICATE_BASES "
+                + ", ".join(f"{b}@{','.join(sorted(v))}" for b, v in sorted(dupes.items()))
+            )
+        if self.skips.get("consolidation_secondary_buy", 0) > 0:
+            hints.append(
+                f"CONSOLIDATION_SECONDARY_BUY n={self.skips.get('consolidation_secondary_buy')}"
             )
         if self.skips.get("corr_group_cap", 0) > 0:
             hints.append(f"CORR_GROUP_CAP n={self.skips.get('corr_group_cap')}")
@@ -2350,6 +2370,55 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False  # same-venue top-up / add
         return b in self._held_alt_bases(None)
 
+    def _duplicate_bases_by_venue(self) -> dict[str, list[str]]:
+        """Bases held on more than one execute venue → venue list."""
+        by_base: dict[str, set[str]] = {}
+        for v in sorted(self._execute_venues):
+            for b in self._held_alt_bases(v):
+                by_base.setdefault(b, set()).add(v)
+        return {
+            b: sorted(vs) for b, vs in sorted(by_base.items()) if len(vs) > 1
+        }
+
+    def _primary_venue_for_base(self, base: str) -> str | None:
+        dupes = self._duplicate_bases_by_venue()
+        b = str(base or "").upper()
+        venues = dupes.get(b)
+        if not venues:
+            return None
+        primary = self._consolidate_primary.strip().lower()
+        if primary in venues:
+            return primary
+        return venues[0]
+
+    def _is_consolidation_secondary(self, venue: str, base: str) -> bool:
+        """True when this venue should wind down a duplicate base (sell-only)."""
+        if not self._consolidate_duplicates:
+            return False
+        primary = self._primary_venue_for_base(base)
+        if primary is None:
+            return False
+        return venue.strip().lower() != primary
+
+    def _trail_partial_qty(
+        self,
+        *,
+        cap: Decimal,
+        partial_pct: Decimal,
+        mark: Decimal,
+        notional_floor: Decimal,
+    ) -> Decimal:
+        """Scale partial qty up to meet maker min-notional when possible."""
+        if cap <= 0 or mark <= 0 or partial_pct <= 0:
+            return _ZERO
+        qty = (cap * partial_pct).quantize(Decimal("0.00000001"))
+        if qty * mark >= notional_floor:
+            return qty
+        need = (notional_floor / mark).quantize(Decimal("0.00000001"))
+        if need > cap:
+            return cap
+        return need
+
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
         """Max buy notional: first_clip until soft-armed, then add_clip."""
         first = self._first_clip_eur
@@ -2505,6 +2574,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "soft_partial_done": False,
                 "hard_partial_done": False,
                 "recovery_be_partial_done": False,
+                "consolidation_wind_down_done": False,
                 "partial_done": False,
                 "time_stop_due": False,
                 "recovery_armed": False,
@@ -2930,7 +3000,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if self._trail_session_only
                     else free,
                 )
-                sell_qty = (cap * self._soft_partial).quantize(Decimal("0.00000001"))
+                maker_min = Decimal(
+                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+                )
+                partial_min = max(
+                    _MIN_LIVE_NOTIONAL,
+                    maker_min * self._trail_partial_min_frac,
+                )
+                sell_qty = self._trail_partial_qty(
+                    cap=cap,
+                    partial_pct=self._soft_partial,
+                    mark=mark,
+                    notional_floor=partial_min,
+                )
                 reason = "trail_soft_partial"
                 st["soft_partial_done"] = True
                 st["partial_done"] = True
@@ -2946,9 +3028,39 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if self._trail_session_only
                     else free,
                 )
-                sell_qty = (cap * self._hard_partial).quantize(Decimal("0.00000001"))
+                maker_min = Decimal(
+                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+                )
+                partial_min = max(
+                    _MIN_LIVE_NOTIONAL,
+                    maker_min * self._trail_partial_min_frac,
+                )
+                sell_qty = self._trail_partial_qty(
+                    cap=cap,
+                    partial_pct=self._hard_partial,
+                    mark=mark,
+                    notional_floor=partial_min,
+                )
                 reason = "trail_hard_partial"
                 st["hard_partial_done"] = True
+            elif (
+                self._consolidate_duplicates
+                and self._is_consolidation_secondary(venue, asset)
+                and be is not None
+                and mark >= be
+                and not st.get("consolidation_wind_down_done")
+            ):
+                # Wind down OKX duplicate at BE+; Bitvavo remains primary bag.
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                cap = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
+                sell_qty = cap
+                reason = "trail_consolidation_wind_down"
+                st["consolidation_wind_down_done"] = True
             elif st.get("triggered"):
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 sell_qty = min(
@@ -2973,8 +3085,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if self._trail_session_only
                     else free,
                 )
-                sell_qty = (cap * self._recovery_be_partial).quantize(
-                    Decimal("0.00000001")
+                maker_min = Decimal(
+                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+                )
+                partial_min = max(
+                    _MIN_LIVE_NOTIONAL,
+                    maker_min * self._trail_partial_min_frac,
+                )
+                sell_qty = self._trail_partial_qty(
+                    cap=cap,
+                    partial_pct=self._recovery_be_partial,
+                    mark=mark,
+                    notional_floor=partial_min,
                 )
                 reason = "trail_recovery_be_partial"
                 st["recovery_be_partial_done"] = True
@@ -3043,6 +3165,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["hard_partial_done"] = False
                 if reason == "trail_recovery_be_partial":
                     st["recovery_be_partial_done"] = False
+                if reason == "trail_consolidation_wind_down":
+                    st["consolidation_wind_down_done"] = False
                 continue
 
             cooldown_key = f"{venue}:{asset}:{reason}"
@@ -3126,6 +3250,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     st["hard_partial_done"] = False
                 if reason == "trail_recovery_be_partial":
                     st["recovery_be_partial_done"] = False
+                if reason == "trail_consolidation_wind_down":
+                    st["consolidation_wind_down_done"] = False
                 self._bump_skip(f"{reason}_reject")
             else:
                 logger.info(
@@ -3137,7 +3263,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     mark,
                     result.status.value,
                 )
-                if reason in {"trail_drawdown", "trail_recovery_be", "time_stop_breakeven"}:
+                if reason in {
+                    "trail_drawdown",
+                    "trail_recovery_be",
+                    "trail_consolidation_wind_down",
+                    "time_stop_breakeven",
+                }:
                     # Full exit path — clear trail when remaining is dust.
                     rem_free = await self._live_free(venue, asset)
                     if rem_free * mark < notional_floor:
@@ -3392,6 +3523,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"(max {self._max_alt_bases} bases for trail concentration)"
                     ),
                 )
+        if (
+            side_is_buy
+            and self._is_consolidation_secondary(venue, base)
+            and not meta.get("trail_take_profit")
+        ):
+            self._bump_skip("consolidation_secondary_buy")
+            return await self._reject_before_live(
+                order_request,
+                reason="CONSOLIDATION_SECONDARY",
+                message=(
+                    f"{base} duplicate on {venue} — sell-only wind-down "
+                    f"(primary {self._primary_venue_for_base(base)})"
+                ),
+            )
         # One base → one venue: don't open FET on OKX when Bitvavo already holds FET.
         if (
             side_is_buy

@@ -127,6 +127,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.max_simultaneous_positions == 3
     assert cfg.live_micro_max_alt_bases == 2
     assert cfg.live_micro_block_cross_venue_duplicate_bases is True
+    assert cfg.live_micro_consolidate_duplicate_bases is True
+    assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
     assert float(cfg.live_micro_first_clip_eur) >= 55.0
     assert float(cfg.live_micro_add_clip_eur) >= 100.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
@@ -1428,6 +1430,55 @@ def test_okx_aggressive_buy_price_joins_bid() -> None:
     )
     px = bridge._aggressive_buy_price("okx", Decimal("99.5"), book)  # noqa: SLF001
     assert px >= Decimal("100")
+
+
+def test_trail_partial_qty_scales_to_min_notional() -> None:
+    bridge = MicroBudgetLiveExecutor(
+        _unlocked(),
+        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(_unlocked()),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    cap = Decimal("10")
+    qty = bridge._trail_partial_qty(  # noqa: SLF001
+        cap=cap,
+        partial_pct=Decimal("0.5"),
+        mark=Decimal("2"),
+        notional_floor=Decimal("12"),
+    )
+    assert qty * Decimal("2") >= Decimal("12")
+    assert qty <= cap
+
+
+def test_consolidation_secondary_detects_okx_fet_duplicate() -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_consolidate_duplicate_bases=True,
+        live_micro_consolidate_primary_venue="bitvavo",
+        paper_maker_min_notional_eur=10.0,
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("FETEUR", Decimal("0.14"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="FET", free=Decimal("3000"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["okx"] = [  # noqa: SLF001
+        Balance(asset="FET", free=Decimal("500"), locked=Decimal("0")),
+    ]
+    assert bridge._duplicate_bases_by_venue() == {"FET": ["bitvavo", "okx"]}  # noqa: SLF001
+    assert bridge._primary_venue_for_base("FET") == "bitvavo"  # noqa: SLF001
+    assert bridge._is_consolidation_secondary("okx", "FET") is True  # noqa: SLF001
+    assert bridge._is_consolidation_secondary("bitvavo", "FET") is False  # noqa: SLF001
 
 
 def test_recovery_be_pullback_requires_prior_peak_above_be() -> None:

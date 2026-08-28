@@ -221,6 +221,8 @@ def _session_settings(
             "live_micro_cross_venue_min_fill_rate": 0.30,
             "live_micro_cross_venue_min_attempts": 8,
             "live_micro_block_cross_venue_duplicate_bases": True,
+            "live_micro_consolidate_duplicate_bases": True,
+            "live_micro_consolidate_primary_venue": "bitvavo",
             "live_micro_okx_deploy_bases": str(
                 getattr(
                     base,

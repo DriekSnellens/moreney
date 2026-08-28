@@ -436,6 +436,9 @@ class Settings(BaseSettings):
     live_micro_max_alt_bases: int = Field(default=0, ge=0, le=20)
     # Do not open the same base on a second execute venue (e.g. FET on Bitvavo+OKX).
     live_micro_block_cross_venue_duplicate_bases: bool = True
+    # When a base is on 2+ venues: primary keeps adds; secondary is sell-only + BE wind-down.
+    live_micro_consolidate_duplicate_bases: bool = True
+    live_micro_consolidate_primary_venue: str = "bitvavo"
     # First entry / pre-soft-arm buy clip (€). Adds after soft-arm use add_clip.
     live_micro_first_clip_eur: float = Field(default=55.0, ge=10.0, le=500.0)
     live_micro_add_clip_eur: float = Field(default=120.0, ge=10.0, le=500.0)
