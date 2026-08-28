@@ -174,8 +174,8 @@ def _session_settings(
             "paper_trail_soft_drawdown_pct": 0.002,
             "paper_trail_soft_partial_pct": 0.0,
             # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
-            "paper_trail_recovery_be_partial_pct": 0.35,
-            "paper_trail_be_harvest_partial_pct": 0.35,
+            "paper_trail_recovery_be_partial_pct": 0.0,
+            "paper_trail_be_harvest_partial_pct": 0.0,
             "paper_trail_be_harvest_min_gain_pct": 0.0005,
             "live_micro_be_harvest_cooldown_sec": 15.0,
             "paper_trail_hard_arm_pct": 0.06,
@@ -224,8 +224,8 @@ def _session_settings(
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
-            # Anti-stack uses duplicate-resting + clip floor; allow other bases while SOL held.
-            "live_micro_block_buys_when_holding_base": False,
+            # One bag per base per venue — scan other coins with momentum instead.
+            "live_micro_block_buys_when_holding_base": True,
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,

@@ -147,12 +147,12 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
-    assert cfg.live_micro_block_buys_when_holding_base is False
+    assert cfg.live_micro_block_buys_when_holding_base is True
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
-    assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
-    assert cfg.paper_trail_be_harvest_partial_pct >= 0.30
+    assert cfg.paper_trail_recovery_be_partial_pct == 0.0
+    assert cfg.paper_trail_be_harvest_partial_pct == 0.0
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
@@ -1019,7 +1019,7 @@ def test_held_alt_bases_are_per_venue_not_global() -> None:
     assert bridge._is_cross_venue_duplicate_base("okx", "DOT") is False  # noqa: SLF001
 
 
-def test_buy_clip_cap_uses_first_then_add_after_soft_arm() -> None:
+def test_buy_clip_cap_uses_first_clip_only() -> None:
     settings = _unlocked(
         live_micro_first_clip_eur=55.0,
         live_micro_add_clip_eur=120.0,
@@ -1039,7 +1039,7 @@ def test_buy_clip_cap_uses_first_then_add_after_soft_arm() -> None:
     bridge._trail_update_state(  # noqa: SLF001
         "bitvavo", "SOL", cost=cost, mark=Decimal("102.5")
     )
-    assert bridge._buy_clip_cap_eur("bitvavo", "SOL") == Decimal("120")  # noqa: SLF001
+    assert bridge._buy_clip_cap_eur("bitvavo", "SOL") == Decimal("55")  # noqa: SLF001
 
 
 @pytest.mark.asyncio

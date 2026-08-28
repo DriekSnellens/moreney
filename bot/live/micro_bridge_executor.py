@@ -338,7 +338,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_block_underwater_adds", True)
         )
         self._block_buys_when_holding_base = bool(
-            getattr(settings, "live_micro_block_buys_when_holding_base", False)
+            getattr(settings, "live_micro_block_buys_when_holding_base", True)
         )
         self._MarkSeries = MarkSeries
         self._try_load_persisted_state()
@@ -2847,6 +2847,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 st["partial_done"] = True
         if reason in {"trail_be_harvest", "trail_recovery_be_partial"}:
             st["recovery_be_partial_done"] = True
+            st["soft_armed"] = False
+            st["triggered"] = False
+            st["peak"] = Decimal("0")
+            st["post_harvest_block_adds"] = True
 
     def _be_harvest_already_done(self, st: dict[str, Any]) -> bool:
         return bool(
@@ -2881,17 +2885,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
-        """Max buy notional: first_clip until soft-armed, then add_clip."""
+        """Single entry clip — no scale-up adds after soft-arm."""
         first = self._first_clip_eur
-        add = self._add_clip_eur
-        if first <= 0 and add <= 0:
-            return None
-        st = self._trail.get(self._lots_key(venue, base)) or {}
-        if st.get("soft_armed") and add > 0:
-            return add
-        if first > 0:
-            return first
-        return add if add > 0 else None
+        if first <= 0:
+            add = self._add_clip_eur
+            return add if add > 0 else None
+        return first
 
     @staticmethod
     def _is_trail_mark_spike(
@@ -3468,8 +3467,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and self._cut_loss_eligible(st, venue=venue, base=asset)
                 and be is not None
                 and mark < be
-                and self._momentum_enabled
-                and self._momentum_down(symbol)
                 and mark <= early_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
@@ -3864,7 +3861,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not self._buys_blocked
                 and not self._daily_kill_active
             ):
-                can_add = asset in held or (
+                can_add = asset not in held and (
                     self._max_alt_bases <= 0 or len(held) < self._max_alt_bases
                 )
                 live_eur = await self._live_free(venue, self._quote)
@@ -4162,8 +4159,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 reason="HOLDING_BASE_BUY_BLOCK",
                 message=(
                     f"buy blocked: already holding {venue}:{base}; "
-                    "sell-only until flat"
+                    "scan other bases with momentum"
                 ),
+            )
+        st = self._trail.get(self._lots_key(venue, base)) or {}
+        if (
+            side_is_buy
+            and st.get("post_harvest_block_adds")
+            and not meta.get("dust_top_up")
+        ):
+            self._bump_skip("post_harvest_add_block")
+            return await self._reject_before_live(
+                order_request,
+                reason="POST_HARVEST_ADD_BLOCK",
+                message=f"add blocked after harvest on {venue}:{base}",
             )
         if (
             side_is_buy

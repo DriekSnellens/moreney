@@ -192,6 +192,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._fair_values: dict[str, Decimal] = {}
         self._active_skew: QuoteSkew | None = None
         self._venue_skews: dict[str, QuoteSkew] = {}
+        self._venue_held_bases: dict[str, set[str]] = {}
         self._venue_free_quote: dict[str, Decimal] = {}
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
@@ -403,12 +404,14 @@ class MakerInventoryStrategy(BaseStrategy):
         self._portfolio_state = portfolio_state
         self._venue_skews = {}
         self._venue_free_quote = {}
+        self._venue_held_bases: dict[str, set[str]] = {}
         if portfolio_state is not None:
             self._active_skew = self._skew_policy.skew(portfolio_state)
             ledger = inventory
             if ledger is not None and hasattr(ledger, "venues"):
                 marks = portfolio_state.mark_prices or {}
                 quote = self._quote
+                min_n = self._dust.min_notional_eur
                 for venue in ledger.venues:
                     key = str(venue).strip().lower()
                     if key:
@@ -417,6 +420,20 @@ class MakerInventoryStrategy(BaseStrategy):
                         )
                         if hasattr(ledger, "available"):
                             self._venue_free_quote[key] = ledger.available(key, quote)
+                        held: set[str] = set()
+                        for sym, mark in marks.items():
+                            if not str(sym).upper().endswith(quote):
+                                continue
+                            base = infer_base_asset(str(sym).upper(), quote)
+                            if not base or base == quote:
+                                continue
+                            qty = ledger.available(key, base)
+                            if qty <= 0:
+                                continue
+                            px = Decimal(str(mark or 0))
+                            if px > 0 and qty * px >= min_n * Decimal("0.5"):
+                                held.add(base)
+                        self._venue_held_bases[key] = held
         else:
             self._active_skew = None
 
@@ -494,6 +511,7 @@ class MakerInventoryStrategy(BaseStrategy):
             return []
 
         dump_or_reduce = self._symbol_sell_only(symbol)
+        base = infer_base_asset(symbol, self._quote)
         if dump_or_reduce and self._vol_guard.is_dump(symbol):
             self._reject(
                 symbol,
@@ -507,6 +525,21 @@ class MakerInventoryStrategy(BaseStrategy):
             if not self._venue_allowed(buy_snap.exchange):
                 continue
             buy_venue = str(buy_snap.exchange or "").strip().lower()
+            if (
+                not dump_or_reduce
+                and base in self._venue_held_bases.get(buy_venue, set())
+            ):
+                self._reject(
+                    symbol,
+                    "held_base_no_new_buy",
+                    (
+                        f"{buy_venue} already holds {base}; "
+                        "emit other momentum bases only"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=buy_snap.exchange,
+                )
+                continue
             for sell_snap in venues:
                 if not self._venue_allowed(sell_snap.exchange):
                     continue
@@ -572,10 +605,14 @@ class MakerInventoryStrategy(BaseStrategy):
         net = Decimal(str(meta.get("net_profit_eur", "0")))
         skew = Decimal(str(meta.get("inventory_skew_score", "0")))
         fv_bonus = Decimal("1") if meta.get("fair_value_aligned") else Decimal("0")
-        # Same-venue used to get a flat +€0.05 rank bonus. That systematically
-        # preferred Bitvavo→Bitvavo, which concentrated realized losses.
-        # Venue quality now comes from calibrated EV / markout, not a cash bonus.
-        return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001"))
+        venue = self._primary_venue(opportunity)
+        base = infer_base_asset(str(opportunity.symbol or "").upper(), self._quote)
+        held_penalty = (
+            Decimal("-1000")
+            if base in self._venue_held_bases.get(venue, set())
+            else Decimal("0")
+        )
+        return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001")) + held_penalty
 
     def _effective_min_profit(
         self, equity: Decimal | None, *, notional: Decimal | None = None
@@ -681,19 +718,29 @@ class MakerInventoryStrategy(BaseStrategy):
     def _venue_opps_ordered(
         self, venue: str, opps: list[TradeOpportunity]
     ) -> list[TradeOpportunity]:
-        """OKX: prefer liquid deploy bases when venue has spare EUR."""
+        """OKX: prefer deploy bases; all venues: unheld bases before held."""
         key = str(venue or "").strip().lower()
-        if key != "okx" or not self._okx_deploy_bases or not opps:
-            return opps
+        held = self._venue_held_bases.get(key, set())
+        fresh: list[TradeOpportunity] = []
+        repeat: list[TradeOpportunity] = []
+        for opp in opps:
+            base = infer_base_asset(str(opp.symbol or "").upper(), self._quote)
+            if base in held:
+                repeat.append(opp)
+            else:
+                fresh.append(opp)
+        pool = fresh if fresh else repeat
+        if key != "okx" or not self._okx_deploy_bases or not pool:
+            return pool
         preferred: list[TradeOpportunity] = []
         other: list[TradeOpportunity] = []
-        for opp in opps:
+        for opp in pool:
             base = infer_base_asset(str(opp.symbol or "").upper(), self._quote)
             if base in self._okx_deploy_bases:
                 preferred.append(opp)
             else:
                 other.append(opp)
-        return preferred + other if preferred else opps
+        return preferred + other if preferred else pool
 
     def _select_balanced_emits(
         self, opportunities: list[TradeOpportunity]
