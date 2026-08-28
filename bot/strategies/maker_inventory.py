@@ -662,29 +662,21 @@ class MakerInventoryStrategy(BaseStrategy):
         ).strip().lower()
 
     def _venue_emit_rotation(self, venues: list[str]) -> list[str]:
-        """Order venues for emit fairness; cash-rich venues get extra turns."""
+        """Bitvavo-first alternation so OKX still gets every other emit slot."""
         if not venues:
             return []
-        cash = {
-            v: self._venue_free_quote.get(v, _ZERO) for v in venues
-        }
-        ordered = sorted(venues, key=lambda v: cash.get(v, _ZERO), reverse=True)
+        primary = str(
+            getattr(self._settings, "live_micro_primary_execute_venue", "bitvavo")
+            or "bitvavo"
+        ).strip().lower()
+        ordered = sorted(
+            venues,
+            key=lambda v: (0 if str(v).strip().lower() == primary else 1, str(v)),
+        )
         if len(ordered) < 2:
             return ordered
-        rich, poor = ordered[0], ordered[1]
-        rich_c = cash.get(rich, _ZERO)
-        poor_c = cash.get(poor, _ZERO)
-        bias_ratio = self._okx_cash_bias_ratio if self._okx_cash_bias_ratio > 0 else Decimal("1.5")
-        if poor_c <= 0:
-            return ordered
-        if rich_c < poor_c * bias_ratio:
-            return ordered
-        # OKX (or whichever venue) has materially more EUR — weight its slots ~2:1.
-        rotation: list[str] = []
-        for venue in ordered:
-            weight = 2 if venue == rich else 1
-            rotation.extend([venue] * weight)
-        return rotation
+        first, second = ordered[0], ordered[1]
+        return [first, second, first, second, first, second, first, second]
 
     def _venue_opps_ordered(
         self, venue: str, opps: list[TradeOpportunity]

@@ -107,7 +107,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_drawdown_pct == 0.03
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.40
-    assert cfg.paper_trail_soft_arm_pct == 0.0125
+    assert cfg.paper_trail_soft_arm_pct == 0.001
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
@@ -117,7 +119,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_buy_momentum_samples >= 8
     assert cfg.live_micro_max_per_corr_group == 2
     assert cfg.paper_daily_kill_eur == 50.0
-    assert cfg.paper_ladder_buy_enabled is True
+    assert cfg.paper_ladder_buy_enabled is False
     assert cfg.paper_time_stop_enabled is True
     assert cfg.paper_dust_policy == "top_up_or_exit"
     assert cfg.paper_regime_block_buys is True
@@ -140,10 +142,12 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 35.0
-    assert cfg.paper_trail_soft_partial_pct == 0.50
-    assert cfg.paper_trail_soft_drawdown_pct == 0.005
+    assert cfg.paper_trail_soft_partial_pct == 0.0
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
-    assert cfg.live_micro_underwater_buy_block == 3
+    assert cfg.live_micro_underwater_buy_block == 1
+    assert cfg.live_micro_block_underwater_adds is True
+    assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
@@ -680,10 +684,11 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.03
-    assert cfg.paper_trail_soft_arm_pct == 0.0125
+    assert cfg.paper_trail_soft_arm_pct == 0.001
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.40
-    assert cfg.paper_trail_soft_partial_pct == 0.50
+    assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.live_micro_max_notional_eur <= 150.0
     assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -2133,3 +2138,17 @@ def test_profitability_engine_uses_profitability_min_settings() -> None:
     calc = engine._calculator  # noqa: SLF001
     assert calc._min_net_profit == Decimal("0.04")  # noqa: SLF001
     assert calc._min_net_return == Decimal("0.0004")  # noqa: SLF001
+
+
+def test_venue_emit_rotation_bitvavo_first_alternation() -> None:
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    strat = MakerInventoryStrategy(
+        _unlocked(
+            live_micro_primary_execute_venue="bitvavo",
+            paper_maker_venues="okx,bitvavo",
+        )
+    )
+    strat._venue_free_quote = {"bitvavo": Decimal("1000"), "okx": Decimal("2000")}  # noqa: SLF001
+    rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
+    assert rot[:4] == ["bitvavo", "okx", "bitvavo", "okx"]

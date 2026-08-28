@@ -869,7 +869,11 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
     okx_count = sum(
         1 for o in selected if (o.metadata or {}).get("buy_exchange") == "okx"
     )
-    assert okx_count >= 2
+    bv_count = sum(
+        1 for o in selected if (o.metadata or {}).get("buy_exchange") == "bitvavo"
+    )
+    assert okx_count >= 1
+    assert bv_count >= 1
     assert len(selected) == 3
 
 

@@ -334,6 +334,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._add_clip_eur = Decimal(
             str(getattr(settings, "live_micro_add_clip_eur", 0) or 0)
         )
+        self._block_underwater_adds = bool(
+            getattr(settings, "live_micro_block_underwater_adds", True)
+        )
         self._MarkSeries = MarkSeries
         self._try_load_persisted_state()
 
@@ -1292,6 +1295,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             1
             for row in self._resting
             if str(row.get("venue") or "").strip().lower() == venue_l
+            and str(row.get("side") or "buy").lower().startswith("b")
+        )
+
+    def _resting_buys_for(self, venue: str, symbol: str) -> int:
+        venue_l = venue.strip().lower()
+        sym = symbol.strip().upper()
+        return sum(
+            1
+            for row in self._resting
+            if str(row.get("venue") or "").strip().lower() == venue_l
+            and str(row.get("symbol") or "").strip().upper() == sym
             and str(row.get("side") or "buy").lower().startswith("b")
         )
 
@@ -3000,27 +3014,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             self._bump_skip("trail_mark_spike")
 
-        if not st.get("soft_armed") and gain >= soft_arm and not mark_spike:
-            st["soft_armed"] = True
-            st["armed"] = True
-            st["peak"] = mark
-            st["newly_soft"] = True
-            st["newly_armed"] = True
-            st["drawdown"] = str(soft_dd)
-            self._push_alert(
-                "soft_arm",
-                f"{base} soft-arm +{float(gain * 100):.1f}% "
-                f"(need {float(soft_arm * 100):.0f}%)",
-                base=base,
+        if not st.get("soft_armed") and not mark_spike:
+            be = self._break_even_sell_price(venue, base)
+            at_net_profit = (
+                be is not None
+                and mark >= be
+                and self._has_trusted_cost(venue, base)
             )
-            logger.info(
-                "TRAIL_SOFT_ARM base=%s cost=%s mark=%s gain=%.2f%% arm=%.2f%%",
-                base,
-                cost,
-                mark,
-                float(gain * 100),
-                float(soft_arm * 100),
-            )
+            if gain >= soft_arm or at_net_profit:
+                st["soft_armed"] = True
+                st["armed"] = True
+                st["peak"] = mark
+                st["newly_soft"] = True
+                st["newly_armed"] = True
+                st["drawdown"] = str(soft_dd)
+                arm_label = (
+                    "net-profit"
+                    if at_net_profit and gain < soft_arm
+                    else f"+{float(gain * 100):.1f}%"
+                )
+                self._push_alert(
+                    "soft_arm",
+                    f"{base} soft-arm {arm_label} "
+                    f"(trail dd {float(soft_dd * 100):.1f}% from peak)",
+                    base=base,
+                )
+                logger.info(
+                    "TRAIL_SOFT_ARM base=%s cost=%s mark=%s gain=%.2f%% arm=%.2f%% "
+                    "net_profit=%s",
+                    base,
+                    cost,
+                    mark,
+                    float(gain * 100),
+                    float(soft_arm * 100),
+                    at_net_profit,
+                )
         elif not st.get("soft_armed") and soft_arm > 0:
             to_arm = soft_arm - gain
             if 0 < to_arm <= self._alert_pct_to_arm:
@@ -4030,6 +4058,39 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if side_is_buy and post_only:
             px = self._aggressive_buy_price(venue, px, order_book)
             order_request = order_request.model_copy(update={"limit_price": px})
+
+        if (
+            side_is_buy
+            and self._block_underwater_adds
+            and not self._is_new_base_buy(venue, base)
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+        ):
+            be = self._break_even_sell_price(venue, base)
+            mark_ref = self._portfolio.state.mark_prices.get(symbol.upper())
+            if mark_ref is None or mark_ref <= 0:
+                mark_ref = px
+            if be is not None and mark_ref < be:
+                self._bump_skip("underwater_add_block")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="UNDERWATER_ADD_BLOCK",
+                    message=(
+                        f"add blocked: {venue}:{base} mark {mark_ref} "
+                        f"below break-even {be}"
+                    ),
+                )
+        if (
+            side_is_buy
+            and self._resting_buys_for(venue, symbol) >= 1
+            and not meta.get("dust_top_up")
+        ):
+            self._bump_skip("duplicate_resting_buy")
+            return await self._reject_before_live(
+                order_request,
+                reason="DUPLICATE_RESTING_BUY",
+                message=f"resting buy already open for {venue}:{symbol}",
+            )
 
         # Size against live Bitvavo free balances (paper pocket can lag fills).
         if side_is_buy:

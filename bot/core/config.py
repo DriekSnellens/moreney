@@ -140,8 +140,8 @@ class Settings(BaseSettings):
     paper_trail_partial_enabled: bool = True
     paper_trail_partial_pct: float = Field(default=0.50, ge=0.05, le=0.95)
     # Soft / hard schedule (preferred over single partial).
-    paper_trail_soft_arm_pct: float = Field(default=0.02, ge=0.005, le=2.0)
-    paper_trail_soft_drawdown_pct: float = Field(default=0.012, ge=0.005, le=0.50)
+    paper_trail_soft_arm_pct: float = Field(default=0.02, ge=0.001, le=2.0)
+    paper_trail_soft_drawdown_pct: float = Field(default=0.012, ge=0.001, le=0.50)
     paper_trail_soft_partial_pct: float = Field(default=0.25, ge=0.0, le=0.90)
     # One-time partial when a recovery-armed bag trades at/above fee-aware BE.
     paper_trail_recovery_be_partial_pct: float = Field(default=0.0, ge=0.0, le=0.90)
@@ -455,6 +455,10 @@ class Settings(BaseSettings):
     live_micro_underwater_min_notional_eur: float = Field(default=25.0, ge=0)
     # When underwater throttle fires: block only new-base buys (still allow adds/top-ups).
     live_micro_underwater_block_new_bases_only: bool = True
+    # Block buy adds to a base already held below fee-aware break-even.
+    live_micro_block_underwater_adds: bool = True
+    # Maker emit scheduling: primary venue gets first slot each round-robin cycle.
+    live_micro_primary_execute_venue: str = "bitvavo"
     # Cut-loss: exit when mark falls this far below fee-aware BE (last-resort fail-safe).
     live_micro_cut_loss_below_be_pct: float = Field(default=0.04, ge=0.0, le=0.25)
     live_micro_cut_loss_new_bases_only: bool = False

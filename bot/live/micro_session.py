@@ -169,9 +169,10 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            "paper_trail_soft_arm_pct": 0.0125,  # earlier soft harvest on €2k pockets
-            "paper_trail_soft_drawdown_pct": 0.005,  # floor (≥ config min); pullback harvest ≥BE
-            "paper_trail_soft_partial_pct": 0.50,  # trail-lab: earlier/larger harvest ≥BE
+            # Arm at net profit (BE); sell full bag on 0.2% peak retrace.
+            "paper_trail_soft_arm_pct": 0.001,
+            "paper_trail_soft_drawdown_pct": 0.002,
+            "paper_trail_soft_partial_pct": 0.0,
             # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
             "paper_trail_recovery_be_partial_pct": 0.35,
             "paper_trail_be_harvest_partial_pct": 0.35,
@@ -188,8 +189,8 @@ def _session_settings(
             "paper_trail_atr_samples": 48,
             "paper_trail_atr_arm_mult": 2.5,
             "paper_trail_atr_dd_mult": 1.0,
-            "paper_ladder_buy_enabled": True,
-            # First leg joins the bid (0%); mild backups only.
+            # Single touch bid — ladder stacked duplicate SOL resting orders.
+            "paper_ladder_buy_enabled": False,
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
             "paper_time_stop_sec": 3600.0,  # after 1h, recovery-arm at BE (no flat dump)
@@ -220,8 +221,10 @@ def _session_settings(
             # Prefer cash / rising entries — do not force underweight dip buys.
             "paper_inventory_buy_dip_bps": 0.0,
             "paper_maker_keep_vs_best_frac": 0.60,  # only near-best NET emits
-            "live_micro_underwater_buy_block": 3,
+            "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
+            "live_micro_block_underwater_adds": True,
+            "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
             "live_micro_cut_loss_below_be_pct": 0.04,
