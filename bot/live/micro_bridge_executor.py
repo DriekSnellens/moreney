@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -2487,6 +2488,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         self.reset_trading_cycle()
         return True
+
+    async def reconcile_dashboard_since(self, since: datetime) -> dict[str, Any]:
+        """Rebuild dashboard KPIs and chart history from exchange fills since ``since``."""
+        from bot.live.dashboard_reconcile import reconcile_dashboard_since
+
+        for venue in sorted(self._execute_venues):
+            try:
+                await self.reconcile_from_exchange(venue)
+            except Exception:  # noqa: BLE001
+                logger.exception("pre-reconcile sync failed venue=%s", venue)
+        return await reconcile_dashboard_since(self, since)
 
     def reset_paper_realized_after_inventory_sync(self) -> None:
         """Inventory sync is not a trade — clear phantom paper realized PnL."""

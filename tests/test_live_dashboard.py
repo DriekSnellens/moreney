@@ -229,6 +229,9 @@ def test_live_dashboard_routes_and_paper_redirects() -> None:
         assert client.get("/dashboard", follow_redirects=False).status_code == 200
         assert client.get("/live/manifest.webmanifest").status_code == 200
         assert client.get("/live/dashboard/metrics").status_code == 200
+        micro = client.get("/live/micro/dashboard", follow_redirects=False)
+        assert micro.status_code == 301
+        assert micro.headers.get("location") == "/live/dashboard"
         for path in ("/paper/dashboard", "/paper/dashboard-lite", "/fleet", "/strategy-lab"):
             resp = client.get(path, follow_redirects=False)
             assert resp.status_code == 303, path

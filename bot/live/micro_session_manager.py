@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -296,6 +296,34 @@ class MicroSessionManager:
             seed_from_session_status(self._status)
         except Exception:  # noqa: BLE001
             pass
+        return out
+
+    async def reconcile_dashboard(
+        self, since: datetime | None = None
+    ) -> dict[str, Any]:
+        """Rebuild dashboard KPIs/history from exchange fills since ``since`` (default 12:00 UTC today)."""
+        from datetime import UTC
+
+        bridge = self._bridge_holder.get("bridge")
+        if bridge is None:
+            return {"ok": False, "reason": "no_active_bridge"}
+        if since is None:
+            now = datetime.now(UTC)
+            since = now.replace(hour=12, minute=0, second=0, microsecond=0)
+            if now < since:
+                since = since - timedelta(days=1)
+        out = await bridge.reconcile_dashboard_since(since)
+        self._publish(
+            {
+                "realized_trade_pnl_eur": out.get("realized_since_eur", "0"),
+                "netto_winst_eur": out.get("realized_since_eur", "0"),
+                "starting_portfolio_eur": out.get("portfolio_start_eur"),
+                "portfolio_value_eur": out.get("portfolio_now_eur"),
+                "session_live_transaction_count": out.get("fills_since", 0),
+                "session_live_fill_count": out.get("fills_since", 0),
+                "bridge": bridge.snapshot_bridge(),
+            }
+        )
         return out
 
     async def stop(self) -> dict[str, Any]:

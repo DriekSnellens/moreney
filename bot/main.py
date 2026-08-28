@@ -566,6 +566,32 @@ async def live_micro_session_reset_dashboard() -> dict[str, Any]:
     return await get_micro_session_manager().reset_dashboard()
 
 
+@app.post("/live/dashboard/reconcile")
+async def live_dashboard_reconcile(
+    since: str | None = Query(
+        default=None,
+        description="ISO timestamp; default 12:00 UTC today",
+    ),
+) -> dict[str, Any]:
+    """Rebuild dashboard KPIs and chart history from exchange fills since ``since``."""
+    from datetime import UTC, datetime, timedelta
+
+    mgr = get_micro_session_manager()
+    if since:
+        try:
+            anchor = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid since: {exc}") from exc
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=UTC)
+    else:
+        now = datetime.now(UTC)
+        anchor = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        if now < anchor:
+            anchor = anchor - timedelta(days=1)
+    return await mgr.reconcile_dashboard(anchor)
+
+
 @app.get("/live/alerts")
 async def live_alerts() -> dict[str, Any]:
     """Phase 4: venue/rebalance alerts (non-executing)."""
@@ -671,7 +697,6 @@ async def logout() -> Response:
 
 @app.get("/", response_class=HTMLResponse, response_model=None)
 @app.get("/live/dashboard", response_class=HTMLResponse, response_model=None)
-@app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
 @app.get("/dashboard", response_class=HTMLResponse, response_model=None)
 async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse | RedirectResponse:
     """Live operator dashboard; paper lab instances redirect to the simple lab UI."""
@@ -679,6 +704,12 @@ async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRes
     if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
         return RedirectResponse(url="/paper/dashboard", status_code=303)
     return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
+async def live_micro_dashboard_redirect() -> RedirectResponse:
+    """Legacy URL — single operator dashboard lives at /live/dashboard."""
+    return RedirectResponse(url="/live/dashboard", status_code=301)
 
 
 @app.get("/live/dashboard/metrics")

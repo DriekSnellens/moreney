@@ -2881,7 +2881,7 @@ def _live_readiness_panel_html(live: dict[str, Any]) -> str:
         Paper blijft default. Live orders alleen na expliciete unlocks.
         API: <code>/live/observe</code>, <code>/live/credentials</code>,
         <code>/live/micro/dry-run</code>.
-        Micro-monitor: <a class="link-lite" href="/live/micro/dashboard">/live/micro/dashboard</a>.
+        Micro-monitor: <a class="link-lite" href="/live/dashboard">/live/dashboard</a>.
       </p>
       <div class="metric-grid compact">
         <article class="metric-card"><span class="label">Fase</span><span class="value">{_esc(live.get('active_phase') or '—')}</span></article>
@@ -2916,7 +2916,7 @@ def _micro_session_panel_html(session: dict[str, Any]) -> str:
       <div class="panel-head">
         <h2>Micro-live sessie (€ budget)</h2>
         <span>
-          <a class="link-lite" href="/live/micro/dashboard">Fullscreen monitor</a>
+          <a class="link-lite" href="/live/dashboard">Live dashboard</a>
           · <span class="pill {pill}">{state}</span>
         </span>
       </div>
