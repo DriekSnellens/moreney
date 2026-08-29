@@ -95,6 +95,7 @@ def _nl_idle(hint: str) -> str:
         "FEES_EAT_EDGE": "Edge te klein na fees",
         "MOMENTUM_BLOCK": "Momentum-filter blokkeert",
         "FOCUS_BASE_REQUIRED": "Nieuwe buy alleen op focus-coins",
+        "ACTIVE_RING": "Active-book deploy (focus vs ring-target)",
         "UNDERWATER_BASE_BLOCK": "Underwater base — geen nieuwe buy op die coin",
         "CORR_GROUP_CAP": "Correlatie-groep vol",
         "POLICY_BLOCKED": "Policy blokkeert",

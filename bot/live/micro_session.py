@@ -188,15 +188,14 @@ def _session_settings(
             # More concurrent NET-passing quotes across venues (still never-loss gated).
             "arbitrage_max_emits_per_cycle": 10 if cross_venue else 5,
             "paper_cycle_interval_ms": 1200.0,
-            # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
-            # Ruim capacity: ~€100 first / ~€180 add so more of the €4k works.
-            "paper_maker_min_notional_eur": 100.0,
-            "live_micro_first_clip_eur": 100.0,
-            "live_micro_add_clip_eur": 180.0,
+            # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
+            "paper_maker_min_notional_eur": 55.0,
+            "live_micro_first_clip_eur": 75.0,
+            "live_micro_add_clip_eur": 120.0,
             # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.05,
             "paper_maker_min_net_return": 0.0005,
-            "paper_maker_small_clip_max_eur": 110.0,
+            "paper_maker_small_clip_max_eur": 90.0,
             "paper_maker_small_clip_min_profit_eur": 0.03,
             "paper_maker_small_clip_min_net_return": 0.0003,
             "paper_maker_min_spread_bps": 5.0,
@@ -246,6 +245,10 @@ def _session_settings(
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
             "live_micro_new_buy_focus_only": True,
+            # Always-on deploy: keep ~€1k/venue working in focus (not stuck) bags.
+            "live_micro_active_ring_eur": float(
+                getattr(base, "live_micro_active_ring_eur", 1000.0) or 1000.0
+            ),
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
             "live_micro_max_per_corr_group": 2,
@@ -316,7 +319,7 @@ def _session_settings(
             "profitability_execution_buffer_bps": 2.0,
             "risk_min_net_profit_usd": 0.05,
             # Hard per-trade ceiling: allow ~€180 add clips on ~€2k pocket.
-            "risk_max_position_usd": min(200.0, max(100.0, budget_f * 0.10)),
+            "risk_max_position_usd": min(150.0, max(80.0, budget_f * 0.08)),
             # Size vs aggregate multi-venue equity so clips stay near the ceiling
             # (2×€2k pockets must not inflate too far and fail NET return).
             "arbitrage_position_pct": min(
@@ -324,7 +327,7 @@ def _session_settings(
                 max(
                     3.0,
                     (
-                        min(200.0, max(100.0, budget_f * 0.10))
+                        min(150.0, max(80.0, budget_f * 0.08))
                         / max(budget_f * max(len(execute_venues), 1), 1.0)
                     )
                     * 100.0,
@@ -347,7 +350,7 @@ def _session_settings(
             "live_micro_max_alt_bases": 8,
             # Cap live order size to add-clip ceiling.
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
-            "live_micro_max_notional_eur": min(200.0, max(100.0, budget_f * 0.10)),
+            "live_micro_max_notional_eur": min(150.0, max(80.0, budget_f * 0.08)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             # Alt-beta book: wider drawdown band than default 5–8% global kill.
             "max_drawdown_percent": float(
@@ -700,6 +703,15 @@ async def run_session(
                 else:
                     bridge.set_buys_blocked(False)
                     bridge.set_underwater_base_blocks({})
+                # Stuck book → strategy: underwater bases do not fill the active ring.
+                try:
+                    maker = getattr(runner, "_maker_strategy", lambda: None)()
+                    if maker is not None and hasattr(maker, "set_stuck_bases"):
+                        maker.set_stuck_bases(
+                            {} if block_buys_full else uw_blocked_bases
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
                 new_uw = {
                     (v, b)
                     for v, bases in uw_blocked_bases.items()

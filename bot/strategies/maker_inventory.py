@@ -182,6 +182,9 @@ class MakerInventoryStrategy(BaseStrategy):
             ).split(",")
             if part.strip()
         }
+        self._active_ring_eur = Decimal(
+            str(getattr(settings, "live_micro_active_ring_eur", 1000) or 1000)
+        )
         self._okx_cash_bias_ratio = Decimal(
             str(getattr(settings, "live_micro_okx_cash_bias_ratio", 1.0) or 1.0)
         )
@@ -200,6 +203,8 @@ class MakerInventoryStrategy(BaseStrategy):
         self._active_skew: QuoteSkew | None = None
         self._venue_skews: dict[str, QuoteSkew] = {}
         self._venue_held_bases: dict[str, set[str]] = {}
+        self._venue_active_notional: dict[str, Decimal] = {}
+        self._venue_stuck_bases: dict[str, set[str]] = {}
         self._venue_free_quote: dict[str, Decimal] = {}
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
@@ -213,6 +218,16 @@ class MakerInventoryStrategy(BaseStrategy):
         self._cycle_fee_cache: dict[str, Decimal] = {}
         self._cycle_fee_str_cache: dict[str, str] = {}
         self._cycle_book_age_cache: dict[int, float] = {}
+
+    def set_stuck_bases(self, by_venue: dict[str, set[str]] | None) -> None:
+        """Mark underwater/stuck bases so they do not fill the active deploy ring."""
+        out: dict[str, set[str]] = {}
+        for venue, bases in (by_venue or {}).items():
+            key = str(venue or "").strip().lower()
+            if not key:
+                continue
+            out[key] = {str(b).strip().upper() for b in bases if str(b).strip()}
+        self._venue_stuck_bases = out
 
     def attach_hotpath_profiler(self, profiler: Any | None) -> None:
         """Attach optional HotPathProfiler for candidate-path substages."""
@@ -412,6 +427,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._venue_skews = {}
         self._venue_free_quote = {}
         self._venue_held_bases: dict[str, set[str]] = {}
+        self._venue_active_notional: dict[str, Decimal] = {}
         if portfolio_state is not None:
             self._active_skew = self._skew_policy.skew(portfolio_state)
             ledger = inventory
@@ -428,6 +444,8 @@ class MakerInventoryStrategy(BaseStrategy):
                         if hasattr(ledger, "available"):
                             self._venue_free_quote[key] = ledger.available(key, quote)
                         held: set[str] = set()
+                        active_n = _ZERO
+                        stuck = self._venue_stuck_bases.get(key, set())
                         for sym, mark in marks.items():
                             if not str(sym).upper().endswith(quote):
                                 continue
@@ -438,9 +456,18 @@ class MakerInventoryStrategy(BaseStrategy):
                             if qty <= 0:
                                 continue
                             px = Decimal(str(mark or 0))
-                            if px > 0 and qty * px >= min_n * Decimal("0.5"):
+                            notional = qty * px if px > 0 else _ZERO
+                            if px > 0 and notional >= min_n * Decimal("0.5"):
                                 held.add(base)
+                                # Active book = focus + not stuck/underwater.
+                                if (
+                                    base.upper() in self._focus_bases
+                                    and base.upper() not in stuck
+                                    and notional > 0
+                                ):
+                                    active_n += notional
                         self._venue_held_bases[key] = held
+                        self._venue_active_notional[key] = active_n
         else:
             self._active_skew = None
 
@@ -635,6 +662,16 @@ class MakerInventoryStrategy(BaseStrategy):
             focus_adj = Decimal("-0.08")
         else:
             focus_adj = Decimal("0")
+        # Active ring underfilled + free cash → strong boost for unheld focus buys.
+        ring_boost = Decimal("0")
+        if (
+            is_buy
+            and base
+            and base.upper() in self._focus_bases
+            and base not in self._venue_held_bases.get(venue, set())
+            and self._ring_needs_deploy(venue)
+        ):
+            ring_boost = Decimal("0.12")
         # OKX flush with spare EUR: slight rank lift for global pass-2 slots.
         okx_cash_bonus = Decimal("0")
         if venue == "okx" and self._okx_cash_rich():
@@ -645,6 +682,7 @@ class MakerInventoryStrategy(BaseStrategy):
             + (fv_bonus * Decimal("0.001"))
             + held_penalty
             + focus_adj
+            + ring_boost
             + okx_cash_bonus
         )
 
@@ -658,19 +696,35 @@ class MakerInventoryStrategy(BaseStrategy):
             return True
         return okx >= bv * self._okx_cash_bias_ratio
 
+    def _ring_needs_deploy(self, venue: str) -> bool:
+        """True when active-book notional is below ring target and free cash exists."""
+        if self._active_ring_eur <= 0:
+            return False
+        key = str(venue or "").strip().lower()
+        free = self._venue_free_quote.get(key, _ZERO)
+        if free < Decimal("50"):
+            return False
+        active = self._venue_active_notional.get(key, _ZERO)
+        return active < self._active_ring_eur
+
+    def _any_ring_needs_deploy(self) -> bool:
+        venues = set(self._venue_free_quote) | set(self._venue_active_notional)
+        return any(self._ring_needs_deploy(v) for v in venues)
+
     def _emit_budget_for_regime(
         self, opportunities: list[TradeOpportunity]
     ) -> tuple[int, Decimal]:
-        """Flat scan → tighter keep_vs_best; idle cash keeps full emit slots.
+        """Flat scan → tighter keep_vs_best; underfilled ring keeps full emit slots.
 
-        Flat = few NET survivors or best NET barely clears the profit floor.
-        Never loosens never-loss; only throttles spray when books are dead AND
-        cash is already deployed.
+        Never loosens never-loss; pushes deploy when active book is below ring.
         """
         max_e = self._max_emits
         keep = self._keep_vs_best_frac
         if not opportunities:
             return max_e, keep
+        # Always-on deploy: ring underfilled → full budget + looser keep.
+        if self._any_ring_needs_deploy():
+            return max_e, min(keep, Decimal("0.25")) if keep > 0 else keep
         nets = [
             Decimal(str((o.metadata or {}).get("net_profit_eur", "0") or "0"))
             for o in opportunities
@@ -684,7 +738,6 @@ class MakerInventoryStrategy(BaseStrategy):
             return max_e, keep
         idle_cash = max(self._venue_free_quote.values(), default=_ZERO)
         if idle_cash >= Decimal("500"):
-            # Cash sitting idle: keep full budget, only mildly tighten vs best.
             return max_e, max(keep, Decimal("0.50"))
         return max(1, max_e // 2), max(keep, Decimal("0.70"))
 
@@ -805,7 +858,7 @@ class MakerInventoryStrategy(BaseStrategy):
     def _venue_opps_ordered(
         self, venue: str, opps: list[TradeOpportunity]
     ) -> list[TradeOpportunity]:
-        """OKX: prefer deploy bases; all venues: unheld bases before held."""
+        """Unheld first; OKX deploy bases; ring underfill → focus unheld first."""
         key = str(venue or "").strip().lower()
         held = self._venue_held_bases.get(key, set())
         fresh: list[TradeOpportunity] = []
@@ -817,6 +870,20 @@ class MakerInventoryStrategy(BaseStrategy):
             else:
                 fresh.append(opp)
         pool = fresh if fresh else repeat
+        if not pool:
+            return pool
+        # Active ring: prioritize unheld focus bases while under target.
+        if self._ring_needs_deploy(key) and self._focus_bases and pool is fresh:
+            focus_fresh: list[TradeOpportunity] = []
+            other_fresh: list[TradeOpportunity] = []
+            for opp in pool:
+                base = infer_base_asset(str(opp.symbol or "").upper(), self._quote)
+                if base and base.upper() in self._focus_bases:
+                    focus_fresh.append(opp)
+                else:
+                    other_fresh.append(opp)
+            if focus_fresh:
+                pool = focus_fresh + other_fresh
         if key != "okx" or not self._okx_deploy_bases or not pool:
             return pool
         preferred: list[TradeOpportunity] = []

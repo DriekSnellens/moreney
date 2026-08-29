@@ -85,14 +85,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
         symbols=["SOLEUR"],
         persist_path=tmp_path / "dual.json",
     )
-    # Aggregate equity ~€4k must still size clips near the ~€200 ceiling.
-    assert dual.arbitrage_position_pct == 5.0
+    # Aggregate equity ~€4k sizes clips near the ~€150 ceiling → 3.75% of €4k.
+    assert dual.arbitrage_position_pct == 3.75
     assert dual.arbitrage_max_emits_per_cycle == 10
     assert dual.live_micro_max_open_orders == 4
     assert dual.live_micro_max_open_orders_per_venue == 2
     assert dual.live_micro_max_alt_bases == 8
-    assert float(dual.live_micro_first_clip_eur) == 100.0
-    assert float(dual.live_micro_add_clip_eur) == 180.0
+    assert float(dual.live_micro_first_clip_eur) == 75.0
+    assert float(dual.live_micro_add_clip_eur) == 120.0
+    assert float(dual.live_micro_active_ring_eur) == 1000.0
     assert float(dual.paper_max_alt_inventory_pct) == 55.0
     assert dual.max_simultaneous_positions == 16
     assert float(dual.paper_maker_keep_vs_best_frac) == 0.30
@@ -139,22 +140,23 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return <= 0.0006
     assert cfg.paper_maker_min_profit_eur <= 0.06
-    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 110.0
+    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 90.0
     assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.03
     assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.0003
-    assert cfg.paper_maker_min_notional_eur >= 100.0
+    assert cfg.paper_maker_min_notional_eur == 55.0
     assert cfg.max_simultaneous_positions >= 8
     assert cfg.live_micro_max_alt_bases == 8
     assert cfg.live_micro_block_cross_venue_duplicate_bases is True
     assert cfg.live_micro_consolidate_duplicate_bases is True
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
-    assert float(cfg.live_micro_first_clip_eur) >= 100.0
-    assert float(cfg.live_micro_add_clip_eur) >= 180.0
+    assert float(cfg.live_micro_first_clip_eur) == 75.0
+    assert float(cfg.live_micro_add_clip_eur) == 120.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
     assert cfg.live_micro_max_open_orders <= 4
     assert cfg.live_micro_max_open_orders_per_venue == 2
-    assert float(cfg.live_micro_max_notional_eur) >= 180.0
-    assert float(cfg.risk_max_position_usd) >= 180.0
+    assert float(cfg.live_micro_max_notional_eur) >= 80.0
+    assert float(cfg.risk_max_position_usd) >= 80.0
+    assert float(cfg.live_micro_active_ring_eur) == 1000.0
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 55.0
@@ -2469,10 +2471,12 @@ def test_emit_budget_flat_tightens() -> None:
             arbitrage_max_emits_per_cycle=8,
             paper_maker_keep_vs_best_frac=0.40,
             paper_maker_min_profit_eur=0.05,
+            live_micro_active_ring_eur=1000.0,
         )
     )
-    # No idle cash → classic flat throttle.
+    # No idle cash, ring already "full" via high active notional → classic flat throttle.
     strat._venue_free_quote = {"bitvavo": Decimal("50")}  # noqa: SLF001
+    strat._venue_active_notional = {"bitvavo": Decimal("1000")}  # noqa: SLF001
 
     def _opp(net: str) -> TradeOpportunity:
         return TradeOpportunity(
@@ -2497,11 +2501,12 @@ def test_emit_budget_flat_tightens() -> None:
     assert max_e == 4
     assert keep == Decimal("0.70")
 
-    # Idle cash keeps full emit slots even when flat.
+    # Underfilled ring + free cash → full emit slots + looser keep.
     strat._venue_free_quote = {"bitvavo": Decimal("1800"), "okx": Decimal("1800")}  # noqa: SLF001
-    max_idle, keep_idle = strat._emit_budget_for_regime([_opp("0.06")])  # noqa: SLF001
-    assert max_idle == 8
-    assert keep_idle == Decimal("0.50")
+    strat._venue_active_notional = {"bitvavo": Decimal("0"), "okx": Decimal("0")}  # noqa: SLF001
+    max_ring, keep_ring = strat._emit_budget_for_regime([_opp("0.06")])  # noqa: SLF001
+    assert max_ring == 8
+    assert keep_ring == Decimal("0.25")
 
     # Many strong nets → full budget.
     strong = [
@@ -2523,9 +2528,51 @@ def test_emit_budget_flat_tightens() -> None:
         )
         for i in range(6)
     ]
+    strat._venue_active_notional = {
+        "bitvavo": Decimal("1000"),
+        "okx": Decimal("1000"),
+    }  # noqa: SLF001
     max_e2, keep2 = strat._emit_budget_for_regime(strong)  # noqa: SLF001
     assert max_e2 == 8
     assert keep2 == Decimal("0.40")
+
+
+def test_active_ring_boosts_unheld_focus_rank() -> None:
+    from bot.core.models import TradeOpportunity
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    strat = MakerInventoryStrategy(
+        _unlocked(
+            live_micro_focus_bases="ADA,LINK",
+            live_micro_active_ring_eur=1000.0,
+            paper_maker_venues="bitvavo",
+        )
+    )
+    strat._venue_free_quote = {"bitvavo": Decimal("1500")}  # noqa: SLF001
+    strat._venue_active_notional = {"bitvavo": Decimal("0")}  # noqa: SLF001
+    strat.set_stuck_bases({"bitvavo": {"SOL"}})
+
+    def _opp(symbol: str, net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol=symbol,
+            side=OpportunitySide.BUY,
+            quantity=Decimal("1"),
+            entry_price=Decimal("1"),
+            expected_exit_price=Decimal("1.01"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": "bitvavo",
+                "sell_exchange": "bitvavo",
+                "net_profit_eur": net,
+            },
+        )
+
+    focus = _opp("ADAEUR", "0.10")
+    other = _opp("HYPEEUR", "0.18")
+    assert strat._rank_opportunity(focus) > strat._rank_opportunity(other)  # noqa: SLF001
 
 
 @pytest.mark.asyncio

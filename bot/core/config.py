@@ -492,6 +492,9 @@ class Settings(BaseSettings):
     )
     # When True, new-base buys must be on focus_bases (sells/harvests unaffected).
     live_micro_new_buy_focus_only: bool = False
+    # Per-venue target EUR for active-book (focus, not underwater) deployment.
+    # While below target with free cash, prefer unheld focus emits (always-on deploy).
+    live_micro_active_ring_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).

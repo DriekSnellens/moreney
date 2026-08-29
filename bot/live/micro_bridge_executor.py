@@ -347,6 +347,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._add_clip_eur = Decimal(
             str(getattr(settings, "live_micro_add_clip_eur", 0) or 0)
         )
+        self._active_ring_eur = Decimal(
+            str(getattr(settings, "live_micro_active_ring_eur", 1000) or 1000)
+        )
         self._block_underwater_adds = bool(
             getattr(settings, "live_micro_block_underwater_adds", True)
         )
@@ -1017,6 +1020,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "duplicate_bases_by_venue": self._duplicate_bases_by_venue(),
             "first_clip_eur": str(self._first_clip_eur),
             "add_clip_eur": str(self._add_clip_eur),
+            "active_ring_eur": str(self._active_ring_eur),
+            "active_book_notional_by_venue": {
+                v: str(self._active_book_notional(v))
+                for v in sorted(self._execute_venues)
+            },
             "held_alt_bases": sorted(self._held_alt_bases()),
             "held_alt_bases_by_venue": {
                 v: sorted(self._held_alt_bases(v)) for v in sorted(self._execute_venues)
@@ -1233,6 +1241,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if venue_cash:
             hints.append("VENUE_CASH " + " ".join(venue_cash))
 
+        # Active deploy ring: focus (not underwater) notional vs target.
+        if self._active_ring_eur > 0:
+            ring_bits: list[str] = []
+            for venue in sorted(self._execute_venues):
+                active = self._active_book_notional(venue)
+                free = self._venue_budget_remaining(venue)
+                need = active < self._active_ring_eur and free >= Decimal("50")
+                ring_bits.append(
+                    f"{venue}=€{float(active):.0f}/€{float(self._active_ring_eur):.0f}"
+                    f"{' NEED' if need else ' OK'}"
+                )
+            hints.append("ACTIVE_RING " + " ".join(ring_bits))
+
         if not hints:
             hints.append("SCANNING_NO_PASSING_EDGE")
         return hints
@@ -1414,6 +1435,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and str(row.get("symbol") or "").strip().upper() == sym
             and str(row.get("side") or "buy").lower().startswith("b")
         )
+
+    def _active_book_notional(self, venue: str) -> Decimal:
+        """Focus-base inventory not underwater — counts toward the deploy ring."""
+        venue_l = venue.strip().lower()
+        stuck = {
+            str(b).upper()
+            for b in self._underwater_blocked_bases.get(venue_l, set())
+        }
+        total = _ZERO
+        min_n = Decimal(
+            str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+        ) * Decimal("0.5")
+        for bal in self._venue_raw_balances.get(venue_l) or []:
+            base = str(getattr(bal, "asset", "") or "").upper()
+            if not base or base == self._quote or base in self._exclude_bases:
+                continue
+            if self._is_long_hold(base):
+                continue
+            if self._focus_bases and base not in self._focus_bases:
+                continue
+            if base in stuck:
+                continue
+            qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                str(getattr(bal, "locked", 0) or 0)
+            )
+            if qty <= 0:
+                continue
+            symbol = f"{base}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol) or _ZERO
+            if mark <= 0:
+                continue
+            notional = qty * mark
+            if notional >= min_n:
+                total += notional
+        return total
 
     def _held_alt_bases(
         self,
