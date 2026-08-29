@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 _ZERO = Decimal("0")
 
 # Top liquid Bitvavo/OKX EUR alts — market-first scan (not portfolio-driven).
+# Extra 20 (Aug 2026): ranked on Bitvavo EUR 24h volume + book depth (€80+),
+# dual-venue OKX USDT liquidity, and maker-friendly spreads (skip pure memes).
 _LIQUID_EUR_SYMBOLS = (
     "BTCEUR",
     "ETHEUR",
@@ -54,6 +56,27 @@ _LIQUID_EUR_SYMBOLS = (
     "APTEUR",
     "FETEUR",
     "POLEUR",
+    # --- expanded universe (dual-venue liquid) ---
+    "HYPEEUR",
+    "ENAEUR",
+    "WLDEUR",
+    "TAOEUR",
+    "ONDOEUR",
+    "BCHEUR",
+    "TRXEUR",
+    "HBAREUR",
+    "UNIEUR",
+    "AAVEEUR",
+    "BNBEUR",
+    "STXEUR",
+    "XPLEUR",
+    "WLFIEUR",
+    "VIRTUALEUR",
+    "ETHFIEUR",
+    "FILEUR",
+    "LDOEUR",
+    "XLMEUR",
+    "RENDEREUR",
 )
 
 _DEFAULT_BUDGET_EUR = Decimal("2000")
@@ -128,7 +151,8 @@ def _session_settings(
     md_symbols = _cross_venue_market_symbols(symbols) if cross_venue else list(symbols)
     maker_venues = "okx,bitvavo" if cross_venue else "bitvavo"
     okx_deploy = str(
-        getattr(base, "live_micro_okx_deploy_bases", "") or "ADA,NEAR,DOT,XRP,LINK,ATOM"
+        getattr(base, "live_micro_okx_deploy_bases", "")
+        or "ADA,NEAR,DOT,XRP,LINK,ATOM,HYPE,ENA,WLD,TAO,ONDO,BCH,TRX,HBAR,UNI,AAVE,BNB,XLM"
     )
     if "BTC" not in {p.strip().upper() for p in okx_deploy.split(",") if p.strip()}:
         okx_deploy = f"BTC,{okx_deploy}" if okx_deploy else "BTC"

@@ -169,20 +169,23 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     from bot.live.micro_session import _liquid_symbols
 
     liquid = _liquid_symbols(_unlocked(live_micro_symbols="*"), exclude_btc=True)
-    assert len(liquid) >= 18
+    assert len(liquid) >= 38
     assert "ETHEUR" in liquid
     assert "SOLEUR" in liquid
     assert "LINKEUR" in liquid
+    assert "HYPEEUR" in liquid
+    assert "BNBEUR" in liquid
+    assert "UNIEUR" in liquid
     assert "BTCEUR" not in liquid
     with_btc = _liquid_symbols(_unlocked(live_micro_symbols="*"), exclude_btc=False)
     assert "BTCEUR" in with_btc
     defaulted = _liquid_symbols(Settings(), exclude_btc=False)
     assert "BTCEUR" in defaulted
     assert "SOLEUR" in defaulted
-    assert len(defaulted) >= 19
+    assert len(defaulted) >= 39
     assert "PEPEEUR" not in liquid
     assert "SHIBEUR" not in liquid
-    assert "BNBEUR" not in liquid
+    assert "FARTCOINEUR" not in liquid
 
 
 def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) -> None:
