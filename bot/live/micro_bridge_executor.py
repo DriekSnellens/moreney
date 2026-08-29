@@ -1401,16 +1401,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and str(row.get("side") or "buy").lower().startswith("b")
         )
 
-    def _held_alt_bases(self, venue: str | None = None) -> set[str]:
+    def _held_alt_bases(
+        self,
+        venue: str | None = None,
+        *,
+        min_notional_eur: Decimal | float | None = None,
+    ) -> set[str]:
         """Distinct non-quote assets with meaningful inventory.
 
         When *venue* is set, only that exchange's balances count toward the
         concentration cap — Bitvavo holdings must not block OKX new-base buys.
+
+        ``min_notional_eur`` overrides the default maker min notional (used by
+        cross-venue uniqueness with a lower floor so sub-clip bags still count).
         """
         held: set[str] = set()
-        min_notional = Decimal(
-            str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-        )
+        if min_notional_eur is None:
+            min_notional = Decimal(
+                str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+            )
+        else:
+            min_notional = Decimal(str(min_notional_eur))
         venue_l = venue.strip().lower() if venue else None
 
         def _maybe_add(base: str, qty: Decimal) -> None:
@@ -1440,7 +1451,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         venues = sorted(self._execute_venues) if self._execute_venues else []
         if venues:
             for v in venues:
-                held |= self._held_alt_bases(v)
+                held |= self._held_alt_bases(v, min_notional_eur=min_notional)
             return held
 
         # Single-venue / pre-sync fallback: aggregate paper pocket balances.
@@ -1460,6 +1471,75 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         for asset, bal in self._portfolio.state.balances.items():
             _maybe_add(str(asset or "").upper(), Decimal(str(bal.total or 0)))
         return held
+
+    def _resting_buy_bases(self, venue: str | None = None) -> set[str]:
+        """Bases with an open resting buy (fills may still be pending)."""
+        venue_l = venue.strip().lower() if venue else None
+        out: set[str] = set()
+        for row in self._resting:
+            if not str(row.get("side") or "buy").lower().startswith("b"):
+                continue
+            row_venue = str(row.get("venue") or "").strip().lower()
+            if venue_l is not None and row_venue != venue_l:
+                continue
+            symbol = str(row.get("symbol") or "").strip().upper()
+            base = infer_base_asset(symbol, self._quote)
+            if not base or base == self._quote or base in self._exclude_bases:
+                continue
+            if self._is_long_hold(base):
+                continue
+            out.add(base)
+        return out
+
+    def _trail_claimed_bases(
+        self,
+        venue: str | None = None,
+        *,
+        min_notional_eur: Decimal | float = _MIN_LIVE_NOTIONAL,
+    ) -> set[str]:
+        """Bases with trail inventory ≥ floor (covers brief post-fill sync lag)."""
+        floor = Decimal(str(min_notional_eur or 0))
+        venue_l = venue.strip().lower() if venue else None
+        out: set[str] = set()
+        for trail_key, st in self._trail.items():
+            if not isinstance(st, dict):
+                continue
+            bag_venue = str(st.get("venue") or trail_key.split(":", 1)[0]).strip().lower()
+            if venue_l is not None and bag_venue != venue_l:
+                continue
+            base = str(st.get("base") or trail_key.split(":", 1)[-1]).upper()
+            if not base or base == self._quote or base in self._exclude_bases:
+                continue
+            if self._is_long_hold(base):
+                continue
+            try:
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                mark = _ZERO
+            qty = self._balance_qty(bag_venue, base)
+            if qty <= 0:
+                try:
+                    qty = Decimal(str(st.get("session_qty") or 0))
+                except Exception:  # noqa: BLE001
+                    qty = _ZERO
+            if mark > 0 and qty * mark >= floor:
+                out.add(base)
+            elif qty > 0 and mark <= 0:
+                out.add(base)
+        return out
+
+    def _bases_claimed_for_cross_venue(self, venue: str | None = None) -> set[str]:
+        """Inventory + resting buys + trail bags — uniqueness across venues.
+
+        Uses ``_MIN_LIVE_NOTIONAL`` (not the maker clip floor) so a €60 TAO bag
+        still blocks the other venue after first_clip was raised to €100.
+        """
+        floor = _MIN_LIVE_NOTIONAL
+        return (
+            self._held_alt_bases(venue, min_notional_eur=floor)
+            | self._resting_buy_bases(venue)
+            | self._trail_claimed_bases(venue, min_notional_eur=floor)
+        )
 
     def _seed_cost_lots_from_balances(self, venue: str, bals: list[Any]) -> None:
         """Seed provisional FIFO lots at mark (untrusted — not safe for sells)."""
@@ -2887,21 +2967,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return base.upper() not in self._held_alt_bases(venue)
 
     def _is_cross_venue_duplicate_base(self, venue: str, base: str) -> bool:
-        """True when opening a base already held on another execute venue."""
+        """True when opening a base already held/claimed on another execute venue."""
         if not self._block_cross_venue_duplicate_bases:
             return False
         b = str(base or "").upper()
         if not b or b in self._exclude_bases or self._is_long_hold(b):
             return False
-        if b in self._held_alt_bases(venue):
-            return False  # same-venue top-up / add
-        return b in self._held_alt_bases(None)
+        if b in self._bases_claimed_for_cross_venue(venue):
+            return False  # same-venue top-up / add / own resting
+        return b in self._bases_claimed_for_cross_venue(None)
 
     def _duplicate_bases_by_venue(self) -> dict[str, list[str]]:
-        """Bases held on more than one execute venue → venue list."""
+        """Bases claimed on more than one execute venue → venue list."""
         by_base: dict[str, set[str]] = {}
         for v in sorted(self._execute_venues):
-            for b in self._held_alt_bases(v):
+            for b in self._bases_claimed_for_cross_venue(v):
                 by_base.setdefault(b, set()).add(v)
         return {
             b: sorted(vs) for b, vs in sorted(by_base.items()) if len(vs) > 1

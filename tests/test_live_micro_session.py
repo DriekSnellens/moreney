@@ -1071,6 +1071,70 @@ def test_held_alt_bases_are_per_venue_not_global() -> None:
     assert bridge._is_cross_venue_duplicate_base("okx", "DOT") is False  # noqa: SLF001
 
 
+def test_cross_venue_duplicate_counts_sub_min_bag(tmp_path: Path) -> None:
+    """€60 bag still blocks other venue when maker min notional is €100."""
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_block_cross_venue_duplicate_bases=True,
+        paper_maker_min_notional_eur=100.0,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("TAOEUR", Decimal("200"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._trail.clear()  # noqa: SLF001
+    bridge._resting.clear()  # noqa: SLF001
+    # ~€60 TAO on Bitvavo — below clip floor, above live min notional.
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="TAO", free=Decimal("0.3"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["okx"] = []  # noqa: SLF001
+    assert "TAO" not in bridge._held_alt_bases("bitvavo")  # noqa: SLF001
+    assert "TAO" in bridge._bases_claimed_for_cross_venue("bitvavo")  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("okx", "TAO") is True  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("bitvavo", "TAO") is False  # noqa: SLF001
+
+
+def test_cross_venue_duplicate_counts_resting_buy(tmp_path: Path) -> None:
+    """Resting buy on Bitvavo blocks opening the same base on OKX."""
+    settings = _unlocked(
+        live_micro_block_cross_venue_duplicate_bases=True,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._trail.clear()  # noqa: SLF001
+    bridge._venue_raw_balances["bitvavo"] = []  # noqa: SLF001
+    bridge._venue_raw_balances["okx"] = []  # noqa: SLF001
+    bridge._resting = [  # noqa: SLF001
+        {
+            "venue": "bitvavo",
+            "symbol": "TAOEUR",
+            "side": "buy",
+            "exchange_order_id": "resting-1",
+            "quantity": Decimal("0.3"),
+            "price": Decimal("200"),
+        }
+    ]
+    assert bridge._resting_buy_bases("bitvavo") == {"TAO"}  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("okx", "TAO") is True  # noqa: SLF001
+    assert bridge._is_cross_venue_duplicate_base("bitvavo", "TAO") is False  # noqa: SLF001
+
+
 def test_buy_clip_cap_uses_first_clip_only() -> None:
     settings = _unlocked(
         live_micro_first_clip_eur=55.0,
@@ -1557,13 +1621,14 @@ def test_trail_partial_qty_scales_to_min_notional() -> None:
     assert qty <= cap
 
 
-def test_consolidation_secondary_detects_okx_fet_duplicate() -> None:
+def test_consolidation_secondary_detects_okx_fet_duplicate(tmp_path: Path) -> None:
     from bot.core.models import Balance
 
     settings = _unlocked(
         live_micro_consolidate_duplicate_bases=True,
         live_micro_consolidate_primary_venue="bitvavo",
         paper_maker_min_notional_eur=10.0,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
     )
     portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
     portfolio.set_mark_price("FETEUR", Decimal("0.14"))
@@ -1575,6 +1640,8 @@ def test_consolidation_secondary_detects_okx_fet_duplicate() -> None:
         live_maker=True,
     )
     bridge._execute_venues = {"bitvavo", "okx"}  # noqa: SLF001
+    bridge._trail.clear()  # noqa: SLF001
+    bridge._resting.clear()  # noqa: SLF001
     bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
         Balance(asset="FET", free=Decimal("3000"), locked=Decimal("0")),
     ]
