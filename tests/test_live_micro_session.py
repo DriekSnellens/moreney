@@ -76,7 +76,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
-    assert cfg.arbitrage_max_emits_per_cycle == 6
+    assert cfg.arbitrage_max_emits_per_cycle == 8
     assert cfg.paper_maker_max_open_quotes <= 4
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
@@ -87,7 +87,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     )
     # Aggregate equity ~€4k must still size clips near the ~€200 ceiling.
     assert dual.arbitrage_position_pct == 5.0
-    assert dual.arbitrage_max_emits_per_cycle == 6
+    assert dual.arbitrage_max_emits_per_cycle == 8
     assert dual.live_micro_max_open_orders == 4
     assert dual.live_micro_max_open_orders_per_venue == 2
     assert dual.live_micro_max_alt_bases == 8
@@ -95,6 +95,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(dual.live_micro_add_clip_eur) == 180.0
     assert float(dual.paper_max_alt_inventory_pct) == 55.0
     assert dual.max_simultaneous_positions == 16
+    assert float(dual.paper_maker_keep_vs_best_frac) == 0.40
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -154,7 +155,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_max_alt_inventory_pct >= 50.0
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.paper_trail_soft_drawdown_pct == 0.003
-    assert cfg.paper_maker_keep_vs_best_frac == 0.60
+    assert cfg.paper_maker_keep_vs_best_frac == 0.40
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
     assert cfg.live_micro_block_buys_when_holding_base is True

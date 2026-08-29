@@ -179,7 +179,7 @@ def _session_settings(
             # One quote per venue per cycle — avoids stacked duplicate resting bids.
             "paper_maker_max_open_quotes": 4 if cross_venue else 2,
             # Fewer concurrent sprays → larger / better trails.
-            "arbitrage_max_emits_per_cycle": 6 if cross_venue else 3,
+            "arbitrage_max_emits_per_cycle": 8 if cross_venue else 4,
             "paper_cycle_interval_ms": 1200.0,
             # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
             # Ruim capacity: ~€100 first / ~€180 add so more of the €4k works.
@@ -255,7 +255,8 @@ def _session_settings(
             # Underweight venues buy sooner (OKX cash deployment).
             # Prefer cash / rising entries — do not force underweight dip buys.
             "paper_inventory_buy_dip_bps": 0.0,
-            "paper_maker_keep_vs_best_frac": 0.60,  # only near-best NET emits
+            # Among NET-passing candidates, allow more than only the top rank.
+            "paper_maker_keep_vs_best_frac": 0.40,
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
