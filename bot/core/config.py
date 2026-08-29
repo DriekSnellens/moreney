@@ -485,8 +485,13 @@ class Settings(BaseSettings):
     live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
     # OKX: prefer deploying free EUR into these liquid bases (not Bitvavo max-base bags).
     live_micro_okx_deploy_bases: str = "BTC,ADA,NEAR,DOT,XRP,LINK,ATOM"
-    # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.2 = 20% richer).
-    live_micro_okx_cash_bias_ratio: float = Field(default=1.2, ge=1.0, le=3.0)
+    # Prefer these dual-liquid bases when ranking NET-passing emits (comma-separated).
+    live_micro_focus_bases: str = (
+        "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
+        "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
+    )
+    # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.25 = 25% richer).
+    live_micro_okx_cash_bias_ratio: float = Field(default=1.25, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).
     live_micro_trail_partial_min_frac: float = Field(default=0.45, ge=0.2, le=1.0)
     live_audit_path: str = "./data/live_audit.jsonl"

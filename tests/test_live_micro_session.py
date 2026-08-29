@@ -123,8 +123,13 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return >= 0.001
+    assert cfg.paper_buy_momentum_min_return == 0.0005
     assert cfg.paper_buy_momentum_samples >= 8
+    assert "SOL" in (cfg.live_micro_focus_bases or "")
+    assert "ETH" in (cfg.live_micro_focus_bases or "")
+    assert "TAO" not in (cfg.live_micro_focus_bases or "")
+    assert float(cfg.live_micro_okx_cash_bias_ratio) <= 1.25
+    assert float(cfg.live_micro_okx_cash_bias_ratio) >= 1.2
     assert cfg.live_micro_max_per_corr_group == 2
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
@@ -213,7 +218,8 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) >= 0.001
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0005
+    assert "SOL" in (cfg.live_micro_focus_bases or "")
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
@@ -2388,11 +2394,127 @@ def test_venue_emit_rotation_bitvavo_first_alternation() -> None:
         _unlocked(
             live_micro_primary_execute_venue="bitvavo",
             paper_maker_venues="okx,bitvavo",
+            live_micro_okx_cash_bias_ratio=1.25,
         )
     )
-    strat._venue_free_quote = {"bitvavo": Decimal("1000"), "okx": Decimal("2000")}  # noqa: SLF001
+    # Equal cash → primary-first alternation.
+    strat._venue_free_quote = {"bitvavo": Decimal("1000"), "okx": Decimal("1000")}  # noqa: SLF001
     rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
     assert rot[:4] == ["bitvavo", "okx", "bitvavo", "okx"]
+
+
+def test_venue_emit_rotation_okx_cash_bias() -> None:
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    strat = MakerInventoryStrategy(
+        _unlocked(
+            live_micro_primary_execute_venue="bitvavo",
+            paper_maker_venues="okx,bitvavo",
+            live_micro_okx_cash_bias_ratio=1.25,
+        )
+    )
+    strat._venue_free_quote = {"bitvavo": Decimal("800"), "okx": Decimal("1600")}  # noqa: SLF001
+    rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
+    assert rot[0] == "okx"
+    assert rot.count("okx") > rot.count("bitvavo")
+
+
+def test_focus_bases_rank_above_near_tie_non_focus() -> None:
+    from bot.core.models import TradeOpportunity
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    strat = MakerInventoryStrategy(
+        _unlocked(
+            live_micro_focus_bases="SOL,ADA",
+            paper_maker_venues="bitvavo",
+        )
+    )
+
+    def _opp(symbol: str, net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol=symbol,
+            side=OpportunitySide.BUY,
+            quantity=Decimal("1"),
+            entry_price=Decimal("90"),
+            expected_exit_price=Decimal("91"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": "bitvavo",
+                "sell_exchange": "bitvavo",
+                "net_profit_eur": net,
+            },
+        )
+
+    focus = _opp("SOLEUR", "0.10")
+    other = _opp("TAOEUR", "0.11")
+    # Focus +0.015 → 0.115 > 0.11 near-tie.
+    assert strat._rank_opportunity(focus) > strat._rank_opportunity(other)  # noqa: SLF001
+    # Large NET still wins.
+    big = _opp("TAOEUR", "0.50")
+    assert strat._rank_opportunity(big) > strat._rank_opportunity(focus)  # noqa: SLF001
+
+
+def test_emit_budget_flat_tightens() -> None:
+    from bot.core.models import TradeOpportunity
+    from bot.strategies.maker_inventory import MakerInventoryStrategy
+
+    strat = MakerInventoryStrategy(
+        _unlocked(
+            arbitrage_max_emits_per_cycle=8,
+            paper_maker_keep_vs_best_frac=0.40,
+            paper_maker_min_profit_eur=0.05,
+        )
+    )
+
+    def _opp(net: str) -> TradeOpportunity:
+        return TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol="SOLEUR",
+            side=OpportunitySide.BUY,
+            quantity=Decimal("1"),
+            entry_price=Decimal("90"),
+            expected_exit_price=Decimal("91"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": "bitvavo",
+                "sell_exchange": "bitvavo",
+                "net_profit_eur": net,
+            },
+        )
+
+    # One weak survivor → flat budget.
+    max_e, keep = strat._emit_budget_for_regime([_opp("0.06")])  # noqa: SLF001
+    assert max_e == 4
+    assert keep == Decimal("0.70")
+
+    # Many strong nets → full budget.
+    strong = [
+        TradeOpportunity(
+            id=uuid4(),
+            strategy_name="maker_inventory",
+            symbol=f"S{i}EUR",
+            side=OpportunitySide.BUY,
+            quantity=Decimal("1"),
+            entry_price=Decimal("90"),
+            expected_exit_price=Decimal("91"),
+            confidence=0.5,
+            rationale="test",
+            metadata={
+                "buy_exchange": "bitvavo",
+                "sell_exchange": "bitvavo",
+                "net_profit_eur": str(0.20 + i * 0.01),
+            },
+        )
+        for i in range(6)
+    ]
+    max_e2, keep2 = strat._emit_budget_for_regime(strong)  # noqa: SLF001
+    assert max_e2 == 8
+    assert keep2 == Decimal("0.40")
 
 
 @pytest.mark.asyncio

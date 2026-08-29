@@ -827,24 +827,27 @@ def test_balanced_emits_give_each_venue_a_slot() -> None:
 
 
 def test_balanced_emits_bias_cash_rich_venue() -> None:
-    """Venue with ≥1.5× peer free EUR gets extra emit slots."""
+    """Venue with ≥ cash-bias-ratio × peer free EUR gets extra emit slots."""
     from bot.core.enums import OpportunitySide
     from bot.core.models import TradeOpportunity
     from uuid import uuid4
 
     strategy = MakerInventoryStrategy(
-        _maker_settings(arbitrage_max_emits_per_cycle=3)
+        _maker_settings(
+            arbitrage_max_emits_per_cycle=3,
+            live_micro_okx_cash_bias_ratio=1.25,
+        )
     )
     strategy._venue_free_quote = {
         "okx": Decimal("1570"),
         "bitvavo": Decimal("860"),
     }
 
-    def _opp(venue: str, net: str) -> TradeOpportunity:
+    def _opp(venue: str, net: str, symbol: str = "ADAEUR") -> TradeOpportunity:
         return TradeOpportunity(
             id=uuid4(),
             strategy_name="maker_inventory",
-            symbol="ADAEUR",
+            symbol=symbol,
             side=OpportunitySide.BUY,
             quantity=Decimal("10"),
             entry_price=Decimal("1"),
@@ -860,10 +863,11 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
         )
 
     ranked = [
-        _opp("bitvavo", "3.0"),
-        _opp("bitvavo", "2.5"),
-        _opp("okx", "2.0"),
-        _opp("okx", "1.8"),
+        _opp("bitvavo", "3.0", "ADAEUR"),
+        _opp("bitvavo", "2.5", "SOLEUR"),
+        _opp("okx", "2.0", "ADAEUR"),
+        _opp("okx", "1.8", "SOLEUR"),
+        _opp("okx", "1.6", "XRPEUR"),
     ]
     selected = strategy._select_balanced_emits(ranked)  # noqa: SLF001
     okx_count = sum(
@@ -872,11 +876,10 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
     bv_count = sum(
         1 for o in selected if (o.metadata or {}).get("buy_exchange") == "bitvavo"
     )
-    assert okx_count >= 1
+    assert okx_count >= bv_count
+    assert okx_count >= 2
     assert bv_count >= 1
-    # One symbol per venue — duplicate ADAEUR quotes collapse to one per exchange.
-    assert len(selected) == 2
-
+    assert len(selected) == 3
 
 def test_okx_deploy_bases_ranked_first_on_okx() -> None:
     from bot.core.enums import OpportunitySide

@@ -234,8 +234,13 @@ def _session_settings(
             "paper_regime_block_buys": True,
             # New-base entries only on rising mark momentum (fits never-loss trail).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.001,  # ≥+0.10% over rolling samples
+            "paper_buy_momentum_min_return": 0.0005,  # ≥+0.05% over rolling samples
             "paper_buy_momentum_samples": 12,
+            # Prefer dual-liquid day-trade bases in emit ranking (avoid TAO-only tunnel).
+            "live_micro_focus_bases": (
+                "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
+                "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
+            ),
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
             "live_micro_max_per_corr_group": 2,
@@ -278,8 +283,9 @@ def _session_settings(
             "live_micro_consolidate_duplicate_bases": True,
             "live_micro_consolidate_primary_venue": "bitvavo",
             "live_micro_okx_deploy_bases": okx_deploy,
+            # OKX with ≥1.25× Bitvavo free EUR gets extra emit rotation slots.
             "live_micro_okx_cash_bias_ratio": float(
-                getattr(base, "live_micro_okx_cash_bias_ratio", 1.5) or 1.5
+                getattr(base, "live_micro_okx_cash_bias_ratio", 1.25) or 1.25
             ),
             "live_micro_trail_partial_min_frac": float(
                 getattr(base, "live_micro_trail_partial_min_frac", 0.45) or 0.45

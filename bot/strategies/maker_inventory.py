@@ -175,8 +175,15 @@ class MakerInventoryStrategy(BaseStrategy):
             ).split(",")
             if part.strip()
         }
+        self._focus_bases = {
+            part.strip().upper()
+            for part in str(
+                getattr(settings, "live_micro_focus_bases", "") or ""
+            ).split(",")
+            if part.strip()
+        }
         self._okx_cash_bias_ratio = Decimal(
-            str(getattr(settings, "live_micro_okx_cash_bias_ratio", 1.2) or 1.2)
+            str(getattr(settings, "live_micro_okx_cash_bias_ratio", 1.25) or 1.25)
         )
         self._profitability = profitability or self._build_profitability_engine(settings)
         self._pairs_evaluated = 0
@@ -465,8 +472,13 @@ class MakerInventoryStrategy(BaseStrategy):
                 )
         with self._hp("candidate_dedup_rank"):
             opportunities.sort(key=self._rank_opportunity, reverse=True)
-            selected = self._select_balanced_emits(opportunities)
-            selected = self._drop_small_vs_best(selected)
+            max_emits, keep_frac = self._emit_budget_for_regime(opportunities)
+            selected = self._select_balanced_emits(
+                opportunities, max_emits=max_emits
+            )
+            selected = self._drop_small_vs_best(
+                selected, keep_frac=keep_frac
+            )
         for opp in selected:
             self._opportunities_emitted += 1
             meta = opp.metadata or {}
@@ -612,7 +624,59 @@ class MakerInventoryStrategy(BaseStrategy):
             if base in self._venue_held_bases.get(venue, set())
             else Decimal("0")
         )
-        return net + (skew * Decimal("0.01")) + (fv_bonus * Decimal("0.001")) + held_penalty
+        # Small tie-break toward focus dual-liquid bases (does not override real NET).
+        focus_bonus = (
+            Decimal("0.015")
+            if base and base.upper() in self._focus_bases
+            else Decimal("0")
+        )
+        # Cash-rich OKX: slight rank lift so it competes for global pass-2 slots.
+        okx_cash_bonus = Decimal("0")
+        if venue == "okx" and self._okx_cash_rich():
+            okx_cash_bonus = Decimal("0.01")
+        return (
+            net
+            + (skew * Decimal("0.01"))
+            + (fv_bonus * Decimal("0.001"))
+            + held_penalty
+            + focus_bonus
+            + okx_cash_bonus
+        )
+
+    def _okx_cash_rich(self) -> bool:
+        """True when OKX free EUR ≥ ratio × Bitvavo free EUR."""
+        okx = self._venue_free_quote.get("okx", _ZERO)
+        bv = self._venue_free_quote.get("bitvavo", _ZERO)
+        if okx <= 0:
+            return False
+        if bv <= 0:
+            return True
+        return okx >= bv * self._okx_cash_bias_ratio
+
+    def _emit_budget_for_regime(
+        self, opportunities: list[TradeOpportunity]
+    ) -> tuple[int, Decimal]:
+        """Flat scan → fewer emits + tighter keep_vs_best; active → full budget.
+
+        Flat = few NET survivors or best NET barely clears the profit floor.
+        Never loosens never-loss; only throttles spray in dead books.
+        """
+        max_e = self._max_emits
+        keep = self._keep_vs_best_frac
+        if not opportunities:
+            return max_e, keep
+        nets = [
+            Decimal(str((o.metadata or {}).get("net_profit_eur", "0") or "0"))
+            for o in opportunities
+        ]
+        best = max(nets)
+        floor = self._min_profit_eur
+        flat = len(opportunities) < max(3, max_e // 2) or (
+            floor > 0 and best < floor * Decimal("2")
+        )
+        if flat:
+            return max(1, max_e // 2), max(keep, Decimal("0.70"))
+        return max_e, keep
 
     def _effective_min_profit(
         self, equity: Decimal | None, *, notional: Decimal | None = None
@@ -699,7 +763,7 @@ class MakerInventoryStrategy(BaseStrategy):
         ).strip().lower()
 
     def _venue_emit_rotation(self, venues: list[str]) -> list[str]:
-        """Bitvavo-first alternation so OKX still gets every other emit slot."""
+        """Primary-first alternation; cash-rich OKX gets extra emit slots."""
         if not venues:
             return []
         primary = str(
@@ -713,6 +777,19 @@ class MakerInventoryStrategy(BaseStrategy):
         if len(ordered) < 2:
             return ordered
         first, second = ordered[0], ordered[1]
+        # OKX flush with spare EUR: overweight OKX slots so cash deploys.
+        venue_set = {str(v).strip().lower() for v in ordered}
+        if "okx" in venue_set and "bitvavo" in venue_set and self._okx_cash_rich():
+            return [
+                "okx",
+                "bitvavo",
+                "okx",
+                "okx",
+                "bitvavo",
+                "okx",
+                "okx",
+                "bitvavo",
+            ]
         return [first, second, first, second, first, second, first, second]
 
     def _venue_opps_ordered(
@@ -743,16 +820,20 @@ class MakerInventoryStrategy(BaseStrategy):
         return preferred + other if preferred else pool
 
     def _select_balanced_emits(
-        self, opportunities: list[TradeOpportunity]
+        self,
+        opportunities: list[TradeOpportunity],
+        *,
+        max_emits: int | None = None,
     ) -> list[TradeOpportunity]:
         """Take top emits with a per-venue fairness pass.
 
         Without this, Bitvavo often monopolizes the tiny max_emits budget whenever
         its NET ranks slightly higher — leaving OKX with cash but no quotes.
-        Venues with more free EUR get extra rotation slots (≥1.5× peer cash).
+        Venues with more free EUR get extra rotation slots (≥ cash-bias ratio).
         Never changes profitability/never-loss gates; only emit scheduling.
         """
-        if not opportunities or self._max_emits <= 0:
+        budget = self._max_emits if max_emits is None else int(max_emits)
+        if not opportunities or budget <= 0:
             return []
         by_venue: dict[str, list[TradeOpportunity]] = {}
         for opp in opportunities:
@@ -767,10 +848,10 @@ class MakerInventoryStrategy(BaseStrategy):
             rotation = venues
         # Pass 1: weighted round-robin until budget is full.
         rot_idx = 0
-        while len(selected) < self._max_emits and rotation:
+        while len(selected) < budget and rotation:
             added = False
             attempts = 0
-            while attempts < len(rotation) and len(selected) < self._max_emits:
+            while attempts < len(rotation) and len(selected) < budget:
                 venue = rotation[rot_idx % len(rotation)]
                 rot_idx += 1
                 attempts += 1
@@ -791,7 +872,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 break
         # Pass 2: fill any leftover slots by global rank order.
         for opp in opportunities:
-            if len(selected) >= self._max_emits:
+            if len(selected) >= budget:
                 break
             oid = getattr(opp, "id", None) or id(opp)
             if oid in selected_ids:
@@ -810,10 +891,14 @@ class MakerInventoryStrategy(BaseStrategy):
         return selected
 
     def _drop_small_vs_best(
-        self, opportunities: list[TradeOpportunity]
+        self,
+        opportunities: list[TradeOpportunity],
+        *,
+        keep_frac: Decimal | None = None,
     ) -> list[TradeOpportunity]:
         """Skip dust next to a much larger NET-euro quote in the same cycle."""
-        if self._keep_vs_best_frac <= 0 or len(opportunities) < 2:
+        frac = self._keep_vs_best_frac if keep_frac is None else keep_frac
+        if frac <= 0 or len(opportunities) < 2:
             return opportunities
         nets = [
             Decimal(str((o.metadata or {}).get("net_profit_eur", "0") or "0"))
@@ -822,7 +907,7 @@ class MakerInventoryStrategy(BaseStrategy):
         best = max(nets)
         if best <= 0:
             return opportunities
-        floor = best * self._keep_vs_best_frac
+        floor = best * frac
         kept = [o for o, net in zip(opportunities, nets, strict=True) if net >= floor]
         return kept or opportunities
 
