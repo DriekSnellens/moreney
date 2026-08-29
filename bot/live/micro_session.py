@@ -199,25 +199,26 @@ def _session_settings(
             # Still fee-aware never-loss; thinner buffer = asks clear sooner.
             "paper_maker_sell_profit_buffer_bps": 10.0,
             # Soft harvest earlier / larger partials → more €/day recycles.
+            # Next step (ruim): recycle winners faster — still never below BE.
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            # Arm at net profit (BE); full exit on 0.4% peak retrace (was 0.2%).
+            # Arm at net profit (BE); full exit on 0.3% peak retrace (was 0.4%).
             "paper_trail_soft_arm_pct": 0.001,
-            "paper_trail_soft_drawdown_pct": 0.004,
+            "paper_trail_soft_drawdown_pct": 0.003,
             "paper_trail_soft_partial_pct": 0.0,
-            # Lock part of BE recoveries (Aug-25 +€129 MTM was not harvested).
-            "paper_trail_recovery_be_partial_pct": 0.35,
-            "paper_trail_be_harvest_partial_pct": 0.35,
-            "paper_trail_be_harvest_min_gain_pct": 0.0005,
-            "live_micro_be_harvest_cooldown_sec": 15.0,
+            # Lock more of BE+ bags into cash so slots free sooner.
+            "paper_trail_recovery_be_partial_pct": 0.50,
+            "paper_trail_be_harvest_partial_pct": 0.50,
+            "paper_trail_be_harvest_min_gain_pct": 0.0003,
+            "live_micro_be_harvest_cooldown_sec": 8.0,
             "paper_trail_hard_arm_pct": 0.06,
-            "paper_trail_hard_drawdown_pct": 0.03,
-            "paper_trail_hard_partial_pct": 0.25,
+            "paper_trail_hard_drawdown_pct": 0.025,
+            "paper_trail_hard_partial_pct": 0.35,
             "paper_trail_arm_gain_pct": 0.06,
-            "paper_trail_drawdown_pct": 0.03,
+            "paper_trail_drawdown_pct": 0.025,
             "paper_trail_partial_enabled": True,
-            "paper_trail_partial_pct": 0.40,
+            "paper_trail_partial_pct": 0.50,
             "paper_trail_atr_enabled": False,  # keep fixed harvest levels
             "paper_trail_atr_samples": 48,
             "paper_trail_atr_arm_mult": 2.5,

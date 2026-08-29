@@ -109,13 +109,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
     assert cfg.paper_trail_arm_gain_pct == 0.06
-    assert cfg.paper_trail_drawdown_pct == 0.03
+    assert cfg.paper_trail_drawdown_pct == 0.025
     assert cfg.paper_trail_partial_enabled is True
-    assert cfg.paper_trail_partial_pct == 0.40
+    assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_arm_pct == 0.001
-    assert cfg.paper_trail_soft_drawdown_pct == 0.004
+    assert cfg.paper_trail_soft_drawdown_pct == 0.003
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.paper_trail_hard_arm_pct == 0.06
+    assert cfg.paper_trail_hard_drawdown_pct == 0.025
+    assert cfg.paper_trail_hard_partial_pct == 0.35
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -151,7 +153,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_max_alt_inventory_pct <= 55.0
     assert cfg.paper_max_alt_inventory_pct >= 50.0
     assert cfg.paper_trail_soft_partial_pct == 0.0
-    assert cfg.paper_trail_soft_drawdown_pct == 0.004
+    assert cfg.paper_trail_soft_drawdown_pct == 0.003
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
@@ -159,14 +161,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
-    assert cfg.paper_trail_recovery_be_partial_pct >= 0.30
-    assert cfg.paper_trail_be_harvest_partial_pct >= 0.30
+    assert cfg.paper_trail_recovery_be_partial_pct >= 0.50
+    assert cfg.paper_trail_be_harvest_partial_pct >= 0.50
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) >= 0.04
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
     assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.01
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 20.0
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 10.0
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
     assert "BTC" in (cfg.live_micro_okx_deploy_bases or "")
@@ -729,11 +732,11 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         symbols=["ADAEUR"],
         persist_path=tmp_path / "t.json",
     )
-    assert cfg.paper_trail_drawdown_pct == 0.03
+    assert cfg.paper_trail_drawdown_pct == 0.025
     assert cfg.paper_trail_soft_arm_pct == 0.001
-    assert cfg.paper_trail_soft_drawdown_pct == 0.004
+    assert cfg.paper_trail_soft_drawdown_pct == 0.003
     assert cfg.paper_trail_hard_arm_pct == 0.06
-    assert cfg.paper_trail_partial_pct == 0.40
+    assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.live_micro_max_notional_eur <= 200.0
     assert cfg.live_micro_max_notional_eur >= 180.0
@@ -741,6 +744,9 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0
     assert cfg.live_micro_reset_drawdown_on_start is True
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 8.0
+    assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.50
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:
