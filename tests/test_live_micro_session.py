@@ -76,7 +76,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
-    assert cfg.arbitrage_max_emits_per_cycle == 8
+    assert cfg.arbitrage_max_emits_per_cycle == 10
     assert cfg.paper_maker_max_open_quotes <= 4
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
@@ -87,7 +87,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     )
     # Aggregate equity ~€4k must still size clips near the ~€200 ceiling.
     assert dual.arbitrage_position_pct == 5.0
-    assert dual.arbitrage_max_emits_per_cycle == 8
+    assert dual.arbitrage_max_emits_per_cycle == 10
     assert dual.live_micro_max_open_orders == 4
     assert dual.live_micro_max_open_orders_per_venue == 2
     assert dual.live_micro_max_alt_bases == 8
@@ -95,7 +95,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(dual.live_micro_add_clip_eur) == 180.0
     assert float(dual.paper_max_alt_inventory_pct) == 55.0
     assert dual.max_simultaneous_positions == 16
-    assert float(dual.paper_maker_keep_vs_best_frac) == 0.40
+    assert float(dual.paper_maker_keep_vs_best_frac) == 0.30
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -123,13 +123,14 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return == 0.0005
+    assert cfg.paper_buy_momentum_min_return == 0.0003
     assert cfg.paper_buy_momentum_samples >= 8
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert "ETH" in (cfg.live_micro_focus_bases or "")
     assert "TAO" not in (cfg.live_micro_focus_bases or "")
-    assert float(cfg.live_micro_okx_cash_bias_ratio) <= 1.25
-    assert float(cfg.live_micro_okx_cash_bias_ratio) >= 1.2
+    assert cfg.live_micro_new_buy_focus_only is True
+    assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
+    assert "TAO" not in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.live_micro_max_per_corr_group == 2
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
@@ -160,7 +161,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_max_alt_inventory_pct >= 50.0
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.paper_trail_soft_drawdown_pct == 0.003
-    assert cfg.paper_maker_keep_vs_best_frac == 0.40
+    assert cfg.paper_maker_keep_vs_best_frac == 0.30
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
     assert cfg.live_micro_block_buys_when_holding_base is True
@@ -218,8 +219,9 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) == 0.0005
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0003
     assert "SOL" in (cfg.live_micro_focus_bases or "")
+    assert cfg.live_micro_new_buy_focus_only is True
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
@@ -2394,11 +2396,11 @@ def test_venue_emit_rotation_bitvavo_first_alternation() -> None:
         _unlocked(
             live_micro_primary_execute_venue="bitvavo",
             paper_maker_venues="okx,bitvavo",
-            live_micro_okx_cash_bias_ratio=1.25,
+            live_micro_okx_cash_bias_ratio=1.0,
         )
     )
-    # Equal cash → primary-first alternation.
-    strat._venue_free_quote = {"bitvavo": Decimal("1000"), "okx": Decimal("1000")}  # noqa: SLF001
+    # Bitvavo richer → primary-first alternation (OKX not cash-rich).
+    strat._venue_free_quote = {"bitvavo": Decimal("2000"), "okx": Decimal("500")}  # noqa: SLF001
     rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
     assert rot[:4] == ["bitvavo", "okx", "bitvavo", "okx"]
 
@@ -2410,10 +2412,11 @@ def test_venue_emit_rotation_okx_cash_bias() -> None:
         _unlocked(
             live_micro_primary_execute_venue="bitvavo",
             paper_maker_venues="okx,bitvavo",
-            live_micro_okx_cash_bias_ratio=1.25,
+            live_micro_okx_cash_bias_ratio=1.0,
         )
     )
-    strat._venue_free_quote = {"bitvavo": Decimal("800"), "okx": Decimal("1600")}  # noqa: SLF001
+    # Equal cash counts as OKX-rich at ratio 1.0.
+    strat._venue_free_quote = {"bitvavo": Decimal("1900"), "okx": Decimal("1900")}  # noqa: SLF001
     rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
     assert rot[0] == "okx"
     assert rot.count("okx") > rot.count("bitvavo")
@@ -2449,8 +2452,8 @@ def test_focus_bases_rank_above_near_tie_non_focus() -> None:
         )
 
     focus = _opp("SOLEUR", "0.10")
-    other = _opp("TAOEUR", "0.11")
-    # Focus +0.015 → 0.115 > 0.11 near-tie.
+    other = _opp("TAOEUR", "0.14")
+    # Focus +0.04 vs non-focus -0.08 → 0.14 vs 0.06.
     assert strat._rank_opportunity(focus) > strat._rank_opportunity(other)  # noqa: SLF001
     # Large NET still wins.
     big = _opp("TAOEUR", "0.50")
@@ -2468,6 +2471,8 @@ def test_emit_budget_flat_tightens() -> None:
             paper_maker_min_profit_eur=0.05,
         )
     )
+    # No idle cash → classic flat throttle.
+    strat._venue_free_quote = {"bitvavo": Decimal("50")}  # noqa: SLF001
 
     def _opp(net: str) -> TradeOpportunity:
         return TradeOpportunity(
@@ -2492,6 +2497,12 @@ def test_emit_budget_flat_tightens() -> None:
     assert max_e == 4
     assert keep == Decimal("0.70")
 
+    # Idle cash keeps full emit slots even when flat.
+    strat._venue_free_quote = {"bitvavo": Decimal("1800"), "okx": Decimal("1800")}  # noqa: SLF001
+    max_idle, keep_idle = strat._emit_budget_for_regime([_opp("0.06")])  # noqa: SLF001
+    assert max_idle == 8
+    assert keep_idle == Decimal("0.50")
+
     # Many strong nets → full budget.
     strong = [
         TradeOpportunity(
@@ -2515,6 +2526,48 @@ def test_emit_budget_flat_tightens() -> None:
     max_e2, keep2 = strat._emit_budget_for_regime(strong)  # noqa: SLF001
     assert max_e2 == 8
     assert keep2 == Decimal("0.40")
+
+
+@pytest.mark.asyncio
+async def test_new_buy_focus_only_blocks_tao(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    settings = _unlocked(
+        live_micro_new_buy_focus_only=True,
+        live_micro_focus_bases="SOL,ADA,LINK",
+        paper_buy_momentum_enabled=False,
+        live_micro_first_clip_eur=55.0,
+        live_micro_bridge_persist_path=str(tmp_path / "focus.json"),
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("500"))
+    portfolio.set_mark_price("TAOEUR", Decimal("200"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+
+    async def fake_live_free(venue: str, asset: str) -> Decimal:
+        return Decimal("500") if asset.upper() == "EUR" else Decimal("0")
+
+    monkeypatch.setattr(bridge, "_live_free", fake_live_free)
+    monkeypatch.setattr(
+        bridge, "_venue_budget_remaining", lambda _v: Decimal("500")
+    )
+    req = OrderRequest(
+        opportunity_id=uuid4(),
+        symbol="TAOEUR",
+        side=OpportunitySide.BUY,
+        quantity=Decimal("0.3"),
+        limit_price=Decimal("200"),
+        metadata={"venue": "bitvavo", "post_only": True},
+    )
+    result = await bridge.execute(req)
+    assert result.status == OrderStatus.REJECTED
+    assert bridge.skips.get("focus_base_required", 0) >= 1
 
 
 @pytest.mark.asyncio

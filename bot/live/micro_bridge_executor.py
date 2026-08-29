@@ -316,6 +316,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._max_per_corr = int(
             getattr(settings, "live_micro_max_per_corr_group", 2) or 2
         )
+        self._focus_bases = {
+            part.strip().upper()
+            for part in str(
+                getattr(settings, "live_micro_focus_bases", "") or ""
+            ).split(",")
+            if part.strip()
+        }
+        self._new_buy_focus_only = bool(
+            getattr(settings, "live_micro_new_buy_focus_only", False)
+        )
         self._position_opened_mono: dict[str, float] = {}
         self._position_opened_at: dict[str, float] = {}
         self._max_alt_bases = int(
@@ -1179,6 +1189,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hints.append(f"FEES_EAT_EDGE n={self.skips.get('fees_eat_edge')}")
         if self.skips.get("momentum_block", 0) > 0:
             hints.append(f"MOMENTUM_BLOCK n={self.skips.get('momentum_block')}")
+        if self.skips.get("focus_base_required", 0) > 0:
+            hints.append(
+                f"FOCUS_BASE_REQUIRED n={self.skips.get('focus_base_required')}"
+            )
         if self.skips.get("cross_venue_duplicate_base", 0) > 0:
             hints.append(
                 f"CROSS_VENUE_DUPLICATE_BASE n={self.skips.get('cross_venue_duplicate_base')}"
@@ -4338,6 +4352,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     message=(
                         f"{venue} corr group already at {self._max_per_corr}: "
                         f"{sorted(held & self._corr_group)}"
+                    ),
+                )
+        if (
+            side_is_buy
+            and self._new_buy_focus_only
+            and self._focus_bases
+            and self._is_new_base_buy(venue, base)
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+        ):
+            if base.upper() not in self._focus_bases:
+                self._bump_skip("focus_base_required")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="FOCUS_BASE_REQUIRED",
+                    message=(
+                        f"new base {base} not in focus list "
+                        f"(avoid non-focus tunnels)"
                     ),
                 )
         if (

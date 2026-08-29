@@ -152,10 +152,17 @@ def _session_settings(
     maker_venues = "okx,bitvavo" if cross_venue else "bitvavo"
     okx_deploy = str(
         getattr(base, "live_micro_okx_deploy_bases", "")
-        or "ADA,NEAR,DOT,XRP,LINK,ATOM,HYPE,ENA,WLD,TAO,ONDO,BCH,TRX,HBAR,UNI,AAVE,BNB,XLM"
+        or (
+            "ADA,NEAR,DOT,XRP,LINK,ATOM,BCH,TRX,UNI,AAVE,BNB,XLM,"
+            "SOL,AVAX,ARB,OP,SUI,APT,DOGE,LTC"
+        )
     )
     if "BTC" not in {p.strip().upper() for p in okx_deploy.split(",") if p.strip()}:
         okx_deploy = f"BTC,{okx_deploy}" if okx_deploy else "BTC"
+    focus_bases = (
+        "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
+        "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
+    )
     return base.model_copy(
         update={
             # Internal engine host only — env keeps PAPER_TRADING_ENABLED=false so
@@ -178,8 +185,8 @@ def _session_settings(
             "paper_maker_same_venue": True,
             # One quote per venue per cycle — avoids stacked duplicate resting bids.
             "paper_maker_max_open_quotes": 4 if cross_venue else 2,
-            # Fewer concurrent sprays → larger / better trails.
-            "arbitrage_max_emits_per_cycle": 8 if cross_venue else 4,
+            # More concurrent NET-passing quotes across venues (still never-loss gated).
+            "arbitrage_max_emits_per_cycle": 10 if cross_venue else 5,
             "paper_cycle_interval_ms": 1200.0,
             # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
             # Ruim capacity: ~€100 first / ~€180 add so more of the €4k works.
@@ -234,13 +241,11 @@ def _session_settings(
             "paper_regime_block_buys": True,
             # New-base entries only on rising mark momentum (fits never-loss trail).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0005,  # ≥+0.05% over rolling samples
+            "paper_buy_momentum_min_return": 0.0003,  # ≥+0.03% over rolling samples
             "paper_buy_momentum_samples": 12,
-            # Prefer dual-liquid day-trade bases in emit ranking (avoid TAO-only tunnel).
-            "live_micro_focus_bases": (
-                "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
-                "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
-            ),
+            # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
+            "live_micro_focus_bases": focus_bases,
+            "live_micro_new_buy_focus_only": True,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
             "live_micro_max_per_corr_group": 2,
@@ -261,7 +266,7 @@ def _session_settings(
             # Prefer cash / rising entries — do not force underweight dip buys.
             "paper_inventory_buy_dip_bps": 0.0,
             # Among NET-passing candidates, allow more than only the top rank.
-            "paper_maker_keep_vs_best_frac": 0.40,
+            "paper_maker_keep_vs_best_frac": 0.30,
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
@@ -283,9 +288,9 @@ def _session_settings(
             "live_micro_consolidate_duplicate_bases": True,
             "live_micro_consolidate_primary_venue": "bitvavo",
             "live_micro_okx_deploy_bases": okx_deploy,
-            # OKX with ≥1.25× Bitvavo free EUR gets extra emit rotation slots.
+            # OKX with ≥ Bitvavo free EUR gets extra emit slots (equal cash counts).
             "live_micro_okx_cash_bias_ratio": float(
-                getattr(base, "live_micro_okx_cash_bias_ratio", 1.25) or 1.25
+                getattr(base, "live_micro_okx_cash_bias_ratio", 1.0) or 1.0
             ),
             "live_micro_trail_partial_min_frac": float(
                 getattr(base, "live_micro_trail_partial_min_frac", 0.45) or 0.45

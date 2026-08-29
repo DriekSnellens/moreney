@@ -835,7 +835,7 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
     strategy = MakerInventoryStrategy(
         _maker_settings(
             arbitrage_max_emits_per_cycle=3,
-            live_micro_okx_cash_bias_ratio=1.25,
+            live_micro_okx_cash_bias_ratio=1.0,
         )
     )
     strategy._venue_free_quote = {

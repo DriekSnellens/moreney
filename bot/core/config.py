@@ -490,8 +490,10 @@ class Settings(BaseSettings):
         "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
         "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
     )
-    # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.25 = 25% richer).
-    live_micro_okx_cash_bias_ratio: float = Field(default=1.25, ge=1.0, le=3.0)
+    # When True, new-base buys must be on focus_bases (sells/harvests unaffected).
+    live_micro_new_buy_focus_only: bool = False
+    # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
+    live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).
     live_micro_trail_partial_min_frac: float = Field(default=0.45, ge=0.2, le=1.0)
     live_audit_path: str = "./data/live_audit.jsonl"

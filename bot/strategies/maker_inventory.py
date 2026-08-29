@@ -183,7 +183,7 @@ class MakerInventoryStrategy(BaseStrategy):
             if part.strip()
         }
         self._okx_cash_bias_ratio = Decimal(
-            str(getattr(settings, "live_micro_okx_cash_bias_ratio", 1.25) or 1.25)
+            str(getattr(settings, "live_micro_okx_cash_bias_ratio", 1.0) or 1.0)
         )
         self._profitability = profitability or self._build_profitability_engine(settings)
         self._pairs_evaluated = 0
@@ -624,27 +624,32 @@ class MakerInventoryStrategy(BaseStrategy):
             if base in self._venue_held_bases.get(venue, set())
             else Decimal("0")
         )
-        # Small tie-break toward focus dual-liquid bases (does not override real NET).
-        focus_bonus = (
-            Decimal("0.015")
-            if base and base.upper() in self._focus_bases
-            else Decimal("0")
-        )
-        # Cash-rich OKX: slight rank lift so it competes for global pass-2 slots.
+        side_l = str(
+            opportunity.side.value if hasattr(opportunity.side, "value") else opportunity.side
+        ).lower()
+        is_buy = side_l.startswith("b")
+        # Prefer focus dual-liquid bases; demote non-focus buys (kills TAO tunnel).
+        if base and base.upper() in self._focus_bases:
+            focus_adj = Decimal("0.04")
+        elif is_buy and self._focus_bases:
+            focus_adj = Decimal("-0.08")
+        else:
+            focus_adj = Decimal("0")
+        # OKX flush with spare EUR: slight rank lift for global pass-2 slots.
         okx_cash_bonus = Decimal("0")
         if venue == "okx" and self._okx_cash_rich():
-            okx_cash_bonus = Decimal("0.01")
+            okx_cash_bonus = Decimal("0.02")
         return (
             net
             + (skew * Decimal("0.01"))
             + (fv_bonus * Decimal("0.001"))
             + held_penalty
-            + focus_bonus
+            + focus_adj
             + okx_cash_bonus
         )
 
     def _okx_cash_rich(self) -> bool:
-        """True when OKX free EUR ≥ ratio × Bitvavo free EUR."""
+        """True when OKX free EUR ≥ ratio × Bitvavo free EUR (ratio 1.0 = equal)."""
         okx = self._venue_free_quote.get("okx", _ZERO)
         bv = self._venue_free_quote.get("bitvavo", _ZERO)
         if okx <= 0:
@@ -656,10 +661,11 @@ class MakerInventoryStrategy(BaseStrategy):
     def _emit_budget_for_regime(
         self, opportunities: list[TradeOpportunity]
     ) -> tuple[int, Decimal]:
-        """Flat scan → fewer emits + tighter keep_vs_best; active → full budget.
+        """Flat scan → tighter keep_vs_best; idle cash keeps full emit slots.
 
         Flat = few NET survivors or best NET barely clears the profit floor.
-        Never loosens never-loss; only throttles spray in dead books.
+        Never loosens never-loss; only throttles spray when books are dead AND
+        cash is already deployed.
         """
         max_e = self._max_emits
         keep = self._keep_vs_best_frac
@@ -674,9 +680,13 @@ class MakerInventoryStrategy(BaseStrategy):
         flat = len(opportunities) < max(3, max_e // 2) or (
             floor > 0 and best < floor * Decimal("2")
         )
-        if flat:
-            return max(1, max_e // 2), max(keep, Decimal("0.70"))
-        return max_e, keep
+        if not flat:
+            return max_e, keep
+        idle_cash = max(self._venue_free_quote.values(), default=_ZERO)
+        if idle_cash >= Decimal("500"):
+            # Cash sitting idle: keep full budget, only mildly tighten vs best.
+            return max_e, max(keep, Decimal("0.50"))
+        return max(1, max_e // 2), max(keep, Decimal("0.70"))
 
     def _effective_min_profit(
         self, equity: Decimal | None, *, notional: Decimal | None = None
