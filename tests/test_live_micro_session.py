@@ -76,8 +76,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
-    assert cfg.arbitrage_max_emits_per_cycle == 4
-    assert cfg.paper_maker_max_open_quotes <= 2
+    assert cfg.arbitrage_max_emits_per_cycle == 6
+    assert cfg.paper_maker_max_open_quotes <= 4
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
         Settings(live_micro_execute_venues="bitvavo,okx"),
@@ -85,11 +85,16 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
         symbols=["SOLEUR"],
         persist_path=tmp_path / "dual.json",
     )
-    # Aggregate equity ~€4k must still size clips near the €150 ceiling.
-    assert dual.arbitrage_position_pct == 3.75
-    assert dual.arbitrage_max_emits_per_cycle == 4
-    assert dual.live_micro_max_open_orders == 2
-    assert dual.live_micro_max_open_orders_per_venue == 1
+    # Aggregate equity ~€4k must still size clips near the ~€200 ceiling.
+    assert dual.arbitrage_position_pct == 5.0
+    assert dual.arbitrage_max_emits_per_cycle == 6
+    assert dual.live_micro_max_open_orders == 4
+    assert dual.live_micro_max_open_orders_per_venue == 2
+    assert dual.live_micro_max_alt_bases == 8
+    assert float(dual.live_micro_first_clip_eur) == 100.0
+    assert float(dual.live_micro_add_clip_eur) == 180.0
+    assert float(dual.paper_max_alt_inventory_pct) == 55.0
+    assert dual.max_simultaneous_positions == 16
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -125,23 +130,26 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return <= 0.0006
     assert cfg.paper_maker_min_profit_eur <= 0.06
-    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 80.0
+    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 110.0
     assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.03
     assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.0003
-    assert cfg.paper_maker_min_notional_eur >= 55.0
-    assert cfg.max_simultaneous_positions == 3
-    assert cfg.live_micro_max_alt_bases == 4
+    assert cfg.paper_maker_min_notional_eur >= 100.0
+    assert cfg.max_simultaneous_positions >= 8
+    assert cfg.live_micro_max_alt_bases == 8
     assert cfg.live_micro_block_cross_venue_duplicate_bases is True
     assert cfg.live_micro_consolidate_duplicate_bases is True
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
-    assert float(cfg.live_micro_first_clip_eur) >= 55.0
-    assert float(cfg.live_micro_add_clip_eur) >= 100.0
+    assert float(cfg.live_micro_first_clip_eur) >= 100.0
+    assert float(cfg.live_micro_add_clip_eur) >= 180.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
-    assert cfg.live_micro_max_open_orders <= 2
-    assert cfg.live_micro_max_open_orders_per_venue == 1
+    assert cfg.live_micro_max_open_orders <= 4
+    assert cfg.live_micro_max_open_orders_per_venue == 2
+    assert float(cfg.live_micro_max_notional_eur) >= 180.0
+    assert float(cfg.risk_max_position_usd) >= 180.0
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
-    assert cfg.paper_max_alt_inventory_pct <= 35.0
+    assert cfg.paper_max_alt_inventory_pct <= 55.0
+    assert cfg.paper_max_alt_inventory_pct >= 50.0
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.paper_trail_soft_drawdown_pct == 0.004
     assert cfg.paper_maker_keep_vs_best_frac == 0.60
@@ -727,7 +735,8 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.40
     assert cfg.paper_trail_soft_partial_pct == 0.0
-    assert cfg.live_micro_max_notional_eur <= 150.0
+    assert cfg.live_micro_max_notional_eur <= 200.0
+    assert cfg.live_micro_max_notional_eur >= 180.0
     assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0

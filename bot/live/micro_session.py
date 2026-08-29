@@ -177,19 +177,19 @@ def _session_settings(
             # Independent same-venue quotes on each exchange alongside cross-venue arb.
             "paper_maker_same_venue": True,
             # One quote per venue per cycle — avoids stacked duplicate resting bids.
-            "paper_maker_max_open_quotes": 2 if cross_venue else 1,
+            "paper_maker_max_open_quotes": 4 if cross_venue else 2,
             # Fewer concurrent sprays → larger / better trails.
-            "arbitrage_max_emits_per_cycle": 4 if cross_venue else 2,
+            "arbitrage_max_emits_per_cycle": 6 if cross_venue else 3,
             "paper_cycle_interval_ms": 1200.0,
             # Larger clips: soft-partial of a real bag must clear Bitvavo fees.
-            # First entry matches min notional; adds after soft-arm scale up.
-            "paper_maker_min_notional_eur": min(70.0, max(55.0, budget_f * 0.03)),
-            "live_micro_first_clip_eur": min(70.0, max(55.0, budget_f * 0.03)),
-            "live_micro_add_clip_eur": 120.0,
+            # Ruim capacity: ~€100 first / ~€180 add so more of the €4k works.
+            "paper_maker_min_notional_eur": 100.0,
+            "live_micro_first_clip_eur": 100.0,
+            "live_micro_add_clip_eur": 180.0,
             # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.05,
             "paper_maker_min_net_return": 0.0005,
-            "paper_maker_small_clip_max_eur": 80.0,
+            "paper_maker_small_clip_max_eur": 110.0,
             "paper_maker_small_clip_min_profit_eur": 0.03,
             "paper_maker_small_clip_min_net_return": 0.0003,
             "paper_maker_min_spread_bps": 5.0,
@@ -247,7 +247,8 @@ def _session_settings(
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
             # Prefer cash when bags pile up (skew → sell-only sooner).
-            "paper_max_alt_inventory_pct": 35.0,
+            # Ruim: allow up to ~half pocket in alts so 8×€100 clips fit.
+            "paper_max_alt_inventory_pct": 55.0,
             "paper_min_alt_inventory_pct": 15.0,
             "paper_inventory_ask_improve_bps": 2.0,
             # Underweight venues buy sooner (OKX cash deployment).
@@ -301,16 +302,16 @@ def _session_settings(
             "profitability_min_net_return": 0.0005,
             "profitability_execution_buffer_bps": 2.0,
             "risk_min_net_profit_usd": 0.05,
-            # Hard per-trade ceiling: ≤8% of pocket, never above €150 on ~€2k.
-            "risk_max_position_usd": min(150.0, max(50.0, budget_f * 0.08)),
-            # Size vs aggregate multi-venue equity so clips stay near the €150
-            # ceiling (2×€2k pockets must not inflate to ~€260 and fail NET return).
+            # Hard per-trade ceiling: allow ~€180 add clips on ~€2k pocket.
+            "risk_max_position_usd": min(200.0, max(100.0, budget_f * 0.10)),
+            # Size vs aggregate multi-venue equity so clips stay near the ceiling
+            # (2×€2k pockets must not inflate too far and fail NET return).
             "arbitrage_position_pct": min(
                 6.5,
                 max(
                     3.0,
                     (
-                        min(150.0, max(50.0, budget_f * 0.08))
+                        min(200.0, max(100.0, budget_f * 0.10))
                         / max(budget_f * max(len(execute_venues), 1), 1.0)
                     )
                     * 100.0,
@@ -321,19 +322,19 @@ def _session_settings(
             "risk_max_daily_loss_usd": max(50.0, budget_f * 0.10),
             # Single-venue Bitvavo live — multi-venue exposure caps would block all size.
             "global_max_venue_exposure_pct": 100.0,
-            # Fewer concurrent bases → larger trails → more realized €/day.
-            "risk_max_open_positions": 3,
-            "max_simultaneous_positions": 3,
-            "opportunity_max_executions_per_cycle": 6,
-            "opportunity_max_candidates_per_cycle": 12,
+            # Ruim: enough open-position headroom for 8 bases/venue (defensive exits unchanged).
+            "risk_max_open_positions": 16 if cross_venue else 8,
+            "max_simultaneous_positions": 16 if cross_venue else 8,
+            "opportunity_max_executions_per_cycle": 8,
+            "opportunity_max_candidates_per_cycle": 16,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else ",".join(_LIQUID_EUR_SYMBOLS),
-            "live_micro_max_alt_bases": 4,
-            # Cap live order size (env must not silently allow full pocket).
+            "live_micro_max_alt_bases": 8,
+            # Cap live order size to add-clip ceiling.
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
-            "live_micro_max_notional_eur": min(150.0, max(50.0, budget_f * 0.08)),
+            "live_micro_max_notional_eur": min(200.0, max(100.0, budget_f * 0.10)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             # Alt-beta book: wider drawdown band than default 5–8% global kill.
             "max_drawdown_percent": float(
@@ -342,8 +343,8 @@ def _session_settings(
             "live_micro_reset_drawdown_on_start": bool(
                 getattr(base, "live_micro_reset_drawdown_on_start", True)
             ),
-            "live_micro_max_open_orders": 2 if cross_venue else 1,
-            "live_micro_max_open_orders_per_venue": 1,
+            "live_micro_max_open_orders": 4 if cross_venue else 2,
+            "live_micro_max_open_orders_per_venue": 2,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
