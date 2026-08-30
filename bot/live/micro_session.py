@@ -238,9 +238,9 @@ def _session_settings(
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,
-            # New-base entries only on rising mark momentum (fits never-loss trail).
+            # New-base entries only on rising/flat mark momentum (fits never-loss trail).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0003,  # ≥+0.03% over rolling samples
+            "paper_buy_momentum_min_return": 0.0001,  # ≥+0.01% when ring is filled
             "paper_buy_momentum_samples": 12,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
@@ -249,9 +249,14 @@ def _session_settings(
             "live_micro_active_ring_eur": float(
                 getattr(base, "live_micro_active_ring_eur", 1000.0) or 1000.0
             ),
+            # Underfilled ring: flat marks OK (still block falling).
+            "live_micro_ring_momentum_min_return": float(
+                getattr(base, "live_micro_ring_momentum_min_return", 0.0) or 0.0
+            ),
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
+            # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
-            "live_micro_max_per_corr_group": 2,
+            "live_micro_max_per_corr_group": 3,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.006,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live

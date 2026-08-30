@@ -124,7 +124,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return == 0.0003
+    assert cfg.paper_buy_momentum_min_return == 0.0001
     assert cfg.paper_buy_momentum_samples >= 8
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert "ETH" in (cfg.live_micro_focus_bases or "")
@@ -132,7 +132,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert "TAO" not in (cfg.live_micro_okx_deploy_bases or "")
-    assert cfg.live_micro_max_per_corr_group == 2
+    assert cfg.live_micro_max_per_corr_group == 3
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0
+    assert float(cfg.live_micro_active_ring_eur) == 1000.0
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
     assert cfg.paper_time_stop_enabled is True
@@ -221,9 +223,11 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) == 0.0003
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0001
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0
+    assert cfg.live_micro_max_per_corr_group == 3
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
@@ -2573,6 +2577,59 @@ def test_active_ring_boosts_unheld_focus_rank() -> None:
     focus = _opp("ADAEUR", "0.10")
     other = _opp("HYPEEUR", "0.18")
     assert strat._rank_opportunity(focus) > strat._rank_opportunity(other)  # noqa: SLF001
+
+
+def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_min_return=0.001,
+        live_micro_ring_momentum_min_return=0.0,
+        live_micro_active_ring_eur=1000.0,
+        live_micro_bridge_persist_path=str(tmp_path / "ring_mom.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
+    ]
+    # Empty active book → ring needs deploy → soft floor.
+    assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
+    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0")  # noqa: SLF001
+
+
+def test_stuck_underwater_base_excluded_from_corr_count(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_corr_group="SOL,ADA,LINK,XRP",
+        live_micro_max_per_corr_group=2,
+        live_micro_bridge_persist_path=str(tmp_path / "corr.json"),
+        paper_maker_min_notional_eur=10.0,
+    )
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("2000"))
+    portfolio.set_mark_price("SOLEUR", Decimal("100"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    from bot.core.models import Balance
+
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="SOL", free=Decimal("1"), locked=Decimal("0")),
+        Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
+    ]
+    bridge.set_underwater_base_blocks({"bitvavo": {"SOL"}}, new_bases_only=True)
+    # Stuck SOL must not consume the corr slot.
+    assert bridge._corr_held_count(venue="bitvavo") == 0  # noqa: SLF001
+    assert bridge._corr_held_count(venue="bitvavo", adding="ADA") == 1  # noqa: SLF001
 
 
 @pytest.mark.asyncio

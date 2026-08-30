@@ -310,6 +310,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._momentum_samples = int(
             getattr(settings, "paper_buy_momentum_samples", 12) or 12
         )
+        self._ring_momentum_min = Decimal(
+            str(getattr(settings, "live_micro_ring_momentum_min_return", 0) or 0)
+        )
         self._corr_group = parse_corr_group(
             str(getattr(settings, "live_micro_corr_group", "") or "")
         )
@@ -2996,14 +2999,47 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _corr_held_count(
         self, *, venue: str | None = None, adding: str | None = None
     ) -> int:
+        """Count corr-group holdings that still consume concentration slots.
+
+        Underwater/stuck bags are excluded — they belong to the stuck book and
+        must not block active-ring deployment into other corr focus bases.
+        """
         if not self._corr_group:
             return 0
         held = self._held_alt_bases(venue)
+        venue_l = (venue or "").strip().lower()
+        stuck = {
+            str(b).upper()
+            for b in self._underwater_blocked_bases.get(venue_l, set())
+        } if venue_l else set()
+        if stuck:
+            held = {b for b in held if b not in stuck}
         if adding:
             held = set(held) | {adding.upper()}
         return len(held & self._corr_group)
 
-    def _momentum_ok(self, symbol: str, *, require_history: bool = False) -> bool:
+    def _ring_needs_deploy(self, venue: str) -> bool:
+        """True when active-book notional is below ring and free EUR remains."""
+        if self._active_ring_eur <= 0:
+            return False
+        free = self._venue_budget_remaining(venue)
+        if free < Decimal("50"):
+            return False
+        return self._active_book_notional(venue) < self._active_ring_eur
+
+    def _momentum_floor_for_buy(self, venue: str) -> Decimal:
+        """Softer momentum floor while active ring still needs deployment."""
+        if self._ring_needs_deploy(venue):
+            return self._ring_momentum_min
+        return self._momentum_min
+
+    def _momentum_ok(
+        self,
+        symbol: str,
+        *,
+        require_history: bool = False,
+        min_return: Decimal | None = None,
+    ) -> bool:
         """True when rolling mark return is at/above the configured floor.
 
         ``require_history`` (new-base entries): block until enough samples exist
@@ -3011,6 +3047,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """
         if not self._momentum_enabled:
             return True
+        floor = self._momentum_min if min_return is None else min_return
         series = self._series_for(symbol)
         need = max(3, min(6, self._momentum_samples // 2))
         if len(series) < need:
@@ -3018,7 +3055,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mom = series.momentum_return()
         if mom is None:
             return not require_history
-        return mom >= self._momentum_min
+        return mom >= floor
 
     def _momentum_down(self, symbol: str) -> bool:
         """True when rolling mark return is at/below the negative momentum floor."""
@@ -4437,15 +4474,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("trail_take_profit")
             and self._is_new_base_buy(venue, base)
         ):
-            # New crypto only: require rising mark momentum before first entry.
-            if not self._momentum_ok(symbol, require_history=True):
+            # New crypto only: require mark momentum (softer while ring underfilled).
+            mom_floor = self._momentum_floor_for_buy(venue)
+            if not self._momentum_ok(
+                symbol, require_history=True, min_return=mom_floor
+            ):
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
                     order_request,
                     reason="MOMENTUM_BLOCK",
                     message=(
-                        f"new base {base} needs rising momentum "
-                        f"(>={self._momentum_min} over ~{self._momentum_samples} samples)"
+                        f"new base {base} needs momentum "
+                        f"(>={mom_floor} over ~{self._momentum_samples} samples"
+                        f"{'; ring-relaxed' if mom_floor < self._momentum_min else ''})"
                     ),
                 )
 

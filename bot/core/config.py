@@ -495,6 +495,9 @@ class Settings(BaseSettings):
     # Per-venue target EUR for active-book (focus, not underwater) deployment.
     # While below target with free cash, prefer unheld focus emits (always-on deploy).
     live_micro_active_ring_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
+    # When active ring is underfilled, allow new buys down to this momentum floor
+    # (0.0 = flat OK; falling marks still blocked). Never loosens never-loss exits.
+    live_micro_ring_momentum_min_return: float = Field(default=0.0, ge=-0.01, le=0.05)
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).
