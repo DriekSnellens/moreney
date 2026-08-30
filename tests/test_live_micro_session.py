@@ -2086,7 +2086,10 @@ def test_mtm_summary_includes_winnable(tmp_path: Path) -> None:
 
 def test_be_harvest_cooldown_shorter_than_full_exit() -> None:
     bridge = MicroBudgetLiveExecutor(
-        _unlocked(live_micro_be_harvest_cooldown_sec=12.0),
+        _unlocked(
+            live_micro_be_harvest_cooldown_sec=12.0,
+            live_micro_exit_engine_enabled=False,
+        ),
         portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
         live_engine=LiveMicroEngine(_unlocked()),
         budget_eur=Decimal("100"),
@@ -2855,3 +2858,109 @@ def test_soft_arm_resets_be_harvest_for_one_shot_per_cycle() -> None:
         "bitvavo", "SOL", cost=cost, mark=Decimal("90.20")
     )
     assert st2.get("be_harvest_partial_done") is True
+
+
+@pytest.mark.asyncio
+async def test_exit_engine_touch_maker_when_bid_below_taker_be() -> None:
+    """D: aggressive quotes join inside spread instead of resting at ask."""
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=15.0,
+        live_micro_exit_engine_enabled=True,
+        live_micro_exit_touch_improve_bps=2.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    # Cost high enough that bid is above maker BE but below taker BE.
+    bridge._cost_lots["bitvavo:DOT"] = [[Decimal("10"), Decimal("0.140")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:DOT")  # noqa: SLF001
+
+    class _T:
+        bid = Decimal("0.1405")
+        ask = Decimal("0.1415")
+        last = Decimal("0.1410")
+
+    class _Client:
+        async def fetch_ticker(self, symbol: str):
+            return _T()
+
+    bridge._trading_client = lambda venue: _Client()  # type: ignore[method-assign]  # noqa: SLF001
+
+    be_m = bridge._break_even_sell_price("bitvavo", "DOT", taker=False)  # noqa: SLF001
+    be_t = bridge._break_even_sell_price("bitvavo", "DOT", taker=True)  # noqa: SLF001
+    assert be_m is not None and be_t is not None
+    assert _T.bid >= be_m
+    assert _T.bid < be_t
+
+    px, post_only, reason = await bridge._profitable_exit_quote(  # noqa: SLF001
+        "bitvavo", "DOT", Decimal("0.1410"), aggressive=True
+    )
+    assert reason == "rest_touch_maker"
+    assert post_only is True
+    assert px is not None and px >= be_m
+    assert px < _T.ask  # inside spread, not parked at ask
+
+    px_pas, _, reason_pas = await bridge._profitable_exit_quote(  # noqa: SLF001
+        "bitvavo", "DOT", Decimal("0.1410"), aggressive=False
+    )
+    assert reason_pas == "rest_maker_be"
+    assert px_pas is not None
+    # Passive sits at min(ask, mark)=mark; aggressive should be closer to bid.
+    assert px <= px_pas
+
+
+def test_exit_cooldown_shorter_with_exit_engine() -> None:
+    settings = _unlocked(
+        live_micro_exit_engine_enabled=True,
+        live_micro_exit_cooldown_sec=3.0,
+        live_micro_be_harvest_cooldown_sec=8.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    assert bridge._exit_cooldown_sec("trail_exit_work") == 3.0  # noqa: SLF001
+    assert bridge._exit_cooldown_sec("trail_be_harvest") == 3.0  # noqa: SLF001
+    assert bridge._exit_cooldown_sec("trail_drawdown") == 3.0  # noqa: SLF001
+
+
+def test_sleeve_loss_cap_pauses_buys() -> None:
+    settings = _unlocked(
+        live_micro_velocity_sleeve_daily_loss_cap_eur=10.0,
+        live_micro_velocity_sleeve_eur=800.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    assert bridge._sleeve_paused is False  # noqa: SLF001
+    bridge._sleeve_realized_eur = Decimal("-10.01")  # noqa: SLF001
+    bridge._check_sleeve_loss_cap()  # noqa: SLF001
+    assert bridge._sleeve_paused is True  # noqa: SLF001
+    # why_idle should surface sleeve pause
+    hints = bridge._why_idle_hints()  # noqa: SLF001
+    assert any(h.startswith("VELOCITY_SLEEVE") and "PAUSED" in h for h in hints)
+    assert any(h.startswith("EXIT_ENGINE") for h in hints)
+
+
+def test_session_settings_enable_exit_engine_and_sleeve() -> None:
+    base = _unlocked()
+    ss = _session_settings(
+        base,
+        budget_eur=Decimal("4000"),
+        symbols=["SOLEUR", "ADAEUR"],
+        persist_path=Path("./data/test_sleeve_settings.json"),
+    )
+    assert ss.live_micro_exit_engine_enabled is True
+    assert float(ss.live_micro_exit_resting_max_age_sec or 0) <= 15.0
+    assert float(ss.live_micro_velocity_sleeve_daily_loss_cap_eur or 0) > 0

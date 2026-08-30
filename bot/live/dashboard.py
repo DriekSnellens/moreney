@@ -96,6 +96,8 @@ def _nl_idle(hint: str) -> str:
         "MOMENTUM_BLOCK": "Momentum-filter blokkeert",
         "FOCUS_BASE_REQUIRED": "Nieuwe buy alleen op focus-coins",
         "ACTIVE_RING": "Active-book deploy (focus vs ring-target)",
+        "VELOCITY_SLEEVE": "Velocity-sleeve (werkkapitaal + dag-verliescap)",
+        "EXIT_ENGINE": "Exit-engine (soft-armed BE+ fill-seeking)",
         "UNDERWATER_BASE_BLOCK": "Underwater base — geen nieuwe buy op die coin",
         "CORR_GROUP_CAP": "Correlatie-groep vol",
         "POLICY_BLOCKED": "Policy blokkeert",
@@ -131,6 +133,8 @@ def _nl_skip(reason: str) -> str:
         "budget_exhausted": "budget",
         "venue_inventory": "venue inventory",
         "stale_edge": "stale edge",
+        "sleeve_loss_cap": "velocity-sleeve verliescap",
+        "exit_cooldown": "exit cooldown",
     }
     return labels.get(reason, reason)
 

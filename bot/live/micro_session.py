@@ -249,6 +249,31 @@ def _session_settings(
             "live_micro_active_ring_eur": float(
                 getattr(base, "live_micro_active_ring_eur", 1000.0) or 1000.0
             ),
+            # A: velocity sleeve ≈ ring size; vault = rest of pocket (never-loss).
+            "live_micro_velocity_sleeve_eur": float(
+                getattr(base, "live_micro_velocity_sleeve_eur", None)
+                or getattr(base, "live_micro_active_ring_eur", 1000.0)
+                or 1000.0
+            ),
+            "live_micro_velocity_sleeve_daily_loss_cap_eur": float(
+                getattr(base, "live_micro_velocity_sleeve_daily_loss_cap_eur", 25.0)
+                or 25.0
+            ),
+            # D: exit engine — fill soft-armed BE+ spikes (touch ask, fast reprice).
+            "live_micro_exit_engine_enabled": True,
+            "live_micro_exit_resting_max_age_sec": float(
+                getattr(base, "live_micro_exit_resting_max_age_sec", 8.0) or 8.0
+            ),
+            "live_micro_exit_cooldown_sec": float(
+                getattr(base, "live_micro_exit_cooldown_sec", 3.0) or 3.0
+            ),
+            "live_micro_exit_touch_improve_bps": float(
+                getattr(base, "live_micro_exit_touch_improve_bps", 2.0) or 2.0
+            ),
+            "live_micro_exit_soft_armed_work": True,
+            "live_micro_exit_soft_armed_partial_pct": float(
+                getattr(base, "live_micro_exit_soft_armed_partial_pct", 0.50) or 0.50
+            ),
             # Underfilled ring: flat marks OK (still block falling).
             "live_micro_ring_momentum_min_return": float(
                 getattr(base, "live_micro_ring_momentum_min_return", 0.0) or 0.0

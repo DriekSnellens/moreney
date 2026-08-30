@@ -498,6 +498,25 @@ class Settings(BaseSettings):
     # When active ring is underfilled, allow new buys down to this momentum floor
     # (0.0 = flat OK; falling marks still blocked). Never loosens never-loss exits.
     live_micro_ring_momentum_min_return: float = Field(default=0.0, ge=-0.01, le=0.05)
+    # --- A+D architecture (velocity sleeve + exit engine) ---
+    # A: Velocity sleeve = working capital for recycle trades (usually = active ring).
+    # Vault = remaining free cash / long-hold — strict never-loss, no sleeve loss burn.
+    live_micro_velocity_sleeve_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
+    # Pause new sleeve buys when sleeve-session realized ≤ -cap (vault untouched).
+    live_micro_velocity_sleeve_daily_loss_cap_eur: float = Field(
+        default=25.0, ge=0.0, le=500.0
+    )
+    # D: Exit engine — soft-armed / BE+ sells seek fills (touch/improve, fast reprice).
+    # Never sells below fee-aware BE; taker only when bid ≥ taker BE.
+    live_micro_exit_engine_enabled: bool = True
+    live_micro_exit_resting_max_age_sec: float = Field(default=8.0, ge=2.0, le=120.0)
+    live_micro_exit_cooldown_sec: float = Field(default=3.0, ge=1.0, le=60.0)
+    live_micro_exit_touch_improve_bps: float = Field(default=2.0, ge=0.0, le=20.0)
+    # While soft-armed and mark ≥ BE, keep working partial exits (spike capture).
+    live_micro_exit_soft_armed_work: bool = True
+    live_micro_exit_soft_armed_partial_pct: float = Field(
+        default=0.50, ge=0.10, le=1.0
+    )
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).

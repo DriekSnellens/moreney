@@ -353,6 +353,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._active_ring_eur = Decimal(
             str(getattr(settings, "live_micro_active_ring_eur", 1000) or 1000)
         )
+        # A: velocity sleeve — working capital; vault = rest (strict never-loss).
+        _sleeve = getattr(settings, "live_micro_velocity_sleeve_eur", None)
+        self._velocity_sleeve_eur = Decimal(
+            str(_sleeve if _sleeve is not None else self._active_ring_eur)
+            or self._active_ring_eur
+        )
+        self._sleeve_daily_loss_cap = Decimal(
+            str(
+                getattr(settings, "live_micro_velocity_sleeve_daily_loss_cap_eur", 25)
+                or 25
+            )
+        )
+        self._sleeve_realized_eur = _ZERO
+        self._sleeve_paused = False
+        # D: exit engine — aggressive BE+ / soft-armed fill seeking.
+        self._exit_engine_enabled = bool(
+            getattr(settings, "live_micro_exit_engine_enabled", True)
+        )
+        self._exit_resting_max_age_sec = float(
+            getattr(settings, "live_micro_exit_resting_max_age_sec", 8.0) or 8.0
+        )
+        self._exit_engine_cooldown_sec = float(
+            getattr(settings, "live_micro_exit_cooldown_sec", 3.0) or 3.0
+        )
+        self._exit_touch_improve_bps = Decimal(
+            str(getattr(settings, "live_micro_exit_touch_improve_bps", 2.0) or 2.0)
+        )
+        self._exit_soft_armed_work = bool(
+            getattr(settings, "live_micro_exit_soft_armed_work", True)
+        )
+        self._exit_soft_armed_partial = Decimal(
+            str(
+                getattr(settings, "live_micro_exit_soft_armed_partial_pct", 0.50)
+                or 0.50
+            )
+        )
         self._block_underwater_adds = bool(
             getattr(settings, "live_micro_block_underwater_adds", True)
         )
@@ -552,6 +588,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "live_fill_count": int(self.live_fill_count),
             "live_transaction_count": int(self.live_transaction_count),
             "realized_trade_pnl_eur": str(self.realized_trade_pnl_eur),
+            "sleeve_realized_eur": str(self._sleeve_realized_eur),
+            "sleeve_paused": bool(self._sleeve_paused),
         }
 
     def _try_load_persisted_state(self) -> bool:
@@ -616,6 +654,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         except Exception:  # noqa: BLE001
             self.realized_trade_pnl_eur = _ZERO
+        try:
+            self._sleeve_realized_eur = Decimal(
+                str(raw.get("sleeve_realized_eur") or 0)
+            )
+        except Exception:  # noqa: BLE001
+            self._sleeve_realized_eur = _ZERO
+        self._sleeve_paused = bool(raw.get("sleeve_paused"))
+        self._check_sleeve_loss_cap()
         if raw.get("session_started_ms") is not None:
             self._session_started_ms = float(raw.get("session_started_ms"))
         logger.info(
@@ -781,6 +827,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "daily_kill",
                     f"session realized {pnl} <= -{self._daily_kill_eur}; buys blocked",
                 )
+
+    def _check_sleeve_loss_cap(self) -> None:
+        """A: pause new sleeve buys when sleeve realized hits daily loss cap."""
+        if self._sleeve_daily_loss_cap <= 0:
+            self._sleeve_paused = False
+            return
+        if self._sleeve_realized_eur <= -self._sleeve_daily_loss_cap:
+            if not self._sleeve_paused:
+                self._sleeve_paused = True
+                self._push_alert(
+                    "sleeve_loss_cap",
+                    f"sleeve realized {self._sleeve_realized_eur} "
+                    f"<= -{self._sleeve_daily_loss_cap}; sleeve buys paused "
+                    f"(vault / never-loss exits unchanged)",
+                )
+        else:
+            self._sleeve_paused = False
 
     def _invalidate_bal_cache(self, venue: str | None = None) -> None:
         if venue is None:
@@ -1024,6 +1087,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "first_clip_eur": str(self._first_clip_eur),
             "add_clip_eur": str(self._add_clip_eur),
             "active_ring_eur": str(self._active_ring_eur),
+            "velocity_sleeve_eur": str(self._velocity_sleeve_eur),
+            "sleeve_realized_eur": str(self._sleeve_realized_eur),
+            "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
+            "sleeve_paused": bool(self._sleeve_paused),
+            "exit_engine": {
+                "enabled": self._exit_engine_enabled,
+                "resting_max_age_sec": self._exit_resting_max_age_sec,
+                "cooldown_sec": self._exit_engine_cooldown_sec,
+                "touch_improve_bps": str(self._exit_touch_improve_bps),
+                "soft_armed_work": self._exit_soft_armed_work,
+                "soft_armed_partial_pct": str(self._exit_soft_armed_partial),
+            },
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))
                 for v in sorted(self._execute_venues)
@@ -1256,6 +1331,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"{' NEED' if need else ' OK'}"
                 )
             hints.append("ACTIVE_RING " + " ".join(ring_bits))
+
+        # A+D: velocity sleeve loss cap + exit engine status.
+        if self._velocity_sleeve_eur > 0 or self._sleeve_daily_loss_cap > 0:
+            sleeve_bits = [
+                f"size=€{float(self._velocity_sleeve_eur):.0f}",
+                f"pnl=€{float(self._sleeve_realized_eur):.2f}",
+                f"cap=-€{float(self._sleeve_daily_loss_cap):.0f}",
+            ]
+            if self._sleeve_paused:
+                sleeve_bits.append("PAUSED")
+            hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
+        if self._exit_engine_enabled:
+            hints.append(
+                "EXIT_ENGINE on "
+                f"reprice={self._exit_resting_max_age_sec:.0f}s "
+                f"cd={self._exit_engine_cooldown_sec:.0f}s "
+                f"work={'on' if self._exit_soft_armed_work else 'off'}"
+            )
 
         if not hints:
             hints.append("SCANNING_NO_PASSING_EDGE")
@@ -1962,8 +2055,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             lots.append([lot_qty, unit])
             self._session_lots.setdefault(lot_key, []).append([lot_qty, unit])
+            trail_st = self._trail.setdefault(lot_key, {})
+            trail_st["sleeve"] = True  # A: session buys belong to velocity sleeve
             if was_new_base and self._cut_loss_below_be_pct > 0:
-                self._trail.setdefault(lot_key, {})["new_session_base"] = True
+                trail_st["new_session_base"] = True
             self._note_position_opened(venue or "bitvavo", base)
             self._mark_cost_trusted(venue or "bitvavo", base)
             return
@@ -1987,6 +2082,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 lots[0][0] = lot_qty
         # Mirror consume on session lots (trail inventory).
         sess = self._session_lots.setdefault(lot_key, [])
+        sess_before = sum((Decimal(str(row[0])) for row in sess), _ZERO)
         left = qty
         while left > 0 and sess:
             sq, _sc = sess[0]
@@ -1997,9 +2093,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 sess.pop(0)
             else:
                 sess[0][0] = sq
+        sess_after = sum((Decimal(str(row[0])) for row in sess), _ZERO)
+        sess_consumed = sess_before - sess_after
         if remaining > 0:
             cost += remaining * price
-        self.realized_trade_pnl_eur += proceeds - cost
+        trade_pnl = proceeds - cost
+        self.realized_trade_pnl_eur += trade_pnl
+        # A: attribute PnL to velocity sleeve when session inventory was sold.
+        if sess_consumed > 0 or bool(
+            (self._trail.get(lot_key) or {}).get("sleeve")
+            or (self._trail.get(lot_key) or {}).get("new_session_base")
+        ):
+            self._sleeve_realized_eur += trade_pnl
+            self._check_sleeve_loss_cap()
         self._check_daily_kill()
         if not lots:
             self._position_opened_mono.pop(lot_key, None)
@@ -2502,18 +2608,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         logger.warning("loss-sell cancel failed id=%s", oid)
                         still.append(row)
                     continue
-            if age >= max_age:
+            # D: trail/exit sells reprice fast so soft-armed spikes can fill.
+            strategy = str(row.get("strategy") or "")
+            row_max_age = max_age
+            if (
+                self._exit_engine_enabled
+                and side_raw.startswith("s")
+                and (
+                    strategy.startswith("trail_")
+                    or strategy in {"dust_exit", "time_stop_breakeven"}
+                )
+            ):
+                row_max_age = min(max_age, self._exit_resting_max_age_sec)
+            if age >= row_max_age:
                 try:
                     await client.cancel_order(oid, symbol)
                     cancelled += 1
                     self._invalidate_bal_cache()
                     self._bump_skip("stale_quote_cancelled")
                     logger.info(
-                        "MICRO_STALE_CANCEL venue=%s symbol=%s id=%s age=%.1fs",
+                        "MICRO_STALE_CANCEL venue=%s symbol=%s id=%s age=%.1fs max=%.1fs strategy=%s",
                         venue,
                         symbol,
                         oid,
                         age,
+                        row_max_age,
+                        strategy,
                     )
                 except Exception:  # noqa: BLE001
                     logger.warning("stale cancel failed id=%s", oid)
@@ -2594,6 +2714,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.session_start_realized_eur = self.realized_trade_pnl_eur
         self._session_started_ms = time.time() * 1000.0
         self._daily_kill_active = False
+        self._sleeve_realized_eur = _ZERO
+        self._sleeve_paused = False
 
     def reset_operator_dashboard(self) -> dict[str, Any]:
         """Zero cumulative KPIs and chart history for a clean operator slate."""
@@ -2610,6 +2732,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.live_trades.clear()
         self.skips.clear()
         self._daily_kill_active = False
+        self._sleeve_realized_eur = _ZERO
+        self._sleeve_paused = False
         self.set_buys_blocked(False)
         self.set_underwater_base_blocks({})
         self._session_started_ms = time.time() * 1000.0
@@ -2641,6 +2765,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         self.skips.clear()
         self._daily_kill_active = False
+        self._sleeve_paused = False
+        # Keep sleeve_realized across cycle reset so daily loss cap still applies.
+        self._check_sleeve_loss_cap()
         self.set_buys_blocked(False)
         self.set_underwater_base_blocks({})
         self.starting_portfolio_eur = self.portfolio_value_eur
@@ -2850,12 +2977,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return True
 
     async def _profitable_exit_quote(
-        self, venue: str, base: str, mark: Decimal
+        self,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        *,
+        aggressive: bool = False,
     ) -> tuple[Decimal | None, bool, str]:
         """Pick a fillable exit price that still clears fee-aware break-even.
 
         Returns (limit_price, post_only, reason). When the bid is already above
         taker break-even, hit the bid (taker) so trail exits actually fill.
+
+        ``aggressive`` (exit engine): join inside the spread near the bid touch
+        instead of resting at the ask — captures short soft-armed spikes.
+        Never quotes below maker BE; taker only when bid ≥ taker BE.
         """
         be_maker = self._break_even_sell_price(venue, base, taker=False)
         be_taker = self._break_even_sell_price(venue, base, taker=True)
@@ -2883,7 +3019,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Bid already clears taker BE → take liquidity for a sure profitable fill.
         if best_bid >= be_taker:
             return best_bid, False, "hit_bid_taker"
-        # Otherwise rest as maker at/above maker BE, near the touch.
+
+        use_aggressive = bool(aggressive and self._exit_engine_enabled)
+        if use_aggressive:
+            # Inside-spread maker near bid touch (fill-seeking, still post-only).
+            improve = best_bid * (self._exit_touch_improve_bps / Decimal("10000"))
+            tick = best_bid * Decimal("0.00005")
+            step = max(improve, tick)
+            touch_px = best_bid + step
+            if best_ask > best_bid:
+                # Stay maker: do not cross the ask.
+                ask_cap = best_ask - min(step, (best_ask - best_bid) / Decimal("2"))
+                if ask_cap > best_bid:
+                    touch_px = min(touch_px, ask_cap)
+            maker_px = max(be_maker, touch_px)
+            if maker_px <= best_bid:
+                maker_px = max(be_maker, best_bid + step)
+            return maker_px, True, "rest_touch_maker"
+
+        # Passive: rest as maker at/above maker BE, near the touch.
         maker_px = max(be_maker, min(best_ask, mark))
         if maker_px <= best_bid:
             maker_px = max(be_maker, best_bid + (best_bid * Decimal("0.0001")))
@@ -3172,8 +3326,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "trail_soft_partial",
             "trail_hard_partial",
             "trail_momentum_be_exit",
+            "trail_exit_work",
         }:
+            if self._exit_engine_enabled:
+                return min(self._be_harvest_cooldown, self._exit_engine_cooldown_sec)
             return self._be_harvest_cooldown
+        if self._exit_engine_enabled and reason.startswith("trail_"):
+            return self._exit_engine_cooldown_sec
         return 45.0
 
     def _soft_partial_would_fire(
@@ -3943,6 +4102,40 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 reason = "trail_be_harvest"
             elif (
+                self._exit_engine_enabled
+                and self._exit_soft_armed_work
+                and st.get("soft_armed")
+                and be is not None
+                and mark >= be
+                and gain_now >= self._be_harvest_min_gain
+            ):
+                # D: keep working BE+ inventory at touch while soft-armed
+                # (do not wait for drawdown — spikes die in seconds).
+                free = await self._refresh_free(venue, symbol, asset, locked)
+                cap = min(
+                    free,
+                    self._session_qty(venue, asset)
+                    if self._trail_session_only
+                    else free,
+                )
+                maker_min = Decimal(
+                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+                )
+                partial_min = max(
+                    _MIN_LIVE_NOTIONAL,
+                    maker_min * self._trail_partial_min_frac,
+                )
+                if self._exit_soft_armed_partial >= Decimal("1"):
+                    sell_qty = cap
+                else:
+                    sell_qty = self._trail_partial_qty(
+                        cap=cap,
+                        partial_pct=self._exit_soft_armed_partial,
+                        mark=mark,
+                        notional_floor=partial_min,
+                    )
+                reason = "trail_exit_work"
+            elif (
                 st.get("recovery_armed")
                 and be is not None
                 and Decimal(str(st.get("peak") or 0)) > be
@@ -3977,6 +4170,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "trail_hard_partial",
                     "trail_be_harvest",
                     "trail_recovery_be_partial",
+                    "trail_exit_work",
                 }
                 else _MIN_LIVE_NOTIONAL
             )
@@ -3992,8 +4186,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     venue, asset, mark, floor=cut_floor
                 )
             else:
+                # D: aggressive touch quotes for all profitable trail exits.
                 exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
-                    venue, asset, mark
+                    venue,
+                    asset,
+                    mark,
+                    aggressive=self._exit_engine_enabled,
                 )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")
@@ -4321,6 +4519,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 message=(
                     f"realized PnL {self.realized_trade_pnl_eur} "
                     f"hit -{self._daily_kill_eur} EUR kill; buys blocked"
+                ),
+            )
+        if side_is_buy and self._sleeve_paused and not meta.get("dust_top_up"):
+            self._bump_skip("sleeve_loss_cap")
+            return await self._reject_before_live(
+                order_request,
+                reason="SLEEVE_LOSS_CAP",
+                message=(
+                    f"sleeve realized {self._sleeve_realized_eur} "
+                    f"hit -{self._sleeve_daily_loss_cap} EUR cap; "
+                    f"sleeve buys paused (vault holds)"
                 ),
             )
         if (
