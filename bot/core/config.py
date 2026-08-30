@@ -464,8 +464,14 @@ class Settings(BaseSettings):
     # Cut-loss: exit when mark falls this far below fee-aware BE (last-resort fail-safe).
     live_micro_cut_loss_below_be_pct: float = Field(default=0.04, ge=0.0, le=0.25)
     live_micro_cut_loss_new_bases_only: bool = False
-    # Early stop: downward momentum + below BE → exit at BE minus this pct (e.g. 1%).
-    live_micro_early_cut_loss_below_be_pct: float = Field(default=0.01, ge=0.0, le=0.10)
+    # Early stop: flat/down momentum + below BE → exit at BE minus this pct.
+    live_micro_early_cut_loss_below_be_pct: float = Field(default=0.015, ge=0.0, le=0.10)
+    # Early cut only on bags opened this session (vault/aged holdings untouched).
+    live_micro_early_cut_new_bases_only: bool = True
+    # Early-cut momentum: fire when rolling return ≤ 0 (flat/down), or ≤ −this if >0.
+    live_micro_early_cut_momentum_max_return: float = Field(
+        default=0.0, ge=-0.01, le=0.01
+    )
     # Downward momentum: rolling return ≤ −this → exit (default 0.3%).
     live_micro_momentum_exit_min_return: float = Field(default=0.003, ge=0.0, le=0.10)
     # Defensive exit floor: never sell below BE + this cushion (default 0.5%).
@@ -496,8 +502,8 @@ class Settings(BaseSettings):
     # While below target with free cash, prefer unheld focus emits (always-on deploy).
     live_micro_active_ring_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
     # When active ring is underfilled, allow new buys down to this momentum floor
-    # (0.0 = flat OK; falling marks still blocked). Never loosens never-loss exits.
-    live_micro_ring_momentum_min_return: float = Field(default=0.0, ge=-0.01, le=0.05)
+    # (slightly positive = no flat/falling entries even while filling the ring).
+    live_micro_ring_momentum_min_return: float = Field(default=0.0002, ge=-0.01, le=0.05)
     # --- A+D architecture (velocity sleeve + exit engine) ---
     # A: Velocity sleeve = working capital for recycle trades (usually = active ring).
     # Vault = remaining free cash / long-hold — strict never-loss, no sleeve loss burn.

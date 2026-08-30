@@ -76,7 +76,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.global_max_venue_exposure_pct == 100.0
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
-    assert cfg.arbitrage_max_emits_per_cycle == 10
+    assert cfg.arbitrage_max_emits_per_cycle == 12
     assert cfg.paper_maker_max_open_quotes <= 4
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
@@ -87,12 +87,12 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     )
     # Aggregate equity ~€4k sizes clips near the ~€150 ceiling → 3.75% of €4k.
     assert dual.arbitrage_position_pct == 3.75
-    assert dual.arbitrage_max_emits_per_cycle == 10
+    assert dual.arbitrage_max_emits_per_cycle == 12
     assert dual.live_micro_max_open_orders == 4
     assert dual.live_micro_max_open_orders_per_venue == 2
     assert dual.live_micro_max_alt_bases == 8
-    assert float(dual.live_micro_first_clip_eur) == 75.0
-    assert float(dual.live_micro_add_clip_eur) == 120.0
+    assert float(dual.live_micro_first_clip_eur) == 55.0
+    assert float(dual.live_micro_add_clip_eur) == 100.0
     assert float(dual.live_micro_active_ring_eur) == 1000.0
     assert float(dual.paper_max_alt_inventory_pct) == 55.0
     assert dual.max_simultaneous_positions == 16
@@ -124,7 +124,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return == 0.0001
+    assert cfg.paper_buy_momentum_min_return == 0.0005
     assert cfg.paper_buy_momentum_samples >= 8
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert "ETH" in (cfg.live_micro_focus_bases or "")
@@ -133,7 +133,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert "TAO" not in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
@@ -151,8 +151,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_block_cross_venue_duplicate_bases is True
     assert cfg.live_micro_consolidate_duplicate_bases is True
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
-    assert float(cfg.live_micro_first_clip_eur) == 75.0
-    assert float(cfg.live_micro_add_clip_eur) == 120.0
+    assert float(cfg.live_micro_first_clip_eur) == 55.0
+    assert float(cfg.live_micro_add_clip_eur) == 100.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
     assert cfg.live_micro_max_open_orders <= 4
     assert cfg.live_micro_max_open_orders_per_venue == 2
@@ -178,7 +178,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
-    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.01
+    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.015
+    assert cfg.live_micro_early_cut_new_bases_only is True
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 10.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
@@ -223,10 +224,10 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) == 0.0001
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0005
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
     assert cfg.live_micro_max_per_corr_group == 3
 
 
@@ -2590,7 +2591,7 @@ def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
     settings = _unlocked(
         paper_buy_momentum_enabled=True,
         paper_buy_momentum_min_return=0.001,
-        live_micro_ring_momentum_min_return=0.0,
+        live_micro_ring_momentum_min_return=0.0002,
         live_micro_active_ring_eur=1000.0,
         live_micro_bridge_persist_path=str(tmp_path / "ring_mom.json"),
     )
@@ -2604,9 +2605,12 @@ def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
     bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
         Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
     ]
-    # Empty active book → ring needs deploy → soft floor.
+    # Empty active book → ring needs deploy → soft (but still > flat) floor.
     assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
-    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0")  # noqa: SLF001
+    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.0002")  # noqa: SLF001
+    # When ring is filled, full momentum floor applies.
+    bridge._active_book_notional = lambda venue: Decimal("1200")  # type: ignore[method-assign]  # noqa: SLF001
+    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.001")  # noqa: SLF001
 
 
 def test_stuck_underwater_base_excluded_from_corr_count(tmp_path: Path) -> None:
@@ -3060,3 +3064,85 @@ def test_okx_ring_clip_while_underfilled() -> None:
     assert cap == Decimal("50")
     cap_bv = bridge._buy_clip_cap_eur("bitvavo", "DOT")  # noqa: SLF001
     assert cap_bv == Decimal("75")
+
+
+def test_early_cut_eligible_new_session_only() -> None:
+    settings = _unlocked(
+        live_micro_early_cut_loss_below_be_pct=0.015,
+        live_micro_early_cut_new_bases_only=True,
+        live_micro_cut_loss_below_be_pct=0.04,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    old = {"new_session_base": False}
+    new = {"new_session_base": True}
+    assert bridge._early_cut_eligible(old, venue="bitvavo", base="SOL") is False  # noqa: SLF001
+    assert bridge._early_cut_eligible(new, venue="bitvavo", base="SOL") is True  # noqa: SLF001
+    early = bridge._early_cut_loss_floor_price("bitvavo", "SOL")  # noqa: SLF001
+    assert early is None
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    early = bridge._early_cut_loss_floor_price("bitvavo", "SOL")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "SOL")  # noqa: SLF001
+    assert early is not None and be is not None
+    assert early == be * Decimal("0.985")
+
+
+def test_momentum_flat_or_down_for_early_cut(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_early_cut_momentum_max_return=0.0,
+        live_micro_bridge_persist_path=str(tmp_path / "flat_mom.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    series = bridge._series_for("FLATEUR")  # noqa: SLF001
+    px = Decimal("10")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    assert bridge._momentum_flat_or_down("FLATEUR") is True  # noqa: SLF001
+    series2 = bridge._series_for("RISEEUR")  # noqa: SLF001
+    px = Decimal("10")
+    for _ in range(12):
+        px = px * Decimal("1.001")
+        series2.push(px)
+    assert bridge._momentum_flat_or_down("RISEEUR") is False  # noqa: SLF001
+
+
+def test_session_buy_tags_new_session_base_for_early_cut() -> None:
+    from bot.core.enums import OrderSide
+
+    settings = _unlocked(
+        live_micro_early_cut_loss_below_be_pct=0.015,
+        live_micro_cut_loss_below_be_pct=0.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._record_realized_fill(  # noqa: SLF001
+        side=OrderSide.BUY,
+        symbol="DOTEUR",
+        qty=Decimal("10"),
+        price=Decimal("1"),
+        fee=Decimal("0.01"),
+        venue="bitvavo",
+    )
+    st = bridge._trail.get("bitvavo:DOT") or {}  # noqa: SLF001
+    assert st.get("new_session_base") is True
+    assert st.get("sleeve") is True

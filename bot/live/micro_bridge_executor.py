@@ -213,6 +213,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._early_cut_loss_below_be_pct = Decimal(
             str(getattr(settings, "live_micro_early_cut_loss_below_be_pct", 0) or 0)
         )
+        self._early_cut_new_bases_only = bool(
+            getattr(settings, "live_micro_early_cut_new_bases_only", True)
+        )
+        self._early_cut_momentum_max = Decimal(
+            str(
+                getattr(settings, "live_micro_early_cut_momentum_max_return", 0) or 0
+            )
+        )
         self._cut_loss_new_bases_only = bool(
             getattr(settings, "live_micro_cut_loss_new_bases_only", False)
         )
@@ -1081,6 +1089,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "momentum_enabled": self._momentum_enabled,
                 "cut_loss_below_be_pct": str(self._cut_loss_below_be_pct),
                 "early_cut_loss_below_be_pct": str(self._early_cut_loss_below_be_pct),
+                "early_cut_new_bases_only": self._early_cut_new_bases_only,
+                "early_cut_momentum_max_return": str(self._early_cut_momentum_max),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "momentum_exit_min_return": str(self._momentum_exit_min),
@@ -2080,7 +2090,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._session_lots.setdefault(lot_key, []).append([lot_qty, unit])
             trail_st = self._trail.setdefault(lot_key, {})
             trail_st["sleeve"] = True  # A: session buys belong to velocity sleeve
-            if was_new_base and self._cut_loss_below_be_pct > 0:
+            if was_new_base:
+                # Tag for early-cut / cut-loss — free capital if entry goes bad.
                 trail_st["new_session_base"] = True
             self._note_position_opened(venue or "bitvavo", base)
             self._mark_cost_trusted(venue or "bitvavo", base)
@@ -3139,6 +3150,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         return True
 
+    def _early_cut_eligible(
+        self, st: dict[str, Any], *, venue: str, base: str
+    ) -> bool:
+        """Early cut: free new-session bags that fail quickly (vault untouched)."""
+        if self._early_cut_loss_below_be_pct <= 0 or self._is_long_hold(base):
+            return False
+        if self._early_cut_new_bases_only and not st.get("new_session_base"):
+            return False
+        if not self._has_trusted_cost(venue, base):
+            return False
+        return True
+
+    def _momentum_flat_or_down(self, symbol: str) -> bool:
+        """True when rolling mark return ≤ early-cut momentum max (default 0 = flat/down)."""
+        if not self._momentum_enabled:
+            return False
+        series = self._series_for(symbol)
+        need = max(3, min(6, self._momentum_samples // 2))
+        if len(series) < need:
+            return False
+        mom = series.momentum_return()
+        if mom is None:
+            return False
+        return mom <= self._early_cut_momentum_max
+
     async def _cut_loss_exit_quote(
         self,
         venue: str,
@@ -3982,11 +4018,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             early_floor = self._early_cut_loss_floor_price(venue, asset)
             if (
                 early_floor is not None
-                and self._cut_loss_eligible(st, venue=venue, base=asset)
+                and self._early_cut_eligible(st, venue=venue, base=asset)
                 and be is not None
                 and mark < be
                 and self._momentum_enabled
-                and self._momentum_down(symbol)
+                and self._momentum_flat_or_down(symbol)
                 and mark <= early_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
@@ -4757,13 +4793,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("trail_take_profit")
             and self._is_new_base_buy(venue, base)
         ):
-            # New crypto only: require mark momentum. While the active ring is
-            # underfilled, allow cold/flat marks (still block clearly falling).
+            # New crypto only: require mark momentum + history (no cold/flat slip-ins).
+            # Ring underfill uses a softer floor but still blocks flat/falling marks.
             mom_floor = self._momentum_floor_for_buy(venue)
             ring_relaxed = self._ring_needs_deploy(venue)
             if not self._momentum_ok(
                 symbol,
-                require_history=not ring_relaxed,
+                require_history=True,
                 min_return=mom_floor,
             ):
                 self._bump_skip("momentum_block")
@@ -4773,7 +4809,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     message=(
                         f"new base {base} needs momentum "
                         f"(>={mom_floor} over ~{self._momentum_samples} samples"
-                        f"{'; ring-relaxed' if ring_relaxed else ''})"
+                        f"{'; ring-soft' if ring_relaxed else ''})"
                     ),
                 )
 

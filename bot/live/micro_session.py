@@ -190,8 +190,8 @@ def _session_settings(
             "paper_cycle_interval_ms": 1200.0,
             # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
             "paper_maker_min_notional_eur": 55.0,
-            "live_micro_first_clip_eur": 75.0,
-            "live_micro_add_clip_eur": 120.0,
+            "live_micro_first_clip_eur": 55.0,
+            "live_micro_add_clip_eur": 100.0,
             # More fills while still fee-positive after maker costs.
             "paper_maker_min_profit_eur": 0.05,
             "paper_maker_min_net_return": 0.0005,
@@ -238,9 +238,9 @@ def _session_settings(
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
             "paper_regime_block_buys": True,
-            # New-base entries only on rising/flat mark momentum (fits never-loss trail).
+            # New-base entries: require rising mark (no flat buys into weak tape).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0001,  # ≥+0.01% when ring is filled
+            "paper_buy_momentum_min_return": 0.0005,  # ≥+0.05% when ring is filled
             "paper_buy_momentum_samples": 12,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
@@ -267,11 +267,9 @@ def _session_settings(
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.75,
             "live_micro_exit_taker_cushion_bps": 5.0,
-            "live_micro_okx_ring_clip_eur": 50.0,
-            # Underfilled ring: flat marks OK (still block falling).
-            "live_micro_ring_momentum_min_return": float(
-                getattr(base, "live_micro_ring_momentum_min_return", 0.0) or 0.0
-            ),
+            "live_micro_okx_ring_clip_eur": 45.0,
+            # Underfilled ring: still require slight uptick (no flat/falling).
+            "live_micro_ring_momentum_min_return": 0.0002,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
@@ -304,7 +302,10 @@ def _session_settings(
             "live_micro_underwater_min_notional_eur": 25.0,
             "live_micro_cut_loss_below_be_pct": 0.04,
             "live_micro_cut_loss_new_bases_only": False,
-            "live_micro_early_cut_loss_below_be_pct": 0.01,
+            # Early cut: new-session bags at −1.5% BE + flat/down momentum → free capital.
+            "live_micro_early_cut_loss_below_be_pct": 0.015,
+            "live_micro_early_cut_new_bases_only": True,
+            "live_micro_early_cut_momentum_max_return": 0.0,
             "live_micro_momentum_exit_min_return": 0.002,
             "live_micro_momentum_exit_above_be_pct": 0.005,
             "global_max_strategy_exposure_pct": 100.0,
