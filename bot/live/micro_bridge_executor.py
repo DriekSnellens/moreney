@@ -4474,10 +4474,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("trail_take_profit")
             and self._is_new_base_buy(venue, base)
         ):
-            # New crypto only: require mark momentum (softer while ring underfilled).
+            # New crypto only: require mark momentum. While the active ring is
+            # underfilled, allow cold/flat marks (still block clearly falling).
             mom_floor = self._momentum_floor_for_buy(venue)
+            ring_relaxed = self._ring_needs_deploy(venue)
             if not self._momentum_ok(
-                symbol, require_history=True, min_return=mom_floor
+                symbol,
+                require_history=not ring_relaxed,
+                min_return=mom_floor,
             ):
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
@@ -4486,7 +4490,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     message=(
                         f"new base {base} needs momentum "
                         f"(>={mom_floor} over ~{self._momentum_samples} samples"
-                        f"{'; ring-relaxed' if mom_floor < self._momentum_min else ''})"
+                        f"{'; ring-relaxed' if ring_relaxed else ''})"
                     ),
                 )
 
