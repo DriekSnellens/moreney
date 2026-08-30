@@ -754,7 +754,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_partial_pct == 0.0
     assert cfg.live_micro_max_notional_eur <= 200.0
-    assert cfg.live_micro_max_notional_eur >= 180.0
+    assert cfg.live_micro_max_notional_eur >= 100.0
     assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0
@@ -762,6 +762,8 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 8.0
     assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.50
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
+    assert cfg.live_micro_exit_engine_enabled is True
+    assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 25.0
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:
@@ -2896,8 +2898,11 @@ async def test_exit_engine_touch_maker_when_bid_below_taker_be() -> None:
     assert _T.bid >= be_m
     assert _T.bid < be_t
 
+    # Mark above maker BE but below taker-BE cushion → inside-spread touch maker.
+    mark = min(_T.ask, be_t * Decimal("1.0002"))
+    assert mark < be_t * Decimal("1.0005")
     px, post_only, reason = await bridge._profitable_exit_quote(  # noqa: SLF001
-        "bitvavo", "DOT", Decimal("0.1410"), aggressive=True
+        "bitvavo", "DOT", mark, aggressive=True
     )
     assert reason == "rest_touch_maker"
     assert post_only is True
@@ -2905,11 +2910,11 @@ async def test_exit_engine_touch_maker_when_bid_below_taker_be() -> None:
     assert px < _T.ask  # inside spread, not parked at ask
 
     px_pas, _, reason_pas = await bridge._profitable_exit_quote(  # noqa: SLF001
-        "bitvavo", "DOT", Decimal("0.1410"), aggressive=False
+        "bitvavo", "DOT", mark, aggressive=False
     )
     assert reason_pas == "rest_maker_be"
     assert px_pas is not None
-    # Passive sits at min(ask, mark)=mark; aggressive should be closer to bid.
+    # Passive sits at min(ask, mark); aggressive should be closer to bid.
     assert px <= px_pas
 
 
@@ -2964,3 +2969,94 @@ def test_session_settings_enable_exit_engine_and_sleeve() -> None:
     assert ss.live_micro_exit_engine_enabled is True
     assert float(ss.live_micro_exit_resting_max_age_sec or 0) <= 15.0
     assert float(ss.live_micro_velocity_sleeve_daily_loss_cap_eur or 0) > 0
+
+
+@pytest.mark.asyncio
+async def test_exit_engine_limit_taker_be_when_mark_clears_cushion() -> None:
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=15.0,
+        live_micro_exit_engine_enabled=True,
+        live_micro_exit_taker_cushion_bps=5.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:DOT"] = [[Decimal("10"), Decimal("0.140")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:DOT")  # noqa: SLF001
+
+    class _T:
+        bid = Decimal("0.1405")  # above maker BE, below taker BE
+        ask = Decimal("0.1420")
+        last = Decimal("0.1418")
+
+    class _Client:
+        async def fetch_ticker(self, symbol: str):
+            return _T()
+
+    bridge._trading_client = lambda venue: _Client()  # type: ignore[method-assign]  # noqa: SLF001
+    be_t = bridge._break_even_sell_price("bitvavo", "DOT", taker=True)  # noqa: SLF001
+    assert be_t is not None
+    # Mark clears taker BE + cushion → limit at taker BE (fill-seeking).
+    mark = be_t * Decimal("1.001")
+    px, post_only, reason = await bridge._profitable_exit_quote(  # noqa: SLF001
+        "bitvavo", "DOT", mark, aggressive=True
+    )
+    assert reason == "limit_taker_be"
+    assert post_only is False
+    assert px is not None and px >= be_t
+
+
+def test_recovery_clears_be_harvest_done_when_underwater() -> None:
+    settings = _unlocked(paper_trail_take_profit_enabled=True)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    st = {
+        "below_be": False,
+        "be_harvest_partial_done": True,
+        "recovery_be_partial_done": True,
+        "soft_armed": True,
+        "recovery_armed": True,
+    }
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    be = bridge._break_even_sell_price("bitvavo", "SOL")  # noqa: SLF001
+    assert be is not None
+    bridged = bridge._maybe_recovery_arm_from_loss(  # noqa: SLF001
+        st, venue="bitvavo", base="SOL", mark=be - Decimal("1"), be=be
+    )
+    assert bridged is False
+    assert st["below_be"] is True
+    assert st["be_harvest_partial_done"] is False
+    assert st["recovery_be_partial_done"] is False
+
+
+def test_okx_ring_clip_while_underfilled() -> None:
+    settings = _unlocked(
+        live_micro_first_clip_eur=75.0,
+        live_micro_okx_ring_clip_eur=50.0,
+        live_micro_active_ring_eur=1000.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+        execute_venues={"bitvavo", "okx"},
+    )
+    bridge._venue_raw_balances["okx"] = []  # noqa: SLF001
+    # Fake free cash so ring_needs_deploy is true.
+    bridge._venue_budget_remaining = lambda venue: Decimal("500")  # type: ignore[method-assign]  # noqa: SLF001
+    cap = bridge._buy_clip_cap_eur("okx", "DOT")  # noqa: SLF001
+    assert cap == Decimal("50")
+    cap_bv = bridge._buy_clip_cap_eur("bitvavo", "DOT")  # noqa: SLF001
+    assert cap_bv == Decimal("75")

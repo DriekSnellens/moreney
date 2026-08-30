@@ -385,10 +385,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._exit_soft_armed_partial = Decimal(
             str(
-                getattr(settings, "live_micro_exit_soft_armed_partial_pct", 0.50)
-                or 0.50
+                getattr(settings, "live_micro_exit_soft_armed_partial_pct", 0.75)
+                or 0.75
             )
         )
+        self._exit_taker_cushion_bps = Decimal(
+            str(getattr(settings, "live_micro_exit_taker_cushion_bps", 5.0) or 5.0)
+        )
+        self._okx_ring_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_okx_ring_clip_eur", 50) or 50)
+        )
+        # Session counters for exit-engine / sleeve observability.
+        self._exit_quote_counts: dict[str, int] = {}
+        self._exit_fill_counts: dict[str, int] = {}
+        self._exit_pending_counts: dict[str, int] = {}
+        self._exit_reject_counts: dict[str, int] = {}
         self._block_underwater_adds = bool(
             getattr(settings, "live_micro_block_underwater_adds", True)
         )
@@ -1096,9 +1107,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "resting_max_age_sec": self._exit_resting_max_age_sec,
                 "cooldown_sec": self._exit_engine_cooldown_sec,
                 "touch_improve_bps": str(self._exit_touch_improve_bps),
+                "taker_cushion_bps": str(self._exit_taker_cushion_bps),
                 "soft_armed_work": self._exit_soft_armed_work,
                 "soft_armed_partial_pct": str(self._exit_soft_armed_partial),
+                "quotes": dict(self._exit_quote_counts),
+                "fills": dict(self._exit_fill_counts),
+                "pending": dict(self._exit_pending_counts),
+                "rejects": dict(self._exit_reject_counts),
             },
+            "okx_ring_clip_eur": str(self._okx_ring_clip_eur),
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))
                 for v in sorted(self._execute_venues)
@@ -1343,11 +1360,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 sleeve_bits.append("PAUSED")
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
         if self._exit_engine_enabled:
+            q = self._exit_quote_counts
+            f = self._exit_fill_counts
+            p = self._exit_pending_counts
             hints.append(
                 "EXIT_ENGINE on "
                 f"reprice={self._exit_resting_max_age_sec:.0f}s "
                 f"cd={self._exit_engine_cooldown_sec:.0f}s "
-                f"work={'on' if self._exit_soft_armed_work else 'off'}"
+                f"work={'on' if self._exit_soft_armed_work else 'off'} "
+                f"q={sum(v for k,v in q.items() if not str(k).startswith('reason:'))} "
+                f"fill={sum(v for k,v in f.items() if not str(k).startswith('reason:'))} "
+                f"pend={sum(v for k,v in p.items() if not str(k).startswith('reason:'))}"
             )
 
         if not hints:
@@ -2918,6 +2941,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if mark < be:
             st["below_be"] = True
+            # Allow a fresh BE+ harvest once the bag recovers.
+            st["be_harvest_partial_done"] = False
+            st["recovery_be_partial_done"] = False
             return False
         if not st.get("below_be"):
             return False
@@ -2959,11 +2985,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         st["recovery_armed"] = True
         if already:
             return False
+        # Fresh recovery → allow immediate BE+ harvest (don't wait for old done flags).
+        st["be_harvest_partial_done"] = False
+        st["recovery_be_partial_done"] = False
         soft_dd = Decimal(str(st.get("drawdown") or self._soft_dd_floor))
         self._push_alert(
             "recovery_arm",
             f"{base} recovery-arm at BE mark={mark} be={be} "
-            f"(trail dd={float(soft_dd * 100):.1f}%; sell only on pullback to BE)",
+            f"(trail dd={float(soft_dd * 100):.1f}%; BE+ harvest + pullback floor)",
             base=base,
         )
         logger.info(
@@ -3022,6 +3051,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         use_aggressive = bool(aggressive and self._exit_engine_enabled)
         if use_aggressive:
+            cushion = self._exit_taker_cushion_bps / Decimal("10000")
+            # Mark already pays taker fees with cushion → work a fillable limit
+            # at taker-BE (can take when bid catches up; never below taker BE).
+            if mark >= be_taker * (Decimal("1") + cushion):
+                return max(be_taker, best_bid), False, "limit_taker_be"
             # Inside-spread maker near bid touch (fill-seeking, still post-only).
             improve = best_bid * (self._exit_touch_improve_bps / Decimal("10000"))
             tick = best_bid * Decimal("0.00005")
@@ -3319,6 +3353,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             st.get("be_harvest_partial_done") or st.get("recovery_be_partial_done")
         )
 
+    def _bump_exit_stat(self, bucket: dict[str, int], key: str) -> None:
+        bucket[key] = int(bucket.get(key, 0) or 0) + 1
+
     def _exit_cooldown_sec(self, reason: str) -> float:
         if reason in {
             "trail_be_harvest",
@@ -3354,6 +3391,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
         """Single entry clip — no scale-up adds after soft-arm."""
         first = self._first_clip_eur
+        venue_l = venue.strip().lower()
+        # OKX ring underfilled: smaller clips → more parallel active-book slots.
+        if (
+            venue_l == "okx"
+            and self._okx_ring_clip_eur > 0
+            and self._ring_needs_deploy(venue_l)
+        ):
+            if first <= 0:
+                first = self._okx_ring_clip_eur
+            else:
+                first = min(first, self._okx_ring_clip_eur)
         if first <= 0:
             add = self._add_clip_eur
             return add if add > 0 else None
@@ -4074,12 +4122,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and mark >= be
                 and self._be_harvest_partial > 0
                 and not self._be_harvest_already_done(st)
-                and gain_now >= self._be_harvest_min_gain
+                and gain_now
+                >= (
+                    min(self._be_harvest_min_gain, Decimal("0.00015"))
+                    if st.get("recovery_armed")
+                    else self._be_harvest_min_gain
+                )
                 and not self._soft_partial_would_fire(
                     st, gain_now=gain_now, soft_arm_now=soft_arm_now
                 )
             ):
                 # Fee-positive harvest at BE+ (recovery bags, small MTM wins).
+                # Recovery bags use a slightly lower min-gain so underwater→BE+
+                # recycles capital before the next dip.
                 free = await self._refresh_free(venue, symbol, asset, locked)
                 cap = min(
                     free,
@@ -4229,6 +4284,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_skip("trail_dust")
                 continue
             self._exit_cooldown_mono[cooldown_key] = time.monotonic()
+            self._bump_exit_stat(self._exit_quote_counts, quote_reason)
+            self._bump_exit_stat(self._exit_quote_counts, f"reason:{reason}")
             logger.info(
                 "TRAIL_EXIT_QUOTE venue=%s base=%s reason=%s quote=%s px=%s post_only=%s qty=%s",
                 venue,
@@ -4254,6 +4311,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "base": asset,
                 "symbol": symbol,
                 "reason": reason,
+                "quote": quote_reason,
                 "qty": str(sell_qty),
                 "mark": str(mark),
                 "cost": str(cost),
@@ -4263,36 +4321,49 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             }
             triggered.append(row)
             if result.status == OrderStatus.REJECTED:
+                self._bump_exit_stat(self._exit_reject_counts, quote_reason)
+                self._bump_exit_stat(self._exit_reject_counts, f"reason:{reason}")
                 if reason != "trail_be_harvest":
                     self._clear_partial_done(st, reason)
                 self._bump_skip(f"{reason}_reject")
             elif reason == "trail_be_harvest":
                 # Lock after submit — resting fills must not re-trigger 35% spam.
                 self._set_partial_done(st, reason)
+                status_l = str(result.status.value).lower()
+                if status_l in {"filled", "partially_filled"}:
+                    self._bump_exit_stat(self._exit_fill_counts, quote_reason)
+                    self._bump_exit_stat(self._exit_fill_counts, f"reason:{reason}")
+                else:
+                    self._bump_exit_stat(self._exit_pending_counts, quote_reason)
+                    self._bump_exit_stat(self._exit_pending_counts, f"reason:{reason}")
                 logger.info(
-                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
+                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s quote=%s",
                     venue,
                     asset,
                     reason,
                     sell_qty,
                     mark,
                     result.status.value,
+                    quote_reason,
                 )
             elif result.status in {
                 OrderStatus.FILLED,
                 OrderStatus.PARTIALLY_FILLED,
             }:
+                self._bump_exit_stat(self._exit_fill_counts, quote_reason)
+                self._bump_exit_stat(self._exit_fill_counts, f"reason:{reason}")
                 self._set_partial_done(st, reason)
                 if reason == "trail_momentum_be_exit":
                     st["momentum_be_exit_done"] = True
                 logger.info(
-                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
+                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s quote=%s",
                     venue,
                     asset,
                     reason,
                     sell_qty,
                     mark,
                     result.status.value,
+                    quote_reason,
                 )
                 if reason in {
                     "trail_drawdown",
@@ -4311,14 +4382,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     else:
                         st["triggered"] = False
             else:
+                self._bump_exit_stat(self._exit_pending_counts, quote_reason)
+                self._bump_exit_stat(self._exit_pending_counts, f"reason:{reason}")
                 logger.info(
-                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s",
+                    "TRAIL_EXIT venue=%s base=%s reason=%s qty=%s mark=%s status=%s quote=%s",
                     venue,
                     asset,
                     reason,
                     sell_qty,
                     mark,
                     result.status.value,
+                    quote_reason,
                 )
 
         return {

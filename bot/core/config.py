@@ -509,14 +509,19 @@ class Settings(BaseSettings):
     # D: Exit engine — soft-armed / BE+ sells seek fills (touch/improve, fast reprice).
     # Never sells below fee-aware BE; taker only when bid ≥ taker BE.
     live_micro_exit_engine_enabled: bool = True
-    live_micro_exit_resting_max_age_sec: float = Field(default=8.0, ge=2.0, le=120.0)
+    live_micro_exit_resting_max_age_sec: float = Field(default=5.0, ge=2.0, le=120.0)
     live_micro_exit_cooldown_sec: float = Field(default=3.0, ge=1.0, le=60.0)
     live_micro_exit_touch_improve_bps: float = Field(default=2.0, ge=0.0, le=20.0)
     # While soft-armed and mark ≥ BE, keep working partial exits (spike capture).
     live_micro_exit_soft_armed_work: bool = True
     live_micro_exit_soft_armed_partial_pct: float = Field(
-        default=0.50, ge=0.10, le=1.0
+        default=0.75, ge=0.10, le=1.0
     )
+    # When mark clears taker-BE by this cushion, prefer fillable limit at taker-BE
+    # (post_only=False) so spikes that already pay fees actually fill.
+    live_micro_exit_taker_cushion_bps: float = Field(default=5.0, ge=0.0, le=50.0)
+    # OKX active-ring: smaller clips while underfilled → more parallel slots.
+    live_micro_okx_ring_clip_eur: float = Field(default=50.0, ge=20.0, le=200.0)
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).

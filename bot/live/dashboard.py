@@ -98,6 +98,7 @@ def _nl_idle(hint: str) -> str:
         "ACTIVE_RING": "Active-book deploy (focus vs ring-target)",
         "VELOCITY_SLEEVE": "Velocity-sleeve (werkkapitaal + dag-verliescap)",
         "EXIT_ENGINE": "Exit-engine (soft-armed BE+ fill-seeking)",
+        "EXIT_FILLS": "Exit fills (touch / taker / work)",
         "UNDERWATER_BASE_BLOCK": "Underwater base — geen nieuwe buy op die coin",
         "CORR_GROUP_CAP": "Correlatie-groep vol",
         "POLICY_BLOCKED": "Policy blokkeert",
@@ -1064,6 +1065,59 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "</div></section>"
     )
 
+    exit_eng = bridge.get("exit_engine") or {}
+    exit_quotes = exit_eng.get("quotes") or {}
+    exit_fills = exit_eng.get("fills") or {}
+    exit_pending = exit_eng.get("pending") or {}
+    exit_rejects = exit_eng.get("rejects") or {}
+
+    def _sum_quote_keys(d: dict) -> int:
+        return sum(
+            int(v or 0)
+            for k, v in d.items()
+            if not str(k).startswith("reason:")
+        )
+
+    touch_q = int(exit_quotes.get("rest_touch_maker", 0) or 0)
+    hit_q = int(exit_quotes.get("hit_bid_taker", 0) or 0)
+    lim_q = int(exit_quotes.get("limit_taker_be", 0) or 0)
+    work_fills = int(exit_fills.get("reason:trail_exit_work", 0) or 0)
+    harvest_fills = int(exit_fills.get("reason:trail_be_harvest", 0) or 0)
+    sleeve_pnl = _dec(bridge.get("sleeve_realized_eur"))
+    sleeve_cap = _dec(bridge.get("sleeve_daily_loss_cap_eur"))
+    sleeve_paused = bool(bridge.get("sleeve_paused"))
+    ring_by = bridge.get("active_book_notional_by_venue") or {}
+    ring_target = _dec(bridge.get("active_ring_eur") or bridge.get("velocity_sleeve_eur"))
+    ring_bits = []
+    for vn in ("bitvavo", "okx"):
+        active = _dec(ring_by.get(vn))
+        ring_bits.append(
+            f"{vn} {_esc(_eur(active))}/{_esc(_eur(ring_target))}"
+        )
+    sleeve_cls = ""
+    if sleeve_pnl is not None and sleeve_pnl > 0:
+        sleeve_cls = "good"
+    elif sleeve_pnl is not None and sleeve_pnl < 0:
+        sleeve_cls = "bad"
+    obs_html = (
+        "<section class='target-band' aria-label='Exit-engine & sleeve'>"
+        "<h2>Exit-engine &amp; velocity sleeve</h2>"
+        "<div class='band-row'>"
+        f"<span>Quotes: touch={touch_q} · hit_bid={hit_q} · lim_taker={lim_q} "
+        f"(totaal {_sum_quote_keys(exit_quotes)})</span>"
+        f"<span>Fills: work={work_fills} · harvest={harvest_fills} · "
+        f"all={_sum_quote_keys(exit_fills)} · pend={_sum_quote_keys(exit_pending)} · "
+        f"rej={_sum_quote_keys(exit_rejects)}</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Sleeve PnL: <strong class='{sleeve_cls}'>"
+        f"{_esc(_eur(sleeve_pnl, signed=True) if sleeve_pnl is not None else '—')}</strong>"
+        f" · cap −{_esc(_eur(sleeve_cap))}"
+        f"{' · PAUSED' if sleeve_paused else ''}</span>"
+        f"<span>Ring: {' · '.join(ring_bits) if ring_bits else '—'}</span>"
+        "</div></section>"
+    )
+
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
       <article class="chart-card chart-pnl-first">
@@ -1167,6 +1221,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {kpi_grid_html}
       {charts_html}
       {target_band_html}
+      {obs_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">

@@ -186,7 +186,7 @@ def _session_settings(
             # One quote per venue per cycle — avoids stacked duplicate resting bids.
             "paper_maker_max_open_quotes": 4 if cross_venue else 2,
             # More concurrent NET-passing quotes across venues (still never-loss gated).
-            "arbitrage_max_emits_per_cycle": 10 if cross_venue else 5,
+            "arbitrage_max_emits_per_cycle": 12 if cross_venue else 5,
             "paper_cycle_interval_ms": 1200.0,
             # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
             "paper_maker_min_notional_eur": 55.0,
@@ -261,19 +261,13 @@ def _session_settings(
             ),
             # D: exit engine — fill soft-armed BE+ spikes (touch ask, fast reprice).
             "live_micro_exit_engine_enabled": True,
-            "live_micro_exit_resting_max_age_sec": float(
-                getattr(base, "live_micro_exit_resting_max_age_sec", 8.0) or 8.0
-            ),
-            "live_micro_exit_cooldown_sec": float(
-                getattr(base, "live_micro_exit_cooldown_sec", 3.0) or 3.0
-            ),
-            "live_micro_exit_touch_improve_bps": float(
-                getattr(base, "live_micro_exit_touch_improve_bps", 2.0) or 2.0
-            ),
+            "live_micro_exit_resting_max_age_sec": 5.0,
+            "live_micro_exit_cooldown_sec": 3.0,
+            "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
-            "live_micro_exit_soft_armed_partial_pct": float(
-                getattr(base, "live_micro_exit_soft_armed_partial_pct", 0.50) or 0.50
-            ),
+            "live_micro_exit_soft_armed_partial_pct": 0.75,
+            "live_micro_exit_taker_cushion_bps": 5.0,
+            "live_micro_okx_ring_clip_eur": 50.0,
             # Underfilled ring: flat marks OK (still block falling).
             "live_micro_ring_momentum_min_return": float(
                 getattr(base, "live_micro_ring_momentum_min_return", 0.0) or 0.0
