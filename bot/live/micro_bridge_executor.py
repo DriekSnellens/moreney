@@ -32,9 +32,10 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 _MIN_LIVE_NOTIONAL = Decimal("5")
-_FILL_POLL_SECONDS = 2.5
-_FILL_POLL_INTERVAL = 0.3
+_FILL_POLL_SECONDS = 1.5
+_FILL_POLL_INTERVAL = 0.15
 _DEFAULT_RESTING_MAX_AGE_SEC = 90.0
+_PERSIST_DEBOUNCE_SEC = 2.5
 _QUOTE_FEE_CURRENCIES = frozenset({"EUR", "USDT", "USDC", "USD"})
 
 
@@ -171,6 +172,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._last_orphan_sweep_mono = 0.0
         self._orphan_sweep_sec = 60.0
+        self._persist_debounce_sec = _PERSIST_DEBOUNCE_SEC
+        self._last_persist_mono = 0.0
+        self._persist_dirty = False
         # Trailing take-profit (soft/hard + ATR) on session buys.
         from bot.live.trail_policy import MarkSeries, parse_corr_group
 
@@ -768,8 +772,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._sanitize_persisted_trails()
         return True
 
-    def persist_runtime_state(self) -> None:
+    def persist_runtime_state(self, *, force: bool = False) -> None:
         path = self._persist_path
+        now = time.monotonic()
+        if (
+            not force
+            and now - self._last_persist_mono < self._persist_debounce_sec
+        ):
+            self._persist_dirty = True
+            return
+        self._persist_dirty = False
+        self._last_persist_mono = now
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(path.suffix + ".tmp")
@@ -780,6 +793,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             tmp.replace(path)
         except Exception as exc:  # noqa: BLE001
             logger.warning("micro bridge persist failed path=%s err=%s", path, exc)
+
+    def flush_runtime_state(self) -> None:
+        """Force-write debounced bridge state (session shutdown / after fills)."""
+        if self._persist_dirty or self._last_persist_mono <= 0:
+            self.persist_runtime_state(force=True)
 
     def set_buys_blocked(self, blocked: bool, *, new_bases_only: bool = False) -> None:
         """Regime guard: when True, reject BUY orders on all venues (sells/trails still run).
@@ -2803,7 +2821,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "placed_at": time.time(),
             }
         )
-        self.persist_runtime_state()
+        self.persist_runtime_state(force=True)
 
     async def _prune_resting_buys(self, venue: str) -> int:
         """Keep at most N resting buys per symbol; drop buys for held bases."""
@@ -2870,6 +2888,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self.persist_runtime_state()
         return cancelled
 
+    async def _resting_order_snapshots(
+        self,
+        client: Any,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, tuple[Decimal, Decimal, str]]:
+        """Parallel fetch_order for resting rows on one venue."""
+
+        async def _one(row: dict[str, Any]) -> tuple[str, tuple[Decimal, Decimal, str]]:
+            oid = str(row.get("exchange_order_id") or "")
+            symbol = str(row.get("symbol") or "")
+            fallback = Decimal(str(row.get("price") or 0))
+            if not oid or not symbol:
+                return oid, (_ZERO, fallback, "open")
+            try:
+                order = await client.fetch_order(oid, symbol)
+                filled = Decimal(str(order.filled_quantity or 0))
+                avg = Decimal(
+                    str(order.average_price or order.price or row.get("price") or 0)
+                )
+                status = order.status
+                status_val = status.value if hasattr(status, "value") else str(status)
+                return oid, (filled, avg, str(status_val))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "resting fetch_order failed id=%s symbol=%s err=%s",
+                    oid,
+                    symbol,
+                    f"{type(exc).__name__}: {exc}"[:180],
+                )
+                return oid, (_ZERO, fallback, "open")
+
+        if not rows:
+            return {}
+        pairs = await asyncio.gather(*[_one(row) for row in rows])
+        return {oid: snap for oid, snap in pairs if oid}
+
     async def manage_resting_orders(self, venue: str = "bitvavo") -> dict[str, Any]:
         """Poll resting live orders: mirror fills, cancel stale quotes, free capital."""
         pruned = await self._prune_resting_buys(venue)
@@ -2888,6 +2942,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             for r in self._resting
             if str(r.get("venue") or "").strip().lower() == venue_l
         }
+        venue_rows: list[dict[str, Any]] = []
+        for row in list(self._resting):
+            row_venue = str(row.get("venue") or "").strip().lower()
+            if row_venue and row_venue != venue_l:
+                continue
+            oid = str(row.get("exchange_order_id") or "")
+            symbol = str(row.get("symbol") or "")
+            if oid and symbol:
+                venue_rows.append(row)
+        snapshots = (
+            await self._resting_order_snapshots(client, venue_rows)
+            if client is not None
+            else {}
+        )
 
         for row in list(self._resting):
             row_venue = str(row.get("venue") or "").strip().lower()
@@ -2903,22 +2971,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             filled = _ZERO
             avg = Decimal(str(row.get("price") or 0))
             status_val = "open"
-            try:
-                order = await client.fetch_order(oid, symbol)
-                filled = Decimal(str(order.filled_quantity or 0))
-                avg = Decimal(
-                    str(order.average_price or order.price or row.get("price") or 0)
-                )
-                status = order.status
-                status_val = status.value if hasattr(status, "value") else str(status)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "resting fetch_order failed venue=%s id=%s symbol=%s err=%s",
-                    venue_l,
-                    oid,
-                    symbol,
-                    f"{type(exc).__name__}: {exc}"[:180],
-                )
+            snap = snapshots.get(oid)
+            if snap is not None:
+                filled, avg, status_val = snap
 
             if filled > 0 and avg > 0:
                 from bot.core.models import OrderRequest
@@ -3125,9 +3180,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 await live_exec.refresh_open_order_count(venue, force=bool(cancelled))
             except Exception:  # noqa: BLE001
                 pass
-        if mirrored or cancelled:
+        if mirrored:
             await self.reconcile_from_exchange(venue)
-        self.persist_runtime_state()
+            self.persist_runtime_state(force=True)
+        else:
+            self.persist_runtime_state()
         return {
             "ok": True,
             "mirrored": mirrored,

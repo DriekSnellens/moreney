@@ -180,7 +180,7 @@ def _session_settings(
             "paper_maker_max_open_quotes": 6 if cross_venue else 4,
             # More concurrent NET-passing quotes across venues (still never-loss gated).
             "arbitrage_max_emits_per_cycle": 12 if cross_venue else 5,
-            "paper_cycle_interval_ms": 1200.0,
+            "paper_cycle_interval_ms": 800.0,
             # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
             "paper_maker_min_notional_eur": 55.0,
             "live_micro_first_clip_eur": 55.0,
@@ -270,7 +270,7 @@ def _session_settings(
             # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
             "live_micro_exit_resting_max_age_sec": 1.0,
-            "live_micro_exit_cooldown_sec": 1.5,
+            "live_micro_exit_cooldown_sec": 1.0,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.75,
@@ -627,10 +627,11 @@ async def run_session(
         continuous,
         cfg.market_data_mode,
     )
-    def _tick() -> None:
+    def _tick(st: dict[str, Any] | None = None) -> None:
         if status_callback is None:
             return
-        st = runner.status()
+        if st is None:
+            st = runner.status()
         elapsed = time.monotonic() - started_mono
         remaining = (
             None
@@ -688,14 +689,17 @@ async def run_session(
         last_sync = time.monotonic()
         last_resting = time.monotonic()
         last_dust = time.monotonic()
+        last_dashboard_tick = time.monotonic()
         while True:
             if should_stop is not None and should_stop():
                 logger.info("Full-bot micro session stop requested")
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 break
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.25)
+            st_now: dict[str, Any] | None = None
             try:
+                st_now = runner.status()
                 bridge.maybe_utc_day_rollover()
                 bridge.check_winnable_gap_alert()
             except Exception:  # noqa: BLE001
@@ -704,7 +708,8 @@ async def run_session(
             # Per-symbol vol dump cool-off is handled inside maker_inventory —
             # do not globally block all buys when memecoins dump.
             try:
-                st_now = runner.status()
+                if st_now is None:
+                    st_now = runner.status()
                 reduce_only = bool(st_now.get("reduce_only"))
                 hmm = st_now.get("hmm_regime") or {}
                 toxic = bool(hmm.get("is_toxic_flow"))
@@ -801,7 +806,7 @@ async def run_session(
                         )
             except Exception:  # noqa: BLE001
                 pass
-            if time.monotonic() - last_resting >= 1.0:
+            if time.monotonic() - last_resting >= 0.5:
                 for resting_venue in sorted(bridge._execute_venues):  # noqa: SLF001
                     try:
                         await bridge.manage_resting_orders(resting_venue)
@@ -849,12 +854,18 @@ async def run_session(
                     except Exception:  # noqa: BLE001
                         logger.exception("periodic micro sync failed venue=%s", sync_venue)
                 last_sync = time.monotonic()
-            _tick()
+            if time.monotonic() - last_dashboard_tick >= 2.0:
+                _tick(st_now)
+                last_dashboard_tick = time.monotonic()
             if not runner.running:
                 break
     finally:
         if bridge_holder is not None:
             bridge_holder.pop("bridge", None)
+        try:
+            bridge.flush_runtime_state()  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            logger.exception("final bridge persist failed")
         try:
             # Free locked capital: cancel any leftover resting live quotes.
             bridge._resting_max_age_sec = 0.0  # noqa: SLF001
