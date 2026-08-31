@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -124,13 +125,14 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_winner_add_enabled is True
     assert cfg.live_micro_winner_add_max == 2
     assert float(cfg.live_micro_winner_add_clip_eur) == 55.0
+    assert float(cfg.live_micro_winner_add_cooldown_sec) == 45.0
     assert cfg.live_micro_low_util_relax_focus is True
     assert float(cfg.paper_maker_min_profit_eur) == 0.03
     assert float(cfg.paper_maker_min_net_return) == 0.0004
     assert float(cfg.profitability_min_net_profit_usd) == 0.03
     assert float(cfg.profitability_min_net_return) == 0.0004
     assert float(cfg.risk_min_net_profit_usd) == 0.03
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 500.0
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
     assert cfg.live_micro_max_resting_buys_per_symbol == 2
     assert cfg.live_micro_max_open_orders_per_venue == 4
     assert cfg.paper_trail_session_buys_only is False
@@ -249,7 +251,7 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 500.0
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
     assert cfg.live_micro_max_per_corr_group == 3
     assert float(cfg.profitability_min_net_return) == 0.0004
     assert float(cfg.profitability_min_net_profit_usd) == 0.03
@@ -797,7 +799,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
     assert cfg.live_micro_exit_engine_enabled is True
     assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 50.0
-    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.5
+    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.0
     assert float(cfg.live_micro_mark_ttl_sec) == 2.0
     assert float(cfg.live_micro_exit_cooldown_sec) == 1.5
 
@@ -2937,10 +2939,13 @@ async def test_holding_base_buy_block_rejects_add(
 
 
 @pytest.mark.asyncio
-async def test_prune_resting_buys_keeps_best_bid_only(
+async def test_prune_resting_buys_keeps_best_n_bids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = _unlocked(live_micro_block_buys_when_holding_base=False)
+    settings = _unlocked(
+        live_micro_block_buys_when_holding_base=False,
+        live_micro_max_resting_buys_per_symbol=2,
+    )
     bridge = MicroBudgetLiveExecutor(
         settings,
         portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
@@ -2954,7 +2959,15 @@ async def test_prune_resting_buys_keeps_best_bid_only(
             "venue": "bitvavo",
             "symbol": "SOLEUR",
             "side": "buy",
-            "exchange_order_id": "low",
+            "exchange_order_id": "lowest",
+            "price": Decimal("88"),
+            "quantity": Decimal("0.2"),
+        },
+        {
+            "venue": "bitvavo",
+            "symbol": "SOLEUR",
+            "side": "buy",
+            "exchange_order_id": "mid",
             "price": Decimal("89"),
             "quantity": Decimal("0.2"),
         },
@@ -2975,9 +2988,73 @@ async def test_prune_resting_buys_keeps_best_bid_only(
     monkeypatch.setattr(bridge, "_trading_client", lambda _v: FakeClient())
     n = await bridge._prune_resting_buys("bitvavo")  # noqa: SLF001
     assert n == 1
-    assert cancelled == ["low"]
+    assert cancelled == ["lowest"]
+    assert len(bridge._resting) == 2  # noqa: SLF001
+    kept = {r["exchange_order_id"] for r in bridge._resting}  # noqa: SLF001
+    assert kept == {"high", "mid"}
+
+
+@pytest.mark.asyncio
+async def test_buy_momentum_cancel_skipped_during_low_util(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        live_micro_cancel_buy_on_flat_momentum=True,
+        live_micro_ring_soft_max_active_eur=650.0,
+        live_micro_active_ring_eur=1000.0,
+        live_micro_resting_max_age_sec=600.0,
+        live_micro_buy_resting_max_age_sec=600.0,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    bridge._resting = [  # noqa: SLF001
+        {
+            "venue": "bitvavo",
+            "symbol": "SOLEUR",
+            "side": "buy",
+            "exchange_order_id": "bid1",
+            "price": Decimal("90"),
+            "quantity": Decimal("0.2"),
+            "placed_mono": time.monotonic(),
+        },
+    ]
+    cancelled: list[str] = []
+
+    class FakeOrder:
+        filled_quantity = Decimal("0")
+        average_price = Decimal("90")
+        price = Decimal("90")
+        status = OrderStatus.OPEN
+
+    class FakeClient:
+        async def fetch_order(self, oid: str, symbol: str) -> FakeOrder:
+            return FakeOrder()
+
+        async def cancel_order(self, oid: str, symbol: str) -> None:
+            cancelled.append(oid)
+
+    monkeypatch.setattr(bridge, "_trading_client", lambda _v: FakeClient())
+    async def _noop_prune(_v: str) -> int:
+        return 0
+
+    monkeypatch.setattr(bridge, "_prune_resting_buys", _noop_prune)
+    monkeypatch.setattr(bridge, "_momentum_flat_or_down_for_cancel", lambda _s: True)
+    monkeypatch.setattr(bridge, "_ring_soft_momentum_eligible", lambda _v: True)
+
+    await bridge.manage_resting_orders("bitvavo")
+    assert cancelled == []
     assert len(bridge._resting) == 1  # noqa: SLF001
-    assert bridge._resting[0]["exchange_order_id"] == "high"  # noqa: SLF001
+
+    monkeypatch.setattr(bridge, "_ring_soft_momentum_eligible", lambda _v: False)
+    await bridge.manage_resting_orders("bitvavo")
+    assert cancelled == ["bid1"]
+    assert bridge._resting == []  # noqa: SLF001
 
 
 def test_select_balanced_emits_one_symbol_per_venue() -> None:

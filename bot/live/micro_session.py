@@ -237,7 +237,7 @@ def _session_settings(
             "paper_buy_momentum_min_return": 0.0008,  # ≥+0.08% rising-tape entries
             "paper_buy_momentum_samples": 12,
             "live_micro_momentum_require_last_n_rising": 3,
-            "live_micro_ring_soft_max_active_eur": 500.0,
+            "live_micro_ring_soft_max_active_eur": 650.0,
             "live_micro_low_util_rising_n": 2,
             "live_micro_low_util_buy_resting_max_age_sec": 60.0,
             "live_micro_buy_resting_max_age_sec": 45.0,
@@ -248,7 +248,7 @@ def _session_settings(
             "live_micro_winner_add_enabled": True,
             "live_micro_winner_add_max": 2,
             "live_micro_winner_add_clip_eur": 55.0,
-            "live_micro_winner_add_cooldown_sec": 60.0,
+            "live_micro_winner_add_cooldown_sec": 45.0,
             "live_micro_buy_quality_underwater_count": 4,
             "live_micro_buy_quality_pause_sec": 2700.0,
             "live_micro_block_underwater_cross_venue": True,
@@ -269,7 +269,7 @@ def _session_settings(
             "live_micro_velocity_sleeve_daily_loss_cap_eur": 50.0,
             # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
-            "live_micro_exit_resting_max_age_sec": 1.5,
+            "live_micro_exit_resting_max_age_sec": 1.0,
             "live_micro_exit_cooldown_sec": 1.5,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,

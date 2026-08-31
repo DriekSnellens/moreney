@@ -2806,7 +2806,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.persist_runtime_state()
 
     async def _prune_resting_buys(self, venue: str) -> int:
-        """Keep at most one resting buy per symbol; drop buys for held bases."""
+        """Keep at most N resting buys per symbol; drop buys for held bases."""
         client = self._trading_client(venue)
         if client is None:
             return 0
@@ -2843,16 +2843,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             by_symbol.setdefault(sym, []).append(row)
 
+        keep_n = max(1, self._max_resting_buys_per_symbol)
         for sym, rows in by_symbol.items():
-            if len(rows) <= 1:
+            if len(rows) <= keep_n:
                 still.extend(rows)
                 continue
             rows.sort(
                 key=lambda r: Decimal(str(r.get("price") or 0)),
                 reverse=True,
             )
-            still.append(rows[0])
-            for extra in rows[1:]:
+            still.extend(rows[:keep_n])
+            for extra in rows[keep_n:]:
                 oid = str(extra.get("exchange_order_id") or "")
                 if not oid:
                     continue
@@ -2996,10 +2997,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         still.append(row)
                     continue
             # Rising-tape: cancel resting buys when momentum goes flat/down.
+            # Low-util: keep quotes working while ring is still thinly deployed.
             if (
                 side_raw.startswith("b")
                 and self._cancel_buy_on_flat_momentum
                 and self._momentum_flat_or_down_for_cancel(symbol)
+                and not self._ring_soft_momentum_eligible(venue)
             ):
                 try:
                     await client.cancel_order(oid, symbol)
