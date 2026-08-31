@@ -147,8 +147,11 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "Sessie MTM" not in html
     assert "Unrealized" in html
     assert "Winnable" in html
-    assert "Vandaag netto" in html
-    assert "Week netto" in html
+    assert "Vandaag netto" not in html
+    assert "Geïnd vandaag" in html
+    assert "Open (unrealized)" in html
+    assert "Geïnd vandaag (verkopen)" in html
+    assert "Week geïnd" in html
     assert "kpi-daily-realized" in html
     assert "Sessie (sinds restart)" in html
     assert "Doel €20–50/dag netto" in html

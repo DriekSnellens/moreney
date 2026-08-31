@@ -432,6 +432,8 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "session_realized_eur": float(session_realized) if session_realized is not None else None,
         "daily_realized_eur": float(daily_realized) if daily_realized is not None else None,
         "weekly_realized_eur": float(weekly_realized) if weekly_realized is not None else None,
+        "harvested_today_eur": float(daily_realized) if daily_realized is not None else None,
+        "open_unrealized_eur": float(unrealized) if unrealized is not None else None,
         "daily_realized_source": pnl_source,
         "weekly_realized_source": pnl_source,
         "weekly_target_low_eur": 140.0,

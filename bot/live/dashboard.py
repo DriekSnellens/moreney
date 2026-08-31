@@ -259,6 +259,36 @@ def _css() -> str:
       border-color: color-mix(in srgb, var(--good) 35%, var(--line));
       background: color-mix(in srgb, var(--good) 6%, var(--bg1));
     }
+    .pnl-split {
+      display: grid;
+      gap: .65rem;
+      grid-template-columns: 1fr 1fr;
+      margin-bottom: .15rem;
+    }
+    @media (min-width: 720px) {
+      .pnl-split { grid-template-columns: 1fr 1fr 1fr; gap: .85rem; }
+    }
+    .pnl-split .card.split-harvest {
+      border-color: color-mix(in srgb, var(--good) 40%, var(--line));
+      background: linear-gradient(135deg, color-mix(in srgb, var(--good) 10%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
+    }
+    .pnl-split .card.split-open {
+      border-color: color-mix(in srgb, #f0b429 35%, var(--line));
+      background: linear-gradient(135deg, color-mix(in srgb, #f0b429 8%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
+    }
+    .pnl-split .card.split-winnable {
+      grid-column: 1 / -1;
+    }
+    @media (min-width: 720px) {
+      .pnl-split .card.split-winnable { grid-column: auto; }
+    }
+    .pnl-split .value { font-size: clamp(1.35rem, 4.5vw, 1.85rem); }
+    .pnl-split-intro {
+      margin: 0 0 .35rem;
+      color: var(--muted);
+      font-size: .78rem;
+      line-height: 1.4;
+    }
     @media (min-width: 720px) {
       .card { padding: 1.1rem 1rem 1rem; border-radius: 18px; }
     }
@@ -1136,13 +1166,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     target_band_html = (
         "<section class='target-band' aria-label='Doelband onderzoek'>"
         "<h2>Doel €20–50/dag netto</h2>"
-        "<p><strong>Vandaag / week</strong> = netto gerealiseerd na fees "
-        "(kalender NL) · <strong>Winnable</strong> = open bags boven BE · "
-        "niet hetzelfde als sessie-restart.</p>"
+        "<p><strong>Geïnd vandaag</strong> = verkochte coins (FIFO) · "
+        "<strong>Open</strong> = nog vast op exchange · "
+        "<strong>Winnable</strong> = boven BE, nog niet verkocht.</p>"
         "<div class='band-row'>"
-        f"<span>Vandaag: <strong class='{band_class}'>"
+        f"<span>Geïnd: <strong class='{band_class}'>"
         f"{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
-        f"<span>Week: {_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else '—')}</span>"
+        f"<span>Open: {_esc(_eur(unrealized, signed=True) if unrealized is not None else '—')}</span>"
+        f"<span>Week geïnd: {_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else '—')}</span>"
         f"<span>Winnable: {_esc(_eur(winnable, signed=True) if winnable is not None else '—')}</span>"
     )
     win_gap = _dec(bridge.get("winnable_gap_eur") or diag.get("winnable_gap_eur"))
@@ -1220,26 +1251,46 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     """
 
     kpi_grid_html = f"""
+    <section aria-label="Geïnd vs open">
+      <p class="pnl-split-intro">Geïnd = winst/verlies op <strong>verkopen</strong> vandaag (cash geboekt). Open = wat je nog vasthoudt t.o.v. kostprijs — nog niet verkocht.</p>
+      <div class="pnl-split">
+        <article class="card split-harvest">
+          <p class="label">Geïnd vandaag (verkopen)</p>
+          <p class="value {daily_realized_class}" id="kpi-harvested-today">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
+          <p class="hint">Coins verkocht · FIFO · sinds 00:00 NL</p>
+        </article>
+        <article class="card split-open">
+          <p class="label">Open (unrealized)</p>
+          <p class="value {unreal_class}" id="kpi-open-unrealized">{_esc(_eur(unrealized, signed=True) if unrealized is not None else "—")}</p>
+          <p class="hint">Nog in portfolio · niet gecashd</p>
+        </article>
+        <article class="card split-winnable">
+          <p class="label">Winnable (nog te harvesten)</p>
+          <p class="value {winn_class}" id="kpi-winnable-harvest">{_esc(_eur(winnable, signed=True) if winnable is not None else "—")}</p>
+          <p class="hint">Boven break-even · exit mogelijk</p>
+        </article>
+      </div>
+    </section>
     <section class="grid-kpi" aria-label="Kern KPIs">
       <article class="card hero">
-        <p class="label">Vandaag netto</p>
+        <p class="label">Geïnd vandaag</p>
         <p class="value {daily_realized_class}" id="kpi-daily-realized">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
-        <p class="hint">Gerealiseerd sinds 00:00 NL · FIFO exchange fills</p>
+        <p class="hint">Zelfde als hierboven · verkopen</p>
       </article>
       <article class="card hero-a">
-        <p class="label">Week netto</p>
+        <p class="label">Week geïnd</p>
         <p class="value {weekly_realized_class}" id="kpi-weekly-realized">{_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else "—")}</p>
-        <p class="hint">Ma–zo NL · doel ≥€140 · FIFO exchange</p>
+        <p class="hint">Ma–zo NL · FIFO exchange</p>
       </article>
       <article class="card">
         <p class="label">Winnable</p>
         <p class="value {winn_class}" id="kpi-winnable">{_esc(_eur(winnable, signed=True))}</p>
-        <p class="hint">Boven break-even (fees)</p>
+        <p class="hint">Open winst boven BE</p>
       </article>
       <article class="card">
-        <p class="label">Unrealized</p>
+        <p class="label">Open (unrealized)</p>
         <p class="value {unreal_class}" id="kpi-unrealized">{_esc(_eur(unrealized, signed=True))}</p>
-        <p class="hint">Open bags vs kostprijs</p>
+        <p class="hint">Totaal open bags vs kost</p>
       </article>
       <article class="card">
         <p class="label">Portfolio</p>
@@ -1247,9 +1298,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">Marktwaarde totaal</p>
       </article>
       <article class="card">
-        <p class="label">Gerealiseerd (totaal)</p>
+        <p class="label">Gerealiseerd (replay)</p>
         <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">FIFO cumulatief na fees</p>
+        <p class="hint">FIFO cumulatief · niet all-time</p>
       </article>
       <article class="card">
         <p class="label">Sessie (sinds restart)</p>
@@ -1455,10 +1506,13 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
       set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
       set('kpi-daily-realized', eurFmt(m.daily_realized_eur, true));
+      set('kpi-harvested-today', eurFmt(m.harvested_today_eur ?? m.daily_realized_eur, true));
       set('kpi-session-realized', eurFmt(m.session_realized_eur, true));
       set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
       set('kpi-winnable', eurFmt(m.winnable_eur, true));
+      set('kpi-winnable-harvest', eurFmt(m.winnable_eur, true));
       set('kpi-unrealized', eurFmt(m.unrealized_eur, true));
+      set('kpi-open-unrealized', eurFmt(m.open_unrealized_eur ?? m.unrealized_eur, true));
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
       if (m.portfolio_holdings) renderPortfolioHoldings(m.portfolio_holdings);
@@ -1470,11 +1524,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         else if (val < 0) el.classList.add('bad');
       }};
       paint('kpi-daily-realized', m.daily_realized_eur);
+      paint('kpi-harvested-today', m.harvested_today_eur ?? m.daily_realized_eur);
       paint('kpi-weekly-realized', m.weekly_realized_eur);
       paint('kpi-session-realized', m.session_realized_eur);
       paint('kpi-realized', m.realized_pnl_eur);
       paint('kpi-winnable', m.winnable_eur);
+      paint('kpi-winnable-harvest', m.winnable_eur);
       paint('kpi-unrealized', m.unrealized_eur);
+      paint('kpi-open-unrealized', m.open_unrealized_eur ?? m.unrealized_eur);
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');
