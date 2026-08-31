@@ -2205,7 +2205,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return
         ts_ms = int(trade.get("timestamp") or 0)
         started_ms = float(self._session_started_ms or 0)
-        if started_ms and ts_ms and ts_ms < started_ms:
+        since_ms = max(0.0, started_ms - 6 * 3600 * 1000) if started_ms else 0.0
+        if since_ms and ts_ms and ts_ms < since_ms:
             return
         ts_iso = (
             datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC).isoformat()
