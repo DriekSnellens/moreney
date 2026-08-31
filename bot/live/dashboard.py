@@ -15,6 +15,7 @@ from bot.live.dashboard_history import (
     load_history,
     recent_fills_for_display,
     weekly_realized_delta,
+    _calendar_pnl_for_payload,
 )
 
 
@@ -770,8 +771,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     hist_for_kpi = payload.get("history") or load_history(limit=7 * 24 * 60)
     if not isinstance(hist_for_kpi, list):
         hist_for_kpi = []
-    daily_realized = daily_realized_delta(hist_for_kpi, current_realized=pnl)
-    weekly_realized = weekly_realized_delta(hist_for_kpi, current_realized=pnl)
+    daily_realized, weekly_realized, pnl_source = _calendar_pnl_for_payload(
+        payload, current_realized=pnl
+    )
     daily_realized_class = ""
     if daily_realized is not None and daily_realized > 0:
         daily_realized_class = "good"
@@ -1222,12 +1224,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card hero">
         <p class="label">Vandaag netto</p>
         <p class="value {daily_realized_class}" id="kpi-daily-realized">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
-        <p class="hint">Gerealiseerd sinds 00:00 NL</p>
+        <p class="hint">Gerealiseerd sinds 00:00 NL · FIFO exchange fills</p>
       </article>
       <article class="card hero-a">
         <p class="label">Week netto</p>
         <p class="value {weekly_realized_class}" id="kpi-weekly-realized">{_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else "—")}</p>
-        <p class="hint">Ma–zo NL · doel ≥€140</p>
+        <p class="hint">Ma–zo NL · doel ≥€140 · FIFO exchange</p>
       </article>
       <article class="card">
         <p class="label">Winnable</p>

@@ -323,6 +323,45 @@ def recent_fills_for_display(diag: dict[str, Any], *, limit: int = 8) -> list[di
     return out
 
 
+def chart_history_points(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop reconcile replay stairs (zero MTM snapshots) — keep live session points."""
+    live: list[dict[str, Any]] = []
+    for row in history:
+        unreal = _to_decimal(row.get("unrealized_eur"))
+        winn = _to_decimal(row.get("winnable_eur"))
+        if unreal is not None and winn is not None and unreal == 0 and winn == 0:
+            continue
+        live.append(row)
+    return live if live else history
+
+
+def _calendar_pnl_for_payload(
+    payload: dict[str, Any],
+    *,
+    current_realized: Decimal | None,
+) -> tuple[Decimal | None, Decimal | None, str | None]:
+    """Prefer exchange-FIFO calendar PnL; fall back to clean history delta."""
+    from bot.live.dashboard_pnl import calendar_pnl_for_metrics
+
+    daily, weekly, source = calendar_pnl_for_metrics()
+    if daily is not None or weekly is not None:
+        return daily, weekly, source or "exchange_fifo"
+
+    session = payload.get("session") or {}
+    extra = session.get("calendar_pnl") or {}
+    daily = _to_decimal(extra.get("daily_eur"))
+    weekly = _to_decimal(extra.get("weekly_eur"))
+    if daily is not None or weekly is not None:
+        return daily, weekly, str(extra.get("source") or "exchange_fifo")
+
+    hist = chart_history_points(load_history(limit=7 * 24 * 60))
+    return (
+        daily_realized_delta(hist, current_realized=current_realized),
+        weekly_realized_delta(hist, current_realized=current_realized),
+        "history_delta",
+    )
+
+
 def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Compact KPI dict for JSON polling."""
     session = payload.get("session") or {}
@@ -375,9 +414,9 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     recent_fills = recent_fills_for_display(diag, limit=8)
     last_fill = recent_fills[-1] if recent_fills else None
 
-    hist = load_history(limit=7 * 24 * 60)
-    weekly_realized = weekly_realized_delta(hist, current_realized=realized)
-    daily_realized = daily_realized_delta(hist, current_realized=realized)
+    daily_realized, weekly_realized, pnl_source = _calendar_pnl_for_payload(
+        payload, current_realized=realized
+    )
 
     return {
         "updated_at": session.get("updated_at"),
@@ -393,6 +432,8 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "session_realized_eur": float(session_realized) if session_realized is not None else None,
         "daily_realized_eur": float(daily_realized) if daily_realized is not None else None,
         "weekly_realized_eur": float(weekly_realized) if weekly_realized is not None else None,
+        "daily_realized_source": pnl_source,
+        "weekly_realized_source": pnl_source,
         "weekly_target_low_eur": 140.0,
         "weekly_target_high_eur": 350.0,
         "weekly_pace_realistic_eur": 35.0,
@@ -426,7 +467,7 @@ def chart_series_from_history(history: list[dict[str, Any]]) -> dict[str, Any]:
         except (TypeError, ValueError):
             return None
 
-    for row in history:
+    for row in chart_history_points(history):
         t = str(row.get("t") or "")
         labels.append(t[11:16] if len(t) >= 16 else t[-8:] or "—")
         portfolio.append(_f("portfolio_eur", row))

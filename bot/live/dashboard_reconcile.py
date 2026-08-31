@@ -269,21 +269,6 @@ async def reconcile_dashboard_since(
     with hist_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(baseline, separators=(",", ":")) + "\n")
         points_written += 1
-        cum = Decimal("0")
-        for ev in sell_events:
-            cum = Decimal(str(ev["realized_cum_eur"]))
-            port = portfolio_start + cum
-            row = {
-                "t": ev["ts"].isoformat(),
-                "running": "1",
-                "portfolio_eur": str(port.quantize(Decimal("0.01"))),
-                "realized_pnl_eur": str(cum),
-                "unrealized_eur": "0",
-                "winnable_eur": "0",
-                "session_pnl_eur": str(cum),
-            }
-            fh.write(json.dumps(row, separators=(",", ":")) + "\n")
-            points_written += 1
 
     record_snapshot(
         {
@@ -302,6 +287,13 @@ async def reconcile_dashboard_since(
 
     bridge.persist_runtime_state()
     audit_fills = _audit_fills_since(since)
+    try:
+        from bot.live.dashboard_pnl import refresh_calendar_pnl_cache
+
+        cal = await refresh_calendar_pnl_cache(bridge, force=True)
+    except Exception:  # noqa: BLE001
+        cal = {}
+        logger.exception("calendar PnL refresh after reconcile failed")
     logger.info(
         "DASHBOARD_RECONCILE since=%s realized=%s fills=%s history_points=%s",
         since.isoformat(),
@@ -321,4 +313,7 @@ async def reconcile_dashboard_since(
         "sell_events": sell_events,
         "symbols_replayed": per_symbol,
         "history_points": points_written,
+        "daily_realized_eur": cal.get("daily_eur"),
+        "weekly_realized_eur": cal.get("weekly_eur"),
+        "calendar_pnl_source": cal.get("source"),
     }

@@ -633,7 +633,17 @@ async def market_data_status() -> dict[str, Any]:
 
 async def _live_dashboard_payload(*, record: bool = True, light: bool = False) -> dict[str, Any]:
     live = get_live_service()
-    session = get_micro_session_manager().status()
+    mgr = get_micro_session_manager()
+    session = mgr.status()
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        try:
+            from bot.live.dashboard_pnl import refresh_calendar_pnl_cache
+
+            cache = await refresh_calendar_pnl_cache(bridge)
+            session = {**session, "calendar_pnl": cache}
+        except Exception:  # noqa: BLE001
+            logger.exception("calendar PnL refresh on dashboard payload failed")
     payload: dict[str, Any] = {
         "session": session,
         "engine": get_micro_engine().status(),
@@ -716,7 +726,17 @@ async def live_micro_dashboard_redirect() -> RedirectResponse:
 @app.get("/live/dashboard/metrics")
 async def live_dashboard_metrics(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
     """JSON KPIs + chart series for mobile polling (no full HTML reload)."""
-    payload = await _live_dashboard_payload(light=True)
+    mgr = get_micro_session_manager()
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        try:
+            from bot.live.dashboard_pnl import refresh_calendar_pnl_cache
+
+            cache = await refresh_calendar_pnl_cache(bridge)
+            mgr._publish({"calendar_pnl": cache})  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            logger.exception("calendar PnL refresh on metrics failed")
+    payload = await _live_dashboard_payload(light=True, record=False)
     history = payload.get("history") or load_history(limit=720)
     return {
         "metrics": metrics_from_payload(payload),
