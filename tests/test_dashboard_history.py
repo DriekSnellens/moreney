@@ -152,6 +152,7 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "kpi-daily-realized" in html
     assert "Sessie (sinds restart)" in html
     assert "Doel €20–50/dag netto" in html
+    assert "Recente fills" in html
 
 def test_pwa_and_metrics_routes() -> None:
     with TestClient(app) as client:

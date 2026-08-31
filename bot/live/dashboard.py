@@ -13,6 +13,7 @@ from bot.live.dashboard_history import (
     chart_series_from_history,
     daily_realized_delta,
     load_history,
+    recent_fills_for_display,
     weekly_realized_delta,
 )
 
@@ -41,6 +42,18 @@ def _eur(value: Any, *, signed: bool = False) -> str:
     if signed and quantized < 0:
         return f"-€{text[1:] if text.startswith('-') else text}"
     return f"€{text}"
+
+
+def _format_fill_ts(raw: Any) -> str:
+    if not raw:
+        return "—"
+    try:
+        from datetime import datetime
+
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return ts.astimezone().strftime("%H:%M:%S")
+    except ValueError:
+        return str(raw)[:19]
 
 
 def _free_eur_by_venue(observe: dict[str, Any]) -> dict[str, Decimal]:
@@ -1037,16 +1050,62 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
             f"<td>{_esc((t.get('result') or {}).get('order', {}).get('status') if isinstance(t.get('result'), dict) else t.get('status') or '')}</td>"
             "</tr>"
         )
+    fill_rows = []
+    recent_fills = recent_fills_for_display(diag, limit=8)
+    for f in recent_fills:
+        side = str(f.get("side") or "").lower()
+        side_cls = "good" if side == "sell" else ""
+        fill_rows.append(
+            "<tr>"
+            f"<td>{_esc(_format_fill_ts(f.get('ts')))}</td>"
+            f"<td>{_esc(f.get('venue') or '')}</td>"
+            f"<td>{_esc(f.get('symbol') or '')}</td>"
+            f"<td class='{side_cls}'>{_esc(f.get('side') or '')}</td>"
+            f"<td>{_esc(f.get('qty') or '')}</td>"
+            f"<td>{_esc(f.get('price') or '')}</td>"
+            f"<td>{_esc(_eur(f.get('notional_eur')))}</td>"
+            f"<td>{_esc(f.get('source') or '')}</td>"
+            "</tr>"
+        )
+    last_fill = recent_fills[-1] if recent_fills else None
+    last_fill_html = ""
+    if last_fill:
+        last_fill_html = (
+            "<section class='idle-banner ok' id='last-fill-banner'>"
+            "<h2>Laatste fill (exchange)</h2>"
+            f"<p class='primary'>{_esc(_format_fill_ts(last_fill.get('ts')))} · "
+            f"{_esc(last_fill.get('venue') or '')} · "
+            f"{_esc(last_fill.get('symbol') or '')} · "
+            f"{_esc(str(last_fill.get('side') or '').upper())} · "
+            f"{_esc(last_fill.get('qty') or '')} @ €{_esc(last_fill.get('price') or '')} · "
+            f"{_esc(_eur(last_fill.get('notional_eur')))}</p>"
+            "<p class='hint'>Orders ≠ fills — Bitvavo kan vullen terwijl status 'cancelled' staat.</p>"
+            "</section>"
+        )
+    fills_html = (
+        "<section class='positions'><h2>Recente fills (exchange)</h2>"
+        + (
+            "<table class='pos'><thead><tr><th>Tijd</th><th>Venue</th><th>Symbol</th>"
+            "<th>Side</th><th>Qty</th><th>Prijs</th><th>Notional</th><th>Bron</th>"
+            "</tr></thead><tbody>"
+            + "".join(fill_rows)
+            + "</tbody></table>"
+            if fill_rows
+            else "<p class='hint'>Nog geen fills gespiegeld — reconcile draait elke ~30s</p>"
+        )
+        + "</section>"
+    )
     trades_html = (
-        "<section class='positions'><h2>Recente live orders</h2>"
+        "<section class='positions'><h2>Recente live orders (status)</h2>"
         + (
             "<table class='pos'><thead><tr><th>Symbol</th><th>Side</th>"
             "<th>Qty</th><th>Status</th></tr></thead><tbody>"
             + "".join(trade_rows)
             + "</tbody></table>"
             if trade_rows
-            else "<p class='hint'>Nog geen live fills deze sessie</p>"
+            else "<p class='hint'>Nog geen live order-pogingen deze sessie</p>"
         )
+        + "<p class='hint'>Submitted/cancelled hier ≠ geen fill — zie fills hierboven.</p>"
         + "</section>"
     )
     alerts_html = (
@@ -1248,6 +1307,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <button type="button" id="install-btn">Installeren</button>
     </div>
     {stale_banner}
+    {last_fill_html}
     <div class="dash-top">
       {portfolio_strip_html}
       {kpi_grid_html}
@@ -1257,6 +1317,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">
+      {fills_html}
       {cash_html}
       {idle_banner}
       {detail_html}

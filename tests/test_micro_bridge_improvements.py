@@ -199,6 +199,8 @@ async def test_mirror_live_fill_increments_session_counter_only(
         budget_eur=Decimal("25"),
     )
     monkeypatch.setattr(bridge, "_live_free", fake_live_free)
+    monkeypatch.setattr(bridge, "_venue_budget_remaining", lambda _v: Decimal("25"))
+    bridge._momentum_enabled = False  # noqa: SLF001
     bridge.backfill_mirrored_count = 99
     req = OrderRequest(
         opportunity_id=uuid4(),
@@ -212,3 +214,63 @@ async def test_mirror_live_fill_increments_session_counter_only(
     assert result.status == OrderStatus.FILLED
     assert bridge.session_live_transaction_count == 1
     assert bridge.backfill_mirrored_count == 99
+    assert len(bridge.recent_live_fills) == 1
+    assert bridge.recent_live_fills[0]["symbol"] == "ETHEUR"
+
+
+def test_mirror_exchange_trade_increments_fill_feed() -> None:
+    settings = _settings()
+    portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=portfolio,
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+    )
+    bridge._session_started_ms = 0
+    trade = {
+        "id": "t-42",
+        "timestamp": 1_700_000_000_000,
+        "side": "sell",
+        "amount": "0.5",
+        "price": "100",
+        "fee": {"cost": "0.05", "currency": "EUR"},
+        "order": "ord-1",
+    }
+    assert bridge._mirror_exchange_trade(
+        venue="bitvavo",
+        base="SOL",
+        trade=trade,
+        source="backfill",
+    )
+    assert bridge.session_live_fill_count == 1
+    assert bridge.recent_live_fills[-1]["source"] == "backfill"
+    assert bridge._mirror_exchange_trade(
+        venue="bitvavo",
+        base="SOL",
+        trade=trade,
+        source="backfill",
+    ) is False
+    assert bridge.session_live_fill_count == 1
+
+
+def test_recent_fills_for_display_prefers_session_feed() -> None:
+    from bot.live.dashboard_history import recent_fills_for_display
+
+    diag = {
+        "recent_live_fills": [
+            {
+                "ts": "2026-08-31T10:52:57+00:00",
+                "venue": "bitvavo",
+                "symbol": "SOLEUR",
+                "side": "sell",
+                "qty": "0.31",
+                "price": "89.42",
+                "notional_eur": "27.71",
+                "source": "backfill",
+            }
+        ]
+    }
+    fills = recent_fills_for_display(diag)
+    assert len(fills) == 1
+    assert fills[0]["symbol"] == "SOLEUR"

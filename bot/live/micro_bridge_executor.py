@@ -119,6 +119,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._live_maker = bool(live_maker)
         self.skips: dict[str, int] = {}
         self.live_trades: list[dict[str, Any]] = []
+        self.recent_live_fills: list[dict[str, Any]] = []
         self._last_sync: dict[str, Any] | None = None
         self._resting: list[dict[str, Any]] = []
         self.live_fill_count = 0
@@ -1313,6 +1314,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "backfill_mirrored": int(self.backfill_mirrored_count),
                 **self._mtm_summary(),
                 "recent_live_trades": list(self.live_trades[-12:]),
+                "recent_live_fills": list(self.recent_live_fills[-12:]),
                 "skip_leaders": sorted(
                     ((k, v) for k, v in self.skips.items()),
                     key=lambda kv: kv[1],
@@ -2120,6 +2122,237 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         return {"ok": True, "venue": venue, "hydrated": hydrated}
 
+    def _trade_fee_quote(
+        self,
+        trade: dict[str, Any],
+        *,
+        base: str,
+        amt: Decimal,
+        px: Decimal,
+    ) -> tuple[Decimal, str]:
+        fee_info = trade.get("fee") or {}
+        fee_amt = Decimal(str(fee_info.get("cost") or 0))
+        fee_cur = str(fee_info.get("currency") or self._quote).upper()
+        if fee_cur == base and fee_amt > 0:
+            fee_quote = fee_amt * px
+        elif fee_cur == self._quote:
+            fee_quote = fee_amt
+        else:
+            fee_quote = fee_amt if fee_amt > 0 else (amt * px * Decimal("0.001"))
+        return fee_quote, fee_cur
+
+    def _trade_order_id(self, trade: dict[str, Any]) -> str:
+        info = trade.get("info") or {}
+        return str(
+            trade.get("order")
+            or trade.get("orderId")
+            or info.get("orderId")
+            or info.get("order_id")
+            or ""
+        )
+
+    def _note_live_fill_event(
+        self,
+        *,
+        venue: str,
+        symbol: str,
+        side: str,
+        qty: Decimal,
+        price: Decimal,
+        source: str = "mirror",
+        exchange_order_id: str | None = None,
+        trade_id: str | None = None,
+    ) -> None:
+        """Increment session fill counters and keep operator-visible fill feed."""
+        self.session_live_fill_count += 1
+        self.session_live_transaction_count += 1
+        self.live_fill_count = self.session_live_fill_count
+        self.live_transaction_count = self.session_live_transaction_count
+        notional = (qty * price).quantize(Decimal("0.01"))
+        self.recent_live_fills.append(
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "venue": venue,
+                "symbol": symbol,
+                "side": side,
+                "qty": str(qty),
+                "price": str(price),
+                "notional_eur": str(notional),
+                "source": source,
+                "exchange_order_id": exchange_order_id,
+                "trade_id": trade_id,
+            }
+        )
+        if len(self.recent_live_fills) > 24:
+            self.recent_live_fills = self.recent_live_fills[-24:]
+
+    def _maybe_note_fill_display(
+        self,
+        *,
+        venue: str,
+        base: str,
+        trade: dict[str, Any],
+        source: str,
+    ) -> None:
+        """Show already-mirrored trades on the dashboard without double-counting PnL."""
+        tid = str(trade.get("id") or "")
+        if not tid or any(str(f.get("trade_id") or "") == tid for f in self.recent_live_fills):
+            return
+        side = str(trade.get("side") or "").lower()
+        amt = Decimal(str(trade.get("amount") or 0))
+        px = Decimal(str(trade.get("price") or 0))
+        if amt <= 0 or px <= 0 or side not in {"buy", "sell"}:
+            return
+        ts_ms = int(trade.get("timestamp") or 0)
+        ts_iso = (
+            datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC).isoformat()
+            if ts_ms
+            else datetime.now(UTC).isoformat()
+        )
+        symbol = f"{base}{self._quote}"
+        notional = (amt * px).quantize(Decimal("0.01"))
+        self.recent_live_fills.append(
+            {
+                "ts": ts_iso,
+                "venue": venue,
+                "symbol": symbol,
+                "side": side,
+                "qty": str(amt),
+                "price": str(px),
+                "notional_eur": str(notional),
+                "source": source,
+                "exchange_order_id": self._trade_order_id(trade) or None,
+                "trade_id": tid,
+            }
+        )
+        if len(self.recent_live_fills) > 24:
+            self.recent_live_fills = self.recent_live_fills[-24:]
+
+    def _mirror_exchange_trade(
+        self,
+        *,
+        venue: str,
+        base: str,
+        trade: dict[str, Any],
+        source: str,
+        since_ms: float = 0,
+        order_id_filter: str | None = None,
+        placed_after_ms: float | None = None,
+    ) -> bool:
+        """Mirror one exchange trade into PnL + session fill counters (deduped)."""
+        from bot.core.enums import OrderSide as _OrderSide
+
+        tid = str(trade.get("id") or "")
+        if not tid:
+            return False
+        mirror_key = f"{venue}:{tid}"
+        if mirror_key in self._mirrored_trade_ids:
+            self._maybe_note_fill_display(venue=venue, base=base, trade=trade, source=source)
+            return False
+        ts = int(trade.get("timestamp") or 0)
+        if since_ms and ts and ts < since_ms:
+            return False
+        trade_oid = self._trade_order_id(trade)
+        if order_id_filter:
+            if trade_oid and trade_oid != order_id_filter:
+                return False
+            if not trade_oid and placed_after_ms and ts and ts < placed_after_ms - 60_000:
+                return False
+        side = str(trade.get("side") or "").lower()
+        amt = Decimal(str(trade.get("amount") or 0))
+        px = Decimal(str(trade.get("price") or 0))
+        if amt <= 0 or px <= 0 or side not in {"buy", "sell"}:
+            return False
+        started_ms = float(self._session_started_ms or 0)
+        if side == "sell" and started_ms and ts and ts < started_ms:
+            self._mirrored_trade_ids.add(mirror_key)
+            return False
+        fee_quote, fee_cur = self._trade_fee_quote(trade, base=base, amt=amt, px=px)
+        symbol = f"{base}{self._quote}"
+        if side == "buy" and self._has_trusted_cost(venue, base):
+            self._mirrored_trade_ids.add(mirror_key)
+            self.backfill_mirrored_count += 1
+            return False
+        try:
+            self._record_realized_fill(
+                side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
+                symbol=symbol,
+                qty=amt,
+                price=px,
+                fee=fee_quote,
+                venue=venue,
+                fee_currency=fee_cur,
+            )
+        except TypeError:
+            self._record_realized_fill(
+                side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
+                symbol=symbol,
+                qty=amt,
+                price=px,
+                fee=fee_quote,
+                venue=venue,
+            )
+        self._note_live_fill_event(
+            venue=venue,
+            symbol=symbol,
+            side=side,
+            qty=amt,
+            price=px,
+            source=source,
+            exchange_order_id=trade_oid or order_id_filter,
+            trade_id=tid,
+        )
+        self._mirrored_trade_ids.add(mirror_key)
+        self.backfill_mirrored_count += 1
+        logger.info(
+            "FILL_%s venue=%s base=%s side=%s qty=%s px=%s trade=%s",
+            source.upper(),
+            venue,
+            base,
+            side,
+            amt,
+            px,
+            tid,
+        )
+        return True
+
+    async def _mirror_trades_for_resting_order(
+        self, venue: str, row: dict[str, Any]
+    ) -> int:
+        """Catch fills on orders the exchange marked cancelled/closed before poll."""
+        venue = venue.strip().lower()
+        symbol = str(row.get("symbol") or "")
+        oid = str(row.get("exchange_order_id") or "")
+        if not symbol:
+            return 0
+        base = infer_base_asset(symbol)
+        client = self._trading_client(venue)
+        if client is None:
+            return 0
+        get_ex = getattr(client, "_get_exchange", None)
+        if not callable(get_ex):
+            return 0
+        try:
+            exchange = await get_ex()
+            ccxt_symbol = f"{base}/{self._quote}"
+            raw = await exchange.fetch_my_trades(ccxt_symbol, limit=40)
+        except Exception:  # noqa: BLE001
+            return 0
+        placed_at = float(row.get("placed_at") or 0)
+        placed_ms = placed_at * 1000.0 if placed_at else None
+        mirrored = 0
+        for trade in sorted(raw or [], key=lambda t: int(t.get("timestamp") or 0)):
+            if self._mirror_exchange_trade(
+                venue=venue,
+                base=base,
+                trade=trade,
+                source="resting_backfill",
+                order_id_filter=oid or None,
+                placed_after_ms=placed_ms,
+            ):
+                mirrored += 1
+        return mirrored
+
     async def _backfill_fills_from_trades(self, venue: str) -> dict[str, Any]:
         """Mirror recent exchange fills into pocket PnL / fill counters.
 
@@ -2150,8 +2383,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if lot_key.startswith(f"{venue}:"):
                 bases.add(lot_key.split(":", 1)[1])
 
-        from bot.core.enums import OrderSide as _OrderSide
-
         for base in sorted(bases):
             symbol = f"{base}/{self._quote}"
             try:
@@ -2159,71 +2390,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             except Exception:  # noqa: BLE001
                 continue
             for trade in sorted(raw or [], key=lambda t: int(t.get("timestamp") or 0)):
-                tid = str(trade.get("id") or "")
-                if not tid:
-                    continue
-                mirror_key = f"{venue}:{tid}"
-                if mirror_key in self._mirrored_trade_ids:
-                    continue
-                ts = int(trade.get("timestamp") or 0)
-                if since_ms and ts and ts < since_ms:
-                    continue
-                side = str(trade.get("side") or "").lower()
-                amt = Decimal(str(trade.get("amount") or 0))
-                px = Decimal(str(trade.get("price") or 0))
-                if amt <= 0 or px <= 0 or side not in {"buy", "sell"}:
-                    continue
-                # Don't re-realize pre-session sells (would double-count PnL on restart).
-                if side == "sell" and started_ms and ts and ts < started_ms:
-                    self._mirrored_trade_ids.add(mirror_key)
-                    continue
-                fee_info = trade.get("fee") or {}
-                fee_amt = Decimal(str(fee_info.get("cost") or 0))
-                fee_cur = str(fee_info.get("currency") or self._quote).upper()
-                if fee_cur == base and fee_amt > 0:
-                    fee_quote = fee_amt * px
-                elif fee_cur == self._quote:
-                    fee_quote = fee_amt
-                else:
-                    fee_quote = fee_amt if fee_amt > 0 else (amt * px * Decimal("0.001"))
-                # Buys: if hydrate already trusted the cost, only dedupe the trade id.
-                if side == "buy" and self._has_trusted_cost(venue, base):
-                    self._mirrored_trade_ids.add(mirror_key)
-                    self.backfill_mirrored_count += 1
+                if self._mirror_exchange_trade(
+                    venue=venue,
+                    base=base,
+                    trade=trade,
+                    source="backfill",
+                    since_ms=since_ms,
+                ):
                     mirrored += 1
-                    continue
-                try:
-                    self._record_realized_fill(
-                        side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
-                        symbol=f"{base}{self._quote}",
-                        qty=amt,
-                        price=px,
-                        fee=fee_quote,
-                        venue=venue,
-                        fee_currency=fee_cur,
-                    )
-                except TypeError:
-                    # Older signature without fee_currency.
-                    self._record_realized_fill(
-                        side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
-                        symbol=f"{base}{self._quote}",
-                        qty=amt,
-                        price=px,
-                        fee=fee_quote,
-                        venue=venue,
-                    )
-                self._mirrored_trade_ids.add(mirror_key)
-                self.backfill_mirrored_count += 1
-                mirrored += 1
-                logger.info(
-                    "FILL_BACKFILL venue=%s base=%s side=%s qty=%s px=%s trade=%s",
-                    venue,
-                    base,
-                    side,
-                    amt,
-                    px,
-                    tid,
-                )
         return {"ok": True, "venue": venue, "mirrored": mirrored}
 
 
@@ -2697,6 +2871,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mirrored = 0
         cancelled = 0
         still: list[dict[str, Any]] = []
+        terminal_dropped: list[dict[str, Any]] = []
         now = time.monotonic()
         max_age = self._resting_max_age_sec
         venue_l = venue.strip().lower()
@@ -2786,6 +2961,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "closed",
             }
             if terminal:
+                terminal_dropped.append(row)
                 continue
             # Never leave a loss-making sell resting on either venue.
             side_raw = str(row.get("side") or "buy").lower()
@@ -2883,6 +3059,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             still.append(row)
 
+        for row in terminal_dropped:
+            try:
+                n = await self._mirror_trades_for_resting_order(venue_l, row)
+                mirrored += n
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "resting terminal fill backfill failed venue=%s id=%s",
+                    venue_l,
+                    row.get("exchange_order_id"),
+                )
+
         self._resting = still
         tracked_ids = {str(r.get("exchange_order_id")) for r in self._resting}
 
@@ -2974,6 +3161,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.live_transaction_count = 0
         self.backfill_mirrored_count = 0
         self.live_trades.clear()
+        self.recent_live_fills.clear()
         self.skips.clear()
         self._daily_kill_active = False
         self._sleeve_realized_eur = _ZERO
@@ -5805,10 +5993,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             fee=fee,
             venue=venue,
         )
-        self.session_live_fill_count += 1
-        self.session_live_transaction_count += 1
-        self.live_fill_count = self.session_live_fill_count
-        self.live_transaction_count = self.session_live_transaction_count
+        self._note_live_fill_event(
+            venue=venue,
+            symbol=order.symbol,
+            side=side.value.lower() if hasattr(side, "value") else str(side).lower(),
+            qty=filled_qty,
+            price=average_price,
+            source="mirror",
+            exchange_order_id=str(exchange_order_id) if exchange_order_id else None,
+        )
 
         result = ExecutionResult(
             order_id=order.id,

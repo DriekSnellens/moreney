@@ -287,6 +287,41 @@ def weekly_realized_delta(
     )
 
 
+def recent_fills_for_display(diag: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
+    """Operator fill feed — in-memory session fills, audit log as fallback."""
+    fills = [f for f in (diag.get("recent_live_fills") or []) if isinstance(f, dict)]
+    if fills:
+        return fills[-limit:]
+    try:
+        from bot.live.dashboard_reconcile import _audit_fills_since
+
+        since = datetime.now(UTC) - timedelta(hours=24)
+        audit_rows = _audit_fills_since(since)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict[str, Any]] = []
+    for row in audit_rows[-limit:]:
+        qty = row.get("qty")
+        px = row.get("price")
+        if qty is None or px is None:
+            continue
+        notional = (Decimal(str(qty)) * Decimal(str(px))).quantize(Decimal("0.01"))
+        ts = row.get("ts")
+        out.append(
+            {
+                "ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts or ""),
+                "venue": row.get("venue"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "qty": str(qty),
+                "price": str(px),
+                "notional_eur": str(notional),
+                "source": row.get("source") or "audit",
+            }
+        )
+    return out
+
+
 def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Compact KPI dict for JSON polling."""
     session = payload.get("session") or {}
@@ -336,6 +371,9 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         tx_n = 0
 
+    recent_fills = recent_fills_for_display(diag, limit=8)
+    last_fill = recent_fills[-1] if recent_fills else None
+
     hist = load_history(limit=7 * 24 * 60)
     weekly_realized = weekly_realized_delta(hist, current_realized=realized)
     daily_realized = daily_realized_delta(hist, current_realized=realized)
@@ -365,6 +403,8 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "free_eur": float(free) if free is not None else None,
         "tx_count": tx_n,
         "portfolio_holdings": bridge.get("portfolio_holdings") or [],
+        "recent_fills": recent_fills,
+        "last_fill": last_fill,
     }
 
 
