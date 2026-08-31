@@ -300,7 +300,8 @@ def _session_settings(
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
-            "live_micro_cut_loss_below_be_pct": 0.04,
+            # Hard cut-loss off until legacy underwater bags are cleared.
+            "live_micro_cut_loss_below_be_pct": 0.0,
             "live_micro_cut_loss_new_bases_only": False,
             # Early cut: new-session bags at −1.5% BE + flat/down momentum → free capital.
             "live_micro_early_cut_loss_below_be_pct": 0.015,
@@ -672,7 +673,6 @@ async def run_session(
         _tick()
         last_sync = time.monotonic()
         last_resting = time.monotonic()
-        last_trail = time.monotonic()
         last_dust = time.monotonic()
         while True:
             if should_stop is not None and should_stop():
@@ -782,7 +782,7 @@ async def run_session(
                         )
             except Exception:  # noqa: BLE001
                 pass
-            if time.monotonic() - last_resting >= 8.0:
+            if time.monotonic() - last_resting >= 3.0:
                 for resting_venue in sorted(bridge._execute_venues):  # noqa: SLF001
                     try:
                         await bridge.manage_resting_orders(resting_venue)
@@ -791,26 +791,25 @@ async def run_session(
                             "resting order management failed venue=%s", resting_venue
                         )
                 last_resting = time.monotonic()
-            if time.monotonic() - last_trail >= 5.0:
-                for trail_venue in sorted(bridge._execute_venues):  # noqa: SLF001
-                    try:
-                        trail = await bridge.check_trailing_take_profits(trail_venue)
-                        if trail.get("triggered"):
-                            logger.info(
-                                "Trailing take-profit exits venue=%s: %s",
-                                trail_venue,
-                                trail.get("triggered"),
-                            )
-                    except Exception:  # noqa: BLE001
-                        logger.exception(
-                            "trailing take-profit check failed venue=%s", trail_venue
-                        )
-                last_trail = time.monotonic()
+            # Trail/exit engine every ~1s loop tick (was 5s — missed BE exits while underwater).
+            for trail_venue in sorted(bridge._execute_venues):  # noqa: SLF001
                 try:
-                    if bridge.maybe_reset_after_wind_down():  # noqa: SLF001
-                        logger.info("Trading cycle reset after wind-down")
+                    trail = await bridge.check_trailing_take_profits(trail_venue)
+                    if trail.get("triggered"):
+                        logger.info(
+                            "Trailing take-profit exits venue=%s: %s",
+                            trail_venue,
+                            trail.get("triggered"),
+                        )
                 except Exception:  # noqa: BLE001
-                    logger.exception("wind-down cycle reset failed")
+                    logger.exception(
+                        "trailing take-profit check failed venue=%s", trail_venue
+                    )
+            try:
+                if bridge.maybe_reset_after_wind_down():  # noqa: SLF001
+                    logger.info("Trading cycle reset after wind-down")
+            except Exception:  # noqa: BLE001
+                logger.exception("wind-down cycle reset failed")
             if time.monotonic() - last_dust >= 60.0:
                 for dust_venue in sorted(bridge._execute_venues):  # noqa: SLF001
                     try:
