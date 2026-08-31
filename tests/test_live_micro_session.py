@@ -115,8 +115,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_arm_pct == 0.001
-    assert cfg.paper_trail_soft_drawdown_pct == 0.003
-    assert cfg.paper_trail_soft_partial_pct == 0.0
+    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
+    assert cfg.paper_trail_soft_partial_pct == 0.30
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_hard_drawdown_pct == 0.025
     assert cfg.paper_trail_hard_partial_pct == 0.35
@@ -169,8 +169,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 55.0
     assert cfg.paper_max_alt_inventory_pct >= 50.0
-    assert cfg.paper_trail_soft_partial_pct == 0.0
-    assert cfg.paper_trail_soft_drawdown_pct == 0.003
+    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
+    assert cfg.live_micro_exit_taker_after_maker_fails == 1
     assert cfg.paper_maker_keep_vs_best_frac == 0.30
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
@@ -755,10 +756,11 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     )
     assert cfg.paper_trail_drawdown_pct == 0.025
     assert cfg.paper_trail_soft_arm_pct == 0.001
-    assert cfg.paper_trail_soft_drawdown_pct == 0.003
+    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
     assert cfg.paper_trail_hard_arm_pct == 0.06
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_partial_pct == 0.0
+    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.live_micro_exit_taker_after_maker_fails == 1
     assert cfg.live_micro_max_notional_eur <= 200.0
     assert cfg.live_micro_max_notional_eur >= 100.0
     assert cfg.paper_markout_enabled is False
@@ -3270,7 +3272,7 @@ async def test_profitable_exit_quote_force_taker_after_maker_fails() -> None:
             return _T()
 
     bridge._trading_client = lambda venue: _Client()  # type: ignore[method-assign]  # noqa: SLF001
-    bridge._exit_maker_fail_counts["bitvavo:FET"] = 2
+    bridge._exit_maker_fail_counts["bitvavo:FET"] = 1
     assert bridge._should_force_taker_exit("bitvavo", "FET") is True  # noqa: SLF001
     px, post_only, reason = await bridge._profitable_exit_quote(  # noqa: SLF001
         "bitvavo", "FET", Decimal("0.1415"), aggressive=True, force_taker=True

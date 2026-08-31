@@ -433,7 +433,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(getattr(settings, "live_micro_exit_taker_cushion_bps", 5.0) or 5.0)
         )
         self._exit_taker_after_maker_fails = int(
-            getattr(settings, "live_micro_exit_taker_after_maker_fails", 2) or 2
+            getattr(settings, "live_micro_exit_taker_after_maker_fails", 1) or 1
         )
         self._winnable_gap_alert_eur = Decimal(
             str(getattr(settings, "live_micro_winnable_gap_alert_eur", 3.0) or 3.0)

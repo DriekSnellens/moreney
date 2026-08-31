@@ -201,10 +201,10 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            # Arm at net profit (BE); full exit on 0.3% peak retrace (was 0.4%).
+            # Arm at net profit (BE); soft partial + tighter dd → cash winnable sooner.
             "paper_trail_soft_arm_pct": 0.001,
-            "paper_trail_soft_drawdown_pct": 0.003,
-            "paper_trail_soft_partial_pct": 0.0,
+            "paper_trail_soft_drawdown_pct": 0.0025,
+            "paper_trail_soft_partial_pct": 0.30,
             # Lock more of BE+ bags into cash so slots free sooner.
             "paper_trail_recovery_be_partial_pct": 0.50,
             "paper_trail_be_harvest_partial_pct": 0.50,
@@ -266,7 +266,8 @@ def _session_settings(
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.75,
             "live_micro_exit_taker_cushion_bps": 5.0,
-            "live_micro_exit_taker_after_maker_fails": 2,
+            # Winnable-A: escalate to taker after 1 stale maker (still only ≥ BE).
+            "live_micro_exit_taker_after_maker_fails": 1,
             "live_micro_mark_ttl_sec": 2.0,
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,

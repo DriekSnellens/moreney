@@ -548,7 +548,7 @@ class Settings(BaseSettings):
     # (post_only=False) so spikes that already pay fees actually fill.
     live_micro_exit_taker_cushion_bps: float = Field(default=5.0, ge=0.0, le=50.0)
     # After N stale/rejected maker exit attempts, escalate to taker (bid ≥ taker BE).
-    live_micro_exit_taker_after_maker_fails: int = Field(default=2, ge=1, le=10)
+    live_micro_exit_taker_after_maker_fails: int = Field(default=1, ge=1, le=10)
     # Mark price cache TTL for trail/BE checks (seconds).
     live_micro_mark_ttl_sec: float = Field(default=5.0, ge=1.0, le=120.0)
     # Alert when winnable MTM exceeds this and is not converting to realized.
