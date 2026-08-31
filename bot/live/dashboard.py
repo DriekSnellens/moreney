@@ -266,7 +266,7 @@ def _css() -> str:
       margin-bottom: .15rem;
     }
     @media (min-width: 720px) {
-      .pnl-split { grid-template-columns: 1fr 1fr 1fr; gap: .85rem; }
+      .pnl-split { grid-template-columns: 1fr 1fr 1fr 1fr; gap: .85rem; }
     }
     .pnl-split .card.split-harvest {
       border-color: color-mix(in srgb, var(--good) 40%, var(--line));
@@ -275,6 +275,10 @@ def _css() -> str:
     .pnl-split .card.split-open {
       border-color: color-mix(in srgb, #f0b429 35%, var(--line));
       background: linear-gradient(135deg, color-mix(in srgb, #f0b429 8%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
+    }
+    .pnl-split .card.split-portfolio {
+      border-color: color-mix(in srgb, #5b9fd4 40%, var(--line));
+      background: linear-gradient(135deg, color-mix(in srgb, #5b9fd4 10%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
     }
     .pnl-split .card.split-winnable {
       grid-column: 1 / -1;
@@ -804,11 +808,34 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     daily_realized, weekly_realized, pnl_source = _calendar_pnl_for_payload(
         payload, current_realized=pnl
     )
+    portfolio_pnl = None
+    if daily_realized is not None and unrealized is not None:
+        portfolio_pnl = daily_realized + unrealized
+    elif daily_realized is not None:
+        portfolio_pnl = daily_realized
+    start_portfolio = _dec(
+        session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur")
+    )
+    session_portfolio_pnl = (
+        (portfolio - start_portfolio)
+        if portfolio is not None and start_portfolio is not None
+        else None
+    )
     daily_realized_class = ""
     if daily_realized is not None and daily_realized > 0:
         daily_realized_class = "good"
     elif daily_realized is not None and daily_realized < 0:
         daily_realized_class = "bad"
+    portfolio_pnl_class = ""
+    if portfolio_pnl is not None and portfolio_pnl > 0:
+        portfolio_pnl_class = "good"
+    elif portfolio_pnl is not None and portfolio_pnl < 0:
+        portfolio_pnl_class = "bad"
+    session_portfolio_class = ""
+    if session_portfolio_pnl is not None and session_portfolio_pnl > 0:
+        session_portfolio_class = "good"
+    elif session_portfolio_pnl is not None and session_portfolio_pnl < 0:
+        session_portfolio_class = "bad"
     weekly_realized_class = ""
     if weekly_realized is not None and weekly_realized > 0:
         weekly_realized_class = "good"
@@ -1168,11 +1195,13 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "<h2>Doel €20–50/dag netto</h2>"
         "<p><strong>Geïnd vandaag</strong> = verkochte coins (FIFO) · "
         "<strong>Open</strong> = nog vast op exchange · "
+        "<strong>Portfolio-winst</strong> = Geïnd + Open · "
         "<strong>Winnable</strong> = boven BE, nog niet verkocht.</p>"
         "<div class='band-row'>"
         f"<span>Geïnd: <strong class='{band_class}'>"
         f"{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
         f"<span>Open: {_esc(_eur(unrealized, signed=True) if unrealized is not None else '—')}</span>"
+        f"<span>Portfolio-winst: {_esc(_eur(portfolio_pnl, signed=True) if portfolio_pnl is not None else '—')}</span>"
         f"<span>Week geïnd: {_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else '—')}</span>"
         f"<span>Winnable: {_esc(_eur(winnable, signed=True) if winnable is not None else '—')}</span>"
     )
@@ -1252,7 +1281,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     kpi_grid_html = f"""
     <section aria-label="Geïnd vs open">
-      <p class="pnl-split-intro">Geïnd = winst/verlies op <strong>verkopen</strong> vandaag (cash geboekt). Open = wat je nog vasthoudt t.o.v. kostprijs — nog niet verkocht.</p>
+      <p class="pnl-split-intro">Geïnd = winst op <strong>verkopen</strong> vandaag. Open = bags t.o.v. kost. <strong>Portfolio-winst</strong> = Geïnd + Open (totaal tradingresultaat vandaag).</p>
       <div class="pnl-split">
         <article class="card split-harvest">
           <p class="label">Geïnd vandaag (verkopen)</p>
@@ -1264,6 +1293,11 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
           <p class="value {unreal_class}" id="kpi-open-unrealized">{_esc(_eur(unrealized, signed=True) if unrealized is not None else "—")}</p>
           <p class="hint">Nog in portfolio · niet gecashd</p>
         </article>
+        <article class="card split-portfolio">
+          <p class="label">Portfolio-winst</p>
+          <p class="value {portfolio_pnl_class}" id="kpi-portfolio-pnl">{_esc(_eur(portfolio_pnl, signed=True) if portfolio_pnl is not None else "—")}</p>
+          <p class="hint">Geïnd + Open · vandaag</p>
+        </article>
         <article class="card split-winnable">
           <p class="label">Winnable (nog te harvesten)</p>
           <p class="value {winn_class}" id="kpi-winnable-harvest">{_esc(_eur(winnable, signed=True) if winnable is not None else "—")}</p>
@@ -1273,11 +1307,16 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     </section>
     <section class="grid-kpi" aria-label="Kern KPIs">
       <article class="card hero">
-        <p class="label">Geïnd vandaag</p>
-        <p class="value {daily_realized_class}" id="kpi-daily-realized">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
-        <p class="hint">Zelfde als hierboven · verkopen</p>
+        <p class="label">Portfolio-winst</p>
+        <p class="value {portfolio_pnl_class}" id="kpi-portfolio-pnl-hero">{_esc(_eur(portfolio_pnl, signed=True) if portfolio_pnl is not None else "—")}</p>
+        <p class="hint">Geïnd vandaag + open bags</p>
       </article>
       <article class="card hero-a">
+        <p class="label">Geïnd vandaag</p>
+        <p class="value {daily_realized_class}" id="kpi-daily-realized">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
+        <p class="hint">Alleen verkopen · FIFO</p>
+      </article>
+      <article class="card">
         <p class="label">Week geïnd</p>
         <p class="value {weekly_realized_class}" id="kpi-weekly-realized">{_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else "—")}</p>
         <p class="hint">Ma–zo NL · FIFO exchange</p>
@@ -1303,9 +1342,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">FIFO cumulatief · niet all-time</p>
       </article>
       <article class="card">
-        <p class="label">Sessie (sinds restart)</p>
-        <p class="value {session_realized_class}" id="kpi-session-realized">{_esc(_eur(session_realized, signed=True) if session_realized is not None else "—")}</p>
-        <p class="hint">Niet gelijk aan vandaag</p>
+        <p class="label">Portfolio Δ (sessie)</p>
+        <p class="value {session_portfolio_class}" id="kpi-session-pnl">{_esc(_eur(session_portfolio_pnl, signed=True) if session_portfolio_pnl is not None else "—")}</p>
+        <p class="hint">Sinds restart · equity</p>
       </article>
       <article class="card">
         <p class="label">Vrij EUR</p>
@@ -1507,7 +1546,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
       set('kpi-daily-realized', eurFmt(m.daily_realized_eur, true));
       set('kpi-harvested-today', eurFmt(m.harvested_today_eur ?? m.daily_realized_eur, true));
-      set('kpi-session-realized', eurFmt(m.session_realized_eur, true));
+      set('kpi-portfolio-pnl', eurFmt(m.portfolio_pnl_eur, true));
+      set('kpi-portfolio-pnl-hero', eurFmt(m.portfolio_pnl_eur, true));
+      set('kpi-session-pnl', eurFmt(m.session_pnl_eur, true));
       set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
       set('kpi-winnable', eurFmt(m.winnable_eur, true));
       set('kpi-winnable-harvest', eurFmt(m.winnable_eur, true));
@@ -1525,8 +1566,10 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       }};
       paint('kpi-daily-realized', m.daily_realized_eur);
       paint('kpi-harvested-today', m.harvested_today_eur ?? m.daily_realized_eur);
+      paint('kpi-portfolio-pnl', m.portfolio_pnl_eur);
+      paint('kpi-portfolio-pnl-hero', m.portfolio_pnl_eur);
+      paint('kpi-session-pnl', m.session_pnl_eur);
       paint('kpi-weekly-realized', m.weekly_realized_eur);
-      paint('kpi-session-realized', m.session_realized_eur);
       paint('kpi-realized', m.realized_pnl_eur);
       paint('kpi-winnable', m.winnable_eur);
       paint('kpi-winnable-harvest', m.winnable_eur);

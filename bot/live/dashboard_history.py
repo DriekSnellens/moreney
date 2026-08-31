@@ -417,6 +417,12 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     daily_realized, weekly_realized, pnl_source = _calendar_pnl_for_payload(
         payload, current_realized=realized
     )
+    open_unrealized = unrealized
+    portfolio_pnl = None
+    if daily_realized is not None and open_unrealized is not None:
+        portfolio_pnl = daily_realized + open_unrealized
+    elif daily_realized is not None:
+        portfolio_pnl = daily_realized
 
     return {
         "updated_at": session.get("updated_at"),
@@ -433,7 +439,8 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "daily_realized_eur": float(daily_realized) if daily_realized is not None else None,
         "weekly_realized_eur": float(weekly_realized) if weekly_realized is not None else None,
         "harvested_today_eur": float(daily_realized) if daily_realized is not None else None,
-        "open_unrealized_eur": float(unrealized) if unrealized is not None else None,
+        "open_unrealized_eur": float(open_unrealized) if open_unrealized is not None else None,
+        "portfolio_pnl_eur": float(portfolio_pnl) if portfolio_pnl is not None else None,
         "daily_realized_source": pnl_source,
         "weekly_realized_source": pnl_source,
         "weekly_target_low_eur": 140.0,

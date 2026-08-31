@@ -151,9 +151,11 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "Geïnd vandaag" in html
     assert "Open (unrealized)" in html
     assert "Geïnd vandaag (verkopen)" in html
+    assert "Portfolio-winst" in html
+    assert "kpi-portfolio-pnl" in html
     assert "Week geïnd" in html
     assert "kpi-daily-realized" in html
-    assert "Sessie (sinds restart)" in html
+    assert "Portfolio Δ (sessie)" in html
     assert "Doel €20–50/dag netto" in html
     assert "Recente fills" in html
 

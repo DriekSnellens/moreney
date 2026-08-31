@@ -78,10 +78,15 @@ def test_metrics_from_payload_prefers_exchange_cache(monkeypatch: pytest.MonkeyP
             "session": {
                 "running": True,
                 "realized_trade_pnl_eur": "164.82",
-                "bridge": {"realized_trade_pnl_eur": "164.82"},
+                "bridge": {
+                    "realized_trade_pnl_eur": "164.82",
+                    "unrealized_mtm_eur": "-5.09",
+                },
             }
         }
     )
     assert metrics["daily_realized_eur"] == pytest.approx(65.09)
     assert metrics["harvested_today_eur"] == pytest.approx(65.09)
+    assert metrics["open_unrealized_eur"] == pytest.approx(-5.09)
+    assert metrics["portfolio_pnl_eur"] == pytest.approx(60.0)
     assert metrics["daily_realized_source"] == "exchange_fifo"
