@@ -87,9 +87,12 @@ async def compute_realized_since(
     bridge: Any,
     since: datetime,
     *,
-    seed_days: int = 14,
-) -> Decimal | None:
-    """Net realized PnL from exchange fills since ``since`` (FIFO, fees included)."""
+    seed_days: int = 21,
+) -> tuple[Decimal | None, list[dict[str, Any]]]:
+    """Net realized PnL from exchange fills since ``since`` (FIFO, fees included).
+
+    Returns ``(realized_eur, sell_events)``. Lots are per venue+base.
+    """
     from bot.live.dashboard_reconcile import _fetch_exchange_trades, _replay_fifo
 
     if since.tzinfo is None:
@@ -107,12 +110,12 @@ async def compute_realized_since(
             )
             all_trades.extend(rows)
     if not all_trades:
-        return None
+        return None, []
     all_trades.sort(key=lambda r: r["ts_ms"])
-    _, realized_since, _, _ = _replay_fifo(
+    _, realized_since, sell_events, _ = _replay_fifo(
         all_trades, since_ms=since_ms, quote=str(getattr(bridge, "_quote", "EUR") or "EUR")
     )
-    return realized_since
+    return realized_since, sell_events
 
 
 async def refresh_calendar_pnl_cache(
@@ -131,17 +134,27 @@ async def refresh_calendar_pnl_cache(
     week_start = operator_week_start_utc()
     daily: Decimal | None = None
     weekly: Decimal | None = None
+    sell_events: list[dict[str, Any]] = []
     err: str | None = None
     try:
         if day_start == week_start:
-            daily = weekly = await compute_realized_since(bridge, day_start)
+            daily, sell_events = await compute_realized_since(bridge, day_start)
+            weekly = daily
         else:
-            daily = await compute_realized_since(bridge, day_start)
-            weekly = await compute_realized_since(bridge, week_start)
+            daily, sell_events = await compute_realized_since(bridge, day_start)
+            weekly, _ = await compute_realized_since(bridge, week_start)
     except Exception as exc:  # noqa: BLE001
         err = str(exc)[:200]
         logger.exception("calendar PnL refresh failed")
 
+    by_base: dict[str, float] = {}
+    for ev in sell_events:
+        key = f"{ev.get('venue')}:{ev.get('base')}"
+        try:
+            by_base[key] = by_base.get(key, 0.0) + float(ev.get("pnl_eur") or 0)
+        except (TypeError, ValueError):
+            continue
+    top = sorted(by_base.items(), key=lambda kv: kv[1])
     updated = datetime.now(UTC).isoformat()
     _cache = {
         "updated_at": updated,
@@ -150,6 +163,8 @@ async def refresh_calendar_pnl_cache(
         "week_start_utc": week_start.isoformat(),
         "daily_eur": str(daily.quantize(Decimal("0.01"))) if daily is not None else None,
         "weekly_eur": str(weekly.quantize(Decimal("0.01"))) if weekly is not None else None,
+        "sell_count": len(sell_events),
+        "by_base_eur": {k: round(v, 2) for k, v in top},
         "error": err,
     }
     _last_refresh_mono = now_mono

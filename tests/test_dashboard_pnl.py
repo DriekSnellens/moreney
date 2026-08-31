@@ -50,11 +50,11 @@ async def test_refresh_calendar_pnl_cache(monkeypatch: pytest.MonkeyPatch) -> No
     bridge._allowed_bases = None
     bridge._venue_raw_balances = {"bitvavo": []}
 
-    async def fake_compute(_bridge, since, *, seed_days=14):
+    async def fake_compute(_bridge, since, *, seed_days=21):
         # Distinct values so day/week paths are exercised separately.
         if since.hour == 22 and since.minute == 0:
-            return Decimal("65.09")
-        return Decimal("65.09")
+            return Decimal("65.09"), []
+        return Decimal("65.09"), []
 
     monkeypatch.setattr(
         "bot.live.dashboard_pnl.compute_realized_since",

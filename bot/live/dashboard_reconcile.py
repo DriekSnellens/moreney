@@ -78,7 +78,7 @@ async def _fetch_exchange_trades(
     venue: str,
     base: str,
     since_ms: int,
-    limit: int = 200,
+    limit: int = 500,
 ) -> list[dict[str, Any]]:
     client = bridge._trading_client(venue)
     if client is None:
@@ -89,15 +89,36 @@ async def _fetch_exchange_trades(
     try:
         exchange = await get_ex()
         symbol = f"{base}/{bridge._quote}"
-        raw = await exchange.fetch_my_trades(symbol, since=since_ms, limit=limit)
+        raw_all: list[dict[str, Any]] = []
+        cursor = since_ms
+        # Paginate forward so both early buys (cost basis) and today's sells are kept.
+        for _ in range(8):
+            batch = await exchange.fetch_my_trades(
+                symbol, since=cursor, limit=min(limit, 200)
+            )
+            if not batch:
+                break
+            raw_all.extend(batch)
+            last_ts = max(int(t.get("timestamp") or 0) for t in batch)
+            if last_ts <= cursor:
+                break
+            if len(batch) < min(limit, 200):
+                break
+            cursor = last_ts + 1
+        raw = raw_all
     except Exception:  # noqa: BLE001
         logger.exception("dashboard reconcile fetch trades failed venue=%s base=%s", venue, base)
         return []
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for trade in raw or []:
         ts_ms = int(trade.get("timestamp") or 0)
-        if not ts_ms:
+        if not ts_ms or ts_ms < since_ms:
             continue
+        tid = str(trade.get("id") or f"{ts_ms}:{trade.get('side')}:{trade.get('amount')}")
+        if tid in seen:
+            continue
+        seen.add(tid)
         side = str(trade.get("side") or "").lower()
         qty = Decimal(str(trade.get("amount") or 0))
         px = Decimal(str(trade.get("price") or 0))
@@ -224,15 +245,20 @@ async def reconcile_dashboard_since(
     seed_ms = since_ms - max(1, seed_days) * 24 * 3600 * 1000
 
     venues = sorted(getattr(bridge, "_execute_venues", None) or {"bitvavo"})
-    bases: set[str] = set()
-    for venue in venues:
-        for bal in bridge._venue_raw_balances.get(venue) or []:
-            asset = str(getattr(bal, "asset", "") or "").upper()
-            if asset and asset not in {bridge._quote, *bridge._exclude_bases}:
-                if bridge._allowed_bases is None or asset in bridge._allowed_bases:
-                    bases.add(asset)
-    if not bases:
-        bases = {"SOL", "ADA", "NEAR", "DOT", "XRP", "LINK", "ATOM", "INJ", "APT"}
+    try:
+        from bot.live.dashboard_pnl import _collect_bases
+
+        bases = _collect_bases(bridge)
+    except Exception:  # noqa: BLE001
+        bases = set()
+        for venue in venues:
+            for bal in bridge._venue_raw_balances.get(venue) or []:
+                asset = str(getattr(bal, "asset", "") or "").upper()
+                if asset and asset not in {bridge._quote, *bridge._exclude_bases}:
+                    if bridge._allowed_bases is None or asset in bridge._allowed_bases:
+                        bases.add(asset)
+        if not bases:
+            bases = {"SOL", "ADA", "NEAR", "DOT", "XRP", "LINK", "ATOM", "INJ", "APT"}
 
     all_trades: list[dict[str, Any]] = []
     per_symbol: dict[str, int] = {}
