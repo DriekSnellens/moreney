@@ -1062,8 +1062,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Gerealiseerd: <strong class='{band_class}'>"
         f"{_esc(_eur(session_realized, signed=True) if session_realized is not None else '—')}</strong></span>"
         f"<span>Winnable: {_esc(_eur(winnable, signed=True) if winnable is not None else '—')}</span>"
-        "</div></section>"
     )
+    win_gap = _dec(bridge.get("winnable_gap_eur") or diag.get("winnable_gap_eur"))
+    if win_gap is not None and win_gap > 0:
+        target_band_html += (
+            f"<span class='warn'>Gap: {_esc(_eur(win_gap, signed=True))} "
+            f"niet gecashd — exit fills checken</span>"
+        )
+    target_band_html += "</div></section>"
 
     exit_eng = bridge.get("exit_engine") or {}
     exit_quotes = exit_eng.get("quotes") or {}

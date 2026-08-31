@@ -526,6 +526,14 @@ class Settings(BaseSettings):
     # When mark clears taker-BE by this cushion, prefer fillable limit at taker-BE
     # (post_only=False) so spikes that already pay fees actually fill.
     live_micro_exit_taker_cushion_bps: float = Field(default=5.0, ge=0.0, le=50.0)
+    # After N stale/rejected maker exit attempts, escalate to taker (bid ≥ taker BE).
+    live_micro_exit_taker_after_maker_fails: int = Field(default=2, ge=1, le=10)
+    # Mark price cache TTL for trail/BE checks (seconds).
+    live_micro_mark_ttl_sec: float = Field(default=5.0, ge=1.0, le=120.0)
+    # Alert when winnable MTM exceeds this and is not converting to realized.
+    live_micro_winnable_gap_alert_eur: float = Field(default=3.0, ge=0.0, le=500.0)
+    # Reset sleeve cap + session PnL baseline at UTC midnight.
+    live_micro_daily_baseline_reset_utc: bool = True
     # OKX active-ring: smaller clips while underfilled → more parallel slots.
     live_micro_okx_ring_clip_eur: float = Field(default=50.0, ge=20.0, le=200.0)
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).

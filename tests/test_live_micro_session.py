@@ -89,7 +89,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert dual.arbitrage_position_pct == 3.75
     assert dual.arbitrage_max_emits_per_cycle == 12
     assert dual.live_micro_max_open_orders == 4
-    assert dual.live_micro_max_open_orders_per_venue == 2
+    assert dual.live_micro_max_open_orders_per_venue == 3
     assert dual.live_micro_max_alt_bases == 8
     assert float(dual.live_micro_first_clip_eur) == 55.0
     assert float(dual.live_micro_add_clip_eur) == 100.0
@@ -124,7 +124,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return == 0.0005
+    assert cfg.paper_buy_momentum_min_return == 0.0002
     assert cfg.paper_buy_momentum_samples >= 8
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert "ETH" in (cfg.live_micro_focus_bases or "")
@@ -155,7 +155,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_add_clip_eur) == 100.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
     assert cfg.live_micro_max_open_orders <= 4
-    assert cfg.live_micro_max_open_orders_per_venue == 2
+    assert cfg.live_micro_max_open_orders_per_venue == 3
     assert float(cfg.live_micro_max_notional_eur) >= 80.0
     assert float(cfg.risk_max_position_usd) >= 80.0
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
@@ -171,7 +171,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_block_buys_when_holding_base is True
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
-    assert float(cfg.live_micro_okx_buy_improve_bps) == 0.0
+    assert float(cfg.live_micro_okx_buy_improve_bps) == 1.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.50
     assert cfg.paper_trail_be_harvest_partial_pct >= 0.50
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) == 0.0
@@ -180,7 +180,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
     assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.015
     assert cfg.live_micro_early_cut_new_bases_only is True
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 10.0
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
@@ -222,7 +222,7 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) == 0.0005
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0002
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
@@ -758,11 +758,13 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0
     assert cfg.live_micro_reset_drawdown_on_start is True
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 8.0
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
     assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.50
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
     assert cfg.live_micro_exit_engine_enabled is True
-    assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 25.0
+    assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 50.0
+    assert float(cfg.live_micro_exit_resting_max_age_sec) == 3.0
+    assert float(cfg.live_micro_mark_ttl_sec) == 5.0
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:
@@ -3144,3 +3146,56 @@ def test_session_buy_tags_new_session_base_for_early_cut() -> None:
     st = bridge._trail.get("bitvavo:DOT") or {}  # noqa: SLF001
     assert st.get("new_session_base") is True
     assert st.get("sleeve") is True
+
+
+@pytest.mark.asyncio
+async def test_profitable_exit_quote_force_taker_after_maker_fails() -> None:
+    settings = _unlocked(paper_maker_sell_profit_buffer_bps=15.0)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:FET"] = [[Decimal("10"), Decimal("0.14")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:FET")  # noqa: SLF001
+
+    class _T:
+        bid = Decimal("0.1405")
+        ask = Decimal("0.1422")
+        last = Decimal("0.1415")
+
+    class _Client:
+        async def fetch_ticker(self, symbol: str):
+            return _T()
+
+    bridge._trading_client = lambda venue: _Client()  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._exit_maker_fail_counts["bitvavo:FET"] = 2
+    assert bridge._should_force_taker_exit("bitvavo", "FET") is True  # noqa: SLF001
+    px, post_only, reason = await bridge._profitable_exit_quote(  # noqa: SLF001
+        "bitvavo", "FET", Decimal("0.1415"), aggressive=True, force_taker=True
+    )
+    assert post_only is False
+    assert reason in {"hit_bid_taker", "limit_taker_be"}
+    assert px is not None
+
+
+def test_maybe_utc_day_rollover_resets_sleeve_and_baseline() -> None:
+    settings = _unlocked(live_micro_daily_baseline_reset_utc=True)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge.realized_trade_pnl_eur = Decimal("-10")
+    bridge.session_start_realized_eur = Decimal("-10")
+    bridge._sleeve_realized_eur = Decimal("-30")
+    bridge._sleeve_paused = True
+    bridge._utc_day_marker = "2000-01-01"
+    assert bridge.maybe_utc_day_rollover() is True
+    assert bridge._sleeve_paused is False
+    assert bridge._sleeve_realized_eur == Decimal("0")
+    assert bridge.session_start_realized_eur == Decimal("-10")

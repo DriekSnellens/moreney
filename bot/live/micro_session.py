@@ -209,7 +209,7 @@ def _session_settings(
             "paper_trail_recovery_be_partial_pct": 0.50,
             "paper_trail_be_harvest_partial_pct": 0.50,
             "paper_trail_be_harvest_min_gain_pct": 0.0003,
-            "live_micro_be_harvest_cooldown_sec": 8.0,
+            "live_micro_be_harvest_cooldown_sec": 5.0,
             "paper_trail_hard_arm_pct": 0.06,
             "paper_trail_hard_drawdown_pct": 0.025,
             "paper_trail_hard_partial_pct": 0.35,
@@ -232,7 +232,7 @@ def _session_settings(
             "paper_regime_block_buys": True,
             # New-base entries: require rising mark (no flat buys into weak tape).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0005,  # ≥+0.05% when ring is filled
+            "paper_buy_momentum_min_return": 0.0002,  # ≥+0.02% default (ring deploy)
             "paper_buy_momentum_samples": 12,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
@@ -247,18 +247,19 @@ def _session_settings(
                 or getattr(base, "live_micro_active_ring_eur", 1000.0)
                 or 1000.0
             ),
-            "live_micro_velocity_sleeve_daily_loss_cap_eur": float(
-                getattr(base, "live_micro_velocity_sleeve_daily_loss_cap_eur", 25.0)
-                or 25.0
-            ),
-            # D: exit engine — fill soft-armed BE+ spikes (touch ask, fast reprice).
+            "live_micro_velocity_sleeve_daily_loss_cap_eur": 50.0,
+            # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
-            "live_micro_exit_resting_max_age_sec": 5.0,
+            "live_micro_exit_resting_max_age_sec": 3.0,
             "live_micro_exit_cooldown_sec": 3.0,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.75,
             "live_micro_exit_taker_cushion_bps": 5.0,
+            "live_micro_exit_taker_after_maker_fails": 2,
+            "live_micro_mark_ttl_sec": 5.0,
+            "live_micro_winnable_gap_alert_eur": 3.0,
+            "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
             # Underfilled ring: still require slight uptick (no flat/falling).
             "live_micro_ring_momentum_min_return": 0.0002,
@@ -290,7 +291,7 @@ def _session_settings(
             # One bag per base per venue — scan other coins with momentum instead.
             "live_micro_block_buys_when_holding_base": True,
             "live_micro_primary_execute_venue": "bitvavo",
-            "live_micro_okx_buy_improve_bps": 0.0,
+            "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
             # Hard cut-loss off until legacy underwater bags are cleared.
             "live_micro_cut_loss_below_be_pct": 0.0,
@@ -377,7 +378,7 @@ def _session_settings(
                 getattr(base, "live_micro_reset_drawdown_on_start", True)
             ),
             "live_micro_max_open_orders": 4 if cross_venue else 2,
-            "live_micro_max_open_orders_per_venue": 2,
+            "live_micro_max_open_orders_per_venue": 3,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
@@ -672,6 +673,11 @@ async def run_session(
             if deadline is not None and time.monotonic() >= deadline:
                 break
             await asyncio.sleep(1.0)
+            try:
+                bridge.maybe_utc_day_rollover()
+                bridge.check_winnable_gap_alert()
+            except Exception:  # noqa: BLE001
+                pass
             # Regime / cash-first: block new buys while reduce-only or toxic HMM.
             # Per-symbol vol dump cool-off is handled inside maker_inventory —
             # do not globally block all buys when memecoins dump.

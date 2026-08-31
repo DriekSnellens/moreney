@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -165,7 +165,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._venue_raw_balances: dict[str, list[Any]] = {}
         self._last_sync_by_venue: dict[str, dict[str, Any]] = {}
         self._mark_fetched_at: dict[str, float] = {}
-        self._mark_ttl_sec = 30.0
+        self._mark_ttl_sec = float(
+            getattr(settings, "live_micro_mark_ttl_sec", 5.0) or 5.0
+        )
         self._last_orphan_sweep_mono = 0.0
         self._orphan_sweep_sec = 60.0
         # Trailing take-profit (soft/hard + ATR) on session buys.
@@ -400,6 +402,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._exit_taker_cushion_bps = Decimal(
             str(getattr(settings, "live_micro_exit_taker_cushion_bps", 5.0) or 5.0)
         )
+        self._exit_taker_after_maker_fails = int(
+            getattr(settings, "live_micro_exit_taker_after_maker_fails", 2) or 2
+        )
+        self._winnable_gap_alert_eur = Decimal(
+            str(getattr(settings, "live_micro_winnable_gap_alert_eur", 3.0) or 3.0)
+        )
+        self._daily_baseline_reset_utc = bool(
+            getattr(settings, "live_micro_daily_baseline_reset_utc", True)
+        )
+        self._exit_maker_fail_counts: dict[str, int] = {}
+        self._utc_day_marker = ""
+        self._winnable_gap_alert_sent = False
         self._okx_ring_clip_eur = Decimal(
             str(getattr(settings, "live_micro_okx_ring_clip_eur", 50) or 50)
         )
@@ -535,9 +549,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     winnable += self._bag_winnable_eur(
                         venue, asset, cost=cost, mark=mark, qty=qty
                     )
+        baseline = self.session_start_realized_eur
+        if baseline is not None:
+            session_delta = self.realized_trade_pnl_eur - baseline
+        else:
+            session_delta = self.realized_trade_pnl_eur
+        winnable_gap = max(_ZERO, winnable - max(_ZERO, session_delta))
         return {
             "unrealized_mtm_eur": str(unrealized.quantize(Decimal("0.01"))),
             "winnable_mtm_eur": str(winnable.quantize(Decimal("0.01"))),
+            "winnable_gap_eur": str(winnable_gap.quantize(Decimal("0.01"))),
             "locked_notional_eur": str(locked.quantize(Decimal("0.01"))),
             "micro_locked_notional_eur": str(micro_locked.quantize(Decimal("0.01"))),
             "long_hold_notional_eur": str(long_hold_locked.quantize(Decimal("0.01"))),
@@ -864,6 +885,79 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         else:
             self._sleeve_paused = False
 
+    @staticmethod
+    def _exit_fail_key(venue: str, base: str) -> str:
+        return f"{venue.strip().lower()}:{base.upper()}"
+
+    def _bump_exit_maker_fail(self, venue: str, base: str) -> int:
+        key = self._exit_fail_key(venue, base)
+        n = int(self._exit_maker_fail_counts.get(key, 0)) + 1
+        self._exit_maker_fail_counts[key] = n
+        return n
+
+    def _clear_exit_maker_fail(self, venue: str, base: str) -> None:
+        self._exit_maker_fail_counts.pop(self._exit_fail_key(venue, base), None)
+
+    def _should_force_taker_exit(self, venue: str, base: str) -> bool:
+        if self._exit_taker_after_maker_fails <= 0:
+            return False
+        key = self._exit_fail_key(venue, base)
+        return int(self._exit_maker_fail_counts.get(key, 0)) >= self._exit_taker_after_maker_fails
+
+    def maybe_utc_day_rollover(self) -> bool:
+        """Reset sleeve daily cap and session PnL baseline at UTC midnight."""
+        if not self._daily_baseline_reset_utc:
+            return False
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        if self._utc_day_marker == today:
+            return False
+        self._utc_day_marker = today
+        self._sleeve_realized_eur = _ZERO
+        self._sleeve_paused = False
+        self.session_start_realized_eur = self.realized_trade_pnl_eur
+        if self.portfolio_value_eur is not None:
+            self.starting_portfolio_eur = self.portfolio_value_eur
+        self._session_started_ms = time.time() * 1000.0
+        self._daily_kill_active = False
+        self._winnable_gap_alert_sent = False
+        self._exit_maker_fail_counts.clear()
+        self._push_alert(
+            "daily_baseline_reset",
+            f"UTC day {today}: sleeve + session baseline reset "
+            f"(realized={self.realized_trade_pnl_eur})",
+        )
+        logger.info(
+            "DAILY_BASELINE_RESET day=%s realized=%s portfolio=%s",
+            today,
+            self.realized_trade_pnl_eur,
+            self.starting_portfolio_eur,
+        )
+        self.persist_runtime_state()
+        return True
+
+    def check_winnable_gap_alert(self) -> None:
+        """Warn when winnable MTM is high but not yet converting to realized."""
+        if self._winnable_gap_alert_eur <= 0:
+            return
+        mtm = self._mtm_summary()
+        winnable = Decimal(str(mtm.get("winnable_mtm_eur") or 0))
+        if winnable < self._winnable_gap_alert_eur:
+            self._winnable_gap_alert_sent = False
+            return
+        if self._winnable_gap_alert_sent:
+            return
+        baseline = self.session_start_realized_eur
+        if baseline is not None:
+            session_delta = self.realized_trade_pnl_eur - baseline
+        else:
+            session_delta = self.realized_trade_pnl_eur
+        self._winnable_gap_alert_sent = True
+        self._push_alert(
+            "winnable_gap",
+            f"winnable €{float(winnable):.2f} vs session realized Δ "
+            f"€{float(session_delta):.2f} — check exit fills",
+        )
+
     def _invalidate_bal_cache(self, venue: str | None = None) -> None:
         if venue is None:
             self._bal_cache.clear()
@@ -1119,6 +1213,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "cooldown_sec": self._exit_engine_cooldown_sec,
                 "touch_improve_bps": str(self._exit_touch_improve_bps),
                 "taker_cushion_bps": str(self._exit_taker_cushion_bps),
+                "taker_after_maker_fails": self._exit_taker_after_maker_fails,
+                "mark_ttl_sec": self._mark_ttl_sec,
+                "maker_fail_counts": dict(self._exit_maker_fail_counts),
                 "soft_armed_work": self._exit_soft_armed_work,
                 "soft_armed_partial_pct": str(self._exit_soft_armed_partial),
                 "quotes": dict(self._exit_quote_counts),
@@ -2661,6 +2758,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     cancelled += 1
                     self._invalidate_bal_cache()
                     self._bump_skip("stale_quote_cancelled")
+                    if (
+                        side_raw.startswith("s")
+                        and strategy.startswith("trail_")
+                    ):
+                        base = infer_base_asset(symbol)
+                        fails = self._bump_exit_maker_fail(venue, base)
+                        logger.info(
+                            "EXIT_MAKER_STALE venue=%s base=%s fails=%s strategy=%s",
+                            venue,
+                            base,
+                            fails,
+                            strategy,
+                        )
                     logger.info(
                         "MICRO_STALE_CANCEL venue=%s symbol=%s id=%s age=%.1fs max=%.1fs strategy=%s",
                         venue,
@@ -2751,6 +2861,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._daily_kill_active = False
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
+        self._utc_day_marker = datetime.now(UTC).strftime("%Y-%m-%d")
+        self._winnable_gap_alert_sent = False
 
     def reset_operator_dashboard(self) -> dict[str, Any]:
         """Zero cumulative KPIs and chart history for a clean operator slate."""
@@ -3024,6 +3136,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mark: Decimal,
         *,
         aggressive: bool = False,
+        force_taker: bool = False,
     ) -> tuple[Decimal | None, bool, str]:
         """Pick a fillable exit price that still clears fee-aware break-even.
 
@@ -3056,6 +3169,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             best_bid = mark
         if best_ask <= 0:
             best_ask = mark
+
+        # Escalate to taker after repeated stale maker exit attempts.
+        if force_taker and best_bid >= be_taker:
+            return best_bid, False, "hit_bid_taker"
+        if force_taker and mark >= be_taker:
+            return max(be_taker, best_bid), False, "limit_taker_be"
 
         # Bid already clears taker BE → take liquidity for a sure profitable fill.
         if best_bid >= be_taker:
@@ -4269,11 +4388,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
             else:
                 # D: aggressive touch quotes for all profitable trail exits.
+                force_taker = self._should_force_taker_exit(venue, asset)
                 exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
                     venue,
                     asset,
                     mark,
                     aggressive=self._exit_engine_enabled,
+                    force_taker=force_taker,
                 )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")
@@ -4350,6 +4471,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if result.status == OrderStatus.REJECTED:
                 self._bump_exit_stat(self._exit_reject_counts, quote_reason)
                 self._bump_exit_stat(self._exit_reject_counts, f"reason:{reason}")
+                if quote_reason in {"rest_touch_maker", "rest_maker_be"}:
+                    self._bump_exit_maker_fail(venue, asset)
                 if reason != "trail_be_harvest":
                     self._clear_partial_done(st, reason)
                 self._bump_skip(f"{reason}_reject")
@@ -4358,6 +4481,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._set_partial_done(st, reason)
                 status_l = str(result.status.value).lower()
                 if status_l in {"filled", "partially_filled"}:
+                    self._clear_exit_maker_fail(venue, asset)
                     self._bump_exit_stat(self._exit_fill_counts, quote_reason)
                     self._bump_exit_stat(self._exit_fill_counts, f"reason:{reason}")
                 else:
@@ -4377,6 +4501,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 OrderStatus.FILLED,
                 OrderStatus.PARTIALLY_FILLED,
             }:
+                self._clear_exit_maker_fail(venue, asset)
                 self._bump_exit_stat(self._exit_fill_counts, quote_reason)
                 self._bump_exit_stat(self._exit_fill_counts, f"reason:{reason}")
                 self._set_partial_done(st, reason)
