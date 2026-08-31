@@ -232,8 +232,16 @@ def _session_settings(
             "paper_regime_block_buys": True,
             # New-base entries: require rising mark (no flat buys into weak tape).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0002,  # ≥+0.02% default (ring deploy)
+            "paper_buy_momentum_min_return": 0.0008,  # ≥+0.08% rising-tape entries
             "paper_buy_momentum_samples": 12,
+            "live_micro_momentum_require_last_n_rising": 3,
+            "live_micro_ring_soft_max_active_eur": 300.0,
+            "live_micro_buy_resting_max_age_sec": 45.0,
+            "live_micro_cancel_buy_on_flat_momentum": True,
+            "live_micro_buy_quality_underwater_count": 4,
+            "live_micro_buy_quality_pause_sec": 2700.0,
+            "live_micro_block_underwater_cross_venue": True,
+            "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
             "live_micro_new_buy_focus_only": True,
@@ -261,7 +269,7 @@ def _session_settings(
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
-            # Underfilled ring: still require slight uptick (no flat/falling).
+            # Underfilled ring + thin book (<€300): softer momentum floor.
             "live_micro_ring_momentum_min_return": 0.0002,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).

@@ -504,6 +504,21 @@ class Settings(BaseSettings):
     # When active ring is underfilled, allow new buys down to this momentum floor
     # (slightly positive = no flat/falling entries even while filling the ring).
     live_micro_ring_momentum_min_return: float = Field(default=0.0002, ge=-0.01, le=0.05)
+    # Soft ring momentum only while active-book notional is below this EUR.
+    live_micro_ring_soft_max_active_eur: float = Field(default=300.0, ge=0.0, le=5000.0)
+    # Resting buy quotes older than this are cancelled (anti adverse-selection).
+    live_micro_buy_resting_max_age_sec: float = Field(default=45.0, ge=5.0, le=600.0)
+    # Cancel resting buys when rolling momentum ≤ 0.
+    live_micro_cancel_buy_on_flat_momentum: bool = True
+    # Require last N marks rising (in addition to momentum floor) for new buys.
+    live_micro_momentum_require_last_n_rising: int = Field(default=3, ge=0, le=12)
+    # Fair-value buy premium: allow maker bids up to FV × (1 + bps/10000).
+    paper_maker_fv_buy_max_premium_bps: float = Field(default=5.0, ge=0.0, le=50.0)
+    # Buy-quality circuit breaker: N underwater session bags → pause new buys.
+    live_micro_buy_quality_underwater_count: int = Field(default=4, ge=0, le=20)
+    live_micro_buy_quality_pause_sec: float = Field(default=2700.0, ge=60.0, le=86400.0)
+    # Block opening a base on venue B while it is underwater on another venue.
+    live_micro_block_underwater_cross_venue: bool = True
     # --- A+D architecture (velocity sleeve + exit engine) ---
     # A: Velocity sleeve = working capital for recycle trades (usually = active ring).
     # Vault = remaining free cash / long-hold — strict never-loss, no sleeve loss burn.

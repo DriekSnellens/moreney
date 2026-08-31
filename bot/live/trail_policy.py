@@ -57,6 +57,17 @@ class MarkSeries:
             return None
         return (last - first) / first
 
+    def last_n_rising(self, n: int = 3) -> bool:
+        """True when the last n marks are strictly non-decreasing and last > first of window."""
+        need = max(2, int(n))
+        if len(self._marks) < need:
+            return False
+        window = list(self._marks)[-need:]
+        for i in range(1, len(window)):
+            if window[i] < window[i - 1]:
+                return False
+        return window[-1] > window[0]
+
 
 def scale_thresholds(
     *,

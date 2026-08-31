@@ -323,6 +323,29 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._ring_momentum_min = Decimal(
             str(getattr(settings, "live_micro_ring_momentum_min_return", 0) or 0)
         )
+        self._ring_soft_max_active_eur = Decimal(
+            str(getattr(settings, "live_micro_ring_soft_max_active_eur", 300) or 300)
+        )
+        self._buy_resting_max_age_sec = float(
+            getattr(settings, "live_micro_buy_resting_max_age_sec", 45.0) or 45.0
+        )
+        self._cancel_buy_on_flat_momentum = bool(
+            getattr(settings, "live_micro_cancel_buy_on_flat_momentum", True)
+        )
+        self._momentum_require_last_n_rising = int(
+            getattr(settings, "live_micro_momentum_require_last_n_rising", 3) or 0
+        )
+        self._buy_quality_underwater_count = int(
+            getattr(settings, "live_micro_buy_quality_underwater_count", 4) or 0
+        )
+        self._buy_quality_pause_sec = float(
+            getattr(settings, "live_micro_buy_quality_pause_sec", 2700.0) or 2700.0
+        )
+        self._block_underwater_cross_venue = bool(
+            getattr(settings, "live_micro_block_underwater_cross_venue", True)
+        )
+        self._buy_quality_pause_until = 0.0
+        self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
             str(getattr(settings, "live_micro_corr_group", "") or "")
         )
@@ -650,6 +673,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(k): (v if isinstance(v, dict) else {})
             for k, v in (raw.get("trail") or {}).items()
         }
+        self._recent_session_buy_keys = [
+            key
+            for key, st in self._trail.items()
+            if isinstance(st, dict) and st.get("new_session_base")
+        ]
         self._resting = []
         for row in raw.get("resting") or []:
             if not isinstance(row, dict):
@@ -2193,6 +2221,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 trail_st["new_session_base"] = True
             self._note_position_opened(venue or "bitvavo", base)
             self._mark_cost_trusted(venue or "bitvavo", base)
+            self._note_session_buy_for_quality(venue or "bitvavo", base)
+            self._refresh_buy_quality_circuit_breaker()
             return
         remaining = qty
         # Quote-denominated fee reduces proceeds; base fee is already outside qty.
@@ -2740,9 +2770,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         logger.warning("loss-sell cancel failed id=%s", oid)
                         still.append(row)
                     continue
+            # Rising-tape: cancel resting buys when momentum goes flat/down.
+            if (
+                side_raw.startswith("b")
+                and self._cancel_buy_on_flat_momentum
+                and self._momentum_flat_or_down_for_cancel(symbol)
+            ):
+                try:
+                    await client.cancel_order(oid, symbol)
+                    cancelled += 1
+                    self._invalidate_bal_cache()
+                    self._bump_skip("buy_momentum_cancelled")
+                    logger.info(
+                        "MICRO_BUY_MOMENTUM_CANCEL venue=%s symbol=%s id=%s",
+                        venue,
+                        symbol,
+                        oid,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("buy-momentum cancel failed id=%s", oid)
+                    still.append(row)
+                continue
             # D: trail/exit sells reprice fast so soft-armed spikes can fill.
             strategy = str(row.get("strategy") or "")
             row_max_age = max_age
+            if side_raw.startswith("b") and self._buy_resting_max_age_sec > 0:
+                row_max_age = min(max_age, self._buy_resting_max_age_sec)
             if (
                 self._exit_engine_enabled
                 and side_raw.startswith("s")
@@ -3371,9 +3424,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         return self._active_book_notional(venue) < self._active_ring_eur
 
+    def _ring_soft_momentum_eligible(self, venue: str) -> bool:
+        """Softer momentum only while active book is still thinly deployed."""
+        if not self._ring_needs_deploy(venue):
+            return False
+        if self._ring_soft_max_active_eur <= 0:
+            return True
+        return self._active_book_notional(venue) < self._ring_soft_max_active_eur
+
     def _momentum_floor_for_buy(self, venue: str) -> Decimal:
-        """Softer momentum floor while active ring still needs deployment."""
-        if self._ring_needs_deploy(venue):
+        """Softer momentum floor only while active book is thinly deployed."""
+        if self._ring_soft_momentum_eligible(venue):
             return self._ring_momentum_min
         return self._momentum_min
 
@@ -3388,6 +3449,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         ``require_history`` (new-base entries): block until enough samples exist
         so cold symbols cannot slip through as "unknown momentum".
+        Optionally requires last N marks rising (anti single-tick noise).
         """
         if not self._momentum_enabled:
             return True
@@ -3399,7 +3461,108 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mom = series.momentum_return()
         if mom is None:
             return not require_history
-        return mom >= floor
+        if mom < floor:
+            return False
+        rising_n = self._momentum_require_last_n_rising
+        if rising_n > 0 and not series.last_n_rising(rising_n):
+            return False
+        return True
+
+    def _momentum_flat_or_down_for_cancel(self, symbol: str) -> bool:
+        """True when rolling return ≤ 0 (cancel resting buys)."""
+        if not self._momentum_enabled:
+            return False
+        series = self._series_for(symbol)
+        need = max(3, min(6, self._momentum_samples // 2))
+        if len(series) < need:
+            return False
+        mom = series.momentum_return()
+        if mom is None:
+            return False
+        return mom <= 0
+
+    def _buy_quality_paused(self) -> bool:
+        return time.monotonic() < self._buy_quality_pause_until
+
+    def _note_session_buy_for_quality(self, venue: str, base: str) -> None:
+        key = self._lots_key(venue, base)
+        if key not in self._recent_session_buy_keys:
+            self._recent_session_buy_keys.append(key)
+        if len(self._recent_session_buy_keys) > 20:
+            self._recent_session_buy_keys = self._recent_session_buy_keys[-20:]
+
+    def _refresh_buy_quality_circuit_breaker(self) -> None:
+        """Pause new buys when too many recent session bags are underwater."""
+        if self._buy_quality_underwater_count <= 0:
+            return
+        if self._buy_quality_paused():
+            return
+        underwater = 0
+        for key in self._recent_session_buy_keys[-12:]:
+            parts = key.split(":", 1)
+            if len(parts) != 2:
+                continue
+            venue, base = parts[0], parts[1]
+            qty = self._balance_qty(venue, base)
+            if qty <= 0:
+                continue
+            be = self._break_even_sell_price(venue, base)
+            if be is None or be <= 0:
+                continue
+            symbol = f"{base}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol.upper())
+            if mark is None or mark <= 0:
+                st = self._trail.get(key) or {}
+                try:
+                    mark = Decimal(str(st.get("mark") or 0))
+                except Exception:  # noqa: BLE001
+                    mark = _ZERO
+            if mark <= 0:
+                continue
+            notional = qty * mark
+            if notional < Decimal("10"):
+                continue
+            if mark < be:
+                underwater += 1
+        if underwater >= self._buy_quality_underwater_count:
+            self._buy_quality_pause_until = (
+                time.monotonic() + self._buy_quality_pause_sec
+            )
+            self._bump_skip("buy_quality_pause")
+            self._push_alert(
+                "buy_quality_pause",
+                f"{underwater} recent session bags underwater — "
+                f"new buys paused {self._buy_quality_pause_sec / 60:.0f}m",
+            )
+
+    def _is_underwater_on_other_venue(self, venue: str, base: str) -> bool:
+        """True when base is held below BE on a different execute venue."""
+        if not self._block_underwater_cross_venue:
+            return False
+        b = str(base or "").upper()
+        if not b or self._is_long_hold(b):
+            return False
+        venue_l = venue.strip().lower()
+        for other in self._execute_venues:
+            if other == venue_l:
+                continue
+            qty = self._balance_qty(other, b)
+            if qty <= 0:
+                continue
+            be = self._break_even_sell_price(other, b)
+            if be is None or be <= 0:
+                continue
+            symbol = f"{b}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol.upper())
+            if mark is None or mark <= 0:
+                st = self._trail.get(self._lots_key(other, b)) or {}
+                try:
+                    mark = Decimal(str(st.get("mark") or 0))
+                except Exception:  # noqa: BLE001
+                    mark = _ZERO
+            if mark > 0 and mark < be and qty * mark >= Decimal("10"):
+                return True
+        return False
 
     def _momentum_down(self, symbol: str) -> bool:
         """True when rolling mark return is at/below the negative momentum floor."""
@@ -4860,6 +5023,38 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"(block opening on {venue})"
                 ),
             )
+        # Max 1 venue per base while underwater elsewhere.
+        if (
+            side_is_buy
+            and self._is_underwater_on_other_venue(venue, base)
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+        ):
+            self._bump_skip("underwater_cross_venue_block")
+            return await self._reject_before_live(
+                order_request,
+                reason="UNDERWATER_CROSS_VENUE",
+                message=(
+                    f"{base} underwater on another venue — "
+                    f"block opening on {venue}"
+                ),
+            )
+        # Buy-quality circuit breaker after clustered underwater entries.
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+        ):
+            self._refresh_buy_quality_circuit_breaker()
+            if self._buy_quality_paused():
+                self._bump_skip("buy_quality_pause")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="BUY_QUALITY_PAUSE",
+                    message="new buys paused after clustered underwater fills",
+                )
         # Correlation cluster: max N from ADA/ATOM/NEAR/SOL/XRP group.
         if (
             side_is_buy
@@ -4912,7 +5107,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # New crypto only: require mark momentum + history (no cold/flat slip-ins).
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
             mom_floor = self._momentum_floor_for_buy(venue)
-            ring_relaxed = self._ring_needs_deploy(venue)
+            ring_relaxed = self._ring_soft_momentum_eligible(venue)
             if not self._momentum_ok(
                 symbol,
                 require_history=True,

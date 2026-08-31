@@ -1180,25 +1180,35 @@ class MakerInventoryStrategy(BaseStrategy):
             return None
 
         if fair_value is not None and fair_value > 0 and not sell_only:
-            # Require buy below fair value and sell above it — otherwise the
-            # "edge" is a one-sided stale book vs global USDT fair value.
-            max_buy = fair_value
-            if skew is not None:
-                dipped = self._skew_policy.max_buy_vs_fair(fair_value, skew)
-                if dipped is not None:
-                    max_buy = dipped
+            # Rising-tape: allow buys up to FV + premium, and up to book mid.
+            # Avoid forcing structural dip-buys vs global USDT fair value.
+            premium_bps = Decimal(
+                str(
+                    getattr(self._settings, "paper_maker_fv_buy_max_premium_bps", 5)
+                    or 0
+                )
+            )
+            max_buy = fair_value * (
+                Decimal("1") + premium_bps / Decimal("10000")
+            )
+            try:
+                best_bid = Decimal(str(buy_snap.order_book.bids[0].price))
+                best_ask = Decimal(str(buy_snap.order_book.asks[0].price))
+                if best_bid > 0 and best_ask > best_bid:
+                    mid = (best_bid + best_ask) / Decimal("2")
+                    max_buy = max(max_buy, mid)
+            except Exception:  # noqa: BLE001
+                pass
+            # Hard toxic ceiling: never buy more than 25 bps above FV.
+            toxic_cap = fair_value * Decimal("1.0025")
+            max_buy = min(max_buy, toxic_cap)
             if buy_price > max_buy:
                 self._reject(
                     buy_snap.symbol,
-                    "toxic_buy_vs_fv" if max_buy == fair_value else "selective_buy_dip",
+                    "toxic_buy_vs_fv",
                     (
                         f"Buy bid {buy_price} is above max allowed {max_buy} "
-                        f"(fair={fair_value}, underweight dip gate)"
-                        if max_buy != fair_value
-                        else (
-                            f"Buy bid {buy_price} is above USDT fair value {fair_value} "
-                            f"({self._fx_symbol} bridge)"
-                        )
+                        f"(fair={fair_value}, premium={premium_bps}bps)"
                     ),
                     buy_exchange=buy_snap.exchange,
                     sell_exchange=sell_snap.exchange,

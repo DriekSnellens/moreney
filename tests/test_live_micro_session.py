@@ -124,7 +124,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return == 0.0002
+    assert cfg.paper_buy_momentum_min_return == 0.0008
+    assert cfg.live_micro_momentum_require_last_n_rising == 3
+    assert float(cfg.live_micro_buy_resting_max_age_sec) == 45.0
+    assert cfg.live_micro_block_underwater_cross_venue is True
+    assert float(cfg.paper_maker_fv_buy_max_premium_bps) == 5.0
     assert cfg.paper_buy_momentum_samples >= 8
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert "ETH" in (cfg.live_micro_focus_bases or "")
@@ -222,10 +226,11 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) == 0.0002
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0008
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 300.0
     assert cfg.live_micro_max_per_corr_group == 3
 
 
@@ -2593,6 +2598,7 @@ def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
         paper_buy_momentum_enabled=True,
         paper_buy_momentum_min_return=0.001,
         live_micro_ring_momentum_min_return=0.0002,
+        live_micro_ring_soft_max_active_eur=300.0,
         live_micro_active_ring_eur=1000.0,
         live_micro_bridge_persist_path=str(tmp_path / "ring_mom.json"),
     )
@@ -2606,12 +2612,59 @@ def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
     bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
         Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
     ]
-    # Empty active book → ring needs deploy → soft (but still > flat) floor.
+    # Empty active book → ring soft eligible → soft floor.
     assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is True  # noqa: SLF001
     assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.0002")  # noqa: SLF001
+    # Active book above soft max but below ring → full momentum floor.
+    bridge._active_book_notional = lambda venue: Decimal("400")  # type: ignore[method-assign]  # noqa: SLF001
+    assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is False  # noqa: SLF001
+    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.001")  # noqa: SLF001
     # When ring is filled, full momentum floor applies.
     bridge._active_book_notional = lambda venue: Decimal("1200")  # type: ignore[method-assign]  # noqa: SLF001
     assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.001")  # noqa: SLF001
+
+
+def test_last_n_rising_required_for_momentum_ok() -> None:
+    from bot.live.trail_policy import MarkSeries
+
+    series = MarkSeries(maxlen=12)
+    for px in [100, 100.05, 100.04, 100.08]:
+        series.push(Decimal(str(px)))
+    assert series.last_n_rising(3) is False  # 100.05 -> 100.04 dip
+    series2 = MarkSeries(maxlen=12)
+    for px in [100, 100.02, 100.05, 100.09]:
+        series2.push(Decimal(str(px)))
+    assert series2.last_n_rising(3) is True
+
+
+def test_buy_quality_circuit_breaker_pauses(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_buy_quality_underwater_count=2,
+        live_micro_buy_quality_pause_sec=120.0,
+        live_micro_bridge_persist_path=str(tmp_path / "bq.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._trusted_cost_keys.add("bitvavo:AAVE")  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ATOM")  # noqa: SLF001
+    bridge._cost_lots["bitvavo:AAVE"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    bridge._cost_lots["bitvavo:ATOM"] = [[Decimal("10"), Decimal("2")]]  # noqa: SLF001
+    bridge._venue_raw_balances["bitvavo"] = [  # noqa: SLF001
+        type("B", (), {"asset": "AAVE", "free": Decimal("1"), "locked": Decimal("0")})(),
+        type("B", (), {"asset": "ATOM", "free": Decimal("10"), "locked": Decimal("0")})(),
+    ]
+    bridge._portfolio.state.mark_prices["AAVEEUR"] = Decimal("99")
+    bridge._portfolio.state.mark_prices["ATOMEUR"] = Decimal("1.9")
+    bridge._recent_session_buy_keys = ["bitvavo:AAVE", "bitvavo:ATOM"]  # noqa: SLF001
+    bridge._refresh_buy_quality_circuit_breaker()  # noqa: SLF001
+    assert bridge._buy_quality_paused() is True  # noqa: SLF001
 
 
 def test_stuck_underwater_base_excluded_from_corr_count(tmp_path: Path) -> None:
