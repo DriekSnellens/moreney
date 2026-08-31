@@ -291,6 +291,7 @@ def recent_fills_for_display(diag: dict[str, Any], *, limit: int = 8) -> list[di
     """Operator fill feed — in-memory session fills, audit log as fallback."""
     fills = [f for f in (diag.get("recent_live_fills") or []) if isinstance(f, dict)]
     if fills:
+        fills.sort(key=lambda f: str(f.get("ts") or ""))
         return fills[-limit:]
     try:
         from bot.live.dashboard_reconcile import _audit_fills_since

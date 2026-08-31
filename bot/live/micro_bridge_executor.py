@@ -2204,6 +2204,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if amt <= 0 or px <= 0 or side not in {"buy", "sell"}:
             return
         ts_ms = int(trade.get("timestamp") or 0)
+        started_ms = float(self._session_started_ms or 0)
+        if started_ms and ts_ms and ts_ms < started_ms:
+            return
         ts_iso = (
             datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC).isoformat()
             if ts_ms
@@ -2398,6 +2401,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     since_ms=since_ms,
                 ):
                     mirrored += 1
+        self.recent_live_fills.sort(key=lambda f: str(f.get("ts") or ""))
+        if len(self.recent_live_fills) > 24:
+            self.recent_live_fills = self.recent_live_fills[-24:]
         return {"ok": True, "venue": venue, "mirrored": mirrored}
 
 
