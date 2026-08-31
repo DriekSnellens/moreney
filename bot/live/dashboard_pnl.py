@@ -90,8 +90,11 @@ async def refresh_calendar_pnl_cache(
     weekly: Decimal | None = None
     err: str | None = None
     try:
-        daily = await compute_realized_since(bridge, day_start)
-        weekly = await compute_realized_since(bridge, week_start)
+        if day_start == week_start:
+            daily = weekly = await compute_realized_since(bridge, day_start)
+        else:
+            daily = await compute_realized_since(bridge, day_start)
+            weekly = await compute_realized_since(bridge, week_start)
     except Exception as exc:  # noqa: BLE001
         err = str(exc)[:200]
         logger.exception("calendar PnL refresh failed")
