@@ -3218,7 +3218,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def reset_operator_dashboard(self) -> dict[str, Any]:
         """Zero cumulative KPIs and chart history for a clean operator slate."""
         from bot.live.dashboard_history import clear_history
-        from bot.live.dashboard_pnl import clear_calendar_pnl_cache
+        from bot.live.dashboard_pnl import clear_calendar_pnl_cache, set_operator_pnl_anchor
 
         self.realized_trade_pnl_eur = _ZERO
         self.session_start_realized_eur = _ZERO
@@ -3240,10 +3240,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.reset_paper_realized_after_inventory_sync()
         clear_history()
         clear_calendar_pnl_cache()
+        anchor = set_operator_pnl_anchor()
         self.persist_runtime_state()
         logger.info(
-            "OPERATOR_DASHBOARD_RESET portfolio=%s realized=0 fills=0",
+            "OPERATOR_DASHBOARD_RESET portfolio=%s realized=0 fills=0 anchor=%s",
             self.starting_portfolio_eur,
+            anchor.isoformat(),
         )
         return {
             "ok": True,
@@ -3251,6 +3253,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "starting_portfolio_eur": str(self.starting_portfolio_eur or ""),
             "session_start_realized_eur": "0",
             "session_live_transaction_count": 0,
+            "operator_anchor_utc": anchor.isoformat(),
         }
 
     def reset_trading_cycle(self) -> dict[str, Any]:

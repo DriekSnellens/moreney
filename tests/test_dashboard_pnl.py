@@ -25,9 +25,37 @@ def _clean_cache(tmp_path, monkeypatch):
         "bot.live.dashboard_pnl._CACHE_PATH",
         tmp_path / "pnl_cache.json",
     )
+    monkeypatch.setattr(
+        "bot.live.dashboard_pnl._ANCHOR_PATH",
+        tmp_path / "pnl_anchor.json",
+    )
     clear_calendar_pnl_cache()
+    from bot.live.dashboard_pnl import clear_operator_pnl_anchor
+
+    clear_operator_pnl_anchor()
     yield
     clear_calendar_pnl_cache()
+    clear_operator_pnl_anchor()
+
+
+def test_operator_pnl_anchor_zeros_until_refresh(tmp_path, monkeypatch) -> None:
+    from bot.live.dashboard_pnl import (
+        get_operator_pnl_anchor,
+        set_operator_pnl_anchor,
+        get_calendar_pnl_cache,
+        _effective_since,
+    )
+    from bot.live.dashboard_history import operator_day_start_utc
+
+    when = datetime(2026, 8, 31, 21, 45, tzinfo=UTC)
+    set_operator_pnl_anchor(when)
+    assert get_operator_pnl_anchor() == when
+    cache = get_calendar_pnl_cache()
+    assert cache["daily_eur"] == "0.00"
+    assert cache["source"] == "operator_reset"
+    # Anchor after day start → Geïnd window starts at anchor
+    day = operator_day_start_utc()
+    assert _effective_since(day) == when
 
 
 def test_chart_history_points_drops_reconcile_stairs() -> None:

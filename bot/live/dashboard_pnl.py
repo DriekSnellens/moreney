@@ -15,9 +15,82 @@ from bot.live.dashboard_history import operator_day_start_utc, operator_week_sta
 logger = logging.getLogger(__name__)
 
 _CACHE_PATH = Path("./data/dashboard_pnl_cache.json")
+_ANCHOR_PATH = Path("./data/dashboard_pnl_anchor.json")
 _CACHE_TTL_SEC = 90.0
 _last_refresh_mono = 0.0
 _cache: dict[str, Any] = {}
+
+
+def set_operator_pnl_anchor(when: datetime | None = None) -> datetime:
+    """Pin Geïnd/week KPIs to start at ``when`` (operator dashboard reset)."""
+    when = when or datetime.now(UTC)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    else:
+        when = when.astimezone(UTC)
+    payload = {"operator_anchor_utc": when.isoformat()}
+    try:
+        _ANCHOR_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ANCHOR_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        logger.exception("operator PnL anchor persist failed")
+    # Immediate clean slate until the next exchange refresh.
+    global _last_refresh_mono, _cache  # noqa: PLW0603
+    _cache = {
+        "updated_at": when.isoformat(),
+        "source": "operator_reset",
+        "day_start_utc": when.isoformat(),
+        "week_start_utc": when.isoformat(),
+        "operator_anchor_utc": when.isoformat(),
+        "daily_eur": "0.00",
+        "weekly_eur": "0.00",
+        "sell_count": 0,
+        "by_base_eur": {},
+        "error": None,
+    }
+    _last_refresh_mono = time.monotonic()
+    _persist_cache(_cache)
+    return when
+
+
+def clear_operator_pnl_anchor() -> None:
+    try:
+        if _ANCHOR_PATH.exists():
+            _ANCHOR_PATH.unlink()
+    except OSError:
+        logger.exception("operator PnL anchor clear failed")
+
+
+def get_operator_pnl_anchor() -> datetime | None:
+    if not _ANCHOR_PATH.exists():
+        return None
+    try:
+        raw = json.loads(_ANCHOR_PATH.read_text(encoding="utf-8"))
+        ts = str((raw or {}).get("operator_anchor_utc") or "")
+        if not ts:
+            return None
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _effective_since(window_start: datetime) -> datetime:
+    """Calendar window start, or operator reset anchor if still in today's NL day."""
+    if window_start.tzinfo is None:
+        window_start = window_start.replace(tzinfo=UTC)
+    else:
+        window_start = window_start.astimezone(UTC)
+    anchor = get_operator_pnl_anchor()
+    if anchor is None:
+        return window_start
+    day = operator_day_start_utc()
+    if anchor < day:
+        clear_operator_pnl_anchor()
+        return window_start
+    return max(window_start, anchor)
 
 
 _DEFAULT_PNL_BASES = frozenset(
@@ -130,8 +203,8 @@ async def refresh_calendar_pnl_cache(
     if not force and now_mono - _last_refresh_mono < _CACHE_TTL_SEC and _cache.get("daily_eur") is not None:
         return dict(_cache)
 
-    day_start = operator_day_start_utc()
-    week_start = operator_week_start_utc()
+    day_start = _effective_since(operator_day_start_utc())
+    week_start = _effective_since(operator_week_start_utc())
     daily: Decimal | None = None
     weekly: Decimal | None = None
     sell_events: list[dict[str, Any]] = []
@@ -156,11 +229,13 @@ async def refresh_calendar_pnl_cache(
             continue
     top = sorted(by_base.items(), key=lambda kv: kv[1])
     updated = datetime.now(UTC).isoformat()
+    anchor = get_operator_pnl_anchor()
     _cache = {
         "updated_at": updated,
-        "source": "exchange_fifo",
+        "source": "exchange_fifo" if anchor is None else "exchange_fifo_since_reset",
         "day_start_utc": day_start.isoformat(),
         "week_start_utc": week_start.isoformat(),
+        "operator_anchor_utc": anchor.isoformat() if anchor else None,
         "daily_eur": str(daily.quantize(Decimal("0.01"))) if daily is not None else None,
         "weekly_eur": str(weekly.quantize(Decimal("0.01"))) if weekly is not None else None,
         "sell_count": len(sell_events),
