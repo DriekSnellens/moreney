@@ -826,8 +826,8 @@ def test_balanced_emits_give_each_venue_a_slot() -> None:
     assert len(selected) == 2
 
 
-def test_balanced_emits_bias_cash_rich_venue() -> None:
-    """Venue with ≥ cash-bias-ratio × peer free EUR gets extra emit slots."""
+def test_balanced_emits_alternate_venues_without_okx_bias() -> None:
+    """Both venues get symmetric rotation — no OKX cash-rich overweight."""
     from bot.core.enums import OpportunitySide
     from bot.core.models import TradeOpportunity
     from uuid import uuid4
@@ -876,12 +876,11 @@ def test_balanced_emits_bias_cash_rich_venue() -> None:
     bv_count = sum(
         1 for o in selected if (o.metadata or {}).get("buy_exchange") == "bitvavo"
     )
-    assert okx_count >= bv_count
-    assert okx_count >= 2
+    assert okx_count >= 1
     assert bv_count >= 1
     assert len(selected) == 3
 
-def test_okx_deploy_bases_ranked_first_on_okx() -> None:
+def test_deploy_bases_do_not_override_net_rank_on_okx() -> None:
     from bot.core.enums import OpportunitySide
     from bot.core.models import TradeOpportunity
     from uuid import uuid4
@@ -918,7 +917,7 @@ def test_okx_deploy_bases_ranked_first_on_okx() -> None:
         _opp("okx", "ADAEUR", "1.0"),
     ]
     selected = strategy._select_balanced_emits(ranked)  # noqa: SLF001
-    assert selected[0].symbol == "ADAEUR"
+    assert selected[0].symbol == "APTEUR"
 
 
 def test_global_overweight_does_not_block_okx_buys() -> None:

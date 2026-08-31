@@ -880,8 +880,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _aggressive_buy_price(
         self, venue: str, px: Decimal, order_book: Any
     ) -> Decimal:
-        """OKX maker buys: join/improve best bid when post-only safe."""
-        if venue.strip().lower() != "okx" or self._okx_buy_improve_bps <= 0:
+        """Maker buys: join/improve best bid when post-only safe (all venues)."""
+        improve_bps = self._okx_buy_improve_bps
+        if improve_bps <= 0:
             return px
         best_bid = _ZERO
         best_ask = _ZERO
@@ -895,7 +896,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 pass
         if best_bid <= 0:
             return px
-        touch = (best_bid * (Decimal("1") + self._okx_buy_improve_bps)).quantize(
+        touch = (best_bid * (Decimal("1") + improve_bps)).quantize(
             Decimal("0.00000001")
         )
         if best_ask > 0 and touch >= best_ask:
@@ -3426,18 +3427,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
         """Single entry clip — no scale-up adds after soft-arm."""
+        del venue, base
         first = self._first_clip_eur
-        venue_l = venue.strip().lower()
-        # OKX ring underfilled: smaller clips → more parallel active-book slots.
-        if (
-            venue_l == "okx"
-            and self._okx_ring_clip_eur > 0
-            and self._ring_needs_deploy(venue_l)
-        ):
-            if first <= 0:
-                first = self._okx_ring_clip_eur
-            else:
-                first = min(first, self._okx_ring_clip_eur)
         if first <= 0:
             add = self._add_clip_eur
             return add if add > 0 else None

@@ -150,15 +150,7 @@ def _session_settings(
     execute_venues = _parse_execute_venues(base)
     md_symbols = _cross_venue_market_symbols(symbols) if cross_venue else list(symbols)
     maker_venues = "okx,bitvavo" if cross_venue else "bitvavo"
-    okx_deploy = str(
-        getattr(base, "live_micro_okx_deploy_bases", "")
-        or (
-            "ADA,NEAR,DOT,XRP,LINK,ATOM,BCH,TRX,UNI,AAVE,BNB,XLM,"
-            "SOL,AVAX,ARB,OP,SUI,APT,DOGE,LTC"
-        )
-    )
-    if "BTC" not in {p.strip().upper() for p in okx_deploy.split(",") if p.strip()}:
-        okx_deploy = f"BTC,{okx_deploy}" if okx_deploy else "BTC"
+    okx_deploy = ""
     focus_bases = (
         "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
         "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
@@ -267,7 +259,7 @@ def _session_settings(
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.75,
             "live_micro_exit_taker_cushion_bps": 5.0,
-            "live_micro_okx_ring_clip_eur": 45.0,
+            "live_micro_okx_ring_clip_eur": 55.0,
             # Underfilled ring: still require slight uptick (no flat/falling).
             "live_micro_ring_momentum_min_return": 0.0002,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
@@ -298,7 +290,7 @@ def _session_settings(
             # One bag per base per venue — scan other coins with momentum instead.
             "live_micro_block_buys_when_holding_base": True,
             "live_micro_primary_execute_venue": "bitvavo",
-            "live_micro_okx_buy_improve_bps": 1.0,
+            "live_micro_okx_buy_improve_bps": 0.0,
             "live_micro_underwater_min_notional_eur": 25.0,
             # Hard cut-loss off until legacy underwater bags are cleared.
             "live_micro_cut_loss_below_be_pct": 0.0,
@@ -313,11 +305,10 @@ def _session_settings(
             "global_max_venue_exposure_pct": 100.0,
             "live_micro_cross_venue_min_fill_rate": 0.30,
             "live_micro_cross_venue_min_attempts": 8,
-            "live_micro_block_cross_venue_duplicate_bases": True,
-            "live_micro_consolidate_duplicate_bases": True,
+            "live_micro_block_cross_venue_duplicate_bases": False,
+            "live_micro_consolidate_duplicate_bases": False,
             "live_micro_consolidate_primary_venue": "bitvavo",
             "live_micro_okx_deploy_bases": okx_deploy,
-            # OKX with ≥ Bitvavo free EUR gets extra emit slots (equal cash counts).
             "live_micro_okx_cash_bias_ratio": float(
                 getattr(base, "live_micro_okx_cash_bias_ratio", 1.0) or 1.0
             ),

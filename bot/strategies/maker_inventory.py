@@ -672,14 +672,6 @@ class MakerInventoryStrategy(BaseStrategy):
             and self._ring_needs_deploy(venue)
         ):
             ring_boost = Decimal("0.12")
-        # OKX flush with spare EUR: slight rank lift for global pass-2 slots.
-        # Stronger when OKX active ring still needs deployment.
-        okx_cash_bonus = Decimal("0")
-        if venue == "okx":
-            if self._ring_needs_deploy("okx"):
-                okx_cash_bonus = Decimal("0.10")
-            elif self._okx_cash_rich():
-                okx_cash_bonus = Decimal("0.02")
         return (
             net
             + (skew * Decimal("0.01"))
@@ -687,7 +679,6 @@ class MakerInventoryStrategy(BaseStrategy):
             + held_penalty
             + focus_adj
             + ring_boost
-            + okx_cash_bonus
         )
 
     def _okx_cash_rich(self) -> bool:
@@ -728,9 +719,6 @@ class MakerInventoryStrategy(BaseStrategy):
             return max_e, keep
         # Always-on deploy: ring underfilled → full budget + looser keep.
         if self._any_ring_needs_deploy():
-            # OKX lagging the ring → extra emit slots so cash actually deploys.
-            if self._ring_needs_deploy("okx"):
-                return max(max_e, 12), min(keep, Decimal("0.20")) if keep > 0 else keep
             return max_e, min(keep, Decimal("0.25")) if keep > 0 else keep
         nets = [
             Decimal(str((o.metadata or {}).get("net_profit_eur", "0") or "0"))
@@ -833,7 +821,7 @@ class MakerInventoryStrategy(BaseStrategy):
         ).strip().lower()
 
     def _venue_emit_rotation(self, venues: list[str]) -> list[str]:
-        """Primary-first alternation; cash-rich OKX gets extra emit slots."""
+        """Primary-first symmetric alternation across execute venues."""
         if not venues:
             return []
         primary = str(
@@ -847,37 +835,12 @@ class MakerInventoryStrategy(BaseStrategy):
         if len(ordered) < 2:
             return ordered
         first, second = ordered[0], ordered[1]
-        venue_set = {str(v).strip().lower() for v in ordered}
-        # OKX ring underfilled: overweight OKX emit slots hard.
-        if "okx" in venue_set and "bitvavo" in venue_set and self._ring_needs_deploy("okx"):
-            return [
-                "okx",
-                "okx",
-                "bitvavo",
-                "okx",
-                "okx",
-                "bitvavo",
-                "okx",
-                "okx",
-            ]
-        # OKX flush with spare EUR: overweight OKX slots so cash deploys.
-        if "okx" in venue_set and "bitvavo" in venue_set and self._okx_cash_rich():
-            return [
-                "okx",
-                "bitvavo",
-                "okx",
-                "okx",
-                "bitvavo",
-                "okx",
-                "okx",
-                "bitvavo",
-            ]
         return [first, second, first, second, first, second, first, second]
 
     def _venue_opps_ordered(
         self, venue: str, opps: list[TradeOpportunity]
     ) -> list[TradeOpportunity]:
-        """Unheld first; OKX deploy bases; ring underfill → focus unheld first."""
+        """Unheld first; ring underfill → focus unheld first."""
         key = str(venue or "").strip().lower()
         held = self._venue_held_bases.get(key, set())
         fresh: list[TradeOpportunity] = []
@@ -903,17 +866,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     other_fresh.append(opp)
             if focus_fresh:
                 pool = focus_fresh + other_fresh
-        if key != "okx" or not self._okx_deploy_bases or not pool:
-            return pool
-        preferred: list[TradeOpportunity] = []
-        other: list[TradeOpportunity] = []
-        for opp in pool:
-            base = infer_base_asset(str(opp.symbol or "").upper(), self._quote)
-            if base in self._okx_deploy_bases:
-                preferred.append(opp)
-            else:
-                other.append(opp)
-        return preferred + other if preferred else pool
+        return pool
 
     def _select_balanced_emits(
         self,

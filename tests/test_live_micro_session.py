@@ -131,7 +131,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert "TAO" not in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
-    assert "TAO" not in (cfg.live_micro_okx_deploy_bases or "")
+    assert (cfg.live_micro_okx_deploy_bases or "") == ""
     assert cfg.live_micro_max_per_corr_group == 3
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
@@ -148,8 +148,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_min_notional_eur == 55.0
     assert cfg.max_simultaneous_positions >= 8
     assert cfg.live_micro_max_alt_bases == 8
-    assert cfg.live_micro_block_cross_venue_duplicate_bases is True
-    assert cfg.live_micro_consolidate_duplicate_bases is True
+    assert cfg.live_micro_block_cross_venue_duplicate_bases is False
+    assert cfg.live_micro_consolidate_duplicate_bases is False
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
     assert float(cfg.live_micro_first_clip_eur) == 55.0
     assert float(cfg.live_micro_add_clip_eur) == 100.0
@@ -171,7 +171,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_block_buys_when_holding_base is True
     assert cfg.live_micro_primary_execute_venue == "bitvavo"
     assert cfg.live_micro_underwater_block_new_bases_only is True
-    assert float(cfg.live_micro_okx_buy_improve_bps) >= 1.0
+    assert float(cfg.live_micro_okx_buy_improve_bps) == 0.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.50
     assert cfg.paper_trail_be_harvest_partial_pct >= 0.50
     assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) == 0.0
@@ -183,8 +183,6 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_be_harvest_cooldown_sec) <= 10.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
-    assert "ADA" in (cfg.live_micro_okx_deploy_bases or "")
-    assert "BTC" in (cfg.live_micro_okx_deploy_bases or "")
     assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
     assert "BTCEUR" not in cfg.market_data_symbols
@@ -1616,8 +1614,10 @@ def test_okx_aggressive_buy_price_joins_bid() -> None:
         bids=[SimpleNamespace(price=Decimal("100"))],
         asks=[SimpleNamespace(price=Decimal("100.05"))],
     )
-    px = bridge._aggressive_buy_price("okx", Decimal("99.5"), book)  # noqa: SLF001
-    assert px >= Decimal("100")
+    px_okx = bridge._aggressive_buy_price("okx", Decimal("99.5"), book)  # noqa: SLF001
+    px_bv = bridge._aggressive_buy_price("bitvavo", Decimal("99.5"), book)  # noqa: SLF001
+    assert px_okx >= Decimal("100")
+    assert px_bv >= Decimal("100")
 
 
 def test_trail_partial_qty_scales_to_min_notional() -> None:
@@ -2417,7 +2417,7 @@ def test_venue_emit_rotation_bitvavo_first_alternation() -> None:
     assert rot[:4] == ["bitvavo", "okx", "bitvavo", "okx"]
 
 
-def test_venue_emit_rotation_okx_cash_bias() -> None:
+def test_venue_emit_rotation_symmetric_without_okx_cash_bias() -> None:
     from bot.strategies.maker_inventory import MakerInventoryStrategy
 
     strat = MakerInventoryStrategy(
@@ -2427,11 +2427,10 @@ def test_venue_emit_rotation_okx_cash_bias() -> None:
             live_micro_okx_cash_bias_ratio=1.0,
         )
     )
-    # Equal cash counts as OKX-rich at ratio 1.0.
     strat._venue_free_quote = {"bitvavo": Decimal("1900"), "okx": Decimal("1900")}  # noqa: SLF001
     rot = strat._venue_emit_rotation(["okx", "bitvavo"])  # noqa: SLF001
-    assert rot[0] == "okx"
-    assert rot.count("okx") > rot.count("bitvavo")
+    assert rot[:4] == ["bitvavo", "okx", "bitvavo", "okx"]
+    assert rot.count("okx") == rot.count("bitvavo")
 
 
 def test_focus_bases_rank_above_near_tie_non_focus() -> None:
@@ -3043,7 +3042,7 @@ def test_recovery_clears_be_harvest_done_when_underwater() -> None:
     assert st["recovery_be_partial_done"] is False
 
 
-def test_okx_ring_clip_while_underfilled() -> None:
+def test_buy_clip_cap_same_on_both_venues() -> None:
     settings = _unlocked(
         live_micro_first_clip_eur=75.0,
         live_micro_okx_ring_clip_eur=50.0,
@@ -3058,11 +3057,10 @@ def test_okx_ring_clip_while_underfilled() -> None:
         execute_venues={"bitvavo", "okx"},
     )
     bridge._venue_raw_balances["okx"] = []  # noqa: SLF001
-    # Fake free cash so ring_needs_deploy is true.
     bridge._venue_budget_remaining = lambda venue: Decimal("500")  # type: ignore[method-assign]  # noqa: SLF001
-    cap = bridge._buy_clip_cap_eur("okx", "DOT")  # noqa: SLF001
-    assert cap == Decimal("50")
+    cap_okx = bridge._buy_clip_cap_eur("okx", "DOT")  # noqa: SLF001
     cap_bv = bridge._buy_clip_cap_eur("bitvavo", "DOT")  # noqa: SLF001
+    assert cap_okx == Decimal("75")
     assert cap_bv == Decimal("75")
 
 
