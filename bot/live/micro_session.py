@@ -317,7 +317,8 @@ def _session_settings(
             "live_micro_cut_loss_below_be_pct": 0.0,
             "live_micro_cut_loss_new_bases_only": False,
             # Early cut: new-session bags at −1.5% BE + flat/down momentum → free capital.
-            "live_micro_early_cut_loss_below_be_pct": 0.015,
+            # Early cut off: never realize intentional losses (target ~€30/day, no red exits).
+            "live_micro_early_cut_loss_below_be_pct": 0.0,
             "live_micro_early_cut_new_bases_only": True,
             "live_micro_early_cut_momentum_max_return": 0.0,
             "live_micro_momentum_exit_min_return": 0.002,

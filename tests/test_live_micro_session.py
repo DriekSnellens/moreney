@@ -203,7 +203,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
-    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.015
+    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.0
     assert cfg.live_micro_early_cut_new_bases_only is True
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
