@@ -110,16 +110,22 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
-    assert cfg.paper_trail_arm_gain_pct == 0.06
-    assert cfg.paper_trail_drawdown_pct == 0.025
+    assert cfg.paper_trail_drawdown_pct == 0.015
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_arm_pct == 0.001
+    assert cfg.paper_trail_soft_arm_pct == 0.0045
     assert cfg.paper_trail_soft_drawdown_pct == 0.0025
-    assert cfg.paper_trail_soft_partial_pct == 0.30
-    assert cfg.paper_trail_hard_arm_pct == 0.06
-    assert cfg.paper_trail_hard_drawdown_pct == 0.025
+    assert cfg.paper_trail_soft_partial_pct == 0.15
+    assert cfg.paper_trail_hard_arm_pct == 0.03
+    assert cfg.paper_trail_hard_drawdown_pct == 0.015
     assert cfg.paper_trail_hard_partial_pct == 0.35
+    assert cfg.paper_trail_arm_gain_pct == 0.03
+    assert cfg.live_micro_winner_add_enabled is True
+    assert cfg.live_micro_winner_add_max == 2
+    assert float(cfg.live_micro_winner_add_clip_eur) == 55.0
+    assert cfg.live_micro_low_util_relax_focus is True
+    assert float(cfg.paper_maker_min_profit_eur) == 0.04
+    assert float(cfg.paper_maker_min_net_return) == 0.0004
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -169,9 +175,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct <= 55.0
     assert cfg.paper_max_alt_inventory_pct >= 50.0
-    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.paper_trail_soft_partial_pct == 0.15
     assert cfg.paper_trail_soft_drawdown_pct == 0.0025
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
+    assert cfg.live_micro_winner_add_enabled is True
+    assert cfg.live_micro_low_util_relax_focus is True
     assert cfg.paper_maker_keep_vs_best_frac == 0.30
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
@@ -471,8 +479,13 @@ async def test_bridge_skips_non_bitvavo_venue() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bridge_mirrors_live_fill(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = _unlocked()
+async def test_bridge_mirrors_live_fill(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=False,
+        live_micro_bridge_persist_path=str(tmp_path / "bridge.json"),
+    )
     portfolio = PaperPortfolio(settings, starting_eur=Decimal("25"))
     engine = LiveMicroEngine(settings)
     engine.arm()
@@ -673,7 +686,7 @@ def test_trail_hard_arm_widens_drawdown() -> None:
     assert st["triggered"] is True
 
 
-def test_trail_ignores_peak_spike_after_soft_arm() -> None:
+def test_trail_ignores_peak_spike_after_soft_arm(tmp_path: Path) -> None:
     settings = _unlocked(
         paper_trail_take_profit_enabled=True,
         paper_trail_soft_arm_pct=0.009,
@@ -681,6 +694,7 @@ def test_trail_ignores_peak_spike_after_soft_arm() -> None:
         paper_trail_hard_arm_pct=0.06,
         paper_trail_hard_drawdown_pct=0.03,
         paper_trail_atr_enabled=False,
+        live_micro_bridge_persist_path=str(tmp_path / "peak.json"),
     )
     bridge = MicroBudgetLiveExecutor(
         settings,
@@ -754,13 +768,14 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         symbols=["ADAEUR"],
         persist_path=tmp_path / "t.json",
     )
-    assert cfg.paper_trail_drawdown_pct == 0.025
-    assert cfg.paper_trail_soft_arm_pct == 0.001
+    assert cfg.paper_trail_drawdown_pct == 0.015
+    assert cfg.paper_trail_soft_arm_pct == 0.0045
     assert cfg.paper_trail_soft_drawdown_pct == 0.0025
-    assert cfg.paper_trail_hard_arm_pct == 0.06
+    assert cfg.paper_trail_hard_arm_pct == 0.03
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_partial_pct == 0.30
+    assert cfg.paper_trail_soft_partial_pct == 0.15
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
+    assert cfg.live_micro_winner_add_max == 2
     assert cfg.live_micro_max_notional_eur <= 200.0
     assert cfg.live_micro_max_notional_eur >= 100.0
     assert cfg.paper_markout_enabled is False
@@ -2248,9 +2263,9 @@ def test_daily_kill_uses_session_realized_delta() -> None:
     assert bridge._daily_kill_active is True  # noqa: SLF001
 
 
-def test_reset_trading_cycle_after_wind_down() -> None:
+def test_reset_trading_cycle_after_wind_down(tmp_path: Path) -> None:
     bridge = MicroBudgetLiveExecutor(
-        _unlocked(),
+        _unlocked(live_micro_bridge_persist_path=str(tmp_path / "wd.json")),
         portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
         live_engine=LiveMicroEngine(_unlocked()),
         budget_eur=Decimal("100"),
@@ -2685,6 +2700,82 @@ def test_low_util_momentum_allows_shorter_rising(tmp_path: Path) -> None:
         )
         is True
     )
+
+
+def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_winner_add_enabled=True,
+        live_micro_winner_add_max=2,
+        live_micro_winner_add_clip_eur=55.0,
+        live_micro_bridge_persist_path=str(tmp_path / "wa.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    bridge._trail["bitvavo:SOL"] = {  # noqa: SLF001
+        "soft_armed": False,
+        "winner_add_count": 0,
+    }
+    be = Decimal("100.15")
+    bridge._break_even_sell_price = lambda venue, base: be  # type: ignore[method-assign]  # noqa: SLF001
+    assert (
+        bridge._winner_add_eligible(  # noqa: SLF001
+            "bitvavo", "SOL", mark=Decimal("100.20"), be=be
+        )
+        is False
+    )
+    bridge._trail["bitvavo:SOL"]["soft_armed"] = True  # noqa: SLF001
+    assert (
+        bridge._winner_add_eligible(  # noqa: SLF001
+            "bitvavo", "SOL", mark=Decimal("100.10"), be=be
+        )
+        is False
+    )
+    assert (
+        bridge._winner_add_eligible(  # noqa: SLF001
+            "bitvavo", "SOL", mark=Decimal("100.30"), be=be
+        )
+        is True
+    )
+    bridge._trail["bitvavo:SOL"]["winner_add_count"] = 2  # noqa: SLF001
+    assert (
+        bridge._winner_add_eligible(  # noqa: SLF001
+            "bitvavo", "SOL", mark=Decimal("100.30"), be=be
+        )
+        is False
+    )
+
+
+def test_low_util_relax_focus_skips_focus_gate(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_new_buy_focus_only=True,
+        live_micro_focus_bases="SOL,ETH",
+        live_micro_low_util_relax_focus=True,
+        live_micro_ring_soft_max_active_eur=300.0,
+        live_micro_active_ring_eur=1000.0,
+        live_micro_bridge_persist_path=str(tmp_path / "rf.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._active_book_notional = lambda venue: Decimal("50")  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._venue_budget_remaining = lambda venue: Decimal("500")  # type: ignore[method-assign]  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is True  # noqa: SLF001
+    assert bridge._low_util_relax_focus is True  # noqa: SLF001
+    # Non-focus base allowed while low-util.
+    assert "LINK" not in bridge._focus_bases  # noqa: SLF001
+    bridge._active_book_notional = lambda venue: Decimal("400")  # type: ignore[method-assign]  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is False  # noqa: SLF001
 
 
 def test_buy_quality_circuit_breaker_pauses(tmp_path: Path) -> None:

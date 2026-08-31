@@ -184,9 +184,9 @@ def _session_settings(
             "paper_maker_min_notional_eur": 55.0,
             "live_micro_first_clip_eur": 55.0,
             "live_micro_add_clip_eur": 100.0,
-            # More fills while still fee-positive after maker costs.
-            "paper_maker_min_profit_eur": 0.05,
-            "paper_maker_min_net_return": 0.0005,
+            # Util-B light: slightly easier NET so empty-ring emits are not starved.
+            "paper_maker_min_profit_eur": 0.04,
+            "paper_maker_min_net_return": 0.0004,
             "paper_maker_small_clip_max_eur": 90.0,
             "paper_maker_small_clip_min_profit_eur": 0.03,
             "paper_maker_small_clip_min_net_return": 0.0003,
@@ -201,20 +201,20 @@ def _session_settings(
             "paper_trail_take_profit_enabled": True,
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
-            # Arm at net profit (BE); soft partial + tighter dd → cash winnable sooner.
-            "paper_trail_soft_arm_pct": 0.001,
+            # B3 runner-window: arm later so winnable can build, then light partial.
+            "paper_trail_soft_arm_pct": 0.0045,
             "paper_trail_soft_drawdown_pct": 0.0025,
-            "paper_trail_soft_partial_pct": 0.30,
+            "paper_trail_soft_partial_pct": 0.15,
             # Lock more of BE+ bags into cash so slots free sooner.
             "paper_trail_recovery_be_partial_pct": 0.50,
             "paper_trail_be_harvest_partial_pct": 0.50,
             "paper_trail_be_harvest_min_gain_pct": 0.0003,
             "live_micro_be_harvest_cooldown_sec": 5.0,
-            "paper_trail_hard_arm_pct": 0.06,
-            "paper_trail_hard_drawdown_pct": 0.025,
+            "paper_trail_hard_arm_pct": 0.03,
+            "paper_trail_hard_drawdown_pct": 0.015,
             "paper_trail_hard_partial_pct": 0.35,
-            "paper_trail_arm_gain_pct": 0.06,
-            "paper_trail_drawdown_pct": 0.025,
+            "paper_trail_arm_gain_pct": 0.03,
+            "paper_trail_drawdown_pct": 0.015,
             "paper_trail_partial_enabled": True,
             "paper_trail_partial_pct": 0.50,
             "paper_trail_atr_enabled": False,  # keep fixed harvest levels
@@ -240,6 +240,13 @@ def _session_settings(
             "live_micro_low_util_buy_resting_max_age_sec": 60.0,
             "live_micro_buy_resting_max_age_sec": 45.0,
             "live_micro_cancel_buy_on_flat_momentum": True,
+            # Util-B: when active book < ring_soft max, allow non-focus new buys.
+            "live_micro_low_util_relax_focus": True,
+            # B3: scale into soft-armed BE+ winners (bridge-submitted adds).
+            "live_micro_winner_add_enabled": True,
+            "live_micro_winner_add_max": 2,
+            "live_micro_winner_add_clip_eur": 55.0,
+            "live_micro_winner_add_cooldown_sec": 60.0,
             "live_micro_buy_quality_underwater_count": 4,
             "live_micro_buy_quality_pause_sec": 2700.0,
             "live_micro_block_underwater_cross_venue": True,

@@ -498,6 +498,13 @@ class Settings(BaseSettings):
     )
     # When True, new-base buys must be on focus_bases (sells/harvests unaffected).
     live_micro_new_buy_focus_only: bool = False
+    # While active book is thinly deployed, allow non-focus new buys (Util-B).
+    live_micro_low_util_relax_focus: bool = False
+    # Scale into soft-armed BE+ winners (bridge-submitted adds).
+    live_micro_winner_add_enabled: bool = False
+    live_micro_winner_add_max: int = Field(default=2, ge=0, le=5)
+    live_micro_winner_add_clip_eur: float = Field(default=55.0, ge=10.0, le=200.0)
+    live_micro_winner_add_cooldown_sec: float = Field(default=60.0, ge=5.0, le=600.0)
     # Per-venue target EUR for active-book (focus, not underwater) deployment.
     # While below target with free cash, prefer unheld focus emits (always-on deploy).
     live_micro_active_ring_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)

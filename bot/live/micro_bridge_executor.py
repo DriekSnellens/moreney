@@ -369,6 +369,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._new_buy_focus_only = bool(
             getattr(settings, "live_micro_new_buy_focus_only", False)
         )
+        self._low_util_relax_focus = bool(
+            getattr(settings, "live_micro_low_util_relax_focus", False)
+        )
+        self._winner_add_enabled = bool(
+            getattr(settings, "live_micro_winner_add_enabled", False)
+        )
+        self._winner_add_max = int(
+            getattr(settings, "live_micro_winner_add_max", 2) or 0
+        )
+        self._winner_add_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_winner_add_clip_eur", 55) or 55)
+        )
+        self._winner_add_cooldown_sec = float(
+            getattr(settings, "live_micro_winner_add_cooldown_sec", 60.0) or 60.0
+        )
         self._position_opened_mono: dict[str, float] = {}
         self._position_opened_at: dict[str, float] = {}
         self._max_alt_bases = int(
@@ -1230,6 +1245,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "low_util_rising_n": self._low_util_rising_n,
                 "low_util_buy_resting_max_age_sec": self._low_util_buy_resting_max_age_sec,
                 "buy_resting_max_age_sec": self._buy_resting_max_age_sec,
+                "low_util_relax_focus": self._low_util_relax_focus,
+                "winner_add_enabled": self._winner_add_enabled,
+                "winner_add_max": self._winner_add_max,
+                "winner_add_clip_eur": str(self._winner_add_clip_eur),
+                "winner_add_cooldown_sec": self._winner_add_cooldown_sec,
                 "cancel_buy_on_flat_momentum": self._cancel_buy_on_flat_momentum,
                 "momentum_require_last_n_rising": self._momentum_require_last_n_rising,
                 "buy_quality_pause_active": self._buy_quality_paused(),
@@ -1569,6 +1589,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "hard_armed": bool(st.get("hard_armed")),
                 "partial_done": bool(st.get("soft_partial_done")),
                 "hard_partial_done": bool(st.get("hard_partial_done")),
+                "winner_add_count": int(st.get("winner_add_count") or 0),
                 "be_harvest_partial_done": bool(
                     st.get("be_harvest_partial_done")
                     or st.get("recovery_be_partial_done")
@@ -3739,13 +3760,139 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
-        """Single entry clip — no scale-up adds after soft-arm."""
-        del venue, base
+        """Entry clip; winner-adds use the dedicated winner clip size."""
+        if (
+            self._winner_add_enabled
+            and not self._is_new_base_buy(venue, base)
+            and self._winner_add_eligible(venue, base, require_soft_arm=True)
+        ):
+            return self._winner_add_clip_eur if self._winner_add_clip_eur > 0 else None
         first = self._first_clip_eur
         if first <= 0:
             add = self._add_clip_eur
             return add if add > 0 else None
         return first
+
+    def _winner_add_eligible(
+        self,
+        venue: str,
+        base: str,
+        *,
+        require_soft_arm: bool = True,
+        mark: Decimal | None = None,
+        be: Decimal | None = None,
+    ) -> bool:
+        """True when we may scale into a soft-armed BE+ bag."""
+        if not self._winner_add_enabled or self._winner_add_max <= 0:
+            return False
+        if self._buys_blocked or self._sleeve_paused or self._daily_kill_active:
+            return False
+        if self._is_long_hold(base) or self._base_underwater_blocked(venue, base):
+            return False
+        trail_key = self._lots_key(venue, base)
+        st = self._trail.get(trail_key) or {}
+        if require_soft_arm and not st.get("soft_armed"):
+            return False
+        if st.get("triggered") or st.get("recovery_armed"):
+            return False
+        if int(st.get("winner_add_count") or 0) >= self._winner_add_max:
+            return False
+        last = float(st.get("winner_add_last_mono") or 0)
+        if last > 0 and (time.monotonic() - last) < self._winner_add_cooldown_sec:
+            return False
+        if be is None:
+            be = self._break_even_sell_price(venue, base)
+        if be is None:
+            return False
+        if mark is None:
+            symbol = f"{base.upper()}{self._quote}"
+            mark = self._portfolio.state.mark_prices.get(symbol.upper())
+        if mark is None or mark <= 0 or mark < be:
+            return False
+        return True
+
+    async def _maybe_submit_winner_add(
+        self,
+        *,
+        venue: str,
+        base: str,
+        symbol: str,
+        mark: Decimal,
+        be: Decimal | None,
+        st: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Bridge-submitted scale-in on soft-armed BE+ winners (B3)."""
+        if not self._winner_add_eligible(
+            venue, base, require_soft_arm=True, mark=mark, be=be
+        ):
+            return None
+        if self._resting_buys_for(venue, symbol) >= 1:
+            return None
+        clip = self._winner_add_clip_eur
+        if clip < _MIN_LIVE_NOTIONAL:
+            return None
+        live_eur = await self._live_free(venue, self._quote)
+        spend = min(clip, live_eur, self._venue_budget_remaining(venue))
+        if spend < _MIN_LIVE_NOTIONAL:
+            self._bump_skip("winner_add_no_quote")
+            return None
+        # Prefer touch bid slightly under mark (maker); still above adverse floor.
+        px = (mark * Decimal("0.9995")).quantize(Decimal("0.00000001"))
+        if px <= 0:
+            return None
+        qty = (spend / px).quantize(Decimal("0.00000001"))
+        if qty <= 0:
+            return None
+        req = OrderRequest(
+            opportunity_id=uuid4(),
+            symbol=symbol,
+            side=OpportunitySide.BUY,
+            quantity=qty,
+            limit_price=px,
+            metadata={
+                "venue": venue,
+                "exchange": venue,
+                "post_only": True,
+                "winner_add": True,
+                "strategy": "winner_add",
+            },
+        )
+        result = await self.execute(
+            req, strategy="winner_add", order_type=OrderType.LIMIT
+        )
+        st["winner_add_last_mono"] = time.monotonic()
+        if result.status in {
+            OrderStatus.SUBMITTED,
+            OrderStatus.PENDING,
+            OrderStatus.OPEN,
+            OrderStatus.FILLED,
+            OrderStatus.PARTIALLY_FILLED,
+        }:
+            st["winner_add_count"] = int(st.get("winner_add_count") or 0) + 1
+            self._bump_skip("winner_add_submitted")
+            logger.info(
+                "WINNER_ADD venue=%s base=%s qty=%s px=%s mark=%s status=%s count=%s",
+                venue,
+                base,
+                qty,
+                px,
+                mark,
+                result.status.value,
+                st.get("winner_add_count"),
+            )
+            return {
+                "action": "winner_add",
+                "base": base,
+                "status": str(result.status.value),
+                "qty": str(qty),
+                "price": str(px),
+            }
+        self._bump_skip("winner_add_rejected")
+        return {
+            "action": "winner_add_rejected",
+            "base": base,
+            "status": str(result.status.value),
+        }
 
     @staticmethod
     def _is_trail_mark_spike(
@@ -4503,6 +4650,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and be is not None
                 and mark >= be
                 and gain_now >= self._be_harvest_min_gain
+                # B3: let soft partial / runner window run first; then work remainder.
+                and (
+                    self._soft_partial <= 0
+                    or st.get("soft_partial_done")
+                )
             ):
                 # D: keep working BE+ inventory at touch while soft-armed
                 # (do not wait for drawdown — spikes die in seconds).
@@ -4548,6 +4700,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 limit_px = max(be, mark * Decimal("0.999"))
                 post_only = True
             else:
+                # B3: no exit this tick → maybe scale into soft-armed BE+ winner.
+                if not st.get("triggered"):
+                    add = await self._maybe_submit_winner_add(
+                        venue=venue,
+                        base=asset,
+                        symbol=symbol,
+                        mark=mark,
+                        be=be,
+                        st=st,
+                    )
+                    if add is not None:
+                        triggered.append(
+                            {
+                                "venue": venue,
+                                "base": asset,
+                                "reason": "winner_add",
+                                "detail": add,
+                            }
+                        )
                 continue
 
             maker_min = Decimal(
@@ -5116,8 +5287,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
             and not meta.get("trail_take_profit")
+            and not meta.get("winner_add")
         ):
-            if base.upper() not in self._focus_bases:
+            # Util-B: while active book is thin, allow non-focus new buys.
+            relax = self._low_util_relax_focus and self._ring_soft_momentum_eligible(
+                venue
+            )
+            if base.upper() not in self._focus_bases and not relax:
                 self._bump_skip("focus_base_required")
                 return await self._reject_before_live(
                     order_request,
@@ -5194,6 +5370,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not self._is_new_base_buy(venue, base)
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not meta.get("winner_add")
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(
