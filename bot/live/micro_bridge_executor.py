@@ -326,6 +326,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._ring_soft_max_active_eur = Decimal(
             str(getattr(settings, "live_micro_ring_soft_max_active_eur", 300) or 300)
         )
+        self._low_util_rising_n = int(
+            getattr(settings, "live_micro_low_util_rising_n", 2) or 0
+        )
+        self._low_util_buy_resting_max_age_sec = float(
+            getattr(settings, "live_micro_low_util_buy_resting_max_age_sec", 60.0)
+            or 60.0
+        )
         self._buy_resting_max_age_sec = float(
             getattr(settings, "live_micro_buy_resting_max_age_sec", 45.0) or 45.0
         )
@@ -1217,6 +1224,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "momentum_exit_min_return": str(self._momentum_exit_min),
+                "momentum_min_return": str(self._momentum_min),
+                "ring_momentum_min_return": str(self._ring_momentum_min),
+                "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
+                "low_util_rising_n": self._low_util_rising_n,
+                "low_util_buy_resting_max_age_sec": self._low_util_buy_resting_max_age_sec,
+                "buy_resting_max_age_sec": self._buy_resting_max_age_sec,
+                "cancel_buy_on_flat_momentum": self._cancel_buy_on_flat_momentum,
+                "momentum_require_last_n_rising": self._momentum_require_last_n_rising,
+                "buy_quality_pause_active": self._buy_quality_paused(),
+                "block_underwater_cross_venue": self._block_underwater_cross_venue,
                 "corr_group": sorted(self._corr_group),
                 "max_per_corr_group": self._max_per_corr,
                 "states": self._trail_states_public(),
@@ -2795,7 +2812,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             strategy = str(row.get("strategy") or "")
             row_max_age = max_age
             if side_raw.startswith("b") and self._buy_resting_max_age_sec > 0:
-                row_max_age = min(max_age, self._buy_resting_max_age_sec)
+                row_max_age = min(
+                    max_age, self._buy_resting_max_age_for_venue(venue)
+                )
             if (
                 self._exit_engine_enabled
                 and side_raw.startswith("s")
@@ -3444,12 +3463,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         *,
         require_history: bool = False,
         min_return: Decimal | None = None,
+        low_util: bool = False,
     ) -> bool:
         """True when rolling mark return is at/above the configured floor.
 
         ``require_history`` (new-base entries): block until enough samples exist
         so cold symbols cannot slip through as "unknown momentum".
-        Optionally requires last N marks rising (anti single-tick noise).
+        Full mode: last N marks strictly rising. Low-util: mostly rising (2/3).
         """
         if not self._momentum_enabled:
             return True
@@ -3464,9 +3484,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if mom < floor:
             return False
         rising_n = self._momentum_require_last_n_rising
-        if rising_n > 0 and not series.last_n_rising(rising_n):
-            return False
-        return True
+        if rising_n <= 0:
+            return True
+        if low_util and self._low_util_rising_n > 0:
+            # Shorter rising window while ring is thinly deployed (default: 2).
+            return series.last_n_rising(self._low_util_rising_n)
+        return series.last_n_rising(rising_n)
+
+    def _buy_resting_max_age_for_venue(self, venue: str) -> float:
+        if (
+            self._ring_soft_momentum_eligible(venue)
+            and self._low_util_buy_resting_max_age_sec > 0
+        ):
+            return max(self._buy_resting_max_age_sec, self._low_util_buy_resting_max_age_sec)
+        return self._buy_resting_max_age_sec
 
     def _momentum_flat_or_down_for_cancel(self, symbol: str) -> bool:
         """True when rolling return ≤ 0 (cancel resting buys)."""
@@ -5112,6 +5143,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 symbol,
                 require_history=True,
                 min_return=mom_floor,
+                low_util=ring_relaxed,
             ):
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
@@ -5120,7 +5152,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     message=(
                         f"new base {base} needs momentum "
                         f"(>={mom_floor} over ~{self._momentum_samples} samples"
-                        f"{'; ring-soft' if ring_relaxed else ''})"
+                        f"{'; low-util boost' if ring_relaxed else ''})"
                     ),
                 )
 

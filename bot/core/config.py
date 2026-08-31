@@ -506,6 +506,12 @@ class Settings(BaseSettings):
     live_micro_ring_momentum_min_return: float = Field(default=0.0002, ge=-0.01, le=0.05)
     # Soft ring momentum only while active-book notional is below this EUR.
     live_micro_ring_soft_max_active_eur: float = Field(default=300.0, ge=0.0, le=5000.0)
+    # While low-util (ring soft), require only this many rising marks (vs full rising_n).
+    live_micro_low_util_rising_n: int = Field(default=2, ge=0, le=12)
+    # While low-util, buy resting quotes may live this long (seconds).
+    live_micro_low_util_buy_resting_max_age_sec: float = Field(
+        default=60.0, ge=5.0, le=600.0
+    )
     # Resting buy quotes older than this are cancelled (anti adverse-selection).
     live_micro_buy_resting_max_age_sec: float = Field(default=45.0, ge=5.0, le=600.0)
     # Cancel resting buys when rolling momentum ≤ 0.

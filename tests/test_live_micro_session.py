@@ -137,7 +137,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert (cfg.live_micro_okx_deploy_bases or "") == ""
     assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
+    assert cfg.live_micro_low_util_rising_n == 2
+    assert float(cfg.live_micro_low_util_buy_resting_max_age_sec) == 60.0
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
@@ -229,7 +231,7 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
     assert float(cfg.paper_buy_momentum_min_return) == 0.0008
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0002
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
     assert float(cfg.live_micro_ring_soft_max_active_eur) == 300.0
     assert cfg.live_micro_max_per_corr_group == 3
 
@@ -2598,7 +2600,7 @@ def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
     settings = _unlocked(
         paper_buy_momentum_enabled=True,
         paper_buy_momentum_min_return=0.001,
-        live_micro_ring_momentum_min_return=0.0002,
+        live_micro_ring_momentum_min_return=0.0005,
         live_micro_ring_soft_max_active_eur=300.0,
         live_micro_active_ring_eur=1000.0,
         live_micro_bridge_persist_path=str(tmp_path / "ring_mom.json"),
@@ -2616,7 +2618,7 @@ def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
     # Empty active book → ring soft eligible → soft floor.
     assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
     assert bridge._ring_soft_momentum_eligible("bitvavo") is True  # noqa: SLF001
-    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.0002")  # noqa: SLF001
+    assert bridge._momentum_floor_for_buy("bitvavo") == Decimal("0.0005")  # noqa: SLF001
     # Active book above soft max but below ring → full momentum floor.
     bridge._active_book_notional = lambda venue: Decimal("400")  # type: ignore[method-assign]  # noqa: SLF001
     assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
@@ -2634,10 +2636,53 @@ def test_last_n_rising_required_for_momentum_ok() -> None:
     for px in [100, 100.05, 100.04, 100.08]:
         series.push(Decimal(str(px)))
     assert series.last_n_rising(3) is False  # 100.05 -> 100.04 dip
+    assert series.last_n_rising(2) is True  # 100.04 -> 100.08
+    assert series.last_n_mostly_rising(3, min_up=2) is False
     series2 = MarkSeries(maxlen=12)
     for px in [100, 100.02, 100.05, 100.09]:
         series2.push(Decimal(str(px)))
     assert series2.last_n_rising(3) is True
+
+
+def test_low_util_momentum_allows_shorter_rising(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_min_return=0.0008,
+        live_micro_ring_momentum_min_return=0.0005,
+        live_micro_momentum_require_last_n_rising=3,
+        live_micro_low_util_rising_n=2,
+        paper_buy_momentum_samples=12,
+        live_micro_bridge_persist_path=str(tmp_path / "lu.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    series = bridge._series_for("SOLEUR")  # noqa: SLF001
+    # Need >=6 samples for history gate; early dip then recover.
+    for px in [100.0, 100.01, 100.03, 100.08, 100.06, 100.12]:
+        series.push(Decimal(str(px)))
+    assert (
+        bridge._momentum_ok(  # noqa: SLF001
+            "SOLEUR",
+            require_history=True,
+            min_return=Decimal("0.0005"),
+            low_util=False,
+        )
+        is False
+    )
+    assert (
+        bridge._momentum_ok(  # noqa: SLF001
+            "SOLEUR",
+            require_history=True,
+            min_return=Decimal("0.0005"),
+            low_util=True,
+        )
+        is True
+    )
 
 
 def test_buy_quality_circuit_breaker_pauses(tmp_path: Path) -> None:

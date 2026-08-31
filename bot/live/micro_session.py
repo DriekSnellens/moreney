@@ -236,6 +236,8 @@ def _session_settings(
             "paper_buy_momentum_samples": 12,
             "live_micro_momentum_require_last_n_rising": 3,
             "live_micro_ring_soft_max_active_eur": 300.0,
+            "live_micro_low_util_rising_n": 2,
+            "live_micro_low_util_buy_resting_max_age_sec": 60.0,
             "live_micro_buy_resting_max_age_sec": 45.0,
             "live_micro_cancel_buy_on_flat_momentum": True,
             "live_micro_buy_quality_underwater_count": 4,
@@ -269,8 +271,8 @@ def _session_settings(
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
-            # Underfilled ring + thin book (<€300): softer momentum floor.
-            "live_micro_ring_momentum_min_return": 0.0002,
+            # Low-util boost: +0.05% floor while active book < €300 (else +0.08%).
+            "live_micro_ring_momentum_min_return": 0.0005,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",

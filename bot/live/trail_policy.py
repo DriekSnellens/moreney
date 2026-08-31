@@ -68,6 +68,15 @@ class MarkSeries:
                 return False
         return window[-1] > window[0]
 
+    def last_n_mostly_rising(self, n: int = 3, *, min_up: int = 2) -> bool:
+        """True when at least min_up of the last (n-1) steps are up and last ≥ first."""
+        need = max(2, int(n))
+        if len(self._marks) < need:
+            return False
+        window = list(self._marks)[-need:]
+        ups = sum(1 for i in range(1, len(window)) if window[i] > window[i - 1])
+        return ups >= int(min_up) and window[-1] >= window[0]
+
 
 def scale_thresholds(
     *,
