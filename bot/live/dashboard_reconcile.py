@@ -129,8 +129,12 @@ def _replay_fifo(
     since_ms: int,
     quote: str = "EUR",
 ) -> tuple[Decimal, Decimal, list[dict[str, Any]], int]:
-    """Return (realized_before, realized_since, sell_events, fill_count_since)."""
-    lots: list[list[Decimal]] = []
+    """Return (realized_before, realized_since, sell_events, fill_count_since).
+
+    Lots are keyed by ``(venue, base)`` so multi-coin / dual-venue streams never
+    cross-match (a SOL sell must not consume an ATOM buy lot).
+    """
+    lots_by_key: dict[tuple[str, str], list[list[Decimal]]] = {}
     realized_before = Decimal("0")
     realized_since = Decimal("0")
     sell_events: list[dict[str, Any]] = []
@@ -140,6 +144,8 @@ def _replay_fifo(
         ts_ms = int(trade["ts_ms"])
         side = trade["side"]
         base = str(trade.get("base") or trade.get("symbol", "")[: -len(quote)]).upper()
+        venue = str(trade.get("venue") or "").strip().lower()
+        lot_key = (venue, base)
         amt = trade["qty"]
         px = trade["price"]
         fee_amt = Decimal(str(trade.get("fee_amt") or 0))
@@ -154,7 +160,7 @@ def _replay_fifo(
                 base=base,
                 quote=quote,
             )
-            lots.append([lot_qty, unit])
+            lots_by_key.setdefault(lot_key, []).append([lot_qty, unit])
             if ts_ms >= since_ms:
                 fills_since += 1
             continue
@@ -165,6 +171,7 @@ def _replay_fifo(
             proceeds = amt * px - fee_amt
         cost = Decimal("0")
         rem = amt
+        lots = lots_by_key.setdefault(lot_key, [])
         while rem > 0 and lots:
             lot_qty, lot_cost = lots[0]
             take = min(rem, lot_qty)
@@ -175,6 +182,12 @@ def _replay_fifo(
                 lots.pop(0)
             else:
                 lots[0][0] = lot_qty
+        matched = amt - rem
+        if matched <= 0:
+            # No seeded buy in window — skip (avoids inventing PnL at cost=0).
+            continue
+        if rem > 0 and amt > 0:
+            proceeds = proceeds * (matched / amt)
         pnl = proceeds - cost
         if ts_ms < since_ms:
             realized_before += pnl
@@ -186,7 +199,7 @@ def _replay_fifo(
                     "ts": trade["ts"],
                     "base": base,
                     "venue": trade.get("venue", ""),
-                    "qty": str(amt),
+                    "qty": str(matched),
                     "price": str(px),
                     "pnl_eur": str(pnl.quantize(Decimal("0.01"))),
                     "realized_cum_eur": str(
