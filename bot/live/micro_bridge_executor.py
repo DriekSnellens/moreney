@@ -324,7 +324,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(getattr(settings, "live_micro_ring_momentum_min_return", 0) or 0)
         )
         self._ring_soft_max_active_eur = Decimal(
-            str(getattr(settings, "live_micro_ring_soft_max_active_eur", 300) or 300)
+            str(getattr(settings, "live_micro_ring_soft_max_active_eur", 500) or 500)
         )
         self._low_util_rising_n = int(
             getattr(settings, "live_micro_low_util_rising_n", 2) or 0
@@ -335,6 +335,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._buy_resting_max_age_sec = float(
             getattr(settings, "live_micro_buy_resting_max_age_sec", 45.0) or 45.0
+        )
+        self._max_resting_buys_per_symbol = int(
+            getattr(settings, "live_micro_max_resting_buys_per_symbol", 2) or 1
         )
         self._cancel_buy_on_flat_momentum = bool(
             getattr(settings, "live_micro_cancel_buy_on_flat_momentum", True)
@@ -1245,6 +1248,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "low_util_rising_n": self._low_util_rising_n,
                 "low_util_buy_resting_max_age_sec": self._low_util_buy_resting_max_age_sec,
                 "buy_resting_max_age_sec": self._buy_resting_max_age_sec,
+                "max_resting_buys_per_symbol": self._max_resting_buys_per_symbol,
                 "low_util_relax_focus": self._low_util_relax_focus,
                 "winner_add_enabled": self._winner_add_enabled,
                 "winner_add_max": self._winner_add_max,
@@ -5383,14 +5387,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         if (
             side_is_buy
-            and self._resting_buys_for(venue, symbol) >= 1
+            and self._resting_buys_for(venue, symbol) >= self._max_resting_buys_per_symbol
             and not meta.get("dust_top_up")
         ):
             self._bump_skip("duplicate_resting_buy")
             return await self._reject_before_live(
                 order_request,
                 reason="DUPLICATE_RESTING_BUY",
-                message=f"resting buy already open for {venue}:{symbol}",
+                message=(
+                    f"resting buys already at cap "
+                    f"{self._max_resting_buys_per_symbol} for {venue}:{symbol}"
+                ),
             )
 
         # Size against live Bitvavo free balances (paper pocket can lag fills).

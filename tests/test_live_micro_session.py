@@ -77,7 +77,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
     assert cfg.arbitrage_max_emits_per_cycle == 12
-    assert cfg.paper_maker_max_open_quotes <= 4
+    assert cfg.paper_maker_max_open_quotes <= 6
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
         Settings(live_micro_execute_venues="bitvavo,okx"),
@@ -88,8 +88,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     # Aggregate equity ~€4k sizes clips near the ~€150 ceiling → 3.75% of €4k.
     assert dual.arbitrage_position_pct == 3.75
     assert dual.arbitrage_max_emits_per_cycle == 12
-    assert dual.live_micro_max_open_orders == 4
-    assert dual.live_micro_max_open_orders_per_venue == 3
+    assert dual.live_micro_max_open_orders == 6
+    assert dual.live_micro_max_open_orders_per_venue == 4
+    assert dual.live_micro_max_resting_buys_per_symbol == 2
     assert dual.live_micro_max_alt_bases == 8
     assert float(dual.live_micro_first_clip_eur) == 55.0
     assert float(dual.live_micro_add_clip_eur) == 100.0
@@ -124,8 +125,14 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_winner_add_max == 2
     assert float(cfg.live_micro_winner_add_clip_eur) == 55.0
     assert cfg.live_micro_low_util_relax_focus is True
-    assert float(cfg.paper_maker_min_profit_eur) == 0.04
+    assert float(cfg.paper_maker_min_profit_eur) == 0.03
     assert float(cfg.paper_maker_min_net_return) == 0.0004
+    assert float(cfg.profitability_min_net_profit_usd) == 0.03
+    assert float(cfg.profitability_min_net_return) == 0.0004
+    assert float(cfg.risk_min_net_profit_usd) == 0.03
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 500.0
+    assert cfg.live_micro_max_resting_buys_per_symbol == 2
+    assert cfg.live_micro_max_open_orders_per_venue == 4
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -166,8 +173,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_first_clip_eur) == 55.0
     assert float(cfg.live_micro_add_clip_eur) == 100.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
-    assert cfg.live_micro_max_open_orders <= 4
-    assert cfg.live_micro_max_open_orders_per_venue == 3
+    assert cfg.live_micro_max_open_orders <= 6
+    assert cfg.live_micro_max_open_orders_per_venue == 4
+    assert cfg.live_micro_max_resting_buys_per_symbol == 2
     assert float(cfg.live_micro_max_notional_eur) >= 80.0
     assert float(cfg.risk_max_position_usd) >= 80.0
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
@@ -241,8 +249,10 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 300.0
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 500.0
     assert cfg.live_micro_max_per_corr_group == 3
+    assert float(cfg.profitability_min_net_return) == 0.0004
+    assert float(cfg.profitability_min_net_profit_usd) == 0.03
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
