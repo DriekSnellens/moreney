@@ -13,6 +13,7 @@ from bot.live.dashboard import render_live_dashboard
 from bot.live.dashboard_history import (
     chart_series_from_history,
     clear_history,
+    daily_realized_delta,
     extract_metrics,
     load_history,
     record_snapshot,
@@ -79,22 +80,55 @@ def test_chart_series_from_history() -> None:
     assert series["portfolio"] == [4100.0]
 
 
-def test_weekly_realized_delta() -> None:
+def test_weekly_realized_delta_uses_calendar_week_baseline() -> None:
     from datetime import UTC, datetime, timedelta
 
-    now = datetime.now(UTC)
+    # Fixed Tuesday so week start is known (Monday).
+    now = datetime(2026, 8, 25, 15, 0, tzinfo=UTC)  # Tuesday
+    monday = datetime(2026, 8, 24, 0, 0, tzinfo=UTC)
     history = [
         {
-            "t": (now - timedelta(days=3)).isoformat(),
-            "realized_pnl_eur": "-10",
+            "t": (monday - timedelta(hours=2)).isoformat(),
+            "realized_pnl_eur": "-20",
         },
         {
-            "t": (now - timedelta(days=1)).isoformat(),
-            "realized_pnl_eur": "-5",
+            "t": (monday + timedelta(hours=1)).isoformat(),
+            "realized_pnl_eur": "-18",
+        },
+        {
+            "t": (now - timedelta(hours=1)).isoformat(),
+            "realized_pnl_eur": "-10",
         },
     ]
-    delta = weekly_realized_delta(history, current_realized=Decimal("7.50"))
-    assert delta == Decimal("17.50")
+    # Baseline = last at/before Monday 00:00 NL ≈ UTC Sunday/Monday boundary.
+    # For Amsterdam in late Aug (CEST=UTC+2), Monday 00:00 NL = Sunday 22:00 UTC.
+    delta = weekly_realized_delta(
+        history, current_realized=Decimal("-5"), now=now
+    )
+    assert delta == Decimal("15")  # -5 - (-20)
+
+
+def test_daily_realized_delta_since_local_midnight() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 8, 25, 14, 0, tzinfo=UTC)
+    history = [
+        {
+            "t": (now - timedelta(hours=20)).isoformat(),
+            "realized_pnl_eur": "-12",
+        },
+        {
+            "t": (now - timedelta(hours=2)).isoformat(),
+            "realized_pnl_eur": "-9",
+        },
+    ]
+    delta = daily_realized_delta(
+        history, current_realized=Decimal("-7"), now=now
+    )
+    # Day start Amsterdam 00:00 = 2026-08-24 22:00 UTC; first sample after that is -9
+    # or last before: -12 depending on cutoff. -20h from 14:00 UTC is 18:00 prev day UTC
+    # = 20:00 NL prev day — before midnight NL. Baseline -12 → delta +5.
+    assert delta == Decimal("5")
 
 
 def test_render_dashboard_includes_charts_and_pwa() -> None:
@@ -113,9 +147,11 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "Sessie MTM" not in html
     assert "Unrealized" in html
     assert "Winnable" in html
-    assert "Week gerealiseerd" in html
-    assert "Sessie gerealiseerd" in html
-
+    assert "Vandaag netto" in html
+    assert "Week netto" in html
+    assert "kpi-daily-realized" in html
+    assert "Sessie (sinds restart)" in html
+    assert "Doel €20–50/dag netto" in html
 
 def test_pwa_and_metrics_routes() -> None:
     with TestClient(app) as client:

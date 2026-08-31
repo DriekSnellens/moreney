@@ -9,7 +9,12 @@ from typing import Any
 
 from fastapi.responses import HTMLResponse
 
-from bot.live.dashboard_history import chart_series_from_history, load_history
+from bot.live.dashboard_history import (
+    chart_series_from_history,
+    daily_realized_delta,
+    load_history,
+    weekly_realized_delta,
+)
 
 
 def _esc(value: Any) -> str:
@@ -749,6 +754,21 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         session_realized_class = "good"
     elif session_realized is not None and session_realized < 0:
         session_realized_class = "bad"
+    hist_for_kpi = payload.get("history") or load_history(limit=7 * 24 * 60)
+    if not isinstance(hist_for_kpi, list):
+        hist_for_kpi = []
+    daily_realized = daily_realized_delta(hist_for_kpi, current_realized=pnl)
+    weekly_realized = weekly_realized_delta(hist_for_kpi, current_realized=pnl)
+    daily_realized_class = ""
+    if daily_realized is not None and daily_realized > 0:
+        daily_realized_class = "good"
+    elif daily_realized is not None and daily_realized < 0:
+        daily_realized_class = "bad"
+    weekly_realized_class = ""
+    if weekly_realized is not None and weekly_realized > 0:
+        weekly_realized_class = "good"
+    elif weekly_realized is not None and weekly_realized < 0:
+        weekly_realized_class = "bad"
     winn_class = ""
     if winnable is not None and winnable > 0:
         winn_class = "good"
@@ -1043,24 +1063,25 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         + "</section>"
     )
 
-    history = payload.get("history") or load_history(limit=720)
+    history = payload.get("history") or hist_for_kpi or load_history(limit=720)
     chart_json = _chart_bootstrap(history if isinstance(history, list) else [])
 
     target_low = Decimal("20")
     target_high = Decimal("50")
     in_target_band = (
-        session_realized is not None and target_low <= session_realized <= target_high
+        daily_realized is not None and target_low <= daily_realized <= target_high
     )
     band_class = "in-band" if in_target_band else "out-band"
     target_band_html = (
         "<section class='target-band' aria-label='Doelband onderzoek'>"
-        "<h2>Doel €20–50/dag</h2>"
-        "<p><strong>Sessie gerealiseerd</strong> = gesloten winst na fees · "
-        "<strong>Winnable</strong> = open bags boven break-even · "
-        "stretch €140–350/week gerealiseerd.</p>"
+        "<h2>Doel €20–50/dag netto</h2>"
+        "<p><strong>Vandaag / week</strong> = netto gerealiseerd na fees "
+        "(kalender NL) · <strong>Winnable</strong> = open bags boven BE · "
+        "niet hetzelfde als sessie-restart.</p>"
         "<div class='band-row'>"
-        f"<span>Gerealiseerd: <strong class='{band_class}'>"
-        f"{_esc(_eur(session_realized, signed=True) if session_realized is not None else '—')}</strong></span>"
+        f"<span>Vandaag: <strong class='{band_class}'>"
+        f"{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
+        f"<span>Week: {_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else '—')}</span>"
         f"<span>Winnable: {_esc(_eur(winnable, signed=True) if winnable is not None else '—')}</span>"
     )
     win_gap = _dec(bridge.get("winnable_gap_eur") or diag.get("winnable_gap_eur"))
@@ -1140,14 +1161,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     kpi_grid_html = f"""
     <section class="grid-kpi" aria-label="Kern KPIs">
       <article class="card hero">
-        <p class="label">Sessie gerealiseerd</p>
-        <p class="value {session_realized_class}" id="kpi-session-realized">{_esc(_eur(session_realized, signed=True) if session_realized is not None else "—")}</p>
-        <p class="hint">Primair · gesloten sinds start</p>
+        <p class="label">Vandaag netto</p>
+        <p class="value {daily_realized_class}" id="kpi-daily-realized">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
+        <p class="hint">Gerealiseerd sinds 00:00 NL</p>
       </article>
       <article class="card hero-a">
-        <p class="label">Week gerealiseerd</p>
-        <p class="value" id="kpi-weekly-realized">—</p>
-        <p class="hint">≥€35/week</p>
+        <p class="label">Week netto</p>
+        <p class="value {weekly_realized_class}" id="kpi-weekly-realized">{_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else "—")}</p>
+        <p class="hint">Ma–zo NL · doel ≥€140</p>
       </article>
       <article class="card">
         <p class="label">Winnable</p>
@@ -1167,7 +1188,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card">
         <p class="label">Gerealiseerd (totaal)</p>
         <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">FIFO na fees</p>
+        <p class="hint">FIFO cumulatief na fees</p>
+      </article>
+      <article class="card">
+        <p class="label">Sessie (sinds restart)</p>
+        <p class="value {session_realized_class}" id="kpi-session-realized">{_esc(_eur(session_realized, signed=True) if session_realized is not None else "—")}</p>
+        <p class="hint">Niet gelijk aan vandaag</p>
       </article>
       <article class="card">
         <p class="label">Vrij EUR</p>
@@ -1365,6 +1391,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       const set = (id, text) => {{ const el = document.getElementById(id); if (el) el.textContent = text; }};
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
       set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
+      set('kpi-daily-realized', eurFmt(m.daily_realized_eur, true));
       set('kpi-session-realized', eurFmt(m.session_realized_eur, true));
       set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
       set('kpi-winnable', eurFmt(m.winnable_eur, true));
@@ -1372,6 +1399,19 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-free', eurFmt(m.free_eur));
       if (m.tx_count !== undefined) set('kpi-tx', String(m.tx_count));
       if (m.portfolio_holdings) renderPortfolioHoldings(m.portfolio_holdings);
+      const paint = (id, val) => {{
+        const el = document.getElementById(id);
+        if (!el || val == null || Number.isNaN(val)) return;
+        el.classList.remove('good', 'bad');
+        if (val > 0) el.classList.add('good');
+        else if (val < 0) el.classList.add('bad');
+      }};
+      paint('kpi-daily-realized', m.daily_realized_eur);
+      paint('kpi-weekly-realized', m.weekly_realized_eur);
+      paint('kpi-session-realized', m.session_realized_eur);
+      paint('kpi-realized', m.realized_pnl_eur);
+      paint('kpi-winnable', m.winnable_eur);
+      paint('kpi-unrealized', m.unrealized_eur);
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');

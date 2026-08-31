@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ _DEFAULT_PATH = Path("./data/dashboard_history.jsonl")
 _MAX_POINTS = 4320  # ~72h at 1/min
 _MIN_INTERVAL_SEC = 55.0
 _last_record_mono = 0.0
+_OPERATOR_TZ = ZoneInfo("Europe/Amsterdam")
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -183,37 +185,106 @@ def seed_from_session_status(status: dict[str, Any]) -> None:
     record_snapshot({"session": status})
 
 
+def _parse_history_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC)
+
+
+def operator_day_start_utc(*, now: datetime | None = None) -> datetime:
+    """Today 00:00 Europe/Amsterdam, as UTC."""
+    local = (now or datetime.now(UTC)).astimezone(_OPERATOR_TZ)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(UTC)
+
+
+def operator_week_start_utc(*, now: datetime | None = None) -> datetime:
+    """Monday 00:00 Europe/Amsterdam of the current week, as UTC."""
+    local = (now or datetime.now(UTC)).astimezone(_OPERATOR_TZ)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = start - timedelta(days=start.weekday())
+    return start.astimezone(UTC)
+
+
+def realized_delta_since(
+    history: list[dict[str, Any]],
+    *,
+    current_realized: Decimal | None,
+    since: datetime,
+) -> Decimal | None:
+    """Net change in cumulative realized PnL since ``since``.
+
+    Baseline = last history point at/before ``since``, else first point after.
+    """
+    if current_realized is None or not history:
+        return None
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    else:
+        since = since.astimezone(UTC)
+
+    last_before: Decimal | None = None
+    first_after: Decimal | None = None
+    for row in history:
+        ts = _parse_history_ts(row.get("t"))
+        if ts is None:
+            continue
+        realized = _to_decimal(row.get("realized_pnl_eur"))
+        if realized is None:
+            continue
+        if ts <= since:
+            last_before = realized
+        elif first_after is None:
+            first_after = realized
+    baseline = last_before if last_before is not None else first_after
+    if baseline is None:
+        return None
+    return current_realized - baseline
+
+
+def daily_realized_delta(
+    history: list[dict[str, Any]],
+    *,
+    current_realized: Decimal | None,
+    now: datetime | None = None,
+) -> Decimal | None:
+    """Net realized since local midnight (Europe/Amsterdam)."""
+    return realized_delta_since(
+        history,
+        current_realized=current_realized,
+        since=operator_day_start_utc(now=now),
+    )
+
+
 def weekly_realized_delta(
     history: list[dict[str, Any]],
     *,
     current_realized: Decimal | None,
     days: int = 7,
+    now: datetime | None = None,
 ) -> Decimal | None:
-    """Change in cumulative realized PnL over the last ``days`` (from history)."""
-    if current_realized is None or not history:
-        return None
-    cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
-    baseline: Decimal | None = None
-    for row in history:
-        t_raw = row.get("t")
-        if not t_raw:
-            continue
-        try:
-            ts = datetime.fromisoformat(str(t_raw).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        if ts < cutoff:
-            continue
-        realized = _to_decimal(row.get("realized_pnl_eur"))
-        if realized is not None:
-            baseline = realized if baseline is None else min(baseline, realized)
-    if baseline is None:
-        baseline = _to_decimal(history[0].get("realized_pnl_eur"))
-    if baseline is None:
-        return None
-    return current_realized - baseline
+    """Net realized this calendar week (Mon–Sun, Europe/Amsterdam).
+
+    ``days`` kept for compatibility; ``days < 7`` uses a rolling window.
+    """
+    if days < 7:
+        since = (now or datetime.now(UTC)) - timedelta(days=max(1, days))
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        return realized_delta_since(
+            history, current_realized=current_realized, since=since
+        )
+    return realized_delta_since(
+        history,
+        current_realized=current_realized,
+        since=operator_week_start_utc(now=now),
+    )
 
 
 def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -267,6 +338,7 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     hist = load_history(limit=7 * 24 * 60)
     weekly_realized = weekly_realized_delta(hist, current_realized=realized)
+    daily_realized = daily_realized_delta(hist, current_realized=realized)
 
     return {
         "updated_at": session.get("updated_at"),
@@ -280,10 +352,13 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "portfolio_eur": float(portfolio) if portfolio is not None else None,
         "realized_pnl_eur": float(realized) if realized is not None else None,
         "session_realized_eur": float(session_realized) if session_realized is not None else None,
+        "daily_realized_eur": float(daily_realized) if daily_realized is not None else None,
         "weekly_realized_eur": float(weekly_realized) if weekly_realized is not None else None,
         "weekly_target_low_eur": 140.0,
         "weekly_target_high_eur": 350.0,
         "weekly_pace_realistic_eur": 35.0,
+        "daily_target_low_eur": 20.0,
+        "daily_target_high_eur": 50.0,
         "unrealized_eur": float(unrealized) if unrealized is not None else None,
         "winnable_eur": float(winnable) if winnable is not None else None,
         "session_pnl_eur": float(session_pnl) if session_pnl is not None else None,
