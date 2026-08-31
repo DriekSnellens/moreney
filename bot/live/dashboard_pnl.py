@@ -20,8 +20,37 @@ _last_refresh_mono = 0.0
 _cache: dict[str, Any] = {}
 
 
+_DEFAULT_PNL_BASES = frozenset(
+    {
+        "ETH",
+        "SOL",
+        "XRP",
+        "ADA",
+        "LINK",
+        "DOT",
+        "AVAX",
+        "NEAR",
+        "ATOM",
+        "DOGE",
+        "LTC",
+        "ARB",
+        "OP",
+        "SUI",
+        "APT",
+        "UNI",
+        "AAVE",
+        "BNB",
+        "BCH",
+        "TRX",
+        "INJ",
+        "TAO",
+    }
+)
+
+
 def _collect_bases(bridge: Any) -> set[str]:
-    bases: set[str] = set()
+    """Bases to fetch for calendar FIFO — include sold-out coins, not only holdings."""
+    bases: set[str] = set(_DEFAULT_PNL_BASES)
     quote = str(getattr(bridge, "_quote", "EUR") or "EUR")
     exclude = getattr(bridge, "_exclude_bases", set()) or set()
     allowed = getattr(bridge, "_allowed_bases", None)
@@ -35,8 +64,22 @@ def _collect_bases(bridge: Any) -> set[str]:
             if allowed is not None and asset not in allowed:
                 continue
             bases.add(asset)
-    if not bases:
-        bases = {"SOL", "ADA", "NEAR", "DOT", "XRP", "LINK", "ATOM", "INJ", "APT", "AAVE", "BNB"}
+    focus = getattr(bridge, "_focus_bases", None) or set()
+    for asset in focus:
+        a = str(asset or "").upper()
+        if a and a != quote and a not in exclude:
+            bases.add(a)
+    for key in getattr(bridge, "_trail", {}) or {}:
+        # trail keys are "venue:BASE"
+        part = str(key).split(":", 1)[-1].upper()
+        if part and part != quote and part not in exclude:
+            bases.add(part)
+    for key in getattr(bridge, "_cost_lots", {}) or {}:
+        part = str(key).split(":", 1)[-1].upper()
+        if part and part != quote and part not in exclude:
+            bases.add(part)
+    if allowed is not None:
+        bases &= {str(a).upper() for a in allowed}
     return bases
 
 
