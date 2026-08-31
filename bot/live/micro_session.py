@@ -258,14 +258,14 @@ def _session_settings(
             "live_micro_velocity_sleeve_daily_loss_cap_eur": 50.0,
             # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
-            "live_micro_exit_resting_max_age_sec": 3.0,
-            "live_micro_exit_cooldown_sec": 3.0,
+            "live_micro_exit_resting_max_age_sec": 1.5,
+            "live_micro_exit_cooldown_sec": 1.5,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.75,
             "live_micro_exit_taker_cushion_bps": 5.0,
             "live_micro_exit_taker_after_maker_fails": 2,
-            "live_micro_mark_ttl_sec": 5.0,
+            "live_micro_mark_ttl_sec": 2.0,
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
@@ -680,7 +680,7 @@ async def run_session(
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 break
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.5)
             try:
                 bridge.maybe_utc_day_rollover()
                 bridge.check_winnable_gap_alert()
@@ -787,7 +787,7 @@ async def run_session(
                         )
             except Exception:  # noqa: BLE001
                 pass
-            if time.monotonic() - last_resting >= 3.0:
+            if time.monotonic() - last_resting >= 1.0:
                 for resting_venue in sorted(bridge._execute_venues):  # noqa: SLF001
                     try:
                         await bridge.manage_resting_orders(resting_venue)

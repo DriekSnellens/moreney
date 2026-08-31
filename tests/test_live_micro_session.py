@@ -768,8 +768,9 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
     assert cfg.live_micro_exit_engine_enabled is True
     assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 50.0
-    assert float(cfg.live_micro_exit_resting_max_age_sec) == 3.0
-    assert float(cfg.live_micro_mark_ttl_sec) == 5.0
+    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.5
+    assert float(cfg.live_micro_mark_ttl_sec) == 2.0
+    assert float(cfg.live_micro_exit_cooldown_sec) == 1.5
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:
