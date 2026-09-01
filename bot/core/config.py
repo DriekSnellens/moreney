@@ -673,6 +673,33 @@ class Settings(BaseSettings):
     live_micro_toxic_adverse_pct: float = Field(default=0.003, ge=0.0, le=0.05)
     live_micro_moderate_adverse_pct: float = Field(default=0.001, ge=0.0, le=0.05)
     live_micro_intelligence_persist_path: str = "./data/live_micro_intelligence_state.json"
+    live_micro_attribution_persist_path: str = "./data/live_micro_attribution_state.json"
+    live_micro_intelligence_auto_apply: bool = False
+    live_micro_experiment_id: str = "phase2_intelligence"
+    # Phase 3 dynamic capital allocation (shadow default).
+    live_micro_dynamic_capital_enabled: bool = False
+    live_micro_dynamic_capital_shadow: bool = True
+    live_micro_dynamic_capital_multiplier: float = Field(default=0.25, ge=0.0, le=1.0)
+    live_micro_min_capital_opportunity_score: float = Field(default=0.15, ge=0.0, le=10.0)
+    live_micro_min_expected_net_per_capital_hour: float = Field(
+        default=0.0001, ge=0.0, le=1.0
+    )
+    live_micro_capital_reservation_ttl_seconds: float = Field(
+        default=30.0, ge=5.0, le=300.0
+    )
+    live_micro_defensive_reserve_pct: float = Field(default=0.30, ge=0.05, le=0.50)
+    live_micro_normal_reserve_pct: float = Field(default=0.20, ge=0.05, le=0.45)
+    live_micro_burst_reserve_pct: float = Field(default=0.12, ge=0.05, le=0.35)
+    live_micro_scarcity_low_max: int = Field(default=2, ge=0, le=20)
+    live_micro_scarcity_medium_max: int = Field(default=7, ge=1, le=50)
+    live_micro_lock_low_minutes: float = Field(default=3.0, ge=0.5, le=30.0)
+    live_micro_lock_moderate_minutes: float = Field(default=10.0, ge=1.0, le=60.0)
+    live_micro_lock_high_minutes: float = Field(default=30.0, ge=5.0, le=120.0)
+    live_micro_lock_very_high_minutes: float = Field(default=60.0, ge=10.0, le=240.0)
+    live_micro_marginal_decay_per_100_eur: float = Field(default=0.05, ge=0.0, le=0.5)
+    live_micro_concentration_penalty_per_100_eur: float = Field(
+        default=0.04, ge=0.0, le=0.5
+    )
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

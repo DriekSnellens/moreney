@@ -81,6 +81,12 @@ class EntryQualityContext:
     corr_groups: dict[str, frozenset[str]] | None = None
     max_per_corr_group: int = 2
     available_capital_eur: Decimal | None = None
+    dynamic_capital_config: Any | None = None
+    capital_reservation_store: Any | None = None
+    underwater_capital_eur: Decimal | None = None
+    resting_reserved_eur: Decimal | None = None
+    is_dead_market: bool = False
+    is_opportunity_burst: bool = False
 
 
 @dataclass
@@ -408,7 +414,7 @@ class TradingEngine:
                 and eq_ctx.opportunity_config is not None
                 and eq_ctx.opportunity_config.enabled
             ):
-                from bot.strategies.opportunity_engine import allocate_portfolio
+                from bot.strategies.opportunity_engine import allocate_portfolio_with_dynamic
 
                 pre_assessments: list[Any] = []
                 scored_map: dict[int, Any] = {}
@@ -440,12 +446,28 @@ class TradingEngine:
                     pre_assessments.append(assessment)
                     scored_map[id(assessment)] = scored
                 avail = eq_ctx.available_capital_eur or Decimal("10000")
-                selected, skipped = allocate_portfolio(
+                shadow = True
+                if eq_ctx.dynamic_capital_config is not None:
+                    shadow = bool(
+                        getattr(eq_ctx.dynamic_capital_config, "shadow_only", True)
+                    )
+                selected, skipped, dyn_meta = allocate_portfolio_with_dynamic(
                     pre_assessments,
                     available_capital_eur=avail,
+                    total_equity_eur=avail,
+                    free_eur=avail,
+                    underwater_capital_eur=eq_ctx.underwater_capital_eur or Decimal("0"),
+                    resting_reserved_eur=eq_ctx.resting_reserved_eur or Decimal("0"),
+                    is_dead_market=eq_ctx.is_dead_market,
+                    is_opportunity_burst=eq_ctx.is_opportunity_burst,
                     corr_groups=eq_ctx.corr_groups,
                     max_per_corr_group=eq_ctx.max_per_corr_group,
+                    dynamic_config=eq_ctx.dynamic_capital_config,
+                    reservation_store=eq_ctx.capital_reservation_store,
+                    shadow_only=shadow,
                 )
+                if dyn_meta and eq_ctx.opportunity_diagnostics is not None:
+                    eq_ctx.opportunity_diagnostics._dynamic_allocation_meta = dyn_meta  # noqa: SLF001
                 if eq_ctx.opportunity_diagnostics is not None:
                     eq_ctx.opportunity_diagnostics.capital_allocator_selected += len(
                         selected
@@ -565,13 +587,29 @@ class TradingEngine:
                 assessments.append(assessment)
                 pending_map[id(assessment)] = (opportunity, profitability)
 
+            from bot.strategies.opportunity_engine import allocate_portfolio_with_dynamic
+
             avail = eq_ctx.available_capital_eur or Decimal("10000")
-            selected, skipped = allocate_portfolio(
+            shadow = True
+            if eq_ctx.dynamic_capital_config is not None:
+                shadow = bool(getattr(eq_ctx.dynamic_capital_config, "shadow_only", True))
+            selected, skipped, dyn_meta = allocate_portfolio_with_dynamic(
                 assessments,
                 available_capital_eur=avail,
+                total_equity_eur=avail,
+                free_eur=avail,
+                underwater_capital_eur=eq_ctx.underwater_capital_eur or Decimal("0"),
+                resting_reserved_eur=eq_ctx.resting_reserved_eur or Decimal("0"),
+                is_dead_market=eq_ctx.is_dead_market,
+                is_opportunity_burst=eq_ctx.is_opportunity_burst,
                 corr_groups=eq_ctx.corr_groups,
                 max_per_corr_group=eq_ctx.max_per_corr_group,
+                dynamic_config=eq_ctx.dynamic_capital_config,
+                reservation_store=eq_ctx.capital_reservation_store,
+                shadow_only=shadow,
             )
+            if dyn_meta and eq_ctx.opportunity_diagnostics is not None:
+                eq_ctx.opportunity_diagnostics._dynamic_allocation_meta = dyn_meta  # noqa: SLF001
             if eq_ctx.opportunity_diagnostics is not None:
                 eq_ctx.opportunity_diagnostics.capital_allocator_selected += len(selected)
                 eq_ctx.opportunity_diagnostics.capital_allocator_skipped += len(skipped)

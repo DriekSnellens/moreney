@@ -735,6 +735,19 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "adverse_selection_reject": diag.get("adverse_selection_reject"),
         "regime_reject": diag.get("regime_reject"),
         "stale_data_reject": diag.get("stale_data_reject"),
+        "toxic_fill_rate": diag.get("toxic_fill_rate"),
+        "intelligence_cancels": diag.get("intelligence_cancels"),
+        "avoided_adverse_loss_eur": diag.get("avoided_adverse_loss_eur"),
+        "missed_opportunity_eur": diag.get("missed_opportunity_eur"),
+        "total_cancel_alpha_eur": diag.get("total_cancel_alpha_eur"),
+        "average_cancel_alpha_eur": diag.get("average_cancel_alpha_eur"),
+        "average_lock_seconds": diag.get("average_lock_seconds"),
+        "p95_lock_seconds": diag.get("p95_lock_seconds"),
+        "underwater_capital_eur": diag.get("underwater_capital_eur"),
+        "maker_execution_alpha_avg": diag.get("maker_execution_alpha_avg"),
+        "taker_execution_alpha_avg": diag.get("taker_execution_alpha_avg"),
+        "experiment_id": diag.get("experiment_id"),
+        "score_monotonicity_ok": diag.get("score_monotonicity_ok"),
     }
 
 
