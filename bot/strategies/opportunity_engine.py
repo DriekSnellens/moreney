@@ -89,6 +89,15 @@ class OpportunityEngineConfig:
     weight_timing: Decimal = Decimal("0.05")
     weight_venue: Decimal = Decimal("0.05")
     weight_breakout: Decimal = Decimal("0.05")
+    # Phase 2 execution intelligence (off by default; enable via settings).
+    regime_engine_enabled: bool = False
+    adverse_selection_enabled: bool = False
+    outcome_learning_enabled: bool = False
+    execution_quality_enabled: bool = False
+    weight_regime_fit: Decimal = Decimal("0.08")
+    weight_adverse_selection: Decimal = Decimal("0.07")
+    adverse_selection_reject_threshold: Decimal = Decimal("0.80")
+    stale_data_reject_threshold: Decimal = Decimal("0.15")
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +137,14 @@ class OpportunityAssessment:
     extension_30m: Decimal | None = None
     extension_2h: Decimal | None = None
     headroom_ratio: Decimal | None = None
+    market_regime: str | None = None
+    regime_score: Decimal = _ZERO
+    regime_fit: Decimal = _ONE
+    regime_confidence: Decimal | None = None
+    adverse_selection_score: Decimal | None = None
+    empirical_multiplier: Decimal = _ONE
+    execution_decision: str | None = None
+    data_freshness_score: Decimal = _ONE
 
 
 @dataclass
@@ -218,6 +235,11 @@ class OpportunityEngineDiagnostics:
     mfe_samples: int = 0
     adaptive_trail_hold: int = 0
     adaptive_trail_harvest: int = 0
+    regime_reject: int = 0
+    adverse_selection_reject: int = 0
+    stale_data_reject: int = 0
+    execution_wait: int = 0
+    execution_reject: int = 0
     _sum_mfe_capture: Decimal = _ZERO
     _sum_score: Decimal = _ZERO
     _best: OpportunityAssessment | None = None
@@ -247,6 +269,16 @@ class OpportunityEngineDiagnostics:
                 self.liquidity_reject += 1
             if "timing" in reason:
                 self.timing_reject += 1
+            if "regime" in reason or "dead_market" in reason:
+                self.regime_reject += 1
+            if "adverse" in reason:
+                self.adverse_selection_reject += 1
+            if "stale" in reason:
+                self.stale_data_reject += 1
+            if "execution_wait" in reason:
+                self.execution_wait += 1
+            if "execution_reject" in reason:
+                self.execution_reject += 1
         if assessment.venue == "bitvavo":
             self.venue_bitvavo_selected += 1
         elif assessment.venue == "okx":
@@ -315,6 +347,11 @@ class OpportunityEngineDiagnostics:
             ),
             "venue_economics_bitvavo": self.venue_stats.get("bitvavo", CoinVenueStats()).snapshot(),
             "venue_economics_okx": self.venue_stats.get("okx", CoinVenueStats()).snapshot(),
+            "regime_reject": self.regime_reject,
+            "adverse_selection_reject": self.adverse_selection_reject,
+            "stale_data_reject": self.stale_data_reject,
+            "execution_wait": self.execution_wait,
+            "execution_reject": self.execution_reject,
         }
         if economic_extra:
             out.update(economic_extra)
@@ -398,6 +435,18 @@ def config_from_settings(settings: Any) -> OpportunityEngineConfig:
         ),
         weight_breakout=Decimal(
             str(getattr(settings, "live_micro_opp_weight_breakout", 0.05))
+        ),
+        regime_engine_enabled=bool(
+            getattr(settings, "live_micro_regime_engine_enabled", False)
+        ),
+        adverse_selection_enabled=bool(
+            getattr(settings, "live_micro_adverse_selection_enabled", False)
+        ),
+        outcome_learning_enabled=bool(
+            getattr(settings, "live_micro_outcome_learning_enabled", False)
+        ),
+        execution_quality_enabled=bool(
+            getattr(settings, "live_micro_execution_quality_enabled", False)
         ),
     )
 
@@ -564,6 +613,10 @@ def evaluate(
     capital_config: CapitalEfficiencyConfig | None = None,
     venue_config: VenueEconomicsConfig | None = None,
     engine_config: OpportunityEngineConfig | None = None,
+    candidate_count: int = 0,
+    avg_opportunity_score: Decimal | None = None,
+    outcome_store: Any = None,
+    learning_config: Any = None,
 ) -> OpportunityAssessment:
     """Evaluate one candidate — deterministic, no I/O."""
     cfg = engine_config or OpportunityEngineConfig()
@@ -689,6 +742,93 @@ def evaluate(
     if venue_scores:
         venue_score = _clamp01(venue_scores[0].economic_score / max(_ONE, expected_net))
 
+    # Phase 2: market regime, adverse selection, learning, execution quality
+    from bot.intelligence.adverse_selection import assess_adverse_selection, config_from_settings as adverse_cfg_from
+    from bot.intelligence.execution_quality import assess_execution, classify_urgency
+    from bot.intelligence.market_regime_engine import (
+        MarketRegime,
+        classify_market_regime,
+        config_from_settings as regime_cfg_from,
+        regime_fit_for_strategy,
+    )
+    from bot.intelligence.outcome_learning import empirical_multiplier
+
+    snap = snapshot or opportunity.market
+    regime_cfg = regime_cfg_from(None)
+    regime_assessment = None
+    if cfg.regime_engine_enabled:
+        regime_assessment = classify_market_regime(
+            marks=mark_series,
+            snapshot=snap,
+            config=regime_cfg,
+            candidate_count=candidate_count,
+            avg_opportunity_score=avg_opportunity_score,
+        )
+
+    regime_fit = _ONE
+    regime_score = Decimal("0.5")
+    data_fresh = _ONE
+    market_regime_str: str | None = None
+    regime_conf: Decimal | None = None
+
+    if regime_assessment is not None:
+        market_regime_str = regime_assessment.regime.value
+        regime_conf = regime_assessment.confidence
+        data_fresh = regime_assessment.data_freshness_score
+        regime_fit = regime_fit_for_strategy(
+            strategy=opportunity.strategy_name,
+            regime=regime_assessment.regime,
+        )
+        regime_score = _clamp01(regime_fit * regime_assessment.confidence)
+        if regime_assessment.regime == MarketRegime.DEAD_MARKET:
+            reasons.append("dead_market")
+        if data_fresh < cfg.stale_data_reject_threshold:
+            reasons.append("stale_market_data")
+
+    adv = None
+    adverse_score: Decimal | None = None
+    if cfg.adverse_selection_enabled:
+        adv = assess_adverse_selection(
+            snapshot=snap,
+            marks=mark_series,
+            side=opportunity.side,
+            order_price=opportunity.entry_price,
+        )
+        adverse_score = adv.adverse_selection_score
+        if adverse_score >= cfg.adverse_selection_reject_threshold:
+            reasons.append("adverse_selection_high")
+
+    empirical_mult = _ONE
+    if cfg.outcome_learning_enabled and outcome_store is not None and regime_assessment is not None:
+        bucket = outcome_store.bucket(
+            symbol=opportunity.symbol,
+            venue=venue or "unknown",
+            strategy=opportunity.strategy_name,
+            regime=regime_assessment.regime.value,
+        )
+        empirical_mult = empirical_multiplier(bucket=bucket, config=learning_config)
+
+    adverse_penalty = _ONE
+    if adverse_score is not None:
+        adverse_penalty = _ONE - adverse_score * cfg.weight_adverse_selection
+
+    exec_decision_str: str | None = None
+    if cfg.execution_quality_enabled and maker_net is not None and taker_net is not None:
+        urgency = classify_urgency(extension_pct=extension)
+        exec_assess = assess_execution(
+            maker_net_eur=maker_net,
+            taker_net_eur=taker_net,
+            adverse=adv if cfg.adverse_selection_enabled else None,
+            regime=regime_assessment,
+            spread_pct=spread_pct,
+            urgency=urgency,
+        )
+        exec_decision_str = exec_assess.decision.value
+        if exec_assess.decision.value == "REJECT":
+            reasons.append("execution_reject")
+        elif exec_assess.decision.value == "WAIT":
+            reasons.append("execution_wait")
+
     opp_score = _weighted_score(
         [
             (net_edge_score, cfg.weight_net_edge),
@@ -702,8 +842,11 @@ def evaluate(
             (timing, cfg.weight_timing),
             (venue_score, cfg.weight_venue),
             (breakout, cfg.weight_breakout),
+            (regime_score, cfg.weight_regime_fit),
+            (adverse_penalty, cfg.weight_adverse_selection),
         ]
     )
+    opp_score = (opp_score * empirical_mult * data_fresh).quantize(Decimal("0.1"))
 
     mult = _ONE
     if eq is not None:
@@ -726,8 +869,23 @@ def evaluate(
         mult = min(mult, cfg.medium_size_multiplier)
         reasons.append("timing_late_spike")
 
+    if regime_assessment is not None and regime_assessment.regime == MarketRegime.DEAD_MARKET:
+        mult = min(mult, cfg.medium_size_multiplier)
+        opp_score = min(opp_score, cfg.reduced_opportunity_score)
+
+    if adverse_score is not None and adverse_score >= cfg.adverse_selection_reject_threshold:
+        mult = min(mult, cfg.medium_size_multiplier)
+        opp_score = min(opp_score, cfg.reduced_opportunity_score)
+
+    if data_fresh < cfg.stale_data_reject_threshold:
+        opp_score = min(opp_score, cfg.min_opportunity_score - Decimal("1"))
+        mult = _ZERO
+
     decision = OpportunityDecision.HIGH_QUALITY
-    if eq is not None and eq.recommendation == EntryQualityRecommendation.REJECT:
+    if data_fresh < cfg.stale_data_reject_threshold:
+        decision = OpportunityDecision.REJECT
+        reasons.append("stale_data_reject")
+    elif eq is not None and eq.recommendation == EntryQualityRecommendation.REJECT:
         decision = OpportunityDecision.REJECT
         reasons.append(eq.reject_reason or "entry_quality")
     elif ce.recommendation == EntryQualityRecommendation.REJECT:
@@ -785,6 +943,14 @@ def evaluate(
         extension_30m=ext_30m,
         extension_2h=ext_2h,
         headroom_ratio=headroom_ratio,
+        market_regime=market_regime_str,
+        regime_score=regime_score,
+        regime_fit=regime_fit,
+        regime_confidence=regime_conf,
+        adverse_selection_score=adverse_score,
+        empirical_multiplier=empirical_mult,
+        execution_decision=exec_decision_str,
+        data_freshness_score=data_fresh,
     )
 
 

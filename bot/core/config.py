@@ -651,6 +651,27 @@ class Settings(BaseSettings):
     live_micro_opp_weight_timing: float = Field(default=0.05, ge=0.0, le=1.0)
     live_micro_opp_weight_venue: float = Field(default=0.05, ge=0.0, le=1.0)
     live_micro_opp_weight_breakout: float = Field(default=0.05, ge=0.0, le=1.0)
+    # Phase 2 execution intelligence (observation mode default for live safety).
+    live_micro_regime_engine_enabled: bool = True
+    live_micro_adverse_selection_enabled: bool = True
+    live_micro_resting_order_intelligence_enabled: bool = True
+    live_micro_execution_quality_enabled: bool = True
+    live_micro_outcome_learning_enabled: bool = True
+    live_micro_capital_intelligence_enabled: bool = True
+    live_micro_intelligence_observation_mode: bool = True
+    live_micro_min_learning_samples: int = Field(default=20, ge=5, le=500)
+    live_micro_learning_full_samples: int = Field(default=50, ge=10, le=1000)
+    live_micro_empirical_multiplier_min: float = Field(default=0.80, ge=0.5, le=1.0)
+    live_micro_empirical_multiplier_max: float = Field(default=1.20, ge=1.0, le=2.0)
+    live_micro_min_reprice_interval_sec: float = Field(default=5.0, ge=1.0, le=120.0)
+    live_micro_max_resting_order_age_sec: float = Field(default=30.0, ge=5.0, le=600.0)
+    live_micro_stale_market_data_sec: float = Field(default=5.0, ge=1.0, le=60.0)
+    live_micro_regime_min_confidence: float = Field(default=0.45, ge=0.0, le=1.0)
+    live_micro_burst_candidate_min: int = Field(default=8, ge=2, le=100)
+    live_micro_adverse_selection_high_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    live_micro_toxic_adverse_pct: float = Field(default=0.003, ge=0.0, le=0.05)
+    live_micro_moderate_adverse_pct: float = Field(default=0.001, ge=0.0, le=0.05)
+    live_micro_intelligence_persist_path: str = "./data/live_micro_intelligence_state.json"
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

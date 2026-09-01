@@ -47,6 +47,18 @@ from bot.strategies.opportunity_engine import (
     config_from_settings as opportunity_engine_config_from_settings,
     evaluate as evaluate_opportunity_engine,
 )
+from bot.intelligence.adverse_selection import (
+    classify_fill_quality,
+    post_fill_adverse_pct,
+)
+from bot.intelligence.capital_intelligence import assess_capital_state
+from bot.intelligence.market_regime_engine import classify_market_regime, config_from_settings as regime_cfg_from
+from bot.intelligence.outcome_learning import OutcomeRecord
+from bot.intelligence.resting_order_intelligence import (
+    RestingOrderAction,
+    assess_resting_order,
+)
+from bot.intelligence.session import IntelligenceSession
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +441,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._opportunity_engine_enabled = bool(
             self._opportunity_engine_config.enabled
         )
+        self._intelligence_path = Path(
+            str(getattr(settings, "live_micro_intelligence_persist_path", "./data/live_micro_intelligence_state.json"))
+        )
+        self._intelligence = IntelligenceSession.load(self._intelligence_path, settings)
+        self._capital_state_snapshot: dict[str, Any] = {}
         self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
             str(getattr(settings, "live_micro_corr_group", "") or "")
@@ -860,6 +877,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 encoding="utf-8",
             )
             tmp.replace(path)
+            if hasattr(self, "_intelligence"):
+                self._intelligence.save(self._intelligence_path)
         except Exception as exc:  # noqa: BLE001
             logger.warning("micro bridge persist failed path=%s err=%s", path, exc)
 
@@ -1843,12 +1862,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._refresh_economic_capital_metrics()
         eq_extra = self._entry_quality_diagnostics.snapshot()
         opp = getattr(self, "_opportunity_diagnostics", None)
+        intel = self._intelligence.snapshot() if hasattr(self, "_intelligence") else {}
+        cap = self._capital_state_snapshot or {}
         if opp is not None:
             return opp.snapshot(economic_extra={
                 **eq_extra,
                 **self._economic_diagnostics.snapshot(),
+                **intel,
+                **cap,
             })
-        return self._economic_diagnostics.snapshot(entry_quality_extra=eq_extra)
+        return self._economic_diagnostics.snapshot(entry_quality_extra={
+            **eq_extra,
+            **intel,
+            **cap,
+        })
 
     def entry_quality_diagnostics_snapshot(self) -> dict[str, Any]:
         return self._entry_quality_diagnostics.snapshot()
@@ -1911,16 +1938,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             config=self._entry_quality_config,
         )
         if self._opportunity_engine_enabled and self._opportunity_diagnostics is not None:
+            marks = self.mark_history(symbol)
+            regime = classify_market_regime(
+                marks=marks,
+                config=regime_cfg_from(self._settings),
+                candidate_count=int(self._opportunity_diagnostics.candidates),
+            )
+            self._intelligence.current_regime = regime
             opp_assessment = evaluate_opportunity_engine(
                 opportunity=opportunity,
                 profitability=profitability,
-                marks=self.mark_history(symbol),
+                marks=marks,
                 entry_config=self._entry_quality_config,
                 capital_config=self._capital_efficiency_config,
                 venue_config=self._venue_economics_config,
                 engine_config=self._opportunity_engine_config,
+                candidate_count=int(self._opportunity_diagnostics.candidates),
+                outcome_store=self._intelligence.outcome_store,
+                learning_config=self._intelligence.learning_config,
             )
             self._opportunity_diagnostics.record(opp_assessment)
+            cap_state = assess_capital_state(
+                total_budget_eur=self._budget,
+                deployed_eur=self._economic_diagnostics._capital_deployed_eur,  # noqa: SLF001
+                locked_eur=self._economic_diagnostics._capital_locked_eur,  # noqa: SLF001
+                candidate_count=int(self._opportunity_diagnostics.candidates),
+                avg_opportunity_score=opp_assessment.opportunity_score,
+                is_dead_market=regime.regime.value == "DEAD_MARKET",
+                is_opportunity_burst=regime.regime.value == "OPPORTUNITY_BURST",
+            )
+            self._capital_state_snapshot = {
+                "capital_available_eur": str(cap_state.available_eur.quantize(Decimal("0.01"))),
+                "capital_reserved_eur": str(cap_state.reserved_eur.quantize(Decimal("0.01"))),
+                "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
+                "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
+            }
         return assessment
 
     def _note_position_opened(self, venue: str, base: str) -> None:
@@ -2756,6 +2808,49 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._economic_diagnostics.record_net_per_hour(
                     trade_pnl / (hold_sec / Decimal("3600"))
                 )
+            # Outcome learning + execution quality on closed trades.
+            if hasattr(self, "_intelligence") and self._intelligence.learning_config.enabled:
+                regime = self._intelligence.current_regime
+                regime_str = regime.regime.value if regime else "UNKNOWN"
+                fill_meta_dict = fill_meta or {}
+                strat = str(fill_meta_dict.get("strategy") or "maker_inventory")
+                adverse_bps = post_fill_adverse_pct(
+                    side=OpportunitySide.SELL,
+                    entry_price=entry_px,
+                    future_price=price,
+                ) * Decimal("10000")
+                toxic = classify_fill_quality(
+                    adverse_pct=adverse_bps / Decimal("10000"),
+                    config=self._intelligence.adverse_config,
+                ).value == "TOXIC_FILL"
+                rec = OutcomeRecord(
+                    symbol=symbol,
+                    venue=venue or "bitvavo",
+                    strategy=strat,
+                    regime=regime_str,
+                    order_type="maker" if trail_st.get("maker") else "taker",
+                    net_eur=trade_pnl,
+                    hold_seconds=hold_sec,
+                    mfe_capture=mfe_rec.mfe_capture_ratio,
+                    adverse_bps=adverse_bps,
+                    toxic=toxic,
+                    won=trade_pnl > 0,
+                )
+                self._intelligence.outcome_store.record(rec)
+                bucket = self._intelligence.execution_store.bucket(
+                    symbol=symbol,
+                    venue=venue or "bitvavo",
+                    strategy=strat,
+                    regime=regime_str,
+                )
+                bucket.record_fill(
+                    is_maker=bool(trail_st.get("maker", True)),
+                    net_eur=trade_pnl,
+                    adverse_bps=adverse_bps,
+                    mfe_capture=mfe_rec.mfe_capture_ratio,
+                    hold_seconds=hold_sec,
+                    toxic=toxic,
+                )
         # A: attribute PnL to velocity sleeve when session inventory was sold.
         if sess_consumed > 0 or bool(
             (self._trail.get(lot_key) or {}).get("sleeve")
@@ -3303,6 +3398,58 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         )
                     except Exception:  # noqa: BLE001
                         logger.warning("loss-sell cancel failed id=%s", oid)
+                        still.append(row)
+                    continue
+            # Intelligence layer: adverse selection / regime-based cancel (observation mode safe).
+            if self._intelligence.resting_config.enabled:
+                row_meta = row.get("metadata") or {}
+                intel_assess = assess_resting_order(
+                    side=side_raw,
+                    order_price=Decimal(str(row.get("price") or 0)),
+                    age_sec=age,
+                    marks=self.mark_history(symbol),
+                    regime=self._intelligence.current_regime,
+                    expected_net_eur=Decimal(str(row_meta.get("net_profit_eur") or "0.5")),
+                    opportunity_score=Decimal(str(row.get("opportunity_score") or "70")),
+                    previous_adverse_score=Decimal(str(row.get("last_adverse_score")))
+                    if row.get("last_adverse_score") is not None
+                    else None,
+                    last_reprice_mono=float(row.get("last_reprice_mono") or 0) or None,
+                    now_mono=now,
+                    replace_count=int(row.get("replace_count") or 0),
+                    config=self._intelligence.resting_config,
+                    observation_mode=self._intelligence.observation_mode,
+                )
+                row["last_adverse_score"] = str(intel_assess.adverse_selection_score)
+                if intel_assess.observation_only:
+                    self._intelligence.execution_store.observation_cancels += 1
+                    logger.info(
+                        "INTEL_OBS_CANCEL would=%s venue=%s symbol=%s reasons=%s",
+                        intel_assess.action.value,
+                        venue,
+                        symbol,
+                        ",".join(intel_assess.reasons),
+                    )
+                elif intel_assess.action in {
+                    RestingOrderAction.CANCEL,
+                    RestingOrderAction.EXPIRE,
+                }:
+                    try:
+                        await client.cancel_order(oid, symbol)
+                        cancelled += 1
+                        self._intelligence.execution_store.record_churn(cancel=True)
+                        self._invalidate_bal_cache()
+                        self._bump_skip("intel_resting_cancelled")
+                        logger.info(
+                            "INTEL_RESTING_CANCEL venue=%s symbol=%s id=%s action=%s reasons=%s",
+                            venue,
+                            symbol,
+                            oid,
+                            intel_assess.action.value,
+                            ",".join(intel_assess.reasons),
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("intel resting cancel failed id=%s", oid)
                         still.append(row)
                     continue
             # Rising-tape: cancel resting buys when momentum goes flat/down.

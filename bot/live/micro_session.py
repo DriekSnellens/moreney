@@ -283,6 +283,14 @@ def _session_settings(
             "live_micro_timing_enabled": True,
             "live_micro_coin_learning_enabled": True,
             "live_micro_adaptive_exit_enabled": True,
+            # Phase 2 execution intelligence — observation mode first (no execution impact).
+            "live_micro_regime_engine_enabled": True,
+            "live_micro_adverse_selection_enabled": True,
+            "live_micro_resting_order_intelligence_enabled": True,
+            "live_micro_execution_quality_enabled": True,
+            "live_micro_outcome_learning_enabled": True,
+            "live_micro_capital_intelligence_enabled": True,
+            "live_micro_intelligence_observation_mode": True,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,

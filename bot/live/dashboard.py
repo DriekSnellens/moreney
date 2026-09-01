@@ -1364,6 +1364,54 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>OKX avg NET: <span id='venue-okx-avg-net'>{_esc(venue_okx.get('average_net_eur', '—'))}</span></span>"
         "</div></section>"
     )
+    exec_html = (
+        "<section class='target-band' aria-label='Execution quality' id='section-execution-quality'>"
+        "<h2>Execution quality</h2>"
+        "<div class='band-row'>"
+        f"<span>Maker fill rate: <span id='exec-maker-rate'>{_esc(eq_diag.get('execution_maker_fill_rate', '—'))}</span></span>"
+        f"<span>Taker fill rate: <span id='exec-taker-rate'>{_esc(eq_diag.get('execution_taker_fill_rate', '—'))}</span></span>"
+        f"<span>Toxic fill rate: <span id='exec-toxic-rate'>{_esc(eq_diag.get('execution_toxic_fill_rate', '—'))}</span></span>"
+        f"<span>Fill rate: <span id='exec-fill-rate'>{_esc(eq_diag.get('execution_fill_rate', '—'))}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Cancel rate: <span id='exec-cancel-rate'>{_esc(eq_diag.get('execution_cancel_rate', '—'))}</span></span>"
+        f"<span>Replace rate: <span id='exec-replace-rate'>{_esc(eq_diag.get('execution_replace_rate', '—'))}</span></span>"
+        f"<span>Order churn: <span id='exec-churn'>{_esc(eq_diag.get('execution_order_churn', '—'))}</span></span>"
+        f"<span>Obs cancels: <span id='exec-obs-cancel'>{_esc(eq_diag.get('execution_observation_cancels', '—'))}</span></span>"
+        "</div></section>"
+    )
+    regime_html = (
+        "<section class='target-band' aria-label='Market regime' id='section-market-regime'>"
+        "<h2>Market regime</h2>"
+        "<div class='band-row'>"
+        f"<span>Regime: <strong id='regime-current'>{_esc(eq_diag.get('market_regime', '—'))}</strong></span>"
+        f"<span>Confidence: <span id='regime-confidence'>{_esc(eq_diag.get('market_regime_confidence', '—'))}</span></span>"
+        f"<span>Freshness: <span id='regime-freshness'>{_esc(eq_diag.get('data_freshness_score', '—'))}</span></span>"
+        f"<span>Observation: <span id='regime-obs-mode'>{_esc(eq_diag.get('intelligence_observation_mode', '—'))}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>5m return: <span id='regime-ret-5m'>{_esc(eq_diag.get('regime_return_5m', '—'))}</span></span>"
+        f"<span>Volatility: <span id='regime-vol'>{_esc(eq_diag.get('regime_realized_volatility', '—'))}</span></span>"
+        f"<span>Imbalance: <span id='regime-imb'>{_esc(eq_diag.get('regime_orderbook_imbalance', '—'))}</span></span>"
+        f"<span>Reasons: <span id='regime-reasons'>{_esc(eq_diag.get('market_regime_reasons', '—'))}</span></span>"
+        "</div></section>"
+    )
+    cap_intel_html = (
+        "<section class='target-band' aria-label='Capital intelligence' id='section-capital-intelligence'>"
+        "<h2>Capital intelligence</h2>"
+        "<div class='band-row'>"
+        f"<span>Available: <span id='cap-intel-available'>{_esc(eq_diag.get('capital_available_eur', '—'))}</span></span>"
+        f"<span>Reserved: <span id='cap-intel-reserved'>{_esc(eq_diag.get('capital_reserved_eur', '—'))}</span></span>"
+        f"<span>Deployed: <span id='cap-intel-deployed'>{_esc(eq_diag.get('capital_deployed_eur', '—'))}</span></span>"
+        f"<span>Locked: <span id='cap-intel-locked'>{_esc(eq_diag.get('capital_locked_eur', '—'))}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Deployable: <span id='cap-intel-deployable'>{_esc(eq_diag.get('capital_deployable_eur', '—'))}</span></span>"
+        f"<span>Reserve need: <span id='cap-intel-reserve-need'>{_esc(eq_diag.get('capital_reserve_need_pct', '—'))}</span>%</span>"
+        f"<span>NET/capital-h: <span id='cap-intel-net-cap-hr'>{_esc(eq_diag.get('net_eur_per_capital_hour', '—'))}</span></span>"
+        f"<span>Adverse rejects: <span id='cap-intel-adverse-reject'>{_esc(eq_diag.get('adverse_selection_reject', '—'))}</span></span>"
+        "</div></section>"
+    )
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
@@ -1510,6 +1558,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {opp_html}
       {eff_html}
       {venue_html}
+      {exec_html}
+      {regime_html}
+      {cap_intel_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">
@@ -1746,6 +1797,33 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('venue-okx-selected', dash(m.venue_okx_selected));
       set('venue-bv-avg-net', dash(m.venue_economics_bitvavo_avg_net));
       set('venue-okx-avg-net', dash(m.venue_economics_okx_avg_net));
+      // Execution quality
+      set('exec-maker-rate', dash(m.execution_maker_fill_rate));
+      set('exec-taker-rate', dash(m.execution_taker_fill_rate));
+      set('exec-toxic-rate', dash(m.execution_toxic_fill_rate));
+      set('exec-fill-rate', dash(m.execution_fill_rate));
+      set('exec-cancel-rate', dash(m.execution_cancel_rate));
+      set('exec-replace-rate', dash(m.execution_replace_rate));
+      set('exec-churn', dash(m.execution_order_churn));
+      set('exec-obs-cancel', dash(m.execution_observation_cancels));
+      // Market regime
+      set('regime-current', dash(m.market_regime));
+      set('regime-confidence', dash(m.market_regime_confidence));
+      set('regime-freshness', dash(m.data_freshness_score));
+      set('regime-obs-mode', dash(m.intelligence_observation_mode));
+      set('regime-ret-5m', dash(m.regime_return_5m));
+      set('regime-vol', dash(m.regime_realized_volatility));
+      set('regime-imb', dash(m.regime_orderbook_imbalance));
+      set('regime-reasons', dash(m.market_regime_reasons));
+      // Capital intelligence
+      set('cap-intel-available', eurFmt(m.capital_available_eur != null ? parseFloat(m.capital_available_eur) : null));
+      set('cap-intel-reserved', eurFmt(m.capital_reserved_eur != null ? parseFloat(m.capital_reserved_eur) : null));
+      set('cap-intel-deployed', eurFmt(m.capital_deployed_eur != null ? parseFloat(m.capital_deployed_eur) : null));
+      set('cap-intel-locked', eurFmt(m.capital_locked_eur != null ? parseFloat(m.capital_locked_eur) : null));
+      set('cap-intel-deployable', eurFmt(m.capital_deployable_eur != null ? parseFloat(m.capital_deployable_eur) : null));
+      set('cap-intel-reserve-need', dash(m.capital_reserve_need_pct));
+      set('cap-intel-net-cap-hr', dash(m.net_eur_per_capital_hour));
+      set('cap-intel-adverse-reject', dash(m.adverse_selection_reject));
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');

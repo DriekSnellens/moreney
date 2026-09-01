@@ -712,6 +712,29 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "venue_economics_okx_avg_net": venue_okx.get("average_net_eur")
         if isinstance(venue_okx, dict)
         else None,
+        "execution_fill_rate": diag.get("execution_fill_rate"),
+        "execution_maker_fill_rate": diag.get("execution_maker_fill_rate"),
+        "execution_taker_fill_rate": diag.get("execution_taker_fill_rate"),
+        "execution_toxic_fill_rate": diag.get("execution_toxic_fill_rate"),
+        "execution_cancel_rate": diag.get("execution_cancel_rate"),
+        "execution_replace_rate": diag.get("execution_replace_rate"),
+        "execution_order_churn": diag.get("execution_order_churn"),
+        "execution_observation_cancels": diag.get("execution_observation_cancels"),
+        "market_regime": diag.get("market_regime"),
+        "market_regime_confidence": diag.get("market_regime_confidence"),
+        "market_regime_reasons": diag.get("market_regime_reasons"),
+        "data_freshness_score": diag.get("data_freshness_score"),
+        "regime_return_5m": diag.get("regime_return_5m"),
+        "regime_realized_volatility": diag.get("regime_realized_volatility"),
+        "regime_orderbook_imbalance": diag.get("regime_orderbook_imbalance"),
+        "intelligence_observation_mode": diag.get("intelligence_observation_mode"),
+        "capital_available_eur": diag.get("capital_available_eur"),
+        "capital_reserved_eur": diag.get("capital_reserved_eur"),
+        "capital_deployable_eur": diag.get("capital_deployable_eur"),
+        "capital_reserve_need_pct": diag.get("capital_reserve_need_pct"),
+        "adverse_selection_reject": diag.get("adverse_selection_reject"),
+        "regime_reject": diag.get("regime_reject"),
+        "stale_data_reject": diag.get("stale_data_reject"),
     }
 
 
