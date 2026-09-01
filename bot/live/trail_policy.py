@@ -57,6 +57,18 @@ class MarkSeries:
             return None
         return (last - first) / first
 
+    def momentum_return_last(self, n: int) -> Decimal | None:
+        """Rolling return over the last ``n`` marks (short-window momentum)."""
+        need = max(2, int(n))
+        if len(self._marks) < need:
+            return None
+        window = list(self._marks)[-need:]
+        first = window[0]
+        last = window[-1]
+        if first <= 0:
+            return None
+        return (last - first) / first
+
     def last_n_rising(self, n: int = 3) -> bool:
         """True when the last n marks are strictly non-decreasing and last > first of window."""
         need = max(2, int(n))

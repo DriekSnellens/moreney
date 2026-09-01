@@ -356,6 +356,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._trail_hold_rising_n = int(
             getattr(settings, "live_micro_trail_hold_rising_n", 2) or 0
         )
+        self._ring_soft_block_underwater_eur = Decimal(
+            str(
+                getattr(settings, "live_micro_ring_soft_block_underwater_eur", 25)
+                or 25
+            )
+        )
+        self._entry_min_low_util_rising_n = int(
+            getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
+        )
+        self._entry_short_momentum_samples = int(
+            getattr(settings, "live_micro_entry_short_momentum_samples", 6) or 6
+        )
+        self._entry_short_momentum_min = Decimal(
+            str(
+                getattr(settings, "live_micro_entry_short_momentum_min_return", 0.001)
+                or 0.001
+            )
+        )
+        self._corr_sector_momentum_block = int(
+            getattr(settings, "live_micro_corr_sector_momentum_block", 2) or 0
+        )
         self._buy_quality_underwater_count = int(
             getattr(settings, "live_micro_buy_quality_underwater_count", 4) or 0
         )
@@ -1270,6 +1291,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "momentum_min_return": str(self._momentum_min),
                 "ring_momentum_min_return": str(self._ring_momentum_min),
                 "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
+                "ring_soft_block_underwater_eur": str(self._ring_soft_block_underwater_eur),
+                "entry_short_momentum_samples": self._entry_short_momentum_samples,
+                "entry_short_momentum_min_return": str(self._entry_short_momentum_min),
+                "entry_min_low_util_rising_n": self._entry_min_low_util_rising_n,
+                "corr_sector_momentum_block": self._corr_sector_momentum_block,
                 "low_util_rising_n": self._low_util_rising_n,
                 "low_util_buy_resting_max_age_sec": self._low_util_buy_resting_max_age_sec,
                 "buy_resting_max_age_sec": self._buy_resting_max_age_sec,
@@ -1324,6 +1350,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 v: str(self._active_book_notional(v))
                 for v in sorted(self._execute_venues)
             },
+            "underwater_book_notional_by_venue": {
+                v: str(self._underwater_book_notional(v))
+                for v in sorted(self._execute_venues)
+            },
+            "corr_group_momentum_down_count": self._corr_group_momentum_down_count(),
             "held_alt_bases": sorted(self._held_alt_bases()),
             "held_alt_bases_by_venue": {
                 v: sorted(self._held_alt_bases(v)) for v in sorted(self._execute_venues)
@@ -1761,8 +1792,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and str(row.get("side") or "buy").lower().startswith("b")
         )
 
-    def _active_book_notional(self, venue: str) -> Decimal:
-        """Focus-base inventory not underwater — counts toward the deploy ring."""
+    def _focus_inventory_notional(
+        self, venue: str, *, above_be_only: bool
+    ) -> Decimal:
+        """Sum focus-base inventory notional (optionally only at/above break-even)."""
         venue_l = venue.strip().lower()
         stuck = {
             str(b).upper()
@@ -1780,7 +1813,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             if self._focus_bases and base not in self._focus_bases:
                 continue
-            if base in stuck:
+            if above_be_only and base in stuck:
                 continue
             qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
                 str(getattr(bal, "locked", 0) or 0)
@@ -1791,10 +1824,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             mark = self._portfolio.state.mark_prices.get(symbol) or _ZERO
             if mark <= 0:
                 continue
+            if above_be_only:
+                be = self._break_even_sell_price(venue, base)
+                if be is not None and mark < be:
+                    continue
             notional = qty * mark
             if notional >= min_n:
                 total += notional
         return total
+
+    def _active_book_notional(self, venue: str) -> Decimal:
+        """Focus-base inventory not underwater — counts toward the deploy ring."""
+        return self._focus_inventory_notional(venue, above_be_only=True)
+
+    def _underwater_book_notional(self, venue: str) -> Decimal:
+        """Focus-base inventory below break-even (stuck capital)."""
+        total = self._focus_inventory_notional(venue, above_be_only=False)
+        active = self._active_book_notional(venue)
+        return max(_ZERO, total - active)
 
     def _held_alt_bases(
         self,
@@ -3065,7 +3112,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 side_raw.startswith("b")
                 and self._cancel_buy_on_flat_momentum
                 and self._momentum_flat_or_down_for_cancel(symbol)
-                and not self._ring_soft_momentum_eligible(venue)
             ):
                 try:
                     await client.cancel_order(oid, symbol)
@@ -3740,6 +3786,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """Softer momentum only while active book is still thinly deployed."""
         if not self._ring_needs_deploy(venue):
             return False
+        if (
+            self._ring_soft_block_underwater_eur > 0
+            and self._underwater_book_notional(venue)
+            >= self._ring_soft_block_underwater_eur
+        ):
+            return False
         if self._ring_soft_max_active_eur <= 0:
             return True
         return self._active_book_notional(venue) < self._ring_soft_max_active_eur
@@ -3780,9 +3832,59 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if rising_n <= 0:
             return True
         if low_util and self._low_util_rising_n > 0:
-            # Shorter rising window while ring is thinly deployed (default: 2).
-            return series.last_n_rising(self._low_util_rising_n)
+            # Shorter rising window while ring is thinly deployed — never below entry floor.
+            rising_n = max(self._low_util_rising_n, self._entry_min_low_util_rising_n)
+            return series.last_n_rising(rising_n)
         return series.last_n_rising(rising_n)
+
+    def _entry_momentum_ok(
+        self,
+        symbol: str,
+        *,
+        min_return: Decimal,
+        low_util: bool,
+    ) -> bool:
+        """Stricter new-base entry: full + short-window momentum and rising tape."""
+        if not self._momentum_ok(
+            symbol,
+            require_history=True,
+            min_return=min_return,
+            low_util=low_util,
+        ):
+            return False
+        if self._entry_short_momentum_min <= 0:
+            return True
+        series = self._series_for(symbol)
+        short = series.momentum_return_last(self._entry_short_momentum_samples)
+        if short is None:
+            return False
+        return short >= self._entry_short_momentum_min
+
+    def _corr_group_momentum_down_count(self) -> int:
+        """Held corr-group bases with flat/down rolling momentum (sector weakness)."""
+        if not self._corr_group:
+            return 0
+        seen: set[str] = set()
+        down = 0
+        for venue in self._execute_venues:
+            for base in self._held_alt_bases(venue):
+                b = str(base or "").upper()
+                if b in seen or b not in self._corr_group:
+                    continue
+                seen.add(b)
+                if self._momentum_flat_or_down_for_cancel(f"{b}{self._quote}"):
+                    down += 1
+        return down
+
+    def _corr_sector_blocks_new_buy(self, base: str) -> bool:
+        if self._corr_sector_momentum_block <= 0:
+            return False
+        if str(base or "").upper() not in self._corr_group:
+            return False
+        return (
+            self._corr_group_momentum_down_count()
+            >= self._corr_sector_momentum_block
+        )
 
     def _buy_resting_max_age_for_venue(self, venue: str) -> float:
         if (
@@ -5629,9 +5731,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
             mom_floor = self._momentum_floor_for_buy(venue)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
-            if not self._momentum_ok(
+            if self._corr_sector_blocks_new_buy(base):
+                self._bump_skip("corr_sector_momentum_block")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CORR_SECTOR_MOMENTUM_BLOCK",
+                    message=(
+                        f"corr sector weak ({self._corr_group_momentum_down_count()} "
+                        f"bases flat/down ≥ {self._corr_sector_momentum_block})"
+                    ),
+                )
+            if not self._entry_momentum_ok(
                 symbol,
-                require_history=True,
                 min_return=mom_floor,
                 low_util=ring_relaxed,
             ):
@@ -5640,8 +5751,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     order_request,
                     reason="MOMENTUM_BLOCK",
                     message=(
-                        f"new base {base} needs momentum "
-                        f"(>={mom_floor} over ~{self._momentum_samples} samples"
+                        f"new base {base} needs entry momentum "
+                        f"(floor={float(mom_floor * 100):.2f}%"
+                        f", short≥{float(self._entry_short_momentum_min * 100):.2f}%"
                         f"{'; low-util boost' if ring_relaxed else ''})"
                     ),
                 )

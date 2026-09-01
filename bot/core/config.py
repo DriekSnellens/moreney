@@ -527,6 +527,19 @@ class Settings(BaseSettings):
     live_micro_cancel_buy_on_flat_momentum: bool = True
     # Require last N marks rising (in addition to momentum floor) for new buys.
     live_micro_momentum_require_last_n_rising: int = Field(default=3, ge=0, le=12)
+    # Block low-util momentum boost while this much focus inventory is underwater (EUR).
+    live_micro_ring_soft_block_underwater_eur: float = Field(
+        default=25.0, ge=0.0, le=5000.0
+    )
+    # Minimum rising ticks in low-util mode (never below this even when configured lower).
+    live_micro_entry_min_low_util_rising_n: int = Field(default=3, ge=2, le=12)
+    # Short-window momentum floor for new-base entries (last N marks).
+    live_micro_entry_short_momentum_samples: int = Field(default=6, ge=2, le=48)
+    live_micro_entry_short_momentum_min_return: float = Field(
+        default=0.001, ge=0.0, le=0.05
+    )
+    # Block new corr-group buys when this many held corr bases have flat/down momentum.
+    live_micro_corr_sector_momentum_block: int = Field(default=2, ge=0, le=12)
     # Fair-value buy premium: allow maker bids up to FV × (1 + bps/10000).
     paper_maker_fv_buy_max_premium_bps: float = Field(default=5.0, ge=0.0, le=50.0)
     # Buy-quality circuit breaker: N underwater session bags → pause new buys.

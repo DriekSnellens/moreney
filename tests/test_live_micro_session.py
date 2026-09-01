@@ -139,9 +139,13 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.paper_buy_momentum_enabled is True
-    assert cfg.paper_buy_momentum_min_return == 0.0008
-    assert cfg.live_micro_momentum_require_last_n_rising == 3
-    assert float(cfg.live_micro_buy_resting_max_age_sec) == 45.0
+    assert cfg.paper_buy_momentum_min_return == 0.0015
+    assert cfg.live_micro_momentum_require_last_n_rising == 4
+    assert float(cfg.live_micro_buy_resting_max_age_sec) == 30.0
+    assert float(cfg.live_micro_ring_soft_block_underwater_eur) == 25.0
+    assert cfg.live_micro_entry_min_low_util_rising_n == 3
+    assert float(cfg.live_micro_entry_short_momentum_min_return) == 0.001
+    assert cfg.live_micro_corr_sector_momentum_block == 2
     assert cfg.live_micro_block_underwater_cross_venue is True
     assert float(cfg.paper_maker_fv_buy_max_premium_bps) == 5.0
     assert cfg.paper_buy_momentum_samples >= 8
@@ -152,9 +156,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert (cfg.live_micro_okx_deploy_bases or "") == ""
     assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
-    assert cfg.live_micro_low_util_rising_n == 2
-    assert float(cfg.live_micro_low_util_buy_resting_max_age_sec) == 60.0
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0015
+    assert cfg.live_micro_low_util_rising_n == 3
+    assert float(cfg.live_micro_low_util_buy_resting_max_age_sec) == 30.0
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
@@ -249,10 +253,10 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
         persist_path=tmp_path / "mom_settings.json",
     )
     assert cfg.paper_buy_momentum_enabled is True
-    assert float(cfg.paper_buy_momentum_min_return) == 0.0008
+    assert float(cfg.paper_buy_momentum_min_return) == 0.0015
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0015
     assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
     assert cfg.live_micro_max_per_corr_group == 3
     assert float(cfg.profitability_min_net_return) == 0.0004
@@ -2625,6 +2629,98 @@ def test_active_ring_boosts_unheld_focus_rank() -> None:
     assert strat._rank_opportunity(focus) > strat._rank_opportunity(other)  # noqa: SLF001
 
 
+def test_ring_soft_blocked_when_underwater_stuck(tmp_path: Path) -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_ring_soft_max_active_eur=650.0,
+        live_micro_ring_soft_block_underwater_eur=25.0,
+        live_micro_active_ring_eur=1000.0,
+        live_micro_bridge_persist_path=str(tmp_path / "uw_ring.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
+        Balance(asset="SOL", free=Decimal("1"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["bitvavo"] = bridge._bal_cache["bitvavo"]  # noqa: SLF001
+    bridge._portfolio.set_mark_price("SOLEUR", Decimal("100"))
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("105")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    assert bridge._active_book_notional("bitvavo") == Decimal("0")  # noqa: SLF001
+    assert bridge._underwater_book_notional("bitvavo") == Decimal("100")  # noqa: SLF001
+    assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is False  # noqa: SLF001
+
+
+def test_entry_momentum_requires_short_window() -> None:
+    from bot.live.trail_policy import MarkSeries
+
+    series = MarkSeries(maxlen=12)
+    for px in ("100.00", "100.30", "100.50", "100.55", "100.54", "100.53"):
+        series.push(Decimal(px))
+    assert series.momentum_return_last(4) is not None
+    assert series.momentum_return_last(4) < Decimal("0.001")
+
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_min_return=0.001,
+        live_micro_entry_short_momentum_samples=4,
+        live_micro_entry_short_momentum_min_return=0.001,
+        live_micro_momentum_require_last_n_rising=3,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    symbol = "SOLEUR"
+    for px in ("100.00", "100.05", "100.10", "100.15", "100.20", "100.25"):
+        bridge._series_for(symbol).push(Decimal(px))  # noqa: SLF001
+    assert bridge._entry_momentum_ok(  # noqa: SLF001
+        symbol, min_return=Decimal("0.001"), low_util=False
+    ) is True
+    for px in ("100.00", "100.30", "100.50", "100.55", "100.54", "100.53"):
+        bridge._series_for("WEAK").push(Decimal(px))  # noqa: SLF001
+    assert bridge._entry_momentum_ok(  # noqa: SLF001
+        "WEAK", min_return=Decimal("0.001"), low_util=False
+    ) is False
+
+
+def test_corr_sector_blocks_new_buy_when_sector_weak() -> None:
+    settings = _unlocked(
+        paper_buy_momentum_enabled=True,
+        live_micro_corr_group="SOL,XRP,ADA",
+        live_micro_corr_sector_momentum_block=2,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    bridge._venue_raw_balances["bitvavo"] = []  # noqa: SLF001
+    bridge._held_alt_bases = lambda venue: {"SOL", "ADA"}  # type: ignore[method-assign]  # noqa: SLF001
+    for sym, prices in (
+        ("SOLEUR", ("100", "99.5", "99.0", "98.8", "98.5", "98.2")),
+        ("ADAEUR", ("50", "49.8", "49.6", "49.4", "49.2", "49.0")),
+    ):
+        for px in prices:
+            bridge._series_for(sym).push(Decimal(px))  # noqa: SLF001
+    assert bridge._corr_group_momentum_down_count() >= 2  # noqa: SLF001
+    assert bridge._corr_sector_blocks_new_buy("XRP") is True  # noqa: SLF001
+    assert bridge._corr_sector_blocks_new_buy("BTC") is False  # noqa: SLF001
+
+
 def test_ring_underfill_uses_softer_momentum_floor(tmp_path: Path) -> None:
     from bot.core.models import Balance
 
@@ -2748,13 +2844,14 @@ def test_trail_hold_rising_never_defers_drawdown_trigger() -> None:
     ) is False
 
 
-def test_low_util_momentum_allows_shorter_rising(tmp_path: Path) -> None:
+def test_low_util_momentum_uses_min_rising_floor(tmp_path: Path) -> None:
     settings = _unlocked(
         paper_buy_momentum_enabled=True,
         paper_buy_momentum_min_return=0.0008,
         live_micro_ring_momentum_min_return=0.0005,
         live_micro_momentum_require_last_n_rising=3,
         live_micro_low_util_rising_n=2,
+        live_micro_entry_min_low_util_rising_n=3,
         paper_buy_momentum_samples=12,
         live_micro_bridge_persist_path=str(tmp_path / "lu.json"),
     )
@@ -2766,7 +2863,6 @@ def test_low_util_momentum_allows_shorter_rising(tmp_path: Path) -> None:
         live_maker=True,
     )
     series = bridge._series_for("SOLEUR")  # noqa: SLF001
-    # Need >=6 samples for history gate; early dip then recover.
     for px in [100.0, 100.01, 100.03, 100.08, 100.06, 100.12]:
         series.push(Decimal(str(px)))
     assert (
@@ -2774,13 +2870,16 @@ def test_low_util_momentum_allows_shorter_rising(tmp_path: Path) -> None:
             "SOLEUR",
             require_history=True,
             min_return=Decimal("0.0005"),
-            low_util=False,
+            low_util=True,
         )
         is False
     )
+    series2 = bridge._series_for("ADAEUR")  # noqa: SLF001
+    for px in [100.0, 100.02, 100.04, 100.06, 100.08, 100.10]:
+        series2.push(Decimal(str(px)))
     assert (
         bridge._momentum_ok(  # noqa: SLF001
-            "SOLEUR",
+            "ADAEUR",
             require_history=True,
             min_return=Decimal("0.0005"),
             low_util=True,
@@ -3070,7 +3169,7 @@ async def test_prune_resting_buys_keeps_best_n_bids(
 
 
 @pytest.mark.asyncio
-async def test_buy_momentum_cancel_skipped_during_low_util(
+async def test_buy_momentum_cancel_always_on_flat_tape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _unlocked(
@@ -3122,11 +3221,6 @@ async def test_buy_momentum_cancel_skipped_during_low_util(
     monkeypatch.setattr(bridge, "_momentum_flat_or_down_for_cancel", lambda _s: True)
     monkeypatch.setattr(bridge, "_ring_soft_momentum_eligible", lambda _v: True)
 
-    await bridge.manage_resting_orders("bitvavo")
-    assert cancelled == []
-    assert len(bridge._resting) == 1  # noqa: SLF001
-
-    monkeypatch.setattr(bridge, "_ring_soft_momentum_eligible", lambda _v: False)
     await bridge.manage_resting_orders("bitvavo")
     assert cancelled == ["bid1"]
     assert bridge._resting == []  # noqa: SLF001

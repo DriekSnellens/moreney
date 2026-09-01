@@ -234,15 +234,20 @@ def _session_settings(
             "paper_regime_block_buys": True,
             # New-base entries: require rising mark (no flat buys into weak tape).
             "paper_buy_momentum_enabled": True,
-            "paper_buy_momentum_min_return": 0.0008,  # ≥+0.08% rising-tape entries
+            "paper_buy_momentum_min_return": 0.0015,  # ≥+0.15% rising-tape entries
             "paper_buy_momentum_samples": 12,
-            "live_micro_momentum_require_last_n_rising": 3,
+            "live_micro_momentum_require_last_n_rising": 4,
             "live_micro_trail_hold_while_rising": True,
             "live_micro_trail_hold_rising_n": 2,
             "live_micro_ring_soft_max_active_eur": 650.0,
-            "live_micro_low_util_rising_n": 2,
-            "live_micro_low_util_buy_resting_max_age_sec": 60.0,
-            "live_micro_buy_resting_max_age_sec": 45.0,
+            "live_micro_ring_soft_block_underwater_eur": 25.0,
+            "live_micro_low_util_rising_n": 3,
+            "live_micro_entry_min_low_util_rising_n": 3,
+            "live_micro_entry_short_momentum_samples": 6,
+            "live_micro_entry_short_momentum_min_return": 0.001,
+            "live_micro_corr_sector_momentum_block": 2,
+            "live_micro_low_util_buy_resting_max_age_sec": 30.0,
+            "live_micro_buy_resting_max_age_sec": 30.0,
             "live_micro_cancel_buy_on_flat_momentum": True,
             # Util-B: when active book < ring_soft max, allow non-focus new buys.
             "live_micro_low_util_relax_focus": True,
@@ -251,8 +256,8 @@ def _session_settings(
             "live_micro_winner_add_max": 2,
             "live_micro_winner_add_clip_eur": 55.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
-            "live_micro_buy_quality_underwater_count": 4,
-            "live_micro_buy_quality_pause_sec": 2700.0,
+            "live_micro_buy_quality_underwater_count": 2,
+            "live_micro_buy_quality_pause_sec": 1800.0,
             "live_micro_block_underwater_cross_venue": True,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
@@ -283,8 +288,8 @@ def _session_settings(
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
-            # Low-util boost: +0.05% floor while active book < €300 (else +0.08%).
-            "live_micro_ring_momentum_min_return": 0.0005,
+            # Low-util boost: same floor as full mode (no weak 0.05% entries).
+            "live_micro_ring_momentum_min_return": 0.0015,
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
