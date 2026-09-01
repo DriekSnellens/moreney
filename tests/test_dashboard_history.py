@@ -15,8 +15,10 @@ from bot.live.dashboard_history import (
     clear_history,
     daily_portfolio_delta,
     daily_realized_delta,
+    enrich_session_from_bridge,
     extract_metrics,
     load_history,
+    metrics_from_payload,
     record_snapshot,
     weekly_realized_delta,
 )
@@ -179,6 +181,9 @@ def test_render_dashboard_includes_charts_and_pwa() -> None:
     assert "Portfolio Δ (sessie)" in html
     assert "Doel €20–50/dag netto" in html
     assert "Recente fills" in html
+    assert "Opportunity engine" in html
+    assert "opp-candidates" in html
+    assert "section-profit-efficiency" in html
 
 def test_pwa_and_metrics_routes() -> None:
     with TestClient(app) as client:
@@ -198,6 +203,61 @@ def test_pwa_and_metrics_routes() -> None:
         charts = client.get("/live/dashboard/charts")
         assert charts.status_code == 200
         assert "history" in charts.json()
+
+
+def test_enrich_session_from_bridge_merges_diagnostics() -> None:
+    class _Bridge:
+        portfolio_value_eur = Decimal("4200")
+        starting_portfolio_eur = Decimal("4100")
+        realized_trade_pnl_eur = Decimal("12.5")
+        session_live_fill_count = 3
+        session_live_transaction_count = 3
+
+        def snapshot_bridge(self) -> dict:
+            return {
+                "portfolio_value_eur": "4200",
+                "diagnostics": {
+                    "opportunity_candidates": 10,
+                    "opportunity_high_quality": 1,
+                    "opportunity_rejected": 9,
+                    "best_opportunity_symbol": "ARBEUR",
+                    "best_opportunity_score": "72.5",
+                    "capital_deployed_eur": "650.00",
+                    "net_eur_per_hour": "0.18",
+                },
+            }
+
+    session = enrich_session_from_bridge({"running": True}, _Bridge())
+    assert session["portfolio_value_eur"] == "4200"
+    diag = session["bridge"]["diagnostics"]
+    assert diag["opportunity_candidates"] == 10
+    assert diag["best_opportunity_symbol"] == "ARBEUR"
+
+
+def test_metrics_from_payload_includes_opportunity_engine_fields() -> None:
+    metrics = metrics_from_payload(
+        {
+            "session": {
+                "running": True,
+                "started_at": "2026-09-01T10:00:00+00:00",
+                "bridge": {
+                    "remaining_eur": "500",
+                    "diagnostics": {
+                        "opportunity_candidates": 5,
+                        "opportunity_rejected": 4,
+                        "best_opportunity_score": "68.0",
+                        "capital_deployed_eur": "400.00",
+                        "venue_bitvavo_selected": 2,
+                        "venue_okx_selected": 3,
+                    },
+                },
+            }
+        }
+    )
+    assert metrics["opportunity_candidates"] == 5
+    assert metrics["best_opportunity_score"] == "68.0"
+    assert metrics["venue_bitvavo_selected"] == 2
+    assert metrics["available_capital_eur"] == 500.0
 
 
 def test_clear_history(tmp_path: Path) -> None:

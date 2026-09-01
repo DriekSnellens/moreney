@@ -40,6 +40,7 @@ from bot.funding.models import FundingEventType
 from bot.funding.service import get_funding_service, reset_funding_service
 from bot.live.dashboard_history import (
     chart_series_from_history,
+    enrich_session_from_bridge,
     load_history,
     metrics_from_payload,
     record_snapshot,
@@ -641,6 +642,12 @@ async def _live_dashboard_payload(
     mgr = get_micro_session_manager()
     session = mgr.status()
     bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        session = enrich_session_from_bridge(session, bridge)
+    elif session.get("bridge") is None:
+        # Stale status file after restart — avoid empty KPI sections.
+        session = dict(session)
+        session.setdefault("bridge", {})
     if bridge is not None:
         try:
             from bot.live.dashboard_pnl import attach_calendar_pnl, schedule_calendar_pnl_refresh

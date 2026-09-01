@@ -1272,52 +1272,52 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     eq_diag = bridge.get("diagnostics") or {}
     eq_candidates = eq_diag.get("entry_quality_candidates")
     eq_html = (
-        "<section class='target-band' aria-label='Entry quality'>"
+        "<section class='target-band' aria-label='Entry quality' id='section-entry-quality'>"
         "<h2>Entry quality</h2>"
         "<div class='band-row'>"
-        f"<span>Candidates: <strong>{_esc(eq_candidates if eq_candidates is not None else '—')}</strong></span>"
-        f"<span>Normal: {_esc(eq_diag.get('entry_quality_normal', '—'))}</span>"
-        f"<span>Reduced: {_esc(eq_diag.get('entry_quality_reduced', '—'))}</span>"
-        f"<span>Rejected: {_esc(eq_diag.get('entry_quality_rejected', '—'))}</span>"
+        f"<span>Candidates: <strong id='eq-candidates'>{_esc(eq_candidates if eq_candidates is not None else '—')}</strong></span>"
+        f"<span>Normal: <span id='eq-normal'>{_esc(eq_diag.get('entry_quality_normal', '—'))}</span></span>"
+        f"<span>Reduced: <span id='eq-reduced'>{_esc(eq_diag.get('entry_quality_reduced', '—'))}</span></span>"
+        f"<span>Rejected: <span id='eq-rejected'>{_esc(eq_diag.get('entry_quality_rejected', '—'))}</span></span>"
         "</div>"
         "<div class='band-row'>"
-        f"<span>Avg headroom: {_esc(eq_diag.get('average_headroom_pct', '—'))}</span>"
-        f"<span>Avg extension: {_esc(eq_diag.get('average_extension_pct', '—'))}</span>"
-        f"<span>Avg required move: {_esc(eq_diag.get('average_required_move_pct', '—'))}</span>"
-        f"<span>Avg quality: {_esc(eq_diag.get('average_entry_quality', '—'))}</span>"
+        f"<span>Avg headroom: <span id='eq-avg-headroom'>{_esc(eq_diag.get('average_headroom_pct', '—'))}</span></span>"
+        f"<span>Avg extension: <span id='eq-avg-extension'>{_esc(eq_diag.get('average_extension_pct', '—'))}</span></span>"
+        f"<span>Avg required move: <span id='eq-avg-required'>{_esc(eq_diag.get('average_required_move_pct', '—'))}</span></span>"
+        f"<span>Avg quality: <span id='eq-avg-quality'>{_esc(eq_diag.get('average_entry_quality', '—'))}</span></span>"
         "</div>"
         "<div class='band-row'>"
-        f"<span>Headroom rejects: {_esc(eq_diag.get('headroom_reject', '—'))}</span>"
-        f"<span>Extension rejects: {_esc(eq_diag.get('extension_reject', '—'))}</span>"
-        f"<span>Continuity rejects: {_esc(eq_diag.get('continuity_reject', '—'))}</span>"
-        f"<span>Headroom unknown: {_esc(eq_diag.get('headroom_unknown', '—'))}</span>"
+        f"<span>Headroom rejects: <span id='eq-headroom-reject'>{_esc(eq_diag.get('headroom_reject', '—'))}</span></span>"
+        f"<span>Extension rejects: <span id='eq-extension-reject'>{_esc(eq_diag.get('extension_reject', '—'))}</span></span>"
+        f"<span>Continuity rejects: <span id='eq-continuity-reject'>{_esc(eq_diag.get('continuity_reject', '—'))}</span></span>"
+        f"<span>Headroom unknown: <span id='eq-headroom-unknown'>{_esc(eq_diag.get('headroom_unknown', '—'))}</span></span>"
         "</div></section>"
     )
     opp_html = (
-        "<section class='target-band' aria-label='Opportunity engine'>"
+        "<section class='target-band' aria-label='Opportunity engine' id='section-opportunity-engine'>"
         "<h2>Opportunity engine</h2>"
         "<div class='band-row'>"
-        f"<span>Candidates: <strong>{_esc(eq_diag.get('opportunity_candidates', '—'))}</strong></span>"
-        f"<span>High quality: {_esc(eq_diag.get('opportunity_high_quality', '—'))}</span>"
-        f"<span>Reduced: {_esc(eq_diag.get('opportunity_reduced', '—'))}</span>"
-        f"<span>Rejected: {_esc(eq_diag.get('opportunity_rejected', '—'))}</span>"
+        f"<span>Candidates: <strong id='opp-candidates'>{_esc(eq_diag.get('opportunity_candidates', '—'))}</strong></span>"
+        f"<span>High quality: <span id='opp-high'>{_esc(eq_diag.get('opportunity_high_quality', '—'))}</span></span>"
+        f"<span>Reduced: <span id='opp-reduced'>{_esc(eq_diag.get('opportunity_reduced', '—'))}</span></span>"
+        f"<span>Rejected: <span id='opp-rejected'>{_esc(eq_diag.get('opportunity_rejected', '—'))}</span></span>"
         "</div>"
         "<div class='band-row'>"
-        f"<span>Best: {_esc(eq_diag.get('best_opportunity_symbol', '—'))} "
-        f"@ {_esc(eq_diag.get('best_opportunity_venue', '—'))}</span>"
-        f"<span>Score: {_esc(eq_diag.get('best_opportunity_score', '—'))}</span>"
-        f"<span>NET: {_esc(eq_diag.get('best_opportunity_net_eur', '—'))}</span>"
-        f"<span>NET/h: {_esc(eq_diag.get('best_opportunity_net_eur_per_hour', '—'))}</span>"
-        f"<span>Headroom: {_esc(eq_diag.get('best_opportunity_headroom_pct', '—'))}</span>"
-        f"<span>Extension: {_esc(eq_diag.get('best_opportunity_extension_pct', '—'))}</span>"
-        f"<span>Hold: {_esc(eq_diag.get('best_opportunity_hold_minutes', '—'))} min</span>"
+        f"<span>Best: <span id='opp-best-symbol'>{_esc(eq_diag.get('best_opportunity_symbol', '—'))}</span> "
+        f"@ <span id='opp-best-venue'>{_esc(eq_diag.get('best_opportunity_venue', '—'))}</span></span>"
+        f"<span>Score: <span id='opp-best-score'>{_esc(eq_diag.get('best_opportunity_score', '—'))}</span></span>"
+        f"<span>NET: <span id='opp-best-net'>{_esc(eq_diag.get('best_opportunity_net_eur', '—'))}</span></span>"
+        f"<span>NET/h: <span id='opp-best-net-hr'>{_esc(eq_diag.get('best_opportunity_net_eur_per_hour', '—'))}</span></span>"
+        f"<span>Headroom: <span id='opp-best-headroom'>{_esc(eq_diag.get('best_opportunity_headroom_pct', '—'))}</span></span>"
+        f"<span>Extension: <span id='opp-best-extension'>{_esc(eq_diag.get('best_opportunity_extension_pct', '—'))}</span></span>"
+        f"<span>Hold: <span id='opp-best-hold'>{_esc(eq_diag.get('best_opportunity_hold_minutes', '—'))}</span> min</span>"
         "</div>"
         "<div class='band-row'>"
-        f"<span>Allocator selected: {_esc(eq_diag.get('capital_allocator_selected', '—'))}</span>"
-        f"<span>Allocator skipped: {_esc(eq_diag.get('capital_allocator_skipped', '—'))}</span>"
-        f"<span>Volatility rejects: {_esc(eq_diag.get('volatility_reject', '—'))}</span>"
-        f"<span>Spread rejects: {_esc(eq_diag.get('spread_reject', '—'))}</span>"
-        f"<span>Timing rejects: {_esc(eq_diag.get('timing_reject', '—'))}</span>"
+        f"<span>Allocator selected: <span id='opp-alloc-selected'>{_esc(eq_diag.get('capital_allocator_selected', '—'))}</span></span>"
+        f"<span>Allocator skipped: <span id='opp-alloc-skipped'>{_esc(eq_diag.get('capital_allocator_skipped', '—'))}</span></span>"
+        f"<span>Volatility rejects: <span id='opp-vol-reject'>{_esc(eq_diag.get('volatility_reject', '—'))}</span></span>"
+        f"<span>Spread rejects: <span id='opp-spread-reject'>{_esc(eq_diag.get('spread_reject', '—'))}</span></span>"
+        f"<span>Timing rejects: <span id='opp-timing-reject'>{_esc(eq_diag.get('timing_reject', '—'))}</span></span>"
         "</div></section>"
     )
     cap_deployed = _dec(eq_diag.get("capital_deployed_eur"))
@@ -1327,21 +1327,41 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     mfe_cap = eq_diag.get("average_mfe_capture_ratio")
     hold_min = eq_diag.get("average_hold_minutes")
     eff_html = (
-        "<section class='target-band' aria-label='Profit efficiency'>"
-        "<h2>Profit efficiency</h2>"
+        "<section class='target-band' aria-label='Profit efficiency' id='section-profit-efficiency'>"
+        "<h2>Capital efficiency</h2>"
         "<div class='band-row'>"
-        f"<span>Realized NET today: <strong>{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
-        f"<span>NET EUR/hour: {_esc(net_hr if net_hr is not None else '—')}</span>"
-        f"<span>Capital deployed: {_esc(_eur(cap_deployed) if cap_deployed is not None else '—')}</span>"
-        f"<span>Capital locked: {_esc(_eur(cap_locked) if cap_locked is not None else '—')}</span>"
-        f"<span>Utilization: {_esc(cap_util if cap_util is not None else '—')}%</span>"
+        f"<span>Realized NET today: <strong id='eff-net-today'>{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
+        f"<span>NET EUR/hour: <span id='eff-net-hr'>{_esc(net_hr if net_hr is not None else '—')}</span></span>"
+        f"<span>NET EUR/capital-h: <span id='eff-net-cap-hr'>—</span></span>"
+        f"<span>Available capital: <span id='eff-available-cap'>{_esc(_eur(_dec(bridge.get('remaining_eur') or bridge.get('free_quote_eur'))) if bridge.get('remaining_eur') else '—')}</span></span>"
         "</div>"
         "<div class='band-row'>"
-        f"<span>Avg hold: {_esc(hold_min if hold_min is not None else '—')} min</span>"
-        f"<span>MFE capture: {_esc(mfe_cap if mfe_cap is not None else '—')}</span>"
-        f"<span>Cap-eff candidates: {_esc(eq_diag.get('capital_efficiency_candidates', '—'))}</span>"
-        f"<span>Cap-eff rejected: {_esc(eq_diag.get('capital_efficiency_rejected', '—'))}</span>"
-        f"<span>Venue: BV {_esc(eq_diag.get('venue_bitvavo_selected', '—'))} · OKX {_esc(eq_diag.get('venue_okx_selected', '—'))}</span>"
+        f"<span>Capital deployed: <span id='eff-cap-deployed'>{_esc(_eur(cap_deployed) if cap_deployed is not None else '—')}</span></span>"
+        f"<span>Capital locked: <span id='eff-cap-locked'>{_esc(_eur(cap_locked) if cap_locked is not None else '—')}</span></span>"
+        f"<span>Utilization: <span id='eff-cap-util'>{_esc(cap_util if cap_util is not None else '—')}</span>%</span>"
+        f"<span>Avg hold: <span id='eff-avg-hold'>{_esc(hold_min if hold_min is not None else '—')}</span> min</span>"
+        f"<span>MFE capture: <span id='eff-mfe-capture'>{_esc(mfe_cap if mfe_cap is not None else '—')}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Cap-eff candidates: <span id='eff-cap-candidates'>{_esc(eq_diag.get('capital_efficiency_candidates', '—'))}</span></span>"
+        f"<span>Cap-eff rejected: <span id='eff-cap-rejected'>{_esc(eq_diag.get('capital_efficiency_rejected', '—'))}</span></span>"
+        f"<span>Avg opp score: <span id='eff-avg-opp-score'>{_esc(eq_diag.get('average_opportunity_score', '—'))}</span></span>"
+        "</div></section>"
+    )
+    venue_bv = eq_diag.get("venue_economics_bitvavo") or {}
+    venue_okx = eq_diag.get("venue_economics_okx") or {}
+    if not isinstance(venue_bv, dict):
+        venue_bv = {}
+    if not isinstance(venue_okx, dict):
+        venue_okx = {}
+    venue_html = (
+        "<section class='target-band' aria-label='Venue economics' id='section-venue-economics'>"
+        "<h2>Venue economics</h2>"
+        "<div class='band-row'>"
+        f"<span>Bitvavo selected: <span id='venue-bv-selected'>{_esc(eq_diag.get('venue_bitvavo_selected', '—'))}</span></span>"
+        f"<span>OKX selected: <span id='venue-okx-selected'>{_esc(eq_diag.get('venue_okx_selected', '—'))}</span></span>"
+        f"<span>BV avg NET: <span id='venue-bv-avg-net'>{_esc(venue_bv.get('average_net_eur', '—'))}</span></span>"
+        f"<span>OKX avg NET: <span id='venue-okx-avg-net'>{_esc(venue_okx.get('average_net_eur', '—'))}</span></span>"
         "</div></section>"
     )
 
@@ -1489,6 +1509,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {eq_html}
       {opp_html}
       {eff_html}
+      {venue_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">
@@ -1642,6 +1663,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     function applyMetrics(m) {{
       const set = (id, text) => {{ const el = document.getElementById(id); if (el) el.textContent = text; }};
+      const dash = (v) => (v == null || v === '') ? '—' : String(v);
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
       set('kpi-realized', eurFmt(m.session_realized_eur, true));
       set('kpi-daily-realized', eurFmt(m.daily_realized_eur, true));
@@ -1675,6 +1697,55 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       paint('kpi-winnable-harvest', m.winnable_eur);
       paint('kpi-unrealized', m.unrealized_eur);
       paint('kpi-open-unrealized', m.open_unrealized_eur ?? m.unrealized_eur);
+      // Entry quality
+      set('eq-candidates', dash(m.entry_quality_candidates));
+      set('eq-normal', dash(m.entry_quality_normal));
+      set('eq-reduced', dash(m.entry_quality_reduced));
+      set('eq-rejected', dash(m.entry_quality_rejected));
+      set('eq-avg-headroom', dash(m.average_headroom_pct));
+      set('eq-avg-extension', dash(m.average_extension_pct));
+      set('eq-avg-required', dash(m.average_required_move_pct));
+      set('eq-avg-quality', dash(m.average_entry_quality));
+      set('eq-headroom-reject', dash(m.headroom_reject));
+      set('eq-extension-reject', dash(m.extension_reject));
+      set('eq-continuity-reject', dash(m.continuity_reject));
+      set('eq-headroom-unknown', dash(m.headroom_unknown));
+      // Opportunity engine
+      set('opp-candidates', dash(m.opportunity_candidates));
+      set('opp-high', dash(m.opportunity_high_quality));
+      set('opp-reduced', dash(m.opportunity_reduced));
+      set('opp-rejected', dash(m.opportunity_rejected));
+      set('opp-best-symbol', dash(m.best_opportunity_symbol));
+      set('opp-best-venue', dash(m.best_opportunity_venue));
+      set('opp-best-score', dash(m.best_opportunity_score));
+      set('opp-best-net', dash(m.best_opportunity_net_eur));
+      set('opp-best-net-hr', dash(m.best_opportunity_net_eur_per_hour));
+      set('opp-best-headroom', dash(m.best_opportunity_headroom_pct));
+      set('opp-best-extension', dash(m.best_opportunity_extension_pct));
+      set('opp-best-hold', dash(m.best_opportunity_hold_minutes));
+      set('opp-alloc-selected', dash(m.capital_allocator_selected));
+      set('opp-alloc-skipped', dash(m.capital_allocator_skipped));
+      set('opp-vol-reject', dash(m.volatility_reject));
+      set('opp-spread-reject', dash(m.spread_reject));
+      set('opp-timing-reject', dash(m.timing_reject));
+      // Capital efficiency
+      set('eff-net-today', eurFmt(m.daily_realized_eur, true));
+      set('eff-net-hr', dash(m.net_eur_per_hour));
+      set('eff-net-cap-hr', dash(m.net_eur_per_capital_hour));
+      set('eff-available-cap', eurFmt(m.available_capital_eur));
+      set('eff-cap-deployed', eurFmt(m.capital_deployed_eur != null ? parseFloat(m.capital_deployed_eur) : null));
+      set('eff-cap-locked', eurFmt(m.capital_locked_eur != null ? parseFloat(m.capital_locked_eur) : null));
+      set('eff-cap-util', dash(m.capital_utilization_pct));
+      set('eff-avg-hold', dash(m.average_hold_minutes));
+      set('eff-mfe-capture', dash(m.average_mfe_capture_ratio));
+      set('eff-cap-candidates', dash(m.capital_efficiency_candidates));
+      set('eff-cap-rejected', dash(m.capital_efficiency_rejected));
+      set('eff-avg-opp-score', dash(m.average_opportunity_score));
+      // Venue economics
+      set('venue-bv-selected', dash(m.venue_bitvavo_selected));
+      set('venue-okx-selected', dash(m.venue_okx_selected));
+      set('venue-bv-avg-net', dash(m.venue_economics_bitvavo_avg_net));
+      set('venue-okx-avg-net', dash(m.venue_economics_okx_avg_net));
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');

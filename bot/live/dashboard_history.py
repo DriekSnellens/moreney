@@ -497,6 +497,36 @@ def _calendar_pnl_for_payload(
     )
 
 
+def enrich_session_from_bridge(
+    session: dict[str, Any],
+    bridge: Any,
+) -> dict[str, Any]:
+    """Merge live bridge snapshot into session status for dashboard KPIs."""
+    if bridge is None:
+        return session
+    out = dict(session)
+    try:
+        snap = bridge.snapshot_bridge()
+    except Exception:  # noqa: BLE001
+        logger.exception("bridge snapshot_bridge failed for dashboard")
+        return session
+    out["bridge"] = snap
+    for key, attr in (
+        ("portfolio_value_eur", "portfolio_value_eur"),
+        ("starting_portfolio_eur", "starting_portfolio_eur"),
+        ("realized_trade_pnl_eur", "realized_trade_pnl_eur"),
+        ("netto_winst_eur", "realized_trade_pnl_eur"),
+        ("session_live_fill_count", "session_live_fill_count"),
+        ("session_live_transaction_count", "session_live_transaction_count"),
+        ("live_fill_count", "session_live_fill_count"),
+        ("live_transaction_count", "session_live_transaction_count"),
+    ):
+        val = getattr(bridge, attr, None)
+        if val is not None:
+            out[key] = str(val)
+    return out
+
+
 def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Compact KPI dict for JSON polling."""
     session = payload.get("session") or {}
@@ -562,6 +592,27 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         daily_realized=daily_realized,
         history=hist if isinstance(hist, list) else [],
     )
+
+    cap_deployed = _to_decimal(diag.get("capital_deployed_eur"))
+    net_cap_hour = None
+    if daily_realized is not None and cap_deployed and cap_deployed > 0:
+        started = session.get("started_at") or session.get("updated_at")
+        ts = _parse_history_ts(started)
+        if ts is not None:
+            elapsed = Decimal(str(max(60.0, (datetime.now(UTC) - ts).total_seconds())))
+            from bot.strategies.opportunity_economics import compute_net_eur_per_capital_hour
+
+            net_cap_hour = compute_net_eur_per_capital_hour(
+                realized_net_eur=daily_realized,
+                capital_deployed_eur=cap_deployed,
+                elapsed_seconds=elapsed,
+            )
+
+    available_capital = _to_decimal(
+        bridge.get("remaining_eur") or bridge.get("free_quote_eur")
+    )
+    venue_bv = diag.get("venue_economics_bitvavo") or {}
+    venue_okx = diag.get("venue_economics_okx") or {}
 
     return {
         "updated_at": session.get("updated_at"),
@@ -645,6 +696,22 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "volatility_reject": diag.get("volatility_reject"),
         "spread_reject": diag.get("spread_reject"),
         "timing_reject": diag.get("timing_reject"),
+        "net_eur_per_capital_hour": (
+            str(net_cap_hour.quantize(Decimal("0.0001"))) if net_cap_hour is not None else None
+        ),
+        "available_capital_eur": float(available_capital) if available_capital is not None else None,
+        "venue_economics_bitvavo_candidates": venue_bv.get("trade_count")
+        if isinstance(venue_bv, dict)
+        else None,
+        "venue_economics_bitvavo_avg_net": venue_bv.get("average_net_eur")
+        if isinstance(venue_bv, dict)
+        else None,
+        "venue_economics_okx_candidates": venue_okx.get("trade_count")
+        if isinstance(venue_okx, dict)
+        else None,
+        "venue_economics_okx_avg_net": venue_okx.get("average_net_eur")
+        if isinstance(venue_okx, dict)
+        else None,
     }
 
 

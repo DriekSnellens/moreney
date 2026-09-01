@@ -43,6 +43,10 @@ from bot.strategies.opportunity_economics import (
     config_venue_economics_from_settings,
     underwater_recovery_metrics,
 )
+from bot.strategies.opportunity_engine import (
+    config_from_settings as opportunity_engine_config_from_settings,
+    evaluate as evaluate_opportunity_engine,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +422,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._adaptive_trail_enabled = bool(
             getattr(settings, "live_micro_adaptive_trail_enabled", True)
+        )
+        self._opportunity_engine_config = opportunity_engine_config_from_settings(
+            settings
+        )
+        self._opportunity_engine_enabled = bool(
+            self._opportunity_engine_config.enabled
         )
         self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
@@ -1894,12 +1904,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             entry_price=px,
             metadata=meta,
         )
-        return evaluate_entry_quality(
+        assessment = evaluate_entry_quality(
             opportunity=opportunity,
             profitability=profitability,
             marks=self.mark_history(symbol),
             config=self._entry_quality_config,
         )
+        if self._opportunity_engine_enabled and self._opportunity_diagnostics is not None:
+            opp_assessment = evaluate_opportunity_engine(
+                opportunity=opportunity,
+                profitability=profitability,
+                marks=self.mark_history(symbol),
+                entry_config=self._entry_quality_config,
+                capital_config=self._capital_efficiency_config,
+                venue_config=self._venue_economics_config,
+                engine_config=self._opportunity_engine_config,
+            )
+            self._opportunity_diagnostics.record(opp_assessment)
+        return assessment
 
     def _note_position_opened(self, venue: str, base: str) -> None:
         key = self._lots_key(venue, base)
