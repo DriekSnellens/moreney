@@ -48,6 +48,13 @@ from bot.live.dashboard_history import (
 from bot.live.dashboard import render_live_dashboard
 from bot.live.pwa_assets import ICON_SVG, MANIFEST_JSON, SERVICE_WORKER_JS
 from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
+from bot.research.live_vs_research_attribution.api import (
+    attribution_execution,
+    attribution_funnel,
+    attribution_root_causes,
+    attribution_skips,
+    attribution_summary,
+)
 from bot.market_data.research.retention import prune_research_marketdata
 from bot.live.service import get_live_service, reset_live_service
 from bot.live.micro_engine import get_micro_engine, reset_micro_engine
@@ -610,6 +617,36 @@ async def live_audit(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, 
         "runbook": hardening.get("runbook"),
         "withdrawals_supported": False,
     }
+
+
+@app.get("/live/attribution/summary")
+async def live_attribution_summary() -> dict[str, Any]:
+    """Read-only live vs research attribution executive summary."""
+    return attribution_summary()
+
+
+@app.get("/live/attribution/funnel")
+async def live_attribution_funnel() -> dict[str, Any]:
+    """Read-only opportunity funnel from attribution audit."""
+    return attribution_funnel()
+
+
+@app.get("/live/attribution/skips")
+async def live_attribution_skips() -> dict[str, Any]:
+    """Read-only skip attribution breakdown."""
+    return attribution_skips()
+
+
+@app.get("/live/attribution/execution")
+async def live_attribution_execution() -> dict[str, Any]:
+    """Read-only execution and adverse selection attribution."""
+    return attribution_execution()
+
+
+@app.get("/live/attribution/root-causes")
+async def live_attribution_root_causes() -> dict[str, Any]:
+    """Read-only root cause ranking from attribution audit."""
+    return attribution_root_causes()
 
 
 @app.get("/market-data/status")
