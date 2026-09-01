@@ -132,7 +132,7 @@ def test_render_live_dashboard_contains_controls() -> None:
     assert "grid-kpi" in html
     assert "Portfolio" in html
     assert "Vrij EUR" in html
-    assert "Gerealiseerd (replay)" in html
+    assert "Gerealiseerd (sessie)" in html
     assert "Geïnd vandaag (verkopen)" in html
     assert "Winnable" in html
     assert "Transacties" in html

@@ -331,6 +331,72 @@ def daily_realized_delta(
     )
 
 
+def portfolio_delta_since(
+    history: list[dict[str, Any]],
+    *,
+    current_portfolio: Decimal | None,
+    since: datetime,
+) -> Decimal | None:
+    """Net change in portfolio equity since ``since``."""
+    if current_portfolio is None or not history:
+        return None
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    else:
+        since = since.astimezone(UTC)
+
+    last_before: Decimal | None = None
+    first_after: Decimal | None = None
+    for row in history:
+        ts = _parse_history_ts(row.get("t"))
+        if ts is None:
+            continue
+        portfolio = _to_decimal(row.get("portfolio_eur"))
+        if portfolio is None:
+            continue
+        if ts <= since:
+            last_before = portfolio
+        elif first_after is None:
+            first_after = portfolio
+    baseline = last_before if last_before is not None else first_after
+    if baseline is None:
+        return None
+    return current_portfolio - baseline
+
+
+def daily_portfolio_delta(
+    history: list[dict[str, Any]],
+    *,
+    current_portfolio: Decimal | None,
+    now: datetime | None = None,
+) -> Decimal | None:
+    """Portfolio equity change since local midnight (Europe/Amsterdam)."""
+    return portfolio_delta_since(
+        history,
+        current_portfolio=current_portfolio,
+        since=operator_day_start_utc(now=now),
+    )
+
+
+def today_portfolio_pnl(
+    *,
+    portfolio: Decimal | None,
+    session_pnl: Decimal | None,
+    daily_realized: Decimal | None,
+    history: list[dict[str, Any]],
+    now: datetime | None = None,
+) -> Decimal | None:
+    """Operator-facing PnL for today — equity delta, not Geïnd + total open MTM."""
+    delta = daily_portfolio_delta(
+        history, current_portfolio=portfolio, now=now
+    )
+    if delta is not None:
+        return delta
+    if daily_realized is not None:
+        return daily_realized
+    return session_pnl
+
+
 def weekly_realized_delta(
     history: list[dict[str, Any]],
     *,
@@ -487,11 +553,15 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         payload, current_realized=realized
     )
     open_unrealized = unrealized
-    portfolio_pnl = None
-    if daily_realized is not None and open_unrealized is not None:
-        portfolio_pnl = daily_realized + open_unrealized
-    elif daily_realized is not None:
-        portfolio_pnl = daily_realized
+    hist = payload.get("history")
+    if not isinstance(hist, list):
+        hist = load_history(limit=720)
+    portfolio_pnl = today_portfolio_pnl(
+        portfolio=portfolio,
+        session_pnl=session_pnl,
+        daily_realized=daily_realized,
+        history=hist if isinstance(hist, list) else [],
+    )
 
     return {
         "updated_at": session.get("updated_at"),

@@ -56,7 +56,7 @@ def test_operator_pnl_anchor_zeros_until_refresh(tmp_path, monkeypatch) -> None:
     assert cache["daily_eur"] == "0.00"
     assert cache["source"] == "operator_reset"
     # Anchor after day start → Geïnd window starts at anchor
-    day = operator_day_start_utc()
+    day = operator_day_start_utc(now=when)
     assert _effective_since(day) == when
 
 
@@ -115,7 +115,7 @@ def test_metrics_from_payload_prefers_exchange_cache(monkeypatch: pytest.MonkeyP
     assert metrics["daily_realized_eur"] == pytest.approx(65.09)
     assert metrics["harvested_today_eur"] == pytest.approx(65.09)
     assert metrics["open_unrealized_eur"] == pytest.approx(-5.09)
-    assert metrics["portfolio_pnl_eur"] == pytest.approx(60.0)
+    assert metrics["portfolio_pnl_eur"] == pytest.approx(65.09)
     assert metrics["daily_realized_source"] == "exchange_fifo"
 
 

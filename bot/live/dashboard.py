@@ -14,6 +14,7 @@ from bot.live.dashboard_history import (
     daily_realized_delta,
     load_history,
     recent_fills_for_display,
+    today_portfolio_pnl,
     weekly_realized_delta,
     _calendar_pnl_for_payload,
 )
@@ -808,11 +809,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     daily_realized, weekly_realized, pnl_source = _calendar_pnl_for_payload(
         payload, current_realized=pnl
     )
-    portfolio_pnl = None
-    if daily_realized is not None and unrealized is not None:
-        portfolio_pnl = daily_realized + unrealized
-    elif daily_realized is not None:
-        portfolio_pnl = daily_realized
+    portfolio_pnl = today_portfolio_pnl(
+        portfolio=portfolio,
+        session_pnl=None,  # filled below once start_portfolio known
+        daily_realized=daily_realized,
+        history=hist_for_kpi,
+    )
     start_portfolio = _dec(
         session.get("starting_portfolio_eur") or bridge.get("starting_portfolio_eur")
     )
@@ -821,6 +823,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         if portfolio is not None and start_portfolio is not None
         else None
     )
+    if portfolio_pnl is None and session_portfolio_pnl is not None:
+        portfolio_pnl = session_portfolio_pnl
     daily_realized_class = ""
     if daily_realized is not None and daily_realized > 0:
         daily_realized_class = "good"
@@ -1194,8 +1198,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "<section class='target-band' aria-label='Doelband onderzoek'>"
         "<h2>Doel €20–50/dag netto</h2>"
         "<p><strong>Geïnd vandaag</strong> = verkochte coins (FIFO) · "
-        "<strong>Open</strong> = nog vast op exchange · "
-        "<strong>Portfolio-winst</strong> = Geïnd + Open · "
+        "<strong>Open</strong> = totaal unrealized op bags · "
+        "<strong>Portfolio-winst</strong> = equity Δ sinds 00:00 NL · "
         "<strong>Winnable</strong> = boven BE, nog niet verkocht.</p>"
         "<div class='band-row'>"
         f"<span>Geïnd: <strong class='{band_class}'>"
@@ -1281,7 +1285,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     kpi_grid_html = f"""
     <section aria-label="Geïnd vs open">
-      <p class="pnl-split-intro">Geïnd = winst op <strong>verkopen</strong> vandaag. Open = bags t.o.v. kost. <strong>Portfolio-winst</strong> = Geïnd + Open (totaal tradingresultaat vandaag).</p>
+      <p class="pnl-split-intro">Geïnd = winst op <strong>verkopen</strong> vandaag. Open = totaal unrealized op alle bags (niet vandaag). <strong>Portfolio-winst</strong> = portfolio Δ sinds 00:00 NL (geïnd + MTM-beweging vandaag).</p>
       <div class="pnl-split">
         <article class="card split-harvest">
           <p class="label">Geïnd vandaag (verkopen)</p>
@@ -1296,7 +1300,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <article class="card split-portfolio">
           <p class="label">Portfolio-winst</p>
           <p class="value {portfolio_pnl_class}" id="kpi-portfolio-pnl">{_esc(_eur(portfolio_pnl, signed=True) if portfolio_pnl is not None else "—")}</p>
-          <p class="hint">Geïnd + Open · vandaag</p>
+          <p class="hint">Equity Δ sinds 00:00 NL</p>
         </article>
         <article class="card split-winnable">
           <p class="label">Winnable (nog te harvesten)</p>
@@ -1309,7 +1313,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       <article class="card hero">
         <p class="label">Portfolio-winst</p>
         <p class="value {portfolio_pnl_class}" id="kpi-portfolio-pnl-hero">{_esc(_eur(portfolio_pnl, signed=True) if portfolio_pnl is not None else "—")}</p>
-        <p class="hint">Geïnd vandaag + open bags</p>
+        <p class="hint">Portfolio Δ vandaag (equity)</p>
       </article>
       <article class="card hero-a">
         <p class="label">Geïnd vandaag</p>
@@ -1337,9 +1341,9 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="hint">Marktwaarde totaal</p>
       </article>
       <article class="card">
-        <p class="label">Gerealiseerd (replay)</p>
-        <p class="value {pnl_class}" id="kpi-realized">{_esc(_eur(pnl, signed=True))}</p>
-        <p class="hint">FIFO cumulatief · niet all-time</p>
+        <p class="label">Gerealiseerd (sessie)</p>
+        <p class="value {session_realized_class}" id="kpi-realized">{_esc(_eur(session_realized, signed=True) if session_realized is not None else "—")}</p>
+        <p class="hint">Verkopen sinds restart · FIFO replay</p>
       </article>
       <article class="card">
         <p class="label">Portfolio Δ (sessie)</p>
@@ -1561,7 +1565,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     function applyMetrics(m) {{
       const set = (id, text) => {{ const el = document.getElementById(id); if (el) el.textContent = text; }};
       set('kpi-portfolio', eurFmt(m.portfolio_eur));
-      set('kpi-realized', eurFmt(m.realized_pnl_eur, true));
+      set('kpi-realized', eurFmt(m.session_realized_eur, true));
       set('kpi-daily-realized', eurFmt(m.daily_realized_eur, true));
       set('kpi-harvested-today', eurFmt(m.harvested_today_eur ?? m.daily_realized_eur, true));
       set('kpi-portfolio-pnl', eurFmt(m.portfolio_pnl_eur, true));
@@ -1588,7 +1592,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       paint('kpi-portfolio-pnl-hero', m.portfolio_pnl_eur);
       paint('kpi-session-pnl', m.session_pnl_eur);
       paint('kpi-weekly-realized', m.weekly_realized_eur);
-      paint('kpi-realized', m.realized_pnl_eur);
+      paint('kpi-realized', m.session_realized_eur);
       paint('kpi-winnable', m.winnable_eur);
       paint('kpi-winnable-harvest', m.winnable_eur);
       paint('kpi-unrealized', m.unrealized_eur);

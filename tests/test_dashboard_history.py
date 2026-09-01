@@ -13,6 +13,7 @@ from bot.live.dashboard import render_live_dashboard
 from bot.live.dashboard_history import (
     chart_series_from_history,
     clear_history,
+    daily_portfolio_delta,
     daily_realized_delta,
     extract_metrics,
     load_history,
@@ -129,6 +130,26 @@ def test_daily_realized_delta_since_local_midnight() -> None:
     # or last before: -12 depending on cutoff. -20h from 14:00 UTC is 18:00 prev day UTC
     # = 20:00 NL prev day — before midnight NL. Baseline -12 → delta +5.
     assert delta == Decimal("5")
+
+
+def test_daily_portfolio_delta_since_local_midnight() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+    history = [
+        {
+            "t": "2026-08-31T22:05:00+00:00",
+            "portfolio_eur": "4083.82",
+        },
+        {
+            "t": "2026-09-01T08:00:00+00:00",
+            "portfolio_eur": "4077.00",
+        },
+    ]
+    delta = daily_portfolio_delta(
+        history, current_portfolio=Decimal("4076.96"), now=now
+    )
+    assert delta == Decimal("-6.86")
 
 
 def test_render_dashboard_includes_charts_and_pwa() -> None:
