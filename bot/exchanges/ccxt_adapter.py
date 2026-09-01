@@ -56,6 +56,17 @@ def sanitize_okx_client_order_id(raw: str | None) -> str:
     return cleaned[:32]
 
 
+def build_client_order_id(venue: str, raw: str | None = None) -> str:
+    """Generate a venue-safe client order id before submit."""
+    seed = raw or str(uuid4())
+    venue_l = str(venue or "").strip().lower()
+    if venue_l == "okx":
+        return sanitize_okx_client_order_id(seed)
+    if venue_l == "bitvavo":
+        return sanitize_bitvavo_client_order_id(seed)
+    return seed
+
+
 def sanitize_bitvavo_client_order_id(raw: str | None) -> str:
     """Bitvavo clientOrderId: hyphenated UUID (8-4-4-4-12), unique among open orders."""
     text = str(raw or "").strip().lower()
@@ -311,13 +322,12 @@ class CcxtExchangeAdapter(BaseExchangeClient):
         side = _to_ccxt_side(order.side)
         order_type = "limit" if order.limit_price is not None else "market"
         params: dict[str, Any] = {}
-        if order.client_order_id:
-            cl_id = order.client_order_id
-            if self.ccxt_id == "okx":
-                cl_id = sanitize_okx_client_order_id(cl_id)
-            elif self.ccxt_id == "bitvavo":
-                cl_id = sanitize_bitvavo_client_order_id(cl_id)
-            params["clientOrderId"] = cl_id
+        cl_id = order.client_order_id or str(uuid4())
+        if self.ccxt_id == "okx":
+            cl_id = sanitize_okx_client_order_id(cl_id)
+        elif self.ccxt_id == "bitvavo":
+            cl_id = sanitize_bitvavo_client_order_id(cl_id)
+        params["clientOrderId"] = cl_id
         if self.ccxt_id == "bitvavo":
             params["operatorId"] = int(
                 getattr(self._settings, "bitvavo_operator_id", 1001) or 1001

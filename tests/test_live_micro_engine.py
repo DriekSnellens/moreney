@@ -156,3 +156,40 @@ def test_api_micro_engine_endpoints() -> None:
 
     disarm = client.post("/live/micro/disarm").json()
     assert disarm["armed"] is False
+
+
+@pytest.mark.asyncio
+async def test_submit_exchange_error_audits_context(tmp_path: Path) -> None:
+    from bot.core.exceptions import ExchangeError
+
+    settings = _unlocked_settings()
+    audit_path = tmp_path / "audit.jsonl"
+
+    class FailExec(MultiVenueLiveExecutor):
+        async def execute(self, order: OrderRequest) -> ExecutionResult:  # noqa: ARG002
+            raise ExchangeError('okx {"sCode":"51000","sMsg":"Parameter clOrdId error"}')
+
+    engine = LiveMicroEngine(
+        settings,
+        executor=FailExec(settings, force_enabled=True),
+    )
+    engine._audit._path = audit_path  # noqa: SLF001
+    assert engine.arm()["armed"] is True
+    out = await engine.submit(
+        {
+            "venue": "bitvavo",
+            "symbol": "BTCEUR",
+            "side": "buy",
+            "notional_eur": 25,
+            "confirm": True,
+        },
+        confirm=True,
+    )
+    assert out["submitted"] is False
+    assert out["reason"] == "exchange_error"
+    rows = audit_path.read_text(encoding="utf-8").strip().splitlines()
+    payload = __import__("json").loads(rows[-1])["payload"]
+    assert payload["venue"] == "bitvavo"
+    assert payload["symbol"] == "BTCEUR"
+    assert payload["side"] == "buy"
+    assert "clOrdId" in payload["message"]

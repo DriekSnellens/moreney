@@ -245,6 +245,7 @@ def test_mirror_exchange_trade_increments_fill_feed() -> None:
     )
     assert bridge.session_live_fill_count == 1
     assert bridge.recent_live_fills[-1]["source"] == "backfill"
+    assert len(bridge._orders.list_orders()) == 1
     assert bridge._mirror_exchange_trade(
         venue="bitvavo",
         base="SOL",

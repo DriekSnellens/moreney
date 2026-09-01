@@ -23,6 +23,7 @@ from bot.core.config import Settings
 from bot.core.enums import EntryQualityRecommendation, OpportunitySide, OrderSide, OrderStatus, OrderType
 from bot.core.models import ExecutionResult, OrderRequest, ProfitabilityResult, TradeOpportunity
 from bot.execution.paper_executor import PaperExecutor
+from bot.exchanges.ccxt_adapter import build_client_order_id
 from bot.live.micro_engine import LiveMicroEngine
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
@@ -2591,6 +2592,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             exchange_order_id=trade_oid or order_id_filter,
             trade_id=tid,
         )
+        self._apply_paper_mirror_fill(
+            side=_OrderSide.BUY if side == "buy" else _OrderSide.SELL,
+            symbol=symbol,
+            qty=amt,
+            price=px,
+            fee=fee_quote,
+            venue=venue,
+            fee_currency=fee_cur,
+            exchange_order_id=trade_oid or order_id_filter,
+            trade_id=tid,
+            source=source,
+        )
         self._mirrored_trade_ids.add(mirror_key)
         self.backfill_mirrored_count += 1
         logger.info(
@@ -2604,6 +2617,70 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             tid,
         )
         return True
+
+    def _apply_paper_mirror_fill(
+        self,
+        *,
+        side: OrderSide,
+        symbol: str,
+        qty: Decimal,
+        price: Decimal,
+        fee: Decimal,
+        venue: str,
+        fee_currency: str | None = None,
+        exchange_order_id: str | None = None,
+        trade_id: str | None = None,
+        source: str = "backfill",
+    ) -> None:
+        """Keep paper portfolio aligned when bridge FIFO is updated from trade history."""
+        if qty <= 0 or price <= 0:
+            return
+        order = Order(
+            id=uuid4(),
+            strategy="maker_inventory",
+            symbol=symbol.upper().replace("/", "").replace("-", ""),
+            side=side,
+            order_type=OrderType.MARKET,
+            requested_quantity=qty,
+            requested_price=price,
+            status=OrderStatus.FILLED,
+            exchange=venue,
+            opportunity_id=uuid4(),
+            client_order_id=build_client_order_id(venue),
+            metadata={
+                "executor": self.name,
+                "live_mirrored": True,
+                "venue": venue,
+                "source": source,
+                "exchange_order_id": exchange_order_id,
+                "trade_id": trade_id,
+            },
+        )
+        self._orders.add(order)
+        fill = Fill(
+            order_id=order.id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=qty,
+            price=price,
+            fee=fee,
+            fee_asset=str(fee_currency or self._quote),
+            slippage=_ZERO,
+            exchange=venue,
+            metadata={
+                "live_mirrored": True,
+                "source": source,
+                "exchange_order_id": exchange_order_id,
+                "trade_id": trade_id,
+            },
+        )
+        self._orders.attach_fill(order.id, fill)
+        self._fills.apply(order, fill)
+        try:
+            self._apply_venue_ledger(order, qty, price, fee)
+        except Exception:  # noqa: BLE001
+            logger.exception("micro_bridge venue ledger sync failed")
+        self._portfolio.set_mark_price(order.symbol, price)
 
     async def _mirror_trades_for_resting_order(
         self, venue: str, row: dict[str, Any]
@@ -3357,6 +3434,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     exchange_order_id=oid,
                 )
                 mirrored += 1
+                try:
+                    self._live._audit.record(
+                        "micro_resting_fill",
+                        {
+                            "venue": venue,
+                            "symbol": symbol,
+                            "side": side_raw,
+                            "filled_quantity": str(filled),
+                            "average_price": str(avg),
+                            "exchange_order_id": oid,
+                            "status": status_val,
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.debug("resting fill audit skipped", exc_info=True)
                 remaining_open = str(status_val).lower() in {"open", "submitted", "pending", "partial"}
                 if remaining_open and filled < Decimal(str(row.get("quantity") or filled)):
                     # partial — keep tracking remainder
@@ -5124,6 +5216,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             side=OpportunitySide.SELL,
             quantity=qty,
             limit_price=px,
+            client_order_id=build_client_order_id(venue),
             metadata={
                 "venue": venue,
                 "exchange": venue,
@@ -6641,7 +6734,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             exchange=venue,
             opportunity_id=order_request.opportunity_id,
             client_order_id=order_request.client_order_id
-            or f"micro-mirror-{uuid4().hex[:12]}",
+            or build_client_order_id(venue),
             metadata={
                 **(order_request.metadata or {}),
                 "executor": self.name,
