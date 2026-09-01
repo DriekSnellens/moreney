@@ -283,14 +283,16 @@ def _session_settings(
             "live_micro_timing_enabled": True,
             "live_micro_coin_learning_enabled": True,
             "live_micro_adaptive_exit_enabled": True,
-            # Phase 2 execution intelligence — observation mode first (no execution impact).
-            "live_micro_regime_engine_enabled": True,
+            # Phase 2 execution intelligence — partial activation per ablation replay.
+            # Ablation (953 live_audit buys): PLUS_ADVERSE preserves NET (~33.56 vs 34.04)
+            # and would cancel 271 toxic resting orders. PLUS_REGIME alone rejects 100%.
+            "live_micro_regime_engine_enabled": False,
             "live_micro_adverse_selection_enabled": True,
             "live_micro_resting_order_intelligence_enabled": True,
             "live_micro_execution_quality_enabled": True,
             "live_micro_outcome_learning_enabled": True,
             "live_micro_capital_intelligence_enabled": True,
-            "live_micro_intelligence_observation_mode": True,
+            "live_micro_intelligence_observation_mode": False,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,

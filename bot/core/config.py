@@ -659,6 +659,7 @@ class Settings(BaseSettings):
     live_micro_outcome_learning_enabled: bool = True
     live_micro_capital_intelligence_enabled: bool = True
     live_micro_intelligence_observation_mode: bool = True
+    live_micro_regime_scoring_enabled: bool = False
     live_micro_min_learning_samples: int = Field(default=20, ge=5, le=500)
     live_micro_learning_full_samples: int = Field(default=50, ge=10, le=1000)
     live_micro_empirical_multiplier_min: float = Field(default=0.80, ge=0.5, le=1.0)

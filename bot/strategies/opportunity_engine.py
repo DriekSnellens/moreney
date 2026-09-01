@@ -438,6 +438,7 @@ def config_from_settings(settings: Any) -> OpportunityEngineConfig:
         ),
         regime_engine_enabled=bool(
             getattr(settings, "live_micro_regime_engine_enabled", False)
+            and getattr(settings, "live_micro_regime_scoring_enabled", False)
         ),
         adverse_selection_enabled=bool(
             getattr(settings, "live_micro_adverse_selection_enabled", False)
