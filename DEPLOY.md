@@ -63,7 +63,7 @@ sudo cp deploy/systemd/moreney-marketdata.service /etc/systemd/system/
 sudo cp deploy/systemd/moreney-paper@.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now moreney-marketdata
-sudo systemctl enable --now moreney-paper@200 moreney-paper@500 moreney-paper@1000 moreney-paper@5000
+sudo systemctl enable --now moreney-paper@200live moreney-paper@500live moreney-paper@1000live moreney-paper@5000live moreney-paper@25000live
 ```
 
 Legacy single-instance unit `moreney-paper.service` remains available for local mode.
@@ -79,8 +79,9 @@ curl -s http://127.0.0.1:8000/paper/overview
 
 Dashboard:
 
-- `http://<server>:8000/paper/dashboard`
-- `http://<server>:8000/paper/dashboard-lite`
+- `http://<server>:8006/fleet` — all paper bots in one view
+- `http://<server>:8006/paper/dashboard` — single instance
+- `http://<server>:8006/paper/dashboard-lite`
 
 Optional dashboard auth (recommended for public exposure), add in `.env`:
 

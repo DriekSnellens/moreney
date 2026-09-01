@@ -15,7 +15,7 @@ from collections import deque
 from decimal import Decimal
 
 from bot.core.config import Settings
-from bot.core.enums import KillSwitchState, RiskDecisionStatus, RiskRejectReason
+from bot.core.enums import KillSwitchState, OpportunitySide, RiskDecisionStatus, RiskRejectReason
 from bot.core.models import (
     PortfolioSnapshot,
     ProfitabilityResult,
@@ -59,6 +59,8 @@ class RiskEngine:
             Decimal(str(settings.risk_warning_drawdown_percent)) / _HUNDRED
         )
         self._max_trades_per_minute = settings.max_trades_per_minute
+        self._allow_partial = bool(getattr(settings, "risk_allow_partial_sizing", True))
+        self._partial_min_pct = Decimal(str(getattr(settings, "risk_partial_min_notional_pct", 10))) / _HUNDRED
 
     @property
     def kill_switch(self) -> KillSwitch:
@@ -236,6 +238,19 @@ class RiskEngine:
             ctx.liquidity_base is not None
             and opportunity.quantity > ctx.liquidity_base
         ):
+            allowed_qty = ctx.liquidity_base
+            if self._allow_partial and self._partial_allowed(opportunity, allowed_qty):
+                warnings.append(
+                    f"Partial fill: qty capped to liquidity {allowed_qty}"
+                )
+                return await self._approve_partial(
+                    opportunity,
+                    portfolio,
+                    ctx,
+                    allowed_qty=allowed_qty,
+                    warnings=warnings,
+                    score=score,
+                )
             return await self._reject(
                 opportunity,
                 reason_code=RiskRejectReason.INSUFFICIENT_LIQUIDITY,
@@ -275,8 +290,14 @@ class RiskEngine:
                 )
 
         # --- Daily loss ---
-        daily_loss = max(-portfolio.daily_realized_pnl_usd, _ZERO)
-        daily_limit = self._limits.daily_loss_limit(portfolio.equity_usd, self._settings)
+        # Live micro uses exchange-true PnL elsewhere; paper sync can invent
+        # huge "daily losses" (e.g. €1 entry fallback) that must not pause trading.
+        if bool(getattr(self._settings, "live_micro_ignore_paper_daily_loss", False)):
+            daily_loss = _ZERO
+            daily_limit = _ZERO
+        else:
+            daily_loss = max(-portfolio.daily_realized_pnl_usd, _ZERO)
+            daily_limit = self._limits.daily_loss_limit(portfolio.equity_usd, self._settings)
         if daily_loss >= daily_limit and daily_limit > 0:
             await self._kill_switch.pause(
                 f"Daily loss {daily_loss} reached limit {daily_limit}",
@@ -317,21 +338,42 @@ class RiskEngine:
             )
 
         # --- Simultaneous positions ---
-        if portfolio.open_position_count >= self._limits.max_simultaneous_positions:
-            return await self._reject(
-                opportunity,
-                reason_code=RiskRejectReason.MAX_SIMULTANEOUS_POSITIONS,
-                message=(
-                    f"Open positions {portfolio.open_position_count} >= "
-                    f"max {self._limits.max_simultaneous_positions}"
-                ),
-                allowed_qty=_ZERO,
-                maximum_loss=_ZERO,
-                warnings=warnings,
-                risk_score=Decimal("55"),
-                requested_size=opportunity.quantity * opportunity.entry_price,
-                allowed_size=_ZERO,
-            )
+        # Sells / reduce-only must still pass — otherwise inventory can never exit.
+        # Buys that ADD to an already-open symbol are allowed at the cap; only a
+        # brand-new symbol is blocked (otherwise pre-session bags freeze the book).
+        meta = opportunity.metadata or {}
+        is_reduce = (
+            opportunity.side == OpportunitySide.SELL
+            or bool(meta.get("sell_only"))
+            or bool(meta.get("reduce_only"))
+            or str(meta.get("exit_reason") or "").strip() != ""
+        )
+        if not is_reduce:
+            max_pos = self._limits.max_simultaneous_positions
+            if portfolio.open_position_count >= max_pos:
+                open_syms = {
+                    str(p.symbol or "").upper().replace("/", "").replace("-", "")
+                    for p in (portfolio.positions or [])
+                    if p.quantity and p.quantity > 0
+                }
+                opp_sym = str(opportunity.symbol or "").upper().replace("/", "").replace(
+                    "-", ""
+                )
+                if opp_sym not in open_syms:
+                    return await self._reject(
+                        opportunity,
+                        reason_code=RiskRejectReason.MAX_SIMULTANEOUS_POSITIONS,
+                        message=(
+                            f"Open positions {portfolio.open_position_count} >= "
+                            f"max {max_pos}; cannot open new symbol {opp_sym}"
+                        ),
+                        allowed_qty=_ZERO,
+                        maximum_loss=_ZERO,
+                        warnings=warnings,
+                        risk_score=Decimal("55"),
+                        requested_size=opportunity.quantity * opportunity.entry_price,
+                        allowed_size=_ZERO,
+                    )
 
         # --- Trades per minute ---
         self._prune_trade_window()
@@ -353,6 +395,21 @@ class RiskEngine:
 
         # --- Position / exposure limits ---
         limits = self._limits.evaluate(opportunity, portfolio)
+        partial_codes = {"MAX_POSITION_SIZE", "MAX_POSITION_PERCENT", "MAX_TOTAL_EXPOSURE"}
+        if set(limits.breached_codes) & partial_codes and self._allow_partial:
+            if self._partial_allowed(opportunity, limits.allowed_quantity):
+                warnings.append(
+                    f"Partial size: {limits.allowed_quantity} of {opportunity.quantity}"
+                )
+                return await self._approve_partial(
+                    opportunity,
+                    portfolio,
+                    ctx,
+                    allowed_qty=limits.allowed_quantity,
+                    warnings=warnings,
+                    score=score,
+                )
+
         if "MAX_POSITION_SIZE" in limits.breached_codes:
             return await self._reject(
                 opportunity,
@@ -461,6 +518,45 @@ class RiskEngine:
         self._kill_switch.update_conditions(conditions)
 
         # Do not auto-resume here — only escalate toward pause/stop.
+
+    def _partial_allowed(self, opportunity: TradeOpportunity, allowed_qty: Decimal) -> bool:
+        if allowed_qty <= 0:
+            return False
+        requested = opportunity.quantity
+        if allowed_qty >= requested:
+            return False
+        min_qty = requested * self._partial_min_pct
+        return allowed_qty >= min_qty
+
+    async def _approve_partial(
+        self,
+        opportunity: TradeOpportunity,
+        portfolio: PortfolioSnapshot,
+        ctx: RiskContext,
+        *,
+        allowed_qty: Decimal,
+        warnings: list[str],
+        score: Decimal,
+    ) -> RiskDecision:
+        limits = self._limits.evaluate(
+            opportunity.model_copy(update={"quantity": allowed_qty}),
+            portfolio,
+        )
+        daily_limit = self._limits.daily_loss_limit(portfolio.equity_usd, self._settings)
+        max_loss = min(limits.allowed_notional, daily_limit)
+        score += Decimal(str(min(40, int(ctx.estimated_slippage_pct * 10))))
+        self._trade_timestamps.append(time.monotonic())
+        return RiskDecision(
+            opportunity_id=opportunity.id,
+            status=RiskDecisionStatus.APPROVED,
+            reasons=["Partial approval: size reduced to fit limits"],
+            max_allowed_quantity=allowed_qty,
+            rejection_reason=None,
+            risk_score=score,
+            position_size_allowed=allowed_qty,
+            maximum_loss=max_loss,
+            warnings=warnings,
+        )
 
     async def _reject(
         self,

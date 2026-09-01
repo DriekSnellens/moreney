@@ -116,6 +116,108 @@ async def test_unrealized_pnl(
     assert portfolio.state.stats.unrealized_pnl == Decimal("4.9")
 
 
+def test_usdt_cash_counts_in_eur_equity(portfolio: PaperPortfolio) -> None:
+    from bot.portfolio.models import AssetBalance
+
+    state = portfolio.state
+    eur = state.balances["EUR"]
+    # Move 40 EUR into USDT at EURUSDT=1.16 without creating a position.
+    eur.available -= Decimal("40")
+    state.balances["USDT"] = AssetBalance(
+        asset="USDT", available=Decimal("46.4"), reserved=Decimal("0")
+    )
+    state.mark_prices["EURUSDT"] = Decimal("1.16")
+    assert state.total_equity == Decimal("200")
+
+
+def test_usdt_cash_does_not_double_count_eur_positions(portfolio: PaperPortfolio) -> None:
+    from bot.portfolio.models import AssetBalance, PositionState
+
+    state = portfolio.state
+    state.balances["EUR"].available = Decimal("100")
+    state.balances["XRP"] = AssetBalance(
+        asset="XRP", available=Decimal("10"), reserved=Decimal("0")
+    )
+    state.positions["XRPEUR"] = PositionState(
+        symbol="XRPEUR",
+        quantity=Decimal("10"),
+        average_entry_price=Decimal("10"),
+    )
+    state.mark_prices["XRPEUR"] = Decimal("10")
+    # 100 EUR cash + 10 XRP * 10 (balances are marked; positions are not added again).
+    assert state.total_equity == Decimal("200")
+
+
+def test_stale_eur_lot_after_usdt_sell_does_not_inflate_equity(
+    portfolio: PaperPortfolio,
+) -> None:
+    from bot.portfolio.models import AssetBalance, PositionState
+
+    state = portfolio.state
+    state.balances["EUR"].available = Decimal("100")
+    state.balances["XRP"] = AssetBalance(
+        asset="XRP", available=Decimal("40"), reserved=Decimal("0")
+    )
+    state.balances["USDT"] = AssetBalance(
+        asset="USDT", available=Decimal("69.6"), reserved=Decimal("0")
+    )
+    # Sold 60 XRP on USDT; the EUR lot was never reduced (live 25k bug).
+    state.positions["XRPEUR"] = PositionState(
+        symbol="XRPEUR",
+        quantity=Decimal("100"),
+        average_entry_price=Decimal("1"),
+    )
+    state.positions["XRPUSDT"] = PositionState(
+        symbol="XRPUSDT",
+        quantity=Decimal("0"),
+        average_entry_price=Decimal("0"),
+    )
+    state.mark_prices["XRPEUR"] = Decimal("1")
+    state.mark_prices["EURUSDT"] = Decimal("1.16")
+    # Cash 100 + 40 XRP + 69.6 USDT / 1.16 = 200. Must not count the leftover 60 XRP lot.
+    assert state.total_equity == Decimal("200")
+    state.cap_positions_to_balances()
+    assert state.positions["XRPEUR"].quantity == Decimal("40")
+
+
+def test_usdt_sell_closes_seeded_eur_position(portfolio: PaperPortfolio) -> None:
+    from bot.core.enums import OrderSide, OrderType
+    from bot.portfolio.models import AssetBalance, Fill, Order, PositionState
+
+    state = portfolio.state
+    state.balances["EUR"].available = Decimal("100")
+    state.balances["ATOM"] = AssetBalance(
+        asset="ATOM", available=Decimal("100"), reserved=Decimal("0")
+    )
+    state.positions["ATOMEUR"] = PositionState(
+        symbol="ATOMEUR",
+        quantity=Decimal("100"),
+        average_entry_price=Decimal("1"),
+    )
+    state.mark_prices["ATOMEUR"] = Decimal("1")
+    state.mark_prices["EURUSDT"] = Decimal("1.16")
+    order = Order(
+        strategy="triangle",
+        symbol="ATOMUSDT",
+        side=OrderSide.SELL,
+        order_type=OrderType.MARKET,
+        requested_quantity=Decimal("40"),
+        requested_price=Decimal("1.16"),
+    )
+    fill = Fill(
+        order_id=order.id,
+        symbol="ATOMUSDT",
+        side=OrderSide.SELL,
+        quantity=Decimal("40"),
+        price=Decimal("1.16"),
+        fee=Decimal("0"),
+    )
+    result = portfolio.apply_fill(order, fill)
+    assert result.applied is True
+    assert state.positions["ATOMEUR"].quantity == Decimal("60")
+    assert state.balances["ATOM"].total == Decimal("60")
+
+
 @pytest.mark.asyncio
 async def test_multiple_sequential_trades(
     execution: ExecutionService, portfolio: PaperPortfolio

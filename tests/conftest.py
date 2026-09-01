@@ -38,6 +38,8 @@ def settings() -> Settings:
         risk_max_position_usd=1000.0,
         risk_max_daily_loss_usd=200.0,
         risk_max_open_positions=5,
+        max_simultaneous_positions=5,
+        risk_allow_partial_sizing=False,
         risk_min_net_profit_usd=1.0,
         max_position_percent=10.0,
         max_total_exposure_percent=50.0,

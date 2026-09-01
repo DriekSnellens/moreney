@@ -1,0 +1,301 @@
+{
+  "generated_at": "2026-08-26T12:28:24.897750+00:00",
+  "data_mode": "SYNTHETIC_PATHS_PLUS_LIVE_BAG_COSTS",
+  "n_scenarios": 40,
+  "n_configs": 64,
+  "baseline": {
+    "id": "arm0.010_p0.30_dd0.004",
+    "config": {
+      "soft_arm_pct": 0.01,
+      "soft_partial_pct": 0.3,
+      "soft_drawdown_pct": 0.004,
+      "hard_arm_pct": 0.06,
+      "hard_drawdown_pct": 0.03,
+      "hard_partial_pct": 0.25,
+      "fee_rate": 0.0025,
+      "sell_buffer_bps": 10.0
+    },
+    "is": {
+      "n_scenarios": 40,
+      "score": -5.206900590003984,
+      "realized_eur": 53.495442279884635,
+      "be_blocks": 4,
+      "trail_exits": 25,
+      "score_per_scenario": -0.1301725147500996,
+      "realized_per_scenario": 1.3373860569971159
+    },
+    "oos": {
+      "n_scenarios": 40,
+      "score": 1333.5861115312005,
+      "realized_eur": 1399.7080670499909,
+      "be_blocks": 1,
+      "trail_exits": 24,
+      "score_per_scenario": 33.33965278828001,
+      "realized_per_scenario": 34.99270167624977
+    }
+  },
+  "best_is": {
+    "id": "arm0.020_p0.50_dd0.004",
+    "config": {
+      "soft_arm_pct": 0.02,
+      "soft_partial_pct": 0.5,
+      "soft_drawdown_pct": 0.004,
+      "hard_arm_pct": 0.06,
+      "hard_drawdown_pct": 0.03,
+      "hard_partial_pct": 0.25,
+      "fee_rate": 0.0025,
+      "sell_buffer_bps": 10.0
+    },
+    "is": {
+      "n_scenarios": 40,
+      "score": 23.592547521056563,
+      "realized_eur": 86.88953117265045,
+      "be_blocks": 0,
+      "trail_exits": 22,
+      "score_per_scenario": 0.5898136880264141,
+      "realized_per_scenario": 2.1722382793162613
+    },
+    "oos": {
+      "n_scenarios": 40,
+      "score": 1359.0364334258047,
+      "realized_eur": 1425.4895767311673,
+      "be_blocks": 0,
+      "trail_exits": 23,
+      "score_per_scenario": 33.97591083564512,
+      "realized_per_scenario": 35.63723941827918
+    }
+  },
+  "top5_is": [
+    {
+      "id": "arm0.020_p0.50_dd0.004",
+      "config": {
+        "soft_arm_pct": 0.02,
+        "soft_partial_pct": 0.5,
+        "soft_drawdown_pct": 0.004,
+        "hard_arm_pct": 0.06,
+        "hard_drawdown_pct": 0.03,
+        "hard_partial_pct": 0.25,
+        "fee_rate": 0.0025,
+        "sell_buffer_bps": 10.0
+      },
+      "is": {
+        "n_scenarios": 40,
+        "score": 23.592547521056563,
+        "realized_eur": 86.88953117265045,
+        "be_blocks": 0,
+        "trail_exits": 22,
+        "score_per_scenario": 0.5898136880264141,
+        "realized_per_scenario": 2.1722382793162613
+      },
+      "oos": {
+        "n_scenarios": 40,
+        "score": 1359.0364334258047,
+        "realized_eur": 1425.4895767311673,
+        "be_blocks": 0,
+        "trail_exits": 23,
+        "score_per_scenario": 33.97591083564512,
+        "realized_per_scenario": 35.63723941827918
+      }
+    },
+    {
+      "id": "arm0.020_p0.50_dd0.003",
+      "config": {
+        "soft_arm_pct": 0.02,
+        "soft_partial_pct": 0.5,
+        "soft_drawdown_pct": 0.003,
+        "hard_arm_pct": 0.06,
+        "hard_drawdown_pct": 0.03,
+        "hard_partial_pct": 0.25,
+        "fee_rate": 0.0025,
+        "sell_buffer_bps": 10.0
+      },
+      "is": {
+        "n_scenarios": 40,
+        "score": 23.486864683715357,
+        "realized_eur": 86.78384833530926,
+        "be_blocks": 0,
+        "trail_exits": 22,
+        "score_per_scenario": 0.5871716170928839,
+        "realized_per_scenario": 2.1695962083827314
+      },
+      "oos": {
+        "n_scenarios": 40,
+        "score": 1359.1714777388906,
+        "realized_eur": 1425.624621044253,
+        "be_blocks": 0,
+        "trail_exits": 23,
+        "score_per_scenario": 33.97928694347227,
+        "realized_per_scenario": 35.64061552610632
+      }
+    },
+    {
+      "id": "arm0.020_p0.30_dd0.004",
+      "config": {
+        "soft_arm_pct": 0.02,
+        "soft_partial_pct": 0.3,
+        "soft_drawdown_pct": 0.004,
+        "hard_arm_pct": 0.06,
+        "hard_drawdown_pct": 0.03,
+        "hard_partial_pct": 0.25,
+        "fee_rate": 0.0025,
+        "sell_buffer_bps": 10.0
+      },
+      "is": {
+        "n_scenarios": 40,
+        "score": 23.091725169210573,
+        "realized_eur": 86.38870882080447,
+        "be_blocks": 0,
+        "trail_exits": 22,
+        "score_per_scenario": 0.5772931292302643,
+        "realized_per_scenario": 2.1597177205201117
+      },
+      "oos": {
+        "n_scenarios": 40,
+        "score": 1341.730232735319,
+        "realized_eur": 1408.1833760406817,
+        "be_blocks": 0,
+        "trail_exits": 23,
+        "score_per_scenario": 33.543255818382974,
+        "realized_per_scenario": 35.204584401017044
+      }
+    },
+    {
+      "id": "arm0.020_p0.25_dd0.004",
+      "config": {
+        "soft_arm_pct": 0.02,
+        "soft_partial_pct": 0.25,
+        "soft_drawdown_pct": 0.004,
+        "hard_arm_pct": 0.06,
+        "hard_drawdown_pct": 0.03,
+        "hard_partial_pct": 0.25,
+        "fee_rate": 0.0025,
+        "sell_buffer_bps": 10.0
+      },
+      "is": {
+        "n_scenarios": 40,
+        "score": 22.966519581249084,
+        "realized_eur": 86.26350323284298,
+        "be_blocks": 0,
+        "trail_exits": 22,
+        "score_per_scenario": 0.5741629895312271,
+        "realized_per_scenario": 2.1565875808210744
+      },
+      "oos": {
+        "n_scenarios": 40,
+        "score": 1337.403682562698,
+        "realized_eur": 1403.8568258680602,
+        "be_blocks": 0,
+        "trail_exits": 23,
+        "score_per_scenario": 33.43509206406745,
+        "realized_per_scenario": 35.0964206467015
+      }
+    },
+    {
+      "id": "arm0.020_p0.30_dd0.003",
+      "config": {
+        "soft_arm_pct": 0.02,
+        "soft_partial_pct": 0.3,
+        "soft_drawdown_pct": 0.003,
+        "hard_arm_pct": 0.06,
+        "hard_drawdown_pct": 0.03,
+        "hard_partial_pct": 0.25,
+        "fee_rate": 0.0025,
+        "sell_buffer_bps": 10.0
+      },
+      "is": {
+        "n_scenarios": 40,
+        "score": 22.9437691969329,
+        "realized_eur": 86.2407528485268,
+        "be_blocks": 0,
+        "trail_exits": 22,
+        "score_per_scenario": 0.5735942299233225,
+        "realized_per_scenario": 2.15601882121317
+      },
+      "oos": {
+        "n_scenarios": 40,
+        "score": 1341.9192947736392,
+        "realized_eur": 1408.3724380790018,
+        "be_blocks": 0,
+        "trail_exits": 23,
+        "score_per_scenario": 33.54798236934098,
+        "realized_per_scenario": 35.20931095197504
+      }
+    }
+  ],
+  "delta_oos_realized_vs_baseline": 25.78150968117643,
+  "recommendation": {
+    "apply": true,
+    "reason": "OOS realized beat baseline",
+    "best_config": {
+      "soft_arm_pct": 0.02,
+      "soft_partial_pct": 0.5,
+      "soft_drawdown_pct": 0.004,
+      "hard_arm_pct": 0.06,
+      "hard_drawdown_pct": 0.03,
+      "hard_partial_pct": 0.25,
+      "fee_rate": 0.0025,
+      "sell_buffer_bps": 10.0
+    },
+    "baseline_config": {
+      "soft_arm_pct": 0.01,
+      "soft_partial_pct": 0.3,
+      "soft_drawdown_pct": 0.004,
+      "hard_arm_pct": 0.06,
+      "hard_drawdown_pct": 0.03,
+      "hard_partial_pct": 0.25,
+      "fee_rate": 0.0025,
+      "sell_buffer_bps": 10.0
+    },
+    "oos_realized_delta_eur": 25.78150968117643
+  },
+  "bags": [
+    {
+      "key": "bitvavo:APT",
+      "qty": 263.37085637999996,
+      "cost": 0.5351789412343491,
+      "start_mark": 0.4889
+    },
+    {
+      "key": "bitvavo:ARB",
+      "qty": 690.67037982,
+      "cost": 0.08578176172076783,
+      "start_mark": 0.079545
+    },
+    {
+      "key": "bitvavo:FET",
+      "qty": 3488.75220074,
+      "cost": 0.151176974506213,
+      "start_mark": 0.13915
+    },
+    {
+      "key": "bitvavo:LTC",
+      "qty": 3.54454584,
+      "cost": 45.10874092687711,
+      "start_mark": 43.473
+    },
+    {
+      "key": "okx:ARB",
+      "qty": 1668.9471999999996,
+      "cost": 0.08302053609857774,
+      "start_mark": 0.079545
+    },
+    {
+      "key": "okx:FET",
+      "qty": 609.3380000000001,
+      "cost": 0.14917122581028194,
+      "start_mark": 0.13915
+    },
+    {
+      "key": "okx:LTC",
+      "qty": 1.336561,
+      "cost": 45.163232362772845,
+      "start_mark": 43.473
+    },
+    {
+      "key": "okx:SOL",
+      "qty": 4.809818,
+      "cost": 85.32506774434442,
+      "start_mark": 83.45
+    }
+  ]
+}

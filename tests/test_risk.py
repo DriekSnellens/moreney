@@ -61,6 +61,22 @@ async def test_risk_approves_valid_trade(
 
 
 @pytest.mark.asyncio
+async def test_risk_partial_sizing_when_enabled(settings, opportunity: TradeOpportunity) -> None:
+    partial_settings = settings.model_copy(update={"risk_allow_partial_sizing": True})
+    engine = DefaultRiskEngine(partial_settings)
+    huge = opportunity.model_copy(update={"quantity": Decimal("100"), "entry_price": Decimal("100")})
+    decision = await engine.evaluate(
+        huge,
+        _profit(huge, net=Decimal("50"), profitable=True),
+        PortfolioSnapshot(equity_usd=Decimal("10000"), peak_equity_usd=Decimal("10000")),
+        context=_ctx(),
+    )
+    assert decision.status == RiskDecisionStatus.APPROVED
+    assert decision.max_allowed_quantity is not None
+    assert decision.max_allowed_quantity < huge.quantity
+
+
+@pytest.mark.asyncio
 async def test_risk_rejects_oversized_position(settings, opportunity: TradeOpportunity) -> None:
     engine = DefaultRiskEngine(settings)
     huge = opportunity.model_copy(update={"quantity": Decimal("100"), "entry_price": Decimal("100")})

@@ -43,9 +43,20 @@ class LocalOrderBook:
         self._needs_snapshot = True
         self._timestamp = datetime.now(UTC)
         self._received_at = datetime.now(UTC)
+        self._exchange_ts_available = False
+        self._timestamp_quality = "UNSUPPORTED"
         self.sequence_gap_count = 0
         self._cached_order_book: OrderBook | None = None
         self._cache_valid = False
+
+    def _ingest_clock_meta(self, update: OrderBookUpdate) -> None:
+        meta = update.metadata or {}
+        if "exchange_ts_available" in meta:
+            self._exchange_ts_available = bool(meta.get("exchange_ts_available"))
+        if meta.get("timestamp_quality"):
+            self._timestamp_quality = str(meta.get("timestamp_quality"))
+        self._timestamp = update.timestamp
+        self._received_at = update.received_at
 
     @property
     def synchronized(self) -> bool:
@@ -82,8 +93,7 @@ class LocalOrderBook:
         self._asks = {level.price: level.amount for level in update.asks if level.amount > 0}
         self._trim_depth()
         self._sequence = update.sequence
-        self._timestamp = update.timestamp
-        self._received_at = update.received_at
+        self._ingest_clock_meta(update)
         self._synchronized = True
         self._needs_snapshot = False
         self._invalidate_cache()
@@ -147,8 +157,7 @@ class LocalOrderBook:
         self._trim_depth()
         if update.sequence is not None:
             self._sequence = update.sequence
-        self._timestamp = update.timestamp
-        self._received_at = update.received_at
+        self._ingest_clock_meta(update)
         self._invalidate_cache()
         return True
 
@@ -230,6 +239,9 @@ class LocalOrderBook:
                 "exchange": self.exchange,
                 "received_at": self._received_at.isoformat(),
                 "synchronized": True,
+                "exchange_ts": self._timestamp.isoformat() if self._exchange_ts_available else None,
+                "exchange_ts_available": self._exchange_ts_available,
+                "timestamp_quality": self._timestamp_quality,
             },
         )
         if use_cache:

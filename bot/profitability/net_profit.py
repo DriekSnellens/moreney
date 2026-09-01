@@ -43,12 +43,19 @@ class NetProfitCalculator:
         opportunity: TradeOpportunity,
         *,
         order_book: OrderBook | None = None,
+        buy_fee_rate: Decimal | None = None,
+        sell_fee_rate: Decimal | None = None,
     ) -> ProfitEstimate:
         exit_price = self._resolve_exit_price(opportunity)
         entry_notional = opportunity.quantity * opportunity.entry_price
 
         gross = self._gross_profit(opportunity, exit_price)
-        fees = self._fees.calculate(opportunity, exit_price=exit_price)
+        fees = self._fees.calculate(
+            opportunity,
+            exit_price=exit_price,
+            buy_fee_rate=buy_fee_rate,
+            sell_fee_rate=sell_fee_rate,
+        )
         slip = self._slippage.estimate(
             opportunity,
             exit_price=exit_price,
@@ -56,6 +63,7 @@ class NetProfitCalculator:
         )
         funding = self._funding_cost(opportunity, entry_notional)
         buffer = entry_notional * (self._buffer_bps / _BPS)
+        extra = self._extra_cost(opportunity)
 
         net = (
             gross
@@ -64,6 +72,7 @@ class NetProfitCalculator:
             - slip.total_slippage
             - funding
             - buffer
+            - extra
         )
         net_return = net / entry_notional if entry_notional > 0 else _ZERO
 
@@ -100,6 +109,7 @@ class NetProfitCalculator:
                 "vwap": str(slip.vwap) if slip.vwap is not None else None,
                 "funding_periods": str(opportunity.funding_periods),
                 "execution_buffer_bps": str(self._buffer_bps),
+                "extra_cost_eur": str(extra),
                 "min_net_profit_usd": str(self._min_net_profit),
                 "min_net_return": str(self._min_net_return),
                 "gross_alone_never_allows_trade": True,
@@ -150,8 +160,23 @@ class NetProfitCalculator:
             delta = opportunity.entry_price - exit_price
         return opportunity.quantity * delta
 
+    @staticmethod
+    def _extra_cost(opportunity: TradeOpportunity) -> Decimal:
+        """Optional EUR cost that strategies attach (e.g. triangle FX refill)."""
+        meta = opportunity.metadata or {}
+        raw = meta.get("extra_cost_eur", meta.get("expected_fx_cost_eur", 0))
+        try:
+            value = Decimal(str(raw or 0))
+        except Exception:
+            return _ZERO
+        return value if value > 0 else _ZERO
+
     def _funding_cost(self, opportunity: TradeOpportunity, notional: Decimal) -> Decimal:
-        if not self._apply_funding or opportunity.funding_periods <= 0:
+        meta = opportunity.metadata or {}
+        apply_funding = self._apply_funding
+        if "profitability_apply_funding" in meta:
+            apply_funding = bool(meta["profitability_apply_funding"])
+        if not apply_funding or opportunity.funding_periods <= 0:
             return _ZERO
 
         rate = self._funding_rate_default

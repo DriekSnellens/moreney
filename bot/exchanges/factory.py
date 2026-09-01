@@ -9,6 +9,7 @@ from bot.exchanges.binance import BinanceExchange
 from bot.exchanges.bitvavo import BitvavoExchange
 from bot.exchanges.coinbase import CoinbaseExchange
 from bot.exchanges.kraken import KrakenExchange
+from bot.exchanges.okx import OkxExchange
 from bot.exchanges.stub import StubExchangeClient
 
 
@@ -32,4 +33,6 @@ def create_exchange_client(
         return CoinbaseExchange(settings, enable_trading=enable_trading)
     if name == "bitvavo":
         return BitvavoExchange(settings, enable_trading=enable_trading)
+    if name == "okx":
+        return OkxExchange(settings, enable_trading=enable_trading)
     raise ConfigurationError(f"Unsupported exchange_name: {settings.exchange_name}")

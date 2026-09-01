@@ -7,6 +7,7 @@ ProfitabilityEngine / PaperExecutor — consumers build RiskContext from health.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Sequence
@@ -19,9 +20,13 @@ from bot.core.models import MarketSnapshot
 from bot.market_data.adapters.base import PublicMarketDataAdapter
 from bot.market_data.adapters.binance import BinancePublicAdapter
 from bot.market_data.adapters.bitvavo import BitvavoPublicAdapter
+from bot.market_data.adapters.bybit import BybitPublicAdapter
 from bot.market_data.adapters.coinbase import CoinbasePublicAdapter
 from bot.market_data.adapters.kraken import KrakenPublicAdapter
+from bot.market_data.adapters.okx import OkxPublicAdapter
 from bot.market_data.cache import MarketDataCache
+from bot.market_data.equity import EquityQuoteService
+from bot.market_data.funding import FundingRateService
 from bot.market_data.local_order_book import LocalOrderBook
 from bot.market_data.models import (
     ConnectionState,
@@ -41,6 +46,8 @@ _ADAPTERS: dict[str, type[PublicMarketDataAdapter]] = {
     "kraken": KrakenPublicAdapter,
     "coinbase": CoinbasePublicAdapter,
     "bitvavo": BitvavoPublicAdapter,
+    "okx": OkxPublicAdapter,
+    "bybit": BybitPublicAdapter,
 }
 
 
@@ -73,6 +80,30 @@ class MarketDataService:
             enabled=settings.market_data_recording_enabled,
             path=settings.market_data_recording_path,
         )
+        from bot.market_data.research.recorder import ResearchMarketDataRecorder
+
+        self._research_recorder = ResearchMarketDataRecorder(
+            enabled=bool(
+                getattr(settings, "research_marketdata_recording_enabled", True)
+            ),
+            path=str(
+                getattr(
+                    settings,
+                    "research_marketdata_recording_path",
+                    "./data/research_marketdata",
+                )
+            ),
+            max_queue=int(getattr(settings, "research_marketdata_max_queue", 50_000) or 50_000),
+            max_depth_levels=int(
+                getattr(settings, "research_marketdata_depth_levels", 10) or 10
+            ),
+            flush_interval_ms=int(
+                getattr(settings, "research_marketdata_flush_interval_ms", 50) or 50
+            ),
+            flush_every=int(
+                getattr(settings, "research_marketdata_flush_every", 64) or 64
+            ),
+        )
         self._books: dict[tuple[str, str], LocalOrderBook] = {}
         self._ticks: dict[tuple[str, str], MarketTick] = {}
         self._managers: dict[str, WebSocketManager] = {}
@@ -87,6 +118,16 @@ class MarketDataService:
         self._redis_poll_s = float(getattr(settings, "market_data_redis_poll_ms", 100.0)) / 1000.0
         self._remote_health: dict[str, ExchangeHealth] = {}
         self._consumer_task: asyncio.Task[None] | None = None
+        self._funding = FundingRateService(settings)
+        self._funding_publish_task: asyncio.Task[None] | None = None
+        self._equity = EquityQuoteService(settings)
+        self._equity_publish_task: asyncio.Task[None] | None = None
+        from bot.perf.cycle_metrics import CycleLatencyTracker
+
+        self._latency = CycleLatencyTracker(
+            enabled=bool(getattr(settings, "perf_instrumentation_enabled", False)),
+            window=int(getattr(settings, "perf_instrumentation_window", 512) or 512),
+        )
 
         if not self._adapters and start_websockets:
             self._adapters = self._build_live_adapters()
@@ -131,6 +172,14 @@ class MarketDataService:
     def shared_mode(self) -> bool:
         return self._mode == "shared"
 
+    @property
+    def funding(self) -> FundingRateService:
+        return self._funding
+
+    @property
+    def equity(self) -> EquityQuoteService:
+        return self._equity
+
     async def start(self) -> None:
         if self._started:
             return
@@ -140,6 +189,8 @@ class MarketDataService:
         for adapter in self._adapters:
             if adapter._manager is not None:  # noqa: SLF001 — intentional live start
                 await adapter.start(self.handle_event)
+        await self._start_funding(publish=self._mode == "publisher")
+        await self._start_equity(publish=self._mode == "publisher")
         self._started = True
 
     async def start_shared_consumer(self) -> None:
@@ -154,6 +205,8 @@ class MarketDataService:
         self._consumer_task = asyncio.create_task(
             self._consumer_loop(), name="market-data-redis-consumer"
         )
+        await self._start_funding(publish=False)
+        await self._start_equity(publish=False)
         # Prime once so paper start does not wait a full poll interval.
         await self.hydrate_from_redis()
         logger.info(
@@ -165,6 +218,22 @@ class MarketDataService:
 
     async def stop(self) -> None:
         self._started = False
+        await self._funding.stop()
+        await self._equity.stop()
+        if self._funding_publish_task is not None:
+            self._funding_publish_task.cancel()
+            try:
+                await self._funding_publish_task
+            except asyncio.CancelledError:
+                pass
+            self._funding_publish_task = None
+        if self._equity_publish_task is not None:
+            self._equity_publish_task.cancel()
+            try:
+                await self._equity_publish_task
+            except asyncio.CancelledError:
+                pass
+            self._equity_publish_task = None
         if self._consumer_task is not None:
             self._consumer_task.cancel()
             try:
@@ -189,21 +258,142 @@ class MarketDataService:
             await asyncio.sleep(self._redis_poll_s)
 
     async def hydrate_from_redis(self) -> None:
-        """Pull latest published books/ticks/health into local memory."""
+        """Pull latest published books/ticks/health into local memory.
+
+        Uses one Redis pipeline round-trip for the full exchange×symbol bundle,
+        then skips JSON decode / book rebuild when payloads are byte-identical
+        to the previous poll (publisher still holds the latest snapshot).
+        """
+        t0 = time.perf_counter()
+        bundle = await self._cache.fetch_hydrate_raw(
+            exchanges=self._exchanges,
+            symbols=self._symbols,
+        )
+        self._cache.mark_hydrate()
+        redis_ms = time.perf_counter() - t0
+        self._latency.record("redis_read", redis_ms)
+
+        t_parse = time.perf_counter()
         for exchange in self._exchanges:
-            health = await self._cache.get_health(exchange)
-            if health is not None:
-                self._remote_health[exchange] = health
+            health_raw = self._cache.consume_changed_raw(
+                self._cache.health_key(exchange),
+                bundle.get(self._cache.health_key(exchange)),
+            )
+            if health_raw is not None:
+                try:
+                    self._remote_health[exchange] = ExchangeHealth.model_validate_json(
+                        health_raw
+                    )
+                except Exception:  # noqa: BLE001 — keep hydrate alive
+                    logger.debug("HYDRATE_HEALTH_PARSE_FAILED exchange=%s", exchange)
             for symbol in self._symbols:
-                book = await self._cache.get_book(exchange, symbol)
-                if book is not None:
-                    self.apply_remote_book(exchange, symbol, book)
-                tick = await self._cache.get_tick(exchange, symbol)
-                if tick is not None:
-                    self._ticks[(exchange, symbol)] = tick
+                book_key = self._cache.book_key(exchange, symbol)
+                book_raw = self._cache.consume_changed_raw(
+                    book_key, bundle.get(book_key)
+                )
+                if book_raw is not None:
+                    try:
+                        data = json.loads(book_raw)
+                        data.pop("exchange", None)
+                        book = OrderBook.model_validate(data)
+                        self.apply_remote_book(exchange, symbol, book)
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "HYDRATE_BOOK_PARSE_FAILED exchange=%s symbol=%s",
+                            exchange,
+                            symbol,
+                        )
+                tick_key = self._cache.tick_key(exchange, symbol)
+                tick_raw = self._cache.consume_changed_raw(
+                    tick_key, bundle.get(tick_key)
+                )
+                if tick_raw is not None:
+                    try:
+                        self._ticks[(exchange, symbol)] = MarketTick.model_validate_json(
+                            tick_raw
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "HYDRATE_TICK_PARSE_FAILED exchange=%s symbol=%s",
+                            exchange,
+                            symbol,
+                        )
+        funding_raw = self._cache.consume_changed_raw(
+            self._cache.funding_key(),
+            bundle.get(self._cache.funding_key()),
+        )
+        if funding_raw is not None:
+            try:
+                data = json.loads(funding_raw)
+                if isinstance(data, dict) and data:
+                    self._funding.import_rates({str(k): str(v) for k, v in data.items()})
+            except json.JSONDecodeError:
+                pass
+        equity_raw = self._cache.consume_changed_raw(
+            self._cache.equity_key(),
+            bundle.get(self._cache.equity_key()),
+        )
+        if equity_raw is not None:
+            try:
+                data = json.loads(equity_raw)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict) and data:
+                quotes: dict[str, dict[str, str]] = {}
+                for sym, payload in data.items():
+                    if isinstance(payload, dict):
+                        quotes[str(sym)] = {str(k): str(v) for k, v in payload.items()}
+                if quotes:
+                    self._equity.import_quotes(quotes)
+        self._latency.record("hydrate_parse", time.perf_counter() - t_parse)
+        self._latency.record("hydrate_total", time.perf_counter() - t0)
+
+    async def _start_funding(self, *, publish: bool) -> None:
+        if not self._funding.enabled:
+            return
+        if self._mode in {"local", "publisher"}:
+            await self._funding.start()
+        if publish:
+            self._funding_publish_task = asyncio.create_task(
+                self._funding_publish_loop(), name="funding-redis-publisher"
+            )
+
+    async def _start_equity(self, *, publish: bool) -> None:
+        if not self._equity.enabled:
+            return
+        if self._mode in {"local", "publisher"}:
+            await self._equity.start()
+        if publish:
+            self._equity_publish_task = asyncio.create_task(
+                self._equity_publish_loop(), name="equity-redis-publisher"
+            )
+
+    async def _funding_publish_loop(self) -> None:
+        while self._started:
+            try:
+                await self._cache.set_funding_rates(self._funding.export_rates())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("FUNDING_REDIS_PUBLISH_FAILED error=%s", exc)
+            await asyncio.sleep(self._funding._poll_s)  # noqa: SLF001
+
+    async def _equity_publish_loop(self) -> None:
+        while self._started:
+            try:
+                await self._cache.set_equity_quotes(self._equity.export_quotes())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("EQUITY_REDIS_PUBLISH_FAILED error=%s", exc)
+            await asyncio.sleep(self._equity._poll_s)  # noqa: SLF001
 
     def apply_remote_book(self, exchange: str, symbol: str, book: OrderBook) -> None:
-        """Replace local synchronized book from a Redis-published snapshot."""
+        """Replace local synchronized book from a Redis-published snapshot.
+
+        Preserves publisher ``received_at`` / exchange_ts flags from metadata.
+        Never treats hydrate wall-clock as an exchange timestamp.
+        """
         from bot.market_data.models import OrderBookUpdate
 
         exchange = exchange.lower()
@@ -221,6 +411,23 @@ class MarketDataService:
             and len(local._asks) == len(book.asks)  # noqa: SLF001
         ):
             return
+        meta = dict(book.metadata or {})
+        received_at = datetime.now(UTC)
+        raw_recv = meta.get("received_at")
+        if raw_recv:
+            try:
+                text = str(raw_recv)
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                received_at = datetime.fromisoformat(text)
+                if received_at.tzinfo is None:
+                    received_at = received_at.replace(tzinfo=UTC)
+            except Exception:
+                received_at = datetime.now(UTC)
+        exchange_ts_available = bool(meta.get("exchange_ts_available"))
+        timestamp_quality = str(meta.get("timestamp_quality") or (
+            "MEDIUM" if exchange_ts_available else "UNSUPPORTED"
+        ))
         update = OrderBookUpdate(
             exchange=exchange,
             symbol=symbol,
@@ -229,7 +436,15 @@ class MarketDataService:
             is_snapshot=True,
             sequence=book.nonce,
             timestamp=book.timestamp,
-            received_at=datetime.now(UTC),
+            received_at=received_at,
+            metadata={
+                "exchange_ts_available": exchange_ts_available,
+                "timestamp_quality": timestamp_quality,
+                "exchange_ts": meta.get("exchange_ts"),
+                "received_at": received_at.isoformat(),
+                "hydrated_from_redis": True,
+                "hydrate_wall_clock": datetime.now(UTC).isoformat(),
+            },
         )
         local.apply_snapshot(update)
 
@@ -239,6 +454,8 @@ class MarketDataService:
             return
 
         await self._recorder.record(event)
+        # Research tape: same source events as Redis publisher; non-blocking enqueue.
+        self._research_recorder.enqueue_live(event)
         key = (event.exchange, event.symbol)
         cache_due = self._cache_due(event.exchange)
 
@@ -285,20 +502,54 @@ class MarketDataService:
                     )
                     self._ticks[key] = tick
                     if cache_due:
-                        await self._cache.set_tick(tick)
+                        pending_tick = tick
                         synced = book.to_order_book()
                         if synced is not None:
-                            await self._cache.set_book(event.exchange, synced)
+                            pending_book = synced
+                        else:
+                            pending_book = None
+                    else:
+                        pending_tick = None
+                        pending_book = None
+                else:
+                    pending_tick = None
+                    pending_book = None
+            else:
+                pending_tick = None
+                pending_book = None
+        else:
+            pending_tick = None
+            pending_book = None
 
         if event.tick is not None:
             self._ticks[key] = event.tick
             if cache_due:
-                await self._cache.set_tick(event.tick)
+                pending_tick = event.tick
 
         if cache_due:
             health = self.get_exchange_health(event.exchange)
             self._last_health[event.exchange] = health
-            await self._cache.set_health(health)
+            items: list[tuple[str, str]] = []
+            if pending_tick is not None:
+                items.append(
+                    (
+                        self._cache.tick_key(pending_tick.exchange, pending_tick.symbol),
+                        pending_tick.model_dump_json(),
+                    )
+                )
+            if pending_book is not None:
+                payload = pending_book.model_dump(mode="json")
+                payload["exchange"] = event.exchange.lower()
+                items.append(
+                    (
+                        self._cache.book_key(event.exchange, pending_book.symbol),
+                        json.dumps(payload),
+                    )
+                )
+            items.append(
+                (self._cache.health_key(health.exchange), health.model_dump_json())
+            )
+            await self._cache.pipeline_set(items)
             self._mark_cache_written(event.exchange)
             if health.stale:
                 self._log_stale_throttled(event.exchange, health.last_message_age_ms)
@@ -468,6 +719,13 @@ class MarketDataService:
     def status(self) -> dict[str, dict]:
         return {ex: self.get_exchange_health(ex).model_dump(mode="json") for ex in self._exchanges}
 
+    def research_recorder_status(self) -> dict:
+        """Research infrastructure metrics — does not affect trading."""
+        rec = getattr(self, "_research_recorder", None)
+        if rec is None:
+            return {"enabled": False, "affects_trading": False}
+        return rec.snapshot()
+
     def build_risk_context(self, exchange: str, symbol: str) -> RiskContext:
         """Build RiskContext for existing RiskEngine without modifying it."""
         health = self.get_exchange_health(exchange)
@@ -492,6 +750,9 @@ class MarketDataService:
         Stale or unsynchronized books are omitted — strategies never see invalid data.
         """
         symbol = symbol.upper().replace("-", "").replace("/", "")
+        if self._equity.is_equity_symbol(symbol):
+            equity_snap = self._equity.snapshot_for(symbol)
+            return [equity_snap] if equity_snap is not None else []
         snapshots: list[MarketSnapshot] = []
         for exchange in self._exchanges:
             book = self.get_valid_order_book(exchange, symbol)
@@ -510,6 +771,16 @@ class MarketDataService:
             bid = book.bids[0]
             ask = book.asks[0]
             age = self.get_local_book(exchange, symbol)
+            funding_rate = self._funding.rate_for_spot(exchange, symbol)
+            meta: dict[str, str] = {"source": "realtime_market_data"}
+            perp = None
+            if funding_rate is not None:
+                from bot.market_data.funding import perp_symbol_for
+
+                perp = perp_symbol_for(symbol)
+                meta["funding_source"] = "binance_perp"
+                meta["perp_symbol"] = perp or ""
+                meta["funding_rate"] = str(funding_rate)
             snapshots.append(
                 MarketSnapshot(
                     symbol=symbol,
@@ -520,7 +791,8 @@ class MarketDataService:
                     exchange=exchange,
                     latency_ms=age.age_ms if age else None,
                     timestamp=book.timestamp,
-                    metadata={"source": "realtime_market_data"},
+                    funding_rate=funding_rate,
+                    metadata=meta,
                 )
             )
         return snapshots

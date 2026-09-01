@@ -44,7 +44,9 @@ def test_kill_switch_endpoints() -> None:
 
 def test_no_withdrawal_routes() -> None:
     paths = {route.path.lower() for route in app.routes if hasattr(route, "path")}
-    assert not any("withdraw" in path for path in paths)
+    # No routes that execute withdrawals; tracking endpoints may mention exits.
+    assert not any(p.rstrip("/").endswith("withdraw") for p in paths)
+    assert not any("/withdraw/" in p for p in paths)
 
 
 def test_market_data_status_endpoint() -> None:

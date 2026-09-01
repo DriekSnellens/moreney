@@ -30,6 +30,24 @@ class OrderManager:
             orders = [o for o in orders if o.symbol == sym]
         return orders
 
+    def open_orders(self, *, symbol: str | None = None) -> list[Order]:
+        """Non-terminal orders that still have remaining quantity."""
+        live = {
+            OrderStatus.PENDING,
+            OrderStatus.OPEN,
+            OrderStatus.SUBMITTED,
+            OrderStatus.PARTIALLY_FILLED,
+        }
+        orders = [
+            o
+            for o in self._orders.values()
+            if o.status in live and o.remaining_quantity > 0
+        ]
+        if symbol:
+            sym = symbol.upper()
+            orders = [o for o in orders if o.symbol == sym]
+        return orders
+
     def set_status(
         self,
         order_id: UUID,

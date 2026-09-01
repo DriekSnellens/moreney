@@ -1,8 +1,10 @@
 """Profitability engine: expected NET profit after all costs and thresholds."""
 
+from decimal import Decimal
+
 from bot.core.config import Settings
 from bot.core.exchange_types import OrderBook, TradingFee
-from bot.core.models import ProfitabilityResult, TradeOpportunity
+from bot.core.models import ProfitEstimate, ProfitabilityResult, TradeOpportunity
 from bot.profitability.net_profit import NetProfitCalculator
 
 
@@ -26,13 +28,40 @@ class DefaultProfitabilityEngine:
             trading_fee=trading_fee,
         )
 
+    def estimate_sync(
+        self,
+        opportunity: TradeOpportunity | object,
+        *,
+        order_book: OrderBook | None = None,
+        buy_fee_rate: Decimal | None = None,
+        sell_fee_rate: Decimal | None = None,
+    ) -> ProfitEstimate:
+        """Same NET math as ``evaluate``, without building ``ProfitabilityResult``.
+
+        Accepts duck-typed quote drafts on the maker hot path (quantity, prices,
+        side, fee roles, funding_periods, optional market/metadata).
+        """
+        return self._calculator.estimate(
+            opportunity,  # type: ignore[arg-type]
+            order_book=order_book,
+            buy_fee_rate=buy_fee_rate,
+            sell_fee_rate=sell_fee_rate,
+        )
+
     async def evaluate(
         self,
         opportunity: TradeOpportunity,
         *,
         order_book: OrderBook | None = None,
+        buy_fee_rate: Decimal | None = None,
+        sell_fee_rate: Decimal | None = None,
     ) -> ProfitabilityResult:
-        estimate = self._calculator.estimate(opportunity, order_book=order_book)
+        estimate = self.estimate_sync(
+            opportunity,
+            order_book=order_book,
+            buy_fee_rate=buy_fee_rate,
+            sell_fee_rate=sell_fee_rate,
+        )
         return ProfitabilityResult(
             opportunity_id=opportunity.id,
             gross_profit_usd=estimate.gross_profit,

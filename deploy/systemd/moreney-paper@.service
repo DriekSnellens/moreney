@@ -14,7 +14,7 @@ Environment=PYTHONPATH=/opt/moreney
 Environment=EXECUTION_MODE=paper
 Environment=PAPER_TRADING_ENABLED=true
 Environment=MARKET_DATA_MODE=shared
-Environment=MARKET_DATA_REDIS_POLL_MS=200
+Environment=MARKET_DATA_REDIS_POLL_MS=100
 # Expand API_PORT from EnvironmentFile into uvicorn --port.
 ExecStart=/bin/bash -c 'exec /opt/moreney/.venv/bin/python -m uvicorn bot.main:app --host 0.0.0.0 --port "${API_PORT}"'
 Restart=always

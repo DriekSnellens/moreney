@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from decimal import Decimal
 from uuid import UUID
 
@@ -19,11 +20,13 @@ from bot.core.config import Settings
 from bot.core.enums import OpportunitySide, OrderSide, OrderStatus, OrderType
 from bot.core.exchange_types import OrderBook, OrderBookLevel
 from bot.core.models import ExecutionResult, OrderRequest
+from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
 from bot.execution.base import BaseExecutor
 from bot.execution.fill_tracker import FillTracker
 from bot.execution.order_manager import OrderManager
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
+from bot.portfolio.venue_ledger import infer_base_asset, infer_quote_asset
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,7 @@ class PaperExecutor(BaseExecutor):
         self._orders = order_manager or OrderManager()
         self._fills = fill_tracker or FillTracker(portfolio)
         self._fee_rate = Decimal(str(settings.paper_fee_rate))
+        self._max_slippage = Decimal(str(settings.max_slippage_percent)) / _HUNDRED
         self._slippage_mode = settings.paper_slippage_mode
         self._fixed_slippage_pct = Decimal(str(settings.paper_fixed_slippage_pct))
         self._partial_ok = settings.paper_partial_fills_on_thin_book
@@ -89,7 +93,8 @@ class PaperExecutor(BaseExecutor):
         order_type: OrderType = OrderType.LIMIT,
     ) -> ExecutionResult:
         """Simulate an order. Never contacts an exchange."""
-        if self._latency_ms > 0:
+        post_only = bool((order_request.metadata or {}).get("post_only"))
+        if self._latency_ms > 0 and not post_only:
             await asyncio.sleep(self._latency_ms / 1000.0)
 
         side = _to_order_side(order_request.side)
@@ -129,9 +134,26 @@ class PaperExecutor(BaseExecutor):
 
         self._orders.set_status(order.id, OrderStatus.OPEN)
 
+        if post_only:
+            return self._rest_post_only(
+                order,
+                order_request,
+                order_book,
+                reserve_asset,
+                reserve_amount,
+            )
+
         # Limit price check for limit buys/sells against book/top
         if order.order_type == OrderType.LIMIT and order.requested_price is not None:
             if not self._limit_is_marketable(order, order_book):
+                if (order.metadata or {}).get("arb_leg"):
+                    self._portfolio.release_reservation(reserve_asset, reserve_amount)
+                    return self._reject(
+                        order,
+                        order_request,
+                        reason="NOT_MARKETABLE",
+                        message="Arb leg missed — book moved before the order landed",
+                    )
                 # Leave resting as OPEN (paper: no matching engine loop) —
                 # treat as accepted but unfilled until cancel or later fill.
                 result = ExecutionResult(
@@ -166,8 +188,17 @@ class PaperExecutor(BaseExecutor):
                 reason="INSUFFICIENT_LIQUIDITY",
                 message="No liquidity available to fill",
             )
+        if self._is_adverse_slippage(order, vwap):
+            self._portfolio.release_reservation(reserve_asset, reserve_amount)
+            return self._reject(
+                order,
+                order_request,
+                reason="EXCESSIVE_SLIPPAGE",
+                message="Fill price worse than live slippage limit",
+            )
 
-        fee = filled_qty * vwap * self._fee_rate
+        fee_rate = self._fee_rate_for(order)
+        fee = filled_qty * vwap * fee_rate
         # Adjust reservation: release unused, keep used portion for accounting.
         self._adjust_reservation_after_fill(
             order, reserve_asset, reserve_amount, filled_qty, vwap, fee
@@ -180,13 +211,18 @@ class PaperExecutor(BaseExecutor):
             quantity=filled_qty,
             price=vwap,
             fee=fee,
-            fee_asset=self._quote,
+            fee_asset=self._quote_asset_for(order),
             slippage=slippage_cost,
-            exchange="paper",
-            metadata={"levels_consumed": levels, "slippage_mode": self._slippage_mode},
+            exchange=str((order.metadata or {}).get("venue") or "paper"),
+            metadata={
+                "levels_consumed": levels,
+                "slippage_mode": self._slippage_mode,
+                "fee_rate": str(fee_rate),
+            },
         )
         self._orders.attach_fill(order.id, fill)
         self._fills.apply(order, fill)
+        self._apply_venue_ledger(order, filled_qty, vwap, fee)
 
         # Mark price for unrealized PnL
         self._portfolio.set_mark_price(order.symbol, vwap)
@@ -231,9 +267,10 @@ class PaperExecutor(BaseExecutor):
         # Release unused reservation
         remaining = order.remaining_quantity
         if remaining > 0:
+            self._unlock_venue(order, remaining)
             if order.side == OrderSide.BUY:
                 price = order.requested_price or order.average_fill_price or _ZERO
-                est = remaining * price * (Decimal("1") + self._fee_rate)
+                est = remaining * price * (Decimal("1") + self._fee_rate_for(order))
                 self._portfolio.release_reservation(self._quote, est)
             else:
                 base = self._portfolio.base_asset_for(order.symbol)
@@ -242,6 +279,305 @@ class PaperExecutor(BaseExecutor):
 
     async def get_order(self, order_id: UUID) -> Order | None:
         return self._orders.get(order_id)
+
+    def match_resting(
+        self, books: dict[str, dict[str, OrderBook]]
+    ) -> list[ExecutionResult]:
+        """Fill post-only quotes that were traded through or aged at the touch."""
+        now_ms = int(time.time() * 1000)
+        rest_ms = float(getattr(self._settings, "paper_maker_rest_ms", 0) or 0)
+        raw_queue = getattr(self._settings, "paper_maker_queue_fill_pct", 0)
+        fill_pct = Decimal(str(0 if raw_queue is None else raw_queue))
+        filled: list[ExecutionResult] = []
+        for order in self._orders.open_orders():
+            if not (order.metadata or {}).get("post_only"):
+                continue
+            venue = str((order.metadata or {}).get("venue") or "")
+            book = (books.get(venue) or {}).get(order.symbol)
+            if book is None:
+                continue
+            qty, fill_type = self._maker_fill_quantity(
+                order, book, now_ms, rest_ms, fill_pct
+            )
+            if qty <= 0:
+                continue
+            result = self._fill_resting(order, qty, fill_type=fill_type)
+            if result is not None:
+                filled.append(result)
+        return filled
+
+    def _rest_post_only(
+        self,
+        order: Order,
+        request: OrderRequest,
+        book: OrderBook | None,
+        reserve_asset: str,
+        reserve_amount: Decimal,
+    ) -> ExecutionResult:
+        if self._would_take(order, book):
+            self._portfolio.release_reservation(reserve_asset, reserve_amount)
+            return self._reject(
+                order,
+                request,
+                reason="WOULD_TAKE",
+                message="Post-only order would take liquidity",
+            )
+        if not self._lock_venue_for_rest(order, reserve_asset, reserve_amount):
+            self._portfolio.release_reservation(reserve_asset, reserve_amount)
+            return self._reject(
+                order,
+                request,
+                reason="INSUFFICIENT_BALANCE",
+                message=f"Insufficient venue {reserve_asset} to rest post-only order",
+            )
+        meta = order.metadata
+        meta["placed_ms"] = str(int(time.time() * 1000))
+        meta["reserved_asset"] = reserve_asset
+        meta["reserved_amount"] = str(reserve_amount)
+        result = ExecutionResult(
+            order_id=order.id,
+            opportunity_id=request.opportunity_id,
+            status=OrderStatus.OPEN,
+            filled_quantity=_ZERO,
+            average_price=None,
+            fees_usd=_ZERO,
+            message="Post-only resting (maker)",
+            metadata={
+                "executor": self.name,
+                "exchange": "paper",
+                "post_only": True,
+                "real_exchange_order": False,
+            },
+        )
+        self.history.append(result)
+        logger.info(
+            "PAPER_POST_ONLY_REST order_id=%s side=%s price=%s qty=%s venue=%s "
+            "real_exchange_order=false",
+            order.id,
+            order.side.value,
+            order.requested_price,
+            order.requested_quantity,
+            (order.metadata or {}).get("venue"),
+        )
+        return result
+
+    def _would_take(self, order: Order, book: OrderBook | None) -> bool:
+        if book is None or order.requested_price is None:
+            return False
+        if order.side == OrderSide.BUY:
+            if not book.asks:
+                return False
+            return order.requested_price >= book.asks[0].price
+        if not book.bids:
+            return False
+        return order.requested_price <= book.bids[0].price
+
+    def _maker_fill_quantity(
+        self,
+        order: Order,
+        book: OrderBook,
+        now_ms: int,
+        rest_ms: float,
+        fill_pct: Decimal,
+    ) -> tuple[Decimal, str]:
+        """Return (qty, fill_type). Queue fills stay opt-in; never invent fills."""
+        from bot.core.enums import FillType
+
+        limit = order.requested_price
+        remaining = order.remaining_quantity
+        if limit is None or remaining <= 0:
+            return _ZERO, FillType.UNKNOWN.value
+        placed_ms = int(float((order.metadata or {}).get("placed_ms") or now_ms))
+        aged = now_ms - placed_ms
+        through_raw = getattr(self._settings, "paper_maker_trade_through_fill_pct", 1)
+        through_pct = Decimal(str(1 if through_raw is None else through_raw))
+
+        if order.side == OrderSide.BUY:
+            if not book.bids:
+                return _ZERO, FillType.UNKNOWN.value
+            best = book.bids[0].price
+            displayed = book.bids[0].amount
+            # Live-conservative: only fill when the market trades through our bid.
+            if best < limit:
+                if through_pct <= 0:
+                    return _ZERO, FillType.UNKNOWN.value
+                take = remaining if through_pct >= 1 else remaining * through_pct
+                return min(remaining, take), FillType.TRADE_THROUGH.value
+            if best > limit:
+                return _ZERO, FillType.UNKNOWN.value
+        else:
+            if not book.asks:
+                return _ZERO, FillType.UNKNOWN.value
+            best = book.asks[0].price
+            displayed = book.asks[0].amount
+            if best > limit:
+                if through_pct <= 0:
+                    return _ZERO, FillType.UNKNOWN.value
+                take = remaining if through_pct >= 1 else remaining * through_pct
+                return min(remaining, take), FillType.TRADE_THROUGH.value
+            if best < limit:
+                return _ZERO, FillType.UNKNOWN.value
+
+        # At-touch queue fills are optional and off by default (too optimistic live).
+        if fill_pct <= 0 or aged < rest_ms:
+            return _ZERO, FillType.UNKNOWN.value
+        queued = displayed * fill_pct
+        if queued <= 0:
+            return _ZERO, FillType.UNKNOWN.value
+        return min(remaining, queued), FillType.QUEUE.value
+
+    async def close_one_leg(
+        self,
+        *,
+        opportunity_id: UUID,
+        symbol: str,
+        side: OrderSide,
+        quantity: Decimal,
+        venue: str,
+        order_book: OrderBook | None,
+        strategy: str = "maker_inventory",
+        reason: str = "one_leg_exit",
+    ) -> ExecutionResult | None:
+        """Close leftover inventory after a one-sided maker fill (live-equivalent)."""
+        if quantity <= 0:
+            return None
+        adverse_bps = Decimal(
+            str(getattr(self._settings, "paper_maker_one_leg_adverse_bps", 0) or 0)
+        )
+        from bot.core.enums import OpportunitySide
+        from bot.core.models import OrderRequest
+
+        if side == OrderSide.BUY:
+            # Need to buy back after an unhedged sell fill.
+            if not order_book or not order_book.asks:
+                return None
+            px = order_book.asks[0].price * (
+                Decimal("1") + adverse_bps / Decimal("10000")
+            )
+            opp_side = OpportunitySide.BUY
+        else:
+            if not order_book or not order_book.bids:
+                return None
+            px = order_book.bids[0].price * (
+                Decimal("1") - adverse_bps / Decimal("10000")
+            )
+            if px <= 0:
+                return None
+            opp_side = OpportunitySide.SELL
+
+        request = OrderRequest(
+            opportunity_id=opportunity_id,
+            symbol=symbol,
+            side=opp_side,
+            quantity=quantity,
+            limit_price=px,
+            metadata={
+                "venue": venue,
+                "arb_leg": True,
+                "fee_role": "taker",
+                "one_leg_exit": True,
+                "exit_reason": reason,
+                "strategy": strategy,
+                "real_exchange_order": False,
+            },
+        )
+        return await self.execute(
+            request,
+            order_book=order_book,
+            strategy=strategy,
+            order_type=OrderType.LIMIT,
+        )
+
+    def _fill_resting(
+        self,
+        order: Order,
+        filled_qty: Decimal,
+        *,
+        fill_type: str = "unknown",
+    ) -> ExecutionResult | None:
+        vwap = order.requested_price
+        if vwap is None or filled_qty <= 0:
+            return None
+        fee_rate = self._fee_rate_for(order)
+        fee = filled_qty * vwap * fee_rate
+        fill = Fill(
+            order_id=order.id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=filled_qty,
+            price=vwap,
+            fee=fee,
+            fee_asset=self._quote_asset_for(order),
+            slippage=_ZERO,
+            exchange=str((order.metadata or {}).get("venue") or "paper"),
+            metadata={
+                "post_only": True,
+                "fee_role": "maker",
+                "fee_rate": str(fee_rate),
+                "fill_type": fill_type,
+            },
+        )
+        self._orders.attach_fill(order.id, fill)
+        self._fills.apply(order, fill)
+        self._apply_venue_ledger(
+            order, filled_qty, vwap, fee, inventory_locked=True
+        )
+        self._portfolio.set_mark_price(order.symbol, vwap)
+        meta = dict(order.metadata or {})
+        meta["last_fill_type"] = fill_type
+        order.metadata = meta
+        result = ExecutionResult(
+            order_id=order.id,
+            opportunity_id=order.opportunity_id or order.id,
+            status=order.status,
+            filled_quantity=filled_qty,
+            average_price=vwap,
+            fees_usd=fee,
+            message=f"Paper maker {order.status.value}",
+            metadata={
+                "executor": self.name,
+                "exchange": "paper",
+                "post_only": True,
+                "fee": str(fee),
+                "real_exchange_order": False,
+                "fill_id": str(fill.id),
+                "fill_type": fill_type,
+            },
+        )
+        self.history.append(result)
+        logger.info(
+            "PAPER_MAKER_FILL order_id=%s status=%s qty=%s price=%s fee=%s "
+            "fill_type=%s real_exchange_order=false",
+            order.id,
+            order.status.value,
+            filled_qty,
+            vwap,
+            fee,
+            fill_type,
+        )
+        return result
+
+    def _lock_venue_for_rest(
+        self, order: Order, reserve_asset: str, reserve_amount: Decimal
+    ) -> bool:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return True
+        return ledger.lock(venue, reserve_asset, reserve_amount)
+
+    def _unlock_venue(self, order: Order, remaining_qty: Decimal) -> None:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue or remaining_qty <= 0:
+            return
+        if order.side == OrderSide.BUY:
+            price = order.requested_price or order.average_fill_price or _ZERO
+            amount = remaining_qty * price * (Decimal("1") + self._fee_rate_for(order))
+            ledger.unlock(venue, self._quote_asset_for(order), amount)
+        else:
+            base = self._portfolio.base_asset_for(order.symbol)
+            ledger.unlock(venue, base, remaining_qty)
 
     def _reject(
         self,
@@ -277,10 +613,15 @@ class PaperExecutor(BaseExecutor):
         )
         return result
 
+
+    def _quote_asset_for(self, order: Order) -> str:
+        return infer_quote_asset(order.symbol, self._quote)
+
     def _reservation_needed(
         self, order: Order
     ) -> tuple[bool, str, Decimal]:
         if order.side == OrderSide.BUY:
+            quote = self._quote_asset_for(order)
             price = order.requested_price
             if price is None or price <= 0:
                 # Market buy: estimate with mark or require price
@@ -288,13 +629,15 @@ class PaperExecutor(BaseExecutor):
                 price = mark or Decimal("0")
             if price <= 0:
                 # Allow open without hard reserve when price unknown; reject later
-                return True, self._quote, _ZERO
-            amount = order.requested_quantity * price * (Decimal("1") + self._fee_rate)
-            ok = self._portfolio.available(self._quote) >= amount
-            return ok, self._quote, amount if ok else amount
+                return True, quote, _ZERO
+            amount = order.requested_quantity * price * (Decimal("1") + self._fee_rate_for(order))
+            ok = self._portfolio.available(quote) >= amount
+            ok = ok and self._venue_can_buy(order, amount)
+            return ok, quote, amount if ok else amount
         base = self._portfolio.base_asset_for(order.symbol)
         amount = order.requested_quantity
         ok = self._portfolio.available(base) >= amount
+        ok = ok and self._venue_can_sell(order, base, amount)
         return ok, base, amount if ok else amount
 
     def _adjust_reservation_after_fill(
@@ -336,7 +679,7 @@ class PaperExecutor(BaseExecutor):
     def _limit_is_marketable(self, order: Order, book: OrderBook | None) -> bool:
         assert order.requested_price is not None
         if book is None:
-            return True  # without book, accept limit at requested price
+            return False  # missing book is not a free fill
         if order.side == OrderSide.BUY:
             if not book.asks:
                 return False
@@ -409,6 +752,8 @@ class PaperExecutor(BaseExecutor):
             return None
 
         if remaining > 0:
+            if (order.metadata or {}).get("arb_leg"):
+                return None
             if self._reject_thin and not self._partial_ok:
                 return None
             if not self._partial_ok:
@@ -419,6 +764,79 @@ class PaperExecutor(BaseExecutor):
         if ref is not None and ref > 0:
             slip_cost = abs(vwap - ref) * filled
         return consumed, filled, vwap, slip_cost
+
+    def _fee_rate_for(self, order: Order) -> Decimal:
+        venue = str((order.metadata or {}).get("venue") or "")
+        meta = order.metadata or {}
+        role = str(meta.get("fee_role") or "").lower()
+        if meta.get("post_only") or role == "maker":
+            return venue_maker_fee(venue, fallback=self._fee_rate)
+        return venue_taker_fee(venue, fallback=self._fee_rate)
+
+    def _venue_can_buy(self, order: Order, quote_needed: Decimal) -> bool:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return True
+        return ledger.available(venue, self._quote_asset_for(order)) >= quote_needed
+
+    def _venue_can_sell(self, order: Order, base: str, quantity: Decimal) -> bool:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return True
+        return ledger.can_sell(venue, base, quantity)
+
+    def _apply_venue_ledger(
+        self,
+        order: Order,
+        filled_qty: Decimal,
+        vwap: Decimal,
+        fee: Decimal,
+        *,
+        inventory_locked: bool = False,
+    ) -> None:
+        ledger = getattr(self._portfolio, "venue_ledger", None)
+        venue = str((order.metadata or {}).get("venue") or "")
+        if ledger is None or not venue:
+            return
+
+        quote = self._quote_asset_for(order)
+        base = infer_base_asset(order.symbol, quote)
+        if inventory_locked:
+            # Resting post-only already deducted the reserved asset.
+            if order.side == OrderSide.BUY:
+                ledger.credit(venue, base, filled_qty)
+            else:
+                ledger.credit(venue, quote, filled_qty * vwap - fee)
+            return
+        if order.side == OrderSide.BUY:
+            ledger.apply_buy(
+                venue,
+                base=base,
+                quantity=filled_qty,
+                quote_spent=filled_qty * vwap + fee,
+                quote_asset=quote,
+            )
+        else:
+            ledger.apply_sell(
+                venue,
+                base=base,
+                quantity=filled_qty,
+                quote_received=filled_qty * vwap - fee,
+                quote_asset=quote,
+            )
+
+    def _is_adverse_slippage(self, order: Order, vwap: Decimal) -> bool:
+        """Reject order-book fills that would be untradeable live due to price impact."""
+        if self._slippage_mode != "order_book":
+            return False
+        ref = order.requested_price
+        if ref is None or ref <= 0 or vwap <= 0 or self._max_slippage <= 0:
+            return False
+        if order.side == OrderSide.BUY:
+            return vwap > ref * (Decimal("1") + self._max_slippage)
+        return vwap < ref * (Decimal("1") - self._max_slippage)
 
 
 def _to_order_side(side: OpportunitySide | OrderSide) -> OrderSide:
