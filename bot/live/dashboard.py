@@ -802,7 +802,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         session_realized_class = "good"
     elif session_realized is not None and session_realized < 0:
         session_realized_class = "bad"
-    hist_for_kpi = payload.get("history") or load_history(limit=7 * 24 * 60)
+    hist_for_kpi = payload.get("history") or load_history(limit=720)
     if not isinstance(hist_for_kpi, list):
         hist_for_kpi = []
     daily_realized, weekly_realized, pnl_source = _calendar_pnl_for_payload(
@@ -1384,7 +1384,8 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
   <title>Moreney</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@500;600&family=Sora:wght@500;600&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@500;600&family=Sora:wght@500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'"/>
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@500;600&family=Sora:wght@500;600&display=swap" rel="stylesheet"/></noscript>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
   <style>{_css()}</style>
 </head>
@@ -1453,6 +1454,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     let portfolioChart = null;
     let pnlChart = null;
+    let chartVersion = null;
 
     function buildCharts(data) {{
       const labels = data.labels || [];
@@ -1515,6 +1517,22 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         }},
         options: chartDefaults
       }});
+    }}
+
+    function updateCharts(data) {{
+      if (!portfolioChart || !pnlChart || !window.Chart) {{
+        buildCharts(data);
+        return;
+      }}
+      const labels = data.labels || [];
+      portfolioChart.data.labels = labels;
+      portfolioChart.data.datasets[0].data = data.portfolio || [];
+      portfolioChart.update('none');
+      pnlChart.data.labels = labels;
+      pnlChart.data.datasets[0].data = data.realized || [];
+      pnlChart.data.datasets[1].data = data.unrealized || [];
+      pnlChart.data.datasets[2].data = data.winnable || [];
+      pnlChart.update('none');
     }}
 
     function renderPortfolioHoldings(items) {{
@@ -1591,14 +1609,26 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         if (!res.ok) return;
         const body = await res.json();
         if (body.metrics) applyMetrics(body.metrics);
-        if (body.history) buildCharts(body.history);
+      }} catch (_) {{}}
+    }}
+
+    async function refreshCharts() {{
+      try {{
+        const res = await fetch('/live/dashboard/charts', {{ credentials: 'same-origin' }});
+        if (!res.ok) return;
+        const body = await res.json();
+        if (body.version && body.version === chartVersion) return;
+        chartVersion = body.version || null;
+        if (body.history) updateCharts(body.history);
       }} catch (_) {{}}
     }}
 
     window.addEventListener('DOMContentLoaded', () => {{
       buildCharts(CHART_BOOT);
       refreshMetrics();
-      setInterval(refreshMetrics, 30000);
+      refreshCharts();
+      setInterval(refreshMetrics, 15000);
+      setInterval(refreshCharts, 60000);
     }});
 
     if ('serviceWorker' in navigator) {{

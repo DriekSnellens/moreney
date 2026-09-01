@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -19,6 +20,7 @@ _ANCHOR_PATH = Path("./data/dashboard_pnl_anchor.json")
 _CACHE_TTL_SEC = 90.0
 _last_refresh_mono = 0.0
 _cache: dict[str, Any] = {}
+_refresh_task: asyncio.Task[None] | None = None
 
 
 def set_operator_pnl_anchor(when: datetime | None = None) -> datetime:
@@ -156,6 +158,35 @@ def _collect_bases(bridge: Any) -> set[str]:
     return bases
 
 
+async def _fetch_all_exchange_trades(
+    bridge: Any,
+    *,
+    seed_ms: int,
+) -> list[dict[str, Any]]:
+    """Fetch exchange fills for all configured venues/bases (parallel)."""
+    from bot.live.dashboard_reconcile import _fetch_exchange_trades
+
+    venues = sorted(getattr(bridge, "_execute_venues", None) or {"bitvavo"})
+    bases = sorted(_collect_bases(bridge))
+    tasks = [
+        _fetch_exchange_trades(bridge, venue=venue, base=base, since_ms=seed_ms)
+        for venue in venues
+        for base in bases
+    ]
+    if not tasks:
+        return []
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    all_trades: list[dict[str, Any]] = []
+    for row in results:
+        if isinstance(row, Exception):
+            logger.warning("calendar PnL trade fetch failed: %s", row)
+            continue
+        if row:
+            all_trades.extend(row)
+    all_trades.sort(key=lambda r: r["ts_ms"])
+    return all_trades
+
+
 async def compute_realized_since(
     bridge: Any,
     since: datetime,
@@ -166,7 +197,7 @@ async def compute_realized_since(
 
     Returns ``(realized_eur, sell_events)``. Lots are per venue+base.
     """
-    from bot.live.dashboard_reconcile import _fetch_exchange_trades, _replay_fifo
+    from bot.live.dashboard_reconcile import _replay_fifo
 
     if since.tzinfo is None:
         since = since.replace(tzinfo=UTC)
@@ -174,21 +205,51 @@ async def compute_realized_since(
         since = since.astimezone(UTC)
     since_ms = int(since.timestamp() * 1000)
     seed_ms = since_ms - max(1, seed_days) * 24 * 3600 * 1000
-    venues = sorted(getattr(bridge, "_execute_venues", None) or {"bitvavo"})
-    all_trades: list[dict[str, Any]] = []
-    for venue in venues:
-        for base in sorted(_collect_bases(bridge)):
-            rows = await _fetch_exchange_trades(
-                bridge, venue=venue, base=base, since_ms=seed_ms
-            )
-            all_trades.extend(rows)
+    all_trades = await _fetch_all_exchange_trades(bridge, seed_ms=seed_ms)
     if not all_trades:
         return None, []
-    all_trades.sort(key=lambda r: r["ts_ms"])
     _, realized_since, sell_events, _ = _replay_fifo(
         all_trades, since_ms=since_ms, quote=str(getattr(bridge, "_quote", "EUR") or "EUR")
     )
     return realized_since, sell_events
+
+
+async def compute_realized_windows(
+    bridge: Any,
+    day_start: datetime,
+    week_start: datetime,
+    *,
+    seed_days: int = 21,
+) -> tuple[Decimal | None, Decimal | None, list[dict[str, Any]]]:
+    """Fetch exchange fills once and derive daily + weekly FIFO PnL."""
+    from bot.live.dashboard_reconcile import _replay_fifo
+
+    if day_start.tzinfo is None:
+        day_start = day_start.replace(tzinfo=UTC)
+    else:
+        day_start = day_start.astimezone(UTC)
+    if week_start.tzinfo is None:
+        week_start = week_start.replace(tzinfo=UTC)
+    else:
+        week_start = week_start.astimezone(UTC)
+
+    earliest = min(day_start, week_start)
+    since_ms_day = int(day_start.timestamp() * 1000)
+    since_ms_week = int(week_start.timestamp() * 1000)
+    seed_ms = int(earliest.timestamp() * 1000) - max(1, seed_days) * 24 * 3600 * 1000
+    quote = str(getattr(bridge, "_quote", "EUR") or "EUR")
+
+    all_trades = await _fetch_all_exchange_trades(bridge, seed_ms=seed_ms)
+    if not all_trades:
+        return None, None, []
+
+    _, daily, sell_events, _ = _replay_fifo(
+        all_trades, since_ms=since_ms_day, quote=quote
+    )
+    if day_start == week_start:
+        return daily, daily, sell_events
+    _, weekly, _, _ = _replay_fifo(all_trades, since_ms=since_ms_week, quote=quote)
+    return daily, weekly, sell_events
 
 
 async def refresh_calendar_pnl_cache(
@@ -210,12 +271,9 @@ async def refresh_calendar_pnl_cache(
     sell_events: list[dict[str, Any]] = []
     err: str | None = None
     try:
-        if day_start == week_start:
-            daily, sell_events = await compute_realized_since(bridge, day_start)
-            weekly = daily
-        else:
-            daily, sell_events = await compute_realized_since(bridge, day_start)
-            weekly, _ = await compute_realized_since(bridge, week_start)
+        daily, weekly, sell_events = await compute_realized_windows(
+            bridge, day_start, week_start
+        )
     except Exception as exc:  # noqa: BLE001
         err = str(exc)[:200]
         logger.exception("calendar PnL refresh failed")
@@ -256,6 +314,40 @@ def get_calendar_pnl_cache() -> dict[str, Any]:
     if loaded:
         _cache = loaded
     return dict(_cache)
+
+
+def attach_calendar_pnl(session: dict[str, Any]) -> dict[str, Any]:
+    """Merge cached calendar PnL into a session snapshot (non-blocking)."""
+    cache = get_calendar_pnl_cache()
+    if not cache:
+        return session
+    return {**session, "calendar_pnl": cache}
+
+
+def schedule_calendar_pnl_refresh(bridge: Any) -> None:
+    """Refresh exchange FIFO PnL in the background when cache is stale."""
+    global _refresh_task  # noqa: PLW0603
+
+    now_mono = time.monotonic()
+    if (
+        now_mono - _last_refresh_mono < _CACHE_TTL_SEC
+        and _cache.get("daily_eur") is not None
+    ):
+        return
+    if _refresh_task is not None and not _refresh_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _runner() -> None:
+        try:
+            await refresh_calendar_pnl_cache(bridge, force=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("background calendar PnL refresh failed")
+
+    _refresh_task = loop.create_task(_runner(), name="calendar-pnl-refresh")
 
 
 def calendar_pnl_for_metrics() -> tuple[Decimal | None, Decimal | None, str | None]:

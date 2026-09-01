@@ -173,7 +173,10 @@ def test_pwa_and_metrics_routes() -> None:
         assert metrics.status_code == 200
         body = metrics.json()
         assert "metrics" in body
-        assert "history" in body
+        assert "history" not in body
+        charts = client.get("/live/dashboard/charts")
+        assert charts.status_code == 200
+        assert "history" in charts.json()
 
 
 def test_clear_history(tmp_path: Path) -> None:

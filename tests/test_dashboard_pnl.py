@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -10,6 +11,7 @@ import pytest
 
 from bot.live.dashboard_history import (
     chart_history_points,
+    load_history,
     metrics_from_payload,
 )
 from bot.live.dashboard_pnl import (
@@ -78,15 +80,12 @@ async def test_refresh_calendar_pnl_cache(monkeypatch: pytest.MonkeyPatch) -> No
     bridge._allowed_bases = None
     bridge._venue_raw_balances = {"bitvavo": []}
 
-    async def fake_compute(_bridge, since, *, seed_days=21):
-        # Distinct values so day/week paths are exercised separately.
-        if since.hour == 22 and since.minute == 0:
-            return Decimal("65.09"), []
-        return Decimal("65.09"), []
+    async def fake_windows(_bridge, day_start, week_start, *, seed_days=21):
+        return Decimal("65.09"), Decimal("65.09"), []
 
     monkeypatch.setattr(
-        "bot.live.dashboard_pnl.compute_realized_since",
-        fake_compute,
+        "bot.live.dashboard_pnl.compute_realized_windows",
+        fake_windows,
     )
     out = await refresh_calendar_pnl_cache(bridge, force=True)
     assert out["source"] == "exchange_fifo"
@@ -118,3 +117,15 @@ def test_metrics_from_payload_prefers_exchange_cache(monkeypatch: pytest.MonkeyP
     assert metrics["open_unrealized_eur"] == pytest.approx(-5.09)
     assert metrics["portfolio_pnl_eur"] == pytest.approx(60.0)
     assert metrics["daily_realized_source"] == "exchange_fifo"
+
+
+def test_load_history_tail_read(tmp_path: Path) -> None:
+    hist = tmp_path / "hist.jsonl"
+    lines = [
+        json.dumps({"t": f"2026-08-30T12:{i:02d}:00+00:00", "portfolio_eur": str(4000 + i)})
+        for i in range(120)
+    ]
+    hist.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    rows = load_history(path=hist, limit=10)
+    assert len(rows) == 10
+    assert rows[-1]["portfolio_eur"] == "4119"

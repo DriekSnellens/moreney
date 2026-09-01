@@ -631,41 +631,39 @@ async def market_data_status() -> dict[str, Any]:
     return compact
 
 
-async def _live_dashboard_payload(*, record: bool = True, light: bool = False) -> dict[str, Any]:
+async def _live_dashboard_payload(
+    *,
+    record: bool = True,
+    light: bool = True,
+    include_history: bool = True,
+) -> dict[str, Any]:
     live = get_live_service()
     mgr = get_micro_session_manager()
     session = mgr.status()
     bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
     if bridge is not None:
         try:
-            from bot.live.dashboard_pnl import refresh_calendar_pnl_cache
+            from bot.live.dashboard_pnl import attach_calendar_pnl, schedule_calendar_pnl_refresh
 
-            cache = await refresh_calendar_pnl_cache(bridge)
-            session = {**session, "calendar_pnl": cache}
+            schedule_calendar_pnl_refresh(bridge)
+            session = attach_calendar_pnl(session)
         except Exception:  # noqa: BLE001
-            logger.exception("calendar PnL refresh on dashboard payload failed")
+            logger.exception("calendar PnL attach on dashboard payload failed")
     payload: dict[str, Any] = {
         "session": session,
         "engine": get_micro_engine().status(),
     }
     if not light:
-        observe = await live.phase1_observe(probe=False)
-        readiness = live.compact_status()
         try:
-            alerts = live.phase4_alerts(observe)
+            readiness = live.compact_status()
+            payload["readiness"] = readiness
         except Exception:  # noqa: BLE001
-            alerts = {"alerts": []}
-        payload.update(
-            {
-                "unlock": live.micro_unlock_checklist(),
-                "observe": observe,
-                "readiness": readiness,
-                "alerts": alerts,
-            }
-        )
+            payload["readiness"] = {}
+        payload["unlock"] = live.micro_unlock_checklist()
     if record:
         record_snapshot(payload)
-    payload["history"] = load_history(limit=720)
+    if include_history:
+        payload["history"] = load_history(limit=720)
     return payload
 
 
@@ -725,22 +723,18 @@ async def live_micro_dashboard_redirect() -> RedirectResponse:
 
 @app.get("/live/dashboard/metrics")
 async def live_dashboard_metrics(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
-    """JSON KPIs + chart series for mobile polling (no full HTML reload)."""
-    mgr = get_micro_session_manager()
-    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
-    if bridge is not None:
-        try:
-            from bot.live.dashboard_pnl import refresh_calendar_pnl_cache
+    """JSON KPIs for mobile polling (no full HTML reload)."""
+    payload = await _live_dashboard_payload(light=True, record=False, include_history=False)
+    return {"metrics": metrics_from_payload(payload)}
 
-            cache = await refresh_calendar_pnl_cache(bridge)
-            mgr._publish({"calendar_pnl": cache})  # noqa: SLF001
-        except Exception:  # noqa: BLE001
-            logger.exception("calendar PnL refresh on metrics failed")
-    payload = await _live_dashboard_payload(light=True, record=False)
-    history = payload.get("history") or load_history(limit=720)
+
+@app.get("/live/dashboard/charts")
+async def live_dashboard_charts(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """Chart series only — polled less often than KPI metrics."""
+    history = load_history(limit=720)
     return {
-        "metrics": metrics_from_payload(payload),
-        "history": chart_series_from_history(history if isinstance(history, list) else []),
+        "history": chart_series_from_history(history),
+        "version": history[-1].get("t") if history else None,
     }
 
 

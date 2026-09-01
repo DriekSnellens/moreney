@@ -272,6 +272,14 @@ class MicroSessionManager:
             seed_from_session_status(self._status)
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from bot.live.dashboard_pnl import schedule_calendar_pnl_refresh
+
+            bridge = self._bridge_holder.get("bridge")
+            if bridge is not None:
+                schedule_calendar_pnl_refresh(bridge)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def reset_dashboard(self) -> dict[str, Any]:
         """Zero cumulative realized PnL and chart history on the live bridge."""
