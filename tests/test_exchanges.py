@@ -21,6 +21,7 @@ from bot.exchanges.binance import BinanceExchange
 from bot.exchanges.bitvavo import BitvavoExchange
 from bot.exchanges.ccxt_adapter import (
     CcxtExchangeAdapter,
+    build_client_order_id,
     sanitize_bitvavo_client_order_id,
     sanitize_okx_client_order_id,
 )
@@ -472,6 +473,14 @@ def test_exchange_modules_do_not_import_strategies() -> None:
         source = inspect.getsource(module)
         assert "bot.strategies" not in source
         assert "TradeOpportunity" not in source
+
+
+def test_build_client_order_id_okx_and_bitvavo() -> None:
+    okx_id = build_client_order_id("okx", "micro-deadbeef01234567")
+    assert "-" not in okx_id
+    assert okx_id[0].isalpha()
+    bv_id = build_client_order_id("bitvavo", "m" + "a" * 31)
+    assert len(bv_id.split("-")) == 5
 
 
 def test_sanitize_okx_client_order_id_strips_hyphens() -> None:
