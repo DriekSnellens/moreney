@@ -14,7 +14,8 @@ from uuid import uuid4
 
 from bot.core.config import Settings, get_settings
 from bot.core.enums import OpportunitySide
-from bot.core.exceptions import ExecutionError
+from bot.core.exceptions import ExchangeError, ExecutionError
+from bot.exchanges.ccxt_adapter import build_client_order_id
 from bot.core.models import ExecutionResult, OrderRequest
 from bot.live.audit import LiveAuditLog
 from bot.live.executor import MultiVenueLiveExecutor
@@ -78,6 +79,25 @@ class LiveMicroEngine:
         self._armed = False
         self._audit.record("micro_engine_disarmed", {})
         return {"armed": False, "ok": True}
+
+    def _record_order_exception(
+        self,
+        *,
+        venue: str,
+        symbol: str,
+        side: OpportunitySide,
+        exc: BaseException,
+    ) -> None:
+        self._audit.record(
+            "micro_order_exception",
+            {
+                "error": type(exc).__name__,
+                "message": str(exc)[:500],
+                "venue": venue,
+                "symbol": symbol,
+                "side": side.value if hasattr(side, "value") else str(side),
+            },
+        )
 
     def status(self) -> dict[str, Any]:
         allowed, reason = self._policy.can_place_orders()
@@ -260,7 +280,7 @@ class LiveMicroEngine:
             side=side,
             quantity=qty,
             limit_price=limit_price,
-            client_order_id=str(uuid4()),
+            client_order_id=build_client_order_id(venue),
             metadata={
                 "venue": venue,
                 "exchange": venue,
@@ -279,11 +299,26 @@ class LiveMicroEngine:
                 "reason": "execution_error",
                 "message": str(exc),
             }
+        except ExchangeError as exc:
+            self._record_order_exception(
+                venue=venue,
+                symbol=symbol,
+                side=side,
+                exc=exc,
+            )
+            return {
+                "submitted": False,
+                "executed": False,
+                "reason": "exchange_error",
+                "message": str(exc),
+            }
         except Exception as exc:  # noqa: BLE001
             logger.exception("Micro order unexpected failure")
-            self._audit.record(
-                "micro_order_exception",
-                {"error": type(exc).__name__, "message": str(exc)[:300]},
+            self._record_order_exception(
+                venue=venue,
+                symbol=symbol,
+                side=side,
+                exc=exc,
             )
             return {
                 "submitted": False,
