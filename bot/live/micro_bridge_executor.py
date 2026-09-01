@@ -1844,7 +1844,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         eq_extra = self._entry_quality_diagnostics.snapshot()
         opp = getattr(self, "_opportunity_diagnostics", None)
         if opp is not None:
-            return opp.snapshot(entry_quality_extra={
+            return opp.snapshot(economic_extra={
                 **eq_extra,
                 **self._economic_diagnostics.snapshot(),
             })
