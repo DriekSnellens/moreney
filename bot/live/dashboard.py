@@ -1412,6 +1412,32 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Adverse rejects: <span id='cap-intel-adverse-reject'>{_esc(eq_diag.get('adverse_selection_reject', '—'))}</span></span>"
         "</div></section>"
     )
+    cap_alloc_html = (
+        "<section class='target-band' aria-label='Capital allocation' id='section-capital-allocation'>"
+        "<h2>Capital allocation</h2>"
+        "<div class='band-row'>"
+        f"<span>Total equity: <span id='cap-alloc-equity'>{_esc(eq_diag.get('total_equity_eur', '—'))}</span></span>"
+        f"<span>Free EUR: <span id='cap-alloc-free'>{_esc(eq_diag.get('free_eur', '—'))}</span></span>"
+        f"<span>Locked: <span id='cap-alloc-locked'>{_esc(eq_diag.get('locked_notional_eur', '—'))}</span></span>"
+        f"<span>Underwater: <span id='cap-alloc-underwater'>{_esc(eq_diag.get('underwater_capital_eur', eq_diag.get('capital_locked_eur', '—')))}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Reserve: <span id='cap-alloc-reserve'>{_esc(eq_diag.get('reserve_target_eur', '—'))}</span></span>"
+        f"<span>Deployable: <span id='cap-alloc-deployable'>{_esc(eq_diag.get('deployable_capital_eur', eq_diag.get('capital_deployable_eur', '—')))}</span></span>"
+        f"<span>Reserve mode: <span id='cap-alloc-mode'>{_esc(eq_diag.get('reserve_mode', '—'))}</span></span>"
+        f"<span>Shadow: <span id='cap-alloc-shadow'>{_esc(eq_diag.get('dynamic_capital_shadow', '—'))}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>NET/capital-h: <span id='cap-alloc-net-cap-hr'>{_esc(eq_diag.get('net_eur_per_capital_hour', '—'))}</span></span>"
+        f"<span>Unused deployable: <span id='cap-alloc-unused'>{_esc(eq_diag.get('unused_deployable_eur', '—'))}</span></span>"
+        f"<span>High-quality opps: <span id='cap-alloc-hq-count'>{_esc(eq_diag.get('high_quality_count', '—'))}</span></span>"
+        "</div>"
+        "<table class='alloc-table' id='cap-alloc-table'><thead>"
+        "<tr><th>Symbol</th><th>Venue</th><th>Score</th><th>Velocity</th>"
+        "<th>Requested</th><th>Allocated</th><th>Cap</th><th>Reason</th></tr>"
+        "</thead><tbody id='cap-alloc-rows'></tbody></table>"
+        "</section>"
+    )
     econ_intel_html = (
         "<section class='target-band' aria-label='Economic intelligence' id='section-economic-intelligence'>"
         "<h2>Economic intelligence</h2>"
@@ -1583,6 +1609,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {exec_html}
       {regime_html}
       {cap_intel_html}
+      {cap_alloc_html}
       {econ_intel_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
@@ -1847,6 +1874,30 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('cap-intel-reserve-need', dash(m.capital_reserve_need_pct));
       set('cap-intel-net-cap-hr', dash(m.net_eur_per_capital_hour));
       set('cap-intel-adverse-reject', dash(m.adverse_selection_reject));
+      // Capital allocation (Phase 3)
+      set('cap-alloc-equity', eurFmt(m.total_equity_eur != null ? parseFloat(m.total_equity_eur) : null));
+      set('cap-alloc-free', eurFmt(m.free_eur != null ? parseFloat(m.free_eur) : (m.capital_available_eur != null ? parseFloat(m.capital_available_eur) : null)));
+      set('cap-alloc-locked', eurFmt(m.locked_notional_eur != null ? parseFloat(m.locked_notional_eur) : null));
+      set('cap-alloc-underwater', eurFmt(m.underwater_capital_eur != null ? parseFloat(m.underwater_capital_eur) : (m.capital_locked_eur != null ? parseFloat(m.capital_locked_eur) : null)));
+      set('cap-alloc-reserve', eurFmt(m.reserve_target_eur != null ? parseFloat(m.reserve_target_eur) : null));
+      set('cap-alloc-deployable', eurFmt(m.deployable_capital_eur != null ? parseFloat(m.deployable_capital_eur) : (m.capital_deployable_eur != null ? parseFloat(m.capital_deployable_eur) : null)));
+      set('cap-alloc-mode', dash(m.reserve_mode));
+      set('cap-alloc-shadow', m.dynamic_capital_shadow === true ? 'YES' : (m.dynamic_capital_shadow === false ? 'NO' : dash(m.dynamic_capital_shadow)));
+      set('cap-alloc-net-cap-hr', dash(m.net_eur_per_capital_hour));
+      set('cap-alloc-unused', eurFmt(m.unused_deployable_eur != null ? parseFloat(m.unused_deployable_eur) : null));
+      set('cap-alloc-hq-count', dash(m.high_quality_count));
+      const allocBody = document.getElementById('cap-alloc-rows');
+      if (allocBody) {{
+        const rows = Array.isArray(m.allocations) ? m.allocations : [];
+        allocBody.innerHTML = rows.slice(0, 12).map(r => (
+          '<tr><td>' + dash(r.symbol) + '</td><td>' + dash(r.venue) + '</td>'
+          + '<td>' + dash(r.capital_score) + '</td><td>' + dash(r.velocity_label) + '</td>'
+          + '<td>' + eurFmt(r.requested_eur != null ? parseFloat(r.requested_eur) : null) + '</td>'
+          + '<td>' + eurFmt(r.allocated_eur != null ? parseFloat(r.allocated_eur) : null) + '</td>'
+          + '<td>' + eurFmt(r.requested_eur != null ? parseFloat(r.requested_eur) : null) + '</td>'
+          + '<td>' + dash(r.reason) + '</td></tr>'
+        )).join('');
+      }}
       // Economic intelligence
       set('econ-net-hr', dash(m.net_eur_per_hour));
       set('econ-net-cap-hr', dash(m.net_eur_per_capital_hour));

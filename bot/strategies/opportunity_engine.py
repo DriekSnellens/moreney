@@ -1089,6 +1089,82 @@ def allocate_portfolio(
     return selected, skipped
 
 
+def allocate_portfolio_with_dynamic(
+    assessments: Sequence[OpportunityAssessment],
+    *,
+    available_capital_eur: Decimal,
+    total_equity_eur: Decimal | None = None,
+    free_eur: Decimal | None = None,
+    underwater_capital_eur: Decimal = _ZERO,
+    resting_reserved_eur: Decimal = _ZERO,
+    is_dead_market: bool = False,
+    is_opportunity_burst: bool = False,
+    corr_groups: dict[str, frozenset[str]] | None = None,
+    max_per_corr_group: int = 2,
+    dynamic_config: Any | None = None,
+    reservation_store: Any | None = None,
+    shadow_only: bool = True,
+) -> tuple[
+    list[OpportunityAssessment],
+    list[OpportunityAssessment],
+    dict[str, Any] | None,
+]:
+    """Static greedy allocation, optionally augmented with dynamic shadow/active sizing."""
+    baseline_selected, baseline_skipped = allocate_portfolio(
+        assessments,
+        available_capital_eur=available_capital_eur,
+        corr_groups=corr_groups,
+        max_per_corr_group=max_per_corr_group,
+    )
+    dyn_meta: dict[str, Any] | None = None
+    if dynamic_config is None or not getattr(dynamic_config, "enabled", False):
+        return baseline_selected, baseline_skipped, dyn_meta
+
+    from bot.intelligence.dynamic_capital_allocator import (
+        apply_dynamic_allocation_to_assessment,
+        run_portfolio_allocation,
+    )
+
+    equity = total_equity_eur if total_equity_eur is not None else available_capital_eur
+    free = free_eur if free_eur is not None else available_capital_eur
+    snapshot = run_portfolio_allocation(
+        assessments,
+        total_equity_eur=equity,
+        free_eur=free,
+        underwater_capital_eur=underwater_capital_eur,
+        resting_reserved_eur=resting_reserved_eur,
+        reservation_store=reservation_store,
+        is_dead_market=is_dead_market,
+        is_opportunity_burst=is_opportunity_burst,
+        corr_groups=corr_groups,
+        max_per_corr_group=max_per_corr_group,
+        config=dynamic_config,
+    )
+    dyn_meta = snapshot.as_dict()
+    dyn_meta["shadow_only"] = shadow_only
+
+    if shadow_only:
+        return baseline_selected, baseline_skipped, dyn_meta
+
+    alloc_map = {r.symbol: r for r in snapshot.allocations}
+    selected: list[OpportunityAssessment] = []
+    skipped: list[OpportunityAssessment] = []
+    for assessment in assessments:
+        if assessment.decision == OpportunityDecision.REJECT:
+            skipped.append(assessment)
+            continue
+        alloc = alloc_map.get(assessment.symbol)
+        if alloc is None or alloc.allocated_eur <= 0:
+            skipped.append(assessment)
+            continue
+        adjusted = apply_dynamic_allocation_to_assessment(assessment, alloc)
+        if adjusted.recommended_size_multiplier <= 0:
+            skipped.append(assessment)
+            continue
+        selected.append(adjusted)
+    return selected, skipped, dyn_meta
+
+
 def dedupe_venues(
     opportunities: Sequence[TradeOpportunity],
     *,

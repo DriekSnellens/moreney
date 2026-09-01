@@ -54,6 +54,12 @@ from bot.intelligence.adverse_selection import (
     post_fill_adverse_pct,
 )
 from bot.intelligence.capital_intelligence import assess_capital_state
+from bot.intelligence.dynamic_capital_allocator import (
+    CapitalReservationStore,
+    apply_dynamic_allocation_to_assessment,
+    config_from_settings as dynamic_capital_config_from_settings,
+    run_portfolio_allocation,
+)
 from bot.intelligence.market_regime_engine import classify_market_regime, config_from_settings as regime_cfg_from
 from bot.intelligence.outcome_learning import OutcomeRecord
 from bot.intelligence.resting_order_intelligence import (
@@ -457,6 +463,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(getattr(settings, "live_micro_attribution_persist_path", "./data/live_micro_attribution_state.json"))
         )
         self._capital_state_snapshot: dict[str, Any] = {}
+        self._dynamic_capital_config = dynamic_capital_config_from_settings(settings)
+        self._capital_reservation_store = CapitalReservationStore()
+        self._allocation_snapshot: dict[str, Any] = {}
+        self._allocation_window: list[tuple[float, Any]] = []
+        self._allocation_window_sec = float(
+            getattr(settings, "live_micro_allocation_window_sec", 2.0) or 2.0
+        )
         self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
             str(getattr(settings, "live_micro_corr_group", "") or "")
@@ -1876,12 +1889,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         opp = getattr(self, "_opportunity_diagnostics", None)
         intel = self._intelligence.snapshot() if hasattr(self, "_intelligence") else {}
         cap = self._capital_state_snapshot or {}
+        alloc = self._allocation_snapshot or {}
         if opp is not None:
             return opp.snapshot(economic_extra={
                 **eq_extra,
                 **self._economic_diagnostics.snapshot(),
                 **intel,
                 **cap,
+                **alloc,
             })
         return self._economic_diagnostics.snapshot(entry_quality_extra={
             **eq_extra,
@@ -1985,6 +2000,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
                 "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
             }
+            self._update_dynamic_allocation_shadow(
+                symbol=symbol,
+                venue=str(meta.get("buy_exchange") or meta.get("venue") or "bitvavo"),
+                current_notional=qty * px,
+                opp_assessment=opp_assessment,
+                regime=regime,
+                cap_state=cap_state,
+                meta=meta,
+            )
             self._intelligence.attribution_store.record_opportunity(
                 record_id=str(uuid4()),
                 symbol=symbol,
@@ -2005,6 +2029,92 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 reasons=opp_assessment.reasons,
             )
         return assessment
+
+    def _update_dynamic_allocation_shadow(
+        self,
+        *,
+        symbol: str,
+        venue: str,
+        current_notional: Decimal,
+        opp_assessment: Any,
+        regime: Any,
+        cap_state: Any,
+        meta: dict[str, Any],
+    ) -> None:
+        """Compute shadow (or active) dynamic capital allocation for dashboard + meta."""
+        if not self._dynamic_capital_config.enabled:
+            return
+        now = time.monotonic()
+        self._allocation_window = [
+            (ts, a)
+            for ts, a in self._allocation_window
+            if now - ts <= self._allocation_window_sec
+        ]
+        self._allocation_window.append((now, opp_assessment))
+
+        underwater = self._economic_diagnostics._capital_locked_eur  # noqa: SLF001
+        resting_reserved = _ZERO
+        for row in self._resting:
+            if str(row.get("side") or "buy").lower().startswith("b"):
+                try:
+                    resting_reserved += Decimal(str(row.get("notional_eur") or 0))
+                except Exception:  # noqa: BLE001
+                    pass
+
+        window_assessments = [a for _, a in self._allocation_window]
+        portfolio = run_portfolio_allocation(
+            window_assessments,
+            total_equity_eur=self._budget,
+            free_eur=cap_state.available_eur,
+            locked_notional_eur=self._economic_diagnostics._capital_deployed_eur,  # noqa: SLF001
+            underwater_capital_eur=underwater,
+            resting_reserved_eur=resting_reserved,
+            reservation_store=self._capital_reservation_store,
+            is_dead_market=regime.regime.value == "DEAD_MARKET",
+            is_opportunity_burst=regime.regime.value == "OPPORTUNITY_BURST",
+            corr_groups=self._corr_group,
+            max_per_corr_group=self._max_per_corr,
+            capital_config=self._intelligence.capital_config,
+            config=self._dynamic_capital_config,
+        )
+        self._allocation_snapshot = portfolio.as_dict()
+        self._allocation_snapshot["dynamic_capital_enabled"] = True
+        self._allocation_snapshot["dynamic_capital_shadow"] = (
+            self._dynamic_capital_config.shadow_only
+        )
+
+        match = next(
+            (a for a in portfolio.allocations if a.symbol.upper() == symbol.upper()),
+            None,
+        )
+        shadow_eur = match.allocated_eur if match else _ZERO
+        self._allocation_snapshot["shadow_allocations"] = [
+            {
+                "symbol": symbol,
+                "venue": venue,
+                "current_eur": str(current_notional.quantize(Decimal("0.01"))),
+                "shadow_eur": str(shadow_eur.quantize(Decimal("0.01"))),
+            }
+        ]
+        if match is not None:
+            meta["dynamic_capital_score"] = str(match.capital_score.quantize(Decimal("0.01")))
+            meta["dynamic_capital_shadow_eur"] = str(shadow_eur.quantize(Decimal("0.01")))
+            meta["dynamic_capital_reason"] = match.reason
+            if (
+                not self._dynamic_capital_config.shadow_only
+                and shadow_eur > 0
+                and opp_assessment.capital_required_eur > 0
+            ):
+                adjusted = apply_dynamic_allocation_to_assessment(opp_assessment, match)
+                dyn_mult = adjusted.recommended_size_multiplier
+                eq_mult = meta.get("entry_quality_multiplier")
+                if eq_mult is not None:
+                    try:
+                        dyn_mult = min(dyn_mult, Decimal(str(eq_mult)))
+                    except Exception:  # noqa: BLE001
+                        pass
+                meta["dynamic_capital_multiplier"] = str(dyn_mult.quantize(Decimal("0.001")))
+                meta["entry_quality_multiplier"] = str(dyn_mult.quantize(Decimal("0.001")))
 
     def _note_position_opened(self, venue: str, base: str) -> None:
         key = self._lots_key(venue, base)

@@ -292,6 +292,10 @@ def _session_settings(
             "live_micro_execution_quality_enabled": True,
             "live_micro_outcome_learning_enabled": True,
             "live_micro_capital_intelligence_enabled": True,
+            # Phase 3 dynamic capital allocation — shadow mode default.
+            "live_micro_dynamic_capital_enabled": True,
+            "live_micro_dynamic_capital_shadow": True,
+            "live_micro_dynamic_capital_multiplier": 0.25,
             "live_micro_intelligence_observation_mode": False,
             "live_micro_experiment_id": "phase2_intelligence",
             "live_micro_intelligence_auto_apply": False,
