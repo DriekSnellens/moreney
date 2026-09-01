@@ -271,6 +271,12 @@ def _session_settings(
             "live_micro_entry_min_continuity_score": 0.35,
             "live_micro_entry_target_harvest_pct": 0.012,
             "live_micro_block_underwater_cross_venue": True,
+            # Capital velocity + venue economics (downward-only modifiers).
+            "live_micro_capital_efficiency_enabled": True,
+            "live_micro_min_expected_net_profit_per_hour": 0.05,
+            "live_micro_venue_economic_ranking_enabled": True,
+            "live_micro_mfe_analytics_enabled": True,
+            "live_micro_adaptive_trail_enabled": True,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
@@ -452,13 +458,21 @@ def attach_micro_bridge(
         allowed_bases=allowed_bases,
         live_maker=True,
     )
-    from bot.strategies.entry_quality import EntryQualityDiagnostics, config_from_settings
+    from bot.strategies.entry_quality import config_from_settings
+    from bot.strategies.opportunity_economics import (
+        config_capital_efficiency_from_settings,
+        config_venue_economics_from_settings,
+    )
     from bot.engine.orchestrator import EntryQualityContext
 
     eq_diag = bridge._entry_quality_diagnostics  # noqa: SLF001
+    econ_diag = bridge._economic_diagnostics  # noqa: SLF001
     eq_ctx = EntryQualityContext(
         config=config_from_settings(settings),
+        capital_config=config_capital_efficiency_from_settings(settings),
+        venue_config=config_venue_economics_from_settings(settings),
         diagnostics=eq_diag,
+        economic_diagnostics=econ_diag,
         marks_for=bridge.mark_history,
     )
     runner._executor = bridge  # noqa: SLF001

@@ -46,14 +46,24 @@ from bot.strategies.entry_quality import (
     config_from_settings,
     evaluate_entry_quality,
 )
+from bot.strategies.opportunity_economics import (
+    EconomicDiagnostics,
+    assess_opportunity_economics,
+    config_capital_efficiency_from_settings,
+    config_venue_economics_from_settings,
+    select_best_buy_opportunities,
+)
 
 
 @dataclass
 class EntryQualityContext:
-    """Live entry quality hook — marks from bridge, shared diagnostics."""
+    """Live entry quality + capital economics hook."""
 
     config: EntryQualityConfig
+    capital_config: Any  # CapitalEfficiencyConfig
+    venue_config: Any  # VenueEconomicsConfig
     diagnostics: EntryQualityDiagnostics
+    economic_diagnostics: EconomicDiagnostics
     marks_for: Any | None = None  # callable[[str], list[Decimal]]
 
 
@@ -148,51 +158,84 @@ class TradingEngine:
                 marks = [Decimal(str(m)) for m in ctx.marks_for(opportunity.symbol)]
             except Exception:  # noqa: BLE001
                 marks = []
-        assessment = evaluate_entry_quality(
+        economics = assess_opportunity_economics(
             opportunity=opportunity,
             profitability=profitability,
             marks=marks,
-            config=ctx.config,
+            entry_config=ctx.config,
+            capital_config=ctx.capital_config,
+            venue_config=ctx.venue_config,
         )
-        ctx.diagnostics.record(assessment)
-        if assessment.recommendation == EntryQualityRecommendation.REJECT:
-            return None, assessment
+        eq = economics.entry_quality
+        if eq is not None:
+            ctx.diagnostics.record(eq)
+        ce = economics.capital_efficiency
+        if ce is not None:
+            ctx.economic_diagnostics.capital_efficiency_candidates += 1
+            if ce.recommendation == EntryQualityRecommendation.REJECT:
+                ctx.economic_diagnostics.capital_efficiency_rejected += 1
+            elif ce.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
+                ctx.economic_diagnostics.capital_efficiency_reduced += 1
+            if ce.expected_net_profit_per_hour is not None:
+                ctx.economic_diagnostics.record_net_per_hour(
+                    ce.expected_net_profit_per_hour
+                )
+        if economics.venue:
+            v = economics.venue.lower()
+            if v == "bitvavo":
+                ctx.economic_diagnostics.venue_bitvavo_selected += 1
+            elif v == "okx":
+                ctx.economic_diagnostics.venue_okx_selected += 1
+        if economics.recommendation == EntryQualityRecommendation.REJECT:
+            return None, eq
         new_qty = apply_size_multiplier(
             opportunity.quantity,
-            assessment.recommended_size_multiplier,
+            economics.combined_multiplier,
         )
         if new_qty <= 0:
-            return None, assessment
+            return None, eq
         meta = dict(opportunity.metadata or {})
         meta.update(
             {
-                "entry_quality_score": str(assessment.score),
+                "entry_quality_score": str(eq.score if eq else ""),
                 "headroom_pct": (
-                    str(assessment.headroom_pct)
-                    if assessment.headroom_pct is not None
-                    else None
+                    str(eq.headroom_pct) if eq and eq.headroom_pct is not None else None
                 ),
                 "extension_pct": (
-                    str(assessment.extension_pct)
-                    if assessment.extension_pct is not None
-                    else None
+                    str(eq.extension_pct) if eq and eq.extension_pct is not None else None
                 ),
                 "trend_continuity": (
-                    str(assessment.trend_continuity)
-                    if assessment.trend_continuity is not None
+                    str(eq.trend_continuity)
+                    if eq and eq.trend_continuity is not None
                     else None
                 ),
-                "entry_quality_multiplier": str(assessment.recommended_size_multiplier),
-                "entry_quality_recommendation": assessment.recommendation.value,
-                "entry_quality_reject_reason": assessment.reject_reason,
-                "required_move_pct": str(assessment.required_move_pct),
-                "net_break_even_pct": str(assessment.net_break_even_pct),
+                "entry_quality_multiplier": str(economics.combined_multiplier),
+                "entry_quality_recommendation": economics.recommendation.value,
+                "entry_quality_reject_reason": economics.reject_reason,
+                "required_move_pct": str(eq.required_move_pct if eq else ""),
+                "net_break_even_pct": str(eq.net_break_even_pct if eq else ""),
+                "expected_net_profit_per_hour": (
+                    str(ce.expected_net_profit_per_hour)
+                    if ce and ce.expected_net_profit_per_hour is not None
+                    else None
+                ),
+                "capital_efficiency_per_capital_hour": (
+                    str(ce.capital_efficiency_per_capital_hour)
+                    if ce and ce.capital_efficiency_per_capital_hour is not None
+                    else None
+                ),
+                "expected_hold_seconds": (
+                    str(ce.expected_hold_seconds)
+                    if ce and ce.expected_hold_seconds is not None
+                    else None
+                ),
             }
         )
-        return (
-            opportunity.model_copy(update={"quantity": new_qty, "metadata": meta}),
-            assessment,
-        )
+        if economics.venue and not meta.get("buy_exchange"):
+            meta["buy_exchange"] = economics.venue
+            meta["venue"] = economics.venue
+        update: dict[str, Any] = {"quantity": new_qty, "metadata": meta}
+        return opportunity.model_copy(update=update), eq
 
     async def run_once(self, symbol: str) -> TradeCycleResult:
         """Run a single evaluation cycle for ``symbol``."""
@@ -257,6 +300,11 @@ class TradingEngine:
             opportunities = await self._strategy.evaluate(primary)
         if timing:
             lat.record("candidate_creation", time.perf_counter() - t0)
+        eq_ctx = self._entry_quality
+        if eq_ctx is not None and eq_ctx.venue_config.enabled and opportunities:
+            opportunities = select_best_buy_opportunities(
+                opportunities, config=eq_ctx.venue_config
+            )
         result.opportunities = opportunities
         processed: list[TradeOpportunity] = []
 

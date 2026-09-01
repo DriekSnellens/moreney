@@ -606,6 +606,25 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "average_recommended_size_multiplier": diag.get(
             "average_recommended_size_multiplier"
         ),
+        "capital_efficiency_candidates": diag.get("capital_efficiency_candidates"),
+        "capital_efficiency_reduced": diag.get("capital_efficiency_reduced"),
+        "capital_efficiency_rejected": diag.get("capital_efficiency_rejected"),
+        "venue_bitvavo_selected": diag.get("venue_bitvavo_selected"),
+        "venue_okx_selected": diag.get("venue_okx_selected"),
+        "mfe_capture_samples": diag.get("mfe_capture_samples"),
+        "average_mfe_capture_ratio": diag.get("average_mfe_capture_ratio"),
+        "average_hold_minutes": diag.get("average_hold_minutes"),
+        "net_eur_per_hour": diag.get("net_eur_per_hour"),
+        "capital_deployed_eur": diag.get("capital_deployed_eur"),
+        "capital_locked_eur": diag.get("capital_locked_eur"),
+        "capital_utilization_pct": diag.get("capital_utilization_pct"),
+        "realized_net_eur_session": diag.get("realized_net_eur_session"),
+        "headroom_reject": diag.get("headroom_reject"),
+        "extension_reject": diag.get("extension_reject"),
+        "continuity_reject": diag.get("continuity_reject"),
+        "headroom_unknown": diag.get("headroom_unknown"),
+        "adaptive_trail_hold": diag.get("adaptive_trail_hold"),
+        "adaptive_trail_harvest": diag.get("adaptive_trail_harvest"),
     }
 
 

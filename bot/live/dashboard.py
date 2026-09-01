@@ -1285,6 +1285,36 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Avg extension: {_esc(eq_diag.get('average_extension_pct', '—'))}</span>"
         f"<span>Avg required move: {_esc(eq_diag.get('average_required_move_pct', '—'))}</span>"
         f"<span>Avg quality: {_esc(eq_diag.get('average_entry_quality', '—'))}</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Headroom rejects: {_esc(eq_diag.get('headroom_reject', '—'))}</span>"
+        f"<span>Extension rejects: {_esc(eq_diag.get('extension_reject', '—'))}</span>"
+        f"<span>Continuity rejects: {_esc(eq_diag.get('continuity_reject', '—'))}</span>"
+        f"<span>Headroom unknown: {_esc(eq_diag.get('headroom_unknown', '—'))}</span>"
+        "</div></section>"
+    )
+    cap_deployed = _dec(eq_diag.get("capital_deployed_eur"))
+    cap_locked = _dec(eq_diag.get("capital_locked_eur"))
+    cap_util = eq_diag.get("capital_utilization_pct")
+    net_hr = eq_diag.get("net_eur_per_hour")
+    mfe_cap = eq_diag.get("average_mfe_capture_ratio")
+    hold_min = eq_diag.get("average_hold_minutes")
+    eff_html = (
+        "<section class='target-band' aria-label='Profit efficiency'>"
+        "<h2>Profit efficiency</h2>"
+        "<div class='band-row'>"
+        f"<span>Realized NET today: <strong>{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
+        f"<span>NET EUR/hour: {_esc(net_hr if net_hr is not None else '—')}</span>"
+        f"<span>Capital deployed: {_esc(_eur(cap_deployed) if cap_deployed is not None else '—')}</span>"
+        f"<span>Capital locked: {_esc(_eur(cap_locked) if cap_locked is not None else '—')}</span>"
+        f"<span>Utilization: {_esc(cap_util if cap_util is not None else '—')}%</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Avg hold: {_esc(hold_min if hold_min is not None else '—')} min</span>"
+        f"<span>MFE capture: {_esc(mfe_cap if mfe_cap is not None else '—')}</span>"
+        f"<span>Cap-eff candidates: {_esc(eq_diag.get('capital_efficiency_candidates', '—'))}</span>"
+        f"<span>Cap-eff rejected: {_esc(eq_diag.get('capital_efficiency_rejected', '—'))}</span>"
+        f"<span>Venue: BV {_esc(eq_diag.get('venue_bitvavo_selected', '—'))} · OKX {_esc(eq_diag.get('venue_okx_selected', '—'))}</span>"
         "</div></section>"
     )
 
@@ -1430,6 +1460,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {target_band_html}
       {obs_html}
       {eq_html}
+      {eff_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">

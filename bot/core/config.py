@@ -611,6 +611,20 @@ class Settings(BaseSettings):
     live_micro_entry_weight_extension: float = Field(default=0.15, ge=0.0, le=1.0)
     live_micro_entry_weight_net_edge: float = Field(default=0.15, ge=0.0, le=1.0)
     live_micro_entry_weight_liquidity: float = Field(default=0.05, ge=0.0, le=1.0)
+    # Capital velocity / efficiency (downward-only sizing modifier).
+    live_micro_capital_efficiency_enabled: bool = False
+    live_micro_min_expected_net_profit_per_hour: float = Field(default=0.05, ge=0.0, le=500.0)
+    live_micro_expected_hold_seconds: float = Field(default=1800.0, ge=60.0, le=86400.0)
+    live_micro_min_expected_hold_seconds: float = Field(default=300.0, ge=60.0, le=86400.0)
+    live_micro_max_expected_hold_seconds: float = Field(default=7200.0, ge=300.0, le=86400.0)
+    live_micro_capital_efficiency_reduced_multiplier: float = Field(default=0.75, ge=0.1, le=1.0)
+    live_micro_capital_efficiency_small_multiplier: float = Field(default=0.50, ge=0.1, le=1.0)
+    # Venue economic ranking (same opportunity, pick best NET venue).
+    live_micro_venue_economic_ranking_enabled: bool = False
+    live_micro_venue_default_fill_probability: float = Field(default=0.85, ge=0.1, le=1.0)
+    # MFE analytics + adaptive trail hints (never below BE).
+    live_micro_mfe_analytics_enabled: bool = True
+    live_micro_adaptive_trail_enabled: bool = True
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

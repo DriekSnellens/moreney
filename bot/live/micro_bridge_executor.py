@@ -34,6 +34,15 @@ from bot.strategies.entry_quality import (
     config_from_settings,
     evaluate_entry_quality,
 )
+from bot.strategies.opportunity_economics import (
+    EconomicDiagnostics,
+    MFERecord,
+    adaptive_trail_should_hold,
+    compute_mfe_record,
+    config_capital_efficiency_from_settings,
+    config_venue_economics_from_settings,
+    underwater_recovery_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -397,6 +406,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._entry_quality_config = config_from_settings(settings)
         self._entry_quality_enabled = bool(self._entry_quality_config.enabled)
         self._entry_quality_diagnostics = EntryQualityDiagnostics()
+        self._economic_diagnostics = EconomicDiagnostics()
+        self._capital_efficiency_config = config_capital_efficiency_from_settings(settings)
+        self._venue_economics_config = config_venue_economics_from_settings(settings)
+        self._capital_efficiency_enabled = bool(
+            self._capital_efficiency_config.enabled
+        )
+        self._mfe_analytics_enabled = bool(
+            getattr(settings, "live_micro_mfe_analytics_enabled", True)
+        )
+        self._adaptive_trail_enabled = bool(
+            getattr(settings, "live_micro_adaptive_trail_enabled", True)
+        )
         self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
             str(getattr(settings, "live_micro_corr_group", "") or "")
@@ -1215,20 +1236,36 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             symbol = f"{base}{self._quote}"
             mom = self._momentum_display(symbol)
-            items.append(
-                {
-                    "key": trail_key,
-                    "base": base,
-                    "venue": venue,
-                    "notional_eur": str(notional.quantize(Decimal("0.01"))),
-                    "gain_pct": st.get("gain_pct"),
-                    "role": st.get("role") or "micro_recycle",
-                    "momentum_direction": mom["direction"],
-                    "momentum_arrow": mom["arrow"],
-                    "momentum_return_pct": mom["return_pct"],
-                    "momentum_samples": mom["samples"],
-                }
-            )
+            row: dict[str, Any] = {
+                "key": trail_key,
+                "base": base,
+                "venue": venue,
+                "notional_eur": str(notional.quantize(Decimal("0.01"))),
+                "gain_pct": st.get("gain_pct"),
+                "role": st.get("role") or "micro_recycle",
+                "momentum_direction": mom["direction"],
+                "momentum_arrow": mom["arrow"],
+                "momentum_return_pct": mom["return_pct"],
+                "momentum_samples": mom["samples"],
+            }
+            be = self._break_even_sell_price(venue, base)
+            mark = Decimal(str(st.get("last_mark") or 0))
+            opened = self._position_opened_at.get(trail_key)
+            age_sec = None
+            if opened:
+                age_sec = Decimal(str(max(0.0, time.time() - float(opened))))
+            if be and mark > 0 and mark < be:
+                recovery = underwater_recovery_metrics(
+                    mark=mark,
+                    break_even=be,
+                    notional_eur=notional,
+                    age_seconds=age_sec,
+                    expected_hold_seconds=Decimal(
+                        str(getattr(self._settings, "live_micro_expected_hold_seconds", 1800))
+                    ),
+                )
+                row.update(recovery)
+            items.append(row)
         items.sort(
             key=lambda row: Decimal(str(row.get("notional_eur") or 0)),
             reverse=True,
@@ -1388,7 +1425,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     reverse=True,
                 )[:12],
                 "why_idle": self._why_idle_hints(),
-                **self._entry_quality_diagnostics.snapshot(),
+                **self.economic_diagnostics_snapshot(),
             },
         }
 
@@ -1780,6 +1817,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def mark_history(self, symbol: str) -> list[Decimal]:
         """Rolling mid marks for entry quality (oldest → newest)."""
         return self._series_for(symbol).marks()
+
+    def _refresh_economic_capital_metrics(self) -> None:
+        """Update capital deployed/locked for profit-efficiency dashboard."""
+        deployed = _ZERO
+        locked = _ZERO
+        for v in sorted(self._execute_venues):
+            deployed += self._active_book_notional(v)
+            locked += self._underwater_book_notional(v)
+        self._economic_diagnostics._capital_deployed_eur = deployed  # noqa: SLF001
+        self._economic_diagnostics._capital_locked_eur = locked  # noqa: SLF001
+
+    def economic_diagnostics_snapshot(self) -> dict[str, Any]:
+        self._refresh_economic_capital_metrics()
+        return self._economic_diagnostics.snapshot(
+            entry_quality_extra=self._entry_quality_diagnostics.snapshot()
+        )
 
     def entry_quality_diagnostics_snapshot(self) -> dict[str, Any]:
         return self._entry_quality_diagnostics.snapshot()
@@ -2567,6 +2620,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         fee: Decimal,
         venue: str = "",
         fee_currency: str | None = None,
+        fill_meta: dict[str, Any] | None = None,
     ) -> None:
         """Update FIFO lots / realized PnL for a live mirrored fill."""
         if qty <= 0 or price <= 0:
@@ -2588,6 +2642,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._session_lots.setdefault(lot_key, []).append([lot_qty, unit])
             trail_st = self._trail.setdefault(lot_key, {})
             trail_st["sleeve"] = True  # A: session buys belong to velocity sleeve
+            if self._mfe_analytics_enabled:
+                trail_st["entry_price"] = str(price)
+                trail_st["mfe_price"] = str(price)
+                trail_st["mae_price"] = str(price)
+                trail_st["entry_mono"] = time.monotonic()
+            meta = fill_meta or {}
+            for key in (
+                "extension_pct",
+                "headroom_pct",
+                "trend_continuity",
+                "entry_quality_score",
+            ):
+                val = meta.get(key)
+                if val is not None:
+                    trail_st[f"entry_{key}"] = str(val)
             if was_new_base:
                 # Tag for early-cut / cut-loss — free capital if entry goes bad.
                 trail_st["new_session_base"] = True
@@ -2633,6 +2702,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             cost += remaining * price
         trade_pnl = proceeds - cost
         self.realized_trade_pnl_eur += trade_pnl
+        if self._mfe_analytics_enabled:
+            trail_st = self._trail.get(lot_key) or {}
+            entry_px = Decimal(str(trail_st.get("entry_price") or cost or price))
+            mfe_px = Decimal(str(trail_st.get("mfe_price") or price))
+            mae_px = Decimal(str(trail_st.get("mae_price") or price))
+            entry_mono = trail_st.get("entry_mono")
+            hold_sec: Decimal | None = None
+            if entry_mono is not None:
+                hold_sec = Decimal(str(max(0.0, time.monotonic() - float(entry_mono))))
+            notional = qty * price if qty * price > 0 else proceeds
+            mfe_rec = compute_mfe_record(
+                entry_price=entry_px,
+                exit_price=price,
+                mfe_price=mfe_px,
+                mae_price=mae_px,
+                cost_basis=cost if cost > 0 else entry_px,
+                realized_net_eur=trade_pnl,
+                notional=notional,
+                holding_seconds=hold_sec,
+            )
+            self._economic_diagnostics.record_mfe(mfe_rec)
+            self._economic_diagnostics._sum_realized_net_eur += trade_pnl  # noqa: SLF001
+            if hold_sec is not None and hold_sec > 0 and trade_pnl > 0:
+                self._economic_diagnostics.record_net_per_hour(
+                    trade_pnl / (hold_sec / Decimal("3600"))
+                )
         # A: attribute PnL to velocity sleeve when session inventory was sold.
         if sess_consumed > 0 or bool(
             (self._trail.get(lot_key) or {}).get("sleeve")
@@ -4113,7 +4208,36 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if be is None or mark < be:
             return False
-        return self._momentum_still_rising(symbol)
+        if self._momentum_still_rising(symbol):
+            return True
+        if self._adaptive_trail_enabled and self._mfe_analytics_enabled:
+            marks = self.mark_history(symbol)
+            ext_raw = st.get("entry_extension_pct")
+            cont_raw = st.get("entry_continuity")
+            hr_raw = st.get("entry_headroom_pct")
+            try:
+                ext = Decimal(str(ext_raw)) if ext_raw is not None else None
+            except Exception:  # noqa: BLE001
+                ext = None
+            try:
+                cont = Decimal(str(cont_raw)) if cont_raw is not None else None
+            except Exception:  # noqa: BLE001
+                cont = None
+            try:
+                hr = Decimal(str(hr_raw)) if hr_raw is not None else None
+            except Exception:  # noqa: BLE001
+                hr = None
+            if adaptive_trail_should_hold(
+                symbol=symbol,
+                marks=marks,
+                extension_pct=ext,
+                continuity=cont,
+                headroom_pct=hr,
+                enabled=True,
+            ):
+                self._economic_diagnostics.adaptive_trail_hold += 1
+                return True
+        return False
 
     def _is_new_base_buy(self, venue: str, base: str) -> bool:
         return base.upper() not in self._held_alt_bases(venue)
@@ -4545,6 +4669,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         st["hard_arm"] = str(hard_arm)
         st["atr"] = str(atr)
         st["session_qty"] = str(self._session_qty(venue, base))
+        if self._mfe_analytics_enabled and mark > 0:
+            mfe_px = Decimal(str(st.get("mfe_price") or mark))
+            mae_px = Decimal(str(st.get("mae_price") or mark))
+            if mark > mfe_px:
+                st["mfe_price"] = str(mark)
+            if mae_px <= 0 or mark < mae_px:
+                st["mae_price"] = str(mark)
         st["newly_soft"] = False
         st["newly_hard"] = False
         st["newly_armed"] = False
@@ -6376,6 +6507,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             price=average_price,
             fee=fee,
             venue=venue,
+            fill_meta=dict(order_request.metadata or {}),
         )
         self._note_live_fill_event(
             venue=venue,
