@@ -445,6 +445,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(getattr(settings, "live_micro_intelligence_persist_path", "./data/live_micro_intelligence_state.json"))
         )
         self._intelligence = IntelligenceSession.load(self._intelligence_path, settings)
+        self._intelligence.observation_mode = bool(
+            getattr(settings, "live_micro_intelligence_observation_mode", True)
+        )
         self._capital_state_snapshot: dict[str, Any] = {}
         self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
