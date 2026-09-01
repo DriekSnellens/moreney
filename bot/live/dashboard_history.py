@@ -595,6 +595,17 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "portfolio_holdings": bridge.get("portfolio_holdings") or [],
         "recent_fills": recent_fills,
         "last_fill": last_fill,
+        "entry_quality_candidates": diag.get("entry_quality_candidates"),
+        "entry_quality_normal": diag.get("entry_quality_normal"),
+        "entry_quality_reduced": diag.get("entry_quality_reduced"),
+        "entry_quality_rejected": diag.get("entry_quality_rejected"),
+        "average_headroom_pct": diag.get("average_headroom_pct"),
+        "average_extension_pct": diag.get("average_extension_pct"),
+        "average_entry_quality": diag.get("average_entry_quality"),
+        "average_required_move_pct": diag.get("average_required_move_pct"),
+        "average_recommended_size_multiplier": diag.get(
+            "average_recommended_size_multiplier"
+        ),
     }
 
 

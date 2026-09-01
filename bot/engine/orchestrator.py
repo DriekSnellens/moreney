@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any
 import time
 
-from bot.core.enums import OpportunitySide, OrderStatus, OrderType, RiskDecisionStatus
+from bot.core.enums import EntryQualityRecommendation, OpportunitySide, OrderStatus, OrderType, RiskDecisionStatus
 from bot.core.exceptions import ExchangeError, RiskRejectedError
 from bot.core.interfaces import (
     Executor,
@@ -38,6 +38,23 @@ from bot.execution.paper_executor import PaperExecutor
 from bot.opportunity.engine import GlobalOpportunityEngine
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
+from bot.strategies.entry_quality import (
+    EntryQualityAssessment,
+    EntryQualityConfig,
+    EntryQualityDiagnostics,
+    apply_size_multiplier,
+    config_from_settings,
+    evaluate_entry_quality,
+)
+
+
+@dataclass
+class EntryQualityContext:
+    """Live entry quality hook — marks from bridge, shared diagnostics."""
+
+    config: EntryQualityConfig
+    diagnostics: EntryQualityDiagnostics
+    marks_for: Any | None = None  # callable[[str], list[Decimal]]
 
 
 @dataclass
@@ -52,6 +69,9 @@ class TradeCycleResult:
     orders: list[Order] = field(default_factory=list)
     fills: list[Fill] = field(default_factory=list)
     rejected: list[tuple[TradeOpportunity, RiskDecision]] = field(default_factory=list)
+    entry_quality_rejected: list[tuple[TradeOpportunity, EntryQualityAssessment]] = field(
+        default_factory=list
+    )
     portfolio_equity: Decimal | None = None
     opportunity_ranking: dict[str, Any] | None = None
 
@@ -69,6 +89,7 @@ class TradingEngine:
         portfolio: PortfolioService,
         executor: Executor,
         opportunity_engine: Any | None = None,
+        entry_quality: EntryQualityContext | None = None,
     ) -> None:
         self._market_data = market_data
         self._strategy = strategy
@@ -77,6 +98,7 @@ class TradingEngine:
         self._portfolio = portfolio
         self._executor = executor
         self._opportunity_engine = opportunity_engine
+        self._entry_quality = entry_quality
         self._latency: Any = None
 
     def attach_latency_tracker(self, tracker: Any | None) -> None:
@@ -93,6 +115,84 @@ class TradingEngine:
         if isinstance(self._executor, (PaperExecutor, ExecutionService)):
             return self._executor.portfolio  # type: ignore[no-any-return]
         return None
+
+    @staticmethod
+    def _is_buy_opportunity(opportunity: TradeOpportunity) -> bool:
+        side = opportunity.side
+        val = str(side.value if hasattr(side, "value") else side).lower()
+        return val in {"buy", "long"}
+
+    @staticmethod
+    def _skip_entry_quality(opportunity: TradeOpportunity) -> bool:
+        meta = opportunity.metadata or {}
+        return bool(
+            meta.get("dust_top_up")
+            or meta.get("ladder_leg")
+            or meta.get("trail_take_profit")
+            or meta.get("winner_add")
+        )
+
+    def _apply_entry_quality(
+        self,
+        opportunity: TradeOpportunity,
+        profitability: ProfitabilityResult,
+    ) -> tuple[TradeOpportunity | None, EntryQualityAssessment | None]:
+        ctx = self._entry_quality
+        if ctx is None or not ctx.config.enabled:
+            return opportunity, None
+        if not self._is_buy_opportunity(opportunity) or self._skip_entry_quality(opportunity):
+            return opportunity, None
+        marks: list[Decimal] = []
+        if ctx.marks_for is not None:
+            try:
+                marks = [Decimal(str(m)) for m in ctx.marks_for(opportunity.symbol)]
+            except Exception:  # noqa: BLE001
+                marks = []
+        assessment = evaluate_entry_quality(
+            opportunity=opportunity,
+            profitability=profitability,
+            marks=marks,
+            config=ctx.config,
+        )
+        ctx.diagnostics.record(assessment)
+        if assessment.recommendation == EntryQualityRecommendation.REJECT:
+            return None, assessment
+        new_qty = apply_size_multiplier(
+            opportunity.quantity,
+            assessment.recommended_size_multiplier,
+        )
+        if new_qty <= 0:
+            return None, assessment
+        meta = dict(opportunity.metadata or {})
+        meta.update(
+            {
+                "entry_quality_score": str(assessment.score),
+                "headroom_pct": (
+                    str(assessment.headroom_pct)
+                    if assessment.headroom_pct is not None
+                    else None
+                ),
+                "extension_pct": (
+                    str(assessment.extension_pct)
+                    if assessment.extension_pct is not None
+                    else None
+                ),
+                "trend_continuity": (
+                    str(assessment.trend_continuity)
+                    if assessment.trend_continuity is not None
+                    else None
+                ),
+                "entry_quality_multiplier": str(assessment.recommended_size_multiplier),
+                "entry_quality_recommendation": assessment.recommendation.value,
+                "entry_quality_reject_reason": assessment.reject_reason,
+                "required_move_pct": str(assessment.required_move_pct),
+                "net_break_even_pct": str(assessment.net_break_even_pct),
+            }
+        )
+        return (
+            opportunity.model_copy(update={"quantity": new_qty, "metadata": meta}),
+            assessment,
+        )
 
     async def run_once(self, symbol: str) -> TradeCycleResult:
         """Run a single evaluation cycle for ``symbol``."""
@@ -185,6 +285,14 @@ class TradingEngine:
                     continue
                 if self._should_skip_maker_quote(opportunity):
                     continue
+                eq_orig = opportunity
+                opportunity, eq_assessment = self._apply_entry_quality(
+                    opportunity, profitability
+                )
+                if opportunity is None:
+                    if eq_assessment is not None:
+                        result.entry_quality_rejected.append((eq_orig, eq_assessment))
+                    continue
                 processed.append(opportunity)
                 result.profitability.append(profitability)
                 result.risk_decisions.append(decision)
@@ -222,7 +330,6 @@ class TradingEngine:
         for opportunity in opportunities:
             if self._should_skip_maker_quote(opportunity):
                 continue
-            processed.append(opportunity)
             # Keep mark prices fresh for unrealized PnL when using paper portfolio.
             paper = self.paper_portfolio
             if paper is not None and opportunity.market is not None:
@@ -240,6 +347,17 @@ class TradingEngine:
                 ),
             )
             result.profitability.append(profitability)
+
+            eq_orig = opportunity
+            opportunity, eq_assessment = self._apply_entry_quality(
+                opportunity, profitability
+            )
+            if opportunity is None:
+                if eq_assessment is not None:
+                    result.entry_quality_rejected.append((eq_orig, eq_assessment))
+                continue
+
+            processed.append(opportunity)
 
             opportunity, risk_context = self._enrich_for_risk(opportunity, venue_snapshots)
             slip_pct = (

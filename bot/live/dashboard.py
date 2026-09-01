@@ -1269,6 +1269,24 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Ring: {' · '.join(ring_bits) if ring_bits else '—'}</span>"
         "</div></section>"
     )
+    eq_diag = bridge.get("diagnostics") or {}
+    eq_candidates = eq_diag.get("entry_quality_candidates")
+    eq_html = (
+        "<section class='target-band' aria-label='Entry quality'>"
+        "<h2>Entry quality</h2>"
+        "<div class='band-row'>"
+        f"<span>Candidates: <strong>{_esc(eq_candidates if eq_candidates is not None else '—')}</strong></span>"
+        f"<span>Normal: {_esc(eq_diag.get('entry_quality_normal', '—'))}</span>"
+        f"<span>Reduced: {_esc(eq_diag.get('entry_quality_reduced', '—'))}</span>"
+        f"<span>Rejected: {_esc(eq_diag.get('entry_quality_rejected', '—'))}</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Avg headroom: {_esc(eq_diag.get('average_headroom_pct', '—'))}</span>"
+        f"<span>Avg extension: {_esc(eq_diag.get('average_extension_pct', '—'))}</span>"
+        f"<span>Avg required move: {_esc(eq_diag.get('average_required_move_pct', '—'))}</span>"
+        f"<span>Avg quality: {_esc(eq_diag.get('average_entry_quality', '—'))}</span>"
+        "</div></section>"
+    )
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
@@ -1411,6 +1429,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {charts_html}
       {target_band_html}
       {obs_html}
+      {eq_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">

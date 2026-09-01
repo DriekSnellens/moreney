@@ -61,6 +61,14 @@ class FeeRole(StrEnum):
     TAKER = "taker"
 
 
+class EntryQualityRecommendation(StrEnum):
+    """Entry quality sizing recommendation (downward-only modifier)."""
+
+    REJECT = "reject"
+    REDUCED_SIZE = "reduced_size"
+    NORMAL_SIZE = "normal_size"
+
+
 class KillSwitchState(StrEnum):
     """Kill-switch lifecycle. PAUSED / EMERGENCY_STOP block new orders."""
 

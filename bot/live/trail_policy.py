@@ -89,6 +89,10 @@ class MarkSeries:
         ups = sum(1 for i in range(1, len(window)) if window[i] > window[i - 1])
         return ups >= int(min_up) and window[-1] >= window[0]
 
+    def marks(self) -> list[Decimal]:
+        """Copy of rolling mark history (oldest → newest)."""
+        return list(self._marks)
+
 
 def scale_thresholds(
     *,

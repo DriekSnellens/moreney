@@ -586,6 +586,31 @@ class Settings(BaseSettings):
     # Above BE: defer harvest partials while last N marks are still rising; sell on pullback.
     live_micro_trail_hold_while_rising: bool = True
     live_micro_trail_hold_rising_n: int = Field(default=2, ge=0, le=12)
+    # Entry quality + headroom engine (live micro buys; downward size modifier only).
+    live_micro_entry_headroom_enabled: bool = False
+    live_micro_entry_headroom_min_pct: float = Field(default=0.0025, ge=0.0, le=0.10)
+    live_micro_entry_extension_moderate_pct: float = Field(default=0.012, ge=0.0, le=0.50)
+    live_micro_entry_extension_max_pct: float = Field(default=0.025, ge=0.0, le=0.50)
+    live_micro_entry_extension_extreme_pct: float = Field(default=0.045, ge=0.0, le=0.50)
+    live_micro_entry_quality_min_score: float = Field(default=60.0, ge=0.0, le=100.0)
+    live_micro_entry_reduced_size_score: float = Field(default=70.0, ge=0.0, le=100.0)
+    live_micro_entry_normal_size_score: float = Field(default=80.0, ge=0.0, le=100.0)
+    live_micro_entry_reduced_size_multiplier: float = Field(default=0.75, ge=0.1, le=1.0)
+    live_micro_entry_small_size_multiplier: float = Field(default=0.50, ge=0.1, le=1.0)
+    live_micro_entry_min_continuity_score: float = Field(default=0.35, ge=0.0, le=1.0)
+    live_micro_entry_target_harvest_pct: float = Field(default=0.012, ge=0.0, le=0.10)
+    live_micro_entry_range_lookback: int = Field(default=30, ge=5, le=240)
+    live_micro_entry_extension_samples_5m: int = Field(default=5, ge=2, le=60)
+    live_micro_entry_extension_samples_30m: int = Field(default=30, ge=5, le=120)
+    live_micro_entry_extension_samples_2h: int = Field(default=120, ge=10, le=240)
+    live_micro_entry_continuity_min_marks: int = Field(default=5, ge=3, le=48)
+    live_micro_entry_headroom_unknown_score: float = Field(default=0.45, ge=0.0, le=1.0)
+    live_micro_entry_weight_momentum: float = Field(default=0.20, ge=0.0, le=1.0)
+    live_micro_entry_weight_continuity: float = Field(default=0.15, ge=0.0, le=1.0)
+    live_micro_entry_weight_headroom: float = Field(default=0.30, ge=0.0, le=1.0)
+    live_micro_entry_weight_extension: float = Field(default=0.15, ge=0.0, le=1.0)
+    live_micro_entry_weight_net_edge: float = Field(default=0.15, ge=0.0, le=1.0)
+    live_micro_entry_weight_liquidity: float = Field(default=0.05, ge=0.0, le=1.0)
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

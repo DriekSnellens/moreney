@@ -258,6 +258,18 @@ def _session_settings(
             "live_micro_winner_add_cooldown_sec": 45.0,
             "live_micro_buy_quality_underwater_count": 2,
             "live_micro_buy_quality_pause_sec": 1800.0,
+            "live_micro_entry_headroom_enabled": True,
+            "live_micro_entry_headroom_min_pct": 0.0025,
+            "live_micro_entry_extension_moderate_pct": 0.012,
+            "live_micro_entry_extension_max_pct": 0.025,
+            "live_micro_entry_extension_extreme_pct": 0.045,
+            "live_micro_entry_quality_min_score": 60.0,
+            "live_micro_entry_reduced_size_score": 70.0,
+            "live_micro_entry_normal_size_score": 80.0,
+            "live_micro_entry_reduced_size_multiplier": 0.75,
+            "live_micro_entry_small_size_multiplier": 0.50,
+            "live_micro_entry_min_continuity_score": 0.35,
+            "live_micro_entry_target_harvest_pct": 0.012,
             "live_micro_block_underwater_cross_venue": True,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
@@ -440,6 +452,15 @@ def attach_micro_bridge(
         allowed_bases=allowed_bases,
         live_maker=True,
     )
+    from bot.strategies.entry_quality import EntryQualityDiagnostics, config_from_settings
+    from bot.engine.orchestrator import EntryQualityContext
+
+    eq_diag = bridge._entry_quality_diagnostics  # noqa: SLF001
+    eq_ctx = EntryQualityContext(
+        config=config_from_settings(settings),
+        diagnostics=eq_diag,
+        marks_for=bridge.mark_history,
+    )
     runner._executor = bridge  # noqa: SLF001
     runner._engine = TradingEngine(  # noqa: SLF001
         market_data=runner._provider,  # noqa: SLF001
@@ -453,6 +474,7 @@ def attach_micro_bridge(
             if runner._settings.global_opportunity_engine_enabled  # noqa: SLF001
             else None
         ),
+        entry_quality=eq_ctx,
     )
     return bridge
 

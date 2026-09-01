@@ -20,13 +20,20 @@ from typing import Any
 from uuid import uuid4
 
 from bot.core.config import Settings
-from bot.core.enums import OpportunitySide, OrderSide, OrderStatus, OrderType
-from bot.core.models import ExecutionResult, OrderRequest
+from bot.core.enums import EntryQualityRecommendation, OpportunitySide, OrderSide, OrderStatus, OrderType
+from bot.core.models import ExecutionResult, OrderRequest, ProfitabilityResult, TradeOpportunity
 from bot.execution.paper_executor import PaperExecutor
 from bot.live.micro_engine import LiveMicroEngine
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
 from bot.portfolio.venue_ledger import infer_base_asset
+from bot.strategies.entry_quality import (
+    EntryQualityAssessment,
+    EntryQualityDiagnostics,
+    apply_size_multiplier,
+    config_from_settings,
+    evaluate_entry_quality,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +394,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_block_underwater_cross_venue", True)
         )
         self._buy_quality_pause_until = 0.0
+        self._entry_quality_config = config_from_settings(settings)
+        self._entry_quality_enabled = bool(self._entry_quality_config.enabled)
+        self._entry_quality_diagnostics = EntryQualityDiagnostics()
         self._recent_session_buy_keys: list[str] = []
         self._corr_group = parse_corr_group(
             str(getattr(settings, "live_micro_corr_group", "") or "")
@@ -1378,6 +1388,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     reverse=True,
                 )[:12],
                 "why_idle": self._why_idle_hints(),
+                **self._entry_quality_diagnostics.snapshot(),
             },
         }
 
@@ -1765,6 +1776,71 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             series = self._MarkSeries(maxlen=max(self._atr_samples, self._momentum_samples))
             self._mark_series[symbol] = series
         return series
+
+    def mark_history(self, symbol: str) -> list[Decimal]:
+        """Rolling mid marks for entry quality (oldest → newest)."""
+        return self._series_for(symbol).marks()
+
+    def entry_quality_diagnostics_snapshot(self) -> dict[str, Any]:
+        return self._entry_quality_diagnostics.snapshot()
+
+    def _profitability_stub_for_entry_quality(
+        self,
+        *,
+        qty: Decimal,
+        px: Decimal,
+        meta: dict[str, Any],
+    ) -> ProfitabilityResult:
+        notional = qty * px
+        net_eur = meta.get("net_profit_eur")
+        net_ret = meta.get("net_return")
+        try:
+            net_profit = Decimal(str(net_eur)) if net_eur is not None else _ZERO
+        except Exception:  # noqa: BLE001
+            net_profit = _ZERO
+        try:
+            net_return = Decimal(str(net_ret)) if net_ret is not None else _ZERO
+        except Exception:  # noqa: BLE001
+            net_return = _ZERO
+        fee_est = notional * Decimal("0.002") if notional > 0 else _ZERO
+        return ProfitabilityResult(
+            opportunity_id=uuid4(),
+            gross_profit_usd=net_profit + fee_est,
+            fees_usd=fee_est,
+            slippage_usd=_ZERO,
+            funding_usd=_ZERO,
+            execution_buffer_usd=notional * Decimal("0.001"),
+            net_profit_usd=net_profit,
+            net_return=net_return,
+            is_profitable=net_profit > 0,
+            trade_allowed=True,
+        )
+
+    def _assess_entry_quality_buy(
+        self,
+        *,
+        symbol: str,
+        qty: Decimal,
+        px: Decimal,
+        meta: dict[str, Any],
+    ) -> EntryQualityAssessment:
+        profitability = self._profitability_stub_for_entry_quality(
+            qty=qty, px=px, meta=meta
+        )
+        opportunity = TradeOpportunity(
+            strategy_name=str(meta.get("strategy") or "maker_inventory"),
+            symbol=symbol,
+            side=OpportunitySide.BUY,
+            quantity=qty,
+            entry_price=px,
+            metadata=meta,
+        )
+        return evaluate_entry_quality(
+            opportunity=opportunity,
+            profitability=profitability,
+            marks=self.mark_history(symbol),
+            config=self._entry_quality_config,
+        )
 
     def _note_position_opened(self, venue: str, base: str) -> None:
         key = self._lots_key(venue, base)
@@ -5758,6 +5834,62 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ),
                 )
 
+        if (
+            side_is_buy
+            and self._entry_quality_enabled
+            and self._is_new_base_buy(venue, base)
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+            and not meta.get("winner_add")
+        ):
+            pre_rec = str(meta.get("entry_quality_recommendation") or "")
+            if pre_rec == EntryQualityRecommendation.REJECT.value:
+                self._bump_skip("entry_quality_reject")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ENTRY_QUALITY_REJECT",
+                    message=str(meta.get("entry_quality_reject_reason") or "entry_quality"),
+                )
+            if not pre_rec:
+                assessment = self._assess_entry_quality_buy(
+                    symbol=symbol,
+                    qty=Decimal(str(order_request.quantity or 0)),
+                    px=Decimal(str(order_request.limit_price or 0)),
+                    meta=meta,
+                )
+                self._entry_quality_diagnostics.record(assessment)
+                if assessment.recommendation == EntryQualityRecommendation.REJECT:
+                    self._bump_skip("entry_quality_reject")
+                    reason_key = assessment.reject_reason or "entry_quality"
+                    if "headroom" in reason_key:
+                        self._bump_skip("headroom_reject")
+                    if "extension" in reason_key:
+                        self._bump_skip("extension_reject")
+                    if "continuity" in reason_key:
+                        self._bump_skip("continuity_reject")
+                    if assessment.headroom_pct is None:
+                        self._bump_skip("headroom_unknown")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message=(
+                            f"entry quality {assessment.score} "
+                            f"headroom={assessment.headroom_pct} "
+                            f"ext={assessment.extension_pct} "
+                            f"req={assessment.required_move_pct} "
+                            f"({reason_key})"
+                        ),
+                    )
+                if assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
+                    self._bump_skip("entry_quality_reduced")
+                else:
+                    self._bump_skip("entry_quality_normal")
+            elif pre_rec == EntryQualityRecommendation.REDUCED_SIZE.value:
+                self._bump_skip("entry_quality_reduced")
+            elif pre_rec == EntryQualityRecommendation.NORMAL_SIZE.value:
+                self._bump_skip("entry_quality_normal")
+
         px = Decimal(str(order_request.limit_price or 0))
         qty = Decimal(str(order_request.quantity or 0))
         if px <= 0 or qty <= 0:
@@ -5765,6 +5897,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return await self._reject_before_live(
                 order_request, reason="BAD_SIZE", message="quantity/price required"
             )
+        if side_is_buy:
+            mult_raw = meta.get("entry_quality_multiplier")
+            if mult_raw is not None:
+                try:
+                    mult = Decimal(str(mult_raw))
+                except Exception:  # noqa: BLE001
+                    mult = _ONE
+                if mult < _ONE:
+                    scaled = apply_size_multiplier(qty, mult)
+                    if scaled <= 0:
+                        self._bump_skip("entry_quality_reject")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="ENTRY_QUALITY_REJECT",
+                            message="entry quality size multiplier zero",
+                        )
+                    qty = scaled
+                    order_request = order_request.model_copy(update={"quantity": qty})
         if side_is_buy and post_only:
             px = self._aggressive_buy_price(venue, px, order_book)
             order_request = order_request.model_copy(update={"limit_price": px})
