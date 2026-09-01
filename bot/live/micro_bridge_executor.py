@@ -350,6 +350,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._momentum_require_last_n_rising = int(
             getattr(settings, "live_micro_momentum_require_last_n_rising", 3) or 0
         )
+        self._trail_hold_while_rising = bool(
+            getattr(settings, "live_micro_trail_hold_while_rising", True)
+        )
+        self._trail_hold_rising_n = int(
+            getattr(settings, "live_micro_trail_hold_rising_n", 2) or 0
+        )
         self._buy_quality_underwater_count = int(
             getattr(settings, "live_micro_buy_quality_underwater_count", 4) or 0
         )
@@ -1275,6 +1281,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "winner_add_cooldown_sec": self._winner_add_cooldown_sec,
                 "cancel_buy_on_flat_momentum": self._cancel_buy_on_flat_momentum,
                 "momentum_require_last_n_rising": self._momentum_require_last_n_rising,
+                "trail_hold_while_rising": self._trail_hold_while_rising,
+                "trail_hold_rising_n": self._trail_hold_rising_n,
                 "buy_quality_pause_active": self._buy_quality_paused(),
                 "block_underwater_cross_venue": self._block_underwater_cross_venue,
                 "corr_group": sorted(self._corr_group),
@@ -3893,6 +3901,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         return mom <= -self._momentum_exit_min
 
+    _TRAIL_HOLD_RISING_REASONS = frozenset(
+        {
+            "trail_soft_partial",
+            "trail_hard_partial",
+            "trail_be_harvest",
+            "trail_exit_work",
+        }
+    )
+
+    def _momentum_still_rising(self, symbol: str) -> bool:
+        """True when the last N marks are still climbing (growth tape)."""
+        rising_n = self._trail_hold_rising_n
+        if rising_n <= 0:
+            return False
+        return self._series_for(symbol).last_n_rising(rising_n)
+
+    def _defer_harvest_while_rising(
+        self,
+        symbol: str,
+        *,
+        mark: Decimal,
+        be: Decimal | None,
+        st: dict[str, Any],
+        reason: str,
+    ) -> bool:
+        """Defer BE+ harvests while price momentum is still rising (wait for pullback)."""
+        if not self._trail_hold_while_rising:
+            return False
+        if reason not in self._TRAIL_HOLD_RISING_REASONS:
+            return False
+        if st.get("triggered"):
+            return False
+        if be is None or mark < be:
+            return False
+        return self._momentum_still_rising(symbol)
+
     def _is_new_base_buy(self, venue: str, base: str) -> bool:
         return base.upper() not in self._held_alt_bases(venue)
 
@@ -4983,6 +5027,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                                 "detail": add,
                             }
                         )
+                continue
+
+            if self._defer_harvest_while_rising(
+                symbol, mark=mark, be=be, st=st, reason=reason
+            ):
+                self._bump_skip("trail_hold_rising")
                 continue
 
             maker_min = Decimal(

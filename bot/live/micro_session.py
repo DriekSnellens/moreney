@@ -237,6 +237,8 @@ def _session_settings(
             "paper_buy_momentum_min_return": 0.0008,  # ≥+0.08% rising-tape entries
             "paper_buy_momentum_samples": 12,
             "live_micro_momentum_require_last_n_rising": 3,
+            "live_micro_trail_hold_while_rising": True,
+            "live_micro_trail_hold_rising_n": 2,
             "live_micro_ring_soft_max_active_eur": 650.0,
             "live_micro_low_util_rising_n": 2,
             "live_micro_low_util_buy_resting_max_age_sec": 60.0,

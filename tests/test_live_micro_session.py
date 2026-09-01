@@ -205,6 +205,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
     assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.0
     assert cfg.live_micro_early_cut_new_bases_only is True
+    assert cfg.live_micro_trail_hold_while_rising is True
+    assert cfg.live_micro_trail_hold_rising_n == 2
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
@@ -2671,6 +2673,79 @@ def test_last_n_rising_required_for_momentum_ok() -> None:
     for px in [100, 100.02, 100.05, 100.09]:
         series2.push(Decimal(str(px)))
     assert series2.last_n_rising(3) is True
+
+
+def test_trail_hold_rising_defers_be_harvest_above_be() -> None:
+    settings = _unlocked(
+        live_micro_trail_hold_while_rising=True,
+        live_micro_trail_hold_rising_n=2,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    symbol = "SOLEUR"
+    for px in ("100.00", "100.02", "100.05"):
+        bridge._series_for(symbol).push(Decimal(px))  # noqa: SLF001
+    st = {"triggered": False}
+    be = Decimal("99.50")
+    mark = Decimal("100.05")
+    assert bridge._momentum_still_rising(symbol) is True  # noqa: SLF001
+    assert bridge._defer_harvest_while_rising(  # noqa: SLF001
+        symbol, mark=mark, be=be, st=st, reason="trail_be_harvest"
+    ) is True
+    assert bridge._defer_harvest_while_rising(  # noqa: SLF001
+        symbol, mark=mark, be=be, st=st, reason="trail_drawdown"
+    ) is False
+
+
+def test_trail_hold_rising_allows_exit_after_pullback() -> None:
+    settings = _unlocked(
+        live_micro_trail_hold_while_rising=True,
+        live_micro_trail_hold_rising_n=2,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    symbol = "SOLEUR"
+    for px in ("100.10", "100.08", "100.06"):
+        bridge._series_for(symbol).push(Decimal(px))  # noqa: SLF001
+    st = {"triggered": False}
+    be = Decimal("99.50")
+    mark = Decimal("100.06")
+    assert bridge._momentum_still_rising(symbol) is False  # noqa: SLF001
+    assert bridge._defer_harvest_while_rising(  # noqa: SLF001
+        symbol, mark=mark, be=be, st=st, reason="trail_exit_work"
+    ) is False
+
+
+def test_trail_hold_rising_never_defers_drawdown_trigger() -> None:
+    settings = _unlocked(live_micro_trail_hold_while_rising=True)
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("100"),
+        live_maker=True,
+    )
+    symbol = "SOLEUR"
+    for px in ("100.00", "100.02", "100.05"):
+        bridge._series_for(symbol).push(Decimal(px))  # noqa: SLF001
+    st = {"triggered": True}
+    assert bridge._defer_harvest_while_rising(  # noqa: SLF001
+        symbol,
+        mark=Decimal("100.05"),
+        be=Decimal("99.50"),
+        st=st,
+        reason="trail_soft_partial",
+    ) is False
 
 
 def test_low_util_momentum_allows_shorter_rising(tmp_path: Path) -> None:

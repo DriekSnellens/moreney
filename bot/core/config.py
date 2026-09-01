@@ -570,6 +570,9 @@ class Settings(BaseSettings):
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).
     live_micro_trail_partial_min_frac: float = Field(default=0.45, ge=0.2, le=1.0)
+    # Above BE: defer harvest partials while last N marks are still rising; sell on pullback.
+    live_micro_trail_hold_while_rising: bool = True
+    live_micro_trail_hold_rising_n: int = Field(default=2, ge=0, le=12)
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 
