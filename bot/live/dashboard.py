@@ -1293,6 +1293,33 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Headroom unknown: {_esc(eq_diag.get('headroom_unknown', '—'))}</span>"
         "</div></section>"
     )
+    opp_html = (
+        "<section class='target-band' aria-label='Opportunity engine'>"
+        "<h2>Opportunity engine</h2>"
+        "<div class='band-row'>"
+        f"<span>Candidates: <strong>{_esc(eq_diag.get('opportunity_candidates', '—'))}</strong></span>"
+        f"<span>High quality: {_esc(eq_diag.get('opportunity_high_quality', '—'))}</span>"
+        f"<span>Reduced: {_esc(eq_diag.get('opportunity_reduced', '—'))}</span>"
+        f"<span>Rejected: {_esc(eq_diag.get('opportunity_rejected', '—'))}</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Best: {_esc(eq_diag.get('best_opportunity_symbol', '—'))} "
+        f"@ {_esc(eq_diag.get('best_opportunity_venue', '—'))}</span>"
+        f"<span>Score: {_esc(eq_diag.get('best_opportunity_score', '—'))}</span>"
+        f"<span>NET: {_esc(eq_diag.get('best_opportunity_net_eur', '—'))}</span>"
+        f"<span>NET/h: {_esc(eq_diag.get('best_opportunity_net_eur_per_hour', '—'))}</span>"
+        f"<span>Headroom: {_esc(eq_diag.get('best_opportunity_headroom_pct', '—'))}</span>"
+        f"<span>Extension: {_esc(eq_diag.get('best_opportunity_extension_pct', '—'))}</span>"
+        f"<span>Hold: {_esc(eq_diag.get('best_opportunity_hold_minutes', '—'))} min</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Allocator selected: {_esc(eq_diag.get('capital_allocator_selected', '—'))}</span>"
+        f"<span>Allocator skipped: {_esc(eq_diag.get('capital_allocator_skipped', '—'))}</span>"
+        f"<span>Volatility rejects: {_esc(eq_diag.get('volatility_reject', '—'))}</span>"
+        f"<span>Spread rejects: {_esc(eq_diag.get('spread_reject', '—'))}</span>"
+        f"<span>Timing rejects: {_esc(eq_diag.get('timing_reject', '—'))}</span>"
+        "</div></section>"
+    )
     cap_deployed = _dec(eq_diag.get("capital_deployed_eur"))
     cap_locked = _dec(eq_diag.get("capital_locked_eur"))
     cap_util = eq_diag.get("capital_utilization_pct")
@@ -1460,6 +1487,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {target_band_html}
       {obs_html}
       {eq_html}
+      {opp_html}
       {eff_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>

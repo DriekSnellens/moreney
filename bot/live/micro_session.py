@@ -277,6 +277,12 @@ def _session_settings(
             "live_micro_venue_economic_ranking_enabled": True,
             "live_micro_mfe_analytics_enabled": True,
             "live_micro_adaptive_trail_enabled": True,
+            "live_micro_opportunity_engine_enabled": True,
+            "live_micro_volatility_regime_enabled": True,
+            "live_micro_spread_liquidity_enabled": True,
+            "live_micro_timing_enabled": True,
+            "live_micro_coin_learning_enabled": True,
+            "live_micro_adaptive_exit_enabled": True,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
@@ -463,17 +469,35 @@ def attach_micro_bridge(
         config_capital_efficiency_from_settings,
         config_venue_economics_from_settings,
     )
+    from bot.strategies.opportunity_engine import (
+        OpportunityEngineDiagnostics,
+        config_from_settings as opportunity_engine_config_from_settings,
+    )
     from bot.engine.orchestrator import EntryQualityContext
 
     eq_diag = bridge._entry_quality_diagnostics  # noqa: SLF001
     econ_diag = bridge._economic_diagnostics  # noqa: SLF001
+    opp_diag = OpportunityEngineDiagnostics()
+    bridge._opportunity_diagnostics = opp_diag  # noqa: SLF001
+    corr_raw = str(getattr(settings, "live_micro_corr_group", "") or "")
+    corr_members = frozenset(
+        b.strip().upper() for b in corr_raw.split(",") if b.strip()
+    )
+    corr_groups = {"default": corr_members} if corr_members else None
     eq_ctx = EntryQualityContext(
         config=config_from_settings(settings),
         capital_config=config_capital_efficiency_from_settings(settings),
         venue_config=config_venue_economics_from_settings(settings),
         diagnostics=eq_diag,
         economic_diagnostics=econ_diag,
+        opportunity_config=opportunity_engine_config_from_settings(settings),
+        opportunity_diagnostics=opp_diag,
         marks_for=bridge.mark_history,
+        corr_groups=corr_groups,
+        max_per_corr_group=int(
+            getattr(settings, "live_micro_max_per_corr_group", 2) or 2
+        ),
+        available_capital_eur=budget_eur,
     )
     runner._executor = bridge  # noqa: SLF001
     runner._engine = TradingEngine(  # noqa: SLF001

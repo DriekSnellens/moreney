@@ -625,6 +625,32 @@ class Settings(BaseSettings):
     # MFE analytics + adaptive trail hints (never below BE).
     live_micro_mfe_analytics_enabled: bool = True
     live_micro_adaptive_trail_enabled: bool = True
+    # Central Opportunity Optimization Engine (live micro).
+    live_micro_opportunity_engine_enabled: bool = False
+    live_micro_extension_enabled: bool = True
+    live_micro_volatility_regime_enabled: bool = True
+    live_micro_spread_liquidity_enabled: bool = True
+    live_micro_timing_enabled: bool = True
+    live_micro_coin_learning_enabled: bool = True
+    live_micro_adaptive_exit_enabled: bool = True
+    live_micro_opportunity_min_score: float = Field(default=55.0, ge=0.0, le=100.0)
+    live_micro_opportunity_reduced_score: float = Field(default=70.0, ge=0.0, le=100.0)
+    live_micro_opportunity_high_quality_score: float = Field(default=80.0, ge=0.0, le=100.0)
+    live_micro_max_spread_pct: float = Field(default=0.008, ge=0.0, le=0.05)
+    live_micro_min_liquidity_score: float = Field(default=0.25, ge=0.0, le=1.0)
+    live_micro_maker_fill_probability: float = Field(default=0.65, ge=0.1, le=1.0)
+    live_micro_taker_fill_probability: float = Field(default=0.92, ge=0.1, le=1.0)
+    live_micro_opp_weight_net_edge: float = Field(default=0.22, ge=0.0, le=1.0)
+    live_micro_opp_weight_capital_efficiency: float = Field(default=0.18, ge=0.0, le=1.0)
+    live_micro_opp_weight_headroom: float = Field(default=0.18, ge=0.0, le=1.0)
+    live_micro_opp_weight_momentum: float = Field(default=0.10, ge=0.0, le=1.0)
+    live_micro_opp_weight_continuity: float = Field(default=0.08, ge=0.0, le=1.0)
+    live_micro_opp_weight_extension: float = Field(default=0.08, ge=0.0, le=1.0)
+    live_micro_opp_weight_liquidity: float = Field(default=0.06, ge=0.0, le=1.0)
+    live_micro_opp_weight_spread: float = Field(default=0.05, ge=0.0, le=1.0)
+    live_micro_opp_weight_timing: float = Field(default=0.05, ge=0.0, le=1.0)
+    live_micro_opp_weight_venue: float = Field(default=0.05, ge=0.0, le=1.0)
+    live_micro_opp_weight_breakout: float = Field(default=0.05, ge=0.0, le=1.0)
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 

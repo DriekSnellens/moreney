@@ -48,23 +48,39 @@ from bot.strategies.entry_quality import (
 )
 from bot.strategies.opportunity_economics import (
     EconomicDiagnostics,
+    assess_capital_efficiency,
     assess_opportunity_economics,
     config_capital_efficiency_from_settings,
     config_venue_economics_from_settings,
     select_best_buy_opportunities,
 )
+from bot.strategies.opportunity_engine import (
+    OpportunityAssessment,
+    OpportunityEngineConfig,
+    OpportunityEngineDiagnostics,
+    OpportunityDecision,
+    apply_assessment_to_opportunity,
+    config_from_settings as opportunity_engine_config_from_settings,
+    dedupe_venues,
+    evaluate as evaluate_opportunity,
+)
 
 
 @dataclass
 class EntryQualityContext:
-    """Live entry quality + capital economics hook."""
+    """Live entry quality + opportunity optimization hook."""
 
     config: EntryQualityConfig
     capital_config: Any  # CapitalEfficiencyConfig
     venue_config: Any  # VenueEconomicsConfig
     diagnostics: EntryQualityDiagnostics
     economic_diagnostics: EconomicDiagnostics
+    opportunity_config: OpportunityEngineConfig | None = None
+    opportunity_diagnostics: OpportunityEngineDiagnostics | None = None
     marks_for: Any | None = None  # callable[[str], list[Decimal]]
+    corr_groups: dict[str, frozenset[str]] | None = None
+    max_per_corr_group: int = 2
+    available_capital_eur: Decimal | None = None
 
 
 @dataclass
@@ -158,6 +174,67 @@ class TradingEngine:
                 marks = [Decimal(str(m)) for m in ctx.marks_for(opportunity.symbol)]
             except Exception:  # noqa: BLE001
                 marks = []
+        opp_cfg = ctx.opportunity_config
+        use_engine = opp_cfg is not None and opp_cfg.enabled
+        if use_engine:
+            assessment = evaluate_opportunity(
+                opportunity=opportunity,
+                profitability=profitability,
+                marks=marks,
+                snapshot=opportunity.market,
+                entry_config=ctx.config,
+                capital_config=ctx.capital_config,
+                venue_config=ctx.venue_config,
+                engine_config=opp_cfg,
+            )
+            if ctx.opportunity_diagnostics is not None:
+                ctx.opportunity_diagnostics.record(assessment)
+            ctx.economic_diagnostics.capital_efficiency_candidates += 1
+            if assessment.decision == OpportunityDecision.REJECT:
+                ctx.economic_diagnostics.capital_efficiency_rejected += 1
+            elif assessment.decision == OpportunityDecision.REDUCED:
+                ctx.economic_diagnostics.capital_efficiency_reduced += 1
+            if assessment.expected_net_eur_per_hour is not None:
+                ctx.economic_diagnostics.record_net_per_hour(
+                    assessment.expected_net_eur_per_hour
+                )
+            if assessment.venue:
+                v = assessment.venue.lower()
+                if v == "bitvavo":
+                    ctx.economic_diagnostics.venue_bitvavo_selected += 1
+                elif v == "okx":
+                    ctx.economic_diagnostics.venue_okx_selected += 1
+            updated = apply_assessment_to_opportunity(opportunity, assessment)
+            eq_stub: EntryQualityAssessment | None = None
+            if assessment.entry_quality_score > 0:
+                from bot.strategies.entry_quality import EntryQualityAssessment as EQA
+
+                eq_stub = EQA(
+                    score=assessment.entry_quality_score,
+                    momentum_score=assessment.momentum_score,
+                    trend_continuity=assessment.continuity_score,
+                    extension_pct=assessment.extension_pct,
+                    extension_score=Decimal("0.5"),
+                    local_range_position=None,
+                    headroom_pct=assessment.headroom_pct,
+                    headroom_score=assessment.headroom_score,
+                    net_break_even_pct=Decimal("0"),
+                    required_move_pct=Decimal("0"),
+                    target_harvest_pct=Decimal("0.012"),
+                    expected_net_profit_eur=assessment.expected_net_profit_eur,
+                    recommended_size_multiplier=assessment.recommended_size_multiplier,
+                    recommendation=(
+                        EntryQualityRecommendation.REJECT
+                        if assessment.decision == OpportunityDecision.REJECT
+                        else EntryQualityRecommendation.REDUCED_SIZE
+                        if assessment.decision == OpportunityDecision.REDUCED
+                        else EntryQualityRecommendation.NORMAL_SIZE
+                    ),
+                    reject_reason=",".join(assessment.reasons),
+                )
+                ctx.diagnostics.record(eq_stub)
+            return updated, eq_stub
+
         economics = assess_opportunity_economics(
             opportunity=opportunity,
             profitability=profitability,
@@ -302,8 +379,8 @@ class TradingEngine:
             lat.record("candidate_creation", time.perf_counter() - t0)
         eq_ctx = self._entry_quality
         if eq_ctx is not None and eq_ctx.venue_config.enabled and opportunities:
-            opportunities = select_best_buy_opportunities(
-                opportunities, config=eq_ctx.venue_config
+            opportunities = dedupe_venues(
+                opportunities, venue_config=eq_ctx.venue_config
             )
         result.opportunities = opportunities
         processed: list[TradeOpportunity] = []
@@ -325,7 +402,64 @@ class TradingEngine:
             )
             t_exec = 0.0
             ranked = self._interleave_ranked_by_buy_venue(ranked)
-            for scored in ranked:
+            goe_queue = ranked
+            if (
+                eq_ctx is not None
+                and eq_ctx.opportunity_config is not None
+                and eq_ctx.opportunity_config.enabled
+            ):
+                from bot.strategies.opportunity_engine import allocate_portfolio
+
+                pre_assessments: list[Any] = []
+                scored_map: dict[int, Any] = {}
+                for scored in ranked:
+                    decision = scored.risk_decision
+                    if decision is None or not decision.approved:
+                        continue
+                    if self._should_skip_maker_quote(scored.opportunity):
+                        continue
+                    marks: list[Decimal] = []
+                    if eq_ctx.marks_for is not None:
+                        try:
+                            marks = [
+                                Decimal(str(m))
+                                for m in eq_ctx.marks_for(scored.opportunity.symbol)
+                            ]
+                        except Exception:  # noqa: BLE001
+                            marks = []
+                    assessment = evaluate_opportunity(
+                        opportunity=scored.opportunity,
+                        profitability=scored.profitability,
+                        marks=marks,
+                        snapshot=scored.opportunity.market,
+                        entry_config=eq_ctx.config,
+                        capital_config=eq_ctx.capital_config,
+                        venue_config=eq_ctx.venue_config,
+                        engine_config=eq_ctx.opportunity_config,
+                    )
+                    pre_assessments.append(assessment)
+                    scored_map[id(assessment)] = scored
+                avail = eq_ctx.available_capital_eur or Decimal("10000")
+                selected, skipped = allocate_portfolio(
+                    pre_assessments,
+                    available_capital_eur=avail,
+                    corr_groups=eq_ctx.corr_groups,
+                    max_per_corr_group=eq_ctx.max_per_corr_group,
+                )
+                if eq_ctx.opportunity_diagnostics is not None:
+                    eq_ctx.opportunity_diagnostics.capital_allocator_selected += len(
+                        selected
+                    )
+                    eq_ctx.opportunity_diagnostics.capital_allocator_skipped += len(
+                        skipped
+                    )
+                selected_ids = {id(a) for a in selected}
+                goe_queue = [
+                    scored_map[id(a)]
+                    for a in selected
+                    if id(a) in scored_map
+                ]
+            for scored in goe_queue:
                 opportunity = scored.opportunity
                 profitability = scored.profitability
                 decision = scored.risk_decision
@@ -370,6 +504,127 @@ class TradingEngine:
                 portfolio = await self._portfolio.get_snapshot()
             if timing:
                 lat.record("executor", t_exec)
+            result.opportunities = processed
+            if self.paper_portfolio is not None:
+                result.portfolio_equity = self.paper_portfolio.state.total_equity
+            return result
+
+        batch_engine = (
+            eq_ctx is not None
+            and eq_ctx.opportunity_config is not None
+            and eq_ctx.opportunity_config.enabled
+        )
+        if batch_engine:
+            from bot.strategies.opportunity_engine import allocate_portfolio
+
+            pending: list[tuple[TradeOpportunity, ProfitabilityResult]] = []
+            for opportunity in opportunities:
+                if self._should_skip_maker_quote(opportunity):
+                    continue
+                paper = self.paper_portfolio
+                if paper is not None and opportunity.market is not None:
+                    paper.set_mark_price(opportunity.symbol, opportunity.market.last)
+                profitability = await self._profitability.evaluate(
+                    opportunity,
+                    buy_fee_rate=_fee_rate(
+                        opportunity.metadata,
+                        "buy_maker_fee_rate"
+                        if self._is_maker_quote(opportunity)
+                        else "buy_taker_fee_rate",
+                    ),
+                    sell_fee_rate=_fee_rate(
+                        opportunity.metadata,
+                        "sell_maker_fee_rate"
+                        if self._is_maker_quote(opportunity)
+                        else "sell_taker_fee_rate",
+                    ),
+                )
+                pending.append((opportunity, profitability))
+
+            assessments: list[Any] = []
+            pending_map: dict[int, tuple[TradeOpportunity, ProfitabilityResult]] = {}
+            for opportunity, profitability in pending:
+                marks: list[Decimal] = []
+                if eq_ctx.marks_for is not None:
+                    try:
+                        marks = [
+                            Decimal(str(m)) for m in eq_ctx.marks_for(opportunity.symbol)
+                        ]
+                    except Exception:  # noqa: BLE001
+                        marks = []
+                assessment = evaluate_opportunity(
+                    opportunity=opportunity,
+                    profitability=profitability,
+                    marks=marks,
+                    snapshot=opportunity.market,
+                    entry_config=eq_ctx.config,
+                    capital_config=eq_ctx.capital_config,
+                    venue_config=eq_ctx.venue_config,
+                    engine_config=eq_ctx.opportunity_config,
+                )
+                assessments.append(assessment)
+                pending_map[id(assessment)] = (opportunity, profitability)
+
+            avail = eq_ctx.available_capital_eur or Decimal("10000")
+            selected, skipped = allocate_portfolio(
+                assessments,
+                available_capital_eur=avail,
+                corr_groups=eq_ctx.corr_groups,
+                max_per_corr_group=eq_ctx.max_per_corr_group,
+            )
+            if eq_ctx.opportunity_diagnostics is not None:
+                eq_ctx.opportunity_diagnostics.capital_allocator_selected += len(selected)
+                eq_ctx.opportunity_diagnostics.capital_allocator_skipped += len(skipped)
+
+            exec_queue = [
+                pending_map[id(a)] for a in selected if id(a) in pending_map
+            ]
+            for opportunity, profitability in exec_queue:
+                result.profitability.append(profitability)
+                eq_orig = opportunity
+                opportunity, eq_assessment = self._apply_entry_quality(
+                    opportunity, profitability
+                )
+                if opportunity is None:
+                    if eq_assessment is not None:
+                        result.entry_quality_rejected.append((eq_orig, eq_assessment))
+                    continue
+                processed.append(opportunity)
+                opportunity, risk_context = self._enrich_for_risk(
+                    opportunity, venue_snapshots
+                )
+                slip_pct = (
+                    profitability.slippage_usd
+                    / (opportunity.quantity * opportunity.entry_price)
+                    * Decimal("100")
+                    if opportunity.quantity * opportunity.entry_price > 0
+                    else Decimal("0")
+                )
+                if risk_context is not None:
+                    risk_context = risk_context.model_copy(
+                        update={"estimated_slippage_pct": slip_pct}
+                    )
+                decision = await self._evaluate_risk(
+                    opportunity, profitability, portfolio, risk_context
+                )
+                result.risk_decisions.append(decision)
+                if not decision.approved:
+                    result.rejected.append((opportunity, decision))
+                    continue
+                buy_book = self._resolve_execution_book(
+                    opportunity, venue_snapshots, primary
+                )
+                execution = await self._execute_opportunity(
+                    opportunity,
+                    decision,
+                    snapshot_book=primary,
+                    order_book=buy_book,
+                    venue_snapshots=venue_snapshots,
+                    cycle_result=result,
+                )
+                result.executions.append(execution)
+                self._collect_order_fill(result, execution)
+                portfolio = await self._portfolio.get_snapshot()
             result.opportunities = processed
             if self.paper_portfolio is not None:
                 result.portfolio_equity = self.paper_portfolio.state.total_equity

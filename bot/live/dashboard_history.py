@@ -625,6 +625,26 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "headroom_unknown": diag.get("headroom_unknown"),
         "adaptive_trail_hold": diag.get("adaptive_trail_hold"),
         "adaptive_trail_harvest": diag.get("adaptive_trail_harvest"),
+        "opportunity_candidates": diag.get("opportunity_candidates"),
+        "opportunity_high_quality": diag.get("opportunity_high_quality"),
+        "opportunity_reduced": diag.get("opportunity_reduced"),
+        "opportunity_rejected": diag.get("opportunity_rejected"),
+        "best_opportunity_symbol": diag.get("best_opportunity_symbol"),
+        "best_opportunity_venue": diag.get("best_opportunity_venue"),
+        "best_opportunity_score": diag.get("best_opportunity_score"),
+        "best_opportunity_net_eur": diag.get("best_opportunity_net_eur"),
+        "best_opportunity_net_eur_per_hour": diag.get(
+            "best_opportunity_net_eur_per_hour"
+        ),
+        "best_opportunity_headroom_pct": diag.get("best_opportunity_headroom_pct"),
+        "best_opportunity_extension_pct": diag.get("best_opportunity_extension_pct"),
+        "best_opportunity_hold_minutes": diag.get("best_opportunity_hold_minutes"),
+        "average_opportunity_score": diag.get("average_opportunity_score"),
+        "capital_allocator_selected": diag.get("capital_allocator_selected"),
+        "capital_allocator_skipped": diag.get("capital_allocator_skipped"),
+        "volatility_reject": diag.get("volatility_reject"),
+        "spread_reject": diag.get("spread_reject"),
+        "timing_reject": diag.get("timing_reject"),
     }
 
 

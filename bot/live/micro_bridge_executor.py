@@ -407,6 +407,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._entry_quality_enabled = bool(self._entry_quality_config.enabled)
         self._entry_quality_diagnostics = EntryQualityDiagnostics()
         self._economic_diagnostics = EconomicDiagnostics()
+        self._opportunity_diagnostics = None
         self._capital_efficiency_config = config_capital_efficiency_from_settings(settings)
         self._venue_economics_config = config_venue_economics_from_settings(settings)
         self._capital_efficiency_enabled = bool(
@@ -1830,9 +1831,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     def economic_diagnostics_snapshot(self) -> dict[str, Any]:
         self._refresh_economic_capital_metrics()
-        return self._economic_diagnostics.snapshot(
-            entry_quality_extra=self._entry_quality_diagnostics.snapshot()
-        )
+        eq_extra = self._entry_quality_diagnostics.snapshot()
+        opp = getattr(self, "_opportunity_diagnostics", None)
+        if opp is not None:
+            return opp.snapshot(entry_quality_extra={
+                **eq_extra,
+                **self._economic_diagnostics.snapshot(),
+            })
+        return self._economic_diagnostics.snapshot(entry_quality_extra=eq_extra)
 
     def entry_quality_diagnostics_snapshot(self) -> dict[str, Any]:
         return self._entry_quality_diagnostics.snapshot()
