@@ -204,7 +204,7 @@ def _session_settings(
             # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
             "paper_trail_session_buys_only": False,
             # B3 runner-window: arm later so winnable can build, then light partial.
-            "paper_trail_soft_arm_pct": 0.0045,
+            "paper_trail_soft_arm_pct": 0.012,
             "paper_trail_soft_drawdown_pct": 0.0025,
             "paper_trail_soft_partial_pct": 0.15,
             # Lock more of BE+ bags into cash so slots free sooner.

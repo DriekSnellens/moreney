@@ -115,7 +115,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_drawdown_pct == 0.015
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_arm_pct == 0.0045
+    assert cfg.paper_trail_soft_arm_pct == 0.012
     assert cfg.paper_trail_soft_drawdown_pct == 0.0025
     assert cfg.paper_trail_soft_partial_pct == 0.15
     assert cfg.paper_trail_hard_arm_pct == 0.03
@@ -781,7 +781,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         persist_path=tmp_path / "t.json",
     )
     assert cfg.paper_trail_drawdown_pct == 0.015
-    assert cfg.paper_trail_soft_arm_pct == 0.0045
+    assert cfg.paper_trail_soft_arm_pct == 0.012
     assert cfg.paper_trail_soft_drawdown_pct == 0.0025
     assert cfg.paper_trail_hard_arm_pct == 0.03
     assert cfg.paper_trail_partial_pct == 0.50
