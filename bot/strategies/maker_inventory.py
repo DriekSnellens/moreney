@@ -1483,8 +1483,16 @@ class MakerInventoryStrategy(BaseStrategy):
         same_venue = str(buy_snap.exchange or "").lower() == str(
             sell_snap.exchange or ""
         ).lower()
+        sig = self._alphai_signals
+        alphai_buy = (
+            same_venue
+            and sig is not None
+            and base
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base)
+        )
         # Same-venue buy-only sizing only when explicitly allowed (not winst-mode).
-        if same_venue and self._allow_buy_only:
+        if same_venue and (self._allow_buy_only or alphai_buy):
             capped = min(quantity, max_buy)
         else:
             capped = min(quantity, max_buy, sell_coins)
