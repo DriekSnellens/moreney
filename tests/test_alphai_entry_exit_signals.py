@@ -172,6 +172,168 @@ def test_maker_avoid_base_sell_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_alphai_no_bijkoop_when_held_anywhere() -> None:
+    """Daily policy: if already in portfolio on any venue, do not buy more."""
+    from decimal import Decimal
+
+    from bot.core.exchange_types import OrderBook, OrderBookLevel
+    from bot.core.models import MarketSnapshot
+    from bot.portfolio.models import PortfolioState
+
+    settings = Settings(
+        execution_mode="paper",
+        paper_maker_enabled=True,
+        paper_maker_min_profit_eur=0.02,
+        paper_maker_min_net_return=0.0001,
+        paper_maker_min_notional_eur=55.0,
+        paper_maker_allow_buy_only=True,
+        paper_maker_same_venue=True,
+        paper_maker_venues="bitvavo,okx",
+        alphai_bullish_inventory_build_enabled=True,
+        live_micro_active_ring_eur=1000.0,
+    )
+    maker = MakerInventoryStrategy(settings)
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"AVAX"}), macro_reduce_only=True),
+        {"picks": [{"base": "AVAX", "score": 32.5}], "avoid": []},
+    )
+    maker.apply_alphai_signals(signals)
+    maker.set_alphai_macro_caution(True)
+
+    def snap(ex: str, sym: str, bid: float, ask: float) -> MarketSnapshot:
+        return MarketSnapshot(
+            symbol=sym,
+            bid=Decimal(str(bid)),
+            ask=Decimal(str(ask)),
+            last=Decimal(str((bid + ask) / 2)),
+            order_book=OrderBook(
+                symbol=sym,
+                bids=[OrderBookLevel(price=Decimal(str(bid)), amount=Decimal("100"))],
+                asks=[OrderBookLevel(price=Decimal(str(ask)), amount=Decimal("100"))],
+            ),
+            exchange=ex,
+            latency_ms=50,
+        )
+
+    avax_bid, avax_ask, eurusdt = 24.50, 24.55, 1.08
+    avaxusdt = avax_bid * eurusdt
+    snaps = [
+        snap("bitvavo", "AVAXEUR", avax_bid, avax_ask),
+        snap("okx", "AVAXEUR", avax_bid - 0.01, avax_ask - 0.01),
+        snap("bitvavo", "AVAXUSDT", avaxusdt, avaxusdt + 0.05),
+        snap("okx", "AVAXUSDT", avaxusdt, avaxusdt + 0.05),
+        snap("bitvavo", "EURUSDT", eurusdt, eurusdt + 0.001),
+        snap("okx", "EURUSDT", eurusdt, eurusdt + 0.001),
+    ]
+
+    class Ledger:
+        venues = ["bitvavo", "okx"]
+
+        def available(self, venue: str, asset: str) -> Decimal:
+            if asset == "EUR":
+                return Decimal("2000")
+            if asset == "AVAX" and venue == "okx":
+                return Decimal("10")  # already held on OKX
+            return Decimal("0")
+
+    state = PortfolioState(
+        cash_usd=Decimal("4000"),
+        mark_prices={"AVAXEUR": Decimal("24.5")},
+    )
+    opps = await maker.evaluate_markets(
+        snaps, equity=Decimal("4000"), inventory=Ledger(), portfolio_state=state
+    )
+    buys = [
+        o
+        for o in opps
+        if str(o.side.value if hasattr(o.side, "value") else o.side).lower().startswith("b")
+        and o.symbol == "AVAXEUR"
+    ]
+    assert buys == []
+    assert maker.scan_stats()["reject_counts"].get("held_base_no_new_buy", 0) > 0
+
+
+@pytest.mark.asyncio
+async def test_alphai_picks_best_venue_when_missing() -> None:
+    """Missing daily pick → emit only the better venue (cash + NET)."""
+    from decimal import Decimal
+
+    from bot.core.exchange_types import OrderBook, OrderBookLevel
+    from bot.core.models import MarketSnapshot
+    from bot.portfolio.models import PortfolioState
+
+    settings = Settings(
+        execution_mode="paper",
+        paper_maker_enabled=True,
+        paper_maker_min_profit_eur=0.02,
+        paper_maker_min_net_return=0.0001,
+        paper_maker_min_notional_eur=55.0,
+        paper_maker_allow_buy_only=True,
+        paper_maker_same_venue=True,
+        paper_maker_venues="bitvavo,okx",
+        alphai_bullish_inventory_build_enabled=True,
+        live_micro_active_ring_eur=1000.0,
+    )
+    maker = MakerInventoryStrategy(settings)
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"AVAX"}), macro_reduce_only=True),
+        {"picks": [{"base": "AVAX", "score": 32.5}], "avoid": []},
+    )
+    maker.apply_alphai_signals(signals)
+    maker.set_alphai_macro_caution(True)
+
+    def snap(ex: str, sym: str, bid: float, ask: float) -> MarketSnapshot:
+        return MarketSnapshot(
+            symbol=sym,
+            bid=Decimal(str(bid)),
+            ask=Decimal(str(ask)),
+            last=Decimal(str((bid + ask) / 2)),
+            order_book=OrderBook(
+                symbol=sym,
+                bids=[OrderBookLevel(price=Decimal(str(bid)), amount=Decimal("100"))],
+                asks=[OrderBookLevel(price=Decimal(str(ask)), amount=Decimal("100"))],
+            ),
+            exchange=ex,
+            latency_ms=50,
+        )
+
+    avax_bid, avax_ask, eurusdt = 24.50, 24.55, 1.08
+    avaxusdt = avax_bid * eurusdt
+    snaps = [
+        snap("bitvavo", "AVAXEUR", avax_bid, avax_ask),
+        snap("okx", "AVAXEUR", avax_bid - 0.05, avax_ask - 0.05),  # cheaper on OKX
+        snap("bitvavo", "AVAXUSDT", avaxusdt, avaxusdt + 0.05),
+        snap("okx", "AVAXUSDT", avaxusdt, avaxusdt + 0.05),
+        snap("bitvavo", "EURUSDT", eurusdt, eurusdt + 0.001),
+        snap("okx", "EURUSDT", eurusdt, eurusdt + 0.001),
+    ]
+
+    class Ledger:
+        venues = ["bitvavo", "okx"]
+
+        def available(self, venue: str, asset: str) -> Decimal:
+            if asset == "EUR":
+                return Decimal("2000")
+            return Decimal("0")
+
+    state = PortfolioState(
+        cash_usd=Decimal("4000"),
+        mark_prices={"AVAXEUR": Decimal("24.5")},
+    )
+    opps = await maker.evaluate_markets(
+        snaps, equity=Decimal("4000"), inventory=Ledger(), portfolio_state=state
+    )
+    avax_buys = [
+        o
+        for o in opps
+        if o.symbol == "AVAXEUR"
+        and str(o.side.value if hasattr(o.side, "value") else o.side).lower().startswith("b")
+    ]
+    assert len(avax_buys) == 1
+    assert (avax_buys[0].metadata or {}).get("buy_exchange") == "okx"
+
+
+@pytest.mark.asyncio
 async def test_alphai_same_venue_sizes_from_clip_not_touch() -> None:
     """AlphaI deploy uses min_notional clip, not thin top-of-book touch."""
     from decimal import Decimal

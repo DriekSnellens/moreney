@@ -255,9 +255,9 @@ def _session_settings(
             "live_micro_cancel_buy_on_flat_momentum": True,
             # Util-B: when active book < ring_soft max, allow non-focus new buys.
             "live_micro_low_util_relax_focus": True,
-            # B3: scale into soft-armed BE+ winners (bridge-submitted adds).
-            "live_micro_winner_add_enabled": True,
-            "live_micro_winner_add_max": 2,
+            # Daily AlphaI policy: no bijkoop / scale-in on held bags.
+            "live_micro_winner_add_enabled": False,
+            "live_micro_winner_add_max": 0,
             "live_micro_winner_add_clip_eur": 55.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
             "live_micro_buy_quality_underwater_count": 4,

@@ -125,7 +125,7 @@ class AlphaITradingSignals:
         return _ONE
 
     def inventory_build(self, base: str) -> bool:
-        """Same-venue deploy on strong AlphaI signal (ring fill, skip round-trip NET)."""
+        """First buy only on strong AlphaI signal (no bijkoop if already held)."""
         return self.is_strong_bullish_buy(base)
 
     def bullish_buy_bases(self) -> frozenset[str]:

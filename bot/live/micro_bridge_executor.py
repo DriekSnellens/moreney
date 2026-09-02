@@ -5413,6 +5413,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 asset
             )
             exit_urgency = self._alphai_exit_urgency(asset)
+            # AlphaI hold: when momentum goes flat/down after a peak, harvest BE+
+            # sooner (policy: hold with momentum, exit when peak is past).
+            alphai_peak_past = False
+            if (
+                not exit_urgency
+                and be is not None
+                and mark >= be
+                and gain_now > 0
+                and (
+                    self._alphai_bullish_buy(asset)
+                    or asset.upper()
+                    in (
+                        getattr(self._alphai_signals, "daily_pick_bases", frozenset())
+                        or frozenset()
+                    )
+                )
+                and self._momentum_enabled
+                and self._momentum_flat_or_down(symbol)
+            ):
+                alphai_peak_past = True
+                harvest_gain_floor = harvest_gain_floor * Decimal("0.70")
             early_floor = self._early_cut_loss_floor_price(venue, asset)
             if (
                 early_floor is not None
@@ -5599,7 +5620,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and gain_now
                 >= (
                     harvest_gain_floor * Decimal("0.85")
-                    if exit_urgency
+                    if (exit_urgency or alphai_peak_past)
                     else harvest_gain_floor
                 )
                 # B3: let soft partial / runner window run first; then work remainder.
@@ -5607,6 +5628,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     self._soft_partial <= 0
                     or st.get("soft_partial_done")
                     or exit_urgency
+                    or alphai_peak_past
                 )
             ):
                 # D: keep working BE+ inventory at touch while soft-armed
@@ -5674,8 +5696,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         )
                 continue
 
-            if self._defer_harvest_while_rising(
-                symbol, mark=mark, be=be, st=st, reason=reason
+            if (
+                not exit_urgency
+                and not alphai_peak_past
+                and self._defer_harvest_while_rising(
+                    symbol, mark=mark, be=be, st=st, reason=reason
+                )
             ):
                 self._bump_skip("trail_hold_rising")
                 continue
@@ -6494,9 +6520,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not self._is_new_base_buy(venue, base)
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
-            and not meta.get("alphai_inventory_build")
-            and not meta.get("alphai_strong_bullish_buy")
-            and not self._alphai_strong_bullish_buy(base)
         ):
             be = self._break_even_sell_price(venue, base)
             mark_ref = self._portfolio.state.mark_prices.get(symbol.upper())
@@ -6512,24 +6535,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"below break-even {be}"
                     ),
                 )
+        held_anywhere = base.upper() in self._held_alt_bases()
         if (
             side_is_buy
             and self._block_buys_when_holding_base
-            and not self._is_new_base_buy(venue, base)
+            and (
+                not self._is_new_base_buy(venue, base)
+                or held_anywhere
+            )
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
             and not meta.get("winner_add")
-            and not meta.get("alphai_inventory_build")
-            and not meta.get("alphai_strong_bullish_buy")
-            and not self._alphai_strong_bullish_buy(base)
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(
                 order_request,
                 reason="HOLDING_BASE_BUY_BLOCK",
                 message=(
-                    f"buy blocked: already holding {venue}:{base}; "
-                    "scan other bases with momentum"
+                    f"buy blocked: already holding {base} in portfolio; "
+                    "AlphaI daily policy: no bijkoop"
                 ),
             )
         if (

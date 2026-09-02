@@ -606,29 +606,22 @@ class MakerInventoryStrategy(BaseStrategy):
             if not self._venue_allowed(buy_snap.exchange):
                 continue
             buy_venue = str(buy_snap.exchange or "").strip().lower()
-            if (
-                not dump_or_reduce
-                and base in self._venue_held_bases.get(buy_venue, set())
-            ):
-                allow_alphai_add = (
-                    alphai_bullish_same_venue
-                    and sig is not None
-                    and hasattr(sig, "is_strong_bullish_buy")
-                    and sig.is_strong_bullish_buy(base)
-                    and self._ring_needs_deploy(buy_venue)
+            held_anywhere = any(
+                base in held for held in self._venue_held_bases.values()
+            )
+            # Daily AlphaI policy: if already in portfolio (any venue) → no bijkoop.
+            if not dump_or_reduce and held_anywhere:
+                self._reject(
+                    symbol,
+                    "held_base_no_new_buy",
+                    (
+                        f"portfolio already holds {base}; "
+                        "AlphaI daily policy: no add / bijkoop"
+                    ),
+                    buy_exchange=buy_snap.exchange,
+                    sell_exchange=buy_snap.exchange,
                 )
-                if not allow_alphai_add:
-                    self._reject(
-                        symbol,
-                        "held_base_no_new_buy",
-                        (
-                            f"{buy_venue} already holds {base}; "
-                            "emit other momentum bases only"
-                        ),
-                        buy_exchange=buy_snap.exchange,
-                        sell_exchange=buy_snap.exchange,
-                    )
-                    continue
+                continue
             for sell_snap in venues:
                 if alphai_bullish_same_venue and buy_snap.exchange != sell_snap.exchange:
                     continue
@@ -689,6 +682,20 @@ class MakerInventoryStrategy(BaseStrategy):
                     continue
                 ranked.append(opportunity)
 
+        # AlphaI missing pick: keep best venue only (fee/price aware via rank).
+        if alphai_bullish_same_venue and ranked:
+            buys = [
+                o
+                for o in ranked
+                if str(
+                    o.side.value if hasattr(o.side, "value") else o.side
+                ).lower().startswith("b")
+            ]
+            if len(buys) > 1:
+                best = max(buys, key=self._rank_opportunity)
+                sells = [o for o in ranked if o not in buys]
+                ranked = [best] + sells
+
         return ranked
 
     def _rank_opportunity(self, opportunity: TradeOpportunity) -> Decimal:
@@ -700,7 +707,8 @@ class MakerInventoryStrategy(BaseStrategy):
         base = infer_base_asset(str(opportunity.symbol or "").upper(), self._quote)
         held_penalty = (
             Decimal("-1000")
-            if base in self._venue_held_bases.get(venue, set())
+            if base
+            and any(base in held for held in self._venue_held_bases.values())
             else Decimal("0")
         )
         side_l = str(
@@ -715,6 +723,9 @@ class MakerInventoryStrategy(BaseStrategy):
             and hasattr(sig, "is_bullish_buy")
             and sig.is_bullish_buy(base)
         )
+        held_anywhere = bool(
+            base and any(base in held for held in self._venue_held_bases.values())
+        )
         # Prefer focus dual-liquid bases; demote non-focus buys (kills TAO tunnel).
         if base and (base.upper() in self._focus_bases or bullish_focus):
             focus_adj = Decimal("0.04")
@@ -722,13 +733,21 @@ class MakerInventoryStrategy(BaseStrategy):
             focus_adj = Decimal("-0.08")
         else:
             focus_adj = Decimal("0")
-        # Active ring underfilled + free cash → strong boost for unheld focus buys.
+        # Missing AlphaI daily pick → strong emit priority (buy once, no bijkoop).
         ring_boost = Decimal("0")
         if (
             is_buy
             and base
+            and bullish_focus
+            and not held_anywhere
+            and self._ring_needs_deploy(venue)
+        ):
+            ring_boost = Decimal("0.25")
+        elif (
+            is_buy
+            and base
             and (base.upper() in self._focus_bases or bullish_focus)
-            and base not in self._venue_held_bases.get(venue, set())
+            and not held_anywhere
             and self._ring_needs_deploy(venue)
         ):
             ring_boost = Decimal("0.12")
@@ -738,9 +757,18 @@ class MakerInventoryStrategy(BaseStrategy):
             and sig is not None
             and hasattr(sig, "is_strong_bullish_buy")
             and sig.is_strong_bullish_buy(base)
+            and not held_anywhere
             and self._ring_needs_deploy(venue)
         ):
-            ring_boost = max(ring_boost, Decimal("0.18"))
+            ring_boost = max(ring_boost, Decimal("0.35") if bullish_focus else Decimal("0.18"))
+        # Prefer venue with more free EUR for AlphaI first buy (fill reliability).
+        cash_boost = Decimal("0")
+        if bullish_focus and is_buy and not held_anywhere:
+            free = self._venue_free_quote.get(venue, _ZERO)
+            if free >= Decimal("500"):
+                cash_boost = Decimal("0.02")
+            elif free >= Decimal("100"):
+                cash_boost = Decimal("0.01")
         alphai_boost = Decimal("0")
         if sig is not None and base and hasattr(sig, "maker_rank_boost"):
             alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)
@@ -752,6 +780,7 @@ class MakerInventoryStrategy(BaseStrategy):
             + focus_adj
             + ring_boost
             + alphai_boost
+            + cash_boost
         )
 
     def _okx_cash_rich(self) -> bool:
