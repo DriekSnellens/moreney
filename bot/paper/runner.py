@@ -261,9 +261,10 @@ class PaperRunner:
                 # still do not auto-execute from observer.
                 pass
         self._shadow_observer = None
+        self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
         self._live_disable_research = bool(
             getattr(settings, "live_disable_research_hooks", False)
-        )
+        ) or self._cvd_abandoned
         if not self._live_disable_research:
             try:
                 import os
@@ -2006,6 +2007,8 @@ class PaperRunner:
         self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
     ) -> None:
         """Create frozen CVD candidates at decision time (research path only)."""
+        if getattr(self, "_cvd_abandoned", False):
+            return
         if getattr(self, "_live_disable_research", False):
             return
         if evaluate_frozen_research_economics is None:

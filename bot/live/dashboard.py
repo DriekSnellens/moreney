@@ -1188,15 +1188,19 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     history = payload.get("history") or hist_for_kpi or load_history(limit=720)
     chart_json = _chart_bootstrap(history if isinstance(history, list) else [])
 
-    target_low = Decimal("20")
-    target_high = Decimal("50")
+    target_low = Decimal("0.5")
+    target_high = Decimal("2")
+    # Honest ladder: prove NET/hour first; €20–50/day is stretch only after that.
     in_target_band = (
-        daily_realized is not None and target_low <= daily_realized <= target_high
+        daily_realized is not None and daily_realized >= Decimal("20")
     )
     band_class = "in-band" if in_target_band else "out-band"
     target_band_html = (
-        "<section class='target-band' aria-label='Doelband onderzoek'>"
-        "<h2>Doel €20–50/dag netto</h2>"
+        "<section class='target-band' aria-label='Doelband Capital Velocity Desk'>"
+        "<h2>Capital Velocity Desk — bewijs eerst NET/uur</h2>"
+        "<p>CVD retired (TOB shadow negatief). Doel nu: ring vullen + "
+        "<strong>≥ €0.50 NET/uur</strong> over 5–7 dagen. "
+        "€20–50/dag is stretch pas ná expectancy-proof — geen forecast.</p>"
         "<p><strong>Geïnd vandaag</strong> = verkochte coins (FIFO) · "
         "<strong>Open</strong> = totaal unrealized op bags · "
         "<strong>Portfolio-winst</strong> = equity Δ sinds 00:00 NL · "
