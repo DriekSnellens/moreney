@@ -22,6 +22,7 @@ from bot.integrations.alphai.status import merge_alphai_status
 from bot.live.dashboard_v2 import (
     dashboard_css,
     render_alphai_command_center,
+    render_daily_picks_panel,
     render_operator_panel,
 )
 
@@ -925,6 +926,18 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "</div></section>"
     )
     alphai_state = merge_alphai_status(session, bridge)
+    from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+    from bot.core.config import get_settings as _gs
+
+    _cfg = _gs()
+    daily_picks_report = load_daily_recommendations(
+        getattr(_cfg, "alphai_daily_recommendations_path", "data/alphai/daily_recommendations.json")
+    )
+    if not daily_picks_report:
+        nested = (session.get("alphai") or {}).get("daily_picks")
+        if isinstance(nested, dict) and nested.get("picks"):
+            daily_picks_report = nested
+    daily_picks_html = render_daily_picks_panel(daily_picks_report, esc=_esc)
     alphai_html = render_alphai_command_center(alphai_state, esc=_esc)
     operator_html = render_operator_panel(
         primary=primary,
@@ -937,8 +950,10 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         esc=_esc,
     )
     command_center_html = (
-        f"<section class='command-grid' aria-label='Intelligence command center'>"
-        f"{alphai_html}{operator_html}</section>"
+        f"<section class='command-stack' aria-label='Intelligence command center'>"
+        f"{daily_picks_html}"
+        f"<div class='command-grid'>{alphai_html}{operator_html}</div>"
+        f"</section>"
     )
     intel_fold_html = (
         "<details class='fold' open>"

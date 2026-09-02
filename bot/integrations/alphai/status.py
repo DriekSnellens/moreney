@@ -50,6 +50,18 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
         if k and str(k) != "_MACRO_" and not str(k).startswith("_")
     }
     headline_rows = [h for h in headlines if isinstance(h, dict)][:8]
+    from bot.core.config import get_settings
+    from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+
+    picks_path = getattr(
+        get_settings(),
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    daily = load_daily_recommendations(picks_path) or {}
+    pick_bases = [p.get("base") for p in (daily.get("picks") or []) if isinstance(p, dict)]
+    avoid_bases = [p.get("base") for p in (daily.get("avoid") or []) if isinstance(p, dict)]
+
     return {
         "alphai_enabled": bool(box.get("enabled")),
         "alphai_observation_mode": bool(box.get("observation_mode")),
