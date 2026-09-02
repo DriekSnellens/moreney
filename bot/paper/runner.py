@@ -2236,15 +2236,22 @@ class PaperRunner:
         if monitor is None:
             return
         state = await monitor.maybe_refresh()
+        from bot.integrations.alphai.signals import build_trading_signals
+
+        signals = build_trading_signals(state, monitor.daily_picks_snapshot())
         maker = self._maker_strategy()
         if maker is not None:
             hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))
             alphai_ro = bool(state.global_reduce_only)
             maker.set_reduce_only(hmm_ro or alphai_ro)
             maker.set_news_blocked_bases(set(state.blocked_bases))
+            if hasattr(maker, "apply_alphai_signals"):
+                maker.apply_alphai_signals(signals)
         executor = self._executor
         if hasattr(executor, "apply_alphai_regime"):
             executor.apply_alphai_regime(state)
+        if hasattr(executor, "apply_alphai_trading_signals"):
+            executor.apply_alphai_trading_signals(signals)
         if state.global_reduce_only and not getattr(
             self._settings, "alphai_observation_mode", False
         ):

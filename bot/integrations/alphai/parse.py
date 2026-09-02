@@ -38,6 +38,7 @@ class AlphaIRegimeState:
     enabled: bool = False
     global_reduce_only: bool = False
     blocked_bases: frozenset[str] = frozenset()
+    bullish_bases: frozenset[str] = frozenset()
     macro_reduce_only: bool = False
     headlines: list[dict[str, Any]] = field(default_factory=list)
     blocked_detail: dict[str, str] = field(default_factory=dict)
@@ -53,6 +54,7 @@ class AlphaIRegimeState:
             "global_reduce_only": self.global_reduce_only,
             "macro_reduce_only": self.macro_reduce_only,
             "blocked_bases": sorted(self.blocked_bases),
+            "bullish_bases": sorted(self.bullish_bases),
             "blocked_detail": dict(self.blocked_detail),
             "headline_count": len(self.headlines),
             "headlines": self.headlines[:8],
@@ -114,6 +116,7 @@ def build_regime_from_headlines(
     observation_mode: bool,
 ) -> AlphaIRegimeState:
     blocked: set[str] = set()
+    bullish: set[str] = set()
     blocked_detail: dict[str, str] = {}
     macro_ro = False
     public_headlines: list[dict[str, Any]] = []
@@ -139,12 +142,18 @@ def build_regime_from_headlines(
             if _headline_macro_bearish(h):
                 macro_ro = True
                 blocked_detail["_MACRO_"] = h.title[:120]
+        for base in h.bullish_bases():
+            if focus_bases and base not in focus_bases:
+                continue
+            if base not in blocked:
+                bullish.add(base)
         if not block_bearish_bases:
             continue
         for base in h.bearish_bases():
             if focus_bases and base not in focus_bases:
                 continue
             blocked.add(base)
+            bullish.discard(base)
             blocked_detail.setdefault(base, h.title[:120])
 
     global_ro = macro_ro and not observation_mode
@@ -153,6 +162,7 @@ def build_regime_from_headlines(
         global_reduce_only=global_ro,
         macro_reduce_only=macro_ro,
         blocked_bases=frozenset(blocked if not observation_mode else set()),
+        bullish_bases=frozenset(bullish),
         headlines=public_headlines[:12],
         blocked_detail=blocked_detail,
         last_poll_at=datetime.now(UTC).isoformat(),

@@ -402,6 +402,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._alphai_blocked_bases: frozenset[str] = frozenset()
         self._alphai_blocked_detail: dict[str, str] = {}
         self._alphai_macro_active = False
+        self._alphai_signals: object | None = None
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -924,6 +925,51 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         }
         self._alphai_macro_active = macro
 
+    def apply_alphai_trading_signals(self, signals: object | None) -> None:
+        """Daily picks + bullish/avoid for entry sizing, momentum, exit urgency."""
+        self._alphai_signals = signals
+
+    def _alphai_entry_multiplier(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "entry_size_multiplier"):
+            return _ONE
+        try:
+            return Decimal(str(sig.entry_size_multiplier(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _alphai_momentum_floor_scale(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "momentum_floor_scale"):
+            return _ONE
+        try:
+            return Decimal(str(sig.momentum_floor_scale(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _alphai_exit_urgency(self, base: str) -> bool:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "exit_urgency"):
+            return False
+        return bool(sig.exit_urgency(base))
+
+    def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "be_harvest_gain_scale"):
+            return _ONE
+        try:
+            return Decimal(str(sig.be_harvest_gain_scale(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _effective_exit_resting_max_age_sec(self, base: str) -> float:
+        age = self._exit_resting_max_age_sec
+        if self._alphai_exit_urgency(base):
+            return min(age, 5.0)
+        if self._alphai_macro_active:
+            return min(age, 6.0)
+        return age
+
     def _alphai_blocks_base(self, base: str) -> bool:
         if not self._alphai_enabled:
             return False
@@ -1366,6 +1412,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "blocked_bases": sorted(self._alphai_blocked_bases),
                 "blocked_detail": dict(self._alphai_blocked_detail),
                 "skips": int(self.skips.get("alphai_news_block", 0) or 0),
+                "signals": (
+                    self._alphai_signals.to_public_dict()
+                    if self._alphai_signals is not None
+                    and hasattr(self._alphai_signals, "to_public_dict")
+                    else None
+                ),
             },
             "live_trade_count": len(self.live_trades),
             "live_fill_count": int(self.session_live_fill_count),
@@ -3544,7 +3596,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     or strategy in {"dust_exit", "time_stop_breakeven"}
                 )
             ):
-                row_max_age = min(max_age, self._exit_resting_max_age_sec)
+                base_asset = infer_base_asset(symbol)
+                row_max_age = min(
+                    max_age, self._effective_exit_resting_max_age_sec(base_asset)
+                )
             if age >= row_max_age:
                 try:
                     await client.cancel_order(oid, symbol)
@@ -4203,11 +4258,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return True
         return self._active_book_notional(venue) < self._ring_soft_max_active_eur
 
-    def _momentum_floor_for_buy(self, venue: str) -> Decimal:
+    def _momentum_floor_for_buy(self, venue: str, base: str | None = None) -> Decimal:
         """Softer momentum floor only while active book is thinly deployed."""
-        if self._ring_soft_momentum_eligible(venue):
-            return self._ring_momentum_min
-        return self._momentum_min
+        floor = (
+            self._ring_momentum_min
+            if self._ring_soft_momentum_eligible(venue)
+            else self._momentum_min
+        )
+        if base:
+            floor *= self._alphai_momentum_floor_scale(base)
+        return floor
 
     def _momentum_ok(
         self,
@@ -5319,6 +5379,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
+            harvest_gain_floor = self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(
+                asset
+            )
+            exit_urgency = self._alphai_exit_urgency(asset)
             early_floor = self._early_cut_loss_floor_price(venue, asset)
             if (
                 early_floor is not None
@@ -5464,9 +5528,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not self._be_harvest_already_done(st)
                 and gain_now
                 >= (
-                    min(self._be_harvest_min_gain, Decimal("0.00015"))
+                    min(harvest_gain_floor, Decimal("0.00015"))
                     if st.get("recovery_armed")
-                    else self._be_harvest_min_gain
+                    else harvest_gain_floor
                 )
                 and not self._soft_partial_would_fire(
                     st, gain_now=gain_now, soft_arm_now=soft_arm_now
@@ -5502,11 +5566,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and st.get("soft_armed")
                 and be is not None
                 and mark >= be
-                and gain_now >= self._be_harvest_min_gain
+                and gain_now
+                >= (
+                    harvest_gain_floor * Decimal("0.85")
+                    if exit_urgency
+                    else harvest_gain_floor
+                )
                 # B3: let soft partial / runner window run first; then work remainder.
                 and (
                     self._soft_partial <= 0
                     or st.get("soft_partial_done")
+                    or exit_urgency
                 )
             ):
                 # D: keep working BE+ inventory at touch while soft-armed
@@ -6151,6 +6221,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 reason="ALPHAI_NEWS_BLOCK",
                 message=f"AlphaI bearish headline blocks new {base} buys{': ' + detail if detail else ''}",
             )
+        sig = self._alphai_signals
+        if (
+            side_is_buy
+            and sig is not None
+            and hasattr(sig, "avoid_bases")
+            and base.upper() in sig.avoid_bases
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+            and self._is_new_base_buy(venue, base)
+        ):
+            self._bump_skip("alphai_avoid_base")
+            return await self._reject_before_live(
+                order_request,
+                reason="ALPHAI_AVOID_BASE",
+                message=f"AlphaI daily avoid list blocks new {base} buys",
+            )
         if (
             side_is_buy
             and self._new_buy_focus_only
@@ -6185,7 +6271,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             # New crypto only: require mark momentum + history (no cold/flat slip-ins).
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
-            mom_floor = self._momentum_floor_for_buy(venue)
+            mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
             if self._corr_sector_blocks_new_buy(base):
                 self._bump_skip("corr_sector_momentum_block")
@@ -6279,22 +6365,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         if side_is_buy:
             mult_raw = meta.get("entry_quality_multiplier")
+            mult = _ONE
             if mult_raw is not None:
                 try:
                     mult = Decimal(str(mult_raw))
                 except Exception:  # noqa: BLE001
                     mult = _ONE
-                if mult < _ONE:
-                    scaled = apply_size_multiplier(qty, mult)
-                    if scaled <= 0:
-                        self._bump_skip("entry_quality_reject")
-                        return await self._reject_before_live(
-                            order_request,
-                            reason="ENTRY_QUALITY_REJECT",
-                            message="entry quality size multiplier zero",
-                        )
-                    qty = scaled
-                    order_request = order_request.model_copy(update={"quantity": qty})
+            alphai_mult = self._alphai_entry_multiplier(base)
+            if alphai_mult != _ONE:
+                mult = min(mult * alphai_mult, Decimal("1.35"))
+            if mult != _ONE:
+                scaled = apply_size_multiplier(qty, mult)
+                if scaled <= 0:
+                    self._bump_skip("entry_quality_reject")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message="entry quality size multiplier zero",
+                    )
+                qty = scaled
+                order_request = order_request.model_copy(update={"quantity": qty})
         if side_is_buy and post_only:
             px = self._aggressive_buy_price(venue, px, order_book)
             order_request = order_request.model_copy(update={"limit_price": px})

@@ -209,6 +209,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
         self._news_blocked_bases: frozenset[str] = frozenset()
+        self._alphai_signals: Any | None = None
         self._hmm_regime_id: int | None = None
         self._hmm_uptrend_ask_improve_bps = Decimal(
             str(getattr(settings, "paper_hmm_uptrend_ask_improve_bps", 0) or 0)
@@ -326,6 +327,10 @@ class MakerInventoryStrategy(BaseStrategy):
         self._news_blocked_bases = frozenset(
             str(b).strip().upper() for b in bases if str(b).strip()
         )
+
+    def apply_alphai_signals(self, signals: object | None) -> None:
+        """Daily picks + bullish/avoid signals for rank and FV buy premium."""
+        self._alphai_signals = signals
 
     def set_cross_venue_paused(self, paused: bool) -> None:
         """Pause OKX↔Bitvavo emits when live fill rate is chronically poor."""
@@ -541,6 +546,14 @@ class MakerInventoryStrategy(BaseStrategy):
         base = infer_base_asset(symbol, self._quote).upper()
         if base and base in self._news_blocked_bases:
             return True
+        sig = self._alphai_signals
+        if (
+            sig is not None
+            and base
+            and hasattr(sig, "avoid_bases")
+            and base in sig.avoid_bases
+        ):
+            return True
         return self._vol_guard.is_dump(symbol)
 
     async def _evaluate_symbol(
@@ -682,6 +695,10 @@ class MakerInventoryStrategy(BaseStrategy):
             and self._ring_needs_deploy(venue)
         ):
             ring_boost = Decimal("0.12")
+        alphai_boost = Decimal("0")
+        sig = self._alphai_signals
+        if sig is not None and base and hasattr(sig, "maker_rank_boost"):
+            alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)
         return (
             net
             + (skew * Decimal("0.01"))
@@ -689,6 +706,7 @@ class MakerInventoryStrategy(BaseStrategy):
             + held_penalty
             + focus_adj
             + ring_boost
+            + alphai_boost
         )
 
     def _okx_cash_rich(self) -> bool:
@@ -1198,6 +1216,10 @@ class MakerInventoryStrategy(BaseStrategy):
                     or 0
                 )
             )
+            base_asset = infer_base_asset(buy_snap.symbol, self._quote)
+            sig = self._alphai_signals
+            if sig is not None and base_asset and hasattr(sig, "fv_buy_premium_bps"):
+                premium_bps = sig.fv_buy_premium_bps(base_asset, premium_bps)
             max_buy = fair_value * (
                 Decimal("1") + premium_bps / Decimal("10000")
             )
