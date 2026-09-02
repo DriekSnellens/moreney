@@ -398,6 +398,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             getattr(settings, "live_micro_ring_util_b_ignore_underwater", True)
         )
         self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
+        self._alphai_enabled = bool(getattr(settings, "alphai_enabled", False))
+        self._alphai_blocked_bases: frozenset[str] = frozenset()
+        self._alphai_blocked_detail: dict[str, str] = {}
+        self._alphai_macro_active = False
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -904,6 +908,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             bool(new_bases_only) and bool(blocked) and not self._daily_kill_active
         )
 
+    def apply_alphai_regime(self, state: object | None) -> None:
+        """Sync AlphaI headline blocks onto the live bridge (from PaperRunner poll)."""
+        if state is None:
+            self._alphai_blocked_bases = frozenset()
+            self._alphai_blocked_detail = {}
+            self._alphai_macro_active = False
+            return
+        blocked = getattr(state, "blocked_bases", frozenset()) or frozenset()
+        detail = getattr(state, "blocked_detail", {}) or {}
+        macro = bool(getattr(state, "macro_reduce_only", False))
+        self._alphai_blocked_bases = frozenset(str(b).upper() for b in blocked if b)
+        self._alphai_blocked_detail = {
+            str(k): str(v) for k, v in dict(detail).items() if k and v
+        }
+        self._alphai_macro_active = macro
+
+    def _alphai_blocks_base(self, base: str) -> bool:
+        if not self._alphai_enabled:
+            return False
+        return str(base or "").upper() in self._alphai_blocked_bases
+
     def set_underwater_base_blocks(
         self,
         blocked_bases: dict[str, set[str] | frozenset[str] | list[str]] | None,
@@ -1335,6 +1360,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "exclude_bases": sorted(self._exclude_bases),
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
+            "alphai": {
+                "enabled": self._alphai_enabled,
+                "macro_active": self._alphai_macro_active,
+                "blocked_bases": sorted(self._alphai_blocked_bases),
+                "blocked_detail": dict(self._alphai_blocked_detail),
+                "skips": int(self.skips.get("alphai_news_block", 0) or 0),
+            },
             "live_trade_count": len(self.live_trades),
             "live_fill_count": int(self.session_live_fill_count),
             "live_transaction_count": int(self.session_live_transaction_count),
@@ -1378,6 +1410,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "ring_soft_block_underwater_eur": str(self._ring_soft_block_underwater_eur),
                 "ring_util_b_ignore_underwater": self._ring_util_b_ignore_underwater,
                 "cvd_abandoned": self._cvd_abandoned,
+                "alphai_enabled": self._alphai_enabled,
+                "alphai_blocked_bases": sorted(self._alphai_blocked_bases),
+                "alphai_blocked_detail": dict(self._alphai_blocked_detail),
+                "alphai_macro_active": self._alphai_macro_active,
                 "entry_short_momentum_samples": self._entry_short_momentum_samples,
                 "entry_short_momentum_min_return": str(self._entry_short_momentum_min),
                 "entry_min_low_util_rising_n": self._entry_min_low_util_rising_n,
@@ -1684,6 +1720,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
         if self._cvd_abandoned:
             hints.append("CVD_ABANDONED")
+        if self._alphai_enabled:
+            if self._alphai_macro_active:
+                hints.append("ALPHAI_MACRO_REDUCE_ONLY")
+            if self._alphai_blocked_bases:
+                bases = ",".join(sorted(self._alphai_blocked_bases)[:8])
+                hints.append(f"ALPHAI_NEWS_BLOCK {bases}")
         if self._ring_util_b_ignore_underwater:
             hints.append("UTIL_B_IGNORE_UNDERWATER on")
         if self._exit_engine_enabled:
@@ -6096,6 +6138,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"{sorted(held & self._corr_group)}"
                     ),
                 )
+        if (
+            side_is_buy
+            and self._alphai_blocks_base(base)
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+        ):
+            self._bump_skip("alphai_news_block")
+            detail = self._alphai_blocked_detail.get(base.upper(), "")
+            return await self._reject_before_live(
+                order_request,
+                reason="ALPHAI_NEWS_BLOCK",
+                message=f"AlphaI bearish headline blocks new {base} buys{': ' + detail if detail else ''}",
+            )
         if (
             side_is_buy
             and self._new_buy_focus_only

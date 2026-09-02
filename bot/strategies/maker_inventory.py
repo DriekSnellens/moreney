@@ -208,6 +208,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._venue_free_quote: dict[str, Decimal] = {}
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
+        self._news_blocked_bases: frozenset[str] = frozenset()
         self._hmm_regime_id: int | None = None
         self._hmm_uptrend_ask_improve_bps = Decimal(
             str(getattr(settings, "paper_hmm_uptrend_ask_improve_bps", 0) or 0)
@@ -319,6 +320,12 @@ class MakerInventoryStrategy(BaseStrategy):
     def set_reduce_only(self, enabled: bool) -> None:
         """External guardrail (HMM toxic flow / operator): block new BUY quotes."""
         self._external_reduce_only = bool(enabled)
+
+    def set_news_blocked_bases(self, bases: set[str] | frozenset[str]) -> None:
+        """Per-base headline blocks from AlphaI (bearish catalyst)."""
+        self._news_blocked_bases = frozenset(
+            str(b).strip().upper() for b in bases if str(b).strip()
+        )
 
     def set_cross_venue_paused(self, paused: bool) -> None:
         """Pause OKX↔Bitvavo emits when live fill rate is chronically poor."""
@@ -528,8 +535,11 @@ class MakerInventoryStrategy(BaseStrategy):
         return skew is not None and skew.sell_only
 
     def _symbol_sell_only(self, symbol: str) -> bool:
-        """True when dump guard or HMM toxic forbids new BUY exposure (not global alt cap)."""
+        """True when dump guard, news, or HMM toxic forbids new BUY exposure."""
         if self._external_reduce_only:
+            return True
+        base = infer_base_asset(symbol, self._quote).upper()
+        if base and base in self._news_blocked_bases:
             return True
         return self._vol_guard.is_dump(symbol)
 
@@ -1693,5 +1703,6 @@ class MakerInventoryStrategy(BaseStrategy):
             },
             "dump_symbols": self.dump_symbols(),
             "reduce_only": self._external_reduce_only,
+            "news_blocked_bases": sorted(self._news_blocked_bases),
             "hmm_regime_id": self._hmm_regime_id,
         }

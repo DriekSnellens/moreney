@@ -18,6 +18,7 @@ from bot.live.dashboard_history import (
     weekly_realized_delta,
     _calendar_pnl_for_payload,
 )
+from bot.integrations.alphai.status import merge_alphai_status
 
 
 def _esc(value: Any) -> str:
@@ -130,9 +131,76 @@ def _nl_idle(hint: str) -> str:
         "SCANNING_NO_PASSING_EDGE": "Scant — geen edge die alle filters passeert",
         "SCANNING": "Scant / wacht op setup",
         "GESTOPTE SESSIE": "Sessie gestopt",
+        "ALPHAI_MACRO_REDUCE_ONLY": "AlphaI macro reduce-only",
+        "ALPHAI_NEWS_BLOCK": "AlphaI bearish headline",
     }
     title = labels.get(code, code)
     return f"{title} — {rest}" if rest else title
+
+
+def _render_alphai_html(alphai: dict[str, Any]) -> str:
+    enabled = bool(alphai.get("enabled"))
+    if not enabled and not alphai.get("headlines"):
+        return ""
+    obs = bool(alphai.get("observation_mode"))
+    macro = bool(alphai.get("macro_active") or alphai.get("macro_reduce_only"))
+    blocked = list(alphai.get("blocked_bases") or [])
+    detail = alphai.get("blocked_detail") if isinstance(alphai.get("blocked_detail"), dict) else {}
+    headlines = alphai.get("headlines") if isinstance(alphai.get("headlines"), list) else []
+    hl_rows = []
+    for h in headlines[:6]:
+        if not isinstance(h, dict):
+            continue
+        title = str(h.get("title") or "")[:120]
+        rel = h.get("relevance")
+        cat = h.get("category") or ""
+        hl_rows.append(
+            f"<li><span class='kind'>{_esc(cat)} r{_esc(rel)}</span> {_esc(title)}</li>"
+        )
+    block_rows = []
+    for base in blocked[:10]:
+        reason = detail.get(base) or detail.get(str(base)) or ""
+        block_rows.append(
+            f"<li><strong>{_esc(base)}</strong>"
+            + (f" — {_esc(reason[:100])}" if reason else "")
+            + "</li>"
+        )
+    mode = "observatie (log only)" if obs else "actief (blokkeert buys)"
+    quota = alphai.get("rate_limit_remaining")
+    polls = alphai.get("polls")
+    last_poll = alphai.get("last_poll_at") or "—"
+    skips = alphai.get("skips")
+    err = alphai.get("last_error")
+    err_html = (
+        f"<p class='hint bad'>Laatste fout: {_esc(str(err)[:160])}</p>" if err else ""
+    )
+    return (
+        "<section class='target-band' aria-label='AlphaI news' id='section-alphai'>"
+        "<h2>AlphaI news guard</h2>"
+        "<div class='band-row'>"
+        f"<span>Status: <strong id='alphai-enabled'>{'aan' if enabled else 'uit'}</strong></span>"
+        f"<span>Modus: <span id='alphai-mode'>{_esc(mode)}</span></span>"
+        f"<span>Macro RO: <span id='alphai-macro'>{'ja' if macro else 'nee'}</span></span>"
+        f"<span>Quota: <span id='alphai-quota'>{_esc(quota if quota is not None else '—')}</span></span>"
+        f"<span>Polls: <span id='alphai-polls'>{_esc(polls if polls is not None else '—')}</span></span>"
+        f"<span>Skips: <span id='alphai-skips'>{_esc(skips if skips is not None else '—')}</span></span>"
+        "</div>"
+        f"<p class='hint'>Laatste poll: <span id='alphai-last-poll'>{_esc(last_poll)}</span></p>"
+        + err_html
+        + (
+            "<p class='hint'>Geblokkeerde bases (bearish headlines):</p>"
+            "<ul class='alerts' id='alphai-blocked'>"
+            + ("".join(block_rows) if block_rows else "<li class='hint'>Geen actieve blocks</li>")
+            + "</ul>"
+        )
+        + (
+            "<p class='hint'>Recente headlines:</p>"
+            "<ul class='alerts' id='alphai-headlines'>"
+            + ("".join(hl_rows) if hl_rows else "<li class='hint'>Nog geen headlines</li>")
+            + "</ul>"
+        )
+        + "</section>"
+    )
 
 
 def _nl_skip(reason: str) -> str:
@@ -156,6 +224,7 @@ def _nl_skip(reason: str) -> str:
         "stale_edge": "stale edge",
         "sleeve_loss_cap": "velocity-sleeve verliescap",
         "exit_cooldown": "exit cooldown",
+        "alphai_news_block": "AlphaI bearish headline",
     }
     return labels.get(reason, reason)
 
@@ -1416,6 +1485,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Adverse rejects: <span id='cap-intel-adverse-reject'>{_esc(eq_diag.get('adverse_selection_reject', '—'))}</span></span>"
         "</div></section>"
     )
+    alphai_html = _render_alphai_html(merge_alphai_status(session, bridge))
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
@@ -1564,6 +1634,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {venue_html}
       {exec_html}
       {regime_html}
+      {alphai_html}
       {cap_intel_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
@@ -1828,6 +1899,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('cap-intel-reserve-need', dash(m.capital_reserve_need_pct));
       set('cap-intel-net-cap-hr', dash(m.net_eur_per_capital_hour));
       set('cap-intel-adverse-reject', dash(m.adverse_selection_reject));
+      // AlphaI news guard
+      set('alphai-enabled', m.alphai_enabled ? 'aan' : (m.alphai_enabled === false ? 'uit' : '—'));
+      set('alphai-mode', m.alphai_observation_mode ? 'observatie (log only)' : (m.alphai_enabled ? 'actief (blokkeert buys)' : '—'));
+      set('alphai-macro', m.alphai_macro_active ? 'ja' : 'nee');
+      set('alphai-quota', dash(m.alphai_rate_limit_remaining));
+      set('alphai-polls', dash(m.alphai_polls));
+      set('alphai-skips', dash(m.alphai_skips));
+      set('alphai-last-poll', dash(m.alphai_last_poll_at));
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');

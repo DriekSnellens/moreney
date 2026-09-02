@@ -387,6 +387,15 @@ def _session_settings(
             "live_disable_research_hooks": True,
             # Product retirement: CVD TOB shadow expectancy failed.
             "live_cvd_abandoned": True,
+            # AlphaI news intelligence (requires ALPHAI_API_KEY in env).
+            "alphai_enabled": True,
+            "alphai_min_relevance": 7,
+            "alphai_poll_interval_sec": 120.0,
+            "alphai_block_bearish_bases": True,
+            "alphai_macro_reduce_only": True,
+            "alphai_poll_macro": True,
+            "alphai_poll_actionable": True,
+            "alphai_observation_mode": False,
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,
@@ -764,6 +773,7 @@ async def run_session(
                 "last_cycle": st.get("last_cycle"),
                 "why_not_trade": st.get("why_not_trade"),
                 "pipeline_funnel": st.get("pipeline_funnel"),
+                "alphai": st.get("alphai") or {},
             }
         )
 

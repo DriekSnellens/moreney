@@ -878,6 +878,82 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     }
 
 
+@app.post("/integrations/alphai/webhook")
+async def alphai_webhook(request: Request) -> dict[str, Any]:
+    """Ingest AlphaI Pro push articles (HMAC verified)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    body = await request.body()
+    secret_raw = getattr(settings, "alphai_webhook_secret", None)
+    secret = (
+        secret_raw.get_secret_value()
+        if secret_raw is not None and hasattr(secret_raw, "get_secret_value")
+        else (str(secret_raw).strip() if secret_raw else "")
+    )
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_WEBHOOK_SECRET not configured")
+    from bot.integrations.alphai.webhook import verify_webhook_signature
+
+    sig = request.headers.get("X-Alphai-Signature") or request.headers.get(
+        "x-alphai-signature"
+    )
+    if not verify_webhook_signature(secret, sig, body):
+        raise HTTPException(status_code=401, detail="invalid webhook signature")
+    try:
+        import json
+
+        payload = json.loads(body.decode("utf-8") if body else "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+    article = payload.get("article") if isinstance(payload, dict) else None
+    if not isinstance(article, dict):
+        raise HTTPException(status_code=400, detail="expected { \"article\": {...} }")
+    from bot.integrations.alphai.pending import push_webhook_article
+
+    push_webhook_article(article)
+    try:
+        runner = get_paper_runner()
+        if runner.running:
+            return {"ok": True, **runner.ingest_alphai_article(article)}
+    except Exception:  # noqa: BLE001
+        logger.exception("alphai webhook immediate ingest failed")
+    return {"ok": True, "queued": True}
+
+
+@app.get("/integrations/alphai/status")
+async def alphai_status(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """AlphaI monitor snapshot (runner + live bridge blocks)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        return {"enabled": False}
+    mgr = get_micro_session_manager()
+    session = mgr.status()
+    bridge_snap = (session.get("bridge") or {}) if isinstance(session.get("bridge"), dict) else {}
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        try:
+            bridge_snap = bridge.snapshot_bridge()
+        except Exception:  # noqa: BLE001
+            logger.exception("alphai status bridge snapshot failed")
+    from bot.integrations.alphai.status import merge_alphai_status
+
+    merged = merge_alphai_status(session, bridge_snap)
+    out: dict[str, Any] = {"enabled": True, **merged}
+    try:
+        runner = get_paper_runner()
+        if getattr(runner, "_alphai_monitor", None) is not None:
+            out["monitor"] = runner._alphai_monitor.snapshot()
+    except Exception:  # noqa: BLE001
+        pass
+    import os
+
+    out["api_key_configured"] = bool(
+        getattr(settings, "alphai_api_key", None) or os.environ.get("ALPHAI_API_KEY")
+    )
+    return out
+
+
 @app.get("/api")
 async def api_root() -> JSONResponse:
     settings = get_settings()
