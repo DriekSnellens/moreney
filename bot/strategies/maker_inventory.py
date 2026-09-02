@@ -210,6 +210,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._external_reduce_only = False
         self._news_blocked_bases: frozenset[str] = frozenset()
         self._alphai_signals: Any | None = None
+        self._alphai_macro_caution = False
         self._hmm_regime_id: int | None = None
         self._hmm_uptrend_ask_improve_bps = Decimal(
             str(getattr(settings, "paper_hmm_uptrend_ask_improve_bps", 0) or 0)
@@ -331,6 +332,10 @@ class MakerInventoryStrategy(BaseStrategy):
     def apply_alphai_signals(self, signals: object | None) -> None:
         """Daily picks + bullish/avoid signals for rank and FV buy premium."""
         self._alphai_signals = signals
+
+    def set_alphai_macro_caution(self, enabled: bool) -> None:
+        """Macro headline caution — block non-bullish new buys only."""
+        self._alphai_macro_caution = bool(enabled)
 
     def set_cross_venue_paused(self, paused: bool) -> None:
         """Pause OKX↔Bitvavo emits when live fill rate is chronically poor."""
@@ -554,6 +559,13 @@ class MakerInventoryStrategy(BaseStrategy):
             and base in sig.avoid_bases
         ):
             return True
+        if self._alphai_macro_caution and base:
+            if (
+                sig is None
+                or not hasattr(sig, "is_bullish_buy")
+                or not sig.is_bullish_buy(base)
+            ):
+                return True
         return self._vol_guard.is_dump(symbol)
 
     async def _evaluate_symbol(

@@ -2249,6 +2249,9 @@ class PaperRunner:
         from bot.integrations.alphai.signals import build_trading_signals
 
         observation = bool(getattr(self._settings, "alphai_observation_mode", False))
+        allow_bullish_macro = bool(
+            getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+        )
         self._alphai_reduce_only = bool(
             state.global_reduce_only and not observation
         )
@@ -2256,17 +2259,24 @@ class PaperRunner:
         maker = self._maker_strategy()
         if maker is not None:
             hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))
-            alphai_ro = bool(self._alphai_reduce_only)
-            maker.set_reduce_only(hmm_ro or alphai_ro)
+            maker.set_reduce_only(hmm_ro)
             maker.set_news_blocked_bases(set(state.blocked_bases))
+            if hasattr(maker, "set_alphai_macro_caution"):
+                maker.set_alphai_macro_caution(
+                    self._alphai_reduce_only and allow_bullish_macro
+                )
             if hasattr(maker, "apply_alphai_signals"):
                 maker.apply_alphai_signals(signals)
         executor = self._executor
         if hasattr(executor, "apply_alphai_regime"):
-            executor.apply_alphai_regime(state, observation_mode=observation)
+            executor.apply_alphai_regime(
+                state,
+                observation_mode=observation,
+                allow_bullish_buys=allow_bullish_macro,
+            )
         if hasattr(executor, "apply_alphai_trading_signals"):
             executor.apply_alphai_trading_signals(signals)
-        if self._alphai_reduce_only:
+        if self._alphai_reduce_only and not allow_bullish_macro:
             await self._cancel_all_bids(reason="alphai_macro_reduce_only")
 
     def ingest_alphai_article(self, article: dict[str, Any]) -> dict[str, Any]:

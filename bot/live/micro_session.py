@@ -817,10 +817,15 @@ async def run_session(
                 hmm = st_now.get("hmm_regime") or {}
                 toxic = bool(hmm.get("is_toxic_flow"))
                 alphai_box = st_now.get("alphai") or {}
+                allow_bullish_macro = bool(
+                    getattr(cfg, "alphai_macro_allow_bullish_buys", True)
+                )
                 alphai_macro_ro = bool(
                     alphai_box.get("macro_reduce_only")
                     or alphai_box.get("global_reduce_only")
                 )
+                if alphai_macro_ro and allow_bullish_macro:
+                    alphai_macro_ro = False
                 uw_block = int(
                     getattr(cfg, "live_micro_underwater_buy_block", 3) or 0
                 )

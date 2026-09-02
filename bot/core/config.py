@@ -437,6 +437,8 @@ class Settings(BaseSettings):
     # When True: log headlines + blocks in status but do not pause buys.
     alphai_observation_mode: bool = False
     alphai_bullish_buy_enabled: bool = True
+    # During macro reduce-only, still allow buys on AlphaI bullish picks/headlines.
+    alphai_macro_allow_bullish_buys: bool = True
     alphai_webhook_secret: SecretStr | None = None
     alphai_symbol_cache_path: str = "data/alphai/symbol_cache.json"
     alphai_daily_recommendations_enabled: bool = True

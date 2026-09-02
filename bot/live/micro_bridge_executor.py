@@ -403,6 +403,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._alphai_blocked_detail: dict[str, str] = {}
         self._alphai_macro_active = False
         self._alphai_signals: object | None = None
+        self._alphai_macro_allow_bullish = True
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -910,7 +911,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
     def apply_alphai_regime(
-        self, state: object | None, *, observation_mode: bool = False
+        self,
+        state: object | None,
+        *,
+        observation_mode: bool = False,
+        allow_bullish_buys: bool = True,
     ) -> None:
         """Sync AlphaI headline blocks onto the live bridge (from PaperRunner poll)."""
         if state is None:
@@ -926,7 +931,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(k): str(v) for k, v in dict(detail).items() if k and v
         }
         self._alphai_macro_active = macro and not observation_mode
-        if self._alphai_macro_active and self._regime_block_buys:
+        self._alphai_macro_allow_bullish = bool(allow_bullish_buys)
+        if (
+            self._alphai_macro_active
+            and self._regime_block_buys
+            and not allow_bullish_buys
+        ):
             self.set_buys_blocked(True, new_bases_only=False)
 
     def apply_alphai_trading_signals(self, signals: object | None) -> None:
@@ -6072,6 +6082,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"sleeve buys paused (vault holds)"
                 ),
             )
+        if (
+            side_is_buy
+            and self._alphai_macro_active
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+        ):
+            allow_bullish = bool(
+                getattr(self, "_alphai_macro_allow_bullish", True)
+                and getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+            )
+            if allow_bullish:
+                if not self._alphai_bullish_buy(base):
+                    self._bump_skip("alphai_macro_block")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ALPHAI_MACRO_BLOCK",
+                        message=(
+                            "AlphaI macro caution — only bullish pick/headline "
+                            f"bases allowed (not {base})"
+                        ),
+                    )
+                meta["alphai_macro_bullish_override"] = True
+            else:
+                self._bump_skip("alphai_macro_block")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_MACRO_BLOCK",
+                    message="AlphaI macro reduce-only blocks all new buys",
+                )
         if (
             side_is_buy
             and self._regime_block_buys
