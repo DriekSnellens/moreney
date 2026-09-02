@@ -6117,6 +6117,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and self._buys_blocked
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not (
+                self._alphai_bullish_buy(base)
+                and bool(getattr(self._settings, "alphai_macro_allow_bullish_buys", True))
+            )
         ):
             new_base = self._is_new_base_buy(venue, base)
             if self._buys_blocked_new_bases_only:
@@ -6238,7 +6242,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("trail_take_profit")
         ):
             self._refresh_buy_quality_circuit_breaker()
-            if self._buy_quality_paused():
+            if self._buy_quality_paused() and not self._alphai_bullish_buy(base):
                 self._bump_skip("buy_quality_pause")
                 return await self._reject_before_live(
                     order_request,

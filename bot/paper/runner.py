@@ -819,7 +819,7 @@ class PaperRunner:
             "execution_mode": ExecutionMode.PAPER.value,
             "universe_scan": True,
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else None,
-            "reduce_only": bool(self._hmm_reduce_only or self._alphai_reduce_only),
+            "reduce_only": self._effective_reduce_only(),
             "inventory_target_pct": self._hmm_inventory_target,
             "latency": metrics.report() if metrics.enabled else None,
         }
@@ -935,6 +935,17 @@ class PaperRunner:
             "fx_refilled": len(getattr(self, "_fx_refilled", set())),
         }
 
+    def _effective_reduce_only(self) -> bool:
+        """Global reduce-only for status/micro bridge (excludes macro when bullish buys allowed)."""
+        alphai_ro = self._alphai_reduce_only
+        if alphai_ro and bool(
+            getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+        ):
+            alphai_ro = False
+        maker = self._maker_strategy()
+        maker_ro = bool(getattr(maker, "reduce_only", False)) if maker else False
+        return bool(self._hmm_reduce_only or alphai_ro or maker_ro)
+
     def status(self) -> dict[str, Any]:
         snap = self._tracker.snapshot()
         ks = None
@@ -975,15 +986,7 @@ class PaperRunner:
             "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
             "inventory": self._inventory_snapshot(),
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else {"enabled": False},
-            "reduce_only": bool(
-                self._hmm_reduce_only
-                or self._alphai_reduce_only
-                or (
-                    getattr(self._maker_strategy(), "reduce_only", False)
-                    if self._maker_strategy() is not None
-                    else False
-                )
-            ),
+            "reduce_only": self._effective_reduce_only(),
             "alphai": (
                 self._alphai_monitor.snapshot()
                 if getattr(self, "_alphai_monitor", None) is not None
