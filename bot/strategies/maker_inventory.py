@@ -1310,7 +1310,14 @@ class MakerInventoryStrategy(BaseStrategy):
                     sell_exchange=sell_snap.exchange,
                 )
                 return None
-            if sell_price < fair_value:
+            alphai_same_venue_buy = (
+                sig is not None
+                and base_asset
+                and hasattr(sig, "is_bullish_buy")
+                and sig.is_bullish_buy(base_asset)
+                and buy_snap.exchange == sell_snap.exchange
+            )
+            if sell_price < fair_value and not alphai_same_venue_buy:
                 self._reject(
                     buy_snap.symbol,
                     "toxic_sell_vs_fv",
