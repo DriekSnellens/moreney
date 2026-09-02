@@ -439,6 +439,7 @@ class Settings(BaseSettings):
     alphai_bullish_buy_enabled: bool = True
     # During macro reduce-only, still allow buys on AlphaI bullish picks/headlines.
     alphai_macro_allow_bullish_buys: bool = True
+    alphai_bullish_inventory_build_enabled: bool = True
     alphai_webhook_secret: SecretStr | None = None
     alphai_symbol_cache_path: str = "data/alphai/symbol_cache.json"
     alphai_daily_recommendations_enabled: bool = True

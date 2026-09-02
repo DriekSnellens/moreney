@@ -143,6 +143,15 @@ def test_enforced_blocks_not_soft_avoid() -> None:
     assert "BTC" in signals.blocked_bases
 
 
+def test_inventory_build_flag() -> None:
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"AVAX"})),
+        {"picks": [{"base": "AVAX", "score": 20.0}], "avoid": []},
+    )
+    assert signals.inventory_build("AVAX")
+    assert not signals.inventory_build("ETH")
+
+
 def test_maker_avoid_base_sell_only() -> None:
     settings = Settings(
         execution_mode="paper",

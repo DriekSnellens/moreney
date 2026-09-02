@@ -805,6 +805,21 @@ class MakerInventoryStrategy(BaseStrategy):
         scaled = equity * self._min_profit_equity_bps / _BPS
         return max(floor, scaled)
 
+    def _alphai_inventory_build(self, base: str, candidate: MakerCandidate) -> bool:
+        """Same-venue ring deploy on strong AlphaI pick — skip round-trip NET gate."""
+        if not bool(getattr(self._settings, "alphai_bullish_inventory_build_enabled", True)):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "inventory_build"):
+            return False
+        if not sig.inventory_build(base):
+            return False
+        buy_v = str(candidate.buy_exchange or "").strip().lower()
+        sell_v = str(candidate.sell_exchange or "").strip().lower()
+        if buy_v != sell_v or not buy_v:
+            return False
+        return self._ring_needs_deploy(buy_v)
+
     def _build_fair_values(
         self, by_symbol: dict[str, list[MarketSnapshot]]
     ) -> dict[str, Decimal]:
@@ -1225,7 +1240,18 @@ class MakerInventoryStrategy(BaseStrategy):
 
         with self._hp("spread_calculation"):
             spread_bps = (sell_price - buy_price) / buy_price * _BPS
-        if buy_snap.exchange == sell_snap.exchange and spread_bps < self._min_spread_bps:
+        base_asset = infer_base_asset(buy_snap.symbol, self._quote)
+        sig = self._alphai_signals
+        min_spread = self._min_spread_bps
+        if (
+            sig is not None
+            and base_asset
+            and hasattr(sig, "inventory_build")
+            and sig.inventory_build(base_asset)
+            and buy_snap.exchange == sell_snap.exchange
+        ):
+            min_spread = self._min_spread_bps / Decimal("2")
+        if buy_snap.exchange == sell_snap.exchange and spread_bps < min_spread:
             self._reject(
                 buy_snap.symbol,
                 "tight_spread",
@@ -1516,6 +1542,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
         net = estimate.net_profit
         net_return = estimate.net_return
+        inv_build = self._alphai_inventory_build(base, candidate)
         # Hard dust / NET floors (stofjes + thin margins).
         dust_reason = self._dust.reject_reason(
             quantity=candidate.quantity,
@@ -1523,7 +1550,7 @@ class MakerInventoryStrategy(BaseStrategy):
             net_profit_eur=net,
             net_return=net_return,
         )
-        if dust_reason is not None and not sell_only and not buy_only:
+        if dust_reason is not None and not sell_only and not buy_only and not inv_build:
             self._reject(
                 candidate.symbol,
                 "dust_or_net_floor",
@@ -1534,7 +1561,12 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        if not estimate.trade_allowed and not sell_only and not buy_only:
+        if (
+            not estimate.trade_allowed
+            and not sell_only
+            and not buy_only
+            and not inv_build
+        ):
             reasons = estimate.disallow_reasons or ["profitability engine rejected"]
             self._reject(
                 candidate.symbol,
@@ -1549,7 +1581,7 @@ class MakerInventoryStrategy(BaseStrategy):
         min_eur = self._effective_min_profit(
             equity, notional=candidate.quantity * candidate.buy_price
         )
-        if not sell_only and not buy_only and net < min_eur:
+        if not sell_only and not buy_only and not inv_build and net < min_eur:
             self._reject(
                 candidate.symbol,
                 "min_profit_eur",
@@ -1560,7 +1592,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         _, min_return = self._dust.thresholds_for(candidate.quantity * candidate.buy_price)
-        if not sell_only and not buy_only and net_return < min_return:
+        if not sell_only and not buy_only and not inv_build and net_return < min_return:
             self._reject(
                 candidate.symbol,
                 "min_profit_pct",
@@ -1571,7 +1603,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         # Sell-only / buy-only still need a positive notional (no stofjes).
-        if sell_only or buy_only:
+        if sell_only or buy_only or inv_build:
             px = candidate.sell_price if sell_only else candidate.buy_price
             notional = candidate.quantity * px
             if (
@@ -1591,7 +1623,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 return None
         logger.info(
             "maker quote accepted symbol=%s buy=%s sell=%s qty=%s "
-            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s buy_only=%s",
+            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s buy_only=%s inv_build=%s",
             candidate.symbol,
             candidate.buy_exchange,
             candidate.sell_exchange,
@@ -1602,6 +1634,7 @@ class MakerInventoryStrategy(BaseStrategy):
             skew,
             sell_only,
             buy_only,
+            inv_build,
         )
 
         # Thin market view: same fields as model_copy(order_book=None) without
@@ -1627,6 +1660,8 @@ class MakerInventoryStrategy(BaseStrategy):
             if candidate.sell_snapshot is not None
             else 0.0,
         )
+        if inv_build:
+            buy_only = True
         with self._hp("candidate_object_construction"):
             return TradeOpportunity(
                 strategy_name=self.name,
@@ -1642,13 +1677,18 @@ class MakerInventoryStrategy(BaseStrategy):
                         f"@ ask {candidate.sell_price}"
                         if sell_only
                         else (
-                            f"Buy-only inventory build {candidate.quantity} on "
+                            f"AlphaI inventory build {candidate.quantity} on "
                             f"{candidate.buy_exchange} @ bid {candidate.buy_price}"
-                            if buy_only
+                            if inv_build
                             else (
-                                f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
-                                f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
-                                f"{candidate.sell_price}"
+                                f"Buy-only inventory build {candidate.quantity} on "
+                                f"{candidate.buy_exchange} @ bid {candidate.buy_price}"
+                                if buy_only
+                                else (
+                                    f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
+                                    f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
+                                    f"{candidate.sell_price}"
+                                )
                             )
                         )
                     )
@@ -1675,6 +1715,8 @@ class MakerInventoryStrategy(BaseStrategy):
                     "post_only": True,
                     "sell_only": sell_only,
                     "buy_only": buy_only,
+                    "alphai_inventory_build": inv_build,
+                    "alphai_bullish_buy": inv_build,
                     "fair_value_eur": str(fair_value) if fair_value is not None else None,
                     "fair_value_aligned": fair_aligned,
                     "inventory_skew_score": str(skew),
