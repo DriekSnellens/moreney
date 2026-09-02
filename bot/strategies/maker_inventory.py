@@ -1708,6 +1708,13 @@ class MakerInventoryStrategy(BaseStrategy):
         )
         if inv_build:
             buy_only = True
+        sig = self._alphai_signals
+        strong_bullish = bool(
+            inv_build
+            and sig is not None
+            and hasattr(sig, "is_strong_bullish_buy")
+            and sig.is_strong_bullish_buy(base)
+        )
         with self._hp("candidate_object_construction"):
             return TradeOpportunity(
                 strategy_name=self.name,
@@ -1763,6 +1770,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     "buy_only": buy_only,
                     "alphai_inventory_build": inv_build,
                     "alphai_bullish_buy": inv_build,
+                    "alphai_strong_bullish_buy": strong_bullish,
                     "fair_value_eur": str(fair_value) if fair_value is not None else None,
                     "fair_value_aligned": fair_aligned,
                     "inventory_skew_score": str(skew),
