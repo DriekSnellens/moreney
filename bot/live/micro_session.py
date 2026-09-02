@@ -293,6 +293,8 @@ def _session_settings(
             "live_micro_outcome_learning_enabled": True,
             "live_micro_capital_intelligence_enabled": True,
             "live_micro_intelligence_observation_mode": False,
+            "live_micro_experiment_id": "phase2_intelligence",
+            "live_micro_intelligence_auto_apply": False,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,

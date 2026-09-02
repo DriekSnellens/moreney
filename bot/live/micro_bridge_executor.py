@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from uuid import uuid4
+
 from bot.core.config import Settings
 from bot.core.enums import EntryQualityRecommendation, OpportunitySide, OrderSide, OrderStatus, OrderType
 from bot.core.models import ExecutionResult, OrderRequest, ProfitabilityResult, TradeOpportunity
@@ -447,6 +449,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._intelligence = IntelligenceSession.load(self._intelligence_path, settings)
         self._intelligence.observation_mode = bool(
             getattr(settings, "live_micro_intelligence_observation_mode", True)
+        )
+        self._intelligence.experiment_id = str(
+            getattr(settings, "live_micro_experiment_id", "phase2_intelligence")
+        )
+        self._attribution_path = Path(
+            str(getattr(settings, "live_micro_attribution_persist_path", "./data/live_micro_attribution_state.json"))
         )
         self._capital_state_snapshot: dict[str, Any] = {}
         self._recent_session_buy_keys: list[str] = []
@@ -882,6 +890,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             tmp.replace(path)
             if hasattr(self, "_intelligence"):
                 self._intelligence.save(self._intelligence_path)
+                self._intelligence.attribution_store.save(self._attribution_path)
         except Exception as exc:  # noqa: BLE001
             logger.warning("micro bridge persist failed path=%s err=%s", path, exc)
 
@@ -1976,6 +1985,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
                 "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
             }
+            self._intelligence.attribution_store.record_opportunity(
+                record_id=str(uuid4()),
+                symbol=symbol,
+                venue=str(meta.get("buy_exchange") or meta.get("venue") or "bitvavo"),
+                strategy=str(meta.get("strategy") or "maker_inventory"),
+                side="buy",
+                score_before=assessment.score,
+                score_after=opp_assessment.opportunity_score,
+                regime=regime.regime.value,
+                regime_confidence=regime.confidence,
+                regime_score=opp_assessment.regime_score,
+                adverse_score=opp_assessment.adverse_selection_score,
+                execution_decision=opp_assessment.execution_decision,
+                expected_net=opp_assessment.expected_net_profit_eur,
+                order_price=px,
+                size=qty,
+                experiment_id=self._intelligence.experiment_id,
+                reasons=opp_assessment.reasons,
+            )
         return assessment
 
     def _note_position_opened(self, venue: str, base: str) -> None:
@@ -3424,6 +3452,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     observation_mode=self._intelligence.observation_mode,
                 )
                 row["last_adverse_score"] = str(intel_assess.adverse_selection_score)
+                attr_rec = self._intelligence.attribution_store.record_opportunity(
+                    record_id=str(row.get("exchange_order_id") or uuid4()),
+                    symbol=symbol,
+                    venue=venue,
+                    strategy=str(row.get("strategy") or "maker_inventory"),
+                    side=side_raw,
+                    adverse_score=intel_assess.adverse_selection_score,
+                    expected_net=Decimal(str(row_meta.get("net_profit_eur") or "0.5")),
+                    order_price=Decimal(str(row.get("price") or 0)),
+                    size=Decimal(str(row.get("quantity") or 0)),
+                    regime=self._intelligence.current_regime.regime.value
+                    if self._intelligence.current_regime
+                    else None,
+                    experiment_id=self._intelligence.experiment_id,
+                    reasons=intel_assess.reasons,
+                )
                 if intel_assess.observation_only:
                     self._intelligence.execution_store.observation_cancels += 1
                     logger.info(
@@ -3433,6 +3477,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         symbol,
                         ",".join(intel_assess.reasons),
                     )
+                    if intel_assess.action in {RestingOrderAction.CANCEL, RestingOrderAction.EXPIRE}:
+                        self._intelligence.attribution_store.record_cancel(
+                            attr_rec,
+                            reason=",".join(intel_assess.reasons),
+                            avoided_loss=intel_assess.adverse_selection_score
+                            * Decimal(str(row_meta.get("net_profit_eur") or "0.5")),
+                            missed_opportunity=Decimal(str(row_meta.get("net_profit_eur") or "0.5"))
+                            * Decimal("0.1"),
+                            live_executed=False,
+                        )
                 elif intel_assess.action in {
                     RestingOrderAction.CANCEL,
                     RestingOrderAction.EXPIRE,
@@ -3444,12 +3498,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         self._invalidate_bal_cache()
                         self._bump_skip("intel_resting_cancelled")
                         logger.info(
-                            "INTEL_RESTING_CANCEL venue=%s symbol=%s id=%s action=%s reasons=%s",
+                            "INTEL_RESTING_CANCEL venue=%s symbol=%s id=%s action=%s reasons=%s "
+                            "avoided=%s missed=%s alpha=%s",
                             venue,
                             symbol,
                             oid,
                             intel_assess.action.value,
                             ",".join(intel_assess.reasons),
+                            intel_assess.adverse_selection_score
+                            * Decimal(str(row_meta.get("net_profit_eur") or "0.5")),
+                            Decimal(str(row_meta.get("net_profit_eur") or "0.5")) * Decimal("0.1"),
+                            intel_assess.adverse_selection_score
+                            * Decimal(str(row_meta.get("net_profit_eur") or "0.5"))
+                            - Decimal(str(row_meta.get("net_profit_eur") or "0.5")) * Decimal("0.1"),
+                        )
+                        self._intelligence.attribution_store.record_cancel(
+                            attr_rec,
+                            reason=",".join(intel_assess.reasons),
+                            avoided_loss=intel_assess.adverse_selection_score
+                            * Decimal(str(row_meta.get("net_profit_eur") or "0.5")),
+                            missed_opportunity=Decimal(str(row_meta.get("net_profit_eur") or "0.5"))
+                            * Decimal("0.1"),
+                            live_executed=True,
                         )
                     except Exception:  # noqa: BLE001
                         logger.warning("intel resting cancel failed id=%s", oid)

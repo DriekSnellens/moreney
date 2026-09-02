@@ -1412,6 +1412,28 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Adverse rejects: <span id='cap-intel-adverse-reject'>{_esc(eq_diag.get('adverse_selection_reject', '—'))}</span></span>"
         "</div></section>"
     )
+    econ_intel_html = (
+        "<section class='target-band' aria-label='Economic intelligence' id='section-economic-intelligence'>"
+        "<h2>Economic intelligence</h2>"
+        "<div class='band-row'>"
+        f"<span>NET/h: <span id='econ-net-hr'>{_esc(eq_diag.get('net_eur_per_hour', '—'))}</span></span>"
+        f"<span>NET/capital-h: <span id='econ-net-cap-hr'>{_esc(eq_diag.get('net_eur_per_capital_hour', '—'))}</span></span>"
+        f"<span>Toxic fill rate: <span id='econ-toxic-rate'>{_esc(eq_diag.get('toxic_fill_rate', '—'))}</span></span>"
+        f"<span>Intel cancels: <span id='econ-intel-cancels'>{_esc(eq_diag.get('intelligence_cancels', '—'))}</span></span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>Avoided loss: <span id='econ-avoided-loss'>{_esc(eq_diag.get('avoided_adverse_loss_eur', '—'))}</span></span>"
+        f"<span>Missed opp: <span id='econ-missed-opp'>{_esc(eq_diag.get('missed_opportunity_eur', '—'))}</span></span>"
+        f"<span>Cancel alpha: <span id='econ-cancel-alpha'>{_esc(eq_diag.get('total_cancel_alpha_eur', '—'))}</span></span>"
+        f"<span>Avg lock: <span id='econ-avg-lock'>{_esc(eq_diag.get('average_lock_seconds', '—'))}</span>s</span>"
+        "</div>"
+        "<div class='band-row'>"
+        f"<span>P95 lock: <span id='econ-p95-lock'>{_esc(eq_diag.get('p95_lock_seconds', '—'))}</span>s</span>"
+        f"<span>Underwater cap: <span id='econ-underwater'>{_esc(eq_diag.get('underwater_capital_eur', '—'))}</span></span>"
+        f"<span>Maker alpha: <span id='econ-maker-alpha'>{_esc(eq_diag.get('maker_execution_alpha_avg', '—'))}</span></span>"
+        f"<span>Taker alpha: <span id='econ-taker-alpha'>{_esc(eq_diag.get('taker_execution_alpha_avg', '—'))}</span></span>"
+        "</div></section>"
+    )
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
@@ -1561,6 +1583,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       {exec_html}
       {regime_html}
       {cap_intel_html}
+      {econ_intel_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">
@@ -1824,6 +1847,19 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('cap-intel-reserve-need', dash(m.capital_reserve_need_pct));
       set('cap-intel-net-cap-hr', dash(m.net_eur_per_capital_hour));
       set('cap-intel-adverse-reject', dash(m.adverse_selection_reject));
+      // Economic intelligence
+      set('econ-net-hr', dash(m.net_eur_per_hour));
+      set('econ-net-cap-hr', dash(m.net_eur_per_capital_hour));
+      set('econ-toxic-rate', dash(m.toxic_fill_rate));
+      set('econ-intel-cancels', dash(m.intelligence_cancels));
+      set('econ-avoided-loss', dash(m.avoided_adverse_loss_eur));
+      set('econ-missed-opp', dash(m.missed_opportunity_eur));
+      set('econ-cancel-alpha', dash(m.total_cancel_alpha_eur));
+      set('econ-avg-lock', dash(m.average_lock_seconds));
+      set('econ-p95-lock', dash(m.p95_lock_seconds));
+      set('econ-underwater', dash(m.underwater_capital_eur));
+      set('econ-maker-alpha', dash(m.maker_execution_alpha_avg));
+      set('econ-taker-alpha', dash(m.taker_execution_alpha_avg));
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');

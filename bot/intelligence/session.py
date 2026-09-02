@@ -11,6 +11,7 @@ from typing import Any
 
 from bot.intelligence.adverse_selection import AdverseSelectionConfig, config_from_settings as adverse_cfg
 from bot.intelligence.capital_intelligence import CapitalIntelligenceConfig, config_from_settings as capital_cfg
+from bot.intelligence.economic_attribution import EconomicAttributionStore
 from bot.intelligence.execution_quality import ExecutionQualityStore, config_from_settings as exec_cfg
 from bot.intelligence.market_regime_engine import MarketRegimeAssessment
 from bot.intelligence.outcome_learning import OutcomeLearningStore, config_from_settings as learning_cfg
@@ -30,6 +31,8 @@ class IntelligenceSession:
     resting_config: RestingOrderConfig = field(default_factory=RestingOrderConfig)
     execution_store: ExecutionQualityStore = field(default_factory=ExecutionQualityStore)
     outcome_store: OutcomeLearningStore = field(default_factory=OutcomeLearningStore)
+    attribution_store: EconomicAttributionStore = field(default_factory=EconomicAttributionStore)
+    experiment_id: str = "phase2_intelligence"
     observation_mode: bool = True
     current_regime: MarketRegimeAssessment | None = None
     _pending_post_fill: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -52,7 +55,9 @@ class IntelligenceSession:
         regime = self.current_regime
         out: dict[str, Any] = {
             "intelligence_observation_mode": self.observation_mode,
+            "experiment_id": self.experiment_id,
             **self.execution_store.snapshot(),
+            **self.attribution_store.snapshot(),
         }
         if regime is not None:
             out.update({
@@ -82,7 +87,9 @@ class IntelligenceSession:
         return {
             "execution": self.execution_store.to_dict(),
             "outcomes": self.outcome_store.to_dict(),
+            "attribution": self.attribution_store.to_dict(),
             "observation_mode": self.observation_mode,
+            "experiment_id": self.experiment_id,
             "churn_without_net_improvement": self.churn_without_net_improvement,
         }
 
@@ -93,6 +100,9 @@ class IntelligenceSession:
             return sess
         sess.execution_store = ExecutionQualityStore.from_dict(raw.get("execution"))
         sess.outcome_store = OutcomeLearningStore.from_dict(raw.get("outcomes"))
+        sess.attribution_store = EconomicAttributionStore.from_dict(raw.get("attribution"))
+        if "experiment_id" in raw:
+            sess.experiment_id = str(raw["experiment_id"])
         if "observation_mode" in raw:
             sess.observation_mode = bool(raw["observation_mode"])
         sess.churn_without_net_improvement = int(raw.get("churn_without_net_improvement") or 0)
