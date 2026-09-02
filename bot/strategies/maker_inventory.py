@@ -563,7 +563,9 @@ class MakerInventoryStrategy(BaseStrategy):
             if (
                 sig is None
                 or not hasattr(sig, "is_bullish_buy")
-                or not sig.is_bullish_buy(base)
+                or not sig.is_bullish_buy(
+                    base, ring_fallback=self._alphai_ring_fallback_active()
+                )
             ):
                 return True
         return self._vol_guard.is_dump(symbol)
@@ -596,11 +598,12 @@ class MakerInventoryStrategy(BaseStrategy):
         ranked: list[TradeOpportunity] = []
         fair_value = self._fair_values.get(infer_base_asset(symbol, self._quote))
         sig = self._alphai_signals
+        ring_fb = self._alphai_ring_fallback_active()
         alphai_bullish_same_venue = (
             sig is not None
             and base
             and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base)
+            and sig.is_bullish_buy(base, ring_fallback=ring_fb)
         )
         for buy_snap in venues:
             if not self._venue_allowed(buy_snap.exchange):
@@ -721,7 +724,9 @@ class MakerInventoryStrategy(BaseStrategy):
             and base
             and sig is not None
             and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base)
+            and sig.is_bullish_buy(
+                base, ring_fallback=self._alphai_ring_fallback_active()
+            )
         )
         held_anywhere = bool(
             base and any(base in held for held in self._venue_held_bases.values())
@@ -756,7 +761,7 @@ class MakerInventoryStrategy(BaseStrategy):
             and base
             and sig is not None
             and hasattr(sig, "is_strong_bullish_buy")
-            and sig.is_strong_bullish_buy(base)
+            and sig.is_strong_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
             and not held_anywhere
             and self._ring_needs_deploy(venue)
         ):
@@ -855,6 +860,26 @@ class MakerInventoryStrategy(BaseStrategy):
         scaled = equity * self._min_profit_equity_bps / _BPS
         return max(floor, scaled)
 
+    def _alphai_held_bases(self) -> set[str]:
+        held: set[str] = set()
+        for bases in self._venue_held_bases.values():
+            held.update(str(b).upper() for b in bases)
+        return held
+
+    def _alphai_ring_fallback_active(self) -> bool:
+        """Ring underfilled and every AlphaI bullish pick already held → open focus path."""
+        if not self._any_ring_needs_deploy():
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        if hasattr(sig, "all_bullish_held"):
+            return bool(sig.all_bullish_held(self._alphai_held_bases()))
+        buys = set(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        if not buys:
+            return True
+        return buys.issubset(self._alphai_held_bases())
+
     def _alphai_inventory_build(self, base: str, candidate: MakerCandidate) -> bool:
         """Same-venue first buy on strong AlphaI pick — skip round-trip NET gate."""
         if not bool(getattr(self._settings, "alphai_bullish_inventory_build_enabled", True)):
@@ -862,15 +887,20 @@ class MakerInventoryStrategy(BaseStrategy):
         sig = self._alphai_signals
         if sig is None:
             return False
+        ring_fb = self._alphai_ring_fallback_active()
         # Prefer explicit inventory_build (strong); fall back to is_strong_bullish_buy.
         if hasattr(sig, "inventory_build"):
-            if not sig.inventory_build(base):
+            if not sig.inventory_build(base, ring_fallback=ring_fb):
                 return False
         elif hasattr(sig, "is_strong_bullish_buy"):
-            if not sig.is_strong_bullish_buy(base):
+            if not sig.is_strong_bullish_buy(base, ring_fallback=ring_fb):
                 return False
         else:
             return False
+        # Ring fallback must stay on the configured focus universe.
+        if ring_fb and not sig.is_strong_bullish_buy(base):
+            if not self._focus_bases or base.upper() not in self._focus_bases:
+                return False
         buy_v = str(candidate.buy_exchange or "").strip().lower()
         sell_v = str(candidate.sell_exchange or "").strip().lower()
         if buy_v != sell_v or not buy_v:
@@ -1249,7 +1279,7 @@ class MakerInventoryStrategy(BaseStrategy):
             and sig is not None
             and base_asset
             and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base_asset)
+            and sig.is_bullish_buy(base_asset, ring_fallback=self._alphai_ring_fallback_active())
         )
 
         skew = self._venue_skew(str(buy_snap.exchange or ""))
@@ -1369,7 +1399,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 sig is not None
                 and base_asset
                 and hasattr(sig, "is_bullish_buy")
-                and sig.is_bullish_buy(base_asset)
+                and sig.is_bullish_buy(base_asset, ring_fallback=self._alphai_ring_fallback_active())
                 and buy_snap.exchange == sell_snap.exchange
             )
             if sell_price < fair_value and not alphai_same_venue_buy:
@@ -1552,7 +1582,7 @@ class MakerInventoryStrategy(BaseStrategy):
             and sig is not None
             and base
             and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base)
+            and sig.is_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
         )
         # Same-venue buy-only sizing only when explicitly allowed (not winst-mode).
         if same_venue and (self._allow_buy_only or alphai_buy):
@@ -1759,13 +1789,13 @@ class MakerInventoryStrategy(BaseStrategy):
         bullish_buy = bool(
             sig is not None
             and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base)
+            and sig.is_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
         )
         strong_bullish = bool(
             inv_build
             and sig is not None
             and hasattr(sig, "is_strong_bullish_buy")
-            and sig.is_strong_bullish_buy(base)
+            and sig.is_strong_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
         )
         with self._hp("candidate_object_construction"):
             return TradeOpportunity(
@@ -1823,6 +1853,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     "alphai_inventory_build": inv_build,
                     "alphai_bullish_buy": bullish_buy,
                     "alphai_strong_bullish_buy": strong_bullish,
+                    "alphai_ring_fallback": self._alphai_ring_fallback_active(),
                     "fair_value_eur": str(fair_value) if fair_value is not None else None,
                     "fair_value_aligned": fair_aligned,
                     "inventory_skew_score": str(skew),

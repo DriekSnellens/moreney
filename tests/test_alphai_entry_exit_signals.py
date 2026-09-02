@@ -152,6 +152,92 @@ def test_inventory_build_flag() -> None:
     assert not signals.inventory_build("ETH")
 
 
+def test_ring_fallback_opens_watch_and_focus() -> None:
+    signals = build_trading_signals(
+        AlphaIRegimeState(macro_reduce_only=True),
+        {
+            "picks": [{"base": "LINK", "score": 32.5}],
+            "avoid": [{"base": "ETH", "score": -10.0}],
+            "watch": [{"base": "ADA", "score": 2.0}],
+        },
+    )
+    assert signals.all_bullish_held({"LINK"})
+    assert not signals.inventory_build("ADA")
+    assert signals.inventory_build("ADA", ring_fallback=True)
+    assert signals.is_bullish_buy("ADA", ring_fallback=True)
+    assert not signals.is_bullish_buy("ETH", ring_fallback=True)
+    assert signals.inventory_build("DOT", ring_fallback=True)  # unscored non-avoid
+    assert not signals.inventory_build("ETH", ring_fallback=True)
+
+
+def test_starbucks_regulation_does_not_trigger_macro() -> None:
+    row = {
+        "original": {
+            "uid": "sbux1",
+            "title": "Starbucks dress code didn’t violate NYC workers’ labor rights, US court rules",
+            "time_published": "2026-09-02T20:00:00Z",
+        },
+        "enrichment": {
+            "relevance_score": 8,
+            "category": "regulation",
+            "tickers": ["SBUX"],
+            "ai_trading_insights": {
+                "ticker_analysis": [
+                    {
+                        "ticker": "SBUX",
+                        "impact_analysis": {"sentiment": "neutral"},
+                    }
+                ]
+            },
+        },
+    }
+    headline = parse_news_row(row)
+    assert headline is not None
+    state = build_regime_from_headlines(
+        [headline],
+        min_relevance=7,
+        block_bearish_bases=True,
+        macro_reduce_only=True,
+        focus_bases={"SOL", "ETH", "LINK"},
+        observation_mode=False,
+    )
+    assert state.macro_reduce_only is False
+
+
+def test_fed_regulation_still_triggers_macro() -> None:
+    row = {
+        "original": {
+            "uid": "fed1",
+            "title": "SEC crypto enforcement wave threatens ETF inflows",
+            "time_published": "2026-09-02T20:00:00Z",
+        },
+        "enrichment": {
+            "relevance_score": 9,
+            "category": "regulation",
+            "tickers": ["BTC-USD", "ETH-USD"],
+            "ai_trading_insights": {
+                "ticker_analysis": [
+                    {
+                        "ticker": "BTC-USD",
+                        "impact_analysis": {"sentiment": "bearish"},
+                    }
+                ]
+            },
+        },
+    }
+    headline = parse_news_row(row)
+    assert headline is not None
+    state = build_regime_from_headlines(
+        [headline],
+        min_relevance=7,
+        block_bearish_bases=True,
+        macro_reduce_only=True,
+        focus_bases={"BTC", "ETH"},
+        observation_mode=False,
+    )
+    assert state.macro_reduce_only is True
+
+
 def test_maker_avoid_base_sell_only() -> None:
     settings = Settings(
         execution_mode="paper",

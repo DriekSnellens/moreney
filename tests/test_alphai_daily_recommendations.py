@@ -78,3 +78,24 @@ def test_score_and_rank_bullish_over_bearish() -> None:
     assert any(p.base == "ETH" for p in buy)
     assert any(p.base == "BTC" for p in avoid)
     assert scores["ETH"]["score"] > scores["BTC"]["score"]
+
+
+def test_mixed_headline_goes_to_watch_not_avoid() -> None:
+    scores = {
+        "SOL": {
+            "score": -3.5,
+            "bullish": ["Solana turns positive"],
+            "bearish": ["Cryptos Hesitant"],
+            "mentions": 2,
+        },
+        "ADA": {
+            "score": 3.5,
+            "bullish": ["ADA partnership"],
+            "bearish": [],
+            "mentions": 1,
+        },
+    }
+    buy, avoid, watch = build_picks_from_scores(scores, top_n=8)
+    assert any(p.base == "ADA" for p in buy)
+    assert not any(p.base == "SOL" for p in avoid)
+    assert any(p.base == "SOL" for p in watch)

@@ -19,6 +19,7 @@ class AlphaITradingSignals:
     daily_pick_scores: dict[str, float]
     daily_pick_bases: frozenset[str]
     avoid_bases: frozenset[str]
+    watch_bases: frozenset[str]
     bullish_bases: frozenset[str]
     blocked_bases: frozenset[str]
     macro_active: bool
@@ -43,8 +44,21 @@ class AlphaITradingSignals:
         b = str(base or "").upper()
         return b in self.avoid_bases or b in self.blocked_bases
 
-    def is_bullish_buy(self, base: str) -> bool:
-        """Live bullish headline or daily pick with positive score — allow entry."""
+    def all_bullish_held(self, held_bases: set[str] | frozenset[str]) -> bool:
+        """True when every bullish buy pick is already in portfolio (or none exist)."""
+        buys = self.bullish_buy_bases()
+        held = {str(b).upper() for b in held_bases}
+        if not buys:
+            return True
+        return buys.issubset(held)
+
+    def is_bullish_buy(self, base: str, *, ring_fallback: bool = False) -> bool:
+        """Live bullish headline or daily pick with positive score — allow entry.
+
+        When *ring_fallback* is set (active ring underfilled and all bullish picks
+        already held), also allow watch-list / non-avoid focus bases so the desk
+        is not idle under macro caution.
+        """
         b = str(base or "").upper()
         if b in self.blocked_bases or b in self.avoid_bases:
             return False
@@ -52,16 +66,25 @@ class AlphaITradingSignals:
             return True
         if b in self.daily_pick_bases and self.pick_score(b) > 0:
             return True
+        if ring_fallback:
+            if b in self.watch_bases:
+                return True
+            # Unscored / flat focus: allow only when no unheld bullish picks remain.
+            return self.pick_score(b) >= 0
         return False
 
-    def is_strong_bullish_buy(self, base: str) -> bool:
+    def is_strong_bullish_buy(self, base: str, *, ring_fallback: bool = False) -> bool:
         """Live headline bullish or top daily pick — proactive buy path."""
         b = str(base or "").upper()
-        if not self.is_bullish_buy(b):
+        if not self.is_bullish_buy(b, ring_fallback=ring_fallback):
             return False
         if b in self.bullish_bases:
             return True
-        return self.is_top_pick(b) and self.pick_score(b) >= 4.0
+        if self.is_top_pick(b) and self.pick_score(b) >= 3.0:
+            return True
+        if ring_fallback and b in self.watch_bases and self.pick_score(b) > 0:
+            return True
+        return False
 
     def entry_size_multiplier(self, base: str) -> Decimal:
         """Boost size on daily picks + live bullish; trim on avoid (pre-block)."""
@@ -124,9 +147,21 @@ class AlphaITradingSignals:
             return Decimal("0.80")
         return _ONE
 
-    def inventory_build(self, base: str) -> bool:
-        """First buy only on strong AlphaI signal (no bijkoop if already held)."""
-        return self.is_strong_bullish_buy(base)
+    def inventory_build(self, base: str, *, ring_fallback: bool = False) -> bool:
+        """First buy on strong AlphaI signal; ring_fallback opens watch/focus path."""
+        if self.is_strong_bullish_buy(base):
+            return True
+        if not ring_fallback:
+            return False
+        b = str(base or "").upper()
+        if b in self.blocked_bases or b in self.avoid_bases:
+            return False
+        # Prefer watch / soft-positive; else any non-avoid with non-negative score.
+        if b in self.watch_bases:
+            return True
+        if b in self.daily_pick_bases and self.pick_score(b) > 0:
+            return True
+        return self.pick_score(b) >= 0
 
     def bullish_buy_bases(self) -> frozenset[str]:
         return frozenset(
@@ -140,6 +175,7 @@ class AlphaITradingSignals:
             "daily_pick_scores": dict(self.daily_pick_scores),
             "daily_pick_bases": sorted(self.daily_pick_bases),
             "avoid_bases": sorted(self.avoid_bases),
+            "watch_bases": sorted(self.watch_bases),
             "bullish_bases": sorted(self.bullish_bases),
             "bullish_buy_bases": sorted(self.bullish_buy_bases()),
             "blocked_bases": sorted(self.blocked_bases),
@@ -155,6 +191,7 @@ def build_trading_signals(
     scores: dict[str, float] = {}
     pick_bases: set[str] = set()
     avoid: set[str] = set()
+    watch: set[str] = set()
 
     if isinstance(daily, dict):
         for row in daily.get("picks") or []:
@@ -174,6 +211,21 @@ def build_trading_signals(
             base = str(row.get("base") or "").strip().upper()
             if base:
                 avoid.add(base)
+                try:
+                    scores[base] = float(row.get("score") or scores.get(base, 0.0))
+                except (TypeError, ValueError):
+                    pass
+        for row in daily.get("watch") or []:
+            if not isinstance(row, dict):
+                continue
+            base = str(row.get("base") or "").strip().upper()
+            if not base or base in avoid:
+                continue
+            watch.add(base)
+            try:
+                scores[base] = float(row.get("score") or scores.get(base, 0.0))
+            except (TypeError, ValueError):
+                scores.setdefault(base, 0.0)
 
     bullish: set[str] = set()
     blocked: set[str] = set()
@@ -196,6 +248,7 @@ def build_trading_signals(
         daily_pick_scores=scores,
         daily_pick_bases=frozenset(pick_bases),
         avoid_bases=frozenset(avoid),
+        watch_bases=frozenset(watch),
         bullish_bases=frozenset(bullish),
         blocked_bases=frozenset(blocked),
         macro_active=macro,

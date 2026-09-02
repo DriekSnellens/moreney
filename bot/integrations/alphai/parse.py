@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+import re
 
 
 @dataclass
@@ -191,7 +192,101 @@ def _extract_sentiments(enrichment: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+_MACRO_MARKET_KEYWORDS = (
+    "fed",
+    "fomc",
+    "ecb",
+    "interest rate",
+    "rate hike",
+    "rate cut",
+    "inflation",
+    "cpi",
+    "gdp",
+    "recession",
+    "tariff",
+    "sanction",
+    "embargo",
+    "war",
+    "invasion",
+    "geopolit",
+    "crypto",
+    "bitcoin",
+    "ethereum",
+    "sec",
+    "cftc",
+    "etf",
+    "stablecoin",
+    "treasury",
+    "yield",
+    "bond market",
+    "stock market",
+    "risk-off",
+    "risk off",
+)
+
+_MACRO_NOISE_KEYWORDS = (
+    "dress code",
+    "labor rights",
+    "workers'",
+    "workplace",
+    "employment lawsuit",
+    "vaccine",
+    "covid",
+    "sports",
+    "nba",
+    "nfl",
+)
+
+
+def _title_has_keyword(title: str, keyword: str) -> bool:
+    """Substring match for multi-word phrases; token match for short words."""
+    key = keyword.lower().strip()
+    if not key:
+        return False
+    if " " in key or "-" in key:
+        return key in title
+    return re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", title) is not None
+
+
+def _headline_macro_market_relevant(h: AlphaIHeadline) -> bool:
+    """Ignore corporate/labor regulation noise that is not market-moving."""
+    title = (h.title or "").lower()
+    if any(_title_has_keyword(title, noise) for noise in _MACRO_NOISE_KEYWORDS):
+        return False
+    if any(_title_has_keyword(title, key) for key in _MACRO_MARKET_KEYWORDS):
+        return True
+    # Crypto / major risk assets in the ticker set.
+    for ticker in h.tickers:
+        base = _base_from_alphai_ticker(str(ticker))
+        if base in {
+            "BTC",
+            "ETH",
+            "SOL",
+            "XRP",
+            "BNB",
+            "ADA",
+            "AVAX",
+            "LINK",
+            "DOGE",
+            "SPY",
+            "QQQ",
+            "ES",
+            "NQ",
+            "DXY",
+            "USD",
+            "EUR",
+        }:
+            return True
+    if h.category == "macro_economy":
+        return True
+    # Regulation/geopolitics without market cues: only if explicitly bearish.
+    return any(_is_bearish(s) for s in h.sentiments.values())
+
+
 def _headline_macro_bearish(h: AlphaIHeadline) -> bool:
+    """True only for market-relevant macro/regulation/geopolitics risk."""
+    if not _headline_macro_market_relevant(h):
+        return False
     if h.category in {"regulation", "geopolitics"} and h.relevance >= 7:
         return True
     if h.category == "macro_economy" and h.relevance >= 8:

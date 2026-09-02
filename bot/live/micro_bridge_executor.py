@@ -983,7 +983,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         sig = self._alphai_signals
         if sig is None or not hasattr(sig, "is_bullish_buy"):
             return False
-        return bool(sig.is_bullish_buy(base))
+        ring_fb = self._alphai_ring_fallback_active()
+        return bool(sig.is_bullish_buy(base, ring_fallback=ring_fb))
+
+    def _alphai_ring_fallback_active(self) -> bool:
+        """Ring underfilled and all bullish picks held → allow focus non-avoid buys."""
+        if self._active_ring_eur <= 0:
+            return False
+        # Any execute venue needs deploy and has free cash.
+        needs = False
+        for venue in self._execute_venues:
+            active = self._active_book_notional(venue)
+            free = self._venue_budget_remaining(venue)
+            if active < self._active_ring_eur and free >= Decimal("50"):
+                needs = True
+                break
+        if not needs:
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        held: set[str] = set()
+        for v in self._execute_venues:
+            held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+        if hasattr(sig, "all_bullish_held"):
+            return bool(sig.all_bullish_held(held))
+        buys = set(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        if not buys:
+            return True
+        return buys.issubset(held)
 
     def _alphai_strong_bullish_buy(self, base: str) -> bool:
         if not self._alphai_bullish_buy(base):
@@ -991,7 +1019,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         sig = self._alphai_signals
         if sig is None or not hasattr(sig, "is_strong_bullish_buy"):
             return False
-        return bool(sig.is_strong_bullish_buy(base))
+        return bool(
+            sig.is_strong_bullish_buy(
+                base, ring_fallback=self._alphai_ring_fallback_active()
+            )
+        )
 
     def _effective_exit_resting_max_age_sec(self, base: str) -> float:
         age = self._exit_resting_max_age_sec
@@ -6129,11 +6161,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         order_request,
                         reason="ALPHAI_MACRO_BLOCK",
                         message=(
-                            "AlphaI macro caution — only bullish pick/headline "
-                            f"bases allowed (not {base})"
+                            "AlphaI macro caution — only bullish/watch "
+                            f"(or ring-fallback focus) bases allowed (not {base})"
                         ),
                     )
                 meta["alphai_macro_bullish_override"] = True
+                if self._alphai_ring_fallback_active():
+                    meta["alphai_ring_fallback"] = True
             else:
                 self._bump_skip("alphai_macro_block")
                 return await self._reject_before_live(

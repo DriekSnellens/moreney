@@ -147,14 +147,14 @@ def score_focus_bases(
             if base not in rows:
                 continue
             touched.add(base)
-            weight = h.relevance * (2.5 if h.category == "crypto" else 1.5)
+            weight = h.relevance * (3.0 if h.category == "crypto" else 1.5)
             rows[base]["score"] += weight
             rows[base]["bullish"].append(h.title[:100])
         for base in h.bearish_bases():
             if base not in rows:
                 continue
             touched.add(base)
-            weight = h.relevance * (3.0 if h.category == "crypto" else 2.0)
+            weight = h.relevance * (3.5 if h.category == "crypto" else 2.0)
             rows[base]["score"] -= weight
             rows[base]["bearish"].append(h.title[:100])
         for ticker in h.tickers:
@@ -196,9 +196,14 @@ def build_picks_from_scores(
     avoid: list[BasePick] = []
     watch: list[BasePick] = []
     for pick in ranked:
-        if pick.score >= 4.0 and not pick.bearish_headlines:
+        # Softer hourly buy bar: net score ≥ 3 with bullish headlines dominating.
+        if pick.score >= 3.0 and len(pick.bullish_headlines) >= len(pick.bearish_headlines):
             buy.append(pick)
-        elif pick.score <= -4.0 or (pick.bearish_headlines and pick.score <= 0):
+        elif pick.score <= -4.0 or (
+            pick.bearish_headlines
+            and not pick.bullish_headlines
+            and pick.score <= 0
+        ):
             avoid.append(pick)
         elif pick.score > 0 or pick.bullish_headlines:
             watch.append(pick)
