@@ -722,13 +722,21 @@ def render_daily_picks_panel(
         if macro
         else ""
     )
-    refresh_mode = report.get("refresh_mode") or "hourly"
-    interval = report.get("interval_hours") or 1
-    window_label = (
-        f"elk uur (Europe/Amsterdam)"
-        if int(interval) < 24
-        else "update 12:00 Europe/Amsterdam"
-    )
+    refresh_mode = report.get("refresh_mode") or "intrahour"
+    interval_min = int(report.get("interval_minutes") or 0)
+    if not interval_min:
+        interval_min = int(report.get("interval_hours") or 1) * 60
+    if interval_min >= 24 * 60:
+        window_label = "update 12:00 Europe/Amsterdam"
+    elif interval_min >= 60 and interval_min % 60 == 0:
+        hours = interval_min // 60
+        window_label = (
+            "elk uur (Europe/Amsterdam)"
+            if hours == 1
+            else f"elke {hours} uur (Europe/Amsterdam)"
+        )
+    else:
+        window_label = f"elke {interval_min} min (Europe/Amsterdam)"
     return (
         "<section class='panel daily-picks' id='section-daily-picks'>"
         "<div class='panel-head'><div>"

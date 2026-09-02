@@ -1,4 +1,4 @@
-"""AlphaI bullish/bearish ticker recommendations (hourly + daily)."""
+"""AlphaI bullish/bearish ticker recommendations (15-min / hourly / daily)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from bot.integrations.alphai.daily_recommendations import (
     needs_session_refresh,
     next_update_at_utc,
     recommendation_session_id,
+    resolve_interval_minutes,
     score_focus_bases,
 )
 from bot.integrations.alphai.parse import AlphaIHeadline
@@ -34,6 +35,12 @@ def _headline(
     )
 
 
+def test_resolve_interval_minutes_prefers_minutes() -> None:
+    assert resolve_interval_minutes(interval_minutes=15, interval_hours=1) == 15
+    assert resolve_interval_minutes(interval_hours=1) == 60
+    assert resolve_interval_minutes() == 15
+
+
 def test_recommendation_session_id_daily_noon_amsterdam() -> None:
     # 2026-09-02 10:00 Amsterdam → still previous window (Sept 1 noon start)
     ts = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)  # 10:00 CEST
@@ -46,26 +53,42 @@ def test_recommendation_session_id_hourly() -> None:
     # 2026-09-02 21:30 Amsterdam = 19:30 UTC
     ts = datetime(2026, 9, 2, 19, 30, tzinfo=UTC)
     local = ts.astimezone(ZoneInfo("Europe/Amsterdam"))
-    assert recommendation_session_id(now=ts, interval_hours=1) == (
-        f"{local.date().isoformat()}T{local.hour:02d}"
+    assert recommendation_session_id(now=ts, interval_minutes=60) == (
+        f"{local.date().isoformat()}T{local.hour:02d}:00"
     )
-    nxt = next_update_at_utc(now=ts, interval_hours=1)
+    nxt = next_update_at_utc(now=ts, interval_minutes=60)
     assert nxt > ts
     assert nxt.astimezone(ZoneInfo("Europe/Amsterdam")).minute == 0
 
 
-def test_needs_session_refresh_hourly_on_next_update() -> None:
-    ts = datetime(2026, 9, 2, 19, 30, tzinfo=UTC)
+def test_recommendation_session_id_every_15_minutes() -> None:
+    # 2026-09-02 22:07 Amsterdam = 20:07 UTC → bucket 22:00
+    ts = datetime(2026, 9, 2, 20, 7, tzinfo=UTC)
+    local = ts.astimezone(ZoneInfo("Europe/Amsterdam"))
+    assert recommendation_session_id(now=ts, interval_minutes=15) == (
+        f"{local.date().isoformat()}T{local.hour:02d}:00"
+    )
+    ts2 = datetime(2026, 9, 2, 20, 22, tzinfo=UTC)  # 22:22 Amsterdam → 22:15
+    local2 = ts2.astimezone(ZoneInfo("Europe/Amsterdam"))
+    assert recommendation_session_id(now=ts2, interval_minutes=15) == (
+        f"{local2.date().isoformat()}T{local2.hour:02d}:15"
+    )
+    nxt = next_update_at_utc(now=ts, interval_minutes=15)
+    assert nxt == datetime(2026, 9, 2, 20, 15, tzinfo=UTC)
+
+
+def test_needs_session_refresh_15m_on_next_update() -> None:
+    ts = datetime(2026, 9, 2, 20, 16, tzinfo=UTC)
     cached = {
-        "session_id": "2026-09-02T20",
-        "next_update_at": "2026-09-02T18:00:00+00:00",  # already past
+        "session_id": "2026-09-02T22:00",
+        "next_update_at": "2026-09-02T20:15:00+00:00",  # already past
     }
-    assert needs_session_refresh(cached, now=ts, interval_hours=1) is True
+    assert needs_session_refresh(cached, now=ts, interval_minutes=15) is True
     fresh = {
-        "session_id": recommendation_session_id(now=ts, interval_hours=1),
-        "next_update_at": next_update_at_utc(now=ts, interval_hours=1).isoformat(),
+        "session_id": recommendation_session_id(now=ts, interval_minutes=15),
+        "next_update_at": next_update_at_utc(now=ts, interval_minutes=15).isoformat(),
     }
-    assert needs_session_refresh(fresh, now=ts, interval_hours=1) is False
+    assert needs_session_refresh(fresh, now=ts, interval_minutes=15) is False
 
 
 def test_score_and_rank_bullish_over_bearish() -> None:

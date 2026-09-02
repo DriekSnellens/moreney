@@ -1028,6 +1028,9 @@ async def alphai_daily_recommendations_refresh(
         update_hour_local=int(
             getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
         ),
+        interval_minutes=int(
+            getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15
+        ),
         interval_hours=int(
             getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
         ),

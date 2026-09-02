@@ -1,4 +1,4 @@
-"""AlphaI bullish/bearish ticker recommendations (hourly or daily refresh)."""
+"""AlphaI bullish/bearish ticker recommendations (15-min / hourly / daily refresh)."""
 
 from __future__ import annotations
 
@@ -39,48 +39,73 @@ class BasePick:
         }
 
 
+def resolve_interval_minutes(
+    *,
+    interval_minutes: int | None = None,
+    interval_hours: int | None = None,
+    default_minutes: int = 15,
+) -> int:
+    """Prefer explicit minutes; fall back to hours×60; floor at 5 minutes."""
+    if interval_minutes is not None and int(interval_minutes) > 0:
+        return max(5, int(interval_minutes))
+    if interval_hours is not None and int(interval_hours) > 0:
+        return max(5, int(interval_hours) * 60)
+    return max(5, int(default_minutes or 15))
+
+
 def recommendation_session_id(
     *,
     now: datetime | None = None,
-    interval_hours: int = 1,
+    interval_minutes: int | None = None,
+    interval_hours: int | None = None,
     update_hour_local: int = 12,
 ) -> str:
     """Bucket id for the current recommendation window.
 
-    * ``interval_hours < 24`` → ``YYYY-MM-DDTHH`` (Europe/Amsterdam hour floor)
-    * ``interval_hours >= 24`` → date of noon→noon session (legacy daily)
+    * ``interval < 1440 min`` → ``YYYY-MM-DDTHH:MM`` (Europe/Amsterdam floor)
+    * ``interval >= 1440 min`` → date of noon→noon session (legacy daily)
     """
     instant = now or datetime.now(UTC)
     local = instant.astimezone(_OPERATOR_TZ)
-    hours = max(1, int(interval_hours or 1))
-    if hours >= 24:
+    minutes = resolve_interval_minutes(
+        interval_minutes=interval_minutes,
+        interval_hours=interval_hours,
+    )
+    if minutes >= 24 * 60:
         anchor = local.replace(hour=update_hour_local, minute=0, second=0, microsecond=0)
         if local < anchor:
             anchor -= timedelta(days=1)
         return anchor.date().isoformat()
-    bucket = (local.hour // hours) * hours
-    return f"{local.date().isoformat()}T{bucket:02d}"
+    total = local.hour * 60 + local.minute
+    bucket = (total // minutes) * minutes
+    hour, minute = divmod(bucket, 60)
+    return f"{local.date().isoformat()}T{hour:02d}:{minute:02d}"
 
 
 def next_update_at_utc(
     *,
     now: datetime | None = None,
-    interval_hours: int = 1,
+    interval_minutes: int | None = None,
+    interval_hours: int | None = None,
     update_hour_local: int = 12,
 ) -> datetime:
     instant = now or datetime.now(UTC)
     local = instant.astimezone(_OPERATOR_TZ)
-    hours = max(1, int(interval_hours or 1))
-    if hours >= 24:
+    minutes = resolve_interval_minutes(
+        interval_minutes=interval_minutes,
+        interval_hours=interval_hours,
+    )
+    if minutes >= 24 * 60:
         target = local.replace(
             hour=update_hour_local, minute=0, second=0, microsecond=0
         )
         if local >= target:
             target += timedelta(days=1)
         return target.astimezone(UTC)
-    bucket = (local.hour // hours) * hours
-    target = local.replace(hour=bucket, minute=0, second=0, microsecond=0)
-    target += timedelta(hours=hours)
+    total = local.hour * 60 + local.minute
+    bucket = (total // minutes) * minutes
+    target = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    target += timedelta(minutes=bucket + minutes)
     return target.astimezone(UTC)
 
 
@@ -105,7 +130,8 @@ def needs_session_refresh(
     cached: dict[str, Any] | None,
     *,
     now: datetime | None = None,
-    interval_hours: int = 1,
+    interval_minutes: int | None = None,
+    interval_hours: int | None = None,
     update_hour_local: int = 12,
 ) -> bool:
     if not cached:
@@ -123,6 +149,7 @@ def needs_session_refresh(
             pass
     expected = recommendation_session_id(
         now=instant,
+        interval_minutes=interval_minutes,
         interval_hours=interval_hours,
         update_hour_local=update_hour_local,
     )
@@ -223,7 +250,8 @@ def generate_daily_recommendations(
     min_relevance: int = 6,
     top_n: int = 8,
     update_hour_local: int = 12,
-    interval_hours: int = 1,
+    interval_minutes: int | None = None,
+    interval_hours: int | None = None,
     macro_caution: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -265,17 +293,26 @@ def generate_daily_recommendations(
         top_n=top_n,
         macro_caution=macro_caution,
     )
-    hours = max(1, int(interval_hours or 1))
+    minutes = resolve_interval_minutes(
+        interval_minutes=interval_minutes,
+        interval_hours=interval_hours,
+    )
     session = recommendation_session_id(
         now=instant,
-        interval_hours=hours,
+        interval_minutes=minutes,
         update_hour_local=update_hour_local,
     )
     nxt = next_update_at_utc(
         now=instant,
-        interval_hours=hours,
+        interval_minutes=minutes,
         update_hour_local=update_hour_local,
     )
+    if minutes >= 24 * 60:
+        refresh_mode = "daily"
+    elif minutes >= 60 and minutes % 60 == 0:
+        refresh_mode = "hourly"
+    else:
+        refresh_mode = "intrahour"
 
     return {
         "session_id": session,
@@ -283,8 +320,9 @@ def generate_daily_recommendations(
         "next_update_at": nxt.isoformat(),
         "timezone": str(_OPERATOR_TZ),
         "update_hour_local": update_hour_local,
-        "interval_hours": hours,
-        "refresh_mode": "daily" if hours >= 24 else "hourly",
+        "interval_minutes": minutes,
+        "interval_hours": max(1, (minutes + 59) // 60),
+        "refresh_mode": refresh_mode,
         "macro_caution": macro_caution,
         "headline_count": len(headlines),
         "rate_limit_remaining": client.last_rate_limit.remaining,
@@ -304,15 +342,19 @@ def maybe_refresh_daily(
     min_relevance: int = 6,
     top_n: int = 8,
     update_hour_local: int = 12,
-    interval_hours: int = 1,
+    interval_minutes: int | None = None,
+    interval_hours: int | None = None,
     macro_caution: bool = False,
     force: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
-    """Refresh when the hourly/daily session bucket rolls (or when ``force``)."""
+    """Refresh when the session bucket rolls (or when ``force``)."""
     cached = load_daily_recommendations(path)
     instant = now or datetime.now(UTC)
-    hours = max(1, int(interval_hours or 1))
+    minutes = resolve_interval_minutes(
+        interval_minutes=interval_minutes,
+        interval_hours=interval_hours,
+    )
 
     if not enabled:
         return cached
@@ -322,18 +364,15 @@ def maybe_refresh_daily(
         if not needs_session_refresh(
             cached,
             now=instant,
-            interval_hours=hours,
+            interval_minutes=minutes,
             update_hour_local=update_hour_local,
         ):
             return cached
         # Legacy daily mode: wait until past the local update hour on first run.
-        if hours >= 24:
+        if minutes >= 24 * 60 and cached is None:
             local = instant.astimezone(_OPERATOR_TZ)
-            past_anchor = local.hour > update_hour_local or (
-                local.hour == update_hour_local and local.minute >= 0
-            )
-            if not past_anchor and cached:
-                return cached
+            if local.hour < update_hour_local:
+                return None
 
     try:
         report = generate_daily_recommendations(
@@ -342,17 +381,17 @@ def maybe_refresh_daily(
             min_relevance=min_relevance,
             top_n=top_n,
             update_hour_local=update_hour_local,
-            interval_hours=hours,
+            interval_minutes=minutes,
             macro_caution=macro_caution,
             now=instant,
         )
         save_daily_recommendations(path, report)
         logger.info(
-            "ALPHAI_PICKS mode=%s session=%s top=%s next=%s",
+            "ALPHAI_PICKS_REFRESHED session=%s mode=%s picks=%s avoid=%s",
+            report.get("session_id"),
             report.get("refresh_mode"),
-            report["session_id"],
-            [p["base"] for p in report.get("picks") or []][:5],
-            report.get("next_update_at"),
+            [p.get("base") for p in (report.get("picks") or [])[:5]],
+            [p.get("base") for p in (report.get("avoid") or [])[:5]],
         )
         return report
     except Exception:
