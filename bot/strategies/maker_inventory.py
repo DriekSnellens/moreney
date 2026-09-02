@@ -595,6 +595,13 @@ class MakerInventoryStrategy(BaseStrategy):
 
         ranked: list[TradeOpportunity] = []
         fair_value = self._fair_values.get(infer_base_asset(symbol, self._quote))
+        sig = self._alphai_signals
+        alphai_bullish_same_venue = (
+            sig is not None
+            and base
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base)
+        )
         for buy_snap in venues:
             if not self._venue_allowed(buy_snap.exchange):
                 continue
@@ -615,6 +622,8 @@ class MakerInventoryStrategy(BaseStrategy):
                 )
                 continue
             for sell_snap in venues:
+                if alphai_bullish_same_venue and buy_snap.exchange != sell_snap.exchange:
+                    continue
                 if not self._venue_allowed(sell_snap.exchange):
                     continue
                 same = buy_snap.exchange == sell_snap.exchange
@@ -806,19 +815,20 @@ class MakerInventoryStrategy(BaseStrategy):
         return max(floor, scaled)
 
     def _alphai_inventory_build(self, base: str, candidate: MakerCandidate) -> bool:
-        """Same-venue ring deploy on strong AlphaI pick — skip round-trip NET gate."""
+        """Same-venue deploy on AlphaI pick — skip round-trip NET gate."""
         if not bool(getattr(self._settings, "alphai_bullish_inventory_build_enabled", True)):
             return False
         sig = self._alphai_signals
-        if sig is None or not hasattr(sig, "inventory_build"):
+        if sig is None or not hasattr(sig, "is_bullish_buy"):
             return False
-        if not sig.inventory_build(base):
+        if not sig.is_bullish_buy(base):
             return False
         buy_v = str(candidate.buy_exchange or "").strip().lower()
         sell_v = str(candidate.sell_exchange or "").strip().lower()
         if buy_v != sell_v or not buy_v:
             return False
-        return self._ring_needs_deploy(buy_v)
+        free = self._venue_free_quote.get(buy_v, _ZERO)
+        return free >= Decimal("50")
 
     def _build_fair_values(
         self, by_symbol: dict[str, list[MarketSnapshot]]
@@ -1246,8 +1256,8 @@ class MakerInventoryStrategy(BaseStrategy):
         if (
             sig is not None
             and base_asset
-            and hasattr(sig, "inventory_build")
-            and sig.inventory_build(base_asset)
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base_asset)
             and buy_snap.exchange == sell_snap.exchange
         ):
             min_spread = self._min_spread_bps / Decimal("2")
