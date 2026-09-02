@@ -1,9 +1,18 @@
 # Profit Architecture — Dual-Sleeve Path to €50–100/day
 
-**Status:** Design proposal (no live wiring in this document’s PR)  
+**Status:** Implemented (Phases 0–3 wired; CVD LIMITED_LIVE defaults **hard-off**)  
 **Capital assumption:** €2k–€4k deployable across Bitvavo + OKX (pocket already present)  
 **Infra assumption:** market data, dual-venue ledger, micro bridge, GOE, intelligence stack — already live  
 **Goal:** Compose engines that **already exist** into an architecture that can hit **€50–100/day netto**, without inventing a third strategy.
+
+### Implementation status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 0 Expectation hygiene | **Done** | Dashboard: Desk €50–100 + S1 €20–45; history KPIs updated |
+| 1 Unlock S1 | **Done** | `live_micro_ring_util_b_ignore_underwater=True`; ring momentum 0.0005 vs full 0.0015 |
+| 2 CVD LIMITED_LIVE | **Wired, hard-off** | `live_cvd_limited_enabled=False` default; enable only after shadow VALIDATED |
+| 3 Desk scale | **Done** | S2 sleeve + desk loss cap + scale max; sleeve tags S1/S2 on fills |
 
 ---
 

@@ -396,6 +396,36 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 or 25
             )
         )
+        # Phase-1 unlock: vault underwater must not kill Util-B free-cash deploys.
+        self._ring_util_b_ignore_underwater = bool(
+            getattr(settings, "live_micro_ring_util_b_ignore_underwater", True)
+        )
+        # S2 CVD risk sleeve (LIMITED_LIVE — default off via live_cvd_limited_enabled).
+        self._cvd_limited_enabled = bool(
+            getattr(settings, "live_cvd_limited_enabled", False)
+        )
+        _cvd_sleeve = Decimal(
+            str(getattr(settings, "live_cvd_risk_sleeve_eur", 500) or 0)
+        )
+        _cvd_scale_max = Decimal(
+            str(getattr(settings, "live_cvd_risk_sleeve_scale_max_eur", 1000) or 1000)
+        )
+        if _cvd_scale_max > 0 and _cvd_sleeve > _cvd_scale_max:
+            _cvd_sleeve = _cvd_scale_max
+        self._cvd_risk_sleeve_eur = _cvd_sleeve
+        self._cvd_sleeve_daily_loss_cap = Decimal(
+            str(getattr(settings, "live_cvd_sleeve_daily_loss_cap_eur", 25) or 0)
+        )
+        self._cvd_max_notional_eur = Decimal(
+            str(getattr(settings, "live_cvd_max_notional_eur", 150) or 150)
+        )
+        self._cvd_sleeve_realized_eur = _ZERO
+        self._cvd_sleeve_paused = False
+        self._cvd_sleeve_open_notional_eur = _ZERO
+        self._desk_daily_loss_cap = Decimal(
+            str(getattr(settings, "live_desk_daily_loss_cap_eur", 75) or 0)
+        )
+        self._desk_paused = False
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -780,6 +810,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "realized_trade_pnl_eur": str(self.realized_trade_pnl_eur),
             "sleeve_realized_eur": str(self._sleeve_realized_eur),
             "sleeve_paused": bool(self._sleeve_paused),
+            "cvd_sleeve_realized_eur": str(self._cvd_sleeve_realized_eur),
+            "cvd_sleeve_paused": bool(self._cvd_sleeve_paused),
+            "cvd_sleeve_open_notional_eur": str(self._cvd_sleeve_open_notional_eur),
+            "desk_paused": bool(self._desk_paused),
         }
 
     def _try_load_persisted_state(self) -> bool:
@@ -857,6 +891,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = bool(raw.get("sleeve_paused"))
         self._check_sleeve_loss_cap()
+        try:
+            self._cvd_sleeve_realized_eur = Decimal(
+                str(raw.get("cvd_sleeve_realized_eur") or 0)
+            )
+        except Exception:  # noqa: BLE001
+            self._cvd_sleeve_realized_eur = _ZERO
+        try:
+            self._cvd_sleeve_open_notional_eur = Decimal(
+                str(raw.get("cvd_sleeve_open_notional_eur") or 0)
+            )
+        except Exception:  # noqa: BLE001
+            self._cvd_sleeve_open_notional_eur = _ZERO
+        self._cvd_sleeve_paused = bool(raw.get("cvd_sleeve_paused"))
+        self._desk_paused = bool(raw.get("desk_paused"))
+        self._check_cvd_sleeve_loss_cap()
+        self._check_desk_loss_cap()
         if raw.get("session_started_ms") is not None:
             self._session_started_ms = float(raw.get("session_started_ms"))
         logger.info(
@@ -1057,6 +1107,58 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         else:
             self._sleeve_paused = False
 
+    def _check_cvd_sleeve_loss_cap(self) -> None:
+        """S2: pause new CVD buys when CVD sleeve realized hits daily loss cap."""
+        if self._cvd_sleeve_daily_loss_cap <= 0:
+            self._cvd_sleeve_paused = False
+            return
+        if self._cvd_sleeve_realized_eur <= -self._cvd_sleeve_daily_loss_cap:
+            if not self._cvd_sleeve_paused:
+                self._cvd_sleeve_paused = True
+                self._push_alert(
+                    "cvd_sleeve_loss_cap",
+                    f"CVD sleeve realized {self._cvd_sleeve_realized_eur} "
+                    f"<= -{self._cvd_sleeve_daily_loss_cap}; S2 buys paused",
+                )
+        else:
+            self._cvd_sleeve_paused = False
+
+    def _check_desk_loss_cap(self) -> None:
+        """Desk: pause new S1+S2 risk when combined sleeve PnL hits desk cap."""
+        if self._desk_daily_loss_cap <= 0:
+            self._desk_paused = False
+            return
+        combined = self._sleeve_realized_eur + self._cvd_sleeve_realized_eur
+        if combined <= -self._desk_daily_loss_cap:
+            if not self._desk_paused:
+                self._desk_paused = True
+                self._push_alert(
+                    "desk_loss_cap",
+                    f"desk sleeve PnL {combined} <= -{self._desk_daily_loss_cap}; "
+                    f"new risk paused",
+                )
+        else:
+            self._desk_paused = False
+
+    def _resolve_order_sleeve(self, meta: dict[str, Any], strategy: str = "") -> str:
+        raw = str(meta.get("sleeve") or meta.get("profit_sleeve") or "").upper()
+        if raw in {"S1", "S2", "VAULT_EXIT"}:
+            return raw
+        if meta.get("frozen_cvd") or str(strategy or meta.get("strategy") or "").lower() in {
+            "cross_venue_dislocation",
+            "cvd",
+        }:
+            return "S2"
+        if meta.get("trail_take_profit") or meta.get("exit_reason"):
+            return "VAULT_EXIT" if not meta.get("sleeve") else "S1"
+        return "S1"
+
+    def _cvd_sleeve_remaining(self) -> Decimal:
+        if self._cvd_risk_sleeve_eur <= 0:
+            return _ZERO
+        used = max(_ZERO, self._cvd_sleeve_open_notional_eur)
+        return max(_ZERO, self._cvd_risk_sleeve_eur - used)
+
     @staticmethod
     def _exit_fail_key(venue: str, base: str) -> str:
         return f"{venue.strip().lower()}:{base.upper()}"
@@ -1086,6 +1188,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._utc_day_marker = today
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
+        self._cvd_sleeve_realized_eur = _ZERO
+        self._cvd_sleeve_paused = False
+        self._desk_paused = False
         self.session_start_realized_eur = self.realized_trade_pnl_eur
         if self.portfolio_value_eur is not None:
             self.starting_portfolio_eur = self.portfolio_value_eur
@@ -1381,6 +1486,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "ring_momentum_min_return": str(self._ring_momentum_min),
                 "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
                 "ring_soft_block_underwater_eur": str(self._ring_soft_block_underwater_eur),
+                "ring_util_b_ignore_underwater": self._ring_util_b_ignore_underwater,
                 "entry_short_momentum_samples": self._entry_short_momentum_samples,
                 "entry_short_momentum_min_return": str(self._entry_short_momentum_min),
                 "entry_min_low_util_rising_n": self._entry_min_low_util_rising_n,
@@ -1418,6 +1524,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "sleeve_realized_eur": str(self._sleeve_realized_eur),
             "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
             "sleeve_paused": bool(self._sleeve_paused),
+            "cvd_limited_enabled": bool(self._cvd_limited_enabled),
+            "cvd_risk_sleeve_eur": str(self._cvd_risk_sleeve_eur),
+            "cvd_sleeve_realized_eur": str(self._cvd_sleeve_realized_eur),
+            "cvd_sleeve_daily_loss_cap_eur": str(self._cvd_sleeve_daily_loss_cap),
+            "cvd_sleeve_paused": bool(self._cvd_sleeve_paused),
+            "cvd_sleeve_open_notional_eur": str(self._cvd_sleeve_open_notional_eur),
+            "cvd_sleeve_remaining_eur": str(self._cvd_sleeve_remaining()),
+            "cvd_max_notional_eur": str(self._cvd_max_notional_eur),
+            "desk_daily_loss_cap_eur": str(self._desk_daily_loss_cap),
+            "desk_paused": bool(self._desk_paused),
+            "desk_sleeve_realized_eur": str(
+                self._sleeve_realized_eur + self._cvd_sleeve_realized_eur
+            ),
+            "s1_target_low_eur": "20",
+            "s1_target_high_eur": "45",
+            "desk_target_low_eur": "50",
+            "desk_target_high_eur": "100",
             "exit_engine": {
                 "enabled": self._exit_engine_enabled,
                 "resting_max_age_sec": self._exit_resting_max_age_sec,
@@ -1685,6 +1808,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if self._sleeve_paused:
                 sleeve_bits.append("PAUSED")
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
+        cvd_bits = [
+            f"enabled={'on' if self._cvd_limited_enabled else 'off'}",
+            f"size=€{float(self._cvd_risk_sleeve_eur):.0f}",
+            f"pnl=€{float(self._cvd_sleeve_realized_eur):.2f}",
+            f"open=€{float(self._cvd_sleeve_open_notional_eur):.0f}",
+            f"cap=-€{float(self._cvd_sleeve_daily_loss_cap):.0f}",
+        ]
+        if self._cvd_sleeve_paused:
+            cvd_bits.append("PAUSED")
+        hints.append("CVD_SLEEVE " + " ".join(cvd_bits))
+        desk_bits = [
+            f"pnl=€{float(self._sleeve_realized_eur + self._cvd_sleeve_realized_eur):.2f}",
+            f"cap=-€{float(self._desk_daily_loss_cap):.0f}",
+        ]
+        if self._desk_paused:
+            desk_bits.append("PAUSED")
+        hints.append("DESK " + " ".join(desk_bits))
+        if self._ring_util_b_ignore_underwater:
+            hints.append("UTIL_B_IGNORE_UNDERWATER on")
         if self._exit_engine_enabled:
             q = self._exit_quote_counts
             f = self._exit_fill_counts
@@ -2752,7 +2894,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             lots.append([lot_qty, unit])
             self._session_lots.setdefault(lot_key, []).append([lot_qty, unit])
             trail_st = self._trail.setdefault(lot_key, {})
-            trail_st["sleeve"] = True  # A: session buys belong to velocity sleeve
+            sleeve_tag = self._resolve_order_sleeve(fill_meta or {}, strategy="")
+            trail_st["sleeve"] = True  # A: session buys belong to a profit sleeve
+            trail_st["profit_sleeve"] = sleeve_tag
+            if sleeve_tag == "S2":
+                notional = Decimal(str((fill_meta or {}).get("notional_eur") or 0))
+                if notional <= 0:
+                    notional = qty * price
+                if notional > 0:
+                    self._cvd_sleeve_open_notional_eur += notional
             if self._mfe_analytics_enabled:
                 trail_st["entry_price"] = str(price)
                 trail_st["mfe_price"] = str(price)
@@ -2882,13 +3032,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     hold_seconds=hold_sec,
                     toxic=toxic,
                 )
-        # A: attribute PnL to velocity sleeve when session inventory was sold.
-        if sess_consumed > 0 or bool(
-            (self._trail.get(lot_key) or {}).get("sleeve")
-            or (self._trail.get(lot_key) or {}).get("new_session_base")
-        ):
+        # Attribute PnL to S1 velocity sleeve or S2 CVD sleeve.
+        trail_row = self._trail.get(lot_key) or {}
+        profit_sleeve = str(trail_row.get("profit_sleeve") or "").upper()
+        if not profit_sleeve:
+            profit_sleeve = self._resolve_order_sleeve(fill_meta or {}, strategy="")
+        is_session_sleeve = sess_consumed > 0 or bool(
+            trail_row.get("sleeve") or trail_row.get("new_session_base")
+        )
+        if is_session_sleeve and profit_sleeve == "S2":
+            self._cvd_sleeve_realized_eur += trade_pnl
+            # Free open notional on exit (best-effort).
+            freed = qty * price
+            if freed > 0:
+                self._cvd_sleeve_open_notional_eur = max(
+                    _ZERO, self._cvd_sleeve_open_notional_eur - freed
+                )
+            self._check_cvd_sleeve_loss_cap()
+            self._check_desk_loss_cap()
+        elif is_session_sleeve:
             self._sleeve_realized_eur += trade_pnl
             self._check_sleeve_loss_cap()
+            self._check_desk_loss_cap()
         self._check_daily_kill()
         if not lots:
             self._position_opened_mono.pop(lot_key, None)
@@ -4202,11 +4367,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return self._active_book_notional(venue) < self._active_ring_eur
 
     def _ring_soft_momentum_eligible(self, venue: str) -> bool:
-        """Softer momentum only while active book is still thinly deployed."""
+        """Softer momentum only while active book is still thinly deployed.
+
+        Phase-1 unlock: when ``live_micro_ring_util_b_ignore_underwater`` is True,
+        underwater vault bags do **not** disable Util-B. Same-base underwater adds
+        remain blocked via ``UNDERWATER_BASE_BLOCK`` / buy-quality gates.
+        """
         if not self._ring_needs_deploy(venue):
             return False
         if (
-            self._ring_soft_block_underwater_eur > 0
+            not self._ring_util_b_ignore_underwater
+            and self._ring_soft_block_underwater_eur > 0
             and self._underwater_book_notional(venue)
             >= self._ring_soft_block_underwater_eur
         ):
@@ -5973,6 +6144,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         remaining = self._venue_budget_remaining(venue)
         side_is_buy = order_request.side == OpportunitySide.BUY
+        sleeve = self._resolve_order_sleeve(meta, strategy=strategy)
+        meta["sleeve"] = sleeve
+        meta["profit_sleeve"] = sleeve
+        if order_request.metadata is None:
+            order_request.metadata = meta
+        else:
+            order_request.metadata.update(meta)
         if side_is_buy and self._daily_kill_active:
             self._bump_skip("daily_kill")
             return await self._reject_before_live(
@@ -5983,7 +6161,50 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"hit -{self._daily_kill_eur} EUR kill; buys blocked"
                 ),
             )
-        if side_is_buy and self._sleeve_paused and not meta.get("dust_top_up"):
+        if side_is_buy and self._desk_paused and not meta.get("dust_top_up"):
+            self._bump_skip("desk_loss_cap")
+            return await self._reject_before_live(
+                order_request,
+                reason="DESK_LOSS_CAP",
+                message=(
+                    f"desk sleeve PnL "
+                    f"{self._sleeve_realized_eur + self._cvd_sleeve_realized_eur} "
+                    f"hit -{self._desk_daily_loss_cap} EUR; new risk paused"
+                ),
+            )
+        if (
+            side_is_buy
+            and sleeve == "S2"
+            and not self._cvd_limited_enabled
+            and not meta.get("dust_top_up")
+        ):
+            self._bump_skip("cvd_limited_disabled")
+            return await self._reject_before_live(
+                order_request,
+                reason="CVD_LIMITED_DISABLED",
+                message="CVD LIMITED_LIVE is hard-off (live_cvd_limited_enabled=false)",
+            )
+        if (
+            side_is_buy
+            and sleeve == "S2"
+            and self._cvd_sleeve_paused
+            and not meta.get("dust_top_up")
+        ):
+            self._bump_skip("cvd_sleeve_loss_cap")
+            return await self._reject_before_live(
+                order_request,
+                reason="CVD_SLEEVE_LOSS_CAP",
+                message=(
+                    f"CVD sleeve realized {self._cvd_sleeve_realized_eur} "
+                    f"hit -{self._cvd_sleeve_daily_loss_cap} EUR cap"
+                ),
+            )
+        if (
+            side_is_buy
+            and sleeve == "S1"
+            and self._sleeve_paused
+            and not meta.get("dust_top_up")
+        ):
             self._bump_skip("sleeve_loss_cap")
             return await self._reject_before_live(
                 order_request,
@@ -5994,6 +6215,36 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"sleeve buys paused (vault holds)"
                 ),
             )
+        if (
+            side_is_buy
+            and sleeve == "S2"
+            and not meta.get("dust_top_up")
+        ):
+            cvd_rem = self._cvd_sleeve_remaining()
+            req_notional = Decimal(str(order_request.quantity or 0)) * Decimal(
+                str(order_request.limit_price or 0)
+            )
+            if req_notional <= 0:
+                req_notional = Decimal(str(meta.get("notional_eur") or 0))
+            if self._cvd_max_notional_eur > 0 and req_notional > self._cvd_max_notional_eur:
+                self._bump_skip("cvd_max_notional")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CVD_MAX_NOTIONAL",
+                    message=(
+                        f"CVD notional {req_notional} exceeds max "
+                        f"{self._cvd_max_notional_eur}"
+                    ),
+                )
+            if cvd_rem < _MIN_LIVE_NOTIONAL or (
+                req_notional > 0 and req_notional > cvd_rem
+            ):
+                self._bump_skip("cvd_sleeve_exhausted")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CVD_SLEEVE_EXHAUSTED",
+                    message=f"CVD sleeve remaining EUR {cvd_rem}",
+                )
         if (
             side_is_buy
             and self._regime_block_buys

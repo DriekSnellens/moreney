@@ -1188,19 +1188,34 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     history = payload.get("history") or hist_for_kpi or load_history(limit=720)
     chart_json = _chart_bootstrap(history if isinstance(history, list) else [])
 
-    target_low = Decimal("20")
-    target_high = Decimal("50")
+    target_low = Decimal("50")
+    target_high = Decimal("100")
+    s1_low = Decimal("20")
+    s1_high = Decimal("45")
     in_target_band = (
         daily_realized is not None and target_low <= daily_realized <= target_high
     )
     band_class = "in-band" if in_target_band else "out-band"
+    s1_pnl = _dec(bridge.get("sleeve_realized_eur"))
+    cvd_pnl = _dec(bridge.get("cvd_sleeve_realized_eur"))
+    desk_pnl = _dec(bridge.get("desk_sleeve_realized_eur"))
+    if desk_pnl is None and s1_pnl is not None:
+        desk_pnl = s1_pnl + (cvd_pnl or Decimal("0"))
+    cvd_on = bool(bridge.get("cvd_limited_enabled"))
     target_band_html = (
-        "<section class='target-band' aria-label='Doelband onderzoek'>"
-        "<h2>Doel €20–50/dag netto</h2>"
+        "<section class='target-band' aria-label='Doelband dual-sleeve desk'>"
+        "<h2>Desk €50–100/dag · S1 maker €20–45</h2>"
         "<p><strong>Geïnd vandaag</strong> = verkochte coins (FIFO) · "
         "<strong>Open</strong> = totaal unrealized op bags · "
         "<strong>Portfolio-winst</strong> = equity Δ sinds 00:00 NL · "
         "<strong>Winnable</strong> = boven BE, nog niet verkocht.</p>"
+        "<div class='band-row'>"
+        f"<span>S1 target: €{_esc(s1_low)}–{_esc(s1_high)} · "
+        f"PnL {_esc(_eur(s1_pnl, signed=True) if s1_pnl is not None else '—')}</span>"
+        f"<span>S2 CVD: {'LIMITED on' if cvd_on else 'hard-off'} · "
+        f"PnL {_esc(_eur(cvd_pnl, signed=True) if cvd_pnl is not None else '—')}</span>"
+        f"<span>Desk sleeve: {_esc(_eur(desk_pnl, signed=True) if desk_pnl is not None else '—')}</span>"
+        "</div>"
         "<div class='band-row'>"
         f"<span>Geïnd: <strong class='{band_class}'>"
         f"{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else '—')}</strong></span>"
@@ -1262,10 +1277,14 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"rej={_sum_quote_keys(exit_rejects)}</span>"
         "</div>"
         "<div class='band-row'>"
-        f"<span>Sleeve PnL: <strong class='{sleeve_cls}'>"
+        f"<span>S1 Sleeve PnL: <strong class='{sleeve_cls}'>"
         f"{_esc(_eur(sleeve_pnl, signed=True) if sleeve_pnl is not None else '—')}</strong>"
         f" · cap −{_esc(_eur(sleeve_cap))}"
         f"{' · PAUSED' if sleeve_paused else ''}</span>"
+        f"<span>S2 CVD: {'on' if bool(bridge.get('cvd_limited_enabled')) else 'off'} · "
+        f"PnL {_esc(_eur(_dec(bridge.get('cvd_sleeve_realized_eur')), signed=True))} · "
+        f"open {_esc(_eur(_dec(bridge.get('cvd_sleeve_open_notional_eur'))))}"
+        f"{' · PAUSED' if bool(bridge.get('cvd_sleeve_paused')) else ''}</span>"
         f"<span>Ring: {' · '.join(ring_bits) if ring_bits else '—'}</span>"
         "</div></section>"
     )
