@@ -240,6 +240,9 @@ def _session_settings(
             "live_micro_trail_hold_while_rising": True,
             "live_micro_trail_hold_rising_n": 2,
             "live_micro_ring_soft_max_active_eur": 650.0,
+            # Phase-1 unlock: Util-B stays available while vault bags are underwater.
+            "live_micro_ring_util_b_ignore_underwater": True,
+            # Soft-block retained for observability / legacy mode only.
             "live_micro_ring_soft_block_underwater_eur": 25.0,
             "live_micro_low_util_rising_n": 3,
             "live_micro_entry_min_low_util_rising_n": 3,
@@ -251,12 +254,15 @@ def _session_settings(
             "live_micro_cancel_buy_on_flat_momentum": True,
             # Util-B: when active book < ring_soft max, allow non-focus new buys.
             "live_micro_low_util_relax_focus": True,
+            # Phase-1: ring momentum floor actually softer than full entry floor.
+            "live_micro_ring_momentum_min_return": 0.0005,
             # B3: scale into soft-armed BE+ winners (bridge-submitted adds).
             "live_micro_winner_add_enabled": True,
             "live_micro_winner_add_max": 2,
             "live_micro_winner_add_clip_eur": 55.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
-            "live_micro_buy_quality_underwater_count": 2,
+            # Slightly higher threshold so 2 stuck bags don't pause the whole ring.
+            "live_micro_buy_quality_underwater_count": 4,
             "live_micro_buy_quality_pause_sec": 1800.0,
             "live_micro_entry_headroom_enabled": True,
             "live_micro_entry_headroom_min_pct": 0.0025,
@@ -293,6 +299,8 @@ def _session_settings(
             "live_micro_outcome_learning_enabled": True,
             "live_micro_capital_intelligence_enabled": True,
             "live_micro_intelligence_observation_mode": False,
+            "live_micro_experiment_id": "phase2_intelligence",
+            "live_micro_intelligence_auto_apply": False,
             "paper_maker_fv_buy_max_premium_bps": 5.0,
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
@@ -322,8 +330,7 @@ def _session_settings(
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
-            # Low-util boost: same floor as full mode (no weak 0.05% entries).
-            "live_micro_ring_momentum_min_return": 0.0015,
+            # Phase-1: keep soft ring floor (set above); do not re-raise to full momentum.
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
@@ -380,8 +387,30 @@ def _session_settings(
             ),
             "paper_markout_enabled": False,
             "paper_maker_fair_value": True,
-            # Live-only: no research CVD/shadow/lead-lag on hot path.
+            # Live-only: research hooks off; CVD LIMITED_LIVE is a narrow separate flag.
             "live_disable_research_hooks": True,
+            # Phase-2: hard-off until shadow VALIDATED + explicit enable.
+            "live_cvd_limited_enabled": bool(
+                getattr(base, "live_cvd_limited_enabled", False)
+            ),
+            "live_cvd_shadow_observe": bool(
+                getattr(base, "live_cvd_shadow_observe", True)
+            ),
+            "live_cvd_risk_sleeve_eur": float(
+                getattr(base, "live_cvd_risk_sleeve_eur", 500.0) or 500.0
+            ),
+            "live_cvd_sleeve_daily_loss_cap_eur": float(
+                getattr(base, "live_cvd_sleeve_daily_loss_cap_eur", 25.0) or 25.0
+            ),
+            "live_cvd_max_notional_eur": float(
+                getattr(base, "live_cvd_max_notional_eur", 150.0) or 150.0
+            ),
+            "live_cvd_risk_sleeve_scale_max_eur": float(
+                getattr(base, "live_cvd_risk_sleeve_scale_max_eur", 1000.0) or 1000.0
+            ),
+            "live_desk_daily_loss_cap_eur": float(
+                getattr(base, "live_desk_daily_loss_cap_eur", 75.0) or 75.0
+            ),
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,

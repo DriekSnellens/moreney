@@ -264,7 +264,11 @@ class PaperRunner:
         self._live_disable_research = bool(
             getattr(settings, "live_disable_research_hooks", False)
         )
-        if not self._live_disable_research:
+        _enable_shadow = (not self._live_disable_research) or (
+            bool(getattr(settings, "live_cvd_limited_enabled", False))
+            and bool(getattr(settings, "live_cvd_shadow_observe", True))
+        )
+        if _enable_shadow:
             try:
                 import os
 
@@ -1591,9 +1595,13 @@ class PaperRunner:
         return base
 
     def _shadow_observe(self, books: dict[str, dict[str, Any]]) -> None:
-        if getattr(self, "_live_disable_research", False):
-            return
         """Live shadow of frozen CVD. Never places orders or changes fills."""
+        limited_shadow = bool(
+            getattr(self._settings, "live_cvd_limited_enabled", False)
+            and getattr(self._settings, "live_cvd_shadow_observe", True)
+        )
+        if getattr(self, "_live_disable_research", False) and not limited_shadow:
+            return
         observer = getattr(self, "_shadow_observer", None)
         if observer is None:
             return
@@ -2005,8 +2013,13 @@ class PaperRunner:
     def _inject_cvd_candidates(
         self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
     ) -> None:
-        """Create frozen CVD candidates at decision time (research path only)."""
-        if getattr(self, "_live_disable_research", False):
+        """Create frozen CVD candidates at decision time.
+
+        Research path: on when research hooks are enabled.
+        Live LIMITED_LIVE: also on when ``live_cvd_limited_enabled`` (narrow flag).
+        """
+        limited = bool(getattr(self._settings, "live_cvd_limited_enabled", False))
+        if getattr(self, "_live_disable_research", False) and not limited:
             return
         if evaluate_frozen_research_economics is None:
             return
@@ -2025,11 +2038,20 @@ class PaperRunner:
                 prof_by_id = {p.opportunity_id: p for p in result.profitability}
                 gate = self._gate_settings()
                 for opp in cvd_opps:
+                    meta = dict(opp.metadata or {})
+                    meta["sleeve"] = "S2"
+                    meta["profit_sleeve"] = "S2"
+                    if limited:
+                        meta["cvd_limited_live"] = True
+                    opp.metadata = meta
                     if opp.id not in existing_ids:
                         result.opportunities.append(opp)
                     research = evaluate_frozen_research_economics(opp)
                     live = evaluate_live_profitability_economics(opp, settings=gate)
-                    self._economic_parity_store.record(opp, research=research, live=live)
+                    if self._economic_parity_store is not None:
+                        self._economic_parity_store.record(
+                            opp, research=research, live=live
+                        )
                     if opp.id not in prof_by_id:
                         result.profitability.append(
                             frozen_to_profitability_result(opp, research)

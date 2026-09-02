@@ -143,6 +143,10 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_momentum_require_last_n_rising == 4
     assert float(cfg.live_micro_buy_resting_max_age_sec) == 30.0
     assert float(cfg.live_micro_ring_soft_block_underwater_eur) == 25.0
+    assert cfg.live_micro_ring_util_b_ignore_underwater is True
+    assert cfg.live_cvd_limited_enabled is False
+    assert float(cfg.live_cvd_risk_sleeve_eur) == 500.0
+    assert float(cfg.live_desk_daily_loss_cap_eur) == 75.0
     assert cfg.live_micro_entry_min_low_util_rising_n == 3
     assert float(cfg.live_micro_entry_short_momentum_min_return) == 0.001
     assert cfg.live_micro_corr_sector_momentum_block == 2
@@ -156,7 +160,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert (cfg.live_micro_okx_deploy_bases or "") == ""
     assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0015
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
+    assert cfg.live_micro_buy_quality_underwater_count == 4
     assert cfg.live_micro_low_util_rising_n == 3
     assert float(cfg.live_micro_low_util_buy_resting_max_age_sec) == 30.0
     assert float(cfg.live_micro_active_ring_eur) == 1000.0
@@ -256,7 +261,8 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
     assert float(cfg.paper_buy_momentum_min_return) == 0.0015
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0015
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
+    assert cfg.live_micro_ring_util_b_ignore_underwater is True
     assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
     assert cfg.live_micro_max_per_corr_group == 3
     assert float(cfg.profitability_min_net_return) == 0.0004
@@ -2630,11 +2636,13 @@ def test_active_ring_boosts_unheld_focus_rank() -> None:
 
 
 def test_ring_soft_blocked_when_underwater_stuck(tmp_path: Path) -> None:
+    """Legacy mode: soft-block still disables Util-B when ignore flag is False."""
     from bot.core.models import Balance
 
     settings = _unlocked(
         live_micro_ring_soft_max_active_eur=650.0,
         live_micro_ring_soft_block_underwater_eur=25.0,
+        live_micro_ring_util_b_ignore_underwater=False,
         live_micro_active_ring_eur=1000.0,
         live_micro_bridge_persist_path=str(tmp_path / "uw_ring.json"),
     )
@@ -2657,6 +2665,55 @@ def test_ring_soft_blocked_when_underwater_stuck(tmp_path: Path) -> None:
     assert bridge._underwater_book_notional("bitvavo") == Decimal("100")  # noqa: SLF001
     assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
     assert bridge._ring_soft_momentum_eligible("bitvavo") is False  # noqa: SLF001
+
+
+def test_ring_util_b_unlocked_while_underwater(tmp_path: Path) -> None:
+    """Phase-1 unlock: Util-B stays eligible while vault bags are underwater."""
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_ring_soft_max_active_eur=650.0,
+        live_micro_ring_soft_block_underwater_eur=25.0,
+        live_micro_ring_util_b_ignore_underwater=True,
+        live_micro_active_ring_eur=1000.0,
+        live_micro_bridge_persist_path=str(tmp_path / "uw_ring_unlock.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
+        Balance(asset="SOL", free=Decimal("1"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["bitvavo"] = bridge._bal_cache["bitvavo"]  # noqa: SLF001
+    bridge._portfolio.set_mark_price("SOLEUR", Decimal("100"))
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("105")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
+    assert bridge._underwater_book_notional("bitvavo") >= Decimal("25")  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is True  # noqa: SLF001
+
+
+def test_cvd_sleeve_gates_when_limited_off(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_cvd_limited_enabled=False,
+        live_cvd_risk_sleeve_eur=500.0,
+        live_micro_bridge_persist_path=str(tmp_path / "cvd_off.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    assert bridge._cvd_limited_enabled is False  # noqa: SLF001
+    assert bridge._resolve_order_sleeve({"frozen_cvd": True}) == "S2"  # noqa: SLF001
+    assert bridge._cvd_sleeve_remaining() == Decimal("500")  # noqa: SLF001
 
 
 def test_entry_momentum_requires_short_window() -> None:

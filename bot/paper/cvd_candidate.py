@@ -160,6 +160,8 @@ def _check_dislocation(
             "a_rich": a_rich,
             "frozen_cvd": True,
             "decision_time_candidate": True,
+            "sleeve": "S2",
+            "profit_sleeve": "S2",
             "decision_economics_snapshot": decision_snapshot,
             "outcome_horizon_ms": 5000,
             "entry_semantics": "immediate_at_signal_time",

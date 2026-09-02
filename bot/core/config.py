@@ -528,9 +528,31 @@ class Settings(BaseSettings):
     # Require last N marks rising (in addition to momentum floor) for new buys.
     live_micro_momentum_require_last_n_rising: int = Field(default=3, ge=0, le=12)
     # Block low-util momentum boost while this much focus inventory is underwater (EUR).
+    # When live_micro_ring_util_b_ignore_underwater=True (Phase-1 unlock), this threshold
+    # no longer disables Util-B for free-cash RING_NEED deploys — same-base underwater
+    # adds remain blocked via underwater_buy_block.
     live_micro_ring_soft_block_underwater_eur: float = Field(
         default=25.0, ge=0.0, le=5000.0
     )
+    # Phase-1 dual-sleeve unlock: allow Util-B / soft ring momentum while vault bags
+    # are underwater (free cash may open fresh BE+ focus bags on RING_NEED).
+    live_micro_ring_util_b_ignore_underwater: bool = True
+    # --- Dual-sleeve desk: S2 CVD LIMITED_LIVE (hard-off until product flip) ---
+    # Narrow path: inject frozen CVD even when live_disable_research_hooks=True.
+    # Default False — requires explicit enable after shadow VALIDATED.
+    live_cvd_limited_enabled: bool = False
+    # When limited CVD is on, also run shadow observer (monitor, no separate orders).
+    live_cvd_shadow_observe: bool = True
+    # S2 risk sleeve EUR (separate from S1 active ring / velocity sleeve).
+    live_cvd_risk_sleeve_eur: float = Field(default=500.0, ge=0.0, le=5000.0)
+    # Pause new S2 buys when CVD sleeve realized ≤ -cap.
+    live_cvd_sleeve_daily_loss_cap_eur: float = Field(default=25.0, ge=0.0, le=500.0)
+    # Hard per-order notional cap for S2 (frozen CVD default notional is €100).
+    live_cvd_max_notional_eur: float = Field(default=150.0, ge=10.0, le=1000.0)
+    # Phase-3 scale ceiling for S2 sleeve (LIMITED_LIVE must stay ≤ this).
+    live_cvd_risk_sleeve_scale_max_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
+    # Desk-level daily kill for new risk across S1+S2 (0 = use paper_daily_kill_eur).
+    live_desk_daily_loss_cap_eur: float = Field(default=75.0, ge=0.0, le=1000.0)
     # Minimum rising ticks in low-util mode (never below this even when configured lower).
     live_micro_entry_min_low_util_rising_n: int = Field(default=3, ge=2, le=12)
     # Short-window momentum floor for new-base entries (last N marks).
@@ -673,6 +695,9 @@ class Settings(BaseSettings):
     live_micro_toxic_adverse_pct: float = Field(default=0.003, ge=0.0, le=0.05)
     live_micro_moderate_adverse_pct: float = Field(default=0.001, ge=0.0, le=0.05)
     live_micro_intelligence_persist_path: str = "./data/live_micro_intelligence_state.json"
+    live_micro_attribution_persist_path: str = "./data/live_micro_attribution_state.json"
+    live_micro_intelligence_auto_apply: bool = False
+    live_micro_experiment_id: str = "phase2_intelligence"
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 
