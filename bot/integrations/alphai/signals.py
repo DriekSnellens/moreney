@@ -43,6 +43,15 @@ class AlphaITradingSignals:
         b = str(base or "").upper()
         return b in self.avoid_bases or b in self.blocked_bases
 
+    def is_bullish_buy(self, base: str) -> bool:
+        """Live bullish headline or daily pick with positive score — allow entry."""
+        b = str(base or "").upper()
+        if b in self.blocked_bases or b in self.avoid_bases:
+            return False
+        if b in self.bullish_bases:
+            return True
+        return b in self.daily_pick_bases and self.pick_score(b) >= 4.0
+
     def entry_size_multiplier(self, base: str) -> Decimal:
         """Boost size on daily picks + live bullish; trim on avoid (pre-block)."""
         b = str(base or "").upper()
@@ -86,11 +95,14 @@ class AlphaITradingSignals:
         return default_bps + extra
 
     def momentum_floor_scale(self, base: str) -> Decimal:
-        """Scale momentum floor down (easier entry) for top picks."""
-        if self.is_top_pick(base) or str(base or "").upper() in self.bullish_bases:
-            return Decimal("0.70")
-        if self.pick_score(base) >= 4.0:
-            return Decimal("0.85")
+        """Scale momentum floor down (easier entry) for top picks / bullish headlines."""
+        b = str(base or "").upper()
+        if b in self.bullish_bases and self.is_top_pick(b):
+            return Decimal("0.50")
+        if self.is_top_pick(b) or b in self.bullish_bases:
+            return Decimal("0.65")
+        if self.pick_score(b) >= 4.0:
+            return Decimal("0.80")
         return _ONE
 
     def be_harvest_gain_scale(self, base: str) -> Decimal:
@@ -101,12 +113,20 @@ class AlphaITradingSignals:
             return Decimal("0.80")
         return _ONE
 
+    def bullish_buy_bases(self) -> frozenset[str]:
+        return frozenset(
+            b
+            for b in set(self.daily_pick_bases) | set(self.bullish_bases)
+            if self.is_bullish_buy(b)
+        )
+
     def to_public_dict(self) -> dict[str, Any]:
         return {
             "daily_pick_scores": dict(self.daily_pick_scores),
             "daily_pick_bases": sorted(self.daily_pick_bases),
             "avoid_bases": sorted(self.avoid_bases),
             "bullish_bases": sorted(self.bullish_bases),
+            "bullish_buy_bases": sorted(self.bullish_buy_bases()),
             "blocked_bases": sorted(self.blocked_bases),
             "macro_active": self.macro_active,
         }
@@ -143,12 +163,14 @@ def build_trading_signals(
     bullish: set[str] = set()
     blocked: set[str] = set()
     macro = False
+    observation = False
     if state is not None:
         bullish = set(getattr(state, "bullish_bases", frozenset()) or ())
         blocked = set(getattr(state, "blocked_bases", frozenset()) or ())
         macro = bool(getattr(state, "macro_reduce_only", False))
-        # Observation mode keeps blocked empty but detail populated — treat detail as soft avoid.
-        if not blocked:
+        observation = bool(getattr(state, "observation_mode", False))
+        # Observation mode: blocked_bases empty but detail populated — soft avoid only.
+        if observation and not blocked:
             detail = getattr(state, "blocked_detail", {}) or {}
             for key in detail:
                 k = str(key).strip().upper()

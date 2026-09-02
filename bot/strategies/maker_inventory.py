@@ -695,8 +695,17 @@ class MakerInventoryStrategy(BaseStrategy):
             and self._ring_needs_deploy(venue)
         ):
             ring_boost = Decimal("0.12")
-        alphai_boost = Decimal("0")
         sig = self._alphai_signals
+        if (
+            is_buy
+            and base
+            and sig is not None
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base)
+            and self._ring_needs_deploy(venue)
+        ):
+            ring_boost = max(ring_boost, Decimal("0.16"))
+        alphai_boost = Decimal("0")
         if sig is not None and base and hasattr(sig, "maker_rank_boost"):
             alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)
         return (

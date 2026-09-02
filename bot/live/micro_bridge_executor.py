@@ -909,7 +909,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             bool(new_bases_only) and bool(blocked) and not self._daily_kill_active
         )
 
-    def apply_alphai_regime(self, state: object | None) -> None:
+    def apply_alphai_regime(
+        self, state: object | None, *, observation_mode: bool = False
+    ) -> None:
         """Sync AlphaI headline blocks onto the live bridge (from PaperRunner poll)."""
         if state is None:
             self._alphai_blocked_bases = frozenset()
@@ -923,7 +925,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._alphai_blocked_detail = {
             str(k): str(v) for k, v in dict(detail).items() if k and v
         }
-        self._alphai_macro_active = macro
+        self._alphai_macro_active = macro and not observation_mode
+        if self._alphai_macro_active and self._regime_block_buys:
+            self.set_buys_blocked(True, new_bases_only=False)
 
     def apply_alphai_trading_signals(self, signals: object | None) -> None:
         """Daily picks + bullish/avoid for entry sizing, momentum, exit urgency."""
@@ -961,6 +965,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(sig.be_harvest_gain_scale(base)))
         except Exception:  # noqa: BLE001
             return _ONE
+
+    def _alphai_bullish_buy(self, base: str) -> bool:
+        if not bool(getattr(self._settings, "alphai_bullish_buy_enabled", True)):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_bullish_buy"):
+            return False
+        return bool(sig.is_bullish_buy(base))
 
     def _effective_exit_resting_max_age_sec(self, base: str) -> float:
         age = self._exit_resting_max_age_sec
@@ -6251,7 +6263,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             relax = self._low_util_relax_focus and self._ring_soft_momentum_eligible(
                 venue
             )
-            if base.upper() not in self._focus_bases and not relax:
+            bullish_buy = self._alphai_bullish_buy(base)
+            if (
+                base.upper() not in self._focus_bases
+                and not relax
+                and not bullish_buy
+            ):
                 self._bump_skip("focus_base_required")
                 return await self._reject_before_live(
                     order_request,
@@ -6273,7 +6290,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
             mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
-            if self._corr_sector_blocks_new_buy(base):
+            bullish_buy = self._alphai_bullish_buy(base)
+            if self._corr_sector_blocks_new_buy(base) and not bullish_buy:
                 self._bump_skip("corr_sector_momentum_block")
                 return await self._reject_before_live(
                     order_request,
@@ -6283,11 +6301,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"bases flat/down ≥ {self._corr_sector_momentum_block})"
                     ),
                 )
-            if not self._entry_momentum_ok(
+            momentum_ok = self._entry_momentum_ok(
                 symbol,
                 min_return=mom_floor,
-                low_util=ring_relaxed,
-            ):
+                low_util=ring_relaxed or bullish_buy,
+            )
+            if not momentum_ok and bullish_buy:
+                momentum_ok = self._entry_momentum_ok(
+                    symbol,
+                    min_return=mom_floor * Decimal("0.5"),
+                    low_util=True,
+                )
+            if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
                     order_request,
@@ -6296,9 +6321,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"new base {base} needs entry momentum "
                         f"(floor={float(mom_floor * 100):.2f}%"
                         f", short≥{float(self._entry_short_momentum_min * 100):.2f}%"
-                        f"{'; low-util boost' if ring_relaxed else ''})"
+                        f"{'; low-util boost' if ring_relaxed else ''}"
+                        f"{'; alphai bullish' if bullish_buy else ''})"
                     ),
                 )
+            if bullish_buy:
+                meta["alphai_bullish_buy"] = True
 
         if (
             side_is_buy
@@ -6310,13 +6338,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("winner_add")
         ):
             pre_rec = str(meta.get("entry_quality_recommendation") or "")
+            bullish_buy = self._alphai_bullish_buy(base)
             if pre_rec == EntryQualityRecommendation.REJECT.value:
-                self._bump_skip("entry_quality_reject")
-                return await self._reject_before_live(
-                    order_request,
-                    reason="ENTRY_QUALITY_REJECT",
-                    message=str(meta.get("entry_quality_reject_reason") or "entry_quality"),
-                )
+                hard_reject = str(
+                    meta.get("entry_quality_reject_reason") or ""
+                ) in {"extension_extreme", "continuity_spike"}
+                if not (bullish_buy and not hard_reject):
+                    self._bump_skip("entry_quality_reject")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message=str(
+                            meta.get("entry_quality_reject_reason") or "entry_quality"
+                        ),
+                    )
+                self._bump_skip("entry_quality_reduced")
             if not pre_rec:
                 assessment = self._assess_entry_quality_buy(
                     symbol=symbol,
@@ -6326,28 +6362,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 self._entry_quality_diagnostics.record(assessment)
                 if assessment.recommendation == EntryQualityRecommendation.REJECT:
-                    self._bump_skip("entry_quality_reject")
                     reason_key = assessment.reject_reason or "entry_quality"
-                    if "headroom" in reason_key:
-                        self._bump_skip("headroom_reject")
-                    if "extension" in reason_key:
-                        self._bump_skip("extension_reject")
-                    if "continuity" in reason_key:
-                        self._bump_skip("continuity_reject")
-                    if assessment.headroom_pct is None:
-                        self._bump_skip("headroom_unknown")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="ENTRY_QUALITY_REJECT",
-                        message=(
-                            f"entry quality {assessment.score} "
-                            f"headroom={assessment.headroom_pct} "
-                            f"ext={assessment.extension_pct} "
-                            f"req={assessment.required_move_pct} "
-                            f"({reason_key})"
-                        ),
-                    )
-                if assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
+                    hard_reject = reason_key in {
+                        "extension_extreme",
+                        "continuity_spike",
+                    }
+                    if bullish_buy and not hard_reject:
+                        self._bump_skip("entry_quality_reduced")
+                    else:
+                        self._bump_skip("entry_quality_reject")
+                        if "headroom" in reason_key:
+                            self._bump_skip("headroom_reject")
+                        if "extension" in reason_key:
+                            self._bump_skip("extension_reject")
+                        if "continuity" in reason_key:
+                            self._bump_skip("continuity_reject")
+                        if assessment.headroom_pct is None:
+                            self._bump_skip("headroom_unknown")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="ENTRY_QUALITY_REJECT",
+                            message=(
+                                f"entry quality {assessment.score} "
+                                f"headroom={assessment.headroom_pct} "
+                                f"ext={assessment.extension_pct} "
+                                f"req={assessment.required_move_pct} "
+                                f"({reason_key})"
+                            ),
+                        )
+                elif assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
                     self._bump_skip("entry_quality_reduced")
                 else:
                     self._bump_skip("entry_quality_normal")

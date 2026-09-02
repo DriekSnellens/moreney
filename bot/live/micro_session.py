@@ -404,7 +404,7 @@ def _session_settings(
                 getattr(base, "alphai_poll_actionable", True)
             ),
             "alphai_observation_mode": bool(
-                getattr(base, "alphai_observation_mode", True)
+                getattr(base, "alphai_observation_mode", False)
             ),
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
@@ -816,6 +816,11 @@ async def run_session(
                 reduce_only = bool(st_now.get("reduce_only"))
                 hmm = st_now.get("hmm_regime") or {}
                 toxic = bool(hmm.get("is_toxic_flow"))
+                alphai_box = st_now.get("alphai") or {}
+                alphai_macro_ro = bool(
+                    alphai_box.get("macro_reduce_only")
+                    or alphai_box.get("global_reduce_only")
+                )
                 uw_block = int(
                     getattr(cfg, "live_micro_underwater_buy_block", 3) or 0
                 )
@@ -834,7 +839,7 @@ async def run_session(
                             uw_blocked_bases.setdefault(v.strip().lower(), set()).add(
                                 base
                             )
-                block_buys_full = reduce_only or toxic
+                block_buys_full = reduce_only or toxic or alphai_macro_ro
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )

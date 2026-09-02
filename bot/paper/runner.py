@@ -231,6 +231,7 @@ class PaperRunner:
             ),
         )
         self._hmm_reduce_only = False
+        self._alphai_reduce_only = False
         self._hmm_last: RegimePrediction | None = None
         self._hmm_inventory_target = float(
             getattr(settings, "paper_hmm_normal_inventory_pct", 0.30) or 0.30
@@ -818,7 +819,7 @@ class PaperRunner:
             "execution_mode": ExecutionMode.PAPER.value,
             "universe_scan": True,
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else None,
-            "reduce_only": self._hmm_reduce_only,
+            "reduce_only": bool(self._hmm_reduce_only or self._alphai_reduce_only),
             "inventory_target_pct": self._hmm_inventory_target,
             "latency": metrics.report() if metrics.enabled else None,
         }
@@ -974,6 +975,15 @@ class PaperRunner:
             "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
             "inventory": self._inventory_snapshot(),
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else {"enabled": False},
+            "reduce_only": bool(
+                self._hmm_reduce_only
+                or self._alphai_reduce_only
+                or (
+                    getattr(self._maker_strategy(), "reduce_only", False)
+                    if self._maker_strategy() is not None
+                    else False
+                )
+            ),
             "alphai": (
                 self._alphai_monitor.snapshot()
                 if getattr(self, "_alphai_monitor", None) is not None
@@ -2238,23 +2248,25 @@ class PaperRunner:
         state = await monitor.maybe_refresh()
         from bot.integrations.alphai.signals import build_trading_signals
 
+        observation = bool(getattr(self._settings, "alphai_observation_mode", False))
+        self._alphai_reduce_only = bool(
+            state.global_reduce_only and not observation
+        )
         signals = build_trading_signals(state, monitor.daily_picks_snapshot())
         maker = self._maker_strategy()
         if maker is not None:
             hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))
-            alphai_ro = bool(state.global_reduce_only)
+            alphai_ro = bool(self._alphai_reduce_only)
             maker.set_reduce_only(hmm_ro or alphai_ro)
             maker.set_news_blocked_bases(set(state.blocked_bases))
             if hasattr(maker, "apply_alphai_signals"):
                 maker.apply_alphai_signals(signals)
         executor = self._executor
         if hasattr(executor, "apply_alphai_regime"):
-            executor.apply_alphai_regime(state)
+            executor.apply_alphai_regime(state, observation_mode=observation)
         if hasattr(executor, "apply_alphai_trading_signals"):
             executor.apply_alphai_trading_signals(signals)
-        if state.global_reduce_only and not getattr(
-            self._settings, "alphai_observation_mode", False
-        ):
+        if self._alphai_reduce_only:
             await self._cancel_all_bids(reason="alphai_macro_reduce_only")
 
     def ingest_alphai_article(self, article: dict[str, Any]) -> dict[str, Any]:

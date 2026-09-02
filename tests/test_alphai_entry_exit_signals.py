@@ -105,6 +105,42 @@ def test_maker_rank_prefers_daily_pick() -> None:
     assert avax_boost > eth_boost
 
 
+def test_is_bullish_buy_daily_and_headline() -> None:
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"SOL"})),
+        {"picks": [{"base": "AVAX", "score": 20.0}], "avoid": []},
+    )
+    assert signals.is_bullish_buy("SOL")
+    assert signals.is_bullish_buy("AVAX")
+    assert not signals.is_bullish_buy("ETH")
+    blocked = build_trading_signals(
+        AlphaIRegimeState(blocked_bases=frozenset({"SOL"})),
+        {"picks": [{"base": "SOL", "score": 20.0}], "avoid": []},
+    )
+    assert not blocked.is_bullish_buy("SOL")
+
+
+def test_observation_mode_soft_avoid_only() -> None:
+    state = AlphaIRegimeState(
+        blocked_bases=frozenset(),
+        blocked_detail={"BTC": "SEC probe"},
+        observation_mode=True,
+    )
+    signals = build_trading_signals(state, None)
+    assert "BTC" not in signals.blocked_bases
+    assert "BTC" in signals.avoid_bases
+
+
+def test_enforced_blocks_not_soft_avoid() -> None:
+    state = AlphaIRegimeState(
+        blocked_bases=frozenset({"BTC"}),
+        blocked_detail={"BTC": "SEC probe"},
+        observation_mode=False,
+    )
+    signals = build_trading_signals(state, None)
+    assert "BTC" in signals.blocked_bases
+
+
 def test_maker_avoid_base_sell_only() -> None:
     settings = Settings(
         execution_mode="paper",
