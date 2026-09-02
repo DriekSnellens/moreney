@@ -41,13 +41,68 @@ class AlphaINewsMonitor:
             getattr(settings, "live_micro_focus_bases", "") or "",
             fallback=set(LIQUID_EUR_BASES),
         )
+        self._daily_picks_path = str(
+            getattr(
+                settings,
+                "alphai_daily_recommendations_path",
+                "data/alphai/daily_recommendations.json",
+            )
+        )
+        self._last_daily_picks: dict[str, Any] | None = None
 
     @property
     def state(self) -> AlphaIRegimeState:
         return self._state
 
     def snapshot(self) -> dict[str, Any]:
-        return self._state.to_public_dict()
+        out = self._state.to_public_dict()
+        if self._last_daily_picks:
+            out["daily_picks"] = {
+                "session_id": self._last_daily_picks.get("session_id"),
+                "generated_at": self._last_daily_picks.get("generated_at"),
+                "next_update_at": self._last_daily_picks.get("next_update_at"),
+                "picks": (self._last_daily_picks.get("picks") or [])[:8],
+                "avoid": (self._last_daily_picks.get("avoid") or [])[:4],
+            }
+        return out
+
+    def daily_picks_snapshot(self) -> dict[str, Any] | None:
+        if self._last_daily_picks:
+            return dict(self._last_daily_picks)
+        from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+
+        cached = load_daily_recommendations(self._daily_picks_path)
+        if cached:
+            self._last_daily_picks = cached
+        return cached
+
+    async def maybe_refresh_daily_picks(self, *, force: bool = False) -> dict[str, Any] | None:
+        if not self._enabled or self._client is None:
+            return self.daily_picks_snapshot()
+        if not bool(getattr(self._settings, "alphai_daily_recommendations_enabled", True)):
+            return self.daily_picks_snapshot()
+        from bot.integrations.alphai.daily_recommendations import maybe_refresh_daily
+
+        report = await asyncio.to_thread(
+            maybe_refresh_daily,
+            self._client,
+            self._daily_picks_path,
+            focus_bases=self._focus_bases,
+            enabled=True,
+            min_relevance=int(
+                getattr(self._settings, "alphai_daily_recommendations_min_relevance", 6)
+                or 6
+            ),
+            top_n=int(getattr(self._settings, "alphai_daily_recommendations_top_n", 8) or 8),
+            update_hour_local=int(
+                getattr(self._settings, "alphai_daily_recommendations_hour", 12) or 12
+            ),
+            macro_caution=bool(self._state.macro_reduce_only),
+            force=force,
+        )
+        if report:
+            self._last_daily_picks = report
+        return report
 
     async def maybe_refresh(self) -> AlphaIRegimeState:
         if not self._enabled or self._client is None:
@@ -66,6 +121,10 @@ class AlphaINewsMonitor:
         except Exception as exc:
             logger.warning("ALPHAI_POLL_FAILED: %s", exc)
             self._state.last_error = str(exc)
+        try:
+            await self.maybe_refresh_daily_picks()
+        except Exception:
+            logger.exception("ALPHAI_DAILY_PICKS_REFRESH_FAILED")
         return self._state
 
     def ingest_webhook_article(self, article: dict[str, Any]) -> AlphaIRegimeState:

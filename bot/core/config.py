@@ -438,6 +438,11 @@ class Settings(BaseSettings):
     alphai_observation_mode: bool = False
     alphai_webhook_secret: SecretStr | None = None
     alphai_symbol_cache_path: str = "data/alphai/symbol_cache.json"
+    alphai_daily_recommendations_enabled: bool = True
+    alphai_daily_recommendations_path: str = "data/alphai/daily_recommendations.json"
+    alphai_daily_recommendations_hour: int = Field(default=12, ge=0, le=23)
+    alphai_daily_recommendations_top_n: int = Field(default=8, ge=1, le=20)
+    alphai_daily_recommendations_min_relevance: int = Field(default=6, ge=1, le=10)
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

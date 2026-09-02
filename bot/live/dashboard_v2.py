@@ -167,6 +167,11 @@ def dashboard_css() -> str:
     @media (min-width: 980px) {
       .command-grid { grid-template-columns: 1.35fr .95fr; }
     }
+    .command-stack {
+      display: flex;
+      flex-direction: column;
+      gap: .85rem;
+    }
     .panel {
       background: var(--surface);
       border: 1px solid var(--line);
@@ -483,6 +488,51 @@ def dashboard_css() -> str:
       font-size: .78rem;
     }
     .install-banner.show { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+    .panel.daily-picks {
+      border-color: color-mix(in srgb, var(--good) 35%, var(--line));
+      background: linear-gradient(155deg, rgba(52,211,153,.08), var(--surface));
+    }
+    .pick-list {
+      margin: .65rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: .45rem;
+    }
+    .pick-row {
+      display: grid;
+      grid-template-columns: 2rem 4rem 3rem 1fr;
+      gap: .5rem;
+      align-items: baseline;
+      padding: .45rem .55rem;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      font-size: .78rem;
+    }
+    .pick-rank {
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+    .pick-base {
+      font-size: .92rem;
+      color: var(--good);
+    }
+    .pick-score {
+      font-family: var(--mono);
+      color: var(--accent);
+    }
+    .pick-note {
+      color: var(--muted);
+      font-size: .72rem;
+      line-height: 1.3;
+    }
+    @media (max-width: 560px) {
+      .pick-row { grid-template-columns: 2rem 3.5rem 1fr; }
+      .pick-score { grid-column: 3; }
+      .pick-note { grid-column: 2 / -1; }
+    }
     """
 
 
@@ -619,4 +669,77 @@ def render_operator_panel(
         f"<div class='mini-kpi'><p class='label'>Cap util %</p>"
         f"<p class='value' id='eff-cap-util-inline'>{esc(cap_util if cap_util is not None else '—')}</p></div>"
         "</div></section>"
+    )
+
+
+def render_daily_picks_panel(
+    report: dict[str, Any] | None,
+    *,
+    esc: Callable[[Any], str],
+) -> str:
+    if not report:
+        return (
+            "<section class='panel daily-picks' id='section-daily-picks'>"
+            "<div class='panel-head'><div>"
+            "<h2>Koopaanbevelingen vandaag</h2>"
+            "<p class='sub'>Wordt dagelijks om 12:00 NL ververst (AlphaI headlines)</p></div></div>"
+            "<p class='hint'>Nog geen picks — wacht op eerste refresh na 12:00 of run seed script.</p>"
+            "</section>"
+        )
+    picks = report.get("picks") or []
+    avoid = report.get("avoid") or []
+    session_id = report.get("session_id") or "—"
+    generated = report.get("generated_at") or "—"
+    nxt = report.get("next_update_at") or "—"
+    macro = bool(report.get("macro_caution"))
+
+    pick_rows = []
+    for p in picks[:10]:
+        if not isinstance(p, dict):
+            continue
+        base = p.get("base") or "?"
+        score = p.get("score")
+        rank = p.get("rank") or "—"
+        note = str(p.get("note") or "")[:90]
+        pick_rows.append(
+            "<li class='pick-row'>"
+            f"<span class='pick-rank'>{esc(rank)}</span>"
+            f"<strong class='pick-base'>{esc(base)}</strong>"
+            f"<span class='pick-score'>{esc(score)}</span>"
+            f"<span class='pick-note'>{esc(note)}</span>"
+            "</li>"
+        )
+    avoid_chips = []
+    for p in avoid[:6]:
+        if not isinstance(p, dict):
+            continue
+        avoid_chips.append(
+            f"<span class='chip block' title='{esc(str(p.get('note') or '')[:100])}'>"
+            f"{esc(p.get('base'))}</span>"
+        )
+    macro_html = (
+        "<p class='hint bad'>Macro voorzichtigheid — kleinere pick-lijst vandaag.</p>"
+        if macro
+        else ""
+    )
+    return (
+        "<section class='panel daily-picks' id='section-daily-picks'>"
+        "<div class='panel-head'><div>"
+        "<h2>Koopaanbevelingen vandaag</h2>"
+        f"<p class='sub'>Venster {esc(session_id)} · update 12:00 Europe/Amsterdam</p></div>"
+        f"<span class='pill {'obs' if macro else 'on'}' id='daily-picks-badge'>"
+        f"{len(picks)} picks</span></div>"
+        + macro_html
+        + f"<p class='hint'>Gegenereerd: <span id='daily-picks-generated'>{esc(generated)}</span>"
+        f" · Volgende: <span id='daily-picks-next'>{esc(nxt)}</span></p>"
+        + (
+            "<ol class='pick-list' id='daily-picks-list'>"
+            + ("".join(pick_rows) if pick_rows else "<li class='hint'>Geen bullish picks — macro/neutral dag</li>")
+            + "</ol>"
+        )
+        + (
+            "<p class='label' style='margin-top:.65rem'>Vermijden (bearish headlines)</p>"
+            f"<div class='chip-row' id='daily-picks-avoid'>{''.join(avoid_chips) if avoid_chips else '<span class=\"chip none\">—</span>'}</div>"
+        )
+        + "</section>"
     )
