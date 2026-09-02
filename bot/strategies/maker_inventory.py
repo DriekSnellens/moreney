@@ -1193,6 +1193,17 @@ class MakerInventoryStrategy(BaseStrategy):
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
 
+        base_asset = infer_base_asset(buy_snap.symbol, self._quote)
+        sig = self._alphai_signals
+        alphai_same_venue_buy = (
+            not sell_only
+            and buy_snap.exchange == sell_snap.exchange
+            and sig is not None
+            and base_asset
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base_asset)
+        )
+
         skew = self._venue_skew(str(buy_snap.exchange or ""))
         if skew is not None:
             buy_price, sell_price = self._skew_policy.apply_prices(
@@ -1253,14 +1264,8 @@ class MakerInventoryStrategy(BaseStrategy):
         base_asset = infer_base_asset(buy_snap.symbol, self._quote)
         sig = self._alphai_signals
         min_spread = self._min_spread_bps
-        if (
-            sig is not None
-            and base_asset
-            and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base_asset)
-            and buy_snap.exchange == sell_snap.exchange
-        ):
-            min_spread = self._min_spread_bps / Decimal("2")
+        if alphai_same_venue_buy:
+            min_spread = Decimal("0")
         if buy_snap.exchange == sell_snap.exchange and spread_bps < min_spread:
             self._reject(
                 buy_snap.symbol,
@@ -1368,7 +1373,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 self._maker_fee(buy_snap.exchange) * _BPS + self._spread_fee_buffer_bps
             )
         # Sell-only recycle: allow thinner edge so capital velocity wins.
-        if not sell_only and cost_bps >= spread_bps:
+        if not sell_only and cost_bps >= spread_bps and not alphai_same_venue_buy:
             self._reject(
                 buy_snap.symbol,
                 "fees_eat_edge",
@@ -1388,7 +1393,7 @@ class MakerInventoryStrategy(BaseStrategy):
         stale_cap = self._max_edge_bps
         if fee_bps > 0:
             stale_cap = max(stale_cap, fee_bps * Decimal("2"))
-        if stale_cap > 0 and spread_bps > stale_cap:
+        if stale_cap > 0 and spread_bps > stale_cap and not alphai_same_venue_buy:
             self._reject(
                 buy_snap.symbol,
                 "stale_edge",
