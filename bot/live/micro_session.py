@@ -388,14 +388,24 @@ def _session_settings(
             # Product retirement: CVD TOB shadow expectancy failed.
             "live_cvd_abandoned": True,
             # AlphaI news intelligence (requires ALPHAI_API_KEY in env).
-            "alphai_enabled": True,
-            "alphai_min_relevance": 7,
-            "alphai_poll_interval_sec": 120.0,
-            "alphai_block_bearish_bases": True,
-            "alphai_macro_reduce_only": True,
-            "alphai_poll_macro": True,
-            "alphai_poll_actionable": True,
-            "alphai_observation_mode": False,
+            "alphai_enabled": bool(getattr(base, "alphai_enabled", True)),
+            "alphai_min_relevance": int(getattr(base, "alphai_min_relevance", 7) or 7),
+            "alphai_poll_interval_sec": float(
+                getattr(base, "alphai_poll_interval_sec", 120.0) or 120.0
+            ),
+            "alphai_block_bearish_bases": bool(
+                getattr(base, "alphai_block_bearish_bases", True)
+            ),
+            "alphai_macro_reduce_only": bool(
+                getattr(base, "alphai_macro_reduce_only", True)
+            ),
+            "alphai_poll_macro": bool(getattr(base, "alphai_poll_macro", True)),
+            "alphai_poll_actionable": bool(
+                getattr(base, "alphai_poll_actionable", True)
+            ),
+            "alphai_observation_mode": bool(
+                getattr(base, "alphai_observation_mode", True)
+            ),
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,
