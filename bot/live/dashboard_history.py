@@ -613,6 +613,9 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
     venue_bv = diag.get("venue_economics_bitvavo") or {}
     venue_okx = diag.get("venue_economics_okx") or {}
+    from bot.integrations.alphai.status import alphai_metrics
+
+    alphai = alphai_metrics(session, bridge)
 
     return {
         "updated_at": session.get("updated_at"),
@@ -735,6 +738,7 @@ def metrics_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "adverse_selection_reject": diag.get("adverse_selection_reject"),
         "regime_reject": diag.get("regime_reject"),
         "stale_data_reject": diag.get("stale_data_reject"),
+        **alphai,
     }
 
 

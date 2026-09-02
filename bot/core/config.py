@@ -422,6 +422,22 @@ class Settings(BaseSettings):
     live_allow_without_research_unlock: bool = False
     # Live-only: skip CVD inject, shadow observer, research status panels in PaperRunner.
     live_disable_research_hooks: bool = True
+    # Product retirement: CVD mid/TOB gap falsified live expectancy (see POST_CVD_VELOCITY_DESK).
+    # When True, research hooks stay off and CVD inject is hard-rejected.
+    live_cvd_abandoned: bool = True
+    # --- AlphaI news intelligence (https://alphai.io) ---
+    alphai_enabled: bool = False
+    alphai_api_key: SecretStr | None = None
+    alphai_min_relevance: int = Field(default=7, ge=1, le=10)
+    alphai_poll_interval_sec: float = Field(default=120.0, ge=30.0, le=3600.0)
+    alphai_block_bearish_bases: bool = True
+    alphai_macro_reduce_only: bool = True
+    alphai_poll_macro: bool = True
+    alphai_poll_actionable: bool = True
+    # When True: log headlines + blocks in status but do not pause buys.
+    alphai_observation_mode: bool = False
+    alphai_webhook_secret: SecretStr | None = None
+    alphai_symbol_cache_path: str = "data/alphai/symbol_cache.json"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
@@ -531,6 +547,9 @@ class Settings(BaseSettings):
     live_micro_ring_soft_block_underwater_eur: float = Field(
         default=25.0, ge=0.0, le=5000.0
     )
+    # Capital Velocity Desk unlock: allow Util-B / soft ring momentum while *other*
+    # vault bags are underwater. Same-base underwater adds stay blocked.
+    live_micro_ring_util_b_ignore_underwater: bool = True
     # Minimum rising ticks in low-util mode (never below this even when configured lower).
     live_micro_entry_min_low_util_rising_n: int = Field(default=3, ge=2, le=12)
     # Short-window momentum floor for new-base entries (last N marks).

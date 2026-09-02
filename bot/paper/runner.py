@@ -260,10 +260,23 @@ class PaperRunner:
                 # Phase D remains off unless both flags intentionally flipped;
                 # still do not auto-execute from observer.
                 pass
+        self._alphai_monitor = None
+        if getattr(settings, "alphai_enabled", False):
+            try:
+                from bot.integrations.alphai import AlphaINewsMonitor
+
+                self._alphai_monitor = AlphaINewsMonitor(settings)
+                logger.info(
+                    "ALPHAI monitor enabled observation=%s",
+                    getattr(settings, "alphai_observation_mode", False),
+                )
+            except Exception:
+                logger.exception("ALPHAI_INIT_FAILED")
         self._shadow_observer = None
+        self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
         self._live_disable_research = bool(
             getattr(settings, "live_disable_research_hooks", False)
-        )
+        ) or self._cvd_abandoned
         if not self._live_disable_research:
             try:
                 import os
@@ -708,6 +721,10 @@ class PaperRunner:
         with metrics.span("hmm_regime"):
             await self._apply_hmm_regime_guardrail(books=books)
 
+        # AlphaI news guardrail: bearish catalysts → per-base / macro reduce-only.
+        with metrics.span("alphai_regime"):
+            await self._apply_alphai_news_guardrail()
+
         with metrics.span("match_expire"):
             await self._match_and_expire_quotes(books=books)
 
@@ -957,6 +974,11 @@ class PaperRunner:
             "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
             "inventory": self._inventory_snapshot(),
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else {"enabled": False},
+            "alphai": (
+                self._alphai_monitor.snapshot()
+                if getattr(self, "_alphai_monitor", None) is not None
+                else {"enabled": False}
+            ),
             "desk_scan": (
                 (self._last_cycle or {}).get("scan") or {}
             ),
@@ -2006,6 +2028,8 @@ class PaperRunner:
         self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
     ) -> None:
         """Create frozen CVD candidates at decision time (research path only)."""
+        if getattr(self, "_cvd_abandoned", False):
+            return
         if getattr(self, "_live_disable_research", False):
             return
         if evaluate_frozen_research_economics is None:
@@ -2205,6 +2229,34 @@ class PaperRunner:
                 target * 100.0,
             )
             await self._cancel_all_bids(reason="hmm_toxic_flow")
+
+    async def _apply_alphai_news_guardrail(self) -> None:
+        """Poll AlphaI headlines and block toxic new-base entries."""
+        monitor = getattr(self, "_alphai_monitor", None)
+        if monitor is None:
+            return
+        state = await monitor.maybe_refresh()
+        maker = self._maker_strategy()
+        if maker is not None:
+            hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))
+            alphai_ro = bool(state.global_reduce_only)
+            maker.set_reduce_only(hmm_ro or alphai_ro)
+            maker.set_news_blocked_bases(set(state.blocked_bases))
+        executor = self._executor
+        if hasattr(executor, "apply_alphai_regime"):
+            executor.apply_alphai_regime(state)
+        if state.global_reduce_only and not getattr(
+            self._settings, "alphai_observation_mode", False
+        ):
+            await self._cancel_all_bids(reason="alphai_macro_reduce_only")
+
+    def ingest_alphai_article(self, article: dict[str, Any]) -> dict[str, Any]:
+        """Push webhook article into the live monitor (Pro tier)."""
+        monitor = getattr(self, "_alphai_monitor", None)
+        if monitor is None:
+            return {"ok": False, "reason": "alphai_disabled"}
+        state = monitor.ingest_webhook_article(article)
+        return state.to_public_dict()
 
     async def _cancel_all_bids(self, *, reason: str) -> None:
         from bot.core.enums import OrderSide

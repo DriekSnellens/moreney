@@ -241,6 +241,10 @@ def _session_settings(
             "live_micro_trail_hold_rising_n": 2,
             "live_micro_ring_soft_max_active_eur": 650.0,
             "live_micro_ring_soft_block_underwater_eur": 25.0,
+            # Capital Velocity Desk: unlock Util-B despite vault underwater bags.
+            "live_micro_ring_util_b_ignore_underwater": True,
+            # Soft floor while ring NEED; full paper floor stays 0.0015 when ring OK.
+            "live_micro_ring_momentum_min_return": 0.0005,
             "live_micro_low_util_rising_n": 3,
             "live_micro_entry_min_low_util_rising_n": 3,
             "live_micro_entry_short_momentum_samples": 6,
@@ -256,7 +260,7 @@ def _session_settings(
             "live_micro_winner_add_max": 2,
             "live_micro_winner_add_clip_eur": 55.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
-            "live_micro_buy_quality_underwater_count": 2,
+            "live_micro_buy_quality_underwater_count": 4,
             "live_micro_buy_quality_pause_sec": 1800.0,
             "live_micro_entry_headroom_enabled": True,
             "live_micro_entry_headroom_min_pct": 0.0025,
@@ -322,8 +326,7 @@ def _session_settings(
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
             "live_micro_okx_ring_clip_eur": 55.0,
-            # Low-util boost: same floor as full mode (no weak 0.05% entries).
-            "live_micro_ring_momentum_min_return": 0.0015,
+            # Soft floor while ring NEED is set earlier (0.0005); do not re-pin to full.
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
@@ -382,6 +385,27 @@ def _session_settings(
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.
             "live_disable_research_hooks": True,
+            # Product retirement: CVD TOB shadow expectancy failed.
+            "live_cvd_abandoned": True,
+            # AlphaI news intelligence (requires ALPHAI_API_KEY in env).
+            "alphai_enabled": bool(getattr(base, "alphai_enabled", True)),
+            "alphai_min_relevance": int(getattr(base, "alphai_min_relevance", 7) or 7),
+            "alphai_poll_interval_sec": float(
+                getattr(base, "alphai_poll_interval_sec", 120.0) or 120.0
+            ),
+            "alphai_block_bearish_bases": bool(
+                getattr(base, "alphai_block_bearish_bases", True)
+            ),
+            "alphai_macro_reduce_only": bool(
+                getattr(base, "alphai_macro_reduce_only", True)
+            ),
+            "alphai_poll_macro": bool(getattr(base, "alphai_poll_macro", True)),
+            "alphai_poll_actionable": bool(
+                getattr(base, "alphai_poll_actionable", True)
+            ),
+            "alphai_observation_mode": bool(
+                getattr(base, "alphai_observation_mode", True)
+            ),
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,
@@ -759,6 +783,7 @@ async def run_session(
                 "last_cycle": st.get("last_cycle"),
                 "why_not_trade": st.get("why_not_trade"),
                 "pipeline_funnel": st.get("pipeline_funnel"),
+                "alphai": st.get("alphai") or {},
             }
         )
 
