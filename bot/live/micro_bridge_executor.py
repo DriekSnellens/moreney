@@ -6494,6 +6494,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not self._is_new_base_buy(venue, base)
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not meta.get("alphai_inventory_build")
+            and not meta.get("alphai_strong_bullish_buy")
+            and not self._alphai_strong_bullish_buy(base)
         ):
             be = self._break_even_sell_price(venue, base)
             mark_ref = self._portfolio.state.mark_prices.get(symbol.upper())
@@ -6516,6 +6519,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
             and not meta.get("winner_add")
+            and not meta.get("alphai_inventory_build")
+            and not meta.get("alphai_strong_bullish_buy")
+            and not self._alphai_strong_bullish_buy(base)
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(
