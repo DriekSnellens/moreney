@@ -637,9 +637,7 @@ def evaluate(
     net_pct = profitability.net_return
     reasons: list[str] = []
 
-    if meta.get("alphai_inventory_build") or (
-        meta.get("buy_only") and meta.get("alphai_bullish_buy")
-    ):
+    if meta.get("alphai_inventory_build"):
         cap = notional if notional > 0 else Decimal("55")
         return OpportunityAssessment(
             symbol=opportunity.symbol,

@@ -63,6 +63,7 @@ from bot.intelligence.session import IntelligenceSession
 logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
+_ONE = Decimal("1")
 _MIN_LIVE_NOTIONAL = Decimal("5")
 _FILL_POLL_SECONDS = 1.5
 _FILL_POLL_INTERVAL = 0.15
@@ -3315,7 +3316,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if client is None:
             return 0
         venue_l = venue.strip().lower()
-        held = self._held_alt_bases(venue)
+        held = self._held_alt_bases()  # portfolio-wide: any venue holds → cancel buys
         by_symbol: dict[str, list[dict[str, Any]]] = {}
         cancelled = 0
         still: list[dict[str, Any]] = []
@@ -5416,11 +5417,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # AlphaI hold: when momentum goes flat/down after a peak, harvest BE+
             # sooner (policy: hold with momentum, exit when peak is past).
             alphai_peak_past = False
+            peak_px = Decimal(str(st.get("peak") or 0) or 0)
             if (
                 not exit_urgency
                 and be is not None
                 and mark >= be
                 and gain_now > 0
+                and peak_px > 0
+                and mark <= peak_px * Decimal("0.997")  # ≥0.3% off peak
                 and (
                     self._alphai_bullish_buy(asset)
                     or asset.upper()
@@ -6545,7 +6549,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
-            and not meta.get("winner_add")
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(

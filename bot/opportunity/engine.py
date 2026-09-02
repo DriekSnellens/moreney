@@ -366,9 +366,7 @@ class GlobalOpportunityEngine:
             item.score = OpportunityRanker.compute_score(item)
 
             gates: list[str] = []
-            alphai_inv = bool(meta.get("alphai_inventory_build")) or (
-                meta.get("buy_only") and meta.get("alphai_bullish_buy")
-            )
+            alphai_inv = bool(meta.get("alphai_inventory_build"))
             if not profitability.trade_allowed and not alphai_inv:
                 gates.append("profitability")
             min_ev = Decimal(str(getattr(self._settings, "opportunity_min_expected_value", 0)))

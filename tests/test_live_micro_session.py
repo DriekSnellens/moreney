@@ -122,8 +122,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_hard_drawdown_pct == 0.015
     assert cfg.paper_trail_hard_partial_pct == 0.35
     assert cfg.paper_trail_arm_gain_pct == 0.03
-    assert cfg.live_micro_winner_add_enabled is True
-    assert cfg.live_micro_winner_add_max == 2
+    assert cfg.live_micro_winner_add_enabled is False
+    assert cfg.live_micro_winner_add_max == 0
     assert float(cfg.live_micro_winner_add_clip_eur) == 55.0
     assert float(cfg.live_micro_winner_add_cooldown_sec) == 45.0
     assert cfg.live_micro_low_util_relax_focus is True
@@ -194,7 +194,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_soft_partial_pct == 0.15
     assert cfg.paper_trail_soft_drawdown_pct == 0.0025
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
-    assert cfg.live_micro_winner_add_enabled is True
+    assert cfg.live_micro_winner_add_enabled is False
     assert cfg.live_micro_low_util_relax_focus is True
     assert cfg.paper_maker_keep_vs_best_frac == 0.30
     assert cfg.live_micro_underwater_buy_block == 1
@@ -795,7 +795,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_partial_pct == 0.15
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
-    assert cfg.live_micro_winner_add_max == 2
+    assert cfg.live_micro_winner_add_max == 0
     assert cfg.live_micro_max_notional_eur <= 200.0
     assert cfg.live_micro_max_notional_eur >= 100.0
     assert cfg.paper_markout_enabled is False

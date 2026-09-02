@@ -474,7 +474,7 @@ class MakerInventoryStrategy(BaseStrategy):
                                 continue
                             px = Decimal(str(mark or 0))
                             notional = qty * px if px > 0 else _ZERO
-                            if px > 0 and notional >= min_n * Decimal("0.5"):
+                            if px > 0 and notional >= min_n:
                                 held.add(base)
                                 # Active book = focus + not stuck/underwater.
                                 if (
@@ -769,6 +769,10 @@ class MakerInventoryStrategy(BaseStrategy):
                 cash_boost = Decimal("0.02")
             elif free >= Decimal("100"):
                 cash_boost = Decimal("0.01")
+            # Prefer lower buy price (better venue fill) when cash is comparable.
+            buy_px = Decimal(str(opportunity.entry_price or 0))
+            if buy_px > 0:
+                cash_boost += Decimal("0.05") / buy_px
         alphai_boost = Decimal("0")
         if sig is not None and base and hasattr(sig, "maker_rank_boost"):
             alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)
@@ -852,13 +856,20 @@ class MakerInventoryStrategy(BaseStrategy):
         return max(floor, scaled)
 
     def _alphai_inventory_build(self, base: str, candidate: MakerCandidate) -> bool:
-        """Same-venue deploy on AlphaI pick — skip round-trip NET gate."""
+        """Same-venue first buy on strong AlphaI pick — skip round-trip NET gate."""
         if not bool(getattr(self._settings, "alphai_bullish_inventory_build_enabled", True)):
             return False
         sig = self._alphai_signals
-        if sig is None or not hasattr(sig, "is_bullish_buy"):
+        if sig is None:
             return False
-        if not sig.is_bullish_buy(base):
+        # Prefer explicit inventory_build (strong); fall back to is_strong_bullish_buy.
+        if hasattr(sig, "inventory_build"):
+            if not sig.inventory_build(base):
+                return False
+        elif hasattr(sig, "is_strong_bullish_buy"):
+            if not sig.is_strong_bullish_buy(base):
+                return False
+        else:
             return False
         buy_v = str(candidate.buy_exchange or "").strip().lower()
         sell_v = str(candidate.sell_exchange or "").strip().lower()
@@ -1452,10 +1463,17 @@ class MakerInventoryStrategy(BaseStrategy):
                 quantity_cap = min(quantity_cap, max_notional / buy_price)
         with self._hp("inventory_lookup"):
             if alphai_same_venue_buy and buy_price > 0:
+                # Clip from min_notional only; size multiplier applied once in bridge.
+                # Round qty up so qty*price never falls a tick under the dust floor.
+                from decimal import ROUND_UP
+
                 clip_eur = self._dust.min_notional_eur
-                if sig is not None and hasattr(sig, "entry_size_multiplier"):
-                    clip_eur = clip_eur * sig.entry_size_multiplier(base_asset)
-                quantity = min(clip_eur / buy_price, quantity_cap)
+                quantity = min(
+                    (clip_eur / buy_price).quantize(
+                        Decimal("0.00000001"), rounding=ROUND_UP
+                    ),
+                    quantity_cap,
+                )
             else:
                 quantity = min(buy_touch, sell_touch, quantity_cap)
             quantity = self._cap_to_inventory(
@@ -1696,7 +1714,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     sell_exchange=candidate.sell_exchange,
                 )
                 return None
-        logger.info(
+        logger.debug(
             "maker quote accepted symbol=%s buy=%s sell=%s qty=%s "
             "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s buy_only=%s inv_build=%s",
             candidate.symbol,
@@ -1738,6 +1756,11 @@ class MakerInventoryStrategy(BaseStrategy):
         if inv_build:
             buy_only = True
         sig = self._alphai_signals
+        bullish_buy = bool(
+            sig is not None
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base)
+        )
         strong_bullish = bool(
             inv_build
             and sig is not None
@@ -1798,7 +1821,7 @@ class MakerInventoryStrategy(BaseStrategy):
                     "sell_only": sell_only,
                     "buy_only": buy_only,
                     "alphai_inventory_build": inv_build,
-                    "alphai_bullish_buy": inv_build,
+                    "alphai_bullish_buy": bullish_buy,
                     "alphai_strong_bullish_buy": strong_bullish,
                     "fair_value_eur": str(fair_value) if fair_value is not None else None,
                     "fair_value_aligned": fair_aligned,

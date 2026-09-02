@@ -157,7 +157,6 @@ class TradingEngine:
             or meta.get("trail_take_profit")
             or meta.get("winner_add")
             or meta.get("alphai_inventory_build")
-            or (meta.get("buy_only") and meta.get("alphai_bullish_buy"))
         )
 
     def _apply_entry_quality(
@@ -964,9 +963,7 @@ class TradingEngine:
         if not self._is_maker_quote(opportunity):
             return False
         meta = opportunity.metadata or {}
-        if meta.get("alphai_inventory_build") or (
-            meta.get("buy_only") and meta.get("alphai_bullish_buy")
-        ):
+        if meta.get("alphai_inventory_build"):
             return False
         if self._maker_slot_taken(opportunity):
             return True

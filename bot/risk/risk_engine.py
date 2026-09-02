@@ -113,9 +113,7 @@ class RiskEngine:
 
         # --- Profitability gate (does not rewrite PnL) ---
         meta = opportunity.metadata or {}
-        alphai_inv = bool(meta.get("alphai_inventory_build")) or (
-            meta.get("buy_only") and meta.get("alphai_bullish_buy")
-        )
+        alphai_inv = bool(meta.get("alphai_inventory_build"))
         if not alphai_inv and not (profitability.trade_allowed or profitability.is_profitable):
             return await self._reject(
                 opportunity,
