@@ -1,4 +1,4 @@
-"""Daily AlphaI crypto buy recommendations."""
+"""AlphaI bullish/bearish ticker recommendations (hourly + daily)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 
 from bot.integrations.alphai.daily_recommendations import (
     build_picks_from_scores,
+    needs_session_refresh,
+    next_update_at_utc,
     recommendation_session_id,
     score_focus_bases,
 )
@@ -32,12 +34,38 @@ def _headline(
     )
 
 
-def test_recommendation_session_id_uses_noon_amsterdam() -> None:
+def test_recommendation_session_id_daily_noon_amsterdam() -> None:
     # 2026-09-02 10:00 Amsterdam → still previous window (Sept 1 noon start)
     ts = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)  # 10:00 CEST
-    assert recommendation_session_id(now=ts) == "2026-09-01"
+    assert recommendation_session_id(now=ts, interval_hours=24) == "2026-09-01"
     ts2 = datetime(2026, 9, 2, 11, 0, tzinfo=UTC)  # 13:00 CEST
-    assert recommendation_session_id(now=ts2) == "2026-09-02"
+    assert recommendation_session_id(now=ts2, interval_hours=24) == "2026-09-02"
+
+
+def test_recommendation_session_id_hourly() -> None:
+    # 2026-09-02 21:30 Amsterdam = 19:30 UTC
+    ts = datetime(2026, 9, 2, 19, 30, tzinfo=UTC)
+    local = ts.astimezone(ZoneInfo("Europe/Amsterdam"))
+    assert recommendation_session_id(now=ts, interval_hours=1) == (
+        f"{local.date().isoformat()}T{local.hour:02d}"
+    )
+    nxt = next_update_at_utc(now=ts, interval_hours=1)
+    assert nxt > ts
+    assert nxt.astimezone(ZoneInfo("Europe/Amsterdam")).minute == 0
+
+
+def test_needs_session_refresh_hourly_on_next_update() -> None:
+    ts = datetime(2026, 9, 2, 19, 30, tzinfo=UTC)
+    cached = {
+        "session_id": "2026-09-02T20",
+        "next_update_at": "2026-09-02T18:00:00+00:00",  # already past
+    }
+    assert needs_session_refresh(cached, now=ts, interval_hours=1) is True
+    fresh = {
+        "session_id": recommendation_session_id(now=ts, interval_hours=1),
+        "next_update_at": next_update_at_utc(now=ts, interval_hours=1).isoformat(),
+    }
+    assert needs_session_refresh(fresh, now=ts, interval_hours=1) is False
 
 
 def test_score_and_rank_bullish_over_bearish() -> None:

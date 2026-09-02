@@ -61,6 +61,8 @@ class AlphaINewsMonitor:
                 "session_id": self._last_daily_picks.get("session_id"),
                 "generated_at": self._last_daily_picks.get("generated_at"),
                 "next_update_at": self._last_daily_picks.get("next_update_at"),
+                "refresh_mode": self._last_daily_picks.get("refresh_mode"),
+                "interval_hours": self._last_daily_picks.get("interval_hours"),
                 "picks": (self._last_daily_picks.get("picks") or [])[:8],
                 "avoid": (self._last_daily_picks.get("avoid") or [])[:4],
             }
@@ -96,6 +98,9 @@ class AlphaINewsMonitor:
             top_n=int(getattr(self._settings, "alphai_daily_recommendations_top_n", 8) or 8),
             update_hour_local=int(
                 getattr(self._settings, "alphai_daily_recommendations_hour", 12) or 12
+            ),
+            interval_hours=int(
+                getattr(self._settings, "alphai_recommendations_interval_hours", 1) or 1
             ),
             macro_caution=bool(self._state.macro_reduce_only),
             force=force,

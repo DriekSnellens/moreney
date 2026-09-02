@@ -71,6 +71,9 @@ def main() -> int:
         update_hour_local=int(
             getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
         ),
+        interval_hours=int(
+            getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
+        ),
         macro_caution=False,
         force=True,
     )

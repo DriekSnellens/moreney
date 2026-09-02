@@ -445,6 +445,8 @@ class Settings(BaseSettings):
     alphai_daily_recommendations_enabled: bool = True
     alphai_daily_recommendations_path: str = "data/alphai/daily_recommendations.json"
     alphai_daily_recommendations_hour: int = Field(default=12, ge=0, le=23)
+    # 1 = hourly bullish/bearish picks; 24 = legacy noon→noon daily session.
+    alphai_recommendations_interval_hours: int = Field(default=1, ge=1, le=24)
     alphai_daily_recommendations_top_n: int = Field(default=8, ge=1, le=20)
     alphai_daily_recommendations_min_relevance: int = Field(default=6, ge=1, le=10)
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

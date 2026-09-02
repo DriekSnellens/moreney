@@ -1,4 +1,4 @@
-"""Daily crypto buy recommendations from AlphaI headlines (12:00 Europe/Amsterdam)."""
+"""AlphaI bullish/bearish ticker recommendations (hourly or daily refresh)."""
 
 from __future__ import annotations
 
@@ -39,22 +39,48 @@ class BasePick:
         }
 
 
-def recommendation_session_id(*, now: datetime | None = None) -> str:
-    """Trading window id: 12:00 NL → next 12:00 NL (date of window start)."""
+def recommendation_session_id(
+    *,
+    now: datetime | None = None,
+    interval_hours: int = 1,
+    update_hour_local: int = 12,
+) -> str:
+    """Bucket id for the current recommendation window.
+
+    * ``interval_hours < 24`` → ``YYYY-MM-DDTHH`` (Europe/Amsterdam hour floor)
+    * ``interval_hours >= 24`` → date of noon→noon session (legacy daily)
+    """
     instant = now or datetime.now(UTC)
     local = instant.astimezone(_OPERATOR_TZ)
-    anchor = local.replace(hour=12, minute=0, second=0, microsecond=0)
-    if local < anchor:
-        anchor -= timedelta(days=1)
-    return anchor.date().isoformat()
+    hours = max(1, int(interval_hours or 1))
+    if hours >= 24:
+        anchor = local.replace(hour=update_hour_local, minute=0, second=0, microsecond=0)
+        if local < anchor:
+            anchor -= timedelta(days=1)
+        return anchor.date().isoformat()
+    bucket = (local.hour // hours) * hours
+    return f"{local.date().isoformat()}T{bucket:02d}"
 
 
-def next_update_at_utc(*, now: datetime | None = None, hour_local: int = 12) -> datetime:
+def next_update_at_utc(
+    *,
+    now: datetime | None = None,
+    interval_hours: int = 1,
+    update_hour_local: int = 12,
+) -> datetime:
     instant = now or datetime.now(UTC)
     local = instant.astimezone(_OPERATOR_TZ)
-    target = local.replace(hour=hour_local, minute=0, second=0, microsecond=0)
-    if local >= target:
-        target += timedelta(days=1)
+    hours = max(1, int(interval_hours or 1))
+    if hours >= 24:
+        target = local.replace(
+            hour=update_hour_local, minute=0, second=0, microsecond=0
+        )
+        if local >= target:
+            target += timedelta(days=1)
+        return target.astimezone(UTC)
+    bucket = (local.hour // hours) * hours
+    target = local.replace(hour=bucket, minute=0, second=0, microsecond=0)
+    target += timedelta(hours=hours)
     return target.astimezone(UTC)
 
 
@@ -79,10 +105,28 @@ def needs_session_refresh(
     cached: dict[str, Any] | None,
     *,
     now: datetime | None = None,
+    interval_hours: int = 1,
+    update_hour_local: int = 12,
 ) -> bool:
     if not cached:
         return True
-    return str(cached.get("session_id") or "") != recommendation_session_id(now=now)
+    instant = now or datetime.now(UTC)
+    nxt_raw = cached.get("next_update_at")
+    if nxt_raw:
+        try:
+            nxt = datetime.fromisoformat(str(nxt_raw).replace("Z", "+00:00"))
+            if nxt.tzinfo is None:
+                nxt = nxt.replace(tzinfo=UTC)
+            if instant >= nxt.astimezone(UTC):
+                return True
+        except (TypeError, ValueError):
+            pass
+    expected = recommendation_session_id(
+        now=instant,
+        interval_hours=interval_hours,
+        update_hour_local=update_hour_local,
+    )
+    return str(cached.get("session_id") or "") != expected
 
 
 def score_focus_bases(
@@ -174,10 +218,11 @@ def generate_daily_recommendations(
     min_relevance: int = 6,
     top_n: int = 8,
     update_hour_local: int = 12,
+    interval_hours: int = 1,
     macro_caution: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Fetch AlphaI news and rank focus bases for the current 12:00–12:00 window."""
+    """Fetch AlphaI news and rank focus bases for the current refresh window."""
     instant = now or datetime.now(UTC)
     universe = focus_bases or set(LIQUID_EUR_BASES)
     headlines: list[AlphaIHeadline] = []
@@ -215,8 +260,17 @@ def generate_daily_recommendations(
         top_n=top_n,
         macro_caution=macro_caution,
     )
-    session = recommendation_session_id(now=instant)
-    nxt = next_update_at_utc(now=instant, hour_local=update_hour_local)
+    hours = max(1, int(interval_hours or 1))
+    session = recommendation_session_id(
+        now=instant,
+        interval_hours=hours,
+        update_hour_local=update_hour_local,
+    )
+    nxt = next_update_at_utc(
+        now=instant,
+        interval_hours=hours,
+        update_hour_local=update_hour_local,
+    )
 
     return {
         "session_id": session,
@@ -224,6 +278,8 @@ def generate_daily_recommendations(
         "next_update_at": nxt.isoformat(),
         "timezone": str(_OPERATOR_TZ),
         "update_hour_local": update_hour_local,
+        "interval_hours": hours,
+        "refresh_mode": "daily" if hours >= 24 else "hourly",
         "macro_caution": macro_caution,
         "headline_count": len(headlines),
         "rate_limit_remaining": client.last_rate_limit.remaining,
@@ -243,27 +299,36 @@ def maybe_refresh_daily(
     min_relevance: int = 6,
     top_n: int = 8,
     update_hour_local: int = 12,
+    interval_hours: int = 1,
     macro_caution: bool = False,
     force: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
-    """Refresh once per session after local noon (or when ``force``)."""
+    """Refresh when the hourly/daily session bucket rolls (or when ``force``)."""
     cached = load_daily_recommendations(path)
     instant = now or datetime.now(UTC)
-    local = instant.astimezone(_OPERATOR_TZ)
-    past_noon = local.hour > update_hour_local or (
-        local.hour == update_hour_local and local.minute >= 0
-    )
+    hours = max(1, int(interval_hours or 1))
 
     if not enabled:
         return cached
     if client is None:
         return cached
     if not force:
-        if not needs_session_refresh(cached, now=instant):
+        if not needs_session_refresh(
+            cached,
+            now=instant,
+            interval_hours=hours,
+            update_hour_local=update_hour_local,
+        ):
             return cached
-        if not past_noon:
-            return cached
+        # Legacy daily mode: wait until past the local update hour on first run.
+        if hours >= 24:
+            local = instant.astimezone(_OPERATOR_TZ)
+            past_anchor = local.hour > update_hour_local or (
+                local.hour == update_hour_local and local.minute >= 0
+            )
+            if not past_anchor and cached:
+                return cached
 
     try:
         report = generate_daily_recommendations(
@@ -272,16 +337,19 @@ def maybe_refresh_daily(
             min_relevance=min_relevance,
             top_n=top_n,
             update_hour_local=update_hour_local,
+            interval_hours=hours,
             macro_caution=macro_caution,
             now=instant,
         )
         save_daily_recommendations(path, report)
         logger.info(
-            "ALPHAI_DAILY_PICKS session=%s top=%s",
+            "ALPHAI_PICKS mode=%s session=%s top=%s next=%s",
+            report.get("refresh_mode"),
             report["session_id"],
             [p["base"] for p in report.get("picks") or []][:5],
+            report.get("next_update_at"),
         )
         return report
     except Exception:
-        logger.exception("ALPHAI_DAILY_PICKS_FAILED")
+        logger.exception("ALPHAI_PICKS_FAILED")
         return cached

@@ -722,11 +722,18 @@ def render_daily_picks_panel(
         if macro
         else ""
     )
+    refresh_mode = report.get("refresh_mode") or "hourly"
+    interval = report.get("interval_hours") or 1
+    window_label = (
+        f"elk uur (Europe/Amsterdam)"
+        if int(interval) < 24
+        else "update 12:00 Europe/Amsterdam"
+    )
     return (
         "<section class='panel daily-picks' id='section-daily-picks'>"
         "<div class='panel-head'><div>"
-        "<h2>Koopaanbevelingen vandaag</h2>"
-        f"<p class='sub'>Venster {esc(session_id)} · update 12:00 Europe/Amsterdam</p></div>"
+        "<h2>Koopaanbevelingen</h2>"
+        f"<p class='sub'>Venster {esc(session_id)} · {esc(window_label)} · mode {esc(refresh_mode)}</p></div>"
         f"<span class='pill {'obs' if macro else 'on'}' id='daily-picks-badge'>"
         f"{len(picks)} picks</span></div>"
         + macro_html
@@ -734,7 +741,7 @@ def render_daily_picks_panel(
         f" · Volgende: <span id='daily-picks-next'>{esc(nxt)}</span></p>"
         + (
             "<ol class='pick-list' id='daily-picks-list'>"
-            + ("".join(pick_rows) if pick_rows else "<li class='hint'>Geen bullish picks — macro/neutral dag</li>")
+            + ("".join(pick_rows) if pick_rows else "<li class='hint'>Geen bullish picks — macro/neutral venster</li>")
             + "</ol>"
         )
         + (
