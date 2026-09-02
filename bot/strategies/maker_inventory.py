@@ -208,6 +208,9 @@ class MakerInventoryStrategy(BaseStrategy):
         self._venue_free_quote: dict[str, Decimal] = {}
         self._portfolio_state: PortfolioState | None = None
         self._external_reduce_only = False
+        self._news_blocked_bases: frozenset[str] = frozenset()
+        self._alphai_signals: Any | None = None
+        self._alphai_macro_caution = False
         self._hmm_regime_id: int | None = None
         self._hmm_uptrend_ask_improve_bps = Decimal(
             str(getattr(settings, "paper_hmm_uptrend_ask_improve_bps", 0) or 0)
@@ -319,6 +322,20 @@ class MakerInventoryStrategy(BaseStrategy):
     def set_reduce_only(self, enabled: bool) -> None:
         """External guardrail (HMM toxic flow / operator): block new BUY quotes."""
         self._external_reduce_only = bool(enabled)
+
+    def set_news_blocked_bases(self, bases: set[str] | frozenset[str]) -> None:
+        """Per-base headline blocks from AlphaI (bearish catalyst)."""
+        self._news_blocked_bases = frozenset(
+            str(b).strip().upper() for b in bases if str(b).strip()
+        )
+
+    def apply_alphai_signals(self, signals: object | None) -> None:
+        """Daily picks + bullish/avoid signals for rank and FV buy premium."""
+        self._alphai_signals = signals
+
+    def set_alphai_macro_caution(self, enabled: bool) -> None:
+        """Macro headline caution — block non-bullish new buys only."""
+        self._alphai_macro_caution = bool(enabled)
 
     def set_cross_venue_paused(self, paused: bool) -> None:
         """Pause OKX↔Bitvavo emits when live fill rate is chronically poor."""
@@ -446,6 +463,17 @@ class MakerInventoryStrategy(BaseStrategy):
                         held: set[str] = set()
                         active_n = _ZERO
                         stuck = self._venue_stuck_bases.get(key, set())
+                        # Micro clips (~€55) sit under the dust notional floor (€60).
+                        # AlphaI no-bijkoop / ring-fallback must still see those bags.
+                        maker_min = Decimal(
+                            str(
+                                getattr(
+                                    self._settings, "paper_maker_min_notional_eur", 55
+                                )
+                                or 55
+                            )
+                        )
+                        held_min = min(min_n, maker_min, Decimal("25"))
                         for sym, mark in marks.items():
                             if not str(sym).upper().endswith(quote):
                                 continue
@@ -457,13 +485,13 @@ class MakerInventoryStrategy(BaseStrategy):
                                 continue
                             px = Decimal(str(mark or 0))
                             notional = qty * px if px > 0 else _ZERO
-                            if px > 0 and notional >= min_n * Decimal("0.5"):
+                            if px > 0 and notional >= held_min:
                                 held.add(base)
                                 # Active book = focus + not stuck/underwater.
                                 if (
                                     base.upper() in self._focus_bases
                                     and base.upper() not in stuck
-                                    and notional > 0
+                                    and notional >= min_n
                                 ):
                                     active_n += notional
                         self._venue_held_bases[key] = held
@@ -528,9 +556,29 @@ class MakerInventoryStrategy(BaseStrategy):
         return skew is not None and skew.sell_only
 
     def _symbol_sell_only(self, symbol: str) -> bool:
-        """True when dump guard or HMM toxic forbids new BUY exposure (not global alt cap)."""
+        """True when dump guard, news, or HMM toxic forbids new BUY exposure."""
         if self._external_reduce_only:
             return True
+        base = infer_base_asset(symbol, self._quote).upper()
+        if base and base in self._news_blocked_bases:
+            return True
+        sig = self._alphai_signals
+        if (
+            sig is not None
+            and base
+            and hasattr(sig, "avoid_bases")
+            and base in sig.avoid_bases
+        ):
+            return True
+        if self._alphai_macro_caution and base:
+            if (
+                sig is None
+                or not hasattr(sig, "is_bullish_buy")
+                or not sig.is_bullish_buy(
+                    base, ring_fallback=self._alphai_ring_fallback_active()
+                )
+            ):
+                return True
         return self._vol_guard.is_dump(symbol)
 
     async def _evaluate_symbol(
@@ -560,26 +608,37 @@ class MakerInventoryStrategy(BaseStrategy):
 
         ranked: list[TradeOpportunity] = []
         fair_value = self._fair_values.get(infer_base_asset(symbol, self._quote))
+        sig = self._alphai_signals
+        ring_fb = self._alphai_ring_fallback_active()
+        alphai_bullish_same_venue = (
+            sig is not None
+            and base
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base, ring_fallback=ring_fb)
+        )
         for buy_snap in venues:
             if not self._venue_allowed(buy_snap.exchange):
                 continue
             buy_venue = str(buy_snap.exchange or "").strip().lower()
-            if (
-                not dump_or_reduce
-                and base in self._venue_held_bases.get(buy_venue, set())
-            ):
+            held_anywhere = any(
+                base in held for held in self._venue_held_bases.values()
+            )
+            # Daily AlphaI policy: if already in portfolio (any venue) → no bijkoop.
+            if not dump_or_reduce and held_anywhere:
                 self._reject(
                     symbol,
                     "held_base_no_new_buy",
                     (
-                        f"{buy_venue} already holds {base}; "
-                        "emit other momentum bases only"
+                        f"portfolio already holds {base}; "
+                        "AlphaI daily policy: no add / bijkoop"
                     ),
                     buy_exchange=buy_snap.exchange,
                     sell_exchange=buy_snap.exchange,
                 )
                 continue
             for sell_snap in venues:
+                if alphai_bullish_same_venue and buy_snap.exchange != sell_snap.exchange:
+                    continue
                 if not self._venue_allowed(sell_snap.exchange):
                     continue
                 same = buy_snap.exchange == sell_snap.exchange
@@ -637,6 +696,20 @@ class MakerInventoryStrategy(BaseStrategy):
                     continue
                 ranked.append(opportunity)
 
+        # AlphaI missing pick: keep best venue only (fee/price aware via rank).
+        if alphai_bullish_same_venue and ranked:
+            buys = [
+                o
+                for o in ranked
+                if str(
+                    o.side.value if hasattr(o.side, "value") else o.side
+                ).lower().startswith("b")
+            ]
+            if len(buys) > 1:
+                best = max(buys, key=self._rank_opportunity)
+                sells = [o for o in ranked if o not in buys]
+                ranked = [best] + sells
+
         return ranked
 
     def _rank_opportunity(self, opportunity: TradeOpportunity) -> Decimal:
@@ -648,30 +721,77 @@ class MakerInventoryStrategy(BaseStrategy):
         base = infer_base_asset(str(opportunity.symbol or "").upper(), self._quote)
         held_penalty = (
             Decimal("-1000")
-            if base in self._venue_held_bases.get(venue, set())
+            if base
+            and any(base in held for held in self._venue_held_bases.values())
             else Decimal("0")
         )
         side_l = str(
             opportunity.side.value if hasattr(opportunity.side, "value") else opportunity.side
         ).lower()
         is_buy = side_l.startswith("b")
+        sig = self._alphai_signals
+        bullish_focus = (
+            is_buy
+            and base
+            and sig is not None
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(
+                base, ring_fallback=self._alphai_ring_fallback_active()
+            )
+        )
+        held_anywhere = bool(
+            base and any(base in held for held in self._venue_held_bases.values())
+        )
         # Prefer focus dual-liquid bases; demote non-focus buys (kills TAO tunnel).
-        if base and base.upper() in self._focus_bases:
+        if base and (base.upper() in self._focus_bases or bullish_focus):
             focus_adj = Decimal("0.04")
         elif is_buy and self._focus_bases:
             focus_adj = Decimal("-0.08")
         else:
             focus_adj = Decimal("0")
-        # Active ring underfilled + free cash → strong boost for unheld focus buys.
+        # Missing AlphaI daily pick → strong emit priority (buy once, no bijkoop).
         ring_boost = Decimal("0")
         if (
             is_buy
             and base
-            and base.upper() in self._focus_bases
-            and base not in self._venue_held_bases.get(venue, set())
+            and bullish_focus
+            and not held_anywhere
+            and self._ring_needs_deploy(venue)
+        ):
+            ring_boost = Decimal("0.25")
+        elif (
+            is_buy
+            and base
+            and (base.upper() in self._focus_bases or bullish_focus)
+            and not held_anywhere
             and self._ring_needs_deploy(venue)
         ):
             ring_boost = Decimal("0.12")
+        if (
+            is_buy
+            and base
+            and sig is not None
+            and hasattr(sig, "is_strong_bullish_buy")
+            and sig.is_strong_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
+            and not held_anywhere
+            and self._ring_needs_deploy(venue)
+        ):
+            ring_boost = max(ring_boost, Decimal("0.35") if bullish_focus else Decimal("0.18"))
+        # Prefer venue with more free EUR for AlphaI first buy (fill reliability).
+        cash_boost = Decimal("0")
+        if bullish_focus and is_buy and not held_anywhere:
+            free = self._venue_free_quote.get(venue, _ZERO)
+            if free >= Decimal("500"):
+                cash_boost = Decimal("0.02")
+            elif free >= Decimal("100"):
+                cash_boost = Decimal("0.01")
+            # Prefer lower buy price (better venue fill) when cash is comparable.
+            buy_px = Decimal(str(opportunity.entry_price or 0))
+            if buy_px > 0:
+                cash_boost += Decimal("0.05") / buy_px
+        alphai_boost = Decimal("0")
+        if sig is not None and base and hasattr(sig, "maker_rank_boost"):
+            alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)
         return (
             net
             + (skew * Decimal("0.01"))
@@ -679,6 +799,8 @@ class MakerInventoryStrategy(BaseStrategy):
             + held_penalty
             + focus_adj
             + ring_boost
+            + alphai_boost
+            + cash_boost
         )
 
     def _okx_cash_rich(self) -> bool:
@@ -748,6 +870,54 @@ class MakerInventoryStrategy(BaseStrategy):
             return floor
         scaled = equity * self._min_profit_equity_bps / _BPS
         return max(floor, scaled)
+
+    def _alphai_held_bases(self) -> set[str]:
+        held: set[str] = set()
+        for bases in self._venue_held_bases.values():
+            held.update(str(b).upper() for b in bases)
+        return held
+
+    def _alphai_ring_fallback_active(self) -> bool:
+        """Ring underfilled and every AlphaI bullish pick already held → open focus path."""
+        if not self._any_ring_needs_deploy():
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        if hasattr(sig, "all_bullish_held"):
+            return bool(sig.all_bullish_held(self._alphai_held_bases()))
+        buys = set(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        if not buys:
+            return True
+        return buys.issubset(self._alphai_held_bases())
+
+    def _alphai_inventory_build(self, base: str, candidate: MakerCandidate) -> bool:
+        """Same-venue first buy on strong AlphaI pick — skip round-trip NET gate."""
+        if not bool(getattr(self._settings, "alphai_bullish_inventory_build_enabled", True)):
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        ring_fb = self._alphai_ring_fallback_active()
+        # Prefer explicit inventory_build (strong); fall back to is_strong_bullish_buy.
+        if hasattr(sig, "inventory_build"):
+            if not sig.inventory_build(base, ring_fallback=ring_fb):
+                return False
+        elif hasattr(sig, "is_strong_bullish_buy"):
+            if not sig.is_strong_bullish_buy(base, ring_fallback=ring_fb):
+                return False
+        else:
+            return False
+        # Ring fallback must stay on the configured focus universe.
+        if ring_fb and not sig.is_strong_bullish_buy(base):
+            if not self._focus_bases or base.upper() not in self._focus_bases:
+                return False
+        buy_v = str(candidate.buy_exchange or "").strip().lower()
+        sell_v = str(candidate.sell_exchange or "").strip().lower()
+        if buy_v != sell_v or not buy_v:
+            return False
+        free = self._venue_free_quote.get(buy_v, _ZERO)
+        return free >= Decimal("50")
 
     def _build_fair_values(
         self, by_symbol: dict[str, list[MarketSnapshot]]
@@ -1112,6 +1282,17 @@ class MakerInventoryStrategy(BaseStrategy):
         assert buy_snap.order_book is not None
         assert sell_snap.order_book is not None
 
+        base_asset = infer_base_asset(buy_snap.symbol, self._quote)
+        sig = self._alphai_signals
+        alphai_same_venue_buy = (
+            not sell_only
+            and buy_snap.exchange == sell_snap.exchange
+            and sig is not None
+            and base_asset
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base_asset, ring_fallback=self._alphai_ring_fallback_active())
+        )
+
         skew = self._venue_skew(str(buy_snap.exchange or ""))
         if skew is not None:
             buy_price, sell_price = self._skew_policy.apply_prices(
@@ -1169,7 +1350,12 @@ class MakerInventoryStrategy(BaseStrategy):
 
         with self._hp("spread_calculation"):
             spread_bps = (sell_price - buy_price) / buy_price * _BPS
-        if buy_snap.exchange == sell_snap.exchange and spread_bps < self._min_spread_bps:
+        base_asset = infer_base_asset(buy_snap.symbol, self._quote)
+        sig = self._alphai_signals
+        min_spread = self._min_spread_bps
+        if alphai_same_venue_buy:
+            min_spread = Decimal("0")
+        if buy_snap.exchange == sell_snap.exchange and spread_bps < min_spread:
             self._reject(
                 buy_snap.symbol,
                 "tight_spread",
@@ -1188,6 +1374,10 @@ class MakerInventoryStrategy(BaseStrategy):
                     or 0
                 )
             )
+            base_asset = infer_base_asset(buy_snap.symbol, self._quote)
+            sig = self._alphai_signals
+            if sig is not None and base_asset and hasattr(sig, "fv_buy_premium_bps"):
+                premium_bps = sig.fv_buy_premium_bps(base_asset, premium_bps)
             max_buy = fair_value * (
                 Decimal("1") + premium_bps / Decimal("10000")
             )
@@ -1199,22 +1389,31 @@ class MakerInventoryStrategy(BaseStrategy):
                     max_buy = max(max_buy, mid)
             except Exception:  # noqa: BLE001
                 pass
-            # Hard toxic ceiling: never buy more than 25 bps above FV.
-            toxic_cap = fair_value * Decimal("1.0025")
-            max_buy = min(max_buy, toxic_cap)
-            if buy_price > max_buy:
-                self._reject(
-                    buy_snap.symbol,
-                    "toxic_buy_vs_fv",
-                    (
-                        f"Buy bid {buy_price} is above max allowed {max_buy} "
-                        f"(fair={fair_value}, premium={premium_bps}bps)"
-                    ),
-                    buy_exchange=buy_snap.exchange,
-                    sell_exchange=sell_snap.exchange,
-                )
-                return None
-            if sell_price < fair_value:
+            # Hard toxic ceiling for cross-venue / generic buys — same-venue
+            # AlphaI deploy follows local book mid, not USDT bridge FV.
+            if not alphai_same_venue_buy:
+                toxic_cap = fair_value * Decimal("1.0025")
+                max_buy = min(max_buy, toxic_cap)
+                if buy_price > max_buy:
+                    self._reject(
+                        buy_snap.symbol,
+                        "toxic_buy_vs_fv",
+                        (
+                            f"Buy bid {buy_price} is above max allowed {max_buy} "
+                            f"(fair={fair_value}, premium={premium_bps}bps)"
+                        ),
+                        buy_exchange=buy_snap.exchange,
+                        sell_exchange=sell_snap.exchange,
+                    )
+                    return None
+            alphai_same_venue_buy = (
+                sig is not None
+                and base_asset
+                and hasattr(sig, "is_bullish_buy")
+                and sig.is_bullish_buy(base_asset, ring_fallback=self._alphai_ring_fallback_active())
+                and buy_snap.exchange == sell_snap.exchange
+            )
+            if sell_price < fair_value and not alphai_same_venue_buy:
                 self._reject(
                     buy_snap.symbol,
                     "toxic_sell_vs_fv",
@@ -1265,7 +1464,7 @@ class MakerInventoryStrategy(BaseStrategy):
                 self._maker_fee(buy_snap.exchange) * _BPS + self._spread_fee_buffer_bps
             )
         # Sell-only recycle: allow thinner edge so capital velocity wins.
-        if not sell_only and cost_bps >= spread_bps:
+        if not sell_only and cost_bps >= spread_bps and not alphai_same_venue_buy:
             self._reject(
                 buy_snap.symbol,
                 "fees_eat_edge",
@@ -1285,7 +1484,7 @@ class MakerInventoryStrategy(BaseStrategy):
         stale_cap = self._max_edge_bps
         if fee_bps > 0:
             stale_cap = max(stale_cap, fee_bps * Decimal("2"))
-        if stale_cap > 0 and spread_bps > stale_cap:
+        if stale_cap > 0 and spread_bps > stale_cap and not alphai_same_venue_buy:
             self._reject(
                 buy_snap.symbol,
                 "stale_edge",
@@ -1304,7 +1503,20 @@ class MakerInventoryStrategy(BaseStrategy):
             if buy_price > 0:
                 quantity_cap = min(quantity_cap, max_notional / buy_price)
         with self._hp("inventory_lookup"):
-            quantity = min(buy_touch, sell_touch, quantity_cap)
+            if alphai_same_venue_buy and buy_price > 0:
+                # Clip from min_notional only; size multiplier applied once in bridge.
+                # Round qty up so qty*price never falls a tick under the dust floor.
+                from decimal import ROUND_UP
+
+                clip_eur = self._dust.min_notional_eur
+                quantity = min(
+                    (clip_eur / buy_price).quantize(
+                        Decimal("0.00000001"), rounding=ROUND_UP
+                    ),
+                    quantity_cap,
+                )
+            else:
+                quantity = min(buy_touch, sell_touch, quantity_cap)
             quantity = self._cap_to_inventory(
                 quantity,
                 buy_snap=buy_snap,
@@ -1375,8 +1587,16 @@ class MakerInventoryStrategy(BaseStrategy):
         same_venue = str(buy_snap.exchange or "").lower() == str(
             sell_snap.exchange or ""
         ).lower()
+        sig = self._alphai_signals
+        alphai_buy = (
+            same_venue
+            and sig is not None
+            and base
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
+        )
         # Same-venue buy-only sizing only when explicitly allowed (not winst-mode).
-        if same_venue and self._allow_buy_only:
+        if same_venue and (self._allow_buy_only or alphai_buy):
             capped = min(quantity, max_buy)
         else:
             capped = min(quantity, max_buy, sell_coins)
@@ -1456,6 +1676,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
         net = estimate.net_profit
         net_return = estimate.net_return
+        inv_build = self._alphai_inventory_build(base, candidate)
         # Hard dust / NET floors (stofjes + thin margins).
         dust_reason = self._dust.reject_reason(
             quantity=candidate.quantity,
@@ -1463,7 +1684,7 @@ class MakerInventoryStrategy(BaseStrategy):
             net_profit_eur=net,
             net_return=net_return,
         )
-        if dust_reason is not None and not sell_only and not buy_only:
+        if dust_reason is not None and not sell_only and not buy_only and not inv_build:
             self._reject(
                 candidate.symbol,
                 "dust_or_net_floor",
@@ -1474,7 +1695,12 @@ class MakerInventoryStrategy(BaseStrategy):
                 net_return=str(net_return),
             )
             return None
-        if not estimate.trade_allowed and not sell_only and not buy_only:
+        if (
+            not estimate.trade_allowed
+            and not sell_only
+            and not buy_only
+            and not inv_build
+        ):
             reasons = estimate.disallow_reasons or ["profitability engine rejected"]
             self._reject(
                 candidate.symbol,
@@ -1489,7 +1715,7 @@ class MakerInventoryStrategy(BaseStrategy):
         min_eur = self._effective_min_profit(
             equity, notional=candidate.quantity * candidate.buy_price
         )
-        if not sell_only and not buy_only and net < min_eur:
+        if not sell_only and not buy_only and not inv_build and net < min_eur:
             self._reject(
                 candidate.symbol,
                 "min_profit_eur",
@@ -1500,7 +1726,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         _, min_return = self._dust.thresholds_for(candidate.quantity * candidate.buy_price)
-        if not sell_only and not buy_only and net_return < min_return:
+        if not sell_only and not buy_only and not inv_build and net_return < min_return:
             self._reject(
                 candidate.symbol,
                 "min_profit_pct",
@@ -1511,7 +1737,7 @@ class MakerInventoryStrategy(BaseStrategy):
             )
             return None
         # Sell-only / buy-only still need a positive notional (no stofjes).
-        if sell_only or buy_only:
+        if sell_only or buy_only or inv_build:
             px = candidate.sell_price if sell_only else candidate.buy_price
             notional = candidate.quantity * px
             if (
@@ -1529,9 +1755,9 @@ class MakerInventoryStrategy(BaseStrategy):
                     sell_exchange=candidate.sell_exchange,
                 )
                 return None
-        logger.info(
+        logger.debug(
             "maker quote accepted symbol=%s buy=%s sell=%s qty=%s "
-            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s buy_only=%s",
+            "net_profit_eur=%s net_return=%s fair_value=%s skew=%s sell_only=%s buy_only=%s inv_build=%s",
             candidate.symbol,
             candidate.buy_exchange,
             candidate.sell_exchange,
@@ -1542,6 +1768,7 @@ class MakerInventoryStrategy(BaseStrategy):
             skew,
             sell_only,
             buy_only,
+            inv_build,
         )
 
         # Thin market view: same fields as model_copy(order_book=None) without
@@ -1567,6 +1794,20 @@ class MakerInventoryStrategy(BaseStrategy):
             if candidate.sell_snapshot is not None
             else 0.0,
         )
+        if inv_build:
+            buy_only = True
+        sig = self._alphai_signals
+        bullish_buy = bool(
+            sig is not None
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
+        )
+        strong_bullish = bool(
+            inv_build
+            and sig is not None
+            and hasattr(sig, "is_strong_bullish_buy")
+            and sig.is_strong_bullish_buy(base, ring_fallback=self._alphai_ring_fallback_active())
+        )
         with self._hp("candidate_object_construction"):
             return TradeOpportunity(
                 strategy_name=self.name,
@@ -1582,13 +1823,18 @@ class MakerInventoryStrategy(BaseStrategy):
                         f"@ ask {candidate.sell_price}"
                         if sell_only
                         else (
-                            f"Buy-only inventory build {candidate.quantity} on "
+                            f"AlphaI inventory build {candidate.quantity} on "
                             f"{candidate.buy_exchange} @ bid {candidate.buy_price}"
-                            if buy_only
+                            if inv_build
                             else (
-                                f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
-                                f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
-                                f"{candidate.sell_price}"
+                                f"Buy-only inventory build {candidate.quantity} on "
+                                f"{candidate.buy_exchange} @ bid {candidate.buy_price}"
+                                if buy_only
+                                else (
+                                    f"Maker buy {candidate.quantity} on {candidate.buy_exchange} @ bid "
+                                    f"{candidate.buy_price}; maker sell on {candidate.sell_exchange} @ ask "
+                                    f"{candidate.sell_price}"
+                                )
                             )
                         )
                     )
@@ -1615,6 +1861,10 @@ class MakerInventoryStrategy(BaseStrategy):
                     "post_only": True,
                     "sell_only": sell_only,
                     "buy_only": buy_only,
+                    "alphai_inventory_build": inv_build,
+                    "alphai_bullish_buy": bullish_buy,
+                    "alphai_strong_bullish_buy": strong_bullish,
+                    "alphai_ring_fallback": self._alphai_ring_fallback_active(),
                     "fair_value_eur": str(fair_value) if fair_value is not None else None,
                     "fair_value_aligned": fair_aligned,
                     "inventory_skew_score": str(skew),
@@ -1693,5 +1943,6 @@ class MakerInventoryStrategy(BaseStrategy):
             },
             "dump_symbols": self.dump_symbols(),
             "reduce_only": self._external_reduce_only,
+            "news_blocked_bases": sorted(self._news_blocked_bases),
             "hmm_regime_id": self._hmm_regime_id,
         }

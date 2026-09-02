@@ -63,6 +63,7 @@ from bot.intelligence.session import IntelligenceSession
 logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
+_ONE = Decimal("1")
 _MIN_LIVE_NOTIONAL = Decimal("5")
 _FILL_POLL_SECONDS = 1.5
 _FILL_POLL_INTERVAL = 0.15
@@ -394,6 +395,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 or 25
             )
         )
+        self._ring_util_b_ignore_underwater = bool(
+            getattr(settings, "live_micro_ring_util_b_ignore_underwater", True)
+        )
+        self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
+        self._alphai_enabled = bool(getattr(settings, "alphai_enabled", False))
+        self._alphai_blocked_bases: frozenset[str] = frozenset()
+        self._alphai_blocked_detail: dict[str, str] = {}
+        self._alphai_macro_active = False
+        self._alphai_signals: object | None = None
+        self._alphai_macro_allow_bullish = True
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -900,6 +911,133 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             bool(new_bases_only) and bool(blocked) and not self._daily_kill_active
         )
 
+    def apply_alphai_regime(
+        self,
+        state: object | None,
+        *,
+        observation_mode: bool = False,
+        allow_bullish_buys: bool = True,
+    ) -> None:
+        """Sync AlphaI headline blocks onto the live bridge (from PaperRunner poll)."""
+        if state is None:
+            self._alphai_blocked_bases = frozenset()
+            self._alphai_blocked_detail = {}
+            self._alphai_macro_active = False
+            return
+        blocked = getattr(state, "blocked_bases", frozenset()) or frozenset()
+        detail = getattr(state, "blocked_detail", {}) or {}
+        macro = bool(getattr(state, "macro_reduce_only", False))
+        self._alphai_blocked_bases = frozenset(str(b).upper() for b in blocked if b)
+        self._alphai_blocked_detail = {
+            str(k): str(v) for k, v in dict(detail).items() if k and v
+        }
+        self._alphai_macro_active = macro and not observation_mode
+        self._alphai_macro_allow_bullish = bool(allow_bullish_buys)
+        if (
+            self._alphai_macro_active
+            and self._regime_block_buys
+            and not allow_bullish_buys
+        ):
+            self.set_buys_blocked(True, new_bases_only=False)
+
+    def apply_alphai_trading_signals(self, signals: object | None) -> None:
+        """Daily picks + bullish/avoid for entry sizing, momentum, exit urgency."""
+        self._alphai_signals = signals
+
+    def _alphai_entry_multiplier(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "entry_size_multiplier"):
+            return _ONE
+        try:
+            return Decimal(str(sig.entry_size_multiplier(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _alphai_momentum_floor_scale(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "momentum_floor_scale"):
+            return _ONE
+        try:
+            return Decimal(str(sig.momentum_floor_scale(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _alphai_exit_urgency(self, base: str) -> bool:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "exit_urgency"):
+            return False
+        return bool(sig.exit_urgency(base))
+
+    def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "be_harvest_gain_scale"):
+            return _ONE
+        try:
+            return Decimal(str(sig.be_harvest_gain_scale(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _alphai_bullish_buy(self, base: str) -> bool:
+        if not bool(getattr(self._settings, "alphai_bullish_buy_enabled", True)):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_bullish_buy"):
+            return False
+        ring_fb = self._alphai_ring_fallback_active()
+        return bool(sig.is_bullish_buy(base, ring_fallback=ring_fb))
+
+    def _alphai_ring_fallback_active(self) -> bool:
+        """Ring underfilled and all bullish picks held → allow focus non-avoid buys."""
+        if self._active_ring_eur <= 0:
+            return False
+        # Any execute venue needs deploy and has free cash.
+        needs = False
+        for venue in self._execute_venues:
+            active = self._active_book_notional(venue)
+            free = self._venue_budget_remaining(venue)
+            if active < self._active_ring_eur and free >= Decimal("50"):
+                needs = True
+                break
+        if not needs:
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        held: set[str] = set()
+        for v in self._execute_venues:
+            held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+        if hasattr(sig, "all_bullish_held"):
+            return bool(sig.all_bullish_held(held))
+        buys = set(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        if not buys:
+            return True
+        return buys.issubset(held)
+
+    def _alphai_strong_bullish_buy(self, base: str) -> bool:
+        if not self._alphai_bullish_buy(base):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_strong_bullish_buy"):
+            return False
+        return bool(
+            sig.is_strong_bullish_buy(
+                base, ring_fallback=self._alphai_ring_fallback_active()
+            )
+        )
+
+    def _effective_exit_resting_max_age_sec(self, base: str) -> float:
+        age = self._exit_resting_max_age_sec
+        if self._alphai_exit_urgency(base):
+            return min(age, 5.0)
+        if self._alphai_macro_active:
+            return min(age, 6.0)
+        return age
+
+    def _alphai_blocks_base(self, base: str) -> bool:
+        if not self._alphai_enabled:
+            return False
+        return str(base or "").upper() in self._alphai_blocked_bases
+
     def set_underwater_base_blocks(
         self,
         blocked_bases: dict[str, set[str] | frozenset[str] | list[str]] | None,
@@ -1331,6 +1469,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "exclude_bases": sorted(self._exclude_bases),
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
+            "alphai": {
+                "enabled": self._alphai_enabled,
+                "macro_active": self._alphai_macro_active,
+                "blocked_bases": sorted(self._alphai_blocked_bases),
+                "blocked_detail": dict(self._alphai_blocked_detail),
+                "skips": int(self.skips.get("alphai_news_block", 0) or 0),
+                "signals": (
+                    self._alphai_signals.to_public_dict()
+                    if self._alphai_signals is not None
+                    and hasattr(self._alphai_signals, "to_public_dict")
+                    else None
+                ),
+            },
             "live_trade_count": len(self.live_trades),
             "live_fill_count": int(self.session_live_fill_count),
             "live_transaction_count": int(self.session_live_transaction_count),
@@ -1372,6 +1523,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "ring_momentum_min_return": str(self._ring_momentum_min),
                 "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
                 "ring_soft_block_underwater_eur": str(self._ring_soft_block_underwater_eur),
+                "ring_util_b_ignore_underwater": self._ring_util_b_ignore_underwater,
+                "cvd_abandoned": self._cvd_abandoned,
+                "alphai_enabled": self._alphai_enabled,
+                "alphai_blocked_bases": sorted(self._alphai_blocked_bases),
+                "alphai_blocked_detail": dict(self._alphai_blocked_detail),
+                "alphai_macro_active": self._alphai_macro_active,
                 "entry_short_momentum_samples": self._entry_short_momentum_samples,
                 "entry_short_momentum_min_return": str(self._entry_short_momentum_min),
                 "entry_min_low_util_rising_n": self._entry_min_low_util_rising_n,
@@ -1676,6 +1833,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if self._sleeve_paused:
                 sleeve_bits.append("PAUSED")
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
+        if self._cvd_abandoned:
+            hints.append("CVD_ABANDONED")
+        if self._alphai_enabled:
+            if self._alphai_macro_active:
+                hints.append("ALPHAI_MACRO_REDUCE_ONLY")
+            if self._alphai_blocked_bases:
+                bases = ",".join(sorted(self._alphai_blocked_bases)[:8])
+                hints.append(f"ALPHAI_NEWS_BLOCK {bases}")
+        if self._ring_util_b_ignore_underwater:
+            hints.append("UTIL_B_IGNORE_UNDERWATER on")
         if self._exit_engine_enabled:
             q = self._exit_quote_counts
             f = self._exit_fill_counts
@@ -3181,7 +3348,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if client is None:
             return 0
         venue_l = venue.strip().lower()
-        held = self._held_alt_bases(venue)
+        held = self._held_alt_bases()  # portfolio-wide: any venue holds → cancel buys
         by_symbol: dict[str, list[dict[str, Any]]] = {}
         cancelled = 0
         still: list[dict[str, Any]] = []
@@ -3492,7 +3659,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     or strategy in {"dust_exit", "time_stop_breakeven"}
                 )
             ):
-                row_max_age = min(max_age, self._exit_resting_max_age_sec)
+                base_asset = infer_base_asset(symbol)
+                row_max_age = min(
+                    max_age, self._effective_exit_resting_max_age_sec(base_asset)
+                )
             if age >= row_max_age:
                 try:
                     await client.cancel_order(oid, symbol)
@@ -4132,11 +4302,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return self._active_book_notional(venue) < self._active_ring_eur
 
     def _ring_soft_momentum_eligible(self, venue: str) -> bool:
-        """Softer momentum only while active book is still thinly deployed."""
+        """Softer momentum only while active book is still thinly deployed.
+
+        Capital Velocity Desk unlock: when ``live_micro_ring_util_b_ignore_underwater``
+        is True, underwater vault bags do **not** disable Util-B. Same-base underwater
+        adds remain blocked via ``UNDERWATER_BASE_BLOCK`` / buy-quality gates.
+        """
         if not self._ring_needs_deploy(venue):
             return False
         if (
-            self._ring_soft_block_underwater_eur > 0
+            not self._ring_util_b_ignore_underwater
+            and self._ring_soft_block_underwater_eur > 0
             and self._underwater_book_notional(venue)
             >= self._ring_soft_block_underwater_eur
         ):
@@ -4145,11 +4321,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return True
         return self._active_book_notional(venue) < self._ring_soft_max_active_eur
 
-    def _momentum_floor_for_buy(self, venue: str) -> Decimal:
+    def _momentum_floor_for_buy(self, venue: str, base: str | None = None) -> Decimal:
         """Softer momentum floor only while active book is thinly deployed."""
-        if self._ring_soft_momentum_eligible(venue):
-            return self._ring_momentum_min
-        return self._momentum_min
+        floor = (
+            self._ring_momentum_min
+            if self._ring_soft_momentum_eligible(venue)
+            else self._momentum_min
+        )
+        if base:
+            floor *= self._alphai_momentum_floor_scale(base)
+        return floor
 
     def _momentum_ok(
         self,
@@ -5261,6 +5442,34 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
+            harvest_gain_floor = self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(
+                asset
+            )
+            exit_urgency = self._alphai_exit_urgency(asset)
+            # AlphaI hold: when momentum goes flat/down after a peak, harvest BE+
+            # sooner (policy: hold with momentum, exit when peak is past).
+            alphai_peak_past = False
+            peak_px = Decimal(str(st.get("peak") or 0) or 0)
+            if (
+                not exit_urgency
+                and be is not None
+                and mark >= be
+                and gain_now > 0
+                and peak_px > 0
+                and mark <= peak_px * Decimal("0.997")  # ≥0.3% off peak
+                and (
+                    self._alphai_bullish_buy(asset)
+                    or asset.upper()
+                    in (
+                        getattr(self._alphai_signals, "daily_pick_bases", frozenset())
+                        or frozenset()
+                    )
+                )
+                and self._momentum_enabled
+                and self._momentum_flat_or_down(symbol)
+            ):
+                alphai_peak_past = True
+                harvest_gain_floor = harvest_gain_floor * Decimal("0.70")
             early_floor = self._early_cut_loss_floor_price(venue, asset)
             if (
                 early_floor is not None
@@ -5406,9 +5615,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not self._be_harvest_already_done(st)
                 and gain_now
                 >= (
-                    min(self._be_harvest_min_gain, Decimal("0.00015"))
+                    min(harvest_gain_floor, Decimal("0.00015"))
                     if st.get("recovery_armed")
-                    else self._be_harvest_min_gain
+                    else harvest_gain_floor
                 )
                 and not self._soft_partial_would_fire(
                     st, gain_now=gain_now, soft_arm_now=soft_arm_now
@@ -5444,11 +5653,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and st.get("soft_armed")
                 and be is not None
                 and mark >= be
-                and gain_now >= self._be_harvest_min_gain
+                and gain_now
+                >= (
+                    harvest_gain_floor * Decimal("0.85")
+                    if (exit_urgency or alphai_peak_past)
+                    else harvest_gain_floor
+                )
                 # B3: let soft partial / runner window run first; then work remainder.
                 and (
                     self._soft_partial <= 0
                     or st.get("soft_partial_done")
+                    or exit_urgency
+                    or alphai_peak_past
                 )
             ):
                 # D: keep working BE+ inventory at touch while soft-armed
@@ -5516,8 +5732,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         )
                 continue
 
-            if self._defer_harvest_while_rising(
-                symbol, mark=mark, be=be, st=st, reason=reason
+            if (
+                not exit_urgency
+                and not alphai_peak_past
+                and self._defer_harvest_while_rising(
+                    symbol, mark=mark, be=be, st=st, reason=reason
+                )
             ):
                 self._bump_skip("trail_hold_rising")
                 continue
@@ -5926,10 +6146,45 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         if (
             side_is_buy
+            and self._alphai_macro_active
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+        ):
+            allow_bullish = bool(
+                getattr(self, "_alphai_macro_allow_bullish", True)
+                and getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+            )
+            if allow_bullish:
+                if not self._alphai_bullish_buy(base):
+                    self._bump_skip("alphai_macro_block")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ALPHAI_MACRO_BLOCK",
+                        message=(
+                            "AlphaI macro caution — only bullish/watch "
+                            f"(or ring-fallback focus) bases allowed (not {base})"
+                        ),
+                    )
+                meta["alphai_macro_bullish_override"] = True
+                if self._alphai_ring_fallback_active():
+                    meta["alphai_ring_fallback"] = True
+            else:
+                self._bump_skip("alphai_macro_block")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_MACRO_BLOCK",
+                    message="AlphaI macro reduce-only blocks all new buys",
+                )
+        if (
+            side_is_buy
             and self._regime_block_buys
             and self._buys_blocked
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not (
+                self._alphai_bullish_buy(base)
+                and bool(getattr(self._settings, "alphai_macro_allow_bullish_buys", True))
+            )
         ):
             new_base = self._is_new_base_buy(venue, base)
             if self._buys_blocked_new_bases_only:
@@ -6051,7 +6306,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("trail_take_profit")
         ):
             self._refresh_buy_quality_circuit_breaker()
-            if self._buy_quality_paused():
+            if self._buy_quality_paused() and not self._alphai_bullish_buy(base):
                 self._bump_skip("buy_quality_pause")
                 return await self._reject_before_live(
                     order_request,
@@ -6082,6 +6337,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
         if (
             side_is_buy
+            and self._alphai_blocks_base(base)
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+        ):
+            self._bump_skip("alphai_news_block")
+            detail = self._alphai_blocked_detail.get(base.upper(), "")
+            return await self._reject_before_live(
+                order_request,
+                reason="ALPHAI_NEWS_BLOCK",
+                message=f"AlphaI bearish headline blocks new {base} buys{': ' + detail if detail else ''}",
+            )
+        sig = self._alphai_signals
+        if (
+            side_is_buy
+            and sig is not None
+            and hasattr(sig, "avoid_bases")
+            and base.upper() in sig.avoid_bases
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+            and self._is_new_base_buy(venue, base)
+        ):
+            self._bump_skip("alphai_avoid_base")
+            return await self._reject_before_live(
+                order_request,
+                reason="ALPHAI_AVOID_BASE",
+                message=f"AlphaI daily avoid list blocks new {base} buys",
+            )
+        if (
+            side_is_buy
             and self._new_buy_focus_only
             and self._focus_bases
             and self._is_new_base_buy(venue, base)
@@ -6094,7 +6378,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             relax = self._low_util_relax_focus and self._ring_soft_momentum_eligible(
                 venue
             )
-            if base.upper() not in self._focus_bases and not relax:
+            bullish_buy = self._alphai_bullish_buy(base)
+            if (
+                base.upper() not in self._focus_bases
+                and not relax
+                and not bullish_buy
+            ):
                 self._bump_skip("focus_base_required")
                 return await self._reject_before_live(
                     order_request,
@@ -6114,9 +6403,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             # New crypto only: require mark momentum + history (no cold/flat slip-ins).
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
-            mom_floor = self._momentum_floor_for_buy(venue)
+            mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
-            if self._corr_sector_blocks_new_buy(base):
+            bullish_buy = self._alphai_bullish_buy(base)
+            strong_bullish = self._alphai_strong_bullish_buy(base)
+            if self._corr_sector_blocks_new_buy(base) and not bullish_buy:
                 self._bump_skip("corr_sector_momentum_block")
                 return await self._reject_before_live(
                     order_request,
@@ -6126,11 +6417,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"bases flat/down ≥ {self._corr_sector_momentum_block})"
                     ),
                 )
-            if not self._entry_momentum_ok(
+            momentum_ok = self._entry_momentum_ok(
                 symbol,
                 min_return=mom_floor,
-                low_util=ring_relaxed,
-            ):
+                low_util=ring_relaxed or bullish_buy,
+            )
+            if not momentum_ok and bullish_buy:
+                momentum_ok = self._entry_momentum_ok(
+                    symbol,
+                    min_return=mom_floor * Decimal("0.5"),
+                    low_util=True,
+                )
+            if not momentum_ok and strong_bullish and not self._momentum_down(symbol):
+                momentum_ok = True
+            if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
                     order_request,
@@ -6139,9 +6439,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"new base {base} needs entry momentum "
                         f"(floor={float(mom_floor * 100):.2f}%"
                         f", short≥{float(self._entry_short_momentum_min * 100):.2f}%"
-                        f"{'; low-util boost' if ring_relaxed else ''})"
+                        f"{'; low-util boost' if ring_relaxed else ''}"
+                        f"{'; alphai bullish' if bullish_buy else ''})"
                     ),
                 )
+            if bullish_buy:
+                meta["alphai_bullish_buy"] = True
+            if strong_bullish:
+                meta["alphai_strong_bullish_buy"] = True
 
         if (
             side_is_buy
@@ -6153,13 +6458,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("winner_add")
         ):
             pre_rec = str(meta.get("entry_quality_recommendation") or "")
+            bullish_buy = self._alphai_bullish_buy(base)
             if pre_rec == EntryQualityRecommendation.REJECT.value:
-                self._bump_skip("entry_quality_reject")
-                return await self._reject_before_live(
-                    order_request,
-                    reason="ENTRY_QUALITY_REJECT",
-                    message=str(meta.get("entry_quality_reject_reason") or "entry_quality"),
-                )
+                hard_reject = str(
+                    meta.get("entry_quality_reject_reason") or ""
+                ) in {"extension_extreme", "continuity_spike"}
+                if not (bullish_buy and not hard_reject):
+                    self._bump_skip("entry_quality_reject")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message=str(
+                            meta.get("entry_quality_reject_reason") or "entry_quality"
+                        ),
+                    )
+                self._bump_skip("entry_quality_reduced")
             if not pre_rec:
                 assessment = self._assess_entry_quality_buy(
                     symbol=symbol,
@@ -6169,28 +6482,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 self._entry_quality_diagnostics.record(assessment)
                 if assessment.recommendation == EntryQualityRecommendation.REJECT:
-                    self._bump_skip("entry_quality_reject")
                     reason_key = assessment.reject_reason or "entry_quality"
-                    if "headroom" in reason_key:
-                        self._bump_skip("headroom_reject")
-                    if "extension" in reason_key:
-                        self._bump_skip("extension_reject")
-                    if "continuity" in reason_key:
-                        self._bump_skip("continuity_reject")
-                    if assessment.headroom_pct is None:
-                        self._bump_skip("headroom_unknown")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="ENTRY_QUALITY_REJECT",
-                        message=(
-                            f"entry quality {assessment.score} "
-                            f"headroom={assessment.headroom_pct} "
-                            f"ext={assessment.extension_pct} "
-                            f"req={assessment.required_move_pct} "
-                            f"({reason_key})"
-                        ),
-                    )
-                if assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
+                    hard_reject = reason_key in {
+                        "extension_extreme",
+                        "continuity_spike",
+                    }
+                    if bullish_buy and not hard_reject:
+                        self._bump_skip("entry_quality_reduced")
+                    else:
+                        self._bump_skip("entry_quality_reject")
+                        if "headroom" in reason_key:
+                            self._bump_skip("headroom_reject")
+                        if "extension" in reason_key:
+                            self._bump_skip("extension_reject")
+                        if "continuity" in reason_key:
+                            self._bump_skip("continuity_reject")
+                        if assessment.headroom_pct is None:
+                            self._bump_skip("headroom_unknown")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="ENTRY_QUALITY_REJECT",
+                            message=(
+                                f"entry quality {assessment.score} "
+                                f"headroom={assessment.headroom_pct} "
+                                f"ext={assessment.extension_pct} "
+                                f"req={assessment.required_move_pct} "
+                                f"({reason_key})"
+                            ),
+                        )
+                elif assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
                     self._bump_skip("entry_quality_reduced")
                 else:
                     self._bump_skip("entry_quality_normal")
@@ -6208,22 +6528,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         if side_is_buy:
             mult_raw = meta.get("entry_quality_multiplier")
+            mult = _ONE
             if mult_raw is not None:
                 try:
                     mult = Decimal(str(mult_raw))
                 except Exception:  # noqa: BLE001
                     mult = _ONE
-                if mult < _ONE:
-                    scaled = apply_size_multiplier(qty, mult)
-                    if scaled <= 0:
-                        self._bump_skip("entry_quality_reject")
-                        return await self._reject_before_live(
-                            order_request,
-                            reason="ENTRY_QUALITY_REJECT",
-                            message="entry quality size multiplier zero",
-                        )
-                    qty = scaled
-                    order_request = order_request.model_copy(update={"quantity": qty})
+            alphai_mult = self._alphai_entry_multiplier(base)
+            if alphai_mult != _ONE:
+                mult = min(mult * alphai_mult, Decimal("1.35"))
+            if mult != _ONE:
+                scaled = apply_size_multiplier(qty, mult)
+                if scaled <= 0:
+                    self._bump_skip("entry_quality_reject")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message="entry quality size multiplier zero",
+                    )
+                qty = scaled
+                order_request = order_request.model_copy(update={"quantity": qty})
         if side_is_buy and post_only:
             px = self._aggressive_buy_price(venue, px, order_book)
             order_request = order_request.model_copy(update={"limit_price": px})
@@ -6249,21 +6573,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"below break-even {be}"
                     ),
                 )
+        held_anywhere = base.upper() in self._held_alt_bases()
         if (
             side_is_buy
             and self._block_buys_when_holding_base
-            and not self._is_new_base_buy(venue, base)
+            and (
+                not self._is_new_base_buy(venue, base)
+                or held_anywhere
+            )
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
-            and not meta.get("winner_add")
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(
                 order_request,
                 reason="HOLDING_BASE_BUY_BLOCK",
                 message=(
-                    f"buy blocked: already holding {venue}:{base}; "
-                    "scan other bases with momentum"
+                    f"buy blocked: already holding {base} in portfolio; "
+                    "AlphaI daily policy: no bijkoop"
                 ),
             )
         if (

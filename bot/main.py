@@ -878,6 +878,169 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     }
 
 
+@app.post("/integrations/alphai/webhook")
+async def alphai_webhook(request: Request) -> dict[str, Any]:
+    """Ingest AlphaI Pro push articles (HMAC verified)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    body = await request.body()
+    secret_raw = getattr(settings, "alphai_webhook_secret", None)
+    secret = (
+        secret_raw.get_secret_value()
+        if secret_raw is not None and hasattr(secret_raw, "get_secret_value")
+        else (str(secret_raw).strip() if secret_raw else "")
+    )
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_WEBHOOK_SECRET not configured")
+    from bot.integrations.alphai.webhook import verify_webhook_signature
+
+    sig = request.headers.get("X-Alphai-Signature") or request.headers.get(
+        "x-alphai-signature"
+    )
+    if not verify_webhook_signature(secret, sig, body):
+        raise HTTPException(status_code=401, detail="invalid webhook signature")
+    try:
+        import json
+
+        payload = json.loads(body.decode("utf-8") if body else "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+    article = payload.get("article") if isinstance(payload, dict) else None
+    if not isinstance(article, dict):
+        raise HTTPException(status_code=400, detail="expected { \"article\": {...} }")
+    from bot.integrations.alphai.pending import push_webhook_article
+
+    push_webhook_article(article)
+    try:
+        runner = get_paper_runner()
+        if runner.running:
+            return {"ok": True, **runner.ingest_alphai_article(article)}
+    except Exception:  # noqa: BLE001
+        logger.exception("alphai webhook immediate ingest failed")
+    return {"ok": True, "queued": True}
+
+
+@app.get("/integrations/alphai/status")
+async def alphai_status(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """AlphaI monitor snapshot (runner + live bridge blocks)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        return {"enabled": False}
+    mgr = get_micro_session_manager()
+    session = mgr.status()
+    bridge_snap = (session.get("bridge") or {}) if isinstance(session.get("bridge"), dict) else {}
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        try:
+            bridge_snap = bridge.snapshot_bridge()
+        except Exception:  # noqa: BLE001
+            logger.exception("alphai status bridge snapshot failed")
+    from bot.integrations.alphai.status import merge_alphai_status
+
+    merged = merge_alphai_status(session, bridge_snap)
+    out: dict[str, Any] = {"enabled": True, **merged}
+    try:
+        runner = get_paper_runner()
+        if getattr(runner, "_alphai_monitor", None) is not None:
+            out["monitor"] = runner._alphai_monitor.snapshot()
+    except Exception:  # noqa: BLE001
+        pass
+    import os
+
+    out["api_key_configured"] = bool(
+        getattr(settings, "alphai_api_key", None) or os.environ.get("ALPHAI_API_KEY")
+    )
+    return out
+
+
+@app.get("/integrations/alphai/recommendations/daily")
+async def alphai_daily_recommendations(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Daily buy picks for the current 12:00–12:00 Europe/Amsterdam window."""
+    settings = get_settings()
+    from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+
+    path = getattr(
+        settings,
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    report = load_daily_recommendations(path)
+    if report:
+        return {"ok": True, **report}
+    return {
+        "ok": False,
+        "message": "No daily recommendations yet — refresh after 12:00 NL or POST /integrations/alphai/recommendations/refresh",
+    }
+
+
+@app.post("/integrations/alphai/recommendations/refresh")
+async def alphai_daily_recommendations_refresh(
+    force: bool = Query(default=True),
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Generate/refresh daily crypto picks (normally automatic at 12:00 NL)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    monitor = None
+    try:
+        runner = get_paper_runner()
+        monitor = getattr(runner, "_alphai_monitor", None)
+    except Exception:  # noqa: BLE001
+        pass
+    if monitor is not None:
+        report = await monitor.maybe_refresh_daily_picks(force=force)
+        if report:
+            return {"ok": True, **report}
+    import os
+
+    from bot.integrations.alphai.client import AlphaIClient
+    from bot.integrations.alphai.daily_recommendations import maybe_refresh_daily
+    from bot.integrations.alphai.regime import _parse_csv_bases as parse_bases
+    from bot.integrations.alphai.symbols import LIQUID_EUR_BASES
+
+    key = getattr(settings, "alphai_api_key", None)
+    secret = key.get_secret_value() if key is not None else os.environ.get("ALPHAI_API_KEY", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_API_KEY not configured")
+    focus = parse_bases(
+        getattr(settings, "live_micro_focus_bases", "") or "",
+        fallback=set(LIQUID_EUR_BASES),
+    )
+    client = AlphaIClient(str(secret))
+    path = getattr(
+        settings,
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    report = maybe_refresh_daily(
+        client,
+        path,
+        focus_bases=focus,
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        ),
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8),
+        update_hour_local=int(
+            getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
+        ),
+        interval_minutes=int(
+            getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15
+        ),
+        interval_hours=int(
+            getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
+        ),
+        force=force,
+    )
+    if not report:
+        raise HTTPException(status_code=500, detail="Failed to generate recommendations")
+    return {"ok": True, **report}
+
+
 @app.get("/api")
 async def api_root() -> JSONResponse:
     settings = get_settings()

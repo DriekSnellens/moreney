@@ -637,6 +637,35 @@ def evaluate(
     net_pct = profitability.net_return
     reasons: list[str] = []
 
+    if meta.get("alphai_inventory_build"):
+        cap = notional if notional > 0 else Decimal("55")
+        return OpportunityAssessment(
+            symbol=opportunity.symbol,
+            venue=venue or None,
+            direction=str(
+                opportunity.side.value
+                if hasattr(opportunity.side, "value")
+                else opportunity.side
+            ).lower(),
+            expected_net_profit_eur=net_eur,
+            expected_net_profit_pct=net_pct,
+            expected_hold_seconds=Decimal("3600"),
+            expected_net_eur_per_hour=net_eur,
+            expected_net_eur_per_capital_hour=net_eur / cap if cap > 0 else _ZERO,
+            momentum_score=Decimal("0.8"),
+            continuity_score=Decimal("0.7"),
+            volatility_regime=VolatilityRegime.NORMAL,
+            extension_pct=None,
+            headroom_pct=Decimal("0.01"),
+            headroom_score=Decimal("0.8"),
+            capital_required_eur=cap,
+            recommended_size_multiplier=_ONE,
+            opportunity_score=Decimal("95"),
+            decision=OpportunityDecision.HIGH_QUALITY,
+            reasons=("alphai_inventory_build",),
+            fill_probability=Decimal("0.35"),
+        )
+
     eq: EntryQualityAssessment | None = None
     if eq_cfg.enabled and cfg.headroom_enabled:
         eq = evaluate_entry_quality(
@@ -1069,7 +1098,8 @@ def allocate_portfolio(
         cap = assessment.capital_required_eur * assessment.recommended_size_multiplier
         base = _base(assessment.symbol)
         ck = _corr_key(base)
-        if corr_counts.get(ck, 0) >= max_per_corr_group:
+        alphai_deploy = "alphai_inventory_build" in (assessment.reasons or ())
+        if not alphai_deploy and corr_counts.get(ck, 0) >= max_per_corr_group:
             skipped.append(assessment)
             continue
         if cap > budget and budget > 0:
