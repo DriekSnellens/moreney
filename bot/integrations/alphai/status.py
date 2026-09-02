@@ -43,12 +43,22 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
         if isinstance(first, dict):
             top_headline = str(first.get("title") or "")[:120] or None
     blocked_list = blocked if isinstance(blocked, list) else list(blocked)
+    detail = box.get("blocked_detail") if isinstance(box.get("blocked_detail"), dict) else {}
+    would_block = {
+        str(k): str(v)
+        for k, v in detail.items()
+        if k and str(k) != "_MACRO_" and not str(k).startswith("_")
+    }
+    headline_rows = [h for h in headlines if isinstance(h, dict)][:8]
     return {
         "alphai_enabled": bool(box.get("enabled")),
         "alphai_observation_mode": bool(box.get("observation_mode")),
         "alphai_macro_active": bool(box.get("macro_active") or box.get("macro_reduce_only")),
         "alphai_blocked_bases": blocked_list,
         "alphai_blocked_count": len(blocked_list),
+        "alphai_would_block_count": len(would_block),
+        "alphai_would_block": would_block,
+        "alphai_macro_headline": detail.get("_MACRO_"),
         "alphai_rate_limit_remaining": box.get("rate_limit_remaining"),
         "alphai_polls": box.get("polls"),
         "alphai_skips": box.get("skips"),
@@ -58,4 +68,5 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
         if box.get("headline_count") is not None
         else (len(headlines) if isinstance(headlines, list) else 0),
         "alphai_top_headline": top_headline,
+        "alphai_headlines": headline_rows,
     }
