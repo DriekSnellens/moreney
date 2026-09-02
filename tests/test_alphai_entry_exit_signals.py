@@ -112,6 +112,8 @@ def test_is_bullish_buy_daily_and_headline() -> None:
     )
     assert signals.is_bullish_buy("SOL")
     assert signals.is_bullish_buy("AVAX")
+    assert signals.is_strong_bullish_buy("SOL")
+    assert signals.is_strong_bullish_buy("AVAX")
     assert not signals.is_bullish_buy("ETH")
     blocked = build_trading_signals(
         AlphaIRegimeState(blocked_bases=frozenset({"SOL"})),

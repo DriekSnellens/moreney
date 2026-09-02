@@ -974,6 +974,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         return bool(sig.is_bullish_buy(base))
 
+    def _alphai_strong_bullish_buy(self, base: str) -> bool:
+        if not self._alphai_bullish_buy(base):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_strong_bullish_buy"):
+            return False
+        return bool(sig.is_strong_bullish_buy(base))
+
     def _effective_exit_resting_max_age_sec(self, base: str) -> float:
         age = self._exit_resting_max_age_sec
         if self._alphai_exit_urgency(base):
@@ -6291,6 +6299,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
             bullish_buy = self._alphai_bullish_buy(base)
+            strong_bullish = self._alphai_strong_bullish_buy(base)
             if self._corr_sector_blocks_new_buy(base) and not bullish_buy:
                 self._bump_skip("corr_sector_momentum_block")
                 return await self._reject_before_live(
@@ -6312,6 +6321,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     min_return=mom_floor * Decimal("0.5"),
                     low_util=True,
                 )
+            if not momentum_ok and strong_bullish and not self._momentum_down(symbol):
+                momentum_ok = True
             if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
@@ -6327,6 +6338,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
             if bullish_buy:
                 meta["alphai_bullish_buy"] = True
+            if strong_bullish:
+                meta["alphai_strong_bullish_buy"] = True
 
         if (
             side_is_buy

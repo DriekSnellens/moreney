@@ -678,8 +678,16 @@ class MakerInventoryStrategy(BaseStrategy):
             opportunity.side.value if hasattr(opportunity.side, "value") else opportunity.side
         ).lower()
         is_buy = side_l.startswith("b")
+        sig = self._alphai_signals
+        bullish_focus = (
+            is_buy
+            and base
+            and sig is not None
+            and hasattr(sig, "is_bullish_buy")
+            and sig.is_bullish_buy(base)
+        )
         # Prefer focus dual-liquid bases; demote non-focus buys (kills TAO tunnel).
-        if base and base.upper() in self._focus_bases:
+        if base and (base.upper() in self._focus_bases or bullish_focus):
             focus_adj = Decimal("0.04")
         elif is_buy and self._focus_bases:
             focus_adj = Decimal("-0.08")
@@ -690,21 +698,20 @@ class MakerInventoryStrategy(BaseStrategy):
         if (
             is_buy
             and base
-            and base.upper() in self._focus_bases
+            and (base.upper() in self._focus_bases or bullish_focus)
             and base not in self._venue_held_bases.get(venue, set())
             and self._ring_needs_deploy(venue)
         ):
             ring_boost = Decimal("0.12")
-        sig = self._alphai_signals
         if (
             is_buy
             and base
             and sig is not None
-            and hasattr(sig, "is_bullish_buy")
-            and sig.is_bullish_buy(base)
+            and hasattr(sig, "is_strong_bullish_buy")
+            and sig.is_strong_bullish_buy(base)
             and self._ring_needs_deploy(venue)
         ):
-            ring_boost = max(ring_boost, Decimal("0.16"))
+            ring_boost = max(ring_boost, Decimal("0.18"))
         alphai_boost = Decimal("0")
         if sig is not None and base and hasattr(sig, "maker_rank_boost"):
             alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)

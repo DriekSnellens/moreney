@@ -50,7 +50,18 @@ class AlphaITradingSignals:
             return False
         if b in self.bullish_bases:
             return True
-        return b in self.daily_pick_bases and self.pick_score(b) >= 4.0
+        if b in self.daily_pick_bases and self.pick_score(b) > 0:
+            return True
+        return False
+
+    def is_strong_bullish_buy(self, base: str) -> bool:
+        """Live headline bullish or top daily pick — proactive buy path."""
+        b = str(base or "").upper()
+        if not self.is_bullish_buy(b):
+            return False
+        if b in self.bullish_bases:
+            return True
+        return self.is_top_pick(b) and self.pick_score(b) >= 4.0
 
     def entry_size_multiplier(self, base: str) -> Decimal:
         """Boost size on daily picks + live bullish; trim on avoid (pre-block)."""
