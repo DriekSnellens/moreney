@@ -19,6 +19,11 @@ from bot.live.dashboard_history import (
     _calendar_pnl_for_payload,
 )
 from bot.integrations.alphai.status import merge_alphai_status
+from bot.live.dashboard_v2 import (
+    dashboard_css,
+    render_alphai_command_center,
+    render_operator_panel,
+)
 
 
 def _esc(value: Any) -> str:
@@ -138,69 +143,8 @@ def _nl_idle(hint: str) -> str:
     return f"{title} — {rest}" if rest else title
 
 
-def _render_alphai_html(alphai: dict[str, Any]) -> str:
-    enabled = bool(alphai.get("enabled"))
-    if not enabled and not alphai.get("headlines"):
-        return ""
-    obs = bool(alphai.get("observation_mode"))
-    macro = bool(alphai.get("macro_active") or alphai.get("macro_reduce_only"))
-    blocked = list(alphai.get("blocked_bases") or [])
-    detail = alphai.get("blocked_detail") if isinstance(alphai.get("blocked_detail"), dict) else {}
-    headlines = alphai.get("headlines") if isinstance(alphai.get("headlines"), list) else []
-    hl_rows = []
-    for h in headlines[:6]:
-        if not isinstance(h, dict):
-            continue
-        title = str(h.get("title") or "")[:120]
-        rel = h.get("relevance")
-        cat = h.get("category") or ""
-        hl_rows.append(
-            f"<li><span class='kind'>{_esc(cat)} r{_esc(rel)}</span> {_esc(title)}</li>"
-        )
-    block_rows = []
-    for base in blocked[:10]:
-        reason = detail.get(base) or detail.get(str(base)) or ""
-        block_rows.append(
-            f"<li><strong>{_esc(base)}</strong>"
-            + (f" — {_esc(reason[:100])}" if reason else "")
-            + "</li>"
-        )
-    mode = "observatie (log only)" if obs else "actief (blokkeert buys)"
-    quota = alphai.get("rate_limit_remaining")
-    polls = alphai.get("polls")
-    last_poll = alphai.get("last_poll_at") or "—"
-    skips = alphai.get("skips")
-    err = alphai.get("last_error")
-    err_html = (
-        f"<p class='hint bad'>Laatste fout: {_esc(str(err)[:160])}</p>" if err else ""
-    )
-    return (
-        "<section class='target-band' aria-label='AlphaI news' id='section-alphai'>"
-        "<h2>AlphaI news guard</h2>"
-        "<div class='band-row'>"
-        f"<span>Status: <strong id='alphai-enabled'>{'aan' if enabled else 'uit'}</strong></span>"
-        f"<span>Modus: <span id='alphai-mode'>{_esc(mode)}</span></span>"
-        f"<span>Macro RO: <span id='alphai-macro'>{'ja' if macro else 'nee'}</span></span>"
-        f"<span>Quota: <span id='alphai-quota'>{_esc(quota if quota is not None else '—')}</span></span>"
-        f"<span>Polls: <span id='alphai-polls'>{_esc(polls if polls is not None else '—')}</span></span>"
-        f"<span>Skips: <span id='alphai-skips'>{_esc(skips if skips is not None else '—')}</span></span>"
-        "</div>"
-        f"<p class='hint'>Laatste poll: <span id='alphai-last-poll'>{_esc(last_poll)}</span></p>"
-        + err_html
-        + (
-            "<p class='hint'>Geblokkeerde bases (bearish headlines):</p>"
-            "<ul class='alerts' id='alphai-blocked'>"
-            + ("".join(block_rows) if block_rows else "<li class='hint'>Geen actieve blocks</li>")
-            + "</ul>"
-        )
-        + (
-            "<p class='hint'>Recente headlines:</p>"
-            "<ul class='alerts' id='alphai-headlines'>"
-            + ("".join(hl_rows) if hl_rows else "<li class='hint'>Nog geen headlines</li>")
-            + "</ul>"
-        )
-        + "</section>"
-    )
+def _css() -> str:
+    return dashboard_css()
 
 
 def _nl_skip(reason: str) -> str:
@@ -229,511 +173,6 @@ def _nl_skip(reason: str) -> str:
     return labels.get(reason, reason)
 
 
-def _css() -> str:
-    return """
-    :root {
-      --bg0: #0c1118;
-      --bg1: #141c27;
-      --text: #f3f6fa;
-      --muted: #93a4bb;
-      --good: #3ddc97;
-      --bad: #ff6b6b;
-      --line: #243247;
-      --display: "Fraunces", "Iowan Old Style", Georgia, serif;
-      --sans: "Sora", "Avenir Next", "Segoe UI", sans-serif;
-      --mono: "IBM Plex Mono", ui-monospace, monospace;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--text);
-      font-family: var(--sans);
-      background:
-        radial-gradient(900px 480px at 15% -10%, rgba(61,220,151,.12), transparent 55%),
-        radial-gradient(700px 420px at 90% 0%, rgba(120,160,220,.10), transparent 50%),
-        linear-gradient(165deg, #0a0e14 0%, var(--bg0) 45%, #101820 100%);
-    }
-    .wrap {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding:
-        max(.85rem, env(safe-area-inset-top))
-        max(.85rem, env(safe-area-inset-right))
-        max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom)))
-        max(.85rem, env(safe-area-inset-left));
-    }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: .75rem;
-      margin-bottom: .85rem;
-    }
-    .brand {
-      margin: 0;
-      font-family: var(--display);
-      font-size: clamp(1.35rem, 5vw, 2.4rem);
-      font-weight: 600;
-      letter-spacing: -0.03em;
-    }
-    .status {
-      font-size: .72rem;
-      color: var(--muted);
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    .status.on { color: var(--good); }
-    .dash-top {
-      display: flex;
-      flex-direction: column;
-      gap: .85rem;
-      margin-bottom: .5rem;
-    }
-    .grid-kpi {
-      display: grid;
-      gap: .65rem;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    @media (min-width: 720px) {
-      .grid-kpi { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; }
-    }
-    @media (min-width: 1024px) {
-      .grid-kpi { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    }
-    .grid {
-      display: grid;
-      gap: 1rem;
-      grid-template-columns: 1fr;
-    }
-    @media (min-width: 900px) {
-      .grid { grid-template-columns: repeat(3, 1fr); }
-    }
-    .card {
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: .85rem .8rem .75rem;
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      backdrop-filter: blur(8px);
-    }
-    .card.hero {
-      border-color: color-mix(in srgb, #f0b429 35%, var(--line));
-      background: color-mix(in srgb, #f0b429 6%, var(--bg1));
-    }
-    .card.hero-a {
-      border-color: color-mix(in srgb, var(--good) 35%, var(--line));
-      background: color-mix(in srgb, var(--good) 6%, var(--bg1));
-    }
-    .pnl-split {
-      display: grid;
-      gap: .65rem;
-      grid-template-columns: 1fr 1fr;
-      margin-bottom: .15rem;
-    }
-    @media (min-width: 720px) {
-      .pnl-split { grid-template-columns: 1fr 1fr 1fr 1fr; gap: .85rem; }
-    }
-    .pnl-split .card.split-harvest {
-      border-color: color-mix(in srgb, var(--good) 40%, var(--line));
-      background: linear-gradient(135deg, color-mix(in srgb, var(--good) 10%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
-    }
-    .pnl-split .card.split-open {
-      border-color: color-mix(in srgb, #f0b429 35%, var(--line));
-      background: linear-gradient(135deg, color-mix(in srgb, #f0b429 8%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
-    }
-    .pnl-split .card.split-portfolio {
-      border-color: color-mix(in srgb, #5b9fd4 40%, var(--line));
-      background: linear-gradient(135deg, color-mix(in srgb, #5b9fd4 10%, var(--bg1)), color-mix(in srgb, var(--bg1) 92%, transparent));
-    }
-    .pnl-split .card.split-winnable {
-      grid-column: 1 / -1;
-    }
-    @media (min-width: 720px) {
-      .pnl-split .card.split-winnable { grid-column: auto; }
-    }
-    .pnl-split .value { font-size: clamp(1.35rem, 4.5vw, 1.85rem); }
-    .pnl-split-intro {
-      margin: 0 0 .35rem;
-      color: var(--muted);
-      font-size: .78rem;
-      line-height: 1.4;
-    }
-    @media (min-width: 720px) {
-      .card { padding: 1.1rem 1rem 1rem; border-radius: 18px; }
-    }
-    .label {
-      margin: 0;
-      color: var(--muted);
-      font-size: .68rem;
-      font-weight: 600;
-      letter-spacing: .05em;
-      text-transform: uppercase;
-      line-height: 1.25;
-    }
-    @media (min-width: 720px) {
-      .label { font-size: .78rem; letter-spacing: .06em; }
-    }
-    .value {
-      margin: .45rem 0 0;
-      font-family: var(--mono);
-      font-size: clamp(1.15rem, 4.8vw, 2rem);
-      font-weight: 600;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      word-break: break-word;
-    }
-    .value.good { color: var(--good); }
-    .value.bad { color: var(--bad); }
-    .hint {
-      margin: .35rem 0 0;
-      color: var(--muted);
-      font-size: .68rem;
-      line-height: 1.3;
-    }
-    @media (min-width: 720px) {
-      .hint { font-size: .76rem; margin-top: .45rem; }
-    }
-    .target-band {
-      margin: 0;
-      padding: .75rem .85rem;
-      border-radius: 14px;
-      border: 1px solid color-mix(in srgb, #f0b429 35%, var(--line));
-      background: color-mix(in srgb, #f0b429 8%, var(--bg1));
-    }
-    .target-band h2 {
-      margin: 0 0 .35rem;
-      font-size: .78rem;
-      font-weight: 600;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      color: #f0b429;
-    }
-    .target-band p {
-      margin: 0;
-      font-size: .78rem;
-      line-height: 1.35;
-      color: var(--muted);
-    }
-    @media (min-width: 720px) {
-      .target-band { padding: 1rem 1.15rem; border-radius: 16px; }
-      .target-band h2 { font-size: .88rem; }
-      .target-band p { font-size: .85rem; line-height: 1.45; }
-    }
-    .target-band .band-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: .75rem 1.5rem;
-      margin-top: .65rem;
-      font-family: var(--mono);
-      font-size: .82rem;
-    }
-    .target-band .band-row span { color: var(--text); }
-    .target-band .in-band { color: var(--good); }
-    .target-band .out-band { color: var(--muted); }
-    .portfolio-strip {
-      margin: 0;
-      padding: .75rem .85rem;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: color-mix(in srgb, var(--bg1) 92%, transparent);
-    }
-    .portfolio-strip h2 {
-      margin: 0 0 .55rem;
-      font-size: .78rem;
-      font-weight: 600;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    .hold-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: .45rem .55rem;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    .hold-item {
-      display: inline-flex;
-      align-items: center;
-      gap: .35rem;
-      padding: .35rem .55rem;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: color-mix(in srgb, var(--bg0) 55%, transparent);
-      font-family: var(--mono);
-      font-size: .78rem;
-    }
-    .hold-item .mom {
-      font-size: .85rem;
-      font-weight: 600;
-      line-height: 1;
-      min-width: .85rem;
-      text-align: center;
-    }
-    .hold-item .mom-up { color: var(--good); }
-    .hold-item .mom-down { color: var(--bad); }
-    .hold-item .mom-flat { color: var(--muted); }
-    .hold-item .coin { font-weight: 600; color: var(--text); }
-    .hold-item .amt { color: var(--muted); font-size: .72rem; }
-    .hold-item .venue {
-      color: var(--muted);
-      font-size: .65rem;
-      text-transform: lowercase;
-    }
-    .portfolio-empty {
-      margin: 0;
-      color: var(--muted);
-      font-size: .78rem;
-    }
-    @media (min-width: 720px) {
-      .portfolio-strip { padding: 1rem 1.15rem; border-radius: 16px; }
-      .hold-item { font-size: .82rem; padding: .4rem .65rem; }
-    }
-    .positions {
-      margin-top: 1.5rem;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 1rem 1.1rem 1.15rem;
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-      overflow-x: auto;
-    }
-    .positions h2 {
-      margin: 0 0 .75rem;
-      font-family: var(--sans);
-      font-size: .82rem;
-      font-weight: 600;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    table.pos {
-      width: 100%;
-      border-collapse: collapse;
-      font-family: var(--mono);
-      font-size: .82rem;
-    }
-    table.pos th, table.pos td {
-      text-align: left;
-      padding: .45rem .35rem;
-      border-bottom: 1px solid var(--line);
-      white-space: nowrap;
-    }
-    table.pos th { color: var(--muted); font-weight: 500; }
-    table.pos td.good { color: var(--good); }
-    table.pos td.bad { color: var(--bad); }
-    .tag {
-      display: inline-block;
-      border-radius: 999px;
-      padding: .1rem .45rem;
-      font-size: .68rem;
-      letter-spacing: .03em;
-      text-transform: uppercase;
-      border: 1px solid var(--line);
-      color: var(--muted);
-    }
-    .tag.long-hold {
-      border-color: #4a5a78;
-      color: #b8c7de;
-    }
-    ul.alerts {
-      margin: .4rem 0 0;
-      padding-left: 1.1rem;
-      font-family: var(--mono);
-      font-size: .8rem;
-      color: var(--fg);
-    }
-    ul.alerts .kind {
-      color: var(--muted);
-      margin-right: .35rem;
-    }
-    footer {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 20;
-      margin: 0;
-      padding: .55rem max(.85rem, env(safe-area-inset-right))
-        max(.55rem, env(safe-area-inset-bottom))
-        max(.85rem, env(safe-area-inset-left));
-      display: flex;
-      flex-wrap: wrap;
-      gap: .5rem;
-      justify-content: center;
-      background: color-mix(in srgb, var(--bg0) 92%, transparent);
-      border-top: 1px solid var(--line);
-      backdrop-filter: blur(10px);
-    }
-    @media (min-width: 900px) {
-      footer {
-        position: static;
-        margin-top: 1.5rem;
-        padding: 0;
-        background: transparent;
-        border-top: 0;
-        backdrop-filter: none;
-        justify-content: flex-start;
-      }
-    }
-    .btn {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: transparent;
-      color: var(--muted);
-      border-radius: 999px;
-      padding: .45rem .9rem;
-      font: inherit;
-      font-size: .82rem;
-      cursor: pointer;
-    }
-    .btn:hover { color: var(--text); border-color: #3a4b63; }
-    .cash-grid {
-      display: grid;
-      gap: .5rem;
-      grid-template-columns: 1fr 1fr;
-      margin: 0;
-    }
-    .cash-grid .mini {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: .55rem .65rem;
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-    }
-    .cash-grid .mini .label { font-size: .65rem; }
-    .cash-grid .mini .value { margin: .25rem 0 0; font-size: 1rem; }
-    .charts {
-      display: flex;
-      flex-direction: column;
-      gap: .65rem;
-      margin: 0;
-    }
-    @media (min-width: 900px) {
-      .charts {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1rem;
-      }
-    }
-    .chart-card {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: .75rem .75rem .65rem;
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-    }
-    @media (min-width: 720px) {
-      .chart-card { padding: 1rem; border-radius: 18px; }
-    }
-    .chart-card h2 {
-      margin: 0 0 .5rem;
-      font-size: .68rem;
-      font-weight: 600;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    .chart-wrap {
-      position: relative;
-      height: clamp(170px, 46vw, 240px);
-      min-height: 170px;
-    }
-    @media (min-width: 900px) {
-      .chart-wrap { height: min(42vw, 220px); min-height: 180px; }
-    }
-    .chart-wrap canvas { width: 100% !important; height: 100% !important; }
-    .dash-secondary {
-      display: flex;
-      flex-direction: column;
-      gap: .85rem;
-      margin-top: .85rem;
-    }
-    .idle-banner {
-      margin: 0;
-      padding: .75rem .85rem;
-      border-radius: 14px;
-      border: 1px solid #5a3a2a;
-      background: linear-gradient(135deg, rgba(255,107,107,.14), rgba(20,28,39,.9));
-    }
-    .idle-banner.ok {
-      border-color: #2a5a40;
-      background: linear-gradient(135deg, rgba(61,220,151,.10), rgba(20,28,39,.9));
-    }
-    .idle-banner.stale {
-      border-color: #7a5a20;
-      background: linear-gradient(135deg, rgba(240,180,41,.16), rgba(20,28,39,.9));
-    }
-    .idle-banner h2 {
-      margin: 0 0 .35rem;
-      font-size: .78rem;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      color: #ffb4a8;
-    }
-    .idle-banner.ok h2 { color: var(--good); }
-    .idle-banner.stale h2 { color: #f0b429; }
-    .idle-banner .primary {
-      margin: 0;
-      font-family: var(--mono);
-      font-size: .82rem;
-      line-height: 1.35;
-    }
-    .idle-banner ul {
-      margin: .45rem 0 0;
-      padding-left: 1.1rem;
-      color: var(--muted);
-      font-family: var(--mono);
-      font-size: .72rem;
-    }
-    .install-banner {
-      display: none;
-      margin: 0;
-      padding: .75rem .85rem;
-      border-radius: 14px;
-      border: 1px dashed color-mix(in srgb, var(--good) 45%, var(--line));
-      background: color-mix(in srgb, var(--good) 8%, transparent);
-      font-size: .82rem;
-    }
-    .install-banner.show { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
-    .install-banner button {
-      border: 0;
-      border-radius: 999px;
-      padding: .45rem .9rem;
-      background: var(--good);
-      color: #062015;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    details.fold {
-      margin: 0;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: color-mix(in srgb, var(--bg1) 88%, transparent);
-    }
-    details.fold > summary {
-      cursor: pointer;
-      padding: .75rem .85rem;
-      font-weight: 600;
-      font-size: .85rem;
-      list-style: none;
-    }
-    details.fold > summary::-webkit-details-marker { display: none; }
-    details.fold .fold-body { padding: 0 .85rem .85rem; }
-    .updated-at {
-      margin: 0;
-      color: var(--muted);
-      font-size: .68rem;
-      font-family: var(--mono);
-      text-align: center;
-    }
-    @media (min-width: 720px) {
-      .updated-at { font-size: .72rem; text-align: left; }
-    }
-    """
 
 
 def _chart_bootstrap(history: list[dict[str, Any]]) -> str:
@@ -1269,7 +708,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         "<h2>Capital Velocity Desk — bewijs eerst NET/uur</h2>"
         "<p>CVD retired (TOB shadow negatief). Doel nu: ring vullen + "
         "<strong>≥ €0.50 NET/uur</strong> over 5–7 dagen. "
-        "€20–50/dag is stretch pas ná expectancy-proof — geen forecast.</p>"
+        "Doel €20–50/dag netto is stretch pas ná expectancy-proof — geen forecast.</p>"
         "<p><strong>Geïnd vandaag</strong> = verkochte coins (FIFO) · "
         "<strong>Open</strong> = totaal unrealized op bags · "
         "<strong>Portfolio-winst</strong> = equity Δ sinds 00:00 NL · "
@@ -1485,7 +924,28 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         f"<span>Adverse rejects: <span id='cap-intel-adverse-reject'>{_esc(eq_diag.get('adverse_selection_reject', '—'))}</span></span>"
         "</div></section>"
     )
-    alphai_html = _render_alphai_html(merge_alphai_status(session, bridge))
+    alphai_state = merge_alphai_status(session, bridge)
+    alphai_html = render_alphai_command_center(alphai_state, esc=_esc)
+    operator_html = render_operator_panel(
+        primary=primary,
+        running=running,
+        idle_ok=idle_ok,
+        why_extra=extra,
+        skip_li=skip_li,
+        net_hr=eq_diag.get("net_eur_per_hour"),
+        cap_util=eq_diag.get("capital_utilization_pct"),
+        esc=_esc,
+    )
+    command_center_html = (
+        f"<section class='command-grid' aria-label='Intelligence command center'>"
+        f"{alphai_html}{operator_html}</section>"
+    )
+    intel_fold_html = (
+        "<details class='fold' open>"
+        "<summary>Execution intelligence &amp; diagnostiek</summary>"
+        f"<div class='fold-body'>{eq_html}{opp_html}{eff_html}{venue_html}"
+        f"{exec_html}{regime_html}{cap_intel_html}</div></details>"
+    )
 
     charts_html = """
     <section class="charts" aria-label="Portfolio charts">
@@ -1594,7 +1054,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <meta name="theme-color" content="#0c1118"/>
+  <meta name="theme-color" content="#070a0f"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="apple-mobile-web-app-title" content="Moreney"/>
@@ -1612,9 +1072,15 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <h1 class="brand">Moreney</h1>
-      <p class="status {"on" if running else ""}">{("live" if running else "gestopt")}</p>
+    <header class="topbar">
+      <div class="brand-block">
+        <h1 class="brand">Moreney</h1>
+        <p class="tagline">Live micro desk · Velocity sleeve · AlphaI news guard · Bitvavo + OKX</p>
+      </div>
+      <div class="status-pills">
+        <span class="pill {"on" if running else "off"}"><span class="dot"></span>{("live" if running else "gestopt")}</span>
+        <span class="pill {"obs" if alphai_state.get("observation_mode") else ("on" if alphai_state.get("enabled") else "off")}" id="alphai-header-pill">AlphaI</span>
+      </div>
     </header>
     <div id="install-banner" class="install-banner" hidden>
       <span>Voeg Moreney toe aan je startscherm voor snelle PnL-updates.</span>
@@ -1623,25 +1089,18 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     {stale_banner}
     {last_fill_html}
     <div class="dash-top">
-      {portfolio_strip_html}
       {kpi_grid_html}
+      {command_center_html}
       {charts_html}
       {target_band_html}
       {obs_html}
-      {eq_html}
-      {opp_html}
-      {eff_html}
-      {venue_html}
-      {exec_html}
-      {regime_html}
-      {alphai_html}
-      {cap_intel_html}
+      {intel_fold_html}
       <p class="updated-at" id="updated-at">—</p>
     </div>
     <div class="dash-secondary">
+      {portfolio_strip_html}
       {fills_html}
       {cash_html}
-      {idle_banner}
       {detail_html}
     </div>
     <footer>
@@ -1907,6 +1366,58 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('alphai-polls', dash(m.alphai_polls));
       set('alphai-skips', dash(m.alphai_skips));
       set('alphai-last-poll', dash(m.alphai_last_poll_at));
+      set('alphai-headline-count', dash(m.alphai_headline_count));
+      set('eff-net-hr-inline', dash(m.net_eur_per_hour));
+      set('eff-cap-util-inline', dash(m.capital_utilization_pct));
+      const pill = document.getElementById('alphai-header-pill');
+      if (pill) {{
+        pill.classList.remove('on', 'off', 'obs');
+        if (m.alphai_observation_mode) pill.classList.add('obs');
+        else if (m.alphai_enabled) pill.classList.add('on');
+        else pill.classList.add('off');
+      }}
+      const modePill = document.getElementById('alphai-mode-pill');
+      if (modePill) {{
+        modePill.classList.remove('on', 'off', 'obs');
+        if (m.alphai_observation_mode) modePill.classList.add('obs');
+        else if (m.alphai_enabled) modePill.classList.add('on');
+        else modePill.classList.add('off');
+      }}
+      const modeShort = document.getElementById('alphai-mode-short');
+      if (modeShort) {{
+        modeShort.textContent = m.alphai_observation_mode ? 'Observatie' : (m.alphai_enabled ? 'Actief' : 'Uit');
+      }}
+      const feed = document.getElementById('alphai-headline-feed');
+      if (feed && Array.isArray(m.alphai_headlines)) {{
+        if (!m.alphai_headlines.length) {{
+          feed.innerHTML = '<p class="hint">Nog geen headlines — poll loopt…</p>';
+        }} else {{
+          feed.innerHTML = m.alphai_headlines.map((h) => {{
+            const sents = h.sentiments || {{}};
+            const vals = Object.values(sents).map((v) => String(v).toLowerCase());
+            let cls = 'sent-neutral';
+            if (vals.some((v) => ['bearish','negative','very_bearish'].includes(v))) cls = 'sent-bear';
+            else if (vals.some((v) => ['bullish','positive','very_bullish'].includes(v))) cls = 'sent-bull';
+            const sentTxt = Object.entries(sents).slice(0,3).map(([k,v]) => k.split('-')[0]+':'+v).join(', ');
+            return '<article class="headline-card"><div class="meta"><span>'+(h.category||'news')+'</span><span>r'+(h.relevance||'—')+'</span><span class="'+cls+'">'+(sentTxt||'neutral')+'</span></div><p class="title">'+(h.title||'')+'</p></article>';
+          }}).join('');
+        }}
+      }}
+      const chips = document.getElementById('alphai-chips');
+      if (chips) {{
+        const obs = !!m.alphai_observation_mode;
+        const blocked = m.alphai_blocked_bases || [];
+        const would = m.alphai_would_block || {{}};
+        const bases = blocked.length ? blocked : Object.keys(would);
+        let html = '';
+        bases.slice(0, 12).forEach((b) => {{
+          const reason = would[b] || '';
+          const cls = obs && !blocked.length ? 'watch' : 'block';
+          html += '<span class="chip '+cls+'" title="'+reason+'">'+b+'</span>';
+        }});
+        if (m.alphai_macro_active) html += '<span class="chip macro">MACRO RO</span>';
+        chips.innerHTML = html || '<span class="chip none">Geen blocks</span>';
+      }}
       const ts = document.getElementById('updated-at');
       if (ts && m.updated_at) {{
         let label = 'Bijgewerkt ' + new Date(m.updated_at).toLocaleString('nl-NL');
