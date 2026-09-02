@@ -366,7 +366,10 @@ class GlobalOpportunityEngine:
             item.score = OpportunityRanker.compute_score(item)
 
             gates: list[str] = []
-            if not profitability.trade_allowed:
+            alphai_inv = bool(meta.get("alphai_inventory_build")) or (
+                meta.get("buy_only") and meta.get("alphai_bullish_buy")
+            )
+            if not profitability.trade_allowed and not alphai_inv:
                 gates.append("profitability")
             min_ev = Decimal(str(getattr(self._settings, "opportunity_min_expected_value", 0)))
             # Early route stop / hard gate rejects even when shrinkage keeps calibrated EV > 0.
@@ -374,7 +377,9 @@ class GlobalOpportunityEngine:
                 gates.append("ev_calibration")
                 calibrated = min(calibrated, _ZERO)
                 item.calibrated_expected_value = calibrated
-            if item.expected_value < min_ev or item.calibrated_expected_value < min_ev:
+            if not alphai_inv and (
+                item.expected_value < min_ev or item.calibrated_expected_value < min_ev
+            ):
                 gates.append("ev")
 
             if "profitability" in gates:

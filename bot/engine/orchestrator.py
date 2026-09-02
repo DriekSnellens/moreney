@@ -156,6 +156,8 @@ class TradingEngine:
             or meta.get("ladder_leg")
             or meta.get("trail_take_profit")
             or meta.get("winner_add")
+            or meta.get("alphai_inventory_build")
+            or (meta.get("buy_only") and meta.get("alphai_bullish_buy"))
         )
 
     def _apply_entry_quality(
