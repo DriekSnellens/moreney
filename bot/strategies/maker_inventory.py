@@ -463,6 +463,17 @@ class MakerInventoryStrategy(BaseStrategy):
                         held: set[str] = set()
                         active_n = _ZERO
                         stuck = self._venue_stuck_bases.get(key, set())
+                        # Micro clips (~€55) sit under the dust notional floor (€60).
+                        # AlphaI no-bijkoop / ring-fallback must still see those bags.
+                        maker_min = Decimal(
+                            str(
+                                getattr(
+                                    self._settings, "paper_maker_min_notional_eur", 55
+                                )
+                                or 55
+                            )
+                        )
+                        held_min = min(min_n, maker_min, Decimal("25"))
                         for sym, mark in marks.items():
                             if not str(sym).upper().endswith(quote):
                                 continue
@@ -474,13 +485,13 @@ class MakerInventoryStrategy(BaseStrategy):
                                 continue
                             px = Decimal(str(mark or 0))
                             notional = qty * px if px > 0 else _ZERO
-                            if px > 0 and notional >= min_n:
+                            if px > 0 and notional >= held_min:
                                 held.add(base)
                                 # Active book = focus + not stuck/underwater.
                                 if (
                                     base.upper() in self._focus_bases
                                     and base.upper() not in stuck
-                                    and notional > 0
+                                    and notional >= min_n
                                 ):
                                     active_n += notional
                         self._venue_held_bases[key] = held
