@@ -204,21 +204,22 @@ def empirical_multiplier(
     bucket: OutcomeBucket | None,
     config: OutcomeLearningConfig | None = None,
 ) -> Decimal:
-    """Return multiplier in [min, max] based on historical outcomes."""
+    """Return multiplier in [min, max] with shrinkage toward neutral."""
     cfg = config or OutcomeLearningConfig()
     if bucket is None or bucket.samples < cfg.min_learning_samples:
         return cfg.neutral_multiplier
 
     strength = _ONE
+    confidence = "FULL"
     if bucket.samples < cfg.full_learning_samples:
         strength = cfg.weak_adjustment_strength
+        confidence = "WEAK"
 
     win_rate = bucket.win_rate or Decimal("0.5")
     avg_net = bucket.avg_net or _ZERO
     mfe = bucket.avg_mfe_capture or Decimal("0.5")
     toxic = bucket.toxic_rate or _ZERO
 
-    # Baseline quality: win rate + normalized net + MFE capture - toxic penalty
     quality = (
         win_rate * Decimal("0.35")
         + (Decimal("0.5") + avg_net) * Decimal("0.25")
@@ -227,9 +228,26 @@ def empirical_multiplier(
     )
     quality = max(Decimal("0.2"), min(Decimal("1.2"), quality))
 
-    # Map quality 0.5 → 1.0, quality 1.0 → max, quality 0.2 → min
     raw = cfg.neutral_multiplier + (quality - Decimal("0.5")) * strength * Decimal("0.4")
-    return max(cfg.empirical_multiplier_min, min(cfg.empirical_multiplier_max, raw))
+
+    # Shrinkage: small samples pull harder toward neutral (e.g. 3/3 wins → not 1.20)
+    shrink = min(_ONE, Decimal(bucket.samples) / Decimal(cfg.full_learning_samples))
+    adjusted = cfg.neutral_multiplier + (raw - cfg.neutral_multiplier) * shrink
+
+    return max(cfg.empirical_multiplier_min, min(cfg.empirical_multiplier_max, adjusted))
+
+
+def learning_confidence(bucket: OutcomeBucket | None, config: OutcomeLearningConfig | None = None) -> tuple[str, int]:
+    """Return (confidence_label, sample_count)."""
+    cfg = config or OutcomeLearningConfig()
+    if bucket is None:
+        return "NEUTRAL", 0
+    n = bucket.samples
+    if n < cfg.min_learning_samples:
+        return "NEUTRAL", n
+    if n < cfg.full_learning_samples:
+        return "WEAK", n
+    return "FULL", n
 
 
 @dataclass(frozen=True, slots=True)

@@ -673,6 +673,9 @@ class Settings(BaseSettings):
     live_micro_toxic_adverse_pct: float = Field(default=0.003, ge=0.0, le=0.05)
     live_micro_moderate_adverse_pct: float = Field(default=0.001, ge=0.0, le=0.05)
     live_micro_intelligence_persist_path: str = "./data/live_micro_intelligence_state.json"
+    live_micro_attribution_persist_path: str = "./data/live_micro_attribution_state.json"
+    live_micro_intelligence_auto_apply: bool = False
+    live_micro_experiment_id: str = "phase2_intelligence"
     live_audit_path: str = "./data/live_audit.jsonl"
     live_hardening_enabled: bool = True
 
