@@ -610,17 +610,25 @@ class MakerInventoryStrategy(BaseStrategy):
                 not dump_or_reduce
                 and base in self._venue_held_bases.get(buy_venue, set())
             ):
-                self._reject(
-                    symbol,
-                    "held_base_no_new_buy",
-                    (
-                        f"{buy_venue} already holds {base}; "
-                        "emit other momentum bases only"
-                    ),
-                    buy_exchange=buy_snap.exchange,
-                    sell_exchange=buy_snap.exchange,
+                allow_alphai_add = (
+                    alphai_bullish_same_venue
+                    and sig is not None
+                    and hasattr(sig, "is_strong_bullish_buy")
+                    and sig.is_strong_bullish_buy(base)
+                    and self._ring_needs_deploy(buy_venue)
                 )
-                continue
+                if not allow_alphai_add:
+                    self._reject(
+                        symbol,
+                        "held_base_no_new_buy",
+                        (
+                            f"{buy_venue} already holds {base}; "
+                            "emit other momentum bases only"
+                        ),
+                        buy_exchange=buy_snap.exchange,
+                        sell_exchange=buy_snap.exchange,
+                    )
+                    continue
             for sell_snap in venues:
                 if alphai_bullish_same_venue and buy_snap.exchange != sell_snap.exchange:
                     continue
@@ -1300,21 +1308,23 @@ class MakerInventoryStrategy(BaseStrategy):
                     max_buy = max(max_buy, mid)
             except Exception:  # noqa: BLE001
                 pass
-            # Hard toxic ceiling: never buy more than 25 bps above FV.
-            toxic_cap = fair_value * Decimal("1.0025")
-            max_buy = min(max_buy, toxic_cap)
-            if buy_price > max_buy:
-                self._reject(
-                    buy_snap.symbol,
-                    "toxic_buy_vs_fv",
-                    (
-                        f"Buy bid {buy_price} is above max allowed {max_buy} "
-                        f"(fair={fair_value}, premium={premium_bps}bps)"
-                    ),
-                    buy_exchange=buy_snap.exchange,
-                    sell_exchange=sell_snap.exchange,
-                )
-                return None
+            # Hard toxic ceiling for cross-venue / generic buys — same-venue
+            # AlphaI deploy follows local book mid, not USDT bridge FV.
+            if not alphai_same_venue_buy:
+                toxic_cap = fair_value * Decimal("1.0025")
+                max_buy = min(max_buy, toxic_cap)
+                if buy_price > max_buy:
+                    self._reject(
+                        buy_snap.symbol,
+                        "toxic_buy_vs_fv",
+                        (
+                            f"Buy bid {buy_price} is above max allowed {max_buy} "
+                            f"(fair={fair_value}, premium={premium_bps}bps)"
+                        ),
+                        buy_exchange=buy_snap.exchange,
+                        sell_exchange=sell_snap.exchange,
+                    )
+                    return None
             alphai_same_venue_buy = (
                 sig is not None
                 and base_asset
@@ -1412,7 +1422,13 @@ class MakerInventoryStrategy(BaseStrategy):
             if buy_price > 0:
                 quantity_cap = min(quantity_cap, max_notional / buy_price)
         with self._hp("inventory_lookup"):
-            quantity = min(buy_touch, sell_touch, quantity_cap)
+            if alphai_same_venue_buy and buy_price > 0:
+                clip_eur = self._dust.min_notional_eur
+                if sig is not None and hasattr(sig, "entry_size_multiplier"):
+                    clip_eur = clip_eur * sig.entry_size_multiplier(base_asset)
+                quantity = min(clip_eur / buy_price, quantity_cap)
+            else:
+                quantity = min(buy_touch, sell_touch, quantity_cap)
             quantity = self._cap_to_inventory(
                 quantity,
                 buy_snap=buy_snap,

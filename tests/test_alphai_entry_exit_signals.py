@@ -169,3 +169,133 @@ def test_maker_avoid_base_sell_only() -> None:
     maker.apply_alphai_signals(signals)
     assert maker._symbol_sell_only("XRPEUR") is True
     assert maker._symbol_sell_only("SOLEUR") is False
+
+
+@pytest.mark.asyncio
+async def test_alphai_same_venue_sizes_from_clip_not_touch() -> None:
+    """AlphaI deploy uses min_notional clip, not thin top-of-book touch."""
+    from decimal import Decimal
+
+    from bot.core.exchange_types import OrderBook, OrderBookLevel
+    from bot.core.models import MarketSnapshot
+
+    settings = Settings(
+        execution_mode="paper",
+        paper_maker_enabled=True,
+        paper_maker_min_profit_eur=0.02,
+        paper_maker_min_net_return=0.0001,
+        paper_maker_min_notional_eur=55.0,
+        paper_maker_allow_buy_only=True,
+        paper_maker_same_venue=True,
+        paper_maker_venues="bitvavo",
+        alphai_bullish_inventory_build_enabled=True,
+    )
+    maker = MakerInventoryStrategy(settings)
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"AVAX"}), macro_reduce_only=True),
+        {"picks": [{"base": "AVAX", "score": 32.5}], "avoid": []},
+    )
+    maker.apply_alphai_signals(signals)
+    maker.set_alphai_macro_caution(True)
+
+    def snap(sym: str, bid: float, ask: float, qty: float = 0.5) -> MarketSnapshot:
+        return MarketSnapshot(
+            symbol=sym,
+            bid=Decimal(str(bid)),
+            ask=Decimal(str(ask)),
+            last=Decimal(str((bid + ask) / 2)),
+            order_book=OrderBook(
+                symbol=sym,
+                bids=[OrderBookLevel(price=Decimal(str(bid)), amount=Decimal(str(qty)))],
+                asks=[OrderBookLevel(price=Decimal(str(ask)), amount=Decimal(str(qty)))],
+            ),
+            exchange="bitvavo",
+            latency_ms=50,
+        )
+
+    avax_bid, avax_ask, eurusdt = 24.50, 24.55, 1.08
+    avaxusdt = avax_bid * eurusdt
+    snaps = [
+        snap("AVAXEUR", avax_bid, avax_ask),
+        snap("AVAXUSDT", avaxusdt, avaxusdt + 0.05),
+        snap("EURUSDT", eurusdt, eurusdt + 0.001),
+    ]
+
+    class Ledger:
+        def venues(self) -> list[str]:
+            return ["bitvavo"]
+
+        def available(self, venue: str, asset: str) -> Decimal:
+            return Decimal("2000") if asset == "EUR" else Decimal("0")
+
+    opps = await maker.evaluate_markets(
+        snaps, equity=Decimal("4000"), inventory=Ledger()
+    )
+    assert len(opps) == 1
+    meta = opps[0].metadata or {}
+    assert meta.get("buy_only") is True
+    assert opps[0].quantity * opps[0].entry_price >= Decimal("55")
+
+
+@pytest.mark.asyncio
+async def test_alphai_same_venue_skips_toxic_fv_premium() -> None:
+    """Local EUR premium vs USDT fair must not block AlphaI same-venue deploy."""
+    from decimal import Decimal
+
+    from bot.core.exchange_types import OrderBook, OrderBookLevel
+    from bot.core.models import MarketSnapshot
+
+    settings = Settings(
+        execution_mode="paper",
+        paper_maker_enabled=True,
+        paper_maker_min_profit_eur=0.02,
+        paper_maker_min_net_return=0.0001,
+        paper_maker_min_notional_eur=55.0,
+        paper_maker_allow_buy_only=True,
+        paper_maker_same_venue=True,
+        paper_maker_venues="bitvavo",
+        alphai_bullish_inventory_build_enabled=True,
+    )
+    maker = MakerInventoryStrategy(settings)
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"AVAX"}), macro_reduce_only=True),
+        {"picks": [{"base": "AVAX", "score": 32.5}], "avoid": []},
+    )
+    maker.apply_alphai_signals(signals)
+    maker.set_alphai_macro_caution(True)
+
+    def snap(sym: str, bid: float, ask: float, qty: float = 100.0) -> MarketSnapshot:
+        return MarketSnapshot(
+            symbol=sym,
+            bid=Decimal(str(bid)),
+            ask=Decimal(str(ask)),
+            last=Decimal(str((bid + ask) / 2)),
+            order_book=OrderBook(
+                symbol=sym,
+                bids=[OrderBookLevel(price=Decimal(str(bid)), amount=Decimal(str(qty)))],
+                asks=[OrderBookLevel(price=Decimal(str(ask)), amount=Decimal(str(qty)))],
+            ),
+            exchange="bitvavo",
+            latency_ms=50,
+        )
+
+    avax_bid, avax_ask, eurusdt = 24.75, 24.80, 1.08
+    avaxusdt = 24.50 * eurusdt  # USDT fair below local EUR book
+    snaps = [
+        snap("AVAXEUR", avax_bid, avax_ask),
+        snap("AVAXUSDT", avaxusdt, avaxusdt + 0.05),
+        snap("EURUSDT", eurusdt, eurusdt + 0.001),
+    ]
+
+    class Ledger:
+        def venues(self) -> list[str]:
+            return ["bitvavo"]
+
+        def available(self, venue: str, asset: str) -> Decimal:
+            return Decimal("2000") if asset == "EUR" else Decimal("0")
+
+    opps = await maker.evaluate_markets(
+        snaps, equity=Decimal("4000"), inventory=Ledger()
+    )
+    assert len(opps) == 1
+    assert "toxic_buy_vs_fv" not in maker.scan_stats().get("reject_counts", {})
