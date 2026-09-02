@@ -279,8 +279,8 @@ def _headline_macro_market_relevant(h: AlphaIHeadline) -> bool:
             return True
     if h.category == "macro_economy":
         return True
-    # Regulation/geopolitics without market cues: only if explicitly bearish.
-    return any(_is_bearish(s) for s in h.sentiments.values())
+    # Regulation/geopolitics without market/crypto cues is not desk macro.
+    return False
 
 
 def _headline_macro_bearish(h: AlphaIHeadline) -> bool:

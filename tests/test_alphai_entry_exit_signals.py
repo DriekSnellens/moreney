@@ -204,6 +204,40 @@ def test_starbucks_regulation_does_not_trigger_macro() -> None:
     assert state.macro_reduce_only is False
 
 
+def test_openai_copyright_does_not_trigger_macro() -> None:
+    row = {
+        "original": {
+            "uid": "oai1",
+            "title": "Trump Administration Sides With OpenAI in Publishers’ Copyright Lawsuits",
+            "time_published": "2026-09-02T20:00:00Z",
+        },
+        "enrichment": {
+            "relevance_score": 8,
+            "category": "regulation",
+            "tickers": ["MSFT"],
+            "ai_trading_insights": {
+                "ticker_analysis": [
+                    {
+                        "ticker": "MSFT",
+                        "impact_analysis": {"sentiment": "negative"},
+                    }
+                ]
+            },
+        },
+    }
+    headline = parse_news_row(row)
+    assert headline is not None
+    state = build_regime_from_headlines(
+        [headline],
+        min_relevance=7,
+        block_bearish_bases=True,
+        macro_reduce_only=True,
+        focus_bases={"SOL", "ETH"},
+        observation_mode=False,
+    )
+    assert state.macro_reduce_only is False
+
+
 def test_fed_regulation_still_triggers_macro() -> None:
     row = {
         "original": {
