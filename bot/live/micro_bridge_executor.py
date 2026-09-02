@@ -394,6 +394,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 or 25
             )
         )
+        self._ring_util_b_ignore_underwater = bool(
+            getattr(settings, "live_micro_ring_util_b_ignore_underwater", True)
+        )
+        self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -1372,6 +1376,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "ring_momentum_min_return": str(self._ring_momentum_min),
                 "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
                 "ring_soft_block_underwater_eur": str(self._ring_soft_block_underwater_eur),
+                "ring_util_b_ignore_underwater": self._ring_util_b_ignore_underwater,
+                "cvd_abandoned": self._cvd_abandoned,
                 "entry_short_momentum_samples": self._entry_short_momentum_samples,
                 "entry_short_momentum_min_return": str(self._entry_short_momentum_min),
                 "entry_min_low_util_rising_n": self._entry_min_low_util_rising_n,
@@ -1676,6 +1682,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if self._sleeve_paused:
                 sleeve_bits.append("PAUSED")
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
+        if self._cvd_abandoned:
+            hints.append("CVD_ABANDONED")
+        if self._ring_util_b_ignore_underwater:
+            hints.append("UTIL_B_IGNORE_UNDERWATER on")
         if self._exit_engine_enabled:
             q = self._exit_quote_counts
             f = self._exit_fill_counts
@@ -4132,11 +4142,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return self._active_book_notional(venue) < self._active_ring_eur
 
     def _ring_soft_momentum_eligible(self, venue: str) -> bool:
-        """Softer momentum only while active book is still thinly deployed."""
+        """Softer momentum only while active book is still thinly deployed.
+
+        Capital Velocity Desk unlock: when ``live_micro_ring_util_b_ignore_underwater``
+        is True, underwater vault bags do **not** disable Util-B. Same-base underwater
+        adds remain blocked via ``UNDERWATER_BASE_BLOCK`` / buy-quality gates.
+        """
         if not self._ring_needs_deploy(venue):
             return False
         if (
-            self._ring_soft_block_underwater_eur > 0
+            not self._ring_util_b_ignore_underwater
+            and self._ring_soft_block_underwater_eur > 0
             and self._underwater_book_notional(venue)
             >= self._ring_soft_block_underwater_eur
         ):
