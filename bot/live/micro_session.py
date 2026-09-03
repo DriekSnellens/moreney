@@ -183,13 +183,13 @@ def _session_settings(
             "paper_cycle_interval_ms": 800.0,
             # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
             "paper_maker_min_notional_eur": 55.0,
-            "live_micro_first_clip_eur": 55.0,
+            "live_micro_first_clip_eur": 75.0,
             "live_micro_add_clip_eur": 100.0,
             # Util-B light: slightly easier NET so empty-ring emits are not starved.
             # C12: align maker + profitability gate (was 5bps gate killing 4bps maker).
             "paper_maker_min_profit_eur": 0.03,
             "paper_maker_min_net_return": 0.0004,
-            "paper_maker_small_clip_max_eur": 90.0,
+            "paper_maker_small_clip_max_eur": 100.0,
             "paper_maker_small_clip_min_profit_eur": 0.03,
             "paper_maker_small_clip_min_net_return": 0.0003,
             "paper_maker_min_spread_bps": 5.0,
