@@ -91,12 +91,14 @@ def test_priority_buy_bases_and_slot_penalty() -> None:
             "avoid": [],
         },
     )
-    assert signals.priority_buy_bases() == frozenset({"XRP", "LINK", "UNI"})
-    assert signals.unheld_priority_buys({"LINK"}) == frozenset({"XRP", "UNI"})
+    assert signals.priority_buy_bases() == frozenset({"XRP", "LINK", "UNI", "ETH"})
+    assert signals.unheld_priority_buys({"LINK"}) == frozenset({"XRP", "UNI", "ETH"})
     assert signals.is_slot_priority_buy("XRP")
     assert signals.non_pick_slot_penalty("XRP", {"LINK"}) == Decimal("0")
     assert signals.non_pick_slot_penalty("SOL", {"LINK"}) == Decimal("-0.60")
-    assert signals.non_pick_slot_penalty("SOL", {"XRP", "LINK", "UNI"}) == Decimal("0")
+    assert signals.non_pick_slot_penalty("SOL", {"XRP", "LINK", "UNI", "ETH"}) == Decimal(
+        "0"
+    )
 
 
 def test_alphai_stance_drives_buy_and_sell() -> None:
@@ -121,7 +123,9 @@ def test_alphai_stance_drives_buy_and_sell() -> None:
     assert not signals.allows_new_buy("DOT")
     assert signals.recycle_sell_only("DOT")
     assert signals.exit_urgency("SOL")
+    assert signals.exit_urgency("DOT")  # neutral recycle → faster BE harvest
     assert not signals.exit_urgency("XRP")
+    assert signals.be_harvest_gain_scale("DOT") < signals.be_harvest_gain_scale("XRP")
     assert signals.maker_rank_boost("XRP", is_buy=True) > signals.maker_rank_boost(
         "DOT", is_buy=True
     )

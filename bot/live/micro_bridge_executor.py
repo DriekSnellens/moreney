@@ -4685,6 +4685,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if be is None or mark < be:
             return False
+        # Neutral/bearish AlphaI bags: do not hold for rising tape — recycle at BE+.
+        base = infer_base_asset(symbol, self._quote)
+        if base and (
+            self._alphai_exit_urgency(base)
+            or (
+                bool(getattr(self._settings, "alphai_require_bullish_new_buys", False))
+                and not self._alphai_bullish_buy(base)
+            )
+        ):
+            return False
         if self._momentum_still_rising(symbol):
             return True
         if self._adaptive_trail_enabled and self._mfe_analytics_enabled:

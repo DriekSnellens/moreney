@@ -27,7 +27,7 @@ class AlphaITradingSignals:
     def pick_score(self, base: str) -> float:
         return float(self.daily_pick_scores.get(str(base or "").upper(), 0.0))
 
-    def is_top_pick(self, base: str, *, top_n: int = 3) -> bool:
+    def is_top_pick(self, base: str, *, top_n: int = 5) -> bool:
         b = str(base or "").upper()
         if b not in self.daily_pick_bases:
             return False
@@ -39,7 +39,7 @@ class AlphaITradingSignals:
         tops = {k for k, _ in ranked[:top_n]}
         return b in tops
 
-    def priority_buy_bases(self, *, top_n: int = 3) -> frozenset[str]:
+    def priority_buy_bases(self, *, top_n: int = 5) -> frozenset[str]:
         """Daily picks with positive score — preferred deploy targets."""
         ranked = sorted(
             (
@@ -59,14 +59,14 @@ class AlphaITradingSignals:
         self,
         held_bases: set[str] | frozenset[str],
         *,
-        top_n: int = 3,
+        top_n: int = 5,
     ) -> frozenset[str]:
         held = {str(b).upper() for b in held_bases}
         return frozenset(
             b for b in self.priority_buy_bases(top_n=top_n) if b not in held
         )
 
-    def is_slot_priority_buy(self, base: str, *, top_n: int = 3) -> bool:
+    def is_slot_priority_buy(self, base: str, *, top_n: int = 5) -> bool:
         return str(base or "").upper() in self.priority_buy_bases(top_n=top_n)
 
     def non_pick_slot_penalty(
@@ -74,7 +74,7 @@ class AlphaITradingSignals:
         base: str,
         held_bases: set[str] | frozenset[str],
         *,
-        top_n: int = 3,
+        top_n: int = 5,
     ) -> Decimal:
         """Demote non-priority buys while unheld AlphaI picks still need a slot."""
         if not self.unheld_priority_buys(held_bases, top_n=top_n):
@@ -90,16 +90,34 @@ class AlphaITradingSignals:
         return b in self.avoid_bases or b in self.blocked_bases
 
     def allows_new_buy(self, base: str) -> bool:
-        """True only for AlphaI-bullish names (no ring-fallback / focus fill-in)."""
-        return self.is_bullish_buy(base, ring_fallback=False)
+        """True for AlphaI bullish headlines or top positive daily picks."""
+        b = str(base or "").upper()
+        if self.is_bearish(b):
+            return False
+        if b in self.bullish_bases:
+            return True
+        # Top-N positive daily picks (default 5) — expands thin buy universe.
+        if self.is_slot_priority_buy(b, top_n=5):
+            return True
+        return self.is_bullish_buy(b, ring_fallback=False)
 
     def recycle_sell_only(self, base: str) -> bool:
         """Non-bullish bags should recycle at BE+ — no new buy exposure."""
         return not self.allows_new_buy(base)
 
     def exit_urgency(self, base: str) -> bool:
-        """Bearish bags harvest faster (still never below fee-aware BE)."""
-        return self.is_bearish(base)
+        """Bearish or non-bullish bags harvest faster (still never below fee-aware BE)."""
+        return self.is_bearish(base) or self.recycle_sell_only(base)
+
+    def be_harvest_gain_scale(self, base: str) -> Decimal:
+        """Lower min-gain threshold → earlier partial harvest on avoid/neutral."""
+        if self.is_bearish(base):
+            return Decimal("0.50")
+        if self.recycle_sell_only(base):
+            return Decimal("0.65")
+        if self.macro_active:
+            return Decimal("0.80")
+        return _ONE
 
     def all_bullish_held(self, held_bases: set[str] | frozenset[str]) -> bool:
         """True when every bullish buy pick is already in portfolio (or none exist)."""
@@ -205,14 +223,6 @@ class AlphaITradingSignals:
         if self.is_top_pick(b) or b in self.bullish_bases:
             return Decimal("0.65")
         if self.pick_score(b) >= 4.0:
-            return Decimal("0.80")
-        return _ONE
-
-    def be_harvest_gain_scale(self, base: str) -> Decimal:
-        """Lower min-gain threshold → earlier partial harvest on avoid/blocked."""
-        if self.exit_urgency(base):
-            return Decimal("0.55")
-        if self.macro_active:
             return Decimal("0.80")
         return _ONE
 

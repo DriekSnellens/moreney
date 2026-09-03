@@ -223,8 +223,8 @@ def build_picks_from_scores(
     avoid: list[BasePick] = []
     watch: list[BasePick] = []
     for pick in ranked:
-        # Softer hourly buy bar: net score ≥ 3 with bullish headlines dominating.
-        if pick.score >= 3.0 and len(pick.bullish_headlines) >= len(pick.bearish_headlines):
+        # Softer buy bar: net score ≥ 1 with bullish headlines dominating.
+        if pick.score >= 1.0 and len(pick.bullish_headlines) >= len(pick.bearish_headlines):
             buy.append(pick)
         elif pick.score <= -4.0 or (
             pick.bearish_headlines
@@ -234,6 +234,18 @@ def build_picks_from_scores(
             avoid.append(pick)
         elif pick.score > 0 or pick.bullish_headlines:
             watch.append(pick)
+
+    # Fill thin buy universe up to top_n from positive watch (still not bearish).
+    if len(buy) < top_n:
+        for pick in watch:
+            if len(buy) >= top_n:
+                break
+            if pick.score <= 0:
+                continue
+            if len(pick.bearish_headlines) > len(pick.bullish_headlines):
+                continue
+            buy.append(pick)
+        watch = [p for p in watch if p not in buy]
 
     if macro_caution and buy:
         buy = buy[: max(3, top_n // 2)]

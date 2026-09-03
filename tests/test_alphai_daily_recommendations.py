@@ -122,3 +122,31 @@ def test_mixed_headline_goes_to_watch_not_avoid() -> None:
     assert any(p.base == "ADA" for p in buy)
     assert not any(p.base == "SOL" for p in avoid)
     assert any(p.base == "SOL" for p in watch)
+
+
+def test_soft_buy_bar_includes_score_one() -> None:
+    scores = {
+        "LINK": {
+            "score": 1.5,
+            "bullish": ["Chainlink PoR adopted"],
+            "bearish": [],
+            "mentions": 1,
+        },
+        "DOT": {
+            "score": 0.5,
+            "bullish": ["DOT mention"],
+            "bearish": [],
+            "mentions": 1,
+        },
+        "NEAR": {
+            "score": 2.0,
+            "bullish": ["NEAR growth"],
+            "bearish": ["NEAR fee noise"],
+            "mentions": 2,
+        },
+    }
+    buy, _avoid, watch = build_picks_from_scores(scores, top_n=5)
+    assert {p.base for p in buy} >= {"LINK", "NEAR"}
+    # score 0.5 stays watch unless needed to fill — with 2 buys already under top_n=5
+    # DOT score>0 can be promoted from watch fill.
+    assert "DOT" in {p.base for p in buy} or "DOT" in {p.base for p in watch}

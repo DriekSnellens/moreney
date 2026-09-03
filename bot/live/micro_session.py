@@ -209,9 +209,9 @@ def _session_settings(
             "paper_trail_soft_drawdown_pct": 0.002,
             "paper_trail_soft_partial_pct": 0.25,
             "paper_trail_recovery_be_partial_pct": 0.60,
-            "paper_trail_be_harvest_partial_pct": 0.65,
-            "paper_trail_be_harvest_min_gain_pct": 0.0002,
-            "live_micro_be_harvest_cooldown_sec": 3.0,
+            "paper_trail_be_harvest_partial_pct": 0.75,
+            "paper_trail_be_harvest_min_gain_pct": 0.0001,
+            "live_micro_be_harvest_cooldown_sec": 2.0,
             "paper_trail_hard_arm_pct": 0.025,
             "paper_trail_hard_drawdown_pct": 0.012,
             "paper_trail_hard_partial_pct": 0.40,
@@ -414,6 +414,7 @@ def _session_settings(
             # bearish/neutral bags recycle at fee-aware BE+ (never-loss unchanged).
             "alphai_require_bullish_new_buys": True,
             "alphai_bullish_buy_enabled": True,
+            "alphai_daily_recommendations_top_n": 5,
             # AlphaI scored features — shadow-first (score/log, no hard WAIT reject).
             "alphai_feature_scoring_enabled": True,
             "alphai_feature_shadow_only": True,
