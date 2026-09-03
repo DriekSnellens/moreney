@@ -317,8 +317,9 @@ def _session_settings(
             "live_micro_velocity_sleeve_daily_loss_cap_eur": 50.0,
             # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
-            "live_micro_exit_resting_max_age_sec": 1.0,
-            "live_micro_exit_cooldown_sec": 1.0,
+            # Reduce exit-engine churn so we don't hit MAX_TRADES_PER_MINUTE.
+            "live_micro_exit_resting_max_age_sec": 1.5,
+            "live_micro_exit_cooldown_sec": 1.5,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
             "live_micro_exit_soft_armed_partial_pct": 0.85,
