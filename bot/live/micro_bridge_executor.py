@@ -4481,11 +4481,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         *,
         min_return: Decimal,
         low_util: bool,
+        require_history: bool = True,
+        allow_unknown_short: bool = False,
     ) -> bool:
         """Stricter new-base entry: full + short-window momentum and rising tape."""
         if not self._momentum_ok(
             symbol,
-            require_history=True,
+            require_history=require_history,
             min_return=min_return,
             low_util=low_util,
         ):
@@ -4495,7 +4497,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         series = self._series_for(symbol)
         short = series.momentum_return_last(self._entry_short_momentum_samples)
         if short is None:
-            return False
+            # For strong AlphaI top picks we can tolerate "unknown short momentum"
+            # when history is not yet materialized. We still keep never-loss/risk-gates.
+            return bool(allow_unknown_short)
         return short >= self._entry_short_momentum_min
 
     def _corr_group_momentum_down_count(self) -> int:
@@ -6526,6 +6530,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
             bullish_buy = self._alphai_bullish_buy(base)
             strong_bullish = self._alphai_strong_bullish_buy(base)
+            # Velocity scale-up: for AlphaI strong bullish picks we allow missing
+            # momentum-short history (require_history relax) to avoid "momentum_block"
+            # dead-zones while marks warm up. All risk/never-loss gates remain unchanged.
+            momentum_require_history = not strong_bullish
+            momentum_allow_unknown_short = bool(strong_bullish)
             if self._corr_sector_blocks_new_buy(base) and not bullish_buy:
                 self._bump_skip("corr_sector_momentum_block")
                 return await self._reject_before_live(
@@ -6540,12 +6549,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 symbol,
                 min_return=mom_floor,
                 low_util=ring_relaxed or bullish_buy,
+                require_history=momentum_require_history,
+                allow_unknown_short=momentum_allow_unknown_short,
             )
             if not momentum_ok and bullish_buy:
                 momentum_ok = self._entry_momentum_ok(
                     symbol,
                     min_return=mom_floor * Decimal("0.5"),
                     low_util=True,
+                    require_history=momentum_require_history,
+                    allow_unknown_short=momentum_allow_unknown_short,
                 )
             if not momentum_ok and strong_bullish and not self._momentum_down(symbol):
                 momentum_ok = True
