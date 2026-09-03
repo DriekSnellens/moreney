@@ -256,7 +256,7 @@ def _session_settings(
             # Daily AlphaI policy: no bijkoop / scale-in on held bags.
             "live_micro_winner_add_enabled": False,
             "live_micro_winner_add_max": 0,
-            "live_micro_winner_add_clip_eur": 55.0,
+            "live_micro_winner_add_clip_eur": 75.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
             "live_micro_buy_quality_underwater_count": 4,
             "live_micro_buy_quality_pause_sec": 1800.0,
@@ -324,7 +324,7 @@ def _session_settings(
             "live_micro_mark_ttl_sec": 2.0,
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
-            "live_micro_okx_ring_clip_eur": 55.0,
+            "live_micro_okx_ring_clip_eur": 75.0,
             # Soft floor while ring NEED is set earlier (0.0005); do not re-pin to full.
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
