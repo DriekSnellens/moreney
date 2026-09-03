@@ -96,6 +96,8 @@ class OpportunityEngineConfig:
     execution_quality_enabled: bool = False
     weight_regime_fit: Decimal = Decimal("0.08")
     weight_adverse_selection: Decimal = Decimal("0.07")
+    weight_alphai: Decimal = Decimal("0.06")
+    alphai_feature_enabled: bool = False
     adverse_selection_reject_threshold: Decimal = Decimal("0.80")
     stale_data_reject_threshold: Decimal = Decimal("0.15")
 
@@ -145,6 +147,10 @@ class OpportunityAssessment:
     empirical_multiplier: Decimal = _ONE
     execution_decision: str | None = None
     data_freshness_score: Decimal = _ONE
+    alphai_feature_score: Decimal | None = None
+    alphai_freshness: Decimal | None = None
+    alphai_entry_timing: str | None = None
+    alphai_capital_preference: Decimal | None = None
 
 
 @dataclass
@@ -449,6 +455,10 @@ def config_from_settings(settings: Any) -> OpportunityEngineConfig:
         execution_quality_enabled=bool(
             getattr(settings, "live_micro_execution_quality_enabled", False)
         ),
+        alphai_feature_enabled=bool(
+            getattr(settings, "alphai_feature_scoring_enabled", False)
+        ),
+        weight_alphai=Decimal(str(getattr(settings, "alphai_opp_weight", 0.06))),
     )
 
 
@@ -618,6 +628,9 @@ def evaluate(
     avg_opportunity_score: Decimal | None = None,
     outcome_store: Any = None,
     learning_config: Any = None,
+    alphai_signals: Any = None,
+    alphai_feature_config: Any = None,
+    alphai_signal_age_hours: Decimal | None = None,
 ) -> OpportunityAssessment:
     """Evaluate one candidate — deterministic, no I/O."""
     cfg = engine_config or OpportunityEngineConfig()
@@ -859,29 +872,86 @@ def evaluate(
         elif exec_assess.decision.value == "WAIT":
             reasons.append("execution_wait")
 
-    opp_score = _weighted_score(
-        [
-            (net_edge_score, cfg.weight_net_edge),
-            (cap_eff_score, cfg.weight_capital_efficiency),
-            (hr_score, cfg.weight_headroom),
-            (momentum, cfg.weight_momentum),
-            (continuity or Decimal("0.5"), cfg.weight_continuity),
-            (ext_score, cfg.weight_extension),
-            (liquidity, cfg.weight_liquidity),
-            (spread_score, cfg.weight_spread),
-            (timing, cfg.weight_timing),
-            (venue_score, cfg.weight_venue),
-            (breakout, cfg.weight_breakout),
-            (regime_score, cfg.weight_regime_fit),
-            (adverse_penalty, cfg.weight_adverse_selection),
-        ]
-    )
+    alphai_feat_score = Decimal("0.5")
+    alphai_fresh: Decimal | None = None
+    alphai_timing: str | None = None
+    alphai_cap_pref: Decimal | None = None
+    if cfg.alphai_feature_enabled:
+        from bot.integrations.alphai.features import (
+            AlphaIFeatureConfig,
+            compute_alphai_feature,
+        )
+
+        feat_cfg = alphai_feature_config or AlphaIFeatureConfig(
+            enabled=True,
+            score_weight=cfg.weight_alphai,
+        )
+        # Prefer signals passed in; fall back to metadata snapshot.
+        sigs = alphai_signals
+        if sigs is None and meta.get("alphai_signals"):
+            sigs = meta.get("alphai_signals")
+        base_sym = opportunity.symbol.upper()
+        for quote in ("EUR", "USDT", "USDC", "USD"):
+            if base_sym.endswith(quote):
+                base_sym = base_sym[: -len(quote)]
+                break
+        age = alphai_signal_age_hours
+        if age is None and meta.get("alphai_signal_age_hours") is not None:
+            try:
+                age = Decimal(str(meta.get("alphai_signal_age_hours")))
+            except Exception:  # noqa: BLE001
+                age = None
+        feat = compute_alphai_feature(
+            base_sym,
+            sigs,
+            adverse_score=adverse_score,
+            signal_age_hours_value=age,
+            config=feat_cfg,
+        )
+        alphai_feat_score = feat.feature_score
+        alphai_fresh = feat.freshness
+        alphai_timing = feat.entry_timing
+        alphai_cap_pref = feat.capital_preference
+        reasons.extend(feat.reasons)
+        if feat.entry_timing == "WAIT":
+            reasons.append("alphai_adverse_wait")
+            exec_decision_str = exec_decision_str or "WAIT"
+        elif feat.entry_timing == "REDUCE":
+            reasons.append("alphai_adverse_reduce")
+        # Downward-only size from adverse×news (never increases risk caps).
+        if not feat_cfg.shadow_only:
+            mult_pending = feat.size_multiplier
+        else:
+            mult_pending = _ONE
+    else:
+        mult_pending = _ONE
+
+    score_factors = [
+        (net_edge_score, cfg.weight_net_edge),
+        (cap_eff_score, cfg.weight_capital_efficiency),
+        (hr_score, cfg.weight_headroom),
+        (momentum, cfg.weight_momentum),
+        (continuity or Decimal("0.5"), cfg.weight_continuity),
+        (ext_score, cfg.weight_extension),
+        (liquidity, cfg.weight_liquidity),
+        (spread_score, cfg.weight_spread),
+        (timing, cfg.weight_timing),
+        (venue_score, cfg.weight_venue),
+        (breakout, cfg.weight_breakout),
+        (regime_score, cfg.weight_regime_fit),
+        (adverse_penalty, cfg.weight_adverse_selection),
+    ]
+    if cfg.alphai_feature_enabled:
+        score_factors.append((alphai_feat_score, cfg.weight_alphai))
+
+    opp_score = _weighted_score(score_factors)
     opp_score = (opp_score * empirical_mult * data_fresh).quantize(Decimal("0.1"))
 
     mult = _ONE
     if eq is not None:
         mult = min(mult, eq.recommended_size_multiplier)
     mult = min(mult, ce.recommended_size_multiplier)
+    mult = min(mult, mult_pending)
 
     if vol_regime == VolatilityRegime.EXTREME:
         mult = min(mult, cfg.extreme_volatility_size_cap)
@@ -981,6 +1051,10 @@ def evaluate(
         empirical_multiplier=empirical_mult,
         execution_decision=exec_decision_str,
         data_freshness_score=data_fresh,
+        alphai_feature_score=alphai_feat_score if cfg.alphai_feature_enabled else None,
+        alphai_freshness=alphai_fresh,
+        alphai_entry_timing=alphai_timing,
+        alphai_capital_preference=alphai_cap_pref,
     )
 
 
@@ -1038,6 +1112,22 @@ def apply_assessment_to_opportunity(
             "volatility_regime": assessment.volatility_regime.value,
             "timing_score": str(assessment.timing_score),
             "breakout_quality_score": str(assessment.breakout_quality_score),
+            "alphai_feature_score": (
+                str(assessment.alphai_feature_score)
+                if assessment.alphai_feature_score is not None
+                else None
+            ),
+            "alphai_freshness": (
+                str(assessment.alphai_freshness)
+                if assessment.alphai_freshness is not None
+                else None
+            ),
+            "alphai_entry_timing": assessment.alphai_entry_timing,
+            "alphai_capital_preference": (
+                str(assessment.alphai_capital_preference)
+                if assessment.alphai_capital_preference is not None
+                else None
+            ),
         }
     )
     if assessment.venue and not meta.get("buy_exchange"):

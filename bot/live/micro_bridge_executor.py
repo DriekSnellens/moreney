@@ -52,6 +52,15 @@ from bot.intelligence.adverse_selection import (
     post_fill_adverse_pct,
 )
 from bot.intelligence.capital_intelligence import assess_capital_state
+from bot.integrations.alphai.attribution import (
+    AlphaIAttributionEvent,
+    AlphaIAttributionStore,
+)
+from bot.integrations.alphai.features import (
+    AlphaIFeatureAssessment,
+    alphai_feature_from_signals_snapshot,
+    config_from_settings as alphai_feature_config_from_settings,
+)
 from bot.intelligence.market_regime_engine import classify_market_regime, config_from_settings as regime_cfg_from
 from bot.intelligence.outcome_learning import OutcomeRecord
 from bot.intelligence.resting_order_intelligence import (
@@ -405,6 +414,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._alphai_macro_active = False
         self._alphai_signals: object | None = None
         self._alphai_macro_allow_bullish = True
+        self._alphai_feature_config = alphai_feature_config_from_settings(settings)
+        self._alphai_attribution = AlphaIAttributionStore.load(
+            str(
+                getattr(
+                    settings,
+                    "alphai_attribution_persist_path",
+                    "./data/alphai/attribution_state.json",
+                )
+            )
+        )
+        self._alphai_attribution.auto_apply = False
+        self._alphai_feature_snapshot: dict[str, Any] = {}
+        self._alphai_daily_generated_at: str | None = None
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -943,15 +965,39 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def apply_alphai_trading_signals(self, signals: object | None) -> None:
         """Daily picks + bullish/avoid for entry sizing, momentum, exit urgency."""
         self._alphai_signals = signals
+        gen = getattr(signals, "generated_at", None) if signals is not None else None
+        if gen:
+            self._alphai_daily_generated_at = str(gen)
+
+    def _alphai_feature_for(
+        self, base: str, *, adverse_score: Decimal | None = None
+    ) -> AlphaIFeatureAssessment:
+        from bot.integrations.alphai.signals import AlphaITradingSignals
+
+        sigs = (
+            self._alphai_signals
+            if isinstance(self._alphai_signals, AlphaITradingSignals)
+            else None
+        )
+        return alphai_feature_from_signals_snapshot(
+            base,
+            sigs,
+            daily_generated_at=self._alphai_daily_generated_at,
+            adverse_score=adverse_score,
+            config=self._alphai_feature_config,
+        )
 
     def _alphai_entry_multiplier(self, base: str) -> Decimal:
         sig = self._alphai_signals
-        if sig is None or not hasattr(sig, "entry_size_multiplier"):
-            return _ONE
-        try:
-            return Decimal(str(sig.entry_size_multiplier(base)))
-        except Exception:  # noqa: BLE001
-            return _ONE
+        feat = self._alphai_feature_for(base)
+        base_mult = _ONE
+        if sig is not None and hasattr(sig, "entry_size_multiplier"):
+            try:
+                base_mult = Decimal(str(sig.entry_size_multiplier(base)))
+            except Exception:  # noqa: BLE001
+                base_mult = _ONE
+        combined = base_mult * feat.capital_preference * feat.size_multiplier
+        return max(Decimal("0.50"), min(combined, Decimal("1.35")))
 
     def _alphai_momentum_floor_scale(self, base: str) -> Decimal:
         sig = self._alphai_signals
@@ -963,19 +1009,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return _ONE
 
     def _alphai_exit_urgency(self, base: str) -> bool:
+        if self._alphai_feature_for(base).exit_urgency:
+            return True
         sig = self._alphai_signals
         if sig is None or not hasattr(sig, "exit_urgency"):
             return False
         return bool(sig.exit_urgency(base))
 
     def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
-        sig = self._alphai_signals
-        if sig is None or not hasattr(sig, "be_harvest_gain_scale"):
-            return _ONE
-        try:
-            return Decimal(str(sig.be_harvest_gain_scale(base)))
-        except Exception:  # noqa: BLE001
-            return _ONE
+        return self._alphai_feature_for(base).be_harvest_gain_scale
+
+    def _alphai_trail_hold_scale(self, base: str) -> Decimal:
+        return self._alphai_feature_for(base).trail_hold_scale
 
     def _alphai_bullish_buy(self, base: str) -> bool:
         if not bool(getattr(self._settings, "alphai_bullish_buy_enabled", True)):
@@ -1027,10 +1072,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
     def _effective_exit_resting_max_age_sec(self, base: str) -> float:
         age = self._exit_resting_max_age_sec
+        scale = float(self._alphai_trail_hold_scale(base))
         if self._alphai_exit_urgency(base):
-            return min(age, 5.0)
+            return min(age, max(3.0, 5.0 * min(scale, 1.0)))
         if self._alphai_macro_active:
             return min(age, 6.0)
+        if scale > 1.0:
+            return min(age * scale, age * 1.25)
         return age
 
     def _alphai_blocks_base(self, base: str) -> bool:
@@ -2034,17 +2082,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         opp = getattr(self, "_opportunity_diagnostics", None)
         intel = self._intelligence.snapshot() if hasattr(self, "_intelligence") else {}
         cap = self._capital_state_snapshot or {}
+        alphai_extra = {
+            **self._alphai_attribution.snapshot(),
+            **(self._alphai_feature_snapshot or {}),
+            "alphai_feature_shadow": self._alphai_feature_config.shadow_only,
+            "alphai_feature_enabled": self._alphai_feature_config.enabled,
+        }
         if opp is not None:
             return opp.snapshot(economic_extra={
                 **eq_extra,
                 **self._economic_diagnostics.snapshot(),
                 **intel,
                 **cap,
+                **alphai_extra,
             })
         return self._economic_diagnostics.snapshot(entry_quality_extra={
             **eq_extra,
             **intel,
             **cap,
+            **alphai_extra,
         })
 
     def entry_quality_diagnostics_snapshot(self) -> dict[str, Any]:
@@ -2126,8 +2182,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 candidate_count=int(self._opportunity_diagnostics.candidates),
                 outcome_store=self._intelligence.outcome_store,
                 learning_config=self._intelligence.learning_config,
+                alphai_signals=self._alphai_signals,
+                alphai_feature_config=self._alphai_feature_config,
             )
             self._opportunity_diagnostics.record(opp_assessment)
+            bullish_cluster = False
+            sig = self._alphai_signals
+            if sig is not None and hasattr(sig, "bullish_buy_bases"):
+                try:
+                    bullish_cluster = len(sig.bullish_buy_bases()) >= 3
+                except Exception:  # noqa: BLE001
+                    bullish_cluster = False
             cap_state = assess_capital_state(
                 total_budget_eur=self._budget,
                 deployed_eur=self._economic_diagnostics._capital_deployed_eur,  # noqa: SLF001
@@ -2136,13 +2201,53 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 avg_opportunity_score=opp_assessment.opportunity_score,
                 is_dead_market=regime.regime.value == "DEAD_MARKET",
                 is_opportunity_burst=regime.regime.value == "OPPORTUNITY_BURST",
+                alphai_macro_active=self._alphai_macro_active,
+                alphai_bullish_cluster=bullish_cluster,
             )
             self._capital_state_snapshot = {
                 "capital_available_eur": str(cap_state.available_eur.quantize(Decimal("0.01"))),
                 "capital_reserved_eur": str(cap_state.reserved_eur.quantize(Decimal("0.01"))),
                 "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
                 "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
+                "capital_reasons": ",".join(cap_state.reasons),
             }
+            base_sym = symbol.upper()
+            for quote in ("EUR", "USDT", "USDC", "USD"):
+                if base_sym.endswith(quote):
+                    base_sym = base_sym[: -len(quote)]
+                    break
+            feat = self._alphai_feature_for(
+                base_sym, adverse_score=opp_assessment.adverse_selection_score
+            )
+            self._alphai_feature_snapshot = feat.as_dict()
+            meta["alphai_feature_score"] = str(feat.feature_score)
+            meta["alphai_freshness"] = str(feat.freshness)
+            meta["alphai_entry_timing"] = feat.entry_timing
+            meta["alphai_capital_preference"] = str(feat.capital_preference)
+            if feat.entry_timing == "WAIT":
+                self._alphai_attribution.record(
+                    AlphaIAttributionEvent(
+                        kind="adverse_wait",
+                        base=base_sym,
+                        venue=str(meta.get("buy_exchange") or meta.get("venue") or "bitvavo"),
+                        estimated_net_delta_eur=_ZERO,
+                        baseline_net_eur=opp_assessment.expected_net_profit_eur,
+                        alphai_net_eur=_ZERO,
+                        reasons=feat.reasons,
+                    )
+                )
+            if opp_assessment.alphai_feature_score is not None:
+                self._alphai_attribution.record(
+                    AlphaIAttributionEvent(
+                        kind="score_feature",
+                        base=base_sym,
+                        venue=str(meta.get("buy_exchange") or meta.get("venue") or "bitvavo"),
+                        estimated_net_delta_eur=_ZERO,
+                        baseline_net_eur=opp_assessment.expected_net_profit_eur,
+                        alphai_net_eur=opp_assessment.expected_net_profit_eur,
+                        reasons=feat.reasons,
+                    )
+                )
         return assessment
 
     def _note_position_opened(self, venue: str, base: str) -> None:
@@ -6343,6 +6448,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             self._bump_skip("alphai_news_block")
             detail = self._alphai_blocked_detail.get(base.upper(), "")
+            self._alphai_attribution.record(
+                AlphaIAttributionEvent(
+                    kind="blocked_buy",
+                    base=base,
+                    venue=venue,
+                    estimated_net_delta_eur=_ZERO,
+                    baseline_net_eur=_ZERO,
+                    alphai_net_eur=_ZERO,
+                    reasons=("alphai_news_block", detail) if detail else ("alphai_news_block",),
+                )
+            )
             return await self._reject_before_live(
                 order_request,
                 reason="ALPHAI_NEWS_BLOCK",
@@ -6527,6 +6643,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 order_request, reason="BAD_SIZE", message="quantity/price required"
             )
         if side_is_buy:
+            feat_timing = str(meta.get("alphai_entry_timing") or "")
+            if not feat_timing:
+                try:
+                    feat_timing = self._alphai_feature_for(base).entry_timing
+                except Exception:  # noqa: BLE001
+                    feat_timing = ""
+            if (
+                feat_timing == "WAIT"
+                and not self._alphai_feature_config.shadow_only
+                and self._alphai_feature_config.enabled
+            ):
+                self._bump_skip("alphai_adverse_wait")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_ADVERSE_WAIT",
+                    message=f"alphai bullish+adverse wait for {base}",
+                )
             mult_raw = meta.get("entry_quality_multiplier")
             mult = _ONE
             if mult_raw is not None:
@@ -6537,6 +6670,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             alphai_mult = self._alphai_entry_multiplier(base)
             if alphai_mult != _ONE:
                 mult = min(mult * alphai_mult, Decimal("1.35"))
+                if alphai_mult > _ONE:
+                    self._alphai_attribution.record(
+                        AlphaIAttributionEvent(
+                            kind="size_boost",
+                            base=base,
+                            venue=venue,
+                            estimated_net_delta_eur=_ZERO,
+                            baseline_net_eur=_ZERO,
+                            alphai_net_eur=_ZERO,
+                            reasons=("size_boost",),
+                        )
+                    )
             if mult != _ONE:
                 scaled = apply_size_multiplier(qty, mult)
                 if scaled <= 0:

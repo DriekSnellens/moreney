@@ -451,6 +451,21 @@ class Settings(BaseSettings):
     alphai_recommendations_interval_hours: int = Field(default=1, ge=1, le=24)
     alphai_daily_recommendations_top_n: int = Field(default=8, ge=1, le=20)
     alphai_daily_recommendations_min_relevance: int = Field(default=6, ge=1, le=10)
+    # AlphaI scored features (opportunity/capital/adverse timing) — shadow default.
+    alphai_feature_scoring_enabled: bool = True
+    alphai_feature_shadow_only: bool = True
+    alphai_feature_auto_apply: bool = False
+    alphai_opp_weight: float = Field(default=0.06, ge=0.0, le=0.3)
+    alphai_freshness_half_life_hours: float = Field(default=4.0, ge=0.5, le=48.0)
+    alphai_max_freshness_hours: float = Field(default=24.0, ge=1.0, le=72.0)
+    alphai_adverse_bullish_wait_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    alphai_adverse_bullish_reduce_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+    alphai_capital_preference_boost: float = Field(default=0.15, ge=0.0, le=0.5)
+    alphai_capital_avoid_penalty: float = Field(default=0.35, ge=0.0, le=0.8)
+    alphai_exit_urgency_trail_scale: float = Field(default=0.70, ge=0.3, le=1.0)
+    alphai_exit_urgency_be_cushion_scale: float = Field(default=0.55, ge=0.2, le=1.0)
+    alphai_bullish_trail_hold_boost: float = Field(default=1.15, ge=1.0, le=1.5)
+    alphai_attribution_persist_path: str = "./data/alphai/attribution_state.json"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

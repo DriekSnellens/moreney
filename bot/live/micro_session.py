@@ -406,6 +406,11 @@ def _session_settings(
             "alphai_observation_mode": bool(
                 getattr(base, "alphai_observation_mode", False)
             ),
+            # AlphaI scored features — shadow-first (score/log, no hard WAIT reject).
+            "alphai_feature_scoring_enabled": True,
+            "alphai_feature_shadow_only": True,
+            "alphai_feature_auto_apply": False,
+            "alphai_opp_weight": 0.06,
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,

@@ -51,6 +51,8 @@ def assess_capital_state(
     recent_trade_frequency: Decimal | None = None,
     is_dead_market: bool = False,
     is_opportunity_burst: bool = False,
+    alphai_macro_active: bool = False,
+    alphai_bullish_cluster: bool = False,
     realized_net_per_hour: Decimal | None = None,
     config: CapitalIntelligenceConfig | None = None,
 ) -> CapitalState:
@@ -77,6 +79,14 @@ def assess_capital_state(
     if is_opportunity_burst:
         reserve_pct -= cfg.burst_reserve_reduction
         reasons.append("opportunity_burst")
+
+    # Soft news×regime fusion — never exceeds max_reserve_pct / never forces deploy.
+    if alphai_macro_active or (is_dead_market and not alphai_bullish_cluster):
+        reserve_pct += Decimal("0.05")
+        reasons.append("alphai_defensive_reserve")
+    elif alphai_bullish_cluster and is_opportunity_burst:
+        reserve_pct -= Decimal("0.03")
+        reasons.append("alphai_burst_deploy")
 
     if market_volatility is not None and market_volatility > Decimal("0.006"):
         reserve_pct += Decimal("0.05")
