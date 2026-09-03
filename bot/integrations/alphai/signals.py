@@ -84,10 +84,22 @@ class AlphaITradingSignals:
             return _ZERO
         return Decimal("-0.60")
 
-    def exit_urgency(self, base: str) -> bool:
-        """Held bags on avoid/blocked headlines should harvest faster."""
+    def is_bearish(self, base: str) -> bool:
+        """Daily avoid or live bearish/blocked headline."""
         b = str(base or "").upper()
         return b in self.avoid_bases or b in self.blocked_bases
+
+    def allows_new_buy(self, base: str) -> bool:
+        """True only for AlphaI-bullish names (no ring-fallback / focus fill-in)."""
+        return self.is_bullish_buy(base, ring_fallback=False)
+
+    def recycle_sell_only(self, base: str) -> bool:
+        """Non-bullish bags should recycle at BE+ — no new buy exposure."""
+        return not self.allows_new_buy(base)
+
+    def exit_urgency(self, base: str) -> bool:
+        """Bearish bags harvest faster (still never below fee-aware BE)."""
+        return self.is_bearish(base)
 
     def all_bullish_held(self, held_bases: set[str] | frozenset[str]) -> bool:
         """True when every bullish buy pick is already in portfolio (or none exist)."""
@@ -151,15 +163,26 @@ class AlphaITradingSignals:
         b = str(base or "").upper()
         boost = _ZERO
         score = self.pick_score(b)
-        if score > 0:
-            # Stronger weight so high-score picks outrank random focus coins.
-            boost += Decimal(str(min(0.45, 0.08 + score * 0.01)))
-        if b in self.bullish_bases:
-            boost += Decimal("0.08")
-        if self.is_top_pick(b) and is_buy:
-            boost += Decimal("0.20")
-        if b in self.avoid_bases and is_buy:
-            boost -= Decimal("0.50")
+        if is_buy:
+            if score > 0:
+                # Stronger weight so high-score picks outrank random focus coins.
+                boost += Decimal(str(min(0.45, 0.08 + score * 0.01)))
+            if b in self.bullish_bases:
+                boost += Decimal("0.08")
+            if self.is_top_pick(b):
+                boost += Decimal("0.20")
+            if self.is_bearish(b):
+                boost -= Decimal("0.50")
+            elif not self.allows_new_buy(b):
+                boost -= Decimal("0.35")
+        else:
+            # Prefer harvesting bearish / non-bullish bags first (still ≥ BE).
+            if self.is_bearish(b):
+                boost += Decimal("0.35")
+            elif not self.allows_new_buy(b):
+                boost += Decimal("0.12")
+            if b in self.bullish_bases or self.is_top_pick(b):
+                boost -= Decimal("0.08")
         return boost
 
     def fv_buy_premium_bps(self, base: str, default_bps: Decimal) -> Decimal:

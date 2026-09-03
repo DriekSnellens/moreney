@@ -437,6 +437,9 @@ class Settings(BaseSettings):
     # When True: log headlines + blocks in status but do not pause buys.
     alphai_observation_mode: bool = False
     alphai_bullish_buy_enabled: bool = True
+    # When True: new-base buys require AlphaI bullish (daily pick or headline).
+    # Non-bullish held bags become sell-only at fee-aware BE+ (never-loss unchanged).
+    alphai_require_bullish_new_buys: bool = False
     # During macro reduce-only, still allow buys on AlphaI bullish picks/headlines.
     alphai_macro_allow_bullish_buys: bool = True
     alphai_bullish_inventory_build_enabled: bool = True

@@ -255,8 +255,8 @@ def _session_settings(
             "live_micro_low_util_buy_resting_max_age_sec": 30.0,
             "live_micro_buy_resting_max_age_sec": 30.0,
             "live_micro_cancel_buy_on_flat_momentum": True,
-            # Util-B: when active book < ring_soft max, allow non-focus new buys.
-            "live_micro_low_util_relax_focus": True,
+            # Util-B: do not fill thin-ring slots with non-AlphaI coins.
+            "live_micro_low_util_relax_focus": False,
             # Daily AlphaI policy: no bijkoop / scale-in on held bags.
             "live_micro_winner_add_enabled": False,
             "live_micro_winner_add_max": 0,
@@ -410,6 +410,10 @@ def _session_settings(
             "alphai_observation_mode": bool(
                 getattr(base, "alphai_observation_mode", False)
             ),
+            # Buys/sells follow AlphaI: new buys only on bullish picks/headlines;
+            # bearish/neutral bags recycle at fee-aware BE+ (never-loss unchanged).
+            "alphai_require_bullish_new_buys": True,
+            "alphai_bullish_buy_enabled": True,
             # AlphaI scored features — shadow-first (score/log, no hard WAIT reject).
             "alphai_feature_scoring_enabled": True,
             "alphai_feature_shadow_only": True,

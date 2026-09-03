@@ -1028,11 +1028,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         sig = self._alphai_signals
         if sig is None or not hasattr(sig, "is_bullish_buy"):
             return False
+        if bool(getattr(self._settings, "alphai_require_bullish_new_buys", False)):
+            if hasattr(sig, "allows_new_buy"):
+                return bool(sig.allows_new_buy(base))
+            return bool(sig.is_bullish_buy(base, ring_fallback=False))
         ring_fb = self._alphai_ring_fallback_active()
         return bool(sig.is_bullish_buy(base, ring_fallback=ring_fb))
 
     def _alphai_ring_fallback_active(self) -> bool:
         """Ring underfilled and all bullish picks held → allow focus non-avoid buys."""
+        if bool(getattr(self._settings, "alphai_require_bullish_new_buys", False)):
+            return False
         if self._active_ring_eur <= 0:
             return False
         # Any execute venue needs deploy and has free cash.
@@ -6487,6 +6493,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 reason="ALPHAI_AVOID_BASE",
                 message=f"AlphaI daily avoid list blocks new {base} buys",
             )
+        if (
+            side_is_buy
+            and bool(getattr(self._settings, "alphai_require_bullish_new_buys", False))
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+            and self._is_new_base_buy(venue, base)
+        ):
+            sig_now = self._alphai_signals
+            allowed = self._alphai_bullish_buy(base)
+            if sig_now is None:
+                allowed = False
+            if not allowed:
+                self._bump_skip("alphai_bullish_required")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_BULLISH_REQUIRED",
+                    message=(
+                        f"new {base} buys require AlphaI bullish pick/headline "
+                        "(bearish/neutral names recycle at BE+ only)"
+                    ),
+                )
         if (
             side_is_buy
             and self._new_buy_focus_only

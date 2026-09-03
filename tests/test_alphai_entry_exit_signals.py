@@ -99,6 +99,37 @@ def test_priority_buy_bases_and_slot_penalty() -> None:
     assert signals.non_pick_slot_penalty("SOL", {"XRP", "LINK", "UNI"}) == Decimal("0")
 
 
+def test_alphai_stance_drives_buy_and_sell() -> None:
+    signals = build_trading_signals(
+        AlphaIRegimeState(
+            bullish_bases=frozenset({"UNI"}),
+            blocked_bases=frozenset({"ETH"}),
+        ),
+        {
+            "picks": [
+                {"base": "XRP", "score": 54.0},
+                {"base": "UNI", "score": 36.0},
+            ],
+            "avoid": [{"base": "SOL", "score": -8.0}],
+        },
+    )
+    assert signals.is_bearish("SOL")
+    assert signals.is_bearish("ETH")
+    assert signals.allows_new_buy("XRP")
+    assert signals.allows_new_buy("UNI")
+    assert not signals.allows_new_buy("SOL")
+    assert not signals.allows_new_buy("DOT")
+    assert signals.recycle_sell_only("DOT")
+    assert signals.exit_urgency("SOL")
+    assert not signals.exit_urgency("XRP")
+    assert signals.maker_rank_boost("XRP", is_buy=True) > signals.maker_rank_boost(
+        "DOT", is_buy=True
+    )
+    assert signals.maker_rank_boost("SOL", is_buy=False) > signals.maker_rank_boost(
+        "XRP", is_buy=False
+    )
+
+
 def test_maker_rank_prefers_daily_pick() -> None:
     settings = Settings(
         execution_mode="paper",
@@ -310,6 +341,29 @@ def test_maker_avoid_base_sell_only() -> None:
     maker.apply_alphai_signals(signals)
     assert maker._symbol_sell_only("XRPEUR") is True
     assert maker._symbol_sell_only("SOLEUR") is False
+
+
+def test_require_bullish_new_buys_sell_only_for_neutral() -> None:
+    settings = Settings(
+        execution_mode="paper",
+        paper_maker_enabled=True,
+        paper_maker_min_profit_eur=0.02,
+        paper_maker_min_net_return=0.0001,
+        paper_maker_min_notional_eur=0.5,
+        paper_maker_venues="bitvavo",
+        alphai_require_bullish_new_buys=True,
+    )
+    maker = MakerInventoryStrategy(settings)
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"UNI"})),
+        {"picks": [{"base": "XRP", "score": 54.0}], "avoid": [{"base": "SOL", "score": -5.0}]},
+    )
+    maker.apply_alphai_signals(signals)
+    assert maker._symbol_sell_only("XRPEUR") is False
+    assert maker._symbol_sell_only("UNIEUR") is False
+    assert maker._symbol_sell_only("SOLEUR") is True
+    assert maker._symbol_sell_only("DOTEUR") is True
+    assert maker._alphai_ring_fallback_active() is False
 
 
 @pytest.mark.asyncio

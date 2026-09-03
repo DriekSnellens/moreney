@@ -566,8 +566,16 @@ class MakerInventoryStrategy(BaseStrategy):
         if (
             sig is not None
             and base
-            and hasattr(sig, "avoid_bases")
-            and base in sig.avoid_bases
+            and hasattr(sig, "is_bearish")
+            and sig.is_bearish(base)
+        ):
+            return True
+        if (
+            sig is not None
+            and base
+            and bool(getattr(self._settings, "alphai_require_bullish_new_buys", False))
+            and hasattr(sig, "allows_new_buy")
+            and not sig.allows_new_buy(base)
         ):
             return True
         if self._alphai_macro_caution and base:
@@ -886,6 +894,8 @@ class MakerInventoryStrategy(BaseStrategy):
 
     def _alphai_ring_fallback_active(self) -> bool:
         """Ring underfilled and every AlphaI bullish pick already held → open focus path."""
+        if bool(getattr(self._settings, "alphai_require_bullish_new_buys", False)):
+            return False
         if not self._any_ring_needs_deploy():
             return False
         sig = self._alphai_signals
