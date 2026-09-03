@@ -6596,7 +6596,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if pre_rec == EntryQualityRecommendation.REJECT.value:
                 reason_key = str(meta.get("entry_quality_reject_reason") or "")
                 strong = self._alphai_strong_bullish_buy(base)
-                hard_reject = reason_key == "extension_extreme"
+                # Extension_extreme stays a hard reject only when we don't
+                # have strong AlphaI bullish backing.
+                hard_reject = reason_key == "extension_extreme" and not strong
                 soft_ok = (bullish_buy and not hard_reject) or (
                     strong and reason_key == "continuity_spike"
                 )
@@ -6622,7 +6624,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     reason_key = assessment.reject_reason or "entry_quality"
                     strong = self._alphai_strong_bullish_buy(base)
                     # Only extension_extreme stays hard; continuity_spike soft for strong AlphaI.
-                    hard_reject = reason_key == "extension_extreme"
+                    hard_reject = reason_key == "extension_extreme" and not strong
                     soft_continuity = reason_key == "continuity_spike" and strong
                     if (bullish_buy and not hard_reject) or soft_continuity:
                         meta["entry_quality_multiplier"] = str(
