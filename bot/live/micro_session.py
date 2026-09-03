@@ -177,23 +177,23 @@ def _session_settings(
             "paper_maker_same_venue": True,
             # One quote per venue per cycle — avoids stacked duplicate resting bids.
             # C12: more parallel quotes while ring is filling.
-            "paper_maker_max_open_quotes": 6 if cross_venue else 4,
+            "paper_maker_max_open_quotes": 8 if cross_venue else 6,
             # More concurrent NET-passing quotes across venues (still never-loss gated).
             "arbitrage_max_emits_per_cycle": 12 if cross_venue else 5,
             "paper_cycle_interval_ms": 800.0,
             # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
-            "paper_maker_min_notional_eur": 55.0,
-            "live_micro_first_clip_eur": 90.0,
-            "live_micro_add_clip_eur": 120.0,
+            "paper_maker_min_notional_eur": 80.0,
+            "live_micro_first_clip_eur": 100.0,
+            "live_micro_add_clip_eur": 130.0,
             # Util-B light: slightly easier NET so empty-ring emits are not starved.
             # C12: align maker + profitability gate (was 5bps gate killing 4bps maker).
-            # Phase A scale: allow a slightly wider band of "near-edge"
-            # maker trades (still profitability-positive after fees).
-            "paper_maker_min_profit_eur": 0.03,
-            "paper_maker_min_net_return": 0.0004,
-            "paper_maker_small_clip_max_eur": 120.0,
-            "paper_maker_small_clip_min_profit_eur": 0.03,
-            "paper_maker_small_clip_min_net_return": 0.0003,
+            # Near-miss fix (live funnel): most rejects fail NET return 0.0004 by ~0.5bps
+            # or absolute €0.03 by ~€0.002 — still strictly positive after fees.
+            "paper_maker_min_profit_eur": 0.025,
+            "paper_maker_min_net_return": 0.00032,
+            "paper_maker_small_clip_max_eur": 130.0,
+            "paper_maker_small_clip_min_profit_eur": 0.02,
+            "paper_maker_small_clip_min_net_return": 0.00028,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
@@ -260,7 +260,7 @@ def _session_settings(
             # Daily AlphaI policy: no bijkoop / scale-in on held bags.
             "live_micro_winner_add_enabled": False,
             "live_micro_winner_add_max": 0,
-            "live_micro_winner_add_clip_eur": 75.0,
+            "live_micro_winner_add_clip_eur": 90.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
             "live_micro_buy_quality_underwater_count": 8,
             "live_micro_buy_quality_pause_sec": 600.0,
@@ -273,8 +273,8 @@ def _session_settings(
             "live_micro_entry_quality_min_score": 55.0,
             "live_micro_entry_reduced_size_score": 70.0,
             "live_micro_entry_normal_size_score": 80.0,
-            "live_micro_entry_reduced_size_multiplier": 0.75,
-            "live_micro_entry_small_size_multiplier": 0.50,
+            "live_micro_entry_reduced_size_multiplier": 0.85,
+            "live_micro_entry_small_size_multiplier": 0.65,
             "live_micro_entry_min_continuity_score": 0.30,
             "live_micro_entry_target_harvest_pct": 0.008,
             "live_micro_block_underwater_cross_venue": True,
@@ -329,12 +329,12 @@ def _session_settings(
             "live_micro_mark_ttl_sec": 2.0,
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
-            "live_micro_okx_ring_clip_eur": 90.0,
+            "live_micro_okx_ring_clip_eur": 100.0,
             # Soft floor while ring NEED is set earlier (0.0005); do not re-pin to full.
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
-            "live_micro_max_per_corr_group": 3,
+            "live_micro_max_per_corr_group": 4,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.006,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
@@ -345,14 +345,14 @@ def _session_settings(
             "paper_max_holding_sec": 0.0,
             # Prefer cash when bags pile up (skew → sell-only sooner).
             # Ruim: allow up to ~half pocket in alts so 8×€100 clips fit.
-            "paper_max_alt_inventory_pct": 55.0,
+            "paper_max_alt_inventory_pct": 62.0,
             "paper_min_alt_inventory_pct": 15.0,
             "paper_inventory_ask_improve_bps": 2.0,
             # Underweight venues buy sooner (OKX cash deployment).
             # Prefer cash / rising entries — do not force underweight dip buys.
             "paper_inventory_buy_dip_bps": 0.0,
             # Among NET-passing candidates, allow more than only the top rank.
-            "paper_maker_keep_vs_best_frac": 0.30,
+            "paper_maker_keep_vs_best_frac": 0.35,
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
@@ -427,10 +427,10 @@ def _session_settings(
             "live_micro_cross_venue_enabled": cross_venue,
             "arbitrage_min_profit_eur": 0.05,
             "arbitrage_min_profit_pct": 0.0008,
-            "profitability_min_net_profit_usd": 0.03,
-            "profitability_min_net_return": 0.0004,
+            "profitability_min_net_profit_usd": 0.025,
+            "profitability_min_net_return": 0.00032,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.03,
+            "risk_min_net_profit_usd": 0.025,
             # Hard per-trade ceiling: allow ~€180 add clips on ~€2k pocket.
             "risk_max_position_usd": min(150.0, max(80.0, budget_f * 0.08)),
             # Size vs aggregate multi-venue equity so clips stay near the ceiling
@@ -457,13 +457,13 @@ def _session_settings(
             # Velocity scale: allow a small increase in trade throughput.
             # Keep drawdown/daily-loss/correlation caps unchanged.
             "max_trades_per_minute": 200,
-            "opportunity_max_executions_per_cycle": 10,
-            "opportunity_max_candidates_per_cycle": 20,
+            "opportunity_max_executions_per_cycle": 12,
+            "opportunity_max_candidates_per_cycle": 24,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else ",".join(_LIQUID_EUR_SYMBOLS),
-            "live_micro_max_alt_bases": 8,
+            "live_micro_max_alt_bases": 10,
             # Cap live order size to add-clip ceiling.
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
             "live_micro_max_notional_eur": min(150.0, max(80.0, budget_f * 0.08)),
@@ -476,8 +476,8 @@ def _session_settings(
                 getattr(base, "live_micro_reset_drawdown_on_start", True)
             ),
             # C12: more concurrent resting buys while deploying the ring.
-            "live_micro_max_open_orders": 6 if cross_venue else 6,
-            "live_micro_max_open_orders_per_venue": 6,
+            "live_micro_max_open_orders": 8 if cross_venue else 8,
+            "live_micro_max_open_orders_per_venue": 8,
             "live_micro_max_resting_buys_per_symbol": 3,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,

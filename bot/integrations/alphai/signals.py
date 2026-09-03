@@ -39,6 +39,51 @@ class AlphaITradingSignals:
         tops = {k for k, _ in ranked[:top_n]}
         return b in tops
 
+    def priority_buy_bases(self, *, top_n: int = 3) -> frozenset[str]:
+        """Daily picks with positive score — preferred deploy targets."""
+        ranked = sorted(
+            (
+                (b, s)
+                for b, s in self.daily_pick_scores.items()
+                if b in self.daily_pick_bases
+                and s > 0
+                and b not in self.avoid_bases
+                and b not in self.blocked_bases
+            ),
+            key=lambda row: row[1],
+            reverse=True,
+        )
+        return frozenset(b for b, _ in ranked[:top_n])
+
+    def unheld_priority_buys(
+        self,
+        held_bases: set[str] | frozenset[str],
+        *,
+        top_n: int = 3,
+    ) -> frozenset[str]:
+        held = {str(b).upper() for b in held_bases}
+        return frozenset(
+            b for b in self.priority_buy_bases(top_n=top_n) if b not in held
+        )
+
+    def is_slot_priority_buy(self, base: str, *, top_n: int = 3) -> bool:
+        return str(base or "").upper() in self.priority_buy_bases(top_n=top_n)
+
+    def non_pick_slot_penalty(
+        self,
+        base: str,
+        held_bases: set[str] | frozenset[str],
+        *,
+        top_n: int = 3,
+    ) -> Decimal:
+        """Demote non-priority buys while unheld AlphaI picks still need a slot."""
+        if not self.unheld_priority_buys(held_bases, top_n=top_n):
+            return _ZERO
+        b = str(base or "").upper()
+        if self.is_slot_priority_buy(b, top_n=top_n):
+            return _ZERO
+        return Decimal("-0.60")
+
     def exit_urgency(self, base: str) -> bool:
         """Held bags on avoid/blocked headlines should harvest faster."""
         b = str(base or "").upper()
@@ -107,13 +152,14 @@ class AlphaITradingSignals:
         boost = _ZERO
         score = self.pick_score(b)
         if score > 0:
-            boost += Decimal(str(min(0.18, 0.04 + score * 0.006)))
+            # Stronger weight so high-score picks outrank random focus coins.
+            boost += Decimal(str(min(0.45, 0.08 + score * 0.01)))
         if b in self.bullish_bases:
-            boost += Decimal("0.05")
+            boost += Decimal("0.08")
         if self.is_top_pick(b) and is_buy:
-            boost += Decimal("0.04")
+            boost += Decimal("0.20")
         if b in self.avoid_bases and is_buy:
-            boost -= Decimal("0.25")
+            boost -= Decimal("0.50")
         return boost
 
     def fv_buy_premium_bps(self, base: str, default_bps: Decimal) -> Decimal:

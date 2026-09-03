@@ -78,6 +78,27 @@ def test_build_trading_signals_merges_daily_and_regime() -> None:
     assert signals.exit_urgency("XRP") is True
 
 
+def test_priority_buy_bases_and_slot_penalty() -> None:
+    signals = build_trading_signals(
+        None,
+        {
+            "picks": [
+                {"base": "XRP", "score": 54.0},
+                {"base": "LINK", "score": 39.0},
+                {"base": "UNI", "score": 36.0},
+                {"base": "ETH", "score": 18.0},
+            ],
+            "avoid": [],
+        },
+    )
+    assert signals.priority_buy_bases() == frozenset({"XRP", "LINK", "UNI"})
+    assert signals.unheld_priority_buys({"LINK"}) == frozenset({"XRP", "UNI"})
+    assert signals.is_slot_priority_buy("XRP")
+    assert signals.non_pick_slot_penalty("XRP", {"LINK"}) == Decimal("0")
+    assert signals.non_pick_slot_penalty("SOL", {"LINK"}) == Decimal("-0.60")
+    assert signals.non_pick_slot_penalty("SOL", {"XRP", "LINK", "UNI"}) == Decimal("0")
+
+
 def test_maker_rank_prefers_daily_pick() -> None:
     settings = Settings(
         execution_mode="paper",

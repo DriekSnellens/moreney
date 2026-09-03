@@ -792,6 +792,13 @@ class MakerInventoryStrategy(BaseStrategy):
         alphai_boost = Decimal("0")
         if sig is not None and base and hasattr(sig, "maker_rank_boost"):
             alphai_boost = sig.maker_rank_boost(base, is_buy=is_buy)
+        if (
+            is_buy
+            and base
+            and sig is not None
+            and hasattr(sig, "non_pick_slot_penalty")
+        ):
+            alphai_boost += sig.non_pick_slot_penalty(base, self._alphai_held_bases())
         return (
             net
             + (skew * Decimal("0.01"))
