@@ -190,10 +190,10 @@ def _session_settings(
             # Near-miss fix (live funnel): most rejects fail NET return 0.0004 by ~0.5bps
             # or absolute €0.03 by ~€0.002 — still strictly positive after fees.
             "paper_maker_min_profit_eur": 0.025,
-            "paper_maker_min_net_return": 0.00032,
+            "paper_maker_min_net_return": 0.0003,
             "paper_maker_small_clip_max_eur": 130.0,
             "paper_maker_small_clip_min_profit_eur": 0.02,
-            "paper_maker_small_clip_min_net_return": 0.00028,
+            "paper_maker_small_clip_min_net_return": 0.00026,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
@@ -428,7 +428,7 @@ def _session_settings(
             "arbitrage_min_profit_eur": 0.05,
             "arbitrage_min_profit_pct": 0.0008,
             "profitability_min_net_profit_usd": 0.025,
-            "profitability_min_net_return": 0.00032,
+            "profitability_min_net_return": 0.0003,
             "profitability_execution_buffer_bps": 2.0,
             "risk_min_net_profit_usd": 0.025,
             # Hard per-trade ceiling: allow ~€180 add clips on ~€2k pocket.
