@@ -470,9 +470,9 @@ def _session_settings(
                 getattr(base, "live_micro_reset_drawdown_on_start", True)
             ),
             # C12: more concurrent resting buys while deploying the ring.
-            "live_micro_max_open_orders": 6 if cross_venue else 4,
-            "live_micro_max_open_orders_per_venue": 4,
-            "live_micro_max_resting_buys_per_symbol": 2,
+            "live_micro_max_open_orders": 6 if cross_venue else 6,
+            "live_micro_max_open_orders_per_venue": 6,
+            "live_micro_max_resting_buys_per_symbol": 3,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
