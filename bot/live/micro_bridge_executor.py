@@ -6533,8 +6533,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Velocity scale-up: for AlphaI strong bullish picks we allow missing
             # momentum-short history (require_history relax) to avoid "momentum_block"
             # dead-zones while marks warm up. All risk/never-loss gates remain unchanged.
-            momentum_require_history = not strong_bullish
-            momentum_allow_unknown_short = bool(strong_bullish)
+            # Also allow when ring is relaxed (active book thin): this is the
+            # safest time to tolerate unknown momentum.
+            momentum_require_history = not (strong_bullish or ring_relaxed)
+            momentum_allow_unknown_short = bool(strong_bullish or ring_relaxed)
             if self._corr_sector_blocks_new_buy(base) and not bullish_buy:
                 self._bump_skip("corr_sector_momentum_block")
                 return await self._reject_before_live(
