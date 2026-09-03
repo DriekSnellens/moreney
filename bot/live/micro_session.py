@@ -194,7 +194,7 @@ def _session_settings(
             "paper_maker_small_clip_max_eur": 100.0,
             "paper_maker_small_clip_min_profit_eur": 0.01,
             "paper_maker_small_clip_min_net_return": 0.00008,
-            "paper_maker_min_spread_bps": 5.0,
+            "paper_maker_min_spread_bps": 4.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
             "paper_maker_allow_buy_only": True,
