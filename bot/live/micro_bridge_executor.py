@@ -6576,18 +6576,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             pre_rec = str(meta.get("entry_quality_recommendation") or "")
             bullish_buy = self._alphai_bullish_buy(base)
             if pre_rec == EntryQualityRecommendation.REJECT.value:
-                hard_reject = str(
-                    meta.get("entry_quality_reject_reason") or ""
-                ) in {"extension_extreme", "continuity_spike"}
-                if not (bullish_buy and not hard_reject):
+                reason_key = str(meta.get("entry_quality_reject_reason") or "")
+                strong = self._alphai_strong_bullish_buy(base)
+                hard_reject = reason_key == "extension_extreme"
+                soft_ok = (bullish_buy and not hard_reject) or (
+                    strong and reason_key == "continuity_spike"
+                )
+                if not soft_ok:
                     self._bump_skip("entry_quality_reject")
                     return await self._reject_before_live(
                         order_request,
                         reason="ENTRY_QUALITY_REJECT",
-                        message=str(
-                            meta.get("entry_quality_reject_reason") or "entry_quality"
-                        ),
+                        message=reason_key or "entry_quality",
                     )
+                meta["entry_quality_multiplier"] = "0.50"
+                order_request = order_request.model_copy(update={"metadata": meta})
                 self._bump_skip("entry_quality_reduced")
             if not pre_rec:
                 assessment = self._assess_entry_quality_buy(
@@ -6599,11 +6602,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._entry_quality_diagnostics.record(assessment)
                 if assessment.recommendation == EntryQualityRecommendation.REJECT:
                     reason_key = assessment.reject_reason or "entry_quality"
-                    hard_reject = reason_key in {
-                        "extension_extreme",
-                        "continuity_spike",
-                    }
-                    if bullish_buy and not hard_reject:
+                    strong = self._alphai_strong_bullish_buy(base)
+                    # Only extension_extreme stays hard; continuity_spike soft for strong AlphaI.
+                    hard_reject = reason_key == "extension_extreme"
+                    soft_continuity = reason_key == "continuity_spike" and strong
+                    if (bullish_buy and not hard_reject) or soft_continuity:
+                        meta["entry_quality_multiplier"] = str(
+                            min(
+                                assessment.recommended_size_multiplier or Decimal("0.5"),
+                                Decimal("0.50"),
+                            )
+                        )
+                        order_request = order_request.model_copy(
+                            update={"metadata": meta}
+                        )
                         self._bump_skip("entry_quality_reduced")
                     else:
                         self._bump_skip("entry_quality_reject")

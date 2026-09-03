@@ -198,25 +198,23 @@ def _session_settings(
             "paper_maker_allow_buy_only": True,
             # Still fee-aware never-loss; thinner buffer = asks clear sooner.
             "paper_maker_sell_profit_buffer_bps": 10.0,
-            # Soft harvest earlier / larger partials → more €/day recycles.
-            # Next step (ruim): recycle winners faster — still never below BE.
+            # Phase A velocity: arm earlier, harvest larger partials, recycle winners.
+            # Still never below BE (never-loss unchanged).
             "paper_trail_take_profit_enabled": True,
-            # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
+            # Trail all synced inventory (incl. pre-session bags → BE harvest).
             "paper_trail_session_buys_only": False,
-            # B3 runner-window: arm later so winnable can build, then light partial.
-            "paper_trail_soft_arm_pct": 0.012,
-            "paper_trail_soft_drawdown_pct": 0.0025,
-            "paper_trail_soft_partial_pct": 0.15,
-            # Lock more of BE+ bags into cash so slots free sooner.
-            "paper_trail_recovery_be_partial_pct": 0.50,
-            "paper_trail_be_harvest_partial_pct": 0.50,
-            "paper_trail_be_harvest_min_gain_pct": 0.0003,
-            "live_micro_be_harvest_cooldown_sec": 5.0,
-            "paper_trail_hard_arm_pct": 0.03,
-            "paper_trail_hard_drawdown_pct": 0.015,
-            "paper_trail_hard_partial_pct": 0.35,
-            "paper_trail_arm_gain_pct": 0.03,
-            "paper_trail_drawdown_pct": 0.015,
+            "paper_trail_soft_arm_pct": 0.008,
+            "paper_trail_soft_drawdown_pct": 0.002,
+            "paper_trail_soft_partial_pct": 0.25,
+            "paper_trail_recovery_be_partial_pct": 0.60,
+            "paper_trail_be_harvest_partial_pct": 0.65,
+            "paper_trail_be_harvest_min_gain_pct": 0.0002,
+            "live_micro_be_harvest_cooldown_sec": 3.0,
+            "paper_trail_hard_arm_pct": 0.025,
+            "paper_trail_hard_drawdown_pct": 0.012,
+            "paper_trail_hard_partial_pct": 0.40,
+            "paper_trail_arm_gain_pct": 0.025,
+            "paper_trail_drawdown_pct": 0.012,
             "paper_trail_partial_enabled": True,
             "paper_trail_partial_pct": 0.50,
             "paper_trail_atr_enabled": False,  # keep fixed harvest levels
@@ -227,7 +225,7 @@ def _session_settings(
             "paper_ladder_buy_enabled": False,
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 3600.0,  # after 1h, recovery-arm at BE (no flat dump)
+            "paper_time_stop_sec": 2700.0,  # Phase A: earlier BE recovery-arm (was 1h)
             "paper_time_stop_min_profit_bps": 25.0,  # diagnostics / floor helper only
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
@@ -238,7 +236,7 @@ def _session_settings(
             "paper_buy_momentum_samples": 12,
             "live_micro_momentum_require_last_n_rising": 4,
             "live_micro_trail_hold_while_rising": True,
-            "live_micro_trail_hold_rising_n": 2,
+            "live_micro_trail_hold_rising_n": 1,
             "live_micro_ring_soft_max_active_eur": 650.0,
             "live_micro_ring_soft_block_underwater_eur": 25.0,
             # Capital Velocity Desk: unlock Util-B despite vault underwater bags.
@@ -263,17 +261,18 @@ def _session_settings(
             "live_micro_buy_quality_underwater_count": 4,
             "live_micro_buy_quality_pause_sec": 1800.0,
             "live_micro_entry_headroom_enabled": True,
-            "live_micro_entry_headroom_min_pct": 0.0025,
+            # Phase A: slightly softer entry gates — still reject extremes.
+            "live_micro_entry_headroom_min_pct": 0.002,
             "live_micro_entry_extension_moderate_pct": 0.012,
             "live_micro_entry_extension_max_pct": 0.025,
             "live_micro_entry_extension_extreme_pct": 0.045,
-            "live_micro_entry_quality_min_score": 60.0,
+            "live_micro_entry_quality_min_score": 55.0,
             "live_micro_entry_reduced_size_score": 70.0,
             "live_micro_entry_normal_size_score": 80.0,
             "live_micro_entry_reduced_size_multiplier": 0.75,
             "live_micro_entry_small_size_multiplier": 0.50,
-            "live_micro_entry_min_continuity_score": 0.35,
-            "live_micro_entry_target_harvest_pct": 0.012,
+            "live_micro_entry_min_continuity_score": 0.30,
+            "live_micro_entry_target_harvest_pct": 0.008,
             "live_micro_block_underwater_cross_venue": True,
             # Capital velocity + venue economics (downward-only modifiers).
             "live_micro_capital_efficiency_enabled": True,
@@ -318,7 +317,7 @@ def _session_settings(
             "live_micro_exit_cooldown_sec": 1.0,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
-            "live_micro_exit_soft_armed_partial_pct": 0.75,
+            "live_micro_exit_soft_armed_partial_pct": 0.85,
             "live_micro_exit_taker_cushion_bps": 5.0,
             # Winnable-A: escalate to taker after 1 stale maker (still only ≥ BE).
             "live_micro_exit_taker_after_maker_fails": 1,

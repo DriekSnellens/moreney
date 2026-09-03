@@ -235,6 +235,30 @@ _MACRO_NOISE_KEYWORDS = (
     "sports",
     "nba",
     "nfl",
+    # Legal process noise — not desk-wide risk-off unless crash cues also present.
+    "lawsuit",
+    "court case",
+    "seeks dismissal",
+    "dismissed",
+    "app tracking",
+    "antitrust trial",
+)
+
+_MACRO_CRASH_KEYWORDS = (
+    "crash",
+    "selloff",
+    "sell-off",
+    "sell off",
+    "crackdown",
+    "ban crypto",
+    "crypto ban",
+    "default",
+    "collapse",
+    "risk-off",
+    "risk off",
+    "emergency rate",
+    "circuit breaker",
+    "liquidity crisis",
 )
 
 
@@ -284,14 +308,20 @@ def _headline_macro_market_relevant(h: AlphaIHeadline) -> bool:
 
 
 def _headline_macro_bearish(h: AlphaIHeadline) -> bool:
-    """True only for market-relevant macro/regulation/geopolitics risk."""
+    """True only for market-relevant macro risk that is actually bearish.
+
+    Regulation/geopolitics headlines must show bearish sentiment or crash cues.
+    Relevance alone is not enough (e.g. CFTC lawsuit dismissal ≠ desk reduce-only).
+    """
     if not _headline_macro_market_relevant(h):
         return False
-    if h.category in {"regulation", "geopolitics"} and h.relevance >= 7:
+    if any(_is_bearish(s) for s in h.sentiments.values()):
         return True
-    if h.category == "macro_economy" and h.relevance >= 8:
+    title = (h.title or "").lower()
+    if any(_title_has_keyword(title, key) for key in _MACRO_CRASH_KEYWORDS):
         return True
-    return any(_is_bearish(s) for s in h.sentiments.values())
+    # High-relevance macro_economy still needs stress language; avoid idle RO.
+    return False
 
 
 def _is_bearish(sentiment: str) -> bool:
