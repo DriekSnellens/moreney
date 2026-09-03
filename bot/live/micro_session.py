@@ -237,7 +237,9 @@ def _session_settings(
             "live_micro_momentum_require_last_n_rising": 4,
             "live_micro_trail_hold_while_rising": True,
             "live_micro_trail_hold_rising_n": 1,
-            "live_micro_ring_soft_max_active_eur": 650.0,
+            # Phase A scaling: keep ring-soft momentum eligibility longer
+            # so new-base entries hit the softer momentum floor more often.
+            "live_micro_ring_soft_max_active_eur": 900.0,
             "live_micro_ring_soft_block_underwater_eur": 25.0,
             # Capital Velocity Desk: unlock Util-B despite vault underwater bags.
             "live_micro_ring_util_b_ignore_underwater": True,
