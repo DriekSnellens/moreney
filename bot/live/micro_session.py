@@ -189,11 +189,11 @@ def _session_settings(
             # C12: align maker + profitability gate (was 5bps gate killing 4bps maker).
             # Phase A scale: allow a slightly wider band of "near-edge"
             # maker trades (still profitability-positive after fees).
-            "paper_maker_min_profit_eur": 0.02,
-            "paper_maker_min_net_return": 0.00025,
+            "paper_maker_min_profit_eur": 0.01,
+            "paper_maker_min_net_return": 0.0001,
             "paper_maker_small_clip_max_eur": 100.0,
-            "paper_maker_small_clip_min_profit_eur": 0.02,
-            "paper_maker_small_clip_min_net_return": 0.00020,
+            "paper_maker_small_clip_min_profit_eur": 0.01,
+            "paper_maker_small_clip_min_net_return": 0.00008,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
