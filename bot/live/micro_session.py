@@ -187,11 +187,13 @@ def _session_settings(
             "live_micro_add_clip_eur": 100.0,
             # Util-B light: slightly easier NET so empty-ring emits are not starved.
             # C12: align maker + profitability gate (was 5bps gate killing 4bps maker).
-            "paper_maker_min_profit_eur": 0.03,
-            "paper_maker_min_net_return": 0.0004,
+            # Phase A scale: allow a slightly wider band of "near-edge"
+            # maker trades (still profitability-positive after fees).
+            "paper_maker_min_profit_eur": 0.025,
+            "paper_maker_min_net_return": 0.00032,
             "paper_maker_small_clip_max_eur": 100.0,
-            "paper_maker_small_clip_min_profit_eur": 0.03,
-            "paper_maker_small_clip_min_net_return": 0.0003,
+            "paper_maker_small_clip_min_profit_eur": 0.025,
+            "paper_maker_small_clip_min_net_return": 0.00024,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
