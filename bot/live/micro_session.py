@@ -453,6 +453,9 @@ def _session_settings(
             # Ruim: enough open-position headroom for 8 bases/venue (defensive exits unchanged).
             "risk_max_open_positions": 16 if cross_venue else 8,
             "max_simultaneous_positions": 16 if cross_venue else 8,
+            # Velocity scale: allow a small increase in trade throughput.
+            # Keep drawdown/daily-loss/correlation caps unchanged.
+            "max_trades_per_minute": 45,
             "opportunity_max_executions_per_cycle": 10,
             "opportunity_max_candidates_per_cycle": 20,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
