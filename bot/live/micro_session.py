@@ -258,8 +258,8 @@ def _session_settings(
             "live_micro_winner_add_max": 0,
             "live_micro_winner_add_clip_eur": 75.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
-            "live_micro_buy_quality_underwater_count": 4,
-            "live_micro_buy_quality_pause_sec": 1800.0,
+            "live_micro_buy_quality_underwater_count": 8,
+            "live_micro_buy_quality_pause_sec": 600.0,
             "live_micro_entry_headroom_enabled": True,
             # Phase A: slightly softer entry gates — still reject extremes.
             "live_micro_entry_headroom_min_pct": 0.002,

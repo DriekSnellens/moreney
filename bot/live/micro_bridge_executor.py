@@ -2219,7 +2219,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             feat = self._alphai_feature_for(
                 base_sym, adverse_score=opp_assessment.adverse_selection_score
             )
-            self._alphai_feature_snapshot = feat.as_dict()
+            self._alphai_feature_snapshot = {
+                k: str(v) if isinstance(v, Decimal) else v
+                for k, v in feat.as_dict().items()
+            }
             meta["alphai_feature_score"] = str(feat.feature_score)
             meta["alphai_freshness"] = str(feat.freshness)
             meta["alphai_entry_timing"] = feat.entry_timing
