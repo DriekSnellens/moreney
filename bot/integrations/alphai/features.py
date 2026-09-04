@@ -352,11 +352,17 @@ def evaluate_intraday_entry_gate(
     min_freshness: Decimal = Decimal("0.35"),
     adverse_wait_threshold: Decimal = Decimal("0.55"),
     adverse_reduce_threshold: Decimal = Decimal("0.40"),
+    price_lagging: bool = False,
+    price_confirm_scale: Decimal | float | None = None,
+    min_confirm_scale: Decimal = Decimal("0.45"),
+    require_momentum_rising: bool = False,
 ) -> IntradayEntryGateResult:
     """Raise intraday timing quality: buy only when AlphaI + tape agree.
 
     WAIT → skip buy; REDUCE → smaller clip; ALLOW → full path.
     Does not relax risk / never-loss floors.
+
+    Price-confirm (coin-agnostic): lagging vs BTC/peers → WAIT, not just size cut.
     """
     reasons: list[str] = []
     adv = adverse_score if adverse_score is not None else _ZERO
@@ -369,6 +375,24 @@ def evaluate_intraday_entry_gate(
             size_multiplier=Decimal("0"),
             reasons=("alphai_not_bullish",),
         )
+
+    if price_lagging:
+        return IntradayEntryGateResult(
+            action="WAIT",
+            size_multiplier=Decimal("0"),
+            reasons=("price_lagging",),
+        )
+    if price_confirm_scale is not None:
+        try:
+            scale = Decimal(str(price_confirm_scale))
+        except Exception:  # noqa: BLE001
+            scale = _ONE
+        if scale < min_confirm_scale:
+            return IntradayEntryGateResult(
+                action="WAIT",
+                size_multiplier=Decimal("0"),
+                reasons=("price_confirm_weak",),
+            )
 
     if fresh < min_freshness:
         reasons.append("alphai_stale")
@@ -392,6 +416,13 @@ def evaluate_intraday_entry_gate(
             action="WAIT",
             size_multiplier=Decimal("0"),
             reasons=tuple(reasons),
+        )
+
+    if require_momentum_rising and not momentum_rising:
+        return IntradayEntryGateResult(
+            action="WAIT",
+            size_multiplier=Decimal("0"),
+            reasons=("momentum_not_rising_strict",),
         )
 
     size = _ONE

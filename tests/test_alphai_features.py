@@ -190,6 +190,44 @@ def test_intraday_entry_gate_wait_on_adverse_or_down_momentum():
     assert reduce.size_multiplier < Decimal("1")
 
 
+def test_intraday_entry_gate_wait_on_price_lag():
+    lag = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.10"),
+        entry_timing="NORMAL",
+        momentum_down=False,
+        momentum_rising=True,
+        price_lagging=True,
+    )
+    assert lag.action == "WAIT"
+    assert "price_lagging" in lag.reasons
+
+    weak = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.10"),
+        entry_timing="NORMAL",
+        momentum_down=False,
+        momentum_rising=True,
+        price_confirm_scale=Decimal("0.20"),
+    )
+    assert weak.action == "WAIT"
+    assert "price_confirm_weak" in weak.reasons
+
+    strict = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.10"),
+        entry_timing="NORMAL",
+        momentum_down=False,
+        momentum_rising=False,
+        require_momentum_rising=True,
+    )
+    assert strict.action == "WAIT"
+    assert "momentum_not_rising_strict" in strict.reasons
+
+
 def test_opportunity_engine_includes_alphai_score():
     sig = _signals()
     opp = TradeOpportunity(

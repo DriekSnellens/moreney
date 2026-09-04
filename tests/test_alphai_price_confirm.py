@@ -157,6 +157,29 @@ def test_pick_outcomes_scorecard_settles_vs_btc(tmp_path: Path) -> None:
     assert "rank1=AAA" in (summary["latest_lesson"] or "")
 
 
+def test_lagging_pick_is_weak_and_not_strong() -> None:
+    """P0: lagging tape demotes strong → enables cuts/uw (no cut exemption)."""
+    state = AlphaIRegimeState(enabled=True, macro_reduce_only=True)
+    daily = {
+        "picks": [
+            {"base": "AAA", "score": 60.0, "rank": 1},
+            {"base": "BBB", "score": 57.0, "rank": 2},
+        ],
+        "price_check": {
+            "lagging": ["AAA"],
+            "confirm_scales": {"AAA": 0.0, "BBB": 0.95},
+        },
+        "base_reliability": {"AAA": 0.60, "BBB": 1.0},
+    }
+    sig = build_trading_signals(state, daily)
+    assert sig.is_strong_bullish_buy("AAA") is False
+    assert sig.is_weak_bullish_hold("AAA") is True
+    assert sig.price_confirm_scale("AAA") < 0.45
+    assert sig.base_reliability_mult("AAA") < 0.75
+    # BBB stays strong when tape confirms.
+    assert sig.is_strong_bullish_buy("BBB") is True
+
+
 def test_enrich_daily_with_price_check_copy() -> None:
     daily = {"session_id": "x", "picks": [{"base": "AAA", "score": 60}]}
     enriched = enrich_daily_with_price_check(

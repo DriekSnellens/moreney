@@ -159,3 +159,19 @@ def test_overlays_defined_for_all_playbooks() -> None:
     assert PRE_CRASH_FLAT_OVERLAYS["active_ring_eur"] < PLAYBOOK_OVERLAYS[
         CapitalPlaybook.FLAT
     ]["active_ring_eur"]
+
+
+def test_adverse_and_precrash_speed_up_recycle_and_block_deploy() -> None:
+    adverse = PLAYBOOK_OVERLAYS[CapitalPlaybook.ADVERSE]
+    assert adverse["uw_alphai_min_age_sec"] <= 900.0
+    assert adverse["uw_alphai_below_be_pct"] <= 0.010
+    assert adverse["trail_hold_rising_n"] == 0
+    assert adverse["alphai_idle_deploy_blocked"] is True
+    assert adverse["alphai_intraday_require_rising"] is True
+    assert adverse["early_cut_loss_below_be_pct"] <= 0.008
+
+    pre = PRE_CRASH_FLAT_OVERLAYS
+    assert pre["uw_alphai_min_age_sec"] <= 600.0
+    assert pre["trail_hold_rising_n"] == 0
+    assert pre["alphai_idle_deploy_blocked"] is True
+    assert pre["block_new_buys"] is True
