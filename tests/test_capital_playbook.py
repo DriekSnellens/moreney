@@ -19,6 +19,7 @@ def test_flat_day_low_velocity_classifies_flat() -> None:
             median_mom=0.0002,
             winnable_gap_eur=5.0,
             time_stop_below_be_skips=80,
+            inventory_mtm_eur=900.0,
         ),
         current=None,
         held_sec=0,
@@ -28,6 +29,19 @@ def test_flat_day_low_velocity_classifies_flat() -> None:
     assert decision.overlays.get("exit_taker_cushion_bps") == 2.0
     assert decision.overlays.get("winner_add_enabled") is False
     assert decision.overlays.get("active_ring_eur") == 1200.0
+
+
+def test_velocity_alone_does_not_force_flat() -> None:
+    decision = classify_capital_playbook(
+        CapitalPlaybookInputs(
+            sell_fills_last_60m=0,
+            sell_fills_last_180m=0,
+            inventory_mtm_eur=0.0,
+        ),
+        min_hold_sec=0,
+    )
+    assert decision.playbook == CapitalPlaybook.TREND
+    assert "flat_unconfirmed" in decision.reasons
 
 
 def test_adverse_macro_and_underwater() -> None:

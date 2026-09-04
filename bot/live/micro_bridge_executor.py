@@ -1428,9 +1428,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             winnable_gap_eur=winnable_gap,
         )
         held = now - self._capital_playbook_since_mono
+        # First classification applies immediately (no hysteresis from cold TREND default).
+        current = (
+            None
+            if self._capital_playbook_last_refresh_mono <= 0
+            else self._capital_playbook
+        )
         decision = classify_capital_playbook(
             inputs,
-            current=self._capital_playbook,
+            current=current,
             held_sec=held,
             min_hold_sec=self._capital_playbook_min_hold_sec,
         )

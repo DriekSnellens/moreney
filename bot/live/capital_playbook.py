@@ -178,7 +178,17 @@ def _raw_classify(
         )
 
     if flat_score >= 2.0:
-        return CapitalPlaybook.FLAT, min(0.9, 0.5 + 0.1 * flat_score), reasons
+        # Velocity alone is not enough (cold start / restart looks like zero fills).
+        confirm = (
+            inputs.near_be_stuck_count >= 1
+            or inputs.winnable_gap_eur >= 2.0
+            or inputs.time_stop_below_be_skips >= 20
+            or inputs.inventory_mtm_eur >= 400.0
+            or (mom is not None and abs(mom) <= 0.0008)
+        )
+        if confirm:
+            return CapitalPlaybook.FLAT, min(0.9, 0.5 + 0.1 * flat_score), reasons
+        reasons.append("flat_unconfirmed")
 
     # --- TREND default ---
     if inputs.sell_fills_last_60m >= 3:
