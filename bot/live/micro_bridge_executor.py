@@ -867,6 +867,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "resting": resting,
             "mirrored_trade_ids": sorted(self._mirrored_trade_ids),
             "session_lots": self._serialize_lots(self._session_lots),
+            "cost_lots": self._serialize_lots(self._cost_lots),
+            "trusted_cost_keys": sorted(self._trusted_cost_keys),
             "position_opened_at": dict(self._position_opened_at),
             "skips": dict(self.skips),
             "session_live_fill_count": int(self.session_live_fill_count),
@@ -918,6 +920,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(x) for x in (raw.get("mirrored_trade_ids") or []) if str(x)
         }
         self._session_lots = self._deserialize_lots(raw.get("session_lots"))
+        persisted_cost = self._deserialize_lots(raw.get("cost_lots"))
+        if persisted_cost:
+            self._cost_lots = persisted_cost
+        # Session buys are live fills — always treat as trusted cost for exits/recycle.
+        for lot_key, lots in list(self._session_lots.items()):
+            if not lots:
+                continue
+            if lot_key not in self._cost_lots or not self._cost_lots.get(lot_key):
+                self._cost_lots[lot_key] = [list(row) for row in lots]
+            self._trusted_cost_keys.add(lot_key)
+        for key in raw.get("trusted_cost_keys") or []:
+            k = str(key or "")
+            if k:
+                self._trusted_cost_keys.add(k)
+        # Any restored cost lot without an explicit trust flag stays untrusted
+        # unless it also has session_lots (handled above).
         self._position_opened_at = {
             str(k): float(v)
             for k, v in (raw.get("position_opened_at") or {}).items()

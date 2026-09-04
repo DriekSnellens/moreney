@@ -1068,6 +1068,33 @@ def test_session_lots_only_for_trail_cost(tmp_path: Path) -> None:
     assert bridge._session_qty("bitvavo", "ADA") == Decimal("5")  # noqa: SLF001
 
 
+def test_persist_restores_trusted_cost_from_session_lots(tmp_path: Path) -> None:
+    """After restart, session lots must remain trusted so uw_recycle can sell."""
+    path = tmp_path / "trust_persist.json"
+    settings = _unlocked(live_micro_bridge_persist_path=str(path))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._session_lots["bitvavo:ADA"] = [[Decimal("80"), Decimal("1.0")]]  # noqa: SLF001
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("80"), Decimal("1.0")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    bridge.persist_runtime_state(force=True)
+
+    bridge2 = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    assert bridge2._has_trusted_cost("bitvavo", "ADA") is True  # noqa: SLF001
+    assert bridge2._unit_cost("bitvavo", "ADA") == Decimal("1.0")  # noqa: SLF001
+
+
 def test_daily_kill_blocks_buys() -> None:
     settings = _unlocked(paper_daily_kill_eur=50.0)
     bridge = MicroBudgetLiveExecutor(
