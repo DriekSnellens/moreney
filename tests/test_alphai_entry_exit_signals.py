@@ -121,6 +121,47 @@ def test_entry_size_multiplier_scales_high_alpha_scores() -> None:
     assert eth_mult <= Decimal("1.50")
     assert eth_mult >= Decimal("1.40")
     assert signals.entry_size_multiplier("SOL") == Decimal("0.75")
+    assert signals.pick_conviction("ETH") > signals.pick_conviction("ADA")
+
+
+def test_headline_mix_and_weak_hold_bias() -> None:
+    signals = build_trading_signals(
+        None,
+        {
+            "picks": [
+                {
+                    "base": "ETH",
+                    "score": 114.0,
+                    "bullish_headlines": ["a", "b", "c", "d"],
+                    "bearish_headlines": [],
+                },
+                {
+                    "base": "XRP",
+                    "score": 71.5,
+                    "bullish_headlines": ["a", "b", "c", "d"],
+                    "bearish_headlines": ["e"],
+                },
+                {
+                    "base": "BNB",
+                    "score": 18.0,
+                    "bullish_headlines": ["a"],
+                    "bearish_headlines": [],
+                },
+            ],
+            "avoid": [],
+        },
+    )
+    assert signals.is_headline_mixed("XRP")
+    assert not signals.is_headline_mixed("ETH")
+    assert signals.entry_size_multiplier("ETH") > signals.entry_size_multiplier("XRP")
+    assert signals.pick_conviction("ETH") > signals.pick_conviction("BNB")
+    assert signals.is_weak_bullish_hold("BNB")
+    assert not signals.is_weak_bullish_hold("ETH")
+    assert signals.be_harvest_gain_scale("BNB") < signals.be_harvest_gain_scale("ETH")
+    assert signals.trail_hold_boost("ETH") > signals.trail_hold_boost("BNB")
+    assert signals.maker_rank_boost("BNB", is_buy=False) > signals.maker_rank_boost(
+        "ETH", is_buy=False
+    )
 
 
 def test_alphai_buy_clip_cap_prefers_strong_picks(tmp_path: Path) -> None:

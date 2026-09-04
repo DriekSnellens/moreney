@@ -1127,6 +1127,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _alphai_strong_bullish_buy(self, base: str) -> bool:
         if not self._alphai_bullish_buy(base):
             return False
+        # Stale AlphaI: no max-clip path (priority clip still allowed).
+        if not self._alphai_signal_fresh_enough(base):
+            return False
         sig = self._alphai_signals
         if sig is None or not hasattr(sig, "is_strong_bullish_buy"):
             return False
@@ -1135,6 +1138,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 base, ring_fallback=self._alphai_ring_fallback_active()
             )
         )
+
+    def _alphai_signal_fresh_enough(self, base: str) -> bool:
+        """Reject strong-clip / winner-add when AlphaI pick set is stale."""
+        try:
+            return self._alphai_feature_for(base).freshness >= Decimal("0.35")
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _alphai_hold_conviction(self, base: str) -> float:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "pick_conviction"):
+            return 1.0 if self._alphai_bullish_buy(base) else 0.0
+        try:
+            return float(sig.pick_conviction(base))
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _alphai_weak_bullish_hold(self, base: str) -> bool:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_weak_bullish_hold"):
+            return False
+        try:
+            return bool(sig.is_weak_bullish_hold(base))
+        except Exception:  # noqa: BLE001
+            return False
 
     def _effective_exit_resting_max_age_sec(self, base: str) -> float:
         age = self._exit_resting_max_age_sec
@@ -4467,15 +4495,33 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return ("dust", "band", floor)
             return ("dust", "stop", floor)
 
-        # Layer 3: AlphaI picks — hold longer; hard age / depth caps.
+        # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
         if is_alphai:
-            floor = be * (Decimal("1") - self._uw_alphai_below_be_pct)
-            if depth >= self._uw_alphai_below_be_pct:
-                return ("alphai_deep", "stop", floor)
-            if age >= self._uw_alphai_min_age_sec and flat_or_down:
+            weak = self._alphai_weak_bullish_hold(base)
+            conv = self._alphai_hold_conviction(base)
+            if weak or conv < 0.45:
+                # Blend toward non-AlphaI thresholds for weak picks (BNB/DOGE-class).
+                below = (
+                    self._uw_non_alphai_below_be_pct
+                    + (self._uw_alphai_below_be_pct - self._uw_non_alphai_below_be_pct)
+                    * Decimal(str(max(0.0, min(1.0, conv)))
+                    )
+                )
+                min_age = self._uw_non_alphai_min_age_sec + (
+                    self._uw_alphai_min_age_sec - self._uw_non_alphai_min_age_sec
+                ) * max(0.0, min(1.0, conv))
+                tier_prefix = "alphai_weak"
+            else:
+                below = self._uw_alphai_below_be_pct
+                min_age = self._uw_alphai_min_age_sec
+                tier_prefix = "alphai"
+            floor = be * (Decimal("1") - below)
+            if depth >= below:
+                return (f"{tier_prefix}_deep", "stop", floor)
+            if age >= min_age and flat_or_down:
                 if mark >= floor:
-                    return ("alphai_aged", "band", floor)
-                return ("alphai_aged", "stop", floor)
+                    return (f"{tier_prefix}_aged", "band", floor)
+                return (f"{tier_prefix}_aged", "stop", floor)
             return None
 
         # Layer 2a: non-AlphaI aged recycle.
@@ -4939,10 +4985,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if be is None or mark < be:
             return False
-        # Neutral/bearish AlphaI bags: do not hold for rising tape — recycle at BE+.
+        # Neutral/bearish/weak AlphaI bags: do not hold for rising tape — recycle at BE+.
         base = infer_base_asset(symbol, self._quote)
         if base and (
             self._alphai_exit_urgency(base)
+            or self._alphai_weak_bullish_hold(base)
             or (
                 bool(getattr(self._settings, "alphai_require_bullish_new_buys", False))
                 and not self._alphai_bullish_buy(base)
@@ -5152,6 +5199,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         # Max-deploy path: only add into AlphaI-approved bags (still ≥ BE).
         if self._alphai_winner_add_only and not self._alphai_bullish_buy(base):
+            return False
+        # Stale / weak AlphaI: do not scale in — recycle capital toward fresh conviction.
+        if not self._alphai_signal_fresh_enough(base):
+            return False
+        if self._alphai_weak_bullish_hold(base):
             return False
         trail_key = self._lots_key(venue, base)
         st = self._trail.get(trail_key) or {}

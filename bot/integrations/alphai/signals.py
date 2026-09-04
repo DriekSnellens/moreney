@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -23,9 +23,78 @@ class AlphaITradingSignals:
     bullish_bases: frozenset[str]
     blocked_bases: frozenset[str]
     macro_active: bool
+    bullish_headline_counts: dict[str, int] = field(default_factory=dict)
+    bearish_headline_counts: dict[str, int] = field(default_factory=dict)
 
     def pick_score(self, base: str) -> float:
         return float(self.daily_pick_scores.get(str(base or "").upper(), 0.0))
+
+    def headline_bull_count(self, base: str) -> int:
+        return int(self.bullish_headline_counts.get(str(base or "").upper(), 0) or 0)
+
+    def headline_bear_count(self, base: str) -> int:
+        return int(self.bearish_headline_counts.get(str(base or "").upper(), 0) or 0)
+
+    def is_headline_mixed(self, base: str) -> bool:
+        """True when both bullish and bearish headlines are present for *base*."""
+        return self.headline_bull_count(base) > 0 and self.headline_bear_count(base) > 0
+
+    def headline_conflict_ratio(self, base: str) -> float:
+        """Bear share of headline mix in ``[0, 1]`` (0 = pure bull / no news)."""
+        bull = self.headline_bull_count(base)
+        bear = self.headline_bear_count(base)
+        total = bull + bear
+        if total <= 0:
+            return 0.0
+        return bear / float(total)
+
+    def pick_conviction(self, base: str) -> float:
+        """Relative 0..1 conviction among positive daily picks (rank + score).
+
+        Replaces absolute score scales that saturate when picks land in the
+        18–114 range. Live bullish headlines get a floor so regime-only names
+        still look actionable.
+        """
+        b = str(base or "").upper()
+        positive = [
+            (k, float(v))
+            for k, v in self.daily_pick_scores.items()
+            if k in self.daily_pick_bases and float(v) > 0
+            and k not in self.avoid_bases
+            and k not in self.blocked_bases
+        ]
+        if not positive:
+            return 0.75 if b in self.bullish_bases else 0.0
+        ranked = sorted(positive, key=lambda row: row[1], reverse=True)
+        score_map = {k: s for k, s in ranked}
+        if b not in score_map:
+            return 0.70 if b in self.bullish_bases else 0.0
+        n = len(ranked)
+        rank_idx = next(i for i, (k, _) in enumerate(ranked) if k == b)
+        # Rank #1 → 1.0; last of N → 1/N.
+        rank_conv = 1.0 - (rank_idx / max(n, 1))
+        scores = [s for _, s in ranked]
+        mx, mn = max(scores), min(scores)
+        if mx > mn:
+            score_conv = (score_map[b] - mn) / (mx - mn)
+        else:
+            score_conv = 1.0
+        conv = 0.55 * rank_conv + 0.45 * score_conv
+        # Mixed headlines damp conviction (still buyable, weaker hold/size).
+        if self.is_headline_mixed(b):
+            conv *= max(0.55, 1.0 - 0.55 * self.headline_conflict_ratio(b))
+        if b in self.bullish_bases:
+            conv = max(conv, 0.70)
+        return max(0.0, min(1.0, conv))
+
+    def is_weak_bullish_hold(self, base: str) -> bool:
+        """Bullish-enough to buy, but weak conviction → faster recycle/hold trim."""
+        b = str(base or "").upper()
+        if self.is_bearish(b) or not self.allows_new_buy(b):
+            return False
+        if self.is_headline_mixed(b) and self.headline_conflict_ratio(b) >= 0.25:
+            return True
+        return self.pick_conviction(b) < 0.45
 
     def is_top_pick(self, base: str, *, top_n: int = 5) -> bool:
         b = str(base or "").upper()
@@ -110,14 +179,31 @@ class AlphaITradingSignals:
         return self.is_bearish(base) or self.recycle_sell_only(base)
 
     def be_harvest_gain_scale(self, base: str) -> Decimal:
-        """Lower min-gain threshold → earlier partial harvest on avoid/neutral."""
+        """Lower min-gain threshold → earlier partial harvest on avoid/neutral/weak."""
         if self.is_bearish(base):
             return Decimal("0.50")
         if self.recycle_sell_only(base):
             return Decimal("0.65")
+        # Bullish path: conviction-weighted (weak/mixed harvest earlier).
+        conv = self.pick_conviction(base)
+        scale = Decimal(str(round(0.70 + 0.30 * conv, 2)))
+        if self.is_headline_mixed(base):
+            scale = min(scale, Decimal("0.80"))
         if self.macro_active:
-            return Decimal("0.80")
-        return _ONE
+            scale = min(scale, Decimal("0.80"))
+        return scale
+
+    def trail_hold_boost(self, base: str) -> Decimal:
+        """How much longer to trail-hold a bullish bag (1.0 = neutral)."""
+        if self.is_bearish(base) or self.recycle_sell_only(base):
+            return Decimal("0.70")
+        conv = self.pick_conviction(base)
+        boost = Decimal(str(round(1.0 + 0.20 * conv, 2)))
+        if self.is_headline_mixed(base):
+            boost = min(boost, Decimal("1.05"))
+        if self.is_weak_bullish_hold(base):
+            boost = min(boost, Decimal("1.02"))
+        return boost
 
     def all_bullish_held(self, held_bases: set[str] | frozenset[str]) -> bool:
         """True when every bullish buy pick is already in portfolio (or none exist)."""
@@ -167,32 +253,37 @@ class AlphaITradingSignals:
         return False
 
     def entry_size_multiplier(self, base: str) -> Decimal:
-        """Boost size on daily picks + live bullish; trim on avoid (pre-block)."""
+        """Boost size on daily picks + live bullish; trim on avoid / mixed headlines."""
         b = str(base or "").upper()
         if b in self.avoid_bases:
             return Decimal("0.75")
         mult = _ONE
+        conv = self.pick_conviction(b)
         score = self.pick_score(b)
-        if score >= 4.0:
-            # High scores (e.g. ETH ~90+) get near-max clip boost for capital deploy.
-            mult += Decimal(str(min(0.40, 0.05 + score * 0.004)))
+        if score > 0 or b in self.bullish_bases:
+            # Conviction-scaled boost (ETH-class >> DOGE-class).
+            mult += Decimal(str(round(min(0.40, 0.05 + conv * 0.35), 3)))
         if b in self.bullish_bases:
             mult += Decimal("0.10")
         if self.is_top_pick(b):
             mult += Decimal("0.08")
         if self.is_strong_bullish_buy(b):
             mult += Decimal("0.05")
+        # Mixed / conflicting headlines → smaller clip.
+        conflict = self.headline_conflict_ratio(b)
+        if conflict > 0:
+            mult *= Decimal(str(round(max(0.70, 1.0 - 0.45 * conflict), 3)))
         return min(mult, Decimal("1.50"))
 
     def maker_rank_boost(self, base: str, *, is_buy: bool) -> Decimal:
         """Additive EUR rank boost for maker opportunity sorting."""
         b = str(base or "").upper()
         boost = _ZERO
+        conv = self.pick_conviction(b)
         score = self.pick_score(b)
         if is_buy:
-            if score > 0:
-                # Stronger weight so high-score picks outrank random focus coins.
-                boost += Decimal(str(min(0.45, 0.08 + score * 0.01)))
+            if score > 0 or b in self.bullish_bases:
+                boost += Decimal(str(round(min(0.45, 0.08 + conv * 0.37), 3)))
             if b in self.bullish_bases:
                 boost += Decimal("0.08")
             if self.is_top_pick(b):
@@ -201,13 +292,19 @@ class AlphaITradingSignals:
                 boost -= Decimal("0.50")
             elif not self.allows_new_buy(b):
                 boost -= Decimal("0.35")
+            elif self.is_headline_mixed(b):
+                boost -= Decimal("0.08")
         else:
-            # Prefer harvesting bearish / non-bullish bags first (still ≥ BE).
+            # Prefer harvesting bearish / non-bullish / weak bags first (still ≥ BE).
             if self.is_bearish(b):
                 boost += Decimal("0.35")
             elif not self.allows_new_buy(b):
                 boost += Decimal("0.12")
-            if b in self.bullish_bases or self.is_top_pick(b):
+            elif self.is_weak_bullish_hold(b):
+                boost += Decimal("0.10")
+            if (b in self.bullish_bases or self.is_top_pick(b)) and not self.is_weak_bullish_hold(
+                b
+            ):
                 boost -= Decimal("0.08")
         return boost
 
@@ -267,6 +364,11 @@ class AlphaITradingSignals:
             "bullish_buy_bases": sorted(self.bullish_buy_bases()),
             "blocked_bases": sorted(self.blocked_bases),
             "macro_active": self.macro_active,
+            "bullish_headline_counts": dict(self.bullish_headline_counts),
+            "bearish_headline_counts": dict(self.bearish_headline_counts),
+            "pick_conviction": {
+                b: round(self.pick_conviction(b), 3) for b in sorted(self.bullish_buy_bases())
+            },
         }
 
 
@@ -279,6 +381,8 @@ def build_trading_signals(
     pick_bases: set[str] = set()
     avoid: set[str] = set()
     watch: set[str] = set()
+    bull_hl: dict[str, int] = {}
+    bear_hl: dict[str, int] = {}
 
     if isinstance(daily, dict):
         for row in daily.get("picks") or []:
@@ -292,6 +396,23 @@ def build_trading_signals(
                 scores[base] = float(row.get("score") or 0.0)
             except (TypeError, ValueError):
                 scores[base] = 0.0
+            bull_list = row.get("bullish_headlines") or []
+            bear_list = row.get("bearish_headlines") or []
+            if isinstance(bull_list, list):
+                bull_hl[base] = len(bull_list)
+            if isinstance(bear_list, list):
+                bear_hl[base] = len(bear_list)
+            # Explicit counts win when present (tests / compact payloads).
+            if row.get("bullish_headline_count") is not None:
+                try:
+                    bull_hl[base] = int(row.get("bullish_headline_count") or 0)
+                except (TypeError, ValueError):
+                    pass
+            if row.get("bearish_headline_count") is not None:
+                try:
+                    bear_hl[base] = int(row.get("bearish_headline_count") or 0)
+                except (TypeError, ValueError):
+                    pass
         for row in daily.get("avoid") or []:
             if not isinstance(row, dict):
                 continue
@@ -339,4 +460,6 @@ def build_trading_signals(
         bullish_bases=frozenset(bullish),
         blocked_bases=frozenset(blocked),
         macro_active=macro,
+        bullish_headline_counts=bull_hl,
+        bearish_headline_counts=bear_hl,
     )

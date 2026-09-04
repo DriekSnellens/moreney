@@ -426,9 +426,9 @@ def _session_settings(
             "alphai_require_bullish_new_buys": True,
             "alphai_bullish_buy_enabled": True,
             "alphai_daily_recommendations_top_n": 5,
-            # AlphaI scored features — shadow-first (score/log, no hard WAIT reject).
+            # AlphaI scored features — live WAIT on bullish×adverse (never-loss intact).
             "alphai_feature_scoring_enabled": True,
-            "alphai_feature_shadow_only": True,
+            "alphai_feature_shadow_only": False,
             "alphai_feature_auto_apply": False,
             "alphai_opp_weight": 0.06,
             "live_allow_without_research_unlock": True,

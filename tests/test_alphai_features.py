@@ -92,6 +92,49 @@ def test_capital_preference_boost_top_pick():
     assert feat.capital_preference > Decimal("1")
 
 
+def test_feature_score_differentiates_high_vs_low_picks():
+    """Live scores land in 18–114; ETH must outrank BNB in feature_score."""
+    sig = build_trading_signals(
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "XRP", "score": 71.5, "bullish_headlines": ["a"], "bearish_headlines": ["b"]},
+                {"base": "BNB", "score": 18.0, "bullish_headlines": ["a"]},
+            ],
+            "avoid": [],
+            "watch": [],
+        },
+    )
+    cfg = AlphaIFeatureConfig()
+    eth = compute_alphai_feature("ETH", sig, signal_age_hours_value=Decimal("1"), config=cfg)
+    bnb = compute_alphai_feature("BNB", sig, signal_age_hours_value=Decimal("1"), config=cfg)
+    xrp = compute_alphai_feature("XRP", sig, signal_age_hours_value=Decimal("1"), config=cfg)
+    assert eth.feature_score > bnb.feature_score
+    assert eth.capital_preference >= xrp.capital_preference
+    assert eth.trail_hold_scale >= bnb.trail_hold_scale
+    # Mixed XRP: size trim / REDUCE timing.
+    assert xrp.size_multiplier < Decimal("1")
+    assert xrp.entry_timing in {"REDUCE", "NORMAL", "WAIT"}
+    assert "alphai_headline_mixed" in xrp.reasons
+
+
+def test_stale_signal_trims_size_and_trail():
+    sig = build_trading_signals(
+        None,
+        {"picks": [{"base": "ETH", "score": 90.0}], "avoid": [], "watch": []},
+    )
+    feat = compute_alphai_feature(
+        "ETH",
+        sig,
+        signal_age_hours_value=Decimal("20"),
+        config=AlphaIFeatureConfig(),
+    )
+    assert feat.freshness < Decimal("0.35")
+    assert feat.size_multiplier <= Decimal("0.75")
+    assert "alphai_stale" in feat.reasons
+
+
 def test_opportunity_engine_includes_alphai_score():
     sig = _signals()
     opp = TradeOpportunity(

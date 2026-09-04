@@ -191,21 +191,24 @@ def compute_alphai_feature(
     )
 
     pick = Decimal(str(signals.pick_score(b)))
-    # Normalize pick score ~[-5, 10] → [0, 1]
-    pick_norm = _clamp((pick + Decimal("5")) / Decimal("15"), _ZERO, _ONE)
+    # Relative conviction among live picks (handles 18–114 score ranges).
+    if hasattr(signals, "pick_conviction"):
+        pick_norm = _clamp(Decimal(str(signals.pick_conviction(b))), _ZERO, _ONE)
+    else:
+        pick_norm = _clamp((pick + Decimal("5")) / Decimal("15"), _ZERO, _ONE)
 
     raw = Decimal("0.45")  # neutral baseline
     if b in signals.blocked_bases or b in signals.avoid_bases:
         raw = Decimal("0.10")
         reasons.append("alphai_avoid")
     elif b in signals.bullish_bases:
-        raw = Decimal("0.75") + pick_norm * Decimal("0.15")
+        raw = Decimal("0.55") + pick_norm * Decimal("0.40")
         reasons.append("alphai_bullish_headline")
     elif signals.is_top_pick(b):
-        raw = Decimal("0.70") + pick_norm * Decimal("0.20")
+        raw = Decimal("0.50") + pick_norm * Decimal("0.45")
         reasons.append("alphai_top_pick")
     elif b in signals.daily_pick_bases and pick > 0:
-        raw = Decimal("0.55") + pick_norm * Decimal("0.20")
+        raw = Decimal("0.45") + pick_norm * Decimal("0.40")
         reasons.append("alphai_daily_pick")
     elif b in signals.watch_bases:
         raw = Decimal("0.50")
@@ -217,17 +220,27 @@ def compute_alphai_feature(
     if b in signals.avoid_bases or b in signals.blocked_bases:
         raw = min(raw, Decimal("0.15"))
 
+    # Mixed headlines pull feature score toward neutral.
+    if hasattr(signals, "is_headline_mixed") and signals.is_headline_mixed(b):
+        conflict = Decimal(str(signals.headline_conflict_ratio(b)))
+        raw = raw * (_ONE - conflict * Decimal("0.35")) + Decimal("0.45") * conflict * Decimal(
+            "0.35"
+        )
+        reasons.append("alphai_headline_mixed")
+
     feature = _clamp(raw * fresh + Decimal("0.35") * (_ONE - fresh), _ZERO, _ONE)
     if fresh < Decimal("0.35"):
         reasons.append("alphai_stale")
 
-    # Capital preference: boost top/bullish, penalize avoid — never force deploy
+    # Capital preference: boost by conviction, penalize avoid — never force deploy
     pref = _ONE
     if b in signals.avoid_bases or b in signals.blocked_bases:
         pref = _ONE - cfg.capital_avoid_penalty
         reasons.append("capital_avoid_penalty")
-    elif signals.is_top_pick(b) or b in signals.bullish_bases:
-        pref = _ONE + cfg.capital_preference_boost * fresh
+    elif signals.is_top_pick(b) or b in signals.bullish_bases or (
+        b in signals.daily_pick_bases and pick > 0
+    ):
+        pref = _ONE + cfg.capital_preference_boost * fresh * pick_norm
         reasons.append("capital_preference_boost")
     pref = _clamp(pref, Decimal("0.50"), Decimal("1.25"))
 
@@ -249,16 +262,50 @@ def compute_alphai_feature(
         size_mult = Decimal("0.75")
         reasons.append("alphai_adverse_reduce")
 
+    # Mixed headlines: soft size trim even without adverse tape.
+    if is_bullish_path and hasattr(signals, "headline_conflict_ratio"):
+        conflict = Decimal(str(signals.headline_conflict_ratio(b)))
+        if conflict > 0:
+            size_mult = min(
+                size_mult,
+                Decimal(str(round(max(0.70, float(_ONE - conflict * Decimal("0.40"))), 2))),
+            )
+            if conflict >= Decimal("0.25") and entry_timing == "NORMAL":
+                entry_timing = "REDUCE"
+                reasons.append("alphai_mixed_reduce")
+
+    # Stale bullish: never max-size.
+    if is_bullish_path and fresh < Decimal("0.35"):
+        size_mult = min(size_mult, Decimal("0.75"))
+        if entry_timing == "NORMAL":
+            entry_timing = "REDUCE"
+            reasons.append("alphai_stale_reduce")
+
     exit_urg = signals.exit_urgency(b)
+    if hasattr(signals, "is_weak_bullish_hold") and signals.is_weak_bullish_hold(b):
+        # Soft urgency: harvest faster without treating as full avoid.
+        reasons.append("weak_bullish_hold")
     trail_hold = _ONE
-    be_scale = _ONE
+    be_scale = (
+        signals.be_harvest_gain_scale(b)
+        if hasattr(signals, "be_harvest_gain_scale")
+        else _ONE
+    )
     if exit_urg:
         trail_hold = cfg.exit_urgency_trail_scale
-        be_scale = cfg.exit_urgency_be_cushion_scale
+        be_scale = min(be_scale, cfg.exit_urgency_be_cushion_scale)
         reasons.append("exit_urgency")
     elif is_bullish_path and fresh >= Decimal("0.50"):
-        trail_hold = cfg.bullish_trail_hold_boost
+        # Conviction-scaled trail hold (strong ETH >> weak DOGE).
+        boost_span = cfg.bullish_trail_hold_boost - _ONE
+        trail_hold = (_ONE + boost_span * pick_norm * fresh).quantize(Decimal("0.01"))
+        if hasattr(signals, "trail_hold_boost"):
+            trail_hold = min(trail_hold, signals.trail_hold_boost(b))
         reasons.append("bullish_trail_hold")
+    elif is_bullish_path and fresh < Decimal("0.35"):
+        trail_hold = Decimal("0.85")
+        be_scale = min(be_scale, Decimal("0.75"))
+        reasons.append("stale_trail_trim")
     if signals.macro_active and not exit_urg:
         be_scale = min(be_scale, Decimal("0.80"))
         reasons.append("macro_caution")

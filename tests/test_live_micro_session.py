@@ -218,6 +218,8 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_trail_hold_rising_n == 1
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
     assert cfg.alphai_require_bullish_new_buys is True
+    assert cfg.alphai_feature_scoring_enabled is True
+    assert cfg.alphai_feature_shadow_only is False
     assert float(cfg.live_micro_okx_ring_clip_eur) == 140.0
     assert cfg.live_micro_uw_recycle_enabled is True
     assert float(cfg.live_micro_uw_dust_max_notional_eur) == 25.0
@@ -1032,8 +1034,11 @@ def test_soft_partial_zero_skips_early_clip(tmp_path: Path) -> None:
     assert st.get("triggered") is True
 
 
-def test_session_lots_only_for_trail_cost() -> None:
-    settings = _unlocked(paper_trail_session_buys_only=True)
+def test_session_lots_only_for_trail_cost(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_trail_session_buys_only=True,
+        live_micro_bridge_persist_path=str(tmp_path / "session_lots.json"),
+    )
     bridge = MicroBudgetLiveExecutor(
         settings,
         portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
@@ -2965,6 +2970,8 @@ def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
         live_micro_winner_add_enabled=True,
         live_micro_winner_add_max=2,
         live_micro_winner_add_clip_eur=55.0,
+        live_micro_alphai_winner_add_only=True,
+        alphai_bullish_buy_enabled=True,
         live_micro_bridge_persist_path=str(tmp_path / "wa.json"),
     )
     bridge = MicroBudgetLiveExecutor(
@@ -2974,6 +2981,22 @@ def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
         budget_eur=Decimal("500"),
         live_maker=True,
     )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {
+                    "base": "SOL",
+                    "score": 80.0,
+                    "bullish_headlines": ["a", "b", "c"],
+                }
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_daily_generated_at = "2026-09-04T08:00:00+00:00"  # noqa: SLF001
     bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
     bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
     bridge._trail["bitvavo:SOL"] = {  # noqa: SLF001
@@ -3008,6 +3031,105 @@ def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
         )
         is False
     )
+
+
+def test_winner_add_blocked_when_alphai_weak_or_stale(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_winner_add_enabled=True,
+        live_micro_winner_add_max=2,
+        live_micro_alphai_winner_add_only=True,
+        alphai_bullish_buy_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "wa_weak.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    # Weak low-conviction pick should not receive winner-adds.
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "BNB", "score": 18.0, "bullish_headlines": ["a"]},
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_daily_generated_at = "2026-09-04T08:00:00+00:00"  # noqa: SLF001
+    bridge._trail["bitvavo:BNB"] = {  # noqa: SLF001
+        "soft_armed": True,
+        "winner_add_count": 0,
+    }
+    be = Decimal("100.15")
+    assert bridge._alphai_weak_bullish_hold("BNB") is True  # noqa: SLF001
+    assert (
+        bridge._winner_add_eligible(  # noqa: SLF001
+            "bitvavo", "BNB", mark=Decimal("100.30"), be=be
+        )
+        is False
+    )
+
+
+def test_uw_recycle_weak_alphai_faster_than_strong(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_uw_recycle_enabled=True,
+        live_micro_uw_dust_max_notional_eur=0.0,
+        live_micro_uw_non_alphai_below_be_pct=0.01,
+        live_micro_uw_non_alphai_min_age_sec=3600.0,
+        live_micro_uw_alphai_below_be_pct=0.02,
+        live_micro_uw_alphai_min_age_sec=10800.0,
+        live_micro_bridge_persist_path=str(tmp_path / "uw_weak.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "BNB", "score": 18.0, "bullish_headlines": ["a"]},
+            ],
+            "avoid": [],
+        },
+    )
+    for base in ("ETH", "BNB"):
+        bridge._cost_lots[f"bitvavo:{base}"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+        bridge._trusted_cost_keys.add(f"bitvavo:{base}")  # noqa: SLF001
+        bridge._position_opened_at[f"bitvavo:{base}"] = __import__("time").time() - 7000  # noqa: SLF001
+    bridge._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]  # noqa: SLF001
+    mark = Decimal("99.0")  # ~1% below BE
+    be = Decimal("100")
+    weak = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="BNB",
+        symbol="BNBEUR",
+        mark=mark,
+        be=be,
+        notional=Decimal("100"),
+    )
+    strong = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="ETH",
+        symbol="ETHEUR",
+        mark=mark,
+        be=be,
+        notional=Decimal("100"),
+    )
+    assert weak is not None and weak[0].startswith("alphai_weak")
+    assert strong is None  # strong AlphaI still holding at ~1% / ~1.9h
 
 
 def test_low_util_relax_focus_skips_focus_gate(tmp_path: Path) -> None:
