@@ -180,11 +180,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
             )
         )
+        raw_long_hold = getattr(settings, "live_micro_long_hold_bases", None)
+        if raw_long_hold is None:
+            raw_long_hold = ""
         self._long_hold_bases = {
             b.strip().upper()
-            for b in str(
-                getattr(settings, "live_micro_long_hold_bases", "ETH") or "ETH"
-            ).split(",")
+            for b in str(raw_long_hold).split(",")
             if b.strip()
         }
         self.portfolio_value_eur: Decimal | None = None
