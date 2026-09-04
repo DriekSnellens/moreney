@@ -575,8 +575,11 @@ async def test_bridge_mirrors_live_fill(
     assert len(bridge.live_trades) == 1
 
 
-def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
-    settings = _unlocked(paper_maker_sell_profit_buffer_bps=10.0)
+def test_bridge_break_even_sell_includes_fee_and_buffer(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=10.0,
+        live_micro_bridge_persist_path=str(tmp_path / "be.json"),
+    )
     portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
     engine = LiveMicroEngine(settings)
     bridge = MicroBudgetLiveExecutor(
@@ -586,6 +589,9 @@ def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
+    bridge._cost_lots.clear()  # noqa: SLF001
+    bridge._trusted_cost_keys.clear()  # noqa: SLF001
+    bridge._session_lots.clear()  # noqa: SLF001
     bridge._cost_lots["bitvavo:NEAR"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
     # Mark-seeded lots are untrusted until a real fill / trade hydrate.
     assert bridge._break_even_sell_price("bitvavo", "NEAR") is None  # noqa: SLF001
@@ -629,8 +635,12 @@ def test_sell_allowed_at_blocks_below_break_even() -> None:
 @pytest.mark.asyncio
 async def test_bridge_execute_sell_rejects_without_trusted_cost(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    settings = _unlocked(paper_maker_sell_profit_buffer_bps=10.0)
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=10.0,
+        live_micro_bridge_persist_path=str(tmp_path / "sell_trust.json"),
+    )
     engine = LiveMicroEngine(settings)
     engine.arm()
     bridge = MicroBudgetLiveExecutor(
@@ -640,6 +650,10 @@ async def test_bridge_execute_sell_rejects_without_trusted_cost(
         budget_eur=Decimal("200"),
         live_maker=True,
     )
+    bridge.skips.clear()
+    bridge._cost_lots.clear()  # noqa: SLF001
+    bridge._trusted_cost_keys.clear()  # noqa: SLF001
+    bridge._session_lots.clear()  # noqa: SLF001
     # Untrusted mark seed only — must refuse sell even at a high price
     bridge._cost_lots["bitvavo:ADA"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
 
@@ -2313,13 +2327,17 @@ def test_momentum_down_and_exit_target_at_be_plus_half_pct() -> None:
     assert bridge._momentum_down("MILDEUR") is False  # noqa: SLF001
 
 
-def test_buy_fill_marks_new_session_base() -> None:
+def test_buy_fill_marks_new_session_base(tmp_path: Path) -> None:
     from bot.core.enums import OrderSide
 
+    settings = _unlocked(
+        live_micro_cut_loss_below_be_pct=0.04,
+        live_micro_bridge_persist_path=str(tmp_path / "new_base.json"),
+    )
     bridge = MicroBudgetLiveExecutor(
-        _unlocked(live_micro_cut_loss_below_be_pct=0.04),
-        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
-        live_engine=LiveMicroEngine(_unlocked()),
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
         budget_eur=Decimal("100"),
         live_maker=True,
     )
@@ -3797,11 +3815,12 @@ def test_buy_clip_cap_same_on_both_venues() -> None:
     assert cap_bv == Decimal("75")
 
 
-def test_early_cut_eligible_new_session_only() -> None:
+def test_early_cut_eligible_new_session_only(tmp_path: Path) -> None:
     settings = _unlocked(
         live_micro_early_cut_loss_below_be_pct=0.015,
         live_micro_early_cut_new_bases_only=True,
         live_micro_cut_loss_below_be_pct=0.04,
+        live_micro_bridge_persist_path=str(tmp_path / "early_cut.json"),
     )
     bridge = MicroBudgetLiveExecutor(
         settings,
@@ -3810,6 +3829,9 @@ def test_early_cut_eligible_new_session_only() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
+    bridge._cost_lots.clear()  # noqa: SLF001
+    bridge._session_lots.clear()  # noqa: SLF001
+    bridge._trusted_cost_keys.clear()  # noqa: SLF001
     bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
     old = {"new_session_base": False}
     new = {"new_session_base": True}
