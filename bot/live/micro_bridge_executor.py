@@ -4429,16 +4429,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         is_alphai = self._alphai_bullish_buy(base)
         flat_or_down = self._momentum_flat_or_down(symbol)
 
-        # Layer 1: dust — free tiny bags within a thin BE band.
+        # Layer 1: dust — always free tiny bags (sleeve-capped); allow up to 5% BE.
         if (
             self._uw_dust_max_notional > 0
             and notional > 0
             and notional < self._uw_dust_max_notional
-            and self._uw_dust_below_be_pct >= 0
         ):
-            floor = be * (Decimal("1") - self._uw_dust_below_be_pct)
+            dust_pct = max(self._uw_dust_below_be_pct, Decimal("0.05"))
+            floor = be * (Decimal("1") - dust_pct)
             if mark >= floor:
                 return ("dust", "band", floor)
+            return ("dust", "stop", floor)
 
         # Layer 3: AlphaI picks — hold longer; hard age / depth caps.
         if is_alphai:
