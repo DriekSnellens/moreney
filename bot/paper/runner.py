@@ -2322,17 +2322,21 @@ class PaperRunner:
                         getattr(self._settings, "alphai_price_scale_cutoff", 0.45) or 0.45
                     ),
                     base_reliability=reliability,
-                    adaptive=adaptive and lag_pp != default_lag,
+                    adaptive=adaptive and abs(lag_pp - default_lag) > 1e-9,
                 )
                 if bool(getattr(self._settings, "alphai_pick_outcomes_enabled", True)):
-                    await asyncio.to_thread(
-                        sync_pick_outcomes,
-                        daily,
-                        path,
-                        day_returns_pct=day_rets,
-                        enabled=True,
-                        lag_vs_btc_pp=lag_pp,
-                    )
+                    try:
+                        await asyncio.to_thread(
+                            sync_pick_outcomes,
+                            daily,
+                            path,
+                            day_returns_pct=day_rets,
+                            enabled=True,
+                            lag_vs_btc_pp=lag_pp,
+                        )
+                    except Exception:  # noqa: BLE001
+                        # Persist is best-effort; live demotion must still apply.
+                        logger.exception("ALPHAI_PICK_OUTCOMES_PERSIST_FAILED")
             except Exception:  # noqa: BLE001
                 logger.exception("ALPHAI_PRICE_CONFIRM_FAILED")
         signals = build_trading_signals(state, daily)

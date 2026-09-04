@@ -333,11 +333,29 @@ class PickOutcomeStore:
         return store
 
     def save(self, path: Path | str) -> None:
+        import os
+        import tempfile
+
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
-        tmp.replace(p)
+        payload = json.dumps(self.to_dict(), indent=2)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{p.name}.",
+            suffix=".tmp",
+            dir=str(p.parent),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_name, p)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load(cls, path: Path | str) -> PickOutcomeStore:
