@@ -240,9 +240,20 @@ def test_is_bullish_buy_daily_and_headline() -> None:
     )
     assert signals.is_bullish_buy("SOL")
     assert signals.is_bullish_buy("AVAX")
-    assert signals.is_strong_bullish_buy("SOL")
-    assert signals.is_strong_bullish_buy("AVAX")
+    assert signals.is_strong_bullish_buy("SOL")  # live headline bullish
+    assert not signals.is_strong_bullish_buy("AVAX")  # weak score → priority only
     assert not signals.is_bullish_buy("ETH")
+    strong = build_trading_signals(
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 96.0, "rank": 1},
+                {"base": "DOGE", "score": 18.0, "rank": 2},
+            ]
+        },
+    )
+    assert strong.is_strong_bullish_buy("ETH")
+    assert not strong.is_strong_bullish_buy("DOGE")
     blocked = build_trading_signals(
         AlphaIRegimeState(blocked_bases=frozenset({"SOL"})),
         {"picks": [{"base": "SOL", "score": 20.0}], "avoid": []},

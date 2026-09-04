@@ -149,15 +149,20 @@ class AlphaITradingSignals:
         return False
 
     def is_strong_bullish_buy(self, base: str, *, ring_fallback: bool = False) -> bool:
-        """Live headline bullish or top daily pick — proactive buy path."""
+        """Live headline bullish or high-conviction daily pick — max clip path.
+
+        Weak top-N names (low score) stay buyable via ``allows_new_buy`` / priority
+        clip, but must not receive strong-clip / soft-gate treatment.
+        """
         b = str(base or "").upper()
         if not self.is_bullish_buy(b, ring_fallback=ring_fallback):
             return False
         if b in self.bullish_bases:
             return True
-        if self.is_top_pick(b) and self.pick_score(b) >= 3.0:
+        # High bar: top pick AND meaningful score (ETH/XRP-class, not DOGE-18).
+        if self.is_top_pick(b, top_n=3) and self.pick_score(b) >= 35.0:
             return True
-        if ring_fallback and b in self.watch_bases and self.pick_score(b) > 0:
+        if ring_fallback and b in self.watch_bases and self.pick_score(b) >= 10.0:
             return True
         return False
 
