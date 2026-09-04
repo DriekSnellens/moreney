@@ -376,6 +376,10 @@ def _session_settings(
             "live_micro_uw_non_alphai_min_age_sec": 3600.0,
             "live_micro_uw_alphai_below_be_pct": 0.02,
             "live_micro_uw_alphai_min_age_sec": 10800.0,
+            # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
+            "live_micro_alphai_cross_venue_deploy": True,
+            "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,
+            "live_micro_alphai_ring_fill_add_max_depth_pct": 0.012,
             "live_micro_momentum_exit_min_return": 0.002,
             "live_micro_momentum_exit_above_be_pct": 0.005,
             "global_max_strategy_exposure_pct": 100.0,

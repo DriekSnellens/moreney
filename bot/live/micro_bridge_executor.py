@@ -304,6 +304,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_alphai_min_age_sec = float(
             getattr(settings, "live_micro_uw_alphai_min_age_sec", 10800) or 10800
         )
+        self._alphai_cross_venue_deploy = bool(
+            getattr(settings, "live_micro_alphai_cross_venue_deploy", True)
+        )
+        self._alphai_cross_venue_max_other_depth = Decimal(
+            str(
+                getattr(
+                    settings, "live_micro_alphai_cross_venue_max_other_depth_pct", 0.015
+                )
+                or 0
+            )
+        )
+        self._alphai_ring_fill_add_max_depth = Decimal(
+            str(
+                getattr(
+                    settings, "live_micro_alphai_ring_fill_add_max_depth_pct", 0.01
+                )
+                or 0
+            )
+        )
         self._uw_recycle_floors: dict[str, Decimal] = {}
         self._momentum_exit_above_be_pct = Decimal(
             str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.005) or 0)
@@ -1622,6 +1641,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_non_alphai_min_age_sec": self._uw_non_alphai_min_age_sec,
                 "uw_alphai_below_be_pct": str(self._uw_alphai_below_be_pct),
                 "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
+                "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
+                "alphai_cross_venue_max_other_depth_pct": str(
+                    self._alphai_cross_venue_max_other_depth
+                ),
+                "alphai_ring_fill_add_max_depth_pct": str(
+                    self._alphai_ring_fill_add_max_depth
+                ),
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "momentum_exit_min_return": str(self._momentum_exit_min),
                 "momentum_min_return": str(self._momentum_min),
@@ -4809,6 +4835,63 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return True
         return False
 
+    def _underwater_depth_on_venue(self, venue: str, base: str) -> Decimal | None:
+        """Positive fraction below BE on venue, or None if unknown/not held."""
+        b = str(base or "").upper()
+        venue_l = venue.strip().lower()
+        qty = self._balance_qty(venue_l, b)
+        if qty <= 0:
+            return None
+        be = self._break_even_sell_price(venue_l, b)
+        if be is None or be <= 0:
+            return None
+        symbol = f"{b}{self._quote}"
+        mark = self._portfolio.state.mark_prices.get(symbol.upper())
+        if mark is None or mark <= 0:
+            st = self._trail.get(self._lots_key(venue_l, b)) or {}
+            try:
+                mark = Decimal(str(st.get("last_mark") or st.get("mark") or 0))
+            except Exception:  # noqa: BLE001
+                mark = _ZERO
+        if mark <= 0:
+            return None
+        if mark >= be:
+            return Decimal("0")
+        return (be - mark) / be
+
+    def _alphai_idle_deploy_allowed(self, venue: str, base: str) -> bool:
+        """Allow AlphaI buys to deploy idle ring cash despite holding-base policy.
+
+        Cross-venue: base not on this venue, other-venue depth shallow enough.
+        Same-venue ring-fill add: held here but within near-BE depth band.
+        """
+        if not self._alphai_bullish_buy(base):
+            return False
+        if self._sleeve_paused or self._daily_kill_active or self._buys_blocked:
+            return False
+        if not self._ring_needs_deploy(venue):
+            return False
+        venue_l = venue.strip().lower()
+        held_here = not self._is_new_base_buy(venue_l, base)
+        if not held_here:
+            if not self._alphai_cross_venue_deploy:
+                return False
+            for other in self._execute_venues:
+                if other == venue_l:
+                    continue
+                depth = self._underwater_depth_on_venue(other, base)
+                if depth is None:
+                    continue
+                if depth > self._alphai_cross_venue_max_other_depth:
+                    return False
+            return True
+        if self._alphai_ring_fill_add_max_depth <= 0:
+            return False
+        depth = self._underwater_depth_on_venue(venue_l, base)
+        if depth is None:
+            return False
+        return depth <= self._alphai_ring_fill_add_max_depth
+
     def _momentum_down(self, symbol: str) -> bool:
         """True when rolling mark return is at/below the negative momentum floor."""
         if not self._momentum_enabled:
@@ -6640,6 +6723,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
             and not meta.get("trail_take_profit")
+            and not self._alphai_idle_deploy_allowed(venue, base)
         ):
             self._bump_skip("underwater_cross_venue_block")
             return await self._reject_before_live(
@@ -6996,6 +7080,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not self._is_new_base_buy(venue, base)
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not self._alphai_idle_deploy_allowed(venue, base)
         ):
             be = self._break_even_sell_price(venue, base)
             mark_ref = self._portfolio.state.mark_prices.get(symbol.upper())
@@ -7022,6 +7107,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not self._alphai_idle_deploy_allowed(venue, base)
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(

@@ -224,6 +224,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_uw_near_below_be_pct) == 0.008
     assert float(cfg.live_micro_uw_alphai_below_be_pct) == 0.02
     assert float(cfg.live_micro_uw_alphai_min_age_sec) == 10800.0
+    assert cfg.live_micro_alphai_cross_venue_deploy is True
+    assert float(cfg.live_micro_alphai_cross_venue_max_other_depth_pct) == 0.025
+    assert float(cfg.live_micro_alphai_ring_fill_add_max_depth_pct) == 0.012
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
@@ -3836,3 +3839,47 @@ def test_uw_recycle_plan_tiers(tmp_path: Path) -> None:
         )
         is True
     )
+
+
+def test_alphai_idle_deploy_allows_cross_venue_when_shallow(tmp_path: Path) -> None:
+    from bot.integrations.alphai.parse import AlphaIRegimeState
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    settings = _unlocked(
+        live_micro_alphai_cross_venue_deploy=True,
+        live_micro_alphai_cross_venue_max_other_depth_pct=0.025,
+        live_micro_alphai_ring_fill_add_max_depth_pct=0.012,
+        live_micro_active_ring_eur=1850.0,
+        live_micro_block_buys_when_holding_base=True,
+        live_micro_block_underwater_cross_venue=True,
+        alphai_require_bullish_new_buys=True,
+        alphai_bullish_buy_enabled=True,
+        live_micro_execute_venues="bitvavo,okx",
+        live_micro_bridge_persist_path=str(tmp_path / "idle.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("4000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        execute_venues={"bitvavo", "okx"},
+        live_maker=True,
+    )
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset({"SOL", "XRP"})),
+        {"picks": [{"base": "SOL", "score": 40.0}, {"base": "XRP", "score": 50.0}]},
+    )
+    # Pretend ring needs deploy + SOL held only on OKX shallow underwater.
+    bridge._active_book_notional = lambda venue: Decimal("0")  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._venue_budget_remaining = lambda venue: Decimal("1500")  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._balance_qty = (  # type: ignore[method-assign]  # noqa: SLF001
+        lambda venue, base: Decimal("1") if venue == "okx" and base == "SOL" else Decimal("0")
+    )
+    bridge._break_even_sell_price = (  # type: ignore[method-assign]  # noqa: SLF001
+        lambda venue, base: Decimal("100") if base == "SOL" else None
+    )
+    bridge._portfolio.state.mark_prices["SOLEUR"] = Decimal("99")  # -1%
+    assert bridge._alphai_idle_deploy_allowed("bitvavo", "SOL") is True  # noqa: SLF001
+    # Deep on other venue blocks.
+    bridge._portfolio.state.mark_prices["SOLEUR"] = Decimal("96")  # -4%
+    assert bridge._alphai_idle_deploy_allowed("bitvavo", "SOL") is False  # noqa: SLF001

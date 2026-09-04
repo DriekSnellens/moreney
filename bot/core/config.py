@@ -531,6 +531,14 @@ class Settings(BaseSettings):
     live_micro_uw_non_alphai_min_age_sec: float = Field(default=3600.0, ge=60.0, le=86400.0)
     live_micro_uw_alphai_below_be_pct: float = Field(default=0.02, ge=0.0, le=0.10)
     live_micro_uw_alphai_min_age_sec: float = Field(default=10800.0, ge=300.0, le=172800.0)
+    # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
+    live_micro_alphai_cross_venue_deploy: bool = True
+    live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(
+        default=0.015, ge=0.0, le=0.10
+    )
+    live_micro_alphai_ring_fill_add_max_depth_pct: float = Field(
+        default=0.01, ge=0.0, le=0.05
+    )
     # Downward momentum: rolling return ≤ −this → exit (default 0.3%).
     live_micro_momentum_exit_min_return: float = Field(default=0.003, ge=0.0, le=0.10)
     # Defensive exit floor: never sell below BE + this cushion (default 0.5%).
