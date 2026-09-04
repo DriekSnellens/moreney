@@ -437,6 +437,10 @@ def _session_settings(
             "alphai_feature_shadow_only": False,
             "alphai_feature_auto_apply": False,
             "alphai_opp_weight": 0.06,
+            # Intraday timing gate: AlphaI × fresh × adverse × momentum (enforce).
+            "alphai_intraday_gate_enabled": True,
+            "alphai_intraday_gate_shadow_only": False,
+            "alphai_intraday_min_freshness": 0.35,
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,

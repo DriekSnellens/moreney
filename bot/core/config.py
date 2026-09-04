@@ -469,6 +469,10 @@ class Settings(BaseSettings):
     alphai_exit_urgency_be_cushion_scale: float = Field(default=0.55, ge=0.2, le=1.0)
     alphai_bullish_trail_hold_boost: float = Field(default=1.15, ge=1.0, le=1.5)
     alphai_attribution_persist_path: str = "./data/alphai/attribution_state.json"
+    # Intraday AND-gate: AlphaI pick × freshness × low adverse × momentum not down.
+    alphai_intraday_gate_enabled: bool = False
+    alphai_intraday_gate_shadow_only: bool = True
+    alphai_intraday_min_freshness: float = Field(default=0.35, ge=0.0, le=1.0)
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

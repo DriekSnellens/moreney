@@ -324,6 +324,104 @@ def compute_alphai_feature(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class IntradayEntryGateResult:
+    """AlphaI × freshness × adverse × momentum AND-gate for buys."""
+
+    action: str  # ALLOW | REDUCE | WAIT
+    size_multiplier: Decimal
+    reasons: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "size_multiplier": str(self.size_multiplier.quantize(Decimal("0.01"))),
+            "reasons": list(self.reasons),
+        }
+
+
+def evaluate_intraday_entry_gate(
+    *,
+    is_alphai_buy: bool,
+    freshness: Decimal,
+    adverse_score: Decimal | None,
+    entry_timing: str,
+    momentum_down: bool,
+    momentum_rising: bool,
+    headline_mixed: bool = False,
+    min_freshness: Decimal = Decimal("0.35"),
+    adverse_wait_threshold: Decimal = Decimal("0.55"),
+    adverse_reduce_threshold: Decimal = Decimal("0.40"),
+) -> IntradayEntryGateResult:
+    """Raise intraday timing quality: buy only when AlphaI + tape agree.
+
+    WAIT → skip buy; REDUCE → smaller clip; ALLOW → full path.
+    Does not relax risk / never-loss floors.
+    """
+    reasons: list[str] = []
+    adv = adverse_score if adverse_score is not None else _ZERO
+    timing = str(entry_timing or "NORMAL").upper()
+    fresh = freshness if freshness is not None else Decimal("0.75")
+
+    if not is_alphai_buy:
+        return IntradayEntryGateResult(
+            action="WAIT",
+            size_multiplier=Decimal("0"),
+            reasons=("alphai_not_bullish",),
+        )
+
+    if fresh < min_freshness:
+        reasons.append("alphai_stale")
+        return IntradayEntryGateResult(
+            action="WAIT",
+            size_multiplier=Decimal("0"),
+            reasons=tuple(reasons),
+        )
+
+    if timing == "WAIT" or adv >= adverse_wait_threshold:
+        reasons.append("alphai_adverse_wait")
+        return IntradayEntryGateResult(
+            action="WAIT",
+            size_multiplier=Decimal("0"),
+            reasons=tuple(reasons),
+        )
+
+    if momentum_down:
+        reasons.append("momentum_down")
+        return IntradayEntryGateResult(
+            action="WAIT",
+            size_multiplier=Decimal("0"),
+            reasons=tuple(reasons),
+        )
+
+    size = _ONE
+    action = "ALLOW"
+    if timing == "REDUCE" or adv >= adverse_reduce_threshold:
+        action = "REDUCE"
+        size = min(size, Decimal("0.70"))
+        reasons.append("alphai_adverse_reduce")
+    if headline_mixed:
+        action = "REDUCE"
+        size = min(size, Decimal("0.75"))
+        reasons.append("headline_mixed")
+    if not momentum_rising:
+        action = "REDUCE"
+        size = min(size, Decimal("0.80"))
+        reasons.append("momentum_not_rising")
+    if fresh < Decimal("0.55"):
+        action = "REDUCE"
+        size = min(size, Decimal("0.85"))
+        reasons.append("freshness_soft")
+
+    if action == "ALLOW":
+        reasons.append("intraday_gate_ok")
+    return IntradayEntryGateResult(
+        action=action,
+        size_multiplier=size.quantize(Decimal("0.01")),
+        reasons=tuple(dict.fromkeys(reasons)),
+    )
+
+
 def alphai_feature_from_signals_snapshot(
     base: str,
     signals: AlphaITradingSignals | None,

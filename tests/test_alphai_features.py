@@ -7,6 +7,7 @@ from decimal import Decimal
 from bot.integrations.alphai.features import (
     AlphaIFeatureConfig,
     compute_alphai_feature,
+    evaluate_intraday_entry_gate,
     freshness_factor,
 )
 from bot.integrations.alphai.parse import AlphaIRegimeState
@@ -133,6 +134,60 @@ def test_stale_signal_trims_size_and_trail():
     assert feat.freshness < Decimal("0.35")
     assert feat.size_multiplier <= Decimal("0.75")
     assert "alphai_stale" in feat.reasons
+
+
+def test_intraday_entry_gate_wait_on_adverse_or_down_momentum():
+    ok = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.20"),
+        entry_timing="NORMAL",
+        momentum_down=False,
+        momentum_rising=True,
+    )
+    assert ok.action == "ALLOW"
+
+    wait_adv = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.70"),
+        entry_timing="WAIT",
+        momentum_down=False,
+        momentum_rising=True,
+    )
+    assert wait_adv.action == "WAIT"
+
+    wait_mom = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.10"),
+        entry_timing="NORMAL",
+        momentum_down=True,
+        momentum_rising=False,
+    )
+    assert wait_mom.action == "WAIT"
+
+    wait_stale = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.20"),
+        adverse_score=Decimal("0.10"),
+        entry_timing="NORMAL",
+        momentum_down=False,
+        momentum_rising=True,
+    )
+    assert wait_stale.action == "WAIT"
+
+    reduce = evaluate_intraday_entry_gate(
+        is_alphai_buy=True,
+        freshness=Decimal("0.90"),
+        adverse_score=Decimal("0.10"),
+        entry_timing="NORMAL",
+        momentum_down=False,
+        momentum_rising=False,
+        headline_mixed=True,
+    )
+    assert reduce.action == "REDUCE"
+    assert reduce.size_multiplier < Decimal("1")
 
 
 def test_opportunity_engine_includes_alphai_score():

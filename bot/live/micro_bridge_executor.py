@@ -60,6 +60,7 @@ from bot.integrations.alphai.features import (
     AlphaIFeatureAssessment,
     alphai_feature_from_signals_snapshot,
     config_from_settings as alphai_feature_config_from_settings,
+    evaluate_intraday_entry_gate,
 )
 from bot.intelligence.market_regime_engine import classify_market_regime, config_from_settings as regime_cfg_from
 from bot.intelligence.outcome_learning import OutcomeRecord
@@ -490,6 +491,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._alphai_attribution.auto_apply = False
         self._alphai_feature_snapshot: dict[str, Any] = {}
         self._alphai_daily_generated_at: str | None = None
+        self._alphai_intraday_gate_enabled = bool(
+            getattr(settings, "alphai_intraday_gate_enabled", False)
+        )
+        self._alphai_intraday_gate_shadow_only = bool(
+            getattr(settings, "alphai_intraday_gate_shadow_only", True)
+        )
+        self._alphai_intraday_min_freshness = Decimal(
+            str(getattr(settings, "alphai_intraday_min_freshness", 0.35) or 0.35)
+        )
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -1175,6 +1185,60 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return self._alphai_feature_for(base).freshness >= Decimal("0.35")
         except Exception:  # noqa: BLE001
             return True
+
+    def _alphai_intraday_entry_gate(
+        self,
+        base: str,
+        symbol: str,
+        *,
+        adverse_score: Decimal | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> tuple[str, Decimal, tuple[str, ...]]:
+        """AND-gate: AlphaI buy × freshness × adverse × momentum.
+
+        Returns ``(action, size_multiplier, reasons)`` where action is
+        ALLOW | REDUCE | WAIT.
+        """
+        if not self._alphai_intraday_gate_enabled:
+            return "ALLOW", _ONE, ("gate_disabled",)
+        meta = meta or {}
+        adv = adverse_score
+        if adv is None:
+            raw = meta.get("adverse_selection_score") or meta.get("alphai_adverse_score")
+            if raw is not None:
+                try:
+                    adv = Decimal(str(raw))
+                except Exception:  # noqa: BLE001
+                    adv = None
+        feat = self._alphai_feature_for(base, adverse_score=adv)
+        timing = str(meta.get("alphai_entry_timing") or feat.entry_timing or "NORMAL")
+        mixed = False
+        sig = self._alphai_signals
+        if sig is not None and hasattr(sig, "is_headline_mixed"):
+            try:
+                mixed = bool(sig.is_headline_mixed(base))
+            except Exception:  # noqa: BLE001
+                mixed = False
+        mom_down = self._momentum_down(symbol) if self._momentum_enabled else False
+        mom_rising = False
+        if self._momentum_enabled:
+            series = self._series_for(symbol)
+            rising_n = max(1, int(self._momentum_require_last_n_rising or 1))
+            if len(series) >= max(3, rising_n):
+                mom_rising = bool(series.last_n_rising(rising_n))
+        gate = evaluate_intraday_entry_gate(
+            is_alphai_buy=self._alphai_bullish_buy(base),
+            freshness=feat.freshness,
+            adverse_score=adv if adv is not None else _ZERO,
+            entry_timing=timing,
+            momentum_down=mom_down,
+            momentum_rising=mom_rising,
+            headline_mixed=mixed,
+            min_freshness=self._alphai_intraday_min_freshness,
+            adverse_wait_threshold=self._alphai_feature_config.adverse_bullish_wait_threshold,
+            adverse_reduce_threshold=self._alphai_feature_config.adverse_bullish_reduce_threshold,
+        )
+        return gate.action, gate.size_multiplier, gate.reasons
 
     def _alphai_hold_conviction(self, base: str) -> float:
         sig = self._alphai_signals
@@ -2235,6 +2299,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             **(self._alphai_feature_snapshot or {}),
             "alphai_feature_shadow": self._alphai_feature_config.shadow_only,
             "alphai_feature_enabled": self._alphai_feature_config.enabled,
+            "alphai_intraday_gate_enabled": self._alphai_intraday_gate_enabled,
+            "alphai_intraday_gate_shadow": self._alphai_intraday_gate_shadow_only,
+            "alphai_intraday_min_freshness": str(self._alphai_intraday_min_freshness),
         }
         if opp is not None:
             return opp.snapshot(economic_extra={
@@ -7167,10 +7234,50 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     feat_timing = self._alphai_feature_for(base).entry_timing
                 except Exception:  # noqa: BLE001
                     feat_timing = ""
+            # Unified intraday AND-gate (AlphaI × fresh × adverse × momentum).
+            if (
+                self._alphai_intraday_gate_enabled
+                and not meta.get("dust_top_up")
+                and not meta.get("ladder_leg")
+                and not meta.get("trail_take_profit")
+            ):
+                adv_raw = meta.get("adverse_selection_score")
+                adv_sc: Decimal | None = None
+                if adv_raw is not None:
+                    try:
+                        adv_sc = Decimal(str(adv_raw))
+                    except Exception:  # noqa: BLE001
+                        adv_sc = None
+                action, gate_mult, gate_reasons = self._alphai_intraday_entry_gate(
+                    base, symbol, adverse_score=adv_sc, meta=meta
+                )
+                meta["alphai_intraday_gate"] = action
+                meta["alphai_intraday_reasons"] = ",".join(gate_reasons)
+                order_request = order_request.model_copy(update={"metadata": meta})
+                if action == "WAIT":
+                    self._bump_skip("alphai_intraday_wait")
+                    for reason in gate_reasons:
+                        self._bump_skip(f"intraday_{reason}")
+                    if not self._alphai_intraday_gate_shadow_only:
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="ALPHAI_INTRADAY_WAIT",
+                            message=(
+                                f"intraday gate WAIT for {base}: "
+                                + ",".join(gate_reasons)
+                            ),
+                        )
+                elif action == "REDUCE" and gate_mult < _ONE:
+                    meta["alphai_intraday_size_mult"] = str(gate_mult)
+                    order_request = order_request.model_copy(update={"metadata": meta})
+                    if not self._alphai_intraday_gate_shadow_only:
+                        # Applied below together with other size multipliers.
+                        pass
             if (
                 feat_timing == "WAIT"
                 and not self._alphai_feature_config.shadow_only
                 and self._alphai_feature_config.enabled
+                and not self._alphai_intraday_gate_enabled
             ):
                 self._bump_skip("alphai_adverse_wait")
                 return await self._reject_before_live(
@@ -7185,6 +7292,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     mult = Decimal(str(mult_raw))
                 except Exception:  # noqa: BLE001
                     mult = _ONE
+            gate_mult_raw = meta.get("alphai_intraday_size_mult")
+            if (
+                gate_mult_raw is not None
+                and self._alphai_intraday_gate_enabled
+                and not self._alphai_intraday_gate_shadow_only
+            ):
+                try:
+                    mult = min(mult * Decimal(str(gate_mult_raw)), Decimal("1.50"))
+                    self._bump_skip("alphai_intraday_reduce")
+                except Exception:  # noqa: BLE001
+                    pass
             alphai_mult = self._alphai_entry_multiplier(base)
             if alphai_mult != _ONE:
                 mult = min(mult * alphai_mult, Decimal("1.50"))

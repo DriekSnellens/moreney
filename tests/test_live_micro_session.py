@@ -220,6 +220,9 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.alphai_require_bullish_new_buys is True
     assert cfg.alphai_feature_scoring_enabled is True
     assert cfg.alphai_feature_shadow_only is False
+    assert cfg.alphai_intraday_gate_enabled is True
+    assert cfg.alphai_intraday_gate_shadow_only is False
+    assert float(cfg.alphai_intraday_min_freshness) == 0.35
     assert float(cfg.live_micro_okx_ring_clip_eur) == 140.0
     assert cfg.live_micro_uw_recycle_enabled is True
     assert float(cfg.live_micro_uw_dust_max_notional_eur) == 25.0
@@ -3237,6 +3240,52 @@ def test_uw_idle_pressure_recycles_non_strong(tmp_path: Path) -> None:
         notional=Decimal("80"),
     )
     assert plan is not None and plan[0] == "idle_pressure"
+
+
+def test_bridge_intraday_gate_blocks_momentum_down(tmp_path: Path) -> None:
+    from bot.integrations.alphai.signals import build_trading_signals
+    from bot.integrations.alphai.parse import AlphaIRegimeState
+
+    settings = _unlocked(
+        alphai_intraday_gate_enabled=True,
+        alphai_intraday_gate_shadow_only=False,
+        alphai_intraday_min_freshness=0.35,
+        alphai_bullish_buy_enabled=True,
+        alphai_require_bullish_new_buys=True,
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_bridge_persist_path=str(tmp_path / "intraday_gate.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset({"ETH"})),
+        {
+            "picks": [
+                {
+                    "base": "ETH",
+                    "score": 100.0,
+                    "bullish_headlines": ["a", "b", "c"],
+                }
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_daily_generated_at = "2026-09-04T11:00:00+00:00"  # noqa: SLF001
+    series = bridge._series_for("ETHEUR")  # noqa: SLF001
+    px = Decimal("2000")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    action, mult, reasons = bridge._alphai_intraday_entry_gate("ETH", "ETHEUR")  # noqa: SLF001
+    assert action == "WAIT"
+    assert "momentum_down" in reasons
+    assert mult == Decimal("0")
 
 
 def test_low_util_relax_focus_skips_focus_gate(tmp_path: Path) -> None:
