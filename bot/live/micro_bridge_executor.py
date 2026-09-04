@@ -16,7 +16,7 @@ import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from bot.core.config import Settings
@@ -69,6 +69,12 @@ from bot.intelligence.resting_order_intelligence import (
     assess_resting_order,
 )
 from bot.intelligence.session import IntelligenceSession
+from bot.live.capital_playbook import (
+    CapitalPlaybook,
+    CapitalPlaybookInputs,
+    classify_capital_playbook,
+    decision_public_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -500,6 +506,29 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._alphai_intraday_min_freshness = Decimal(
             str(getattr(settings, "alphai_intraday_min_freshness", 0.35) or 0.35)
         )
+        # Capital playbook router state (baselines captured after ring/exit knobs).
+        self._capital_playbook_enabled = bool(
+            getattr(settings, "live_micro_capital_playbook_enabled", False)
+        )
+        self._capital_playbook_min_hold_sec = float(
+            getattr(settings, "live_micro_capital_playbook_min_hold_sec", 900.0) or 900.0
+        )
+        self._capital_playbook_refresh_sec = float(
+            getattr(settings, "live_micro_capital_playbook_refresh_sec", 60.0) or 60.0
+        )
+        self._capital_playbook: CapitalPlaybook = CapitalPlaybook.TREND
+        self._capital_playbook_since_mono = time.monotonic()
+        self._capital_playbook_last_refresh_mono = 0.0
+        self._capital_playbook_decision: dict[str, Any] = {
+            "playbook": CapitalPlaybook.TREND.value,
+            "confidence": 0.0,
+            "reasons": [],
+            "overlays": {},
+        }
+        self._playbook_sell_fill_mono: list[float] = []
+        self._playbook_block_new_buys = False
+        self._playbook_owns_buy_block = False
+        self._playbook_baselines: dict[str, Any] = {}
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -662,6 +691,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._exit_taker_after_maker_fails = int(
             getattr(settings, "live_micro_exit_taker_after_maker_fails", 1) or 1
         )
+        self._playbook_baselines = {
+            "active_ring_eur": self._active_ring_eur,
+            "ring_soft_max_active_eur": self._ring_soft_max_active_eur,
+            "winner_add_enabled": self._winner_add_enabled,
+            "alphai_strong_clip_eur": self._alphai_strong_clip_eur,
+            "exit_taker_cushion_bps": self._exit_taker_cushion_bps,
+            "exit_taker_after_maker_fails": self._exit_taker_after_maker_fails,
+            "be_harvest_min_gain_pct": self._be_harvest_min_gain,
+            "be_harvest_partial_pct": self._be_harvest_partial,
+            "uw_near_min_age_sec": self._uw_near_min_age_sec,
+            "uw_non_alphai_min_age_sec": self._uw_non_alphai_min_age_sec,
+            "uw_idle_min_age_sec": self._uw_idle_min_age_sec,
+            "uw_idle_below_be_pct": self._uw_idle_below_be_pct,
+            "uw_near_below_be_pct": self._uw_near_below_be_pct,
+            "alphai_intraday_min_freshness": self._alphai_intraday_min_freshness,
+            "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
+        }
         self._winnable_gap_alert_eur = Decimal(
             str(getattr(settings, "live_micro_winnable_gap_alert_eur", 3.0) or 3.0)
         )
@@ -992,7 +1038,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self.session_live_transaction_count,
         )
         self._sanitize_persisted_trails()
+        self._seed_playbook_sell_fills_from_recent()
         return True
+
+    def _seed_playbook_sell_fills_from_recent(self) -> None:
+        """Bootstrap velocity window from recent_live_fills after persist load."""
+        now_wall = datetime.now(UTC)
+        now_mono = time.monotonic()
+        seeded: list[float] = []
+        for f in self.recent_live_fills:
+            if str(f.get("side") or "").lower() != "sell":
+                continue
+            ts_raw = str(f.get("ts") or "")
+            if not ts_raw:
+                continue
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                age = (now_wall - ts).total_seconds()
+            except Exception:  # noqa: BLE001
+                continue
+            if 0 <= age <= 3 * 3600:
+                seeded.append(now_mono - age)
+        if seeded:
+            self._playbook_sell_fill_mono = sorted(seeded)[-200:]
 
     def persist_runtime_state(self, *, force: bool = False) -> None:
         path = self._persist_path
@@ -1185,6 +1255,219 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return self._alphai_feature_for(base).freshness >= Decimal("0.35")
         except Exception:  # noqa: BLE001
             return True
+
+    def _note_playbook_sell_fill(self) -> None:
+        now = time.monotonic()
+        self._playbook_sell_fill_mono.append(now)
+        cutoff = now - 3 * 3600.0
+        self._playbook_sell_fill_mono = [
+            t for t in self._playbook_sell_fill_mono if t >= cutoff
+        ]
+
+    def _playbook_sell_fills_in(self, window_sec: float) -> int:
+        cutoff = time.monotonic() - window_sec
+        return sum(1 for t in self._playbook_sell_fill_mono if t >= cutoff)
+
+    def _playbook_bag_stats(self) -> tuple[int, float, int]:
+        """Return (underwater_count, underwater_notional, near_be_stuck_count)."""
+        uw_n = 0
+        uw_eur = 0.0
+        near_stuck = 0
+        for trail_key, st in self._trail.items():
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0:
+                continue
+            venue = str(st.get("venue") or trail_key.split(":", 1)[0])
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            if self._is_long_hold(base):
+                continue
+            qty = self._balance_qty(venue, base)
+            if qty <= 0:
+                qty = Decimal(str(st.get("session_qty") or 0))
+            if qty <= 0:
+                continue
+            notional = float(qty * mark)
+            if notional < 20.0:
+                continue
+            depth = float((mark - cost) / cost)
+            age = self._position_age_sec(venue, base)
+            if depth < -0.004:
+                uw_n += 1
+                uw_eur += notional
+            elif abs(depth) <= 0.004 and age >= 1800.0:
+                near_stuck += 1
+        return uw_n, uw_eur, near_stuck
+
+    def _playbook_median_mom(self) -> float | None:
+        rets: list[float] = []
+        for trail_key, st in list(self._trail.items())[:24]:
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            if self._is_long_hold(base):
+                continue
+            symbol = f"{base}{self._quote}"
+            marks = self.mark_history(symbol)
+            if len(marks) < 6:
+                continue
+            a, b = marks[-6], marks[-1]
+            if a <= 0:
+                continue
+            rets.append(float((b - a) / a))
+        if not rets:
+            return None
+        rets.sort()
+        mid = len(rets) // 2
+        if len(rets) % 2:
+            return rets[mid]
+        return (rets[mid - 1] + rets[mid]) / 2.0
+
+    def _playbook_alphai_wait_ratio(self) -> float:
+        snap = self._alphai_feature_snapshot or {}
+        timing = str(snap.get("entry_timing") or snap.get("alphai_entry_timing") or "")
+        if timing.upper() == "WAIT":
+            return 0.7
+        if self._alphai_macro_active:
+            return 0.8
+        return 0.0
+
+    def _apply_capital_playbook_overlays(self, overlays: Mapping[str, Any] | None) -> None:
+        """Reset to baselines then apply playbook overlays (enforce)."""
+        merged: dict[str, Any] = dict(self._playbook_baselines)
+        if overlays:
+            merged.update(dict(overlays))
+        block_new = bool(merged.pop("block_new_buys", False))
+
+        def _dec(key: str, attr: str, *, cap_to_baseline: bool = False) -> None:
+            if key in merged and merged[key] is not None:
+                val = Decimal(str(merged[key]))
+                if cap_to_baseline and key in self._playbook_baselines:
+                    base_v = Decimal(str(self._playbook_baselines[key]))
+                    if base_v > 0:
+                        val = min(val, base_v)
+                setattr(self, attr, val)
+
+        def _float(key: str, attr: str) -> None:
+            if key in merged and merged[key] is not None:
+                setattr(self, attr, float(merged[key]))
+
+        def _int(key: str, attr: str) -> None:
+            if key in merged and merged[key] is not None:
+                setattr(self, attr, int(merged[key]))
+
+        def _bool(key: str, attr: str) -> None:
+            if key in merged and merged[key] is not None:
+                setattr(self, attr, bool(merged[key]))
+
+        _dec("active_ring_eur", "_active_ring_eur", cap_to_baseline=True)
+        _dec("ring_soft_max_active_eur", "_ring_soft_max_active_eur", cap_to_baseline=True)
+        _bool("winner_add_enabled", "_winner_add_enabled")
+        _dec("alphai_strong_clip_eur", "_alphai_strong_clip_eur", cap_to_baseline=True)
+        _dec("exit_taker_cushion_bps", "_exit_taker_cushion_bps")
+        _int("exit_taker_after_maker_fails", "_exit_taker_after_maker_fails")
+        _dec("be_harvest_min_gain_pct", "_be_harvest_min_gain")
+        _dec("be_harvest_partial_pct", "_be_harvest_partial")
+        _float("uw_near_min_age_sec", "_uw_near_min_age_sec")
+        _float("uw_non_alphai_min_age_sec", "_uw_non_alphai_min_age_sec")
+        _float("uw_idle_min_age_sec", "_uw_idle_min_age_sec")
+        _dec("uw_idle_below_be_pct", "_uw_idle_below_be_pct")
+        _dec("uw_near_below_be_pct", "_uw_near_below_be_pct")
+        _dec("alphai_intraday_min_freshness", "_alphai_intraday_min_freshness")
+        _bool("alphai_cross_venue_deploy", "_alphai_cross_venue_deploy")
+
+        self._playbook_block_new_buys = block_new
+        if block_new and not self._daily_kill_active:
+            self.set_buys_blocked(True, new_bases_only=True)
+            self._playbook_owns_buy_block = True
+        elif (
+            not block_new
+            and self._playbook_owns_buy_block
+            and not self._daily_kill_active
+            and not self._sleeve_paused
+        ):
+            self.set_buys_blocked(False)
+            self._playbook_owns_buy_block = False
+
+    def refresh_capital_playbook(self, *, force: bool = False) -> dict[str, Any]:
+        """Reclassify TREND/FLAT/ADVERSE and apply live overlays."""
+        if not self._capital_playbook_enabled:
+            return {"enabled": False, "playbook": self._capital_playbook.value}
+        now = time.monotonic()
+        if (
+            not force
+            and self._capital_playbook_last_refresh_mono > 0
+            and (now - self._capital_playbook_last_refresh_mono)
+            < self._capital_playbook_refresh_sec
+        ):
+            return {"enabled": True, **self._capital_playbook_decision}
+
+        uw_n, uw_eur, near_stuck = self._playbook_bag_stats()
+        mtm = self._mtm_summary()
+        try:
+            winnable_gap = float(mtm.get("winnable_gap_eur") or 0)
+            locked = float(mtm.get("micro_locked_notional_eur") or 0)
+        except Exception:  # noqa: BLE001
+            winnable_gap = 0.0
+            locked = 0.0
+        inputs = CapitalPlaybookInputs(
+            sell_fills_last_60m=self._playbook_sell_fills_in(3600.0),
+            sell_fills_last_180m=self._playbook_sell_fills_in(3 * 3600.0),
+            underwater_bag_count=uw_n,
+            underwater_notional_eur=uw_eur,
+            near_be_stuck_count=near_stuck,
+            alphai_macro_active=bool(self._alphai_macro_active),
+            alphai_wait_ratio=self._playbook_alphai_wait_ratio(),
+            median_mom=self._playbook_median_mom(),
+            free_quote_eur=float(self.free_quote_eur or 0),
+            inventory_mtm_eur=locked,
+            time_stop_below_be_skips=int(
+                self.skips.get("time_stop_below_be", 0) or 0
+            ),
+            winnable_gap_eur=winnable_gap,
+        )
+        held = now - self._capital_playbook_since_mono
+        decision = classify_capital_playbook(
+            inputs,
+            current=self._capital_playbook,
+            held_sec=held,
+            min_hold_sec=self._capital_playbook_min_hold_sec,
+        )
+        prev = self._capital_playbook
+        if decision.playbook != prev:
+            self._capital_playbook = decision.playbook
+            self._capital_playbook_since_mono = now
+            logger.info(
+                "CAPITAL_PLAYBOOK_SWITCH %s -> %s confidence=%.2f reasons=%s",
+                prev.value,
+                decision.playbook.value,
+                decision.confidence,
+                ",".join(decision.reasons),
+            )
+            self._push_alert(
+                "capital_playbook",
+                f"{prev.value}→{decision.playbook.value} "
+                f"({','.join(decision.reasons[:4])})",
+            )
+        self._apply_capital_playbook_overlays(decision.overlays)
+        self._capital_playbook_decision = {
+            **decision_public_dict(decision),
+            "held_sec": round(now - self._capital_playbook_since_mono, 1),
+            "inputs": {
+                "sell_fills_60m": inputs.sell_fills_last_60m,
+                "sell_fills_180m": inputs.sell_fills_last_180m,
+                "underwater_bags": inputs.underwater_bag_count,
+                "underwater_eur": round(inputs.underwater_notional_eur, 2),
+                "near_be_stuck": inputs.near_be_stuck_count,
+                "median_mom": inputs.median_mom,
+                "winnable_gap_eur": round(inputs.winnable_gap_eur, 2),
+                "macro": inputs.alphai_macro_active,
+            },
+            "enabled": True,
+        }
+        self._capital_playbook_last_refresh_mono = now
+        return self._capital_playbook_decision
 
     def _alphai_intraday_entry_gate(
         self,
@@ -1843,6 +2126,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "rejects": dict(self._exit_reject_counts),
             },
             "okx_ring_clip_eur": str(self._okx_ring_clip_eur),
+            "capital_playbook": {
+                "enabled": self._capital_playbook_enabled,
+                **(self._capital_playbook_decision or {}),
+                "active_ring_eur": str(self._active_ring_eur),
+                "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
+                "exit_taker_cushion_bps": str(self._exit_taker_cushion_bps),
+                "winner_add_enabled": self._winner_add_enabled,
+                "block_new_buys": self._playbook_block_new_buys,
+            },
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))
                 for v in sorted(self._execute_venues)
@@ -2302,6 +2594,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "alphai_intraday_gate_enabled": self._alphai_intraday_gate_enabled,
             "alphai_intraday_gate_shadow": self._alphai_intraday_gate_shadow_only,
             "alphai_intraday_min_freshness": str(self._alphai_intraday_min_freshness),
+            "capital_playbook": self._capital_playbook_decision,
         }
         if opp is not None:
             return opp.snapshot(economic_extra={
@@ -2960,6 +3253,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         if len(self.recent_live_fills) > 24:
             self.recent_live_fills = self.recent_live_fills[-24:]
+        if str(side or "").lower() == "sell":
+            self._note_playbook_sell_fill()
 
     def _maybe_note_fill_display(
         self,
@@ -5923,6 +6218,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self, venue: str = "bitvavo"
     ) -> dict[str, Any]:
         """Soft/hard trail + recovery-arm at BE (no flat BE dump after time-stop)."""
+        try:
+            self.refresh_capital_playbook()
+        except Exception:  # noqa: BLE001
+            logger.exception("CAPITAL_PLAYBOOK_REFRESH_FAILED")
         if not self._trail_enabled and not self._time_stop_enabled:
             return {"ok": True, "enabled": False, "triggered": []}
         venue = venue.strip().lower()
@@ -6727,6 +7026,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         strategy: str = "",
         order_type: OrderType = OrderType.LIMIT,
     ) -> ExecutionResult:
+        try:
+            self.refresh_capital_playbook()
+        except Exception:  # noqa: BLE001
+            logger.exception("CAPITAL_PLAYBOOK_REFRESH_FAILED")
         meta = dict(order_request.metadata or {})
         post_only = bool(meta.get("post_only"))
         if post_only and not self._live_maker:

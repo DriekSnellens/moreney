@@ -441,6 +441,10 @@ def _session_settings(
             "alphai_intraday_gate_enabled": True,
             "alphai_intraday_gate_shadow_only": False,
             "alphai_intraday_min_freshness": 0.35,
+            # Capital playbook router (TREND/FLAT/ADVERSE) — live enforce.
+            "live_micro_capital_playbook_enabled": True,
+            "live_micro_capital_playbook_min_hold_sec": 900.0,
+            "live_micro_capital_playbook_refresh_sec": 60.0,
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,

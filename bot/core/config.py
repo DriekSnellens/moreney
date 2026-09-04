@@ -473,6 +473,14 @@ class Settings(BaseSettings):
     alphai_intraday_gate_enabled: bool = False
     alphai_intraday_gate_shadow_only: bool = True
     alphai_intraday_min_freshness: float = Field(default=0.35, ge=0.0, le=1.0)
+    # Capital playbook router: TREND / FLAT / ADVERSE live overlays (enforce).
+    live_micro_capital_playbook_enabled: bool = False
+    live_micro_capital_playbook_min_hold_sec: float = Field(
+        default=900.0, ge=60.0, le=7200.0
+    )
+    live_micro_capital_playbook_refresh_sec: float = Field(
+        default=60.0, ge=15.0, le=600.0
+    )
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

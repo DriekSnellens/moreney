@@ -1,0 +1,92 @@
+"""Tests for capital playbook router (TREND / FLAT / ADVERSE)."""
+
+from __future__ import annotations
+
+from bot.live.capital_playbook import (
+    CapitalPlaybook,
+    CapitalPlaybookInputs,
+    PLAYBOOK_OVERLAYS,
+    classify_capital_playbook,
+)
+
+
+def test_flat_day_low_velocity_classifies_flat() -> None:
+    decision = classify_capital_playbook(
+        CapitalPlaybookInputs(
+            sell_fills_last_60m=0,
+            sell_fills_last_180m=2,
+            near_be_stuck_count=3,
+            median_mom=0.0002,
+            winnable_gap_eur=5.0,
+            time_stop_below_be_skips=80,
+        ),
+        current=None,
+        held_sec=0,
+        min_hold_sec=0,
+    )
+    assert decision.playbook == CapitalPlaybook.FLAT
+    assert decision.overlays.get("exit_taker_cushion_bps") == 2.0
+    assert decision.overlays.get("winner_add_enabled") is False
+    assert decision.overlays.get("active_ring_eur") == 1200.0
+
+
+def test_adverse_macro_and_underwater() -> None:
+    decision = classify_capital_playbook(
+        CapitalPlaybookInputs(
+            alphai_macro_active=True,
+            underwater_bag_count=4,
+            underwater_notional_eur=200.0,
+            sell_fills_last_60m=1,
+        ),
+        min_hold_sec=0,
+    )
+    assert decision.playbook == CapitalPlaybook.ADVERSE
+    assert decision.overlays.get("block_new_buys") is True
+    assert decision.overlays.get("alphai_strong_clip_eur") == 0.0
+
+
+def test_trend_healthy_velocity() -> None:
+    decision = classify_capital_playbook(
+        CapitalPlaybookInputs(
+            sell_fills_last_60m=5,
+            sell_fills_last_180m=12,
+            median_mom=0.002,
+            near_be_stuck_count=0,
+        ),
+        min_hold_sec=0,
+    )
+    assert decision.playbook == CapitalPlaybook.TREND
+    assert decision.overlays == {}
+
+
+def test_hysteresis_holds_flat_unless_adverse() -> None:
+    held = classify_capital_playbook(
+        CapitalPlaybookInputs(
+            sell_fills_last_60m=5,
+            median_mom=0.002,
+        ),
+        current=CapitalPlaybook.FLAT,
+        held_sec=120.0,
+        min_hold_sec=900.0,
+    )
+    assert held.playbook == CapitalPlaybook.FLAT
+    assert any("hysteresis" in r for r in held.reasons)
+
+    interrupt = classify_capital_playbook(
+        CapitalPlaybookInputs(
+            alphai_macro_active=True,
+            underwater_bag_count=3,
+            underwater_notional_eur=150.0,
+        ),
+        current=CapitalPlaybook.FLAT,
+        held_sec=120.0,
+        min_hold_sec=900.0,
+    )
+    assert interrupt.playbook == CapitalPlaybook.ADVERSE
+
+
+def test_overlays_defined_for_all_playbooks() -> None:
+    assert CapitalPlaybook.TREND in PLAYBOOK_OVERLAYS
+    assert CapitalPlaybook.FLAT in PLAYBOOK_OVERLAYS
+    assert CapitalPlaybook.ADVERSE in PLAYBOOK_OVERLAYS
+    assert PLAYBOOK_OVERLAYS[CapitalPlaybook.FLAT]["exit_taker_cushion_bps"] < 5
