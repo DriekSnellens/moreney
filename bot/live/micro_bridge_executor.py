@@ -4484,16 +4484,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return True
 
     def _momentum_flat_or_down(self, symbol: str) -> bool:
-        """True when rolling mark return ≤ early-cut momentum max (default 0 = flat/down)."""
+        """True when rolling mark return ≤ early-cut momentum max (default 0 = flat/down).
+
+        Cold series (not enough samples yet, e.g. right after restart) counts as
+        flat so underwater recycle/cut paths are not frozen until the tape warms.
+        """
         if not self._momentum_enabled:
-            return False
+            return True
         series = self._series_for(symbol)
         need = max(3, min(6, self._momentum_samples // 2))
         if len(series) < need:
-            return False
+            return True
         mom = series.momentum_return()
         if mom is None:
-            return False
+            return True
         return mom <= self._early_cut_momentum_max
 
     def _position_age_sec(self, venue: str, base: str) -> float:
@@ -4552,19 +4556,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
         # Layer 1b: idle-pressure — free non-strong bags when venue cash is idle.
+        # Deep enough underwater: stop without waiting for momentum samples.
         if (
             self._uw_idle_pressure_enabled
             and not strong_hold
-            and flat_or_down
             and age >= self._uw_idle_min_age_sec
             and depth >= self._uw_idle_below_be_pct
         ):
             free_est = self._venue_budget_remaining(venue)
             if free_est >= self._uw_idle_min_free_eur:
                 floor = be * (Decimal("1") - self._uw_idle_below_be_pct)
-                if mark >= floor:
+                if depth >= self._uw_idle_below_be_pct * Decimal("1.5") or not flat_or_down:
+                    # Clearly underwater or momentum unknown → hit bid.
+                    return ("idle_pressure", "stop", floor)
+                if flat_or_down and mark >= floor:
                     return ("idle_pressure", "band", floor)
-                return ("idle_pressure", "stop", floor)
+                if flat_or_down:
+                    return ("idle_pressure", "stop", floor)
 
         # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
         if is_alphai:
@@ -4595,12 +4603,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return None
 
         # Layer 2a: non-AlphaI aged recycle.
-        if age >= self._uw_non_alphai_min_age_sec and flat_or_down:
+        if age >= self._uw_non_alphai_min_age_sec:
             floor = be * (Decimal("1") - self._uw_non_alphai_below_be_pct)
-            if mark >= floor:
-                return ("non_alphai", "band", floor)
             if depth >= self._uw_non_alphai_below_be_pct:
                 return ("non_alphai", "stop", floor)
+            if flat_or_down:
+                if mark >= floor:
+                    return ("non_alphai", "band", floor)
 
         # Layer 2b: near-BE band after shorter wait.
         if (
@@ -5940,14 +5949,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 continue
             if st.get("time_stop_due") and (be is None or mark < be):
-                cut_floor_early = self._cut_loss_floor_price(venue, asset)
-                if not (
-                    cut_floor_early is not None
-                    and self._cut_loss_eligible(st, venue=venue, base=asset)
-                    and mark <= cut_floor_early
-                ):
-                    self._bump_skip("time_stop_below_be")
-                    continue
+                # Aged + underwater: do NOT bail — fall through to uw_recycle /
+                # early-cut / soft cut so capital can free within the sleeve.
+                self._bump_skip("time_stop_below_be")
 
             if st.get("soft_armed") and not st.get("triggered"):
                 armed_now.append(f"{venue}:{asset}")
