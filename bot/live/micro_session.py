@@ -434,16 +434,16 @@ def _session_settings(
             "profitability_min_net_return": 0.0003,
             "profitability_execution_buffer_bps": 2.0,
             "risk_min_net_profit_usd": 0.025,
-            # Hard per-trade ceiling: AlphaI strong clips up to ~€280 on ~€2k pocket.
-            "risk_max_position_usd": min(280.0, max(120.0, budget_f * 0.14)),
+            # Hard per-trade ceiling: AlphaI strong clips (€280) need a little headroom.
+            "risk_max_position_usd": min(300.0, max(120.0, budget_f * 0.15)),
             # Size vs aggregate multi-venue equity so clips stay near the ceiling
             # (2×€2k pockets must not inflate too far and fail NET return).
             "arbitrage_position_pct": min(
-                7.0,
+                7.5,
                 max(
                     3.0,
                     (
-                        min(280.0, max(120.0, budget_f * 0.14))
+                        min(300.0, max(120.0, budget_f * 0.15))
                         / max(budget_f * max(len(execute_venues), 1), 1.0)
                     )
                     * 100.0,
@@ -469,7 +469,7 @@ def _session_settings(
             "live_micro_max_alt_bases": 10,
             # Cap live order size to add-clip ceiling.
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
-            "live_micro_max_notional_eur": min(280.0, max(120.0, budget_f * 0.14)),
+            "live_micro_max_notional_eur": min(300.0, max(120.0, budget_f * 0.15)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             # Alt-beta book: wider drawdown band than default 5–8% global kill.
             "max_drawdown_percent": float(

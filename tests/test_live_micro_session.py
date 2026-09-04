@@ -86,8 +86,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
         symbols=["SOLEUR"],
         persist_path=tmp_path / "dual.json",
     )
-    # AlphaI max-deploy: ~€280 clip ceiling on €4k aggregate → 7% position pct.
-    assert dual.arbitrage_position_pct == 7.0
+    assert dual.arbitrage_position_pct == 7.5
     assert dual.arbitrage_max_emits_per_cycle == 12
     assert dual.live_micro_max_open_orders == 8
     assert dual.live_micro_max_open_orders_per_venue == 8
@@ -802,7 +801,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.paper_trail_soft_partial_pct == 0.25
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
     assert cfg.live_micro_winner_add_max == 2
-    assert cfg.live_micro_max_notional_eur <= 280.0
+    assert cfg.live_micro_max_notional_eur <= 300.0
     assert cfg.live_micro_max_notional_eur >= 200.0
     assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -931,6 +930,30 @@ def test_policy_allows_sell_above_max_notional() -> None:
         venue="okx", symbol="SOLEUR", notional_eur=Decimal("320"), side="sell"
     )
     assert ok_sell is True, reason_sell
+
+
+def test_policy_allows_buy_within_one_cent_of_max_notional() -> None:
+    """Float dust at exactly the AlphaI strong-clip ceiling must not block buys."""
+    from bot.live.micro import MicroLivePolicy
+
+    pol = MicroLivePolicy(
+        _unlocked(live_micro_max_notional_eur=280, live_micro_venues="bitvavo,okx")
+    )
+    ok, reason = pol.validate_order(
+        venue="bitvavo",
+        symbol="ETHEUR",
+        notional_eur=Decimal("280.0000050842883500"),
+        side="buy",
+    )
+    assert ok is True, reason
+    ok_over, reason_over = pol.validate_order(
+        venue="bitvavo",
+        symbol="ETHEUR",
+        notional_eur=Decimal("280.02"),
+        side="buy",
+    )
+    assert ok_over is False
+    assert "exceeds max" in reason_over
 
 
 def test_soft_partial_retries_while_armed_not_only_newly_soft(tmp_path: Path) -> None:

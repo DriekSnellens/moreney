@@ -100,7 +100,10 @@ class MicroLivePolicy:
             side_l = str(side or "").strip().lower()
             is_sell = side_l.startswith("s")
             if not is_sell:
-                return False, f"notional {notional_eur} exceeds max {self.max_notional_eur()}"
+                # Allow ≤1¢ float/quantize overshoot so AlphaI strong clips at
+                # exactly max_notional are not rejected (280.00000002 > 280).
+                if notional_eur - self.max_notional_eur() > Decimal("0.01"):
+                    return False, f"notional {notional_eur} exceeds max {self.max_notional_eur()}"
         # Profitable exits must never be blocked by resting buy ladders.
         side_l = str(side or "").strip().lower()
         is_sell = side_l.startswith("s")
