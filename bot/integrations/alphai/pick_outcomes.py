@@ -126,6 +126,7 @@ class PickOutcomeStore:
         day_returns_pct: Mapping[str, float],
         *,
         btc_base: str = "BTC",
+        lag_vs_btc_pp: float = 1.5,
     ) -> dict[str, Any] | None:
         entry = next((s for s in self.sessions if s.get("session_id") == session_id), None)
         if entry is None:
@@ -150,7 +151,8 @@ class PickOutcomeStore:
                 continue
             vs_btc = None if btc_ret is None else ret - btc_ret
             beat = vs_btc is not None and vs_btc > 0
-            lag = vs_btc is not None and vs_btc <= -1.5
+            lag_cut = float(lag_vs_btc_pp)
+            lag = vs_btc is not None and vs_btc <= -lag_cut
             if beat:
                 beats += 1
             if lag:
@@ -187,6 +189,7 @@ class PickOutcomeStore:
         *,
         max_age_hours: float = 36.0,
         btc_base: str = "BTC",
+        lag_vs_btc_pp: float = 1.5,
     ) -> int:
         """Re-settle recent sessions (including already settled — tape moves)."""
         cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
@@ -204,15 +207,80 @@ class PickOutcomeStore:
             sid = str(entry.get("session_id") or "")
             if not sid:
                 continue
-            self.settle_session(sid, day_returns_pct, btc_base=btc_base)
+            self.settle_session(
+                sid,
+                day_returns_pct,
+                btc_base=btc_base,
+                lag_vs_btc_pp=lag_vs_btc_pp,
+            )
             n += 1
         return n
+
+    def recent_excesses(self, *, last_n: int = 96) -> list[float]:
+        """Flatten recent settled excess-vs-BTC samples (coin-agnostic)."""
+        recent = [s for s in self.sessions if s.get("settled")][-last_n:]
+        out: list[float] = []
+        for s in recent:
+            for row in s.get("outcomes") or []:
+                if row.get("vs_btc_pp") is None:
+                    continue
+                try:
+                    out.append(float(row["vs_btc_pp"]))
+                except (TypeError, ValueError):
+                    continue
+        return out
+
+    def base_reliability(
+        self,
+        *,
+        min_n: int = 3,
+        last_n: int = 96,
+        neutral: float = 1.0,
+        floor: float = 0.55,
+        ceiling: float = 1.05,
+    ) -> dict[str, float]:
+        """Per-base reliability from settled outcomes — any coin, no allowlist.
+
+        Maps historical beat-rate + avg excess into a multiplier around 1.0.
+        Bases with fewer than ``min_n`` samples stay at ``neutral`` (no invent).
+        """
+        recent = [s for s in self.sessions if s.get("settled")][-last_n:]
+        buckets: dict[str, list[dict[str, Any]]] = {}
+        for s in recent:
+            for row in s.get("outcomes") or []:
+                base = str(row.get("base") or "").upper()
+                if not base:
+                    continue
+                buckets.setdefault(base, []).append(row)
+
+        out: dict[str, float] = {}
+        for base, rows in buckets.items():
+            if len(rows) < int(min_n):
+                continue
+            beats = sum(1 for r in rows if r.get("beat_btc"))
+            beat_rate = beats / float(len(rows))
+            excesses = [
+                float(r["vs_btc_pp"])
+                for r in rows
+                if r.get("vs_btc_pp") is not None
+            ]
+            avg_ex = sum(excesses) / len(excesses) if excesses else 0.0
+            # beat_rate 0.5 → ~1.0; 0.0 → floor; 1.0 → ceiling
+            from_rate = float(floor) + (float(ceiling) - float(floor)) * beat_rate
+            # Soft tilt from average excess (±0.08 per pp, clamped).
+            from_excess = 1.0 + max(-0.20, min(0.20, avg_ex * 0.08))
+            score = 0.7 * from_rate + 0.3 * from_excess
+            out[base] = round(max(float(floor), min(float(ceiling), score)), 4)
+        # Explicit neutral for completeness when callers iterate picks.
+        _ = neutral
+        return out
 
     def summary(self, *, last_n: int = 48) -> dict[str, Any]:
         recent = [s for s in self.sessions if s.get("settled")][-last_n:]
         rows: list[dict[str, Any]] = []
         for s in recent:
             rows.extend(s.get("outcomes") or [])
+        reliability = self.base_reliability(last_n=last_n)
         if not rows:
             return {
                 "settled_sessions": 0,
@@ -223,6 +291,7 @@ class PickOutcomeStore:
                 "rank1_lag_rate": None,
                 "auto_apply": self.auto_apply,
                 "latest_lesson": None,
+                "base_reliability": reliability,
             }
         beats = sum(1 for r in rows if r.get("beat_btc"))
         lags = sum(1 for r in rows if r.get("lagging"))
@@ -242,6 +311,7 @@ class PickOutcomeStore:
             "auto_apply": self.auto_apply,
             "latest_lesson": (latest or {}).get("lesson"),
             "latest_session_id": (latest or {}).get("session_id"),
+            "base_reliability": reliability,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -287,6 +357,7 @@ def sync_pick_outcomes(
     day_returns_pct: Mapping[str, float] | None = None,
     fetch_returns: DayReturnFetcher | None = None,
     enabled: bool = True,
+    lag_vs_btc_pp: float = 1.5,
 ) -> dict[str, Any] | None:
     """Record + settle picks; return summary or None when disabled/empty."""
     if not enabled or not isinstance(report, dict):
@@ -304,9 +375,12 @@ def sync_pick_outcomes(
         except Exception:  # noqa: BLE001
             logger.exception("ALPHAI_PICK_OUTCOMES_FETCH_FAILED")
     store = PickOutcomeStore.load(path)
-    store.record_session(report, day_returns_pct=returns or None, settle=bool(returns))
+    store.record_session(report, day_returns_pct=returns or None, settle=False)
     if returns:
-        store.settle_open(returns)
+        sid = str(report.get("session_id") or "")
+        if sid:
+            store.settle_session(sid, returns, lag_vs_btc_pp=lag_vs_btc_pp)
+        store.settle_open(returns, lag_vs_btc_pp=lag_vs_btc_pp)
     store.save(path)
     summary = store.summary()
     if summary.get("latest_lesson"):

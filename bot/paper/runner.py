@@ -2259,17 +2259,19 @@ class PaperRunner:
             state.global_reduce_only and not observation
         )
         daily = monitor.daily_picks_snapshot()
-        # Price confirmation + pick outcomes: learn when headline picks lag BTC.
+        # Dynamic price confirmation + outcomes learning (no per-coin hardcoding).
         if (
             isinstance(daily, dict)
             and bool(getattr(self._settings, "alphai_price_confirm_enabled", True))
         ):
             try:
                 from bot.integrations.alphai.pick_outcomes import (
+                    PickOutcomeStore,
                     fetch_bitvavo_day_returns,
                     sync_pick_outcomes,
                 )
                 from bot.integrations.alphai.price_confirm import (
+                    adaptive_lag_threshold,
                     enrich_daily_with_price_check,
                 )
 
@@ -2280,28 +2282,56 @@ class PaperRunner:
                 ]
                 bases = sorted(set(pick_bases) | {"BTC"})
                 day_rets = await asyncio.to_thread(fetch_bitvavo_day_returns, bases)
-                lag_pp = float(
+                default_lag = float(
                     getattr(self._settings, "alphai_price_lag_vs_btc_pp", 1.5) or 1.5
+                )
+                path = str(
+                    getattr(
+                        self._settings,
+                        "alphai_pick_outcomes_path",
+                        "./data/alphai/pick_outcomes.json",
+                    )
+                )
+                store = PickOutcomeStore.load(path)
+                adaptive = bool(
+                    getattr(self._settings, "alphai_adaptive_lag_enabled", True)
+                )
+                lag_pp = default_lag
+                if adaptive:
+                    lag_pp = adaptive_lag_threshold(
+                        store.recent_excesses(),
+                        default_pp=default_lag,
+                        min_samples=int(
+                            getattr(self._settings, "alphai_adaptive_lag_min_samples", 20)
+                            or 20
+                        ),
+                    )
+                reliability = store.base_reliability(
+                    min_n=int(
+                        getattr(self._settings, "alphai_base_reliability_min_n", 3) or 3
+                    )
                 )
                 daily = enrich_daily_with_price_check(
                     daily,
                     day_rets,
                     lag_vs_btc_pp=lag_pp,
+                    full_pp=float(
+                        getattr(self._settings, "alphai_price_confirm_full_pp", 0.0) or 0.0
+                    ),
+                    scale_cutoff=float(
+                        getattr(self._settings, "alphai_price_scale_cutoff", 0.45) or 0.45
+                    ),
+                    base_reliability=reliability,
+                    adaptive=adaptive and lag_pp != default_lag,
                 )
                 if bool(getattr(self._settings, "alphai_pick_outcomes_enabled", True)):
-                    path = str(
-                        getattr(
-                            self._settings,
-                            "alphai_pick_outcomes_path",
-                            "./data/alphai/pick_outcomes.json",
-                        )
-                    )
                     await asyncio.to_thread(
                         sync_pick_outcomes,
                         daily,
                         path,
                         day_returns_pct=day_rets,
                         enabled=True,
+                        lag_vs_btc_pp=lag_pp,
                     )
             except Exception:  # noqa: BLE001
                 logger.exception("ALPHAI_PRICE_CONFIRM_FAILED")

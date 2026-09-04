@@ -25,8 +25,10 @@ class AlphaITradingSignals:
     macro_active: bool
     bullish_headline_counts: dict[str, int] = field(default_factory=dict)
     bearish_headline_counts: dict[str, int] = field(default_factory=dict)
-    # Intraday laggards vs BTC (price confirmation) — still buyable, not "strong".
+    # Intraday relative-strength scales (0..1) — derived from tape, not coin lists.
     price_lag_bases: frozenset[str] = field(default_factory=frozenset)
+    price_confirm_scales: dict[str, float] = field(default_factory=dict)
+    base_reliability: dict[str, float] = field(default_factory=dict)
 
     def pick_score(self, base: str) -> float:
         return float(self.daily_pick_scores.get(str(base or "").upper(), 0.0))
@@ -85,16 +87,47 @@ class AlphaITradingSignals:
         # Mixed headlines damp conviction (still buyable, weaker hold/size).
         if self.is_headline_mixed(b):
             conv *= max(0.55, 1.0 - 0.55 * self.headline_conflict_ratio(b))
-        # Price lag vs BTC: headline rank must not dominate relative strength.
-        if b in self.price_lag_bases:
-            conv *= 0.55
-        if b in self.bullish_bases and b not in self.price_lag_bases:
+        # Continuous tape confirmation (any coin): scale multiplies conviction.
+        scale = self.price_confirm_scale(b)
+        if scale < 1.0:
+            conv *= max(0.35, scale)
+        # Historical reliability (any coin): damp or mild boost from outcomes.
+        rel = self.base_reliability_mult(b)
+        if abs(rel - 1.0) > 1e-9:
+            conv *= max(0.45, min(1.10, rel))
+        if b in self.bullish_bases and scale >= 0.70 and rel >= 0.85:
             conv = max(conv, 0.70)
         return max(0.0, min(1.0, conv))
 
+    def price_confirm_scale(self, base: str) -> float:
+        """Continuous ``[0, 1]`` tape confirmation; missing → neutral 1.0."""
+        b = str(base or "").upper()
+        if b in self.price_confirm_scales:
+            try:
+                return max(0.0, min(1.0, float(self.price_confirm_scales[b])))
+            except (TypeError, ValueError):
+                return 1.0
+        # Fallback for older payloads that only set the lagging set.
+        if b in self.price_lag_bases:
+            return 0.35
+        return 1.0
+
+    def base_reliability_mult(self, base: str) -> float:
+        """Historical pick reliability multiplier; missing → neutral 1.0."""
+        b = str(base or "").upper()
+        if b not in self.base_reliability:
+            return 1.0
+        try:
+            return max(0.40, min(1.10, float(self.base_reliability[b])))
+        except (TypeError, ValueError):
+            return 1.0
+
     def is_price_lagging(self, base: str) -> bool:
-        """True when intraday return lags BTC by the configured threshold."""
-        return str(base or "").upper() in self.price_lag_bases
+        """True when dynamic confirm scale is weak (tape lagging peers/BTC)."""
+        b = str(base or "").upper()
+        if b in self.price_lag_bases:
+            return True
+        return self.price_confirm_scale(b) < 0.45
 
     def is_weak_bullish_hold(self, base: str) -> bool:
         """Bullish-enough to buy, but weak conviction → faster recycle/hold trim."""
@@ -102,6 +135,10 @@ class AlphaITradingSignals:
         if self.is_bearish(b) or not self.allows_new_buy(b):
             return False
         if self.is_price_lagging(b):
+            return True
+        if self.price_confirm_scale(b) < 0.55:
+            return True
+        if self.base_reliability_mult(b) < 0.75:
             return True
         if self.is_headline_mixed(b) and self.headline_conflict_ratio(b) >= 0.25:
             return True
@@ -257,9 +294,13 @@ class AlphaITradingSignals:
             return False
         if self.is_price_lagging(b):
             return False
+        if self.price_confirm_scale(b) < 0.55:
+            return False
+        if self.base_reliability_mult(b) < 0.70:
+            return False
         if b in self.bullish_bases:
             return True
-        # High bar: top pick AND meaningful score (ETH/XRP-class, not DOGE-18).
+        # High bar: top pick AND meaningful score (not low-score fillers).
         if self.is_top_pick(b, top_n=3) and self.pick_score(b) >= 35.0:
             return True
         if ring_fallback and b in self.watch_bases and self.pick_score(b) >= 10.0:
@@ -289,6 +330,13 @@ class AlphaITradingSignals:
             mult *= Decimal(str(round(max(0.70, 1.0 - 0.45 * conflict), 3)))
         if self.is_price_lagging(b):
             mult *= Decimal("0.82")
+        else:
+            scale = self.price_confirm_scale(b)
+            if scale < 1.0:
+                mult *= Decimal(str(round(max(0.75, 0.75 + 0.25 * scale), 3)))
+            rel = self.base_reliability_mult(b)
+            if rel < 1.0:
+                mult *= Decimal(str(round(max(0.70, rel), 3)))
         return min(mult, Decimal("1.50"))
 
     def maker_rank_boost(self, base: str, *, is_buy: bool) -> Decimal:
@@ -393,6 +441,15 @@ class AlphaITradingSignals:
                 b: round(self.pick_conviction(b), 3) for b in sorted(self.bullish_buy_bases())
             },
             "price_lag_bases": sorted(self.price_lag_bases),
+            "price_confirm_scales": {
+                b: round(self.price_confirm_scale(b), 3)
+                for b in sorted(self.bullish_buy_bases())
+            },
+            "base_reliability": {
+                b: round(self.base_reliability_mult(b), 3)
+                for b in sorted(set(self.base_reliability) | set(self.bullish_buy_bases()))
+                if b in self.base_reliability
+            },
         }
 
 
@@ -477,6 +534,8 @@ def build_trading_signals(
                     avoid.add(k)
 
     lag_bases: set[str] = set()
+    confirm_scales: dict[str, float] = {}
+    reliability: dict[str, float] = {}
     if isinstance(daily, dict):
         price_check = daily.get("price_check")
         if isinstance(price_check, dict):
@@ -484,10 +543,57 @@ def build_trading_signals(
                 b = str(raw or "").strip().upper()
                 if b:
                     lag_bases.add(b)
-        # Explicit list also accepted (tests / compact payloads).
+            scales_raw = price_check.get("confirm_scales") or {}
+            if isinstance(scales_raw, dict):
+                for k, v in scales_raw.items():
+                    b = str(k or "").strip().upper()
+                    if not b:
+                        continue
+                    try:
+                        confirm_scales[b] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+            # Also accept per-pick rows.
+            picks_box = price_check.get("picks")
+            if isinstance(picks_box, dict):
+                for k, row in picks_box.items():
+                    b = str(k or "").strip().upper()
+                    if not b or not isinstance(row, dict):
+                        continue
+                    if row.get("confirm_scale") is not None and b not in confirm_scales:
+                        try:
+                            confirm_scales[b] = float(row["confirm_scale"])
+                        except (TypeError, ValueError):
+                            pass
+                    if row.get("lagging") and b:
+                        lag_bases.add(b)
         for raw in daily.get("price_lag_bases") or []:
             b = str(raw or "").strip().upper()
             if b:
+                lag_bases.add(b)
+        scales_top = daily.get("price_confirm_scales")
+        if isinstance(scales_top, dict):
+            for k, v in scales_top.items():
+                b = str(k or "").strip().upper()
+                if not b:
+                    continue
+                try:
+                    confirm_scales[b] = float(v)
+                except (TypeError, ValueError):
+                    continue
+        rel_raw = daily.get("base_reliability")
+        if isinstance(rel_raw, dict):
+            for k, v in rel_raw.items():
+                b = str(k or "").strip().upper()
+                if not b:
+                    continue
+                try:
+                    reliability[b] = float(v)
+                except (TypeError, ValueError):
+                    continue
+        # Derive lag set from scales when not explicitly listed.
+        for b, scale in confirm_scales.items():
+            if scale < 0.45:
                 lag_bases.add(b)
 
     return AlphaITradingSignals(
@@ -501,4 +607,6 @@ def build_trading_signals(
         bullish_headline_counts=bull_hl,
         bearish_headline_counts=bear_hl,
         price_lag_bases=frozenset(lag_bases),
+        price_confirm_scales=confirm_scales,
+        base_reliability=reliability,
     )
