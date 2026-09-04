@@ -62,6 +62,21 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
     pick_bases = [p.get("base") for p in (daily.get("picks") or []) if isinstance(p, dict)]
     avoid_bases = [p.get("base") for p in (daily.get("avoid") or []) if isinstance(p, dict)]
 
+    outcomes_summary: dict[str, Any] = {}
+    try:
+        from bot.integrations.alphai.pick_outcomes import PickOutcomeStore
+
+        outcomes_path = getattr(
+            get_settings(),
+            "alphai_pick_outcomes_path",
+            "./data/alphai/pick_outcomes.json",
+        )
+        outcomes_summary = PickOutcomeStore.load(outcomes_path).summary()
+    except Exception:  # noqa: BLE001
+        outcomes_summary = {}
+
+    price_check = daily.get("price_check") if isinstance(daily.get("price_check"), dict) else {}
+
     return {
         "alphai_enabled": bool(box.get("enabled")),
         "alphai_observation_mode": bool(box.get("observation_mode")),
@@ -81,4 +96,11 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
         else (len(headlines) if isinstance(headlines, list) else 0),
         "alphai_top_headline": top_headline,
         "alphai_headlines": headline_rows,
+        "alphai_pick_bases": pick_bases,
+        "alphai_avoid_bases": avoid_bases,
+        "alphai_price_lagging": list(price_check.get("lagging") or []),
+        "alphai_pick_lesson": outcomes_summary.get("latest_lesson"),
+        "alphai_pick_beat_btc_rate": outcomes_summary.get("beat_btc_rate"),
+        "alphai_pick_lag_rate": outcomes_summary.get("lag_rate"),
+        "alphai_pick_avg_vs_btc_pp": outcomes_summary.get("avg_vs_btc_pp"),
     }

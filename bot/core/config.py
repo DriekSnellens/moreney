@@ -469,6 +469,11 @@ class Settings(BaseSettings):
     alphai_exit_urgency_be_cushion_scale: float = Field(default=0.55, ge=0.2, le=1.0)
     alphai_bullish_trail_hold_boost: float = Field(default=1.15, ge=1.0, le=1.5)
     alphai_attribution_persist_path: str = "./data/alphai/attribution_state.json"
+    # Learn from pick vs tape: demote strong treatment when pick lags BTC intraday.
+    alphai_price_confirm_enabled: bool = True
+    alphai_price_lag_vs_btc_pp: float = Field(default=1.5, ge=0.5, le=5.0)
+    alphai_pick_outcomes_enabled: bool = True
+    alphai_pick_outcomes_path: str = "./data/alphai/pick_outcomes.json"
     # Intraday AND-gate: AlphaI pick × freshness × low adverse × momentum not down.
     alphai_intraday_gate_enabled: bool = False
     alphai_intraday_gate_shadow_only: bool = True

@@ -441,6 +441,11 @@ def _session_settings(
             "alphai_intraday_gate_enabled": True,
             "alphai_intraday_gate_shadow_only": False,
             "alphai_intraday_min_freshness": 0.35,
+            # Learn: headline picks that lag BTC lose strong-clip / inventory-build.
+            "alphai_price_confirm_enabled": True,
+            "alphai_price_lag_vs_btc_pp": 1.5,
+            "alphai_pick_outcomes_enabled": True,
+            "alphai_pick_outcomes_path": "./data/alphai/pick_outcomes.json",
             # Capital playbook router (TREND/FLAT/ADVERSE) — live enforce.
             "live_micro_capital_playbook_enabled": True,
             "live_micro_capital_playbook_min_hold_sec": 900.0,

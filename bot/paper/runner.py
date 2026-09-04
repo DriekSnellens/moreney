@@ -2258,7 +2258,54 @@ class PaperRunner:
         self._alphai_reduce_only = bool(
             state.global_reduce_only and not observation
         )
-        signals = build_trading_signals(state, monitor.daily_picks_snapshot())
+        daily = monitor.daily_picks_snapshot()
+        # Price confirmation + pick outcomes: learn when headline picks lag BTC.
+        if (
+            isinstance(daily, dict)
+            and bool(getattr(self._settings, "alphai_price_confirm_enabled", True))
+        ):
+            try:
+                from bot.integrations.alphai.pick_outcomes import (
+                    fetch_bitvavo_day_returns,
+                    sync_pick_outcomes,
+                )
+                from bot.integrations.alphai.price_confirm import (
+                    enrich_daily_with_price_check,
+                )
+
+                pick_bases = [
+                    str(p.get("base") or "").upper()
+                    for p in (daily.get("picks") or [])
+                    if isinstance(p, dict) and p.get("base")
+                ]
+                bases = sorted(set(pick_bases) | {"BTC"})
+                day_rets = await asyncio.to_thread(fetch_bitvavo_day_returns, bases)
+                lag_pp = float(
+                    getattr(self._settings, "alphai_price_lag_vs_btc_pp", 1.5) or 1.5
+                )
+                daily = enrich_daily_with_price_check(
+                    daily,
+                    day_rets,
+                    lag_vs_btc_pp=lag_pp,
+                )
+                if bool(getattr(self._settings, "alphai_pick_outcomes_enabled", True)):
+                    path = str(
+                        getattr(
+                            self._settings,
+                            "alphai_pick_outcomes_path",
+                            "./data/alphai/pick_outcomes.json",
+                        )
+                    )
+                    await asyncio.to_thread(
+                        sync_pick_outcomes,
+                        daily,
+                        path,
+                        day_returns_pct=day_rets,
+                        enabled=True,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("ALPHAI_PRICE_CONFIRM_FAILED")
+        signals = build_trading_signals(state, daily)
         maker = self._maker_strategy()
         if maker is not None:
             hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))

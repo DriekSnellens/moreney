@@ -25,6 +25,8 @@ class AlphaITradingSignals:
     macro_active: bool
     bullish_headline_counts: dict[str, int] = field(default_factory=dict)
     bearish_headline_counts: dict[str, int] = field(default_factory=dict)
+    # Intraday laggards vs BTC (price confirmation) — still buyable, not "strong".
+    price_lag_bases: frozenset[str] = field(default_factory=frozenset)
 
     def pick_score(self, base: str) -> float:
         return float(self.daily_pick_scores.get(str(base or "").upper(), 0.0))
@@ -83,15 +85,24 @@ class AlphaITradingSignals:
         # Mixed headlines damp conviction (still buyable, weaker hold/size).
         if self.is_headline_mixed(b):
             conv *= max(0.55, 1.0 - 0.55 * self.headline_conflict_ratio(b))
-        if b in self.bullish_bases:
+        # Price lag vs BTC: headline rank must not dominate relative strength.
+        if b in self.price_lag_bases:
+            conv *= 0.55
+        if b in self.bullish_bases and b not in self.price_lag_bases:
             conv = max(conv, 0.70)
         return max(0.0, min(1.0, conv))
+
+    def is_price_lagging(self, base: str) -> bool:
+        """True when intraday return lags BTC by the configured threshold."""
+        return str(base or "").upper() in self.price_lag_bases
 
     def is_weak_bullish_hold(self, base: str) -> bool:
         """Bullish-enough to buy, but weak conviction → faster recycle/hold trim."""
         b = str(base or "").upper()
         if self.is_bearish(b) or not self.allows_new_buy(b):
             return False
+        if self.is_price_lagging(b):
+            return True
         if self.is_headline_mixed(b) and self.headline_conflict_ratio(b) >= 0.25:
             return True
         return self.pick_conviction(b) < 0.45
@@ -239,9 +250,12 @@ class AlphaITradingSignals:
 
         Weak top-N names (low score) stay buyable via ``allows_new_buy`` / priority
         clip, but must not receive strong-clip / soft-gate treatment.
+        Price-lagging picks are never "strong" (headline ≠ tape).
         """
         b = str(base or "").upper()
         if not self.is_bullish_buy(b, ring_fallback=ring_fallback):
+            return False
+        if self.is_price_lagging(b):
             return False
         if b in self.bullish_bases:
             return True
@@ -273,6 +287,8 @@ class AlphaITradingSignals:
         conflict = self.headline_conflict_ratio(b)
         if conflict > 0:
             mult *= Decimal(str(round(max(0.70, 1.0 - 0.45 * conflict), 3)))
+        if self.is_price_lagging(b):
+            mult *= Decimal("0.82")
         return min(mult, Decimal("1.50"))
 
     def maker_rank_boost(self, base: str, *, is_buy: bool) -> Decimal:
@@ -288,6 +304,8 @@ class AlphaITradingSignals:
                 boost += Decimal("0.08")
             if self.is_top_pick(b):
                 boost += Decimal("0.20")
+            if self.is_price_lagging(b):
+                boost -= Decimal("0.25")
             if self.is_bearish(b):
                 boost -= Decimal("0.50")
             elif not self.allows_new_buy(b):
@@ -323,6 +341,8 @@ class AlphaITradingSignals:
     def momentum_floor_scale(self, base: str) -> Decimal:
         """Scale momentum floor down (easier entry) for top picks / bullish headlines."""
         b = str(base or "").upper()
+        if self.is_price_lagging(b):
+            return _ONE  # no easier entry while lagging BTC
         if b in self.bullish_bases and self.is_top_pick(b):
             return Decimal("0.50")
         if self.is_top_pick(b) or b in self.bullish_bases:
@@ -333,6 +353,9 @@ class AlphaITradingSignals:
 
     def inventory_build(self, base: str, *, ring_fallback: bool = False) -> bool:
         """First buy on strong AlphaI signal; ring_fallback opens watch/focus path."""
+        if self.is_price_lagging(base):
+            # Lagging tape: no inventory-build privilege from headlines alone.
+            return False
         if self.is_strong_bullish_buy(base):
             return True
         if not ring_fallback:
@@ -369,6 +392,7 @@ class AlphaITradingSignals:
             "pick_conviction": {
                 b: round(self.pick_conviction(b), 3) for b in sorted(self.bullish_buy_bases())
             },
+            "price_lag_bases": sorted(self.price_lag_bases),
         }
 
 
@@ -452,6 +476,20 @@ def build_trading_signals(
                 if k and k != "_MACRO_":
                     avoid.add(k)
 
+    lag_bases: set[str] = set()
+    if isinstance(daily, dict):
+        price_check = daily.get("price_check")
+        if isinstance(price_check, dict):
+            for raw in price_check.get("lagging") or []:
+                b = str(raw or "").strip().upper()
+                if b:
+                    lag_bases.add(b)
+        # Explicit list also accepted (tests / compact payloads).
+        for raw in daily.get("price_lag_bases") or []:
+            b = str(raw or "").strip().upper()
+            if b:
+                lag_bases.add(b)
+
     return AlphaITradingSignals(
         daily_pick_scores=scores,
         daily_pick_bases=frozenset(pick_bases),
@@ -462,4 +500,5 @@ def build_trading_signals(
         macro_active=macro,
         bullish_headline_counts=bull_hl,
         bearish_headline_counts=bear_hl,
+        price_lag_bases=frozenset(lag_bases),
     )
