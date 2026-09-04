@@ -520,7 +520,7 @@ class Settings(BaseSettings):
         default=0.0, ge=-0.01, le=0.01
     )
     # Tiered underwater recycle (sleeve-capped intentional small losses to free capital).
-    # Keeps cut_loss=0 / never-loss for normal exits; only trail_uw_recycle may sell < BE.
+    # BE+ harvests stay never-loss; uw_recycle / cut_loss may sell < BE within the sleeve cap.
     live_micro_uw_recycle_enabled: bool = False
     live_micro_uw_dust_max_notional_eur: float = Field(default=25.0, ge=0.0, le=100.0)
     live_micro_uw_dust_below_be_pct: float = Field(default=0.003, ge=0.0, le=0.05)
@@ -531,6 +531,11 @@ class Settings(BaseSettings):
     live_micro_uw_non_alphai_min_age_sec: float = Field(default=3600.0, ge=60.0, le=86400.0)
     live_micro_uw_alphai_below_be_pct: float = Field(default=0.02, ge=0.0, le=0.10)
     live_micro_uw_alphai_min_age_sec: float = Field(default=10800.0, ge=300.0, le=172800.0)
+    # When venue free cash is high, recycle non-strong underwater bags sooner (min loss).
+    live_micro_uw_idle_pressure_enabled: bool = False
+    live_micro_uw_idle_min_free_eur: float = Field(default=150.0, ge=0.0, le=5000.0)
+    live_micro_uw_idle_min_age_sec: float = Field(default=600.0, ge=60.0, le=86400.0)
+    live_micro_uw_idle_below_be_pct: float = Field(default=0.004, ge=0.0, le=0.05)
     # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
     live_micro_alphai_cross_venue_deploy: bool = True
     live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(

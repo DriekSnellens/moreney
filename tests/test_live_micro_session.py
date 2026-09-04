@@ -208,11 +208,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_buy_improve_bps) == 1.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.50
     assert cfg.paper_trail_be_harvest_partial_pct >= 0.50
-    assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) == 0.0
+    assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) == 0.025
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
-    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.0
+    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.01
     assert cfg.live_micro_early_cut_new_bases_only is True
     assert cfg.live_micro_trail_hold_while_rising is True
     assert cfg.live_micro_trail_hold_rising_n == 1
@@ -223,9 +223,15 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_okx_ring_clip_eur) == 140.0
     assert cfg.live_micro_uw_recycle_enabled is True
     assert float(cfg.live_micro_uw_dust_max_notional_eur) == 25.0
-    assert float(cfg.live_micro_uw_near_below_be_pct) == 0.008
-    assert float(cfg.live_micro_uw_alphai_below_be_pct) == 0.02
-    assert float(cfg.live_micro_uw_alphai_min_age_sec) == 10800.0
+    assert float(cfg.live_micro_uw_near_below_be_pct) == 0.006
+    assert float(cfg.live_micro_uw_near_min_age_sec) == 900.0
+    assert float(cfg.live_micro_uw_non_alphai_below_be_pct) == 0.008
+    assert float(cfg.live_micro_uw_non_alphai_min_age_sec) == 1200.0
+    assert float(cfg.live_micro_uw_alphai_below_be_pct) == 0.015
+    assert float(cfg.live_micro_uw_alphai_min_age_sec) == 3600.0
+    assert cfg.live_micro_uw_idle_pressure_enabled is True
+    assert float(cfg.live_micro_uw_idle_below_be_pct) == 0.004
+    assert float(cfg.live_micro_uw_idle_min_age_sec) == 600.0
     assert cfg.live_micro_alphai_cross_venue_deploy is True
     assert float(cfg.live_micro_alphai_cross_venue_max_other_depth_pct) == 0.025
     assert float(cfg.live_micro_alphai_ring_fill_add_max_depth_pct) == 0.012
@@ -3130,6 +3136,62 @@ def test_uw_recycle_weak_alphai_faster_than_strong(tmp_path: Path) -> None:
     )
     assert weak is not None and weak[0].startswith("alphai_weak")
     assert strong is None  # strong AlphaI still holding at ~1% / ~1.9h
+
+
+def test_uw_idle_pressure_recycles_non_strong(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_uw_recycle_enabled=True,
+        live_micro_uw_dust_max_notional_eur=0.0,
+        live_micro_uw_idle_pressure_enabled=True,
+        live_micro_uw_idle_min_free_eur=100.0,
+        live_micro_uw_idle_min_age_sec=600.0,
+        live_micro_uw_idle_below_be_pct=0.004,
+        live_micro_uw_alphai_below_be_pct=0.015,
+        live_micro_uw_alphai_min_age_sec=3600.0,
+        live_micro_active_ring_eur=1850.0,
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_early_cut_momentum_max_return=0.0,
+        alphai_bullish_buy_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "idle_uw.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "ADA", "score": 0.0},
+            ],
+            "avoid": [],
+        },
+    )
+    series = bridge._series_for("ADAEUR")  # noqa: SLF001
+    px = Decimal("1")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("80"), Decimal("1")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    bridge._position_opened_at["bitvavo:ADA"] = __import__("time").time() - 700  # noqa: SLF001
+    bridge._venue_budget_remaining = lambda venue: Decimal("500")  # type: ignore[method-assign]  # noqa: SLF001
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="ADA",
+        symbol="ADAEUR",
+        mark=Decimal("0.995"),  # -0.5%
+        be=Decimal("1"),
+        notional=Decimal("80"),
+    )
+    assert plan is not None and plan[0] == "idle_pressure"
 
 
 def test_low_util_relax_focus_skips_focus_gate(tmp_path: Path) -> None:

@@ -304,6 +304,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_alphai_min_age_sec = float(
             getattr(settings, "live_micro_uw_alphai_min_age_sec", 10800) or 10800
         )
+        self._uw_idle_pressure_enabled = bool(
+            getattr(settings, "live_micro_uw_idle_pressure_enabled", False)
+        )
+        self._uw_idle_min_free_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_idle_min_free_eur", 150) or 150)
+        )
+        self._uw_idle_min_age_sec = float(
+            getattr(settings, "live_micro_uw_idle_min_age_sec", 600) or 600
+        )
+        self._uw_idle_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_idle_below_be_pct", 0.004) or 0)
+        )
         self._alphai_cross_venue_deploy = bool(
             getattr(settings, "live_micro_alphai_cross_venue_deploy", True)
         )
@@ -1669,6 +1681,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_non_alphai_min_age_sec": self._uw_non_alphai_min_age_sec,
                 "uw_alphai_below_be_pct": str(self._uw_alphai_below_be_pct),
                 "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
+                "uw_idle_pressure_enabled": self._uw_idle_pressure_enabled,
+                "uw_idle_min_free_eur": str(self._uw_idle_min_free_eur),
+                "uw_idle_min_age_sec": self._uw_idle_min_age_sec,
+                "uw_idle_below_be_pct": str(self._uw_idle_below_be_pct),
                 "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
                 "alphai_cross_venue_max_other_depth_pct": str(
                     self._alphai_cross_venue_max_other_depth
@@ -4420,17 +4436,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if not self._has_trusted_cost(venue, base):
             return False
+        # Strong fresh AlphaI: prefer uw_recycle tiers; cut is last-resort deep stop only.
+        # Weak / non-bullish bags may hit the cut floor to free capital.
+        if (
+            self._alphai_strong_bullish_buy(base)
+            and not self._alphai_weak_bullish_hold(base)
+            and self._alphai_hold_conviction(base) >= 0.70
+        ):
+            return False
         return True
 
     def _early_cut_eligible(
         self, st: dict[str, Any], *, venue: str, base: str
     ) -> bool:
-        """Early cut: free new-session bags that fail quickly (vault untouched)."""
+        """Early cut: free new-session bags that fail quickly (sleeve-capped)."""
         if self._early_cut_loss_below_be_pct <= 0 or self._is_long_hold(base):
             return False
         if self._early_cut_new_bases_only and not st.get("new_session_base"):
             return False
         if not self._has_trusted_cost(venue, base):
+            return False
+        # Don't early-cut strong AlphaI conviction bags.
+        if (
+            self._alphai_strong_bullish_buy(base)
+            and not self._alphai_weak_bullish_hold(base)
+            and self._alphai_hold_conviction(base) >= 0.70
+        ):
             return False
         return True
 
@@ -4495,6 +4526,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return ("dust", "band", floor)
             return ("dust", "stop", floor)
 
+        strong_hold = (
+            is_alphai
+            and self._alphai_strong_bullish_buy(base)
+            and not self._alphai_weak_bullish_hold(base)
+            and self._alphai_hold_conviction(base) >= 0.70
+        )
+
+        # Layer 1b: idle-pressure — free non-strong bags when venue cash is idle.
+        if (
+            self._uw_idle_pressure_enabled
+            and not strong_hold
+            and flat_or_down
+            and age >= self._uw_idle_min_age_sec
+            and depth >= self._uw_idle_below_be_pct
+        ):
+            free_est = self._venue_budget_remaining(venue)
+            if free_est >= self._uw_idle_min_free_eur:
+                floor = be * (Decimal("1") - self._uw_idle_below_be_pct)
+                if mark >= floor:
+                    return ("idle_pressure", "band", floor)
+                return ("idle_pressure", "stop", floor)
+
         # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
         if is_alphai:
             weak = self._alphai_weak_bullish_hold(base)
@@ -4504,8 +4557,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 below = (
                     self._uw_non_alphai_below_be_pct
                     + (self._uw_alphai_below_be_pct - self._uw_non_alphai_below_be_pct)
-                    * Decimal(str(max(0.0, min(1.0, conv)))
-                    )
+                    * Decimal(str(max(0.0, min(1.0, conv))))
                 )
                 min_age = self._uw_non_alphai_min_age_sec + (
                     self._uw_alphai_min_age_sec - self._uw_non_alphai_min_age_sec
@@ -5928,13 +5980,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and mark <= early_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_early_cut_loss"
+                notional_early = free * mark
+                if self._uw_recycle_sleeve_allows(
+                    notional=notional_early, mark=mark, be=be
+                ):
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_early_cut_loss"
+                    st["sleeve"] = True
+                else:
+                    self._bump_skip("early_cut_sleeve_cap")
             if not reason and be is not None and mark < be:
                 free_uw = await self._refresh_free(venue, symbol, asset, locked)
                 notional_uw = free_uw * mark
@@ -5969,16 +6028,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 not reason
                 and cut_floor is not None
                 and self._cut_loss_eligible(st, venue=venue, base=asset)
+                and be is not None
                 and mark <= cut_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_cut_loss"
+                notional_cut = free * mark
+                if self._uw_recycle_sleeve_allows(
+                    notional=notional_cut, mark=mark, be=be
+                ):
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_cut_loss"
+                    st["sleeve"] = True
+                else:
+                    self._bump_skip("cut_loss_sleeve_cap")
             elif (
                 not reason
                 and be is not None

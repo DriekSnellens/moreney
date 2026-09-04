@@ -359,23 +359,29 @@ def _session_settings(
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
-            # Hard cut-loss off (vault). Intentional small losses only via uw_recycle + sleeve cap.
-            "live_micro_cut_loss_below_be_pct": 0.0,
+            # Capital velocity: small sleeve losses OK — free stuck bags, redeploy to AlphaI.
+            # Soft cut 2.5% hard stop; early 1% on new-session fails; uw_recycle does the rest.
+            "live_micro_cut_loss_below_be_pct": 0.025,
             "live_micro_cut_loss_new_bases_only": False,
-            "live_micro_early_cut_loss_below_be_pct": 0.0,
+            "live_micro_early_cut_loss_below_be_pct": 0.01,
             "live_micro_early_cut_new_bases_only": True,
             "live_micro_early_cut_momentum_max_return": 0.0,
-            # Tiered underwater recycle: free stuck capital within €50 sleeve loss budget.
+            # Faster underwater recycle — minimize idle capital, keep losses small.
             "live_micro_uw_recycle_enabled": True,
             "live_micro_uw_dust_max_notional_eur": 25.0,
             "live_micro_uw_dust_below_be_pct": 0.003,
-            "live_micro_uw_near_below_be_pct": 0.008,
-            "live_micro_uw_near_max_depth_pct": 0.015,
-            "live_micro_uw_near_min_age_sec": 2700.0,
-            "live_micro_uw_non_alphai_below_be_pct": 0.01,
-            "live_micro_uw_non_alphai_min_age_sec": 3600.0,
-            "live_micro_uw_alphai_below_be_pct": 0.02,
-            "live_micro_uw_alphai_min_age_sec": 10800.0,
+            "live_micro_uw_near_below_be_pct": 0.006,
+            "live_micro_uw_near_max_depth_pct": 0.012,
+            "live_micro_uw_near_min_age_sec": 900.0,
+            "live_micro_uw_non_alphai_below_be_pct": 0.008,
+            "live_micro_uw_non_alphai_min_age_sec": 1200.0,
+            "live_micro_uw_alphai_below_be_pct": 0.015,
+            "live_micro_uw_alphai_min_age_sec": 3600.0,
+            # Idle pressure: if venue has free cash, recycle non-strong bags sooner.
+            "live_micro_uw_idle_pressure_enabled": True,
+            "live_micro_uw_idle_min_free_eur": 150.0,
+            "live_micro_uw_idle_min_age_sec": 600.0,
+            "live_micro_uw_idle_below_be_pct": 0.004,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
             "live_micro_alphai_cross_venue_deploy": True,
             "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,
