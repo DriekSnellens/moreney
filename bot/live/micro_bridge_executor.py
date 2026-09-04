@@ -705,6 +705,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_idle_min_age_sec": self._uw_idle_min_age_sec,
             "uw_idle_below_be_pct": self._uw_idle_below_be_pct,
             "uw_near_below_be_pct": self._uw_near_below_be_pct,
+            "uw_near_max_depth_pct": self._uw_near_max_depth_pct,
             "alphai_intraday_min_freshness": self._alphai_intraday_min_freshness,
             "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
         }
@@ -1268,11 +1269,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         cutoff = time.monotonic() - window_sec
         return sum(1 for t in self._playbook_sell_fill_mono if t >= cutoff)
 
-    def _playbook_bag_stats(self) -> tuple[int, float, int]:
-        """Return (underwater_count, underwater_notional, near_be_stuck_count)."""
+    def _playbook_bag_stats(self) -> tuple[int, float, int, float]:
+        """Return (uw_count, uw_notional, near_be_count, near_be_notional).
+
+        Near-BE = within ±0.5% of cost (aged ≥10m or meaningful size) — used for
+        pre-crash derisk before bags go deep underwater.
+        """
         uw_n = 0
         uw_eur = 0.0
         near_stuck = 0
+        near_eur = 0.0
         for trail_key, st in self._trail.items():
             try:
                 cost = Decimal(str(st.get("cost") or 0))
@@ -1295,12 +1301,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             depth = float((mark - cost) / cost)
             age = self._position_age_sec(venue, base)
-            if depth < -0.004:
+            if depth < -0.005:
                 uw_n += 1
                 uw_eur += notional
-            elif abs(depth) <= 0.004 and age >= 1800.0:
-                near_stuck += 1
-        return uw_n, uw_eur, near_stuck
+            elif abs(depth) <= 0.005:
+                if age >= 600.0 or notional >= 40.0:
+                    near_stuck += 1
+                    near_eur += notional
+        return uw_n, uw_eur, near_stuck, near_eur
 
     def _playbook_median_mom(self) -> float | None:
         rets: list[float] = []
@@ -1374,6 +1382,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         _float("uw_idle_min_age_sec", "_uw_idle_min_age_sec")
         _dec("uw_idle_below_be_pct", "_uw_idle_below_be_pct")
         _dec("uw_near_below_be_pct", "_uw_near_below_be_pct")
+        _dec("uw_near_max_depth_pct", "_uw_near_max_depth_pct")
         _dec("alphai_intraday_min_freshness", "_alphai_intraday_min_freshness")
         _bool("alphai_cross_venue_deploy", "_alphai_cross_venue_deploy")
 
@@ -1403,7 +1412,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             return {"enabled": True, **self._capital_playbook_decision}
 
-        uw_n, uw_eur, near_stuck = self._playbook_bag_stats()
+        uw_n, uw_eur, near_stuck, near_eur = self._playbook_bag_stats()
         mtm = self._mtm_summary()
         try:
             winnable_gap = float(mtm.get("winnable_gap_eur") or 0)
@@ -1417,6 +1426,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             underwater_bag_count=uw_n,
             underwater_notional_eur=uw_eur,
             near_be_stuck_count=near_stuck,
+            near_be_notional_eur=near_eur,
             alphai_macro_active=bool(self._alphai_macro_active),
             alphai_wait_ratio=self._playbook_alphai_wait_ratio(),
             median_mom=self._playbook_median_mom(),
@@ -1453,7 +1463,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
             self._push_alert(
                 "capital_playbook",
-                f"{prev.value}→{decision.playbook.value} "
+                f"{prev.value}→{decision.playbook.value}"
+                f"{' PRE_CRASH' if decision.pre_crash else ''} "
                 f"({','.join(decision.reasons[:4])})",
             )
         self._apply_capital_playbook_overlays(decision.overlays)
@@ -1466,6 +1477,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "underwater_bags": inputs.underwater_bag_count,
                 "underwater_eur": round(inputs.underwater_notional_eur, 2),
                 "near_be_stuck": inputs.near_be_stuck_count,
+                "near_be_eur": round(inputs.near_be_notional_eur, 2),
+                "inventory_eur": round(inputs.inventory_mtm_eur, 2),
                 "median_mom": inputs.median_mom,
                 "winnable_gap_eur": round(inputs.winnable_gap_eur, 2),
                 "macro": inputs.alphai_macro_active,
