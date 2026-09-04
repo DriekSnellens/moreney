@@ -169,12 +169,15 @@ class AlphaITradingSignals:
         mult = _ONE
         score = self.pick_score(b)
         if score >= 4.0:
-            mult += Decimal(str(min(0.25, 0.05 + score * 0.008)))
+            # High scores (e.g. ETH ~90+) get near-max clip boost for capital deploy.
+            mult += Decimal(str(min(0.40, 0.05 + score * 0.004)))
         if b in self.bullish_bases:
-            mult += Decimal("0.08")
+            mult += Decimal("0.10")
         if self.is_top_pick(b):
+            mult += Decimal("0.08")
+        if self.is_strong_bullish_buy(b):
             mult += Decimal("0.05")
-        return min(mult, Decimal("1.35"))
+        return min(mult, Decimal("1.50"))
 
     def maker_rank_boost(self, base: str, *, is_buy: bool) -> Decimal:
         """Additive EUR rank boost for maker opportunity sorting."""

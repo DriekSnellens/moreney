@@ -533,7 +533,8 @@ class Settings(BaseSettings):
     # Scan OKX+Bitvavo books for dislocations; unfunded venues skip live legs.
     live_micro_cross_venue_enabled: bool = True
     # Bases shown as long-hold / outside micro recycle (comma-separated, e.g. ETH).
-    live_micro_long_hold_bases: str = "ETH"
+    # Empty = all focus bases are micro-recyclable (needed when AlphaI tops ETH).
+    live_micro_long_hold_bases: str = ""
     # Durable trail/resting/session counters across micro session restarts.
     live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
     # OKX: prefer deploying free EUR into these liquid bases (not Bitvavo max-base bags).
@@ -550,8 +551,13 @@ class Settings(BaseSettings):
     # Scale into soft-armed BE+ winners (bridge-submitted adds).
     live_micro_winner_add_enabled: bool = False
     live_micro_winner_add_max: int = Field(default=2, ge=0, le=5)
-    live_micro_winner_add_clip_eur: float = Field(default=55.0, ge=10.0, le=200.0)
+    live_micro_winner_add_clip_eur: float = Field(default=55.0, ge=10.0, le=400.0)
     live_micro_winner_add_cooldown_sec: float = Field(default=60.0, ge=5.0, le=600.0)
+    # When True, winner-adds only on AlphaI-allowed (bullish/priority) bags above BE.
+    live_micro_alphai_winner_add_only: bool = True
+    # Larger first-entry clips for AlphaI priority / strong picks (max capital deploy).
+    live_micro_alphai_priority_clip_eur: float = Field(default=0.0, ge=0.0, le=500.0)
+    live_micro_alphai_strong_clip_eur: float = Field(default=0.0, ge=0.0, le=500.0)
     # Per-venue target EUR for active-book (focus, not underwater) deployment.
     # While below target with free cash, prefer unheld focus emits (always-on deploy).
     live_micro_active_ring_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
@@ -628,7 +634,7 @@ class Settings(BaseSettings):
     # Reset sleeve cap + session PnL baseline at UTC midnight.
     live_micro_daily_baseline_reset_utc: bool = True
     # OKX active-ring: smaller clips while underfilled → more parallel slots.
-    live_micro_okx_ring_clip_eur: float = Field(default=50.0, ge=20.0, le=200.0)
+    live_micro_okx_ring_clip_eur: float = Field(default=50.0, ge=20.0, le=400.0)
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).

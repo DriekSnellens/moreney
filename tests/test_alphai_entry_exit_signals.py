@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -99,6 +100,77 @@ def test_priority_buy_bases_and_slot_penalty() -> None:
     assert signals.non_pick_slot_penalty("SOL", {"XRP", "LINK", "UNI", "ETH"}) == Decimal(
         "0"
     )
+
+
+def test_entry_size_multiplier_scales_high_alpha_scores() -> None:
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"ETH"})),
+        {
+            "picks": [
+                {"base": "ETH", "score": 96.0, "rank": 1},
+                {"base": "XRP", "score": 53.5, "rank": 2},
+                {"base": "ADA", "score": 2.0, "rank": 3},
+            ],
+            "avoid": [{"base": "SOL", "score": -5.0}],
+        },
+    )
+    eth_mult = signals.entry_size_multiplier("ETH")
+    xrp_mult = signals.entry_size_multiplier("XRP")
+    ada_mult = signals.entry_size_multiplier("ADA")
+    assert eth_mult > xrp_mult >= ada_mult
+    assert eth_mult <= Decimal("1.50")
+    assert eth_mult >= Decimal("1.40")
+    assert signals.entry_size_multiplier("SOL") == Decimal("0.75")
+
+
+def test_alphai_buy_clip_cap_prefers_strong_picks(tmp_path: Path) -> None:
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+    from bot.live.micro_engine import LiveMicroEngine
+    from bot.portfolio.portfolio import PaperPortfolio
+
+    settings = Settings(
+        execution_mode="paper",
+        live_trading_enabled=True,
+        live_micro_enabled=True,
+        live_orders_unlocked=True,
+        live_allow_without_research_unlock=True,
+        live_micro_venues="bitvavo",
+        live_micro_first_clip_eur=140.0,
+        live_micro_add_clip_eur=200.0,
+        live_micro_alphai_priority_clip_eur=220.0,
+        live_micro_alphai_strong_clip_eur=280.0,
+        live_micro_alphai_winner_add_only=True,
+        live_micro_winner_add_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "clip.json"),
+        alphai_require_bullish_new_buys=True,
+        alphai_bullish_buy_enabled=True,
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    signals = build_trading_signals(
+        AlphaIRegimeState(bullish_bases=frozenset({"ETH"})),
+        {
+            "picks": [
+                {"base": "ETH", "score": 96.0, "rank": 1},
+                {"base": "XRP", "score": 2.5, "rank": 2},
+                {"base": "LINK", "score": 2.0, "rank": 3},
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_signals = signals  # noqa: SLF001
+    assert bridge._buy_clip_cap_eur("bitvavo", "ETH") == Decimal("280")  # noqa: SLF001
+    # Priority pick with score < 3 → priority clip (not strong).
+    assert bridge._buy_clip_cap_eur("bitvavo", "XRP") == Decimal("220")  # noqa: SLF001
+    # Non-AlphaI falls back to first clip.
+    assert bridge._buy_clip_cap_eur("bitvavo", "DOT") == Decimal("140")  # noqa: SLF001
+    # Winner-add requires AlphaI when alphai_winner_add_only.
+    assert bridge._winner_add_eligible("bitvavo", "DOT") is False  # noqa: SLF001
 
 
 def test_alphai_stance_drives_buy_and_sell() -> None:

@@ -32,7 +32,9 @@ def test_micro_session_velocity_desk_overrides(tmp_path: Path) -> None:
     assert cfg.live_disable_research_hooks is True
     assert cfg.live_micro_ring_util_b_ignore_underwater is True
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
-    assert int(cfg.live_micro_buy_quality_underwater_count) == 4
+    assert int(cfg.live_micro_buy_quality_underwater_count) == 8
+    assert float(cfg.live_micro_active_ring_eur) == 1850.0
+    assert float(cfg.live_micro_alphai_strong_clip_eur) == 280.0
 
 
 def test_ring_soft_eligible_ignores_underwater_when_unlocked(monkeypatch) -> None:

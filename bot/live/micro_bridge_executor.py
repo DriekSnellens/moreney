@@ -514,6 +514,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._winner_add_cooldown_sec = float(
             getattr(settings, "live_micro_winner_add_cooldown_sec", 60.0) or 60.0
         )
+        self._alphai_winner_add_only = bool(
+            getattr(settings, "live_micro_alphai_winner_add_only", True)
+        )
+        self._alphai_priority_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_alphai_priority_clip_eur", 0) or 0)
+        )
+        self._alphai_strong_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_alphai_strong_clip_eur", 0) or 0)
+        )
         self._position_opened_mono: dict[str, float] = {}
         self._position_opened_at: dict[str, float] = {}
         self._max_alt_bases = int(
@@ -997,7 +1006,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             except Exception:  # noqa: BLE001
                 base_mult = _ONE
         combined = base_mult * feat.capital_preference * feat.size_multiplier
-        return max(Decimal("0.50"), min(combined, Decimal("1.35")))
+        return max(Decimal("0.50"), min(combined, Decimal("1.50")))
 
     def _alphai_momentum_floor_scale(self, base: str) -> Decimal:
         sig = self._alphai_signals
@@ -1596,6 +1605,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "winner_add_max": self._winner_add_max,
                 "winner_add_clip_eur": str(self._winner_add_clip_eur),
                 "winner_add_cooldown_sec": self._winner_add_cooldown_sec,
+                "alphai_winner_add_only": self._alphai_winner_add_only,
+                "alphai_priority_clip_eur": str(self._alphai_priority_clip_eur),
+                "alphai_strong_clip_eur": str(self._alphai_strong_clip_eur),
                 "cancel_buy_on_flat_momentum": self._cancel_buy_on_flat_momentum,
                 "momentum_require_last_n_rising": self._momentum_require_last_n_rising,
                 "trail_hold_while_rising": self._trail_hold_while_rising,
@@ -4857,7 +4869,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
-        """Entry clip; winner-adds use the dedicated winner clip size."""
+        """Entry clip; AlphaI priority/strong picks get larger deploy size."""
         if (
             self._winner_add_enabled
             and not self._is_new_base_buy(venue, base)
@@ -4865,6 +4877,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             return self._winner_add_clip_eur if self._winner_add_clip_eur > 0 else None
         first = self._first_clip_eur
+        # Concentrate working capital on AlphaI: strong > priority > default first clip.
+        if self._alphai_strong_bullish_buy(base) and self._alphai_strong_clip_eur > 0:
+            return self._alphai_strong_clip_eur
+        if self._alphai_bullish_buy(base) and self._alphai_priority_clip_eur > 0:
+            sig = self._alphai_signals
+            if sig is not None and hasattr(sig, "is_slot_priority_buy"):
+                if sig.is_slot_priority_buy(base, top_n=5):
+                    return self._alphai_priority_clip_eur
+            elif self._alphai_priority_clip_eur > first:
+                return self._alphai_priority_clip_eur
         if first <= 0:
             add = self._add_clip_eur
             return add if add > 0 else None
@@ -4885,6 +4907,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self._buys_blocked or self._sleeve_paused or self._daily_kill_active:
             return False
         if self._is_long_hold(base) or self._base_underwater_blocked(venue, base):
+            return False
+        # Max-deploy path: only add into AlphaI-approved bags (still ≥ BE).
+        if self._alphai_winner_add_only and not self._alphai_bullish_buy(base):
             return False
         trail_key = self._lots_key(venue, base)
         st = self._trail.get(trail_key) or {}
@@ -6738,7 +6763,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     mult = _ONE
             alphai_mult = self._alphai_entry_multiplier(base)
             if alphai_mult != _ONE:
-                mult = min(mult * alphai_mult, Decimal("1.35"))
+                mult = min(mult * alphai_mult, Decimal("1.50"))
                 if alphai_mult > _ONE:
                     self._alphai_attribution.record(
                         AlphaIAttributionEvent(
@@ -6791,6 +6816,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if (
             side_is_buy
             and self._block_buys_when_holding_base
+            and not meta.get("winner_add")
             and (
                 not self._is_new_base_buy(venue, base)
                 or held_anywhere

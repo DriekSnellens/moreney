@@ -78,7 +78,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
     assert cfg.arbitrage_max_emits_per_cycle == 12
-    assert cfg.paper_maker_max_open_quotes <= 6
+    assert cfg.paper_maker_max_open_quotes == 8
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
         Settings(live_micro_execute_venues="bitvavo,okx"),
@@ -86,19 +86,20 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
         symbols=["SOLEUR"],
         persist_path=tmp_path / "dual.json",
     )
-    # Aggregate equity ~€4k sizes clips near the ~€150 ceiling → 3.75% of €4k.
-    assert dual.arbitrage_position_pct == 3.75
+    # AlphaI max-deploy: ~€280 clip ceiling on €4k aggregate → 7% position pct.
+    assert dual.arbitrage_position_pct == 7.0
     assert dual.arbitrage_max_emits_per_cycle == 12
-    assert dual.live_micro_max_open_orders == 6
-    assert dual.live_micro_max_open_orders_per_venue == 4
-    assert dual.live_micro_max_resting_buys_per_symbol == 2
-    assert dual.live_micro_max_alt_bases == 8
-    assert float(dual.live_micro_first_clip_eur) == 55.0
-    assert float(dual.live_micro_add_clip_eur) == 100.0
-    assert float(dual.live_micro_active_ring_eur) == 1000.0
-    assert float(dual.paper_max_alt_inventory_pct) == 55.0
+    assert dual.live_micro_max_open_orders == 8
+    assert dual.live_micro_max_open_orders_per_venue == 8
+    assert dual.live_micro_max_resting_buys_per_symbol == 3
+    assert dual.live_micro_max_alt_bases == 10
+    assert float(dual.live_micro_first_clip_eur) == 140.0
+    assert float(dual.live_micro_add_clip_eur) == 200.0
+    assert float(dual.live_micro_active_ring_eur) == 1850.0
+    assert float(dual.live_micro_velocity_sleeve_eur) == 1850.0
+    assert float(dual.paper_max_alt_inventory_pct) == 78.0
     assert dual.max_simultaneous_positions == 16
-    assert float(dual.paper_maker_keep_vs_best_frac) == 0.30
+    assert float(dual.paper_maker_keep_vs_best_frac) == 0.35
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -112,29 +113,33 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
-    assert cfg.paper_trail_drawdown_pct == 0.015
+    assert cfg.paper_trail_drawdown_pct == 0.012
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_arm_pct == 0.012
-    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
-    assert cfg.paper_trail_soft_partial_pct == 0.15
-    assert cfg.paper_trail_hard_arm_pct == 0.03
-    assert cfg.paper_trail_hard_drawdown_pct == 0.015
-    assert cfg.paper_trail_hard_partial_pct == 0.35
-    assert cfg.paper_trail_arm_gain_pct == 0.03
-    assert cfg.live_micro_winner_add_enabled is False
-    assert cfg.live_micro_winner_add_max == 0
-    assert float(cfg.live_micro_winner_add_clip_eur) == 55.0
+    assert cfg.paper_trail_soft_arm_pct == 0.008
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_partial_pct == 0.25
+    assert cfg.paper_trail_hard_arm_pct == 0.025
+    assert cfg.paper_trail_hard_drawdown_pct == 0.012
+    assert cfg.paper_trail_hard_partial_pct == 0.40
+    assert cfg.paper_trail_arm_gain_pct == 0.025
+    assert cfg.live_micro_winner_add_enabled is True
+    assert cfg.live_micro_winner_add_max == 2
+    assert float(cfg.live_micro_winner_add_clip_eur) == 200.0
     assert float(cfg.live_micro_winner_add_cooldown_sec) == 45.0
-    assert cfg.live_micro_low_util_relax_focus is True
-    assert float(cfg.paper_maker_min_profit_eur) == 0.03
-    assert float(cfg.paper_maker_min_net_return) == 0.0004
-    assert float(cfg.profitability_min_net_profit_usd) == 0.03
-    assert float(cfg.profitability_min_net_return) == 0.0004
-    assert float(cfg.risk_min_net_profit_usd) == 0.03
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
-    assert cfg.live_micro_max_resting_buys_per_symbol == 2
-    assert cfg.live_micro_max_open_orders_per_venue == 4
+    assert cfg.live_micro_alphai_winner_add_only is True
+    assert float(cfg.live_micro_alphai_priority_clip_eur) == 220.0
+    assert float(cfg.live_micro_alphai_strong_clip_eur) == 280.0
+    assert (cfg.live_micro_long_hold_bases or "") == ""
+    assert cfg.live_micro_low_util_relax_focus is False
+    assert float(cfg.paper_maker_min_profit_eur) == 0.025
+    assert float(cfg.paper_maker_min_net_return) == 0.0003
+    assert float(cfg.profitability_min_net_profit_usd) == 0.025
+    assert float(cfg.profitability_min_net_return) == 0.0003
+    assert float(cfg.risk_min_net_profit_usd) == 0.025
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 1850.0
+    assert cfg.live_micro_max_resting_buys_per_symbol == 3
+    assert cfg.live_micro_max_open_orders_per_venue == 8
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -155,13 +160,13 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert (cfg.live_micro_okx_deploy_bases or "") == ""
-    assert cfg.live_micro_max_per_corr_group == 3
+    assert cfg.live_micro_max_per_corr_group == 4
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
     assert cfg.live_micro_ring_util_b_ignore_underwater is True
     assert cfg.live_cvd_abandoned is True
     assert cfg.live_micro_low_util_rising_n == 3
     assert float(cfg.live_micro_low_util_buy_resting_max_age_sec) == 30.0
-    assert float(cfg.live_micro_active_ring_eur) == 1000.0
+    assert float(cfg.live_micro_active_ring_eur) == 1850.0
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
     assert cfg.paper_time_stop_enabled is True
@@ -169,34 +174,33 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return <= 0.0006
     assert cfg.paper_maker_min_profit_eur <= 0.06
-    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 90.0
-    assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.03
-    assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.0003
-    assert cfg.paper_maker_min_notional_eur == 55.0
+    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 220.0
+    assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.02
+    assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.00026
+    assert cfg.paper_maker_min_notional_eur == 80.0
     assert cfg.max_simultaneous_positions >= 8
-    assert cfg.live_micro_max_alt_bases == 8
+    assert cfg.live_micro_max_alt_bases == 10
     assert cfg.live_micro_block_cross_venue_duplicate_bases is False
     assert cfg.live_micro_consolidate_duplicate_bases is False
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
-    assert float(cfg.live_micro_first_clip_eur) == 55.0
-    assert float(cfg.live_micro_add_clip_eur) == 100.0
+    assert float(cfg.live_micro_first_clip_eur) == 140.0
+    assert float(cfg.live_micro_add_clip_eur) == 200.0
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
-    assert cfg.live_micro_max_open_orders <= 6
-    assert cfg.live_micro_max_open_orders_per_venue == 4
-    assert cfg.live_micro_max_resting_buys_per_symbol == 2
-    assert float(cfg.live_micro_max_notional_eur) >= 80.0
-    assert float(cfg.risk_max_position_usd) >= 80.0
-    assert float(cfg.live_micro_active_ring_eur) == 1000.0
+    assert cfg.live_micro_max_open_orders == 8
+    assert cfg.live_micro_max_open_orders_per_venue == 8
+    assert cfg.live_micro_max_resting_buys_per_symbol == 3
+    assert float(cfg.live_micro_max_notional_eur) >= 200.0
+    assert float(cfg.risk_max_position_usd) >= 200.0
+    assert float(cfg.live_micro_active_ring_eur) == 1850.0
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
-    assert cfg.paper_max_alt_inventory_pct <= 55.0
-    assert cfg.paper_max_alt_inventory_pct >= 50.0
-    assert cfg.paper_trail_soft_partial_pct == 0.15
-    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
+    assert cfg.paper_max_alt_inventory_pct == 78.0
+    assert cfg.paper_trail_soft_partial_pct == 0.25
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
-    assert cfg.live_micro_winner_add_enabled is False
-    assert cfg.live_micro_low_util_relax_focus is True
-    assert cfg.paper_maker_keep_vs_best_frac == 0.30
+    assert cfg.live_micro_winner_add_enabled is True
+    assert cfg.live_micro_low_util_relax_focus is False
+    assert cfg.paper_maker_keep_vs_best_frac == 0.35
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
     assert cfg.live_micro_block_buys_when_holding_base is True
@@ -212,8 +216,10 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.0
     assert cfg.live_micro_early_cut_new_bases_only is True
     assert cfg.live_micro_trail_hold_while_rising is True
-    assert cfg.live_micro_trail_hold_rising_n == 2
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
+    assert cfg.live_micro_trail_hold_rising_n == 1
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
+    assert cfg.alphai_require_bullish_new_buys is True
+    assert float(cfg.live_micro_okx_ring_clip_eur) == 140.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
@@ -259,10 +265,10 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
-    assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.profitability_min_net_return) == 0.0004
-    assert float(cfg.profitability_min_net_profit_usd) == 0.03
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == 1850.0
+    assert cfg.live_micro_max_per_corr_group == 4
+    assert float(cfg.profitability_min_net_return) == 0.0003
+    assert float(cfg.profitability_min_net_profit_usd) == 0.025
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
@@ -788,28 +794,30 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         symbols=["ADAEUR"],
         persist_path=tmp_path / "t.json",
     )
-    assert cfg.paper_trail_drawdown_pct == 0.015
-    assert cfg.paper_trail_soft_arm_pct == 0.012
-    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
-    assert cfg.paper_trail_hard_arm_pct == 0.03
+    assert cfg.paper_trail_drawdown_pct == 0.012
+    assert cfg.paper_trail_soft_arm_pct == 0.008
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_hard_arm_pct == 0.025
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_partial_pct == 0.15
+    assert cfg.paper_trail_soft_partial_pct == 0.25
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
-    assert cfg.live_micro_winner_add_max == 0
-    assert cfg.live_micro_max_notional_eur <= 200.0
-    assert cfg.live_micro_max_notional_eur >= 100.0
+    assert cfg.live_micro_winner_add_max == 2
+    assert cfg.live_micro_max_notional_eur <= 280.0
+    assert cfg.live_micro_max_notional_eur >= 200.0
     assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0
     assert cfg.live_micro_reset_drawdown_on_start is True
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
-    assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.50
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
+    assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.75
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0001
     assert cfg.live_micro_exit_engine_enabled is True
     assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 50.0
-    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.0
+    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.5
     assert float(cfg.live_micro_mark_ttl_sec) == 2.0
-    assert float(cfg.live_micro_exit_cooldown_sec) == 1.0
+    assert float(cfg.live_micro_exit_cooldown_sec) == 1.5
+    assert float(cfg.live_micro_active_ring_eur) == 1850.0
+    assert float(cfg.live_micro_velocity_sleeve_eur) == 1850.0
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:

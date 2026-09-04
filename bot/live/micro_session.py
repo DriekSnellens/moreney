@@ -181,17 +181,19 @@ def _session_settings(
             # More concurrent NET-passing quotes across venues (still never-loss gated).
             "arbitrage_max_emits_per_cycle": 12 if cross_venue else 5,
             "paper_cycle_interval_ms": 800.0,
-            # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
+            # AlphaI max-deploy: larger clips on priority/strong picks; base clips mid-size.
             "paper_maker_min_notional_eur": 80.0,
-            "live_micro_first_clip_eur": 100.0,
-            "live_micro_add_clip_eur": 130.0,
+            "live_micro_first_clip_eur": 140.0,
+            "live_micro_add_clip_eur": 200.0,
+            "live_micro_alphai_priority_clip_eur": 220.0,
+            "live_micro_alphai_strong_clip_eur": 280.0,
             # Util-B light: slightly easier NET so empty-ring emits are not starved.
             # C12: align maker + profitability gate (was 5bps gate killing 4bps maker).
             # Near-miss fix (live funnel): most rejects fail NET return 0.0004 by ~0.5bps
             # or absolute €0.03 by ~€0.002 — still strictly positive after fees.
             "paper_maker_min_profit_eur": 0.025,
             "paper_maker_min_net_return": 0.0003,
-            "paper_maker_small_clip_max_eur": 130.0,
+            "paper_maker_small_clip_max_eur": 220.0,
             "paper_maker_small_clip_min_profit_eur": 0.02,
             "paper_maker_small_clip_min_net_return": 0.00026,
             "paper_maker_min_spread_bps": 5.0,
@@ -239,9 +241,8 @@ def _session_settings(
             "live_micro_momentum_require_last_n_rising": 4,
             "live_micro_trail_hold_while_rising": True,
             "live_micro_trail_hold_rising_n": 1,
-            # Phase A scaling: keep ring-soft momentum eligibility longer
-            # so new-base entries hit the softer momentum floor more often.
-            "live_micro_ring_soft_max_active_eur": 900.0,
+            # Max capital deploy: soft momentum until near full pocket is working.
+            "live_micro_ring_soft_max_active_eur": 1850.0,
             "live_micro_ring_soft_block_underwater_eur": 25.0,
             # Capital Velocity Desk: unlock Util-B despite vault underwater bags.
             "live_micro_ring_util_b_ignore_underwater": True,
@@ -257,11 +258,12 @@ def _session_settings(
             "live_micro_cancel_buy_on_flat_momentum": True,
             # Util-B: do not fill thin-ring slots with non-AlphaI coins.
             "live_micro_low_util_relax_focus": False,
-            # Daily AlphaI policy: no bijkoop / scale-in on held bags.
-            "live_micro_winner_add_enabled": False,
-            "live_micro_winner_add_max": 0,
-            "live_micro_winner_add_clip_eur": 90.0,
+            # Scale into AlphaI winners above BE only (never-loss; no underwater adds).
+            "live_micro_winner_add_enabled": True,
+            "live_micro_winner_add_max": 2,
+            "live_micro_winner_add_clip_eur": 200.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
+            "live_micro_alphai_winner_add_only": True,
             "live_micro_buy_quality_underwater_count": 8,
             "live_micro_buy_quality_pause_sec": 600.0,
             "live_micro_entry_headroom_enabled": True,
@@ -304,16 +306,12 @@ def _session_settings(
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
             "live_micro_new_buy_focus_only": True,
-            # Always-on deploy: keep ~€1k/venue working in focus (not stuck) bags.
-            "live_micro_active_ring_eur": float(
-                getattr(base, "live_micro_active_ring_eur", 1000.0) or 1000.0
-            ),
-            # A: velocity sleeve ≈ ring size; vault = rest of pocket (never-loss).
-            "live_micro_velocity_sleeve_eur": float(
-                getattr(base, "live_micro_velocity_sleeve_eur", None)
-                or getattr(base, "live_micro_active_ring_eur", 1000.0)
-                or 1000.0
-            ),
+            # Unlock ETH for AlphaI (top daily pick) — no vault lockout while testing max deploy.
+            "live_micro_long_hold_bases": "",
+            # Always-on deploy: target nearly full €2k/venue working (leave fee/exit buffer).
+            "live_micro_active_ring_eur": 1850.0,
+            # A: velocity sleeve ≈ ring size; vault = small cash buffer (never-loss exits).
+            "live_micro_velocity_sleeve_eur": 1850.0,
             "live_micro_velocity_sleeve_daily_loss_cap_eur": 50.0,
             # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
@@ -329,7 +327,7 @@ def _session_settings(
             "live_micro_mark_ttl_sec": 2.0,
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
-            "live_micro_okx_ring_clip_eur": 100.0,
+            "live_micro_okx_ring_clip_eur": 140.0,
             # Soft floor while ring NEED is set earlier (0.0005); do not re-pin to full.
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
@@ -344,8 +342,8 @@ def _session_settings(
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
             # Prefer cash when bags pile up (skew → sell-only sooner).
-            # Ruim: allow up to ~half pocket in alts so 8×€100 clips fit.
-            "paper_max_alt_inventory_pct": 62.0,
+            # Max deploy: allow most of the pocket in alts (cash buffer for exits/fees).
+            "paper_max_alt_inventory_pct": 78.0,
             "paper_min_alt_inventory_pct": 15.0,
             "paper_inventory_ask_improve_bps": 2.0,
             # Underweight venues buy sooner (OKX cash deployment).
@@ -436,16 +434,16 @@ def _session_settings(
             "profitability_min_net_return": 0.0003,
             "profitability_execution_buffer_bps": 2.0,
             "risk_min_net_profit_usd": 0.025,
-            # Hard per-trade ceiling: allow ~€180 add clips on ~€2k pocket.
-            "risk_max_position_usd": min(150.0, max(80.0, budget_f * 0.08)),
+            # Hard per-trade ceiling: AlphaI strong clips up to ~€280 on ~€2k pocket.
+            "risk_max_position_usd": min(280.0, max(120.0, budget_f * 0.14)),
             # Size vs aggregate multi-venue equity so clips stay near the ceiling
             # (2×€2k pockets must not inflate too far and fail NET return).
             "arbitrage_position_pct": min(
-                6.5,
+                7.0,
                 max(
                     3.0,
                     (
-                        min(150.0, max(80.0, budget_f * 0.08))
+                        min(280.0, max(120.0, budget_f * 0.14))
                         / max(budget_f * max(len(execute_venues), 1), 1.0)
                     )
                     * 100.0,
@@ -471,7 +469,7 @@ def _session_settings(
             "live_micro_max_alt_bases": 10,
             # Cap live order size to add-clip ceiling.
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
-            "live_micro_max_notional_eur": min(150.0, max(80.0, budget_f * 0.08)),
+            "live_micro_max_notional_eur": min(280.0, max(120.0, budget_f * 0.14)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             # Alt-beta book: wider drawdown band than default 5–8% global kill.
             "max_drawdown_percent": float(
