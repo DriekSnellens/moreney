@@ -890,6 +890,11 @@ async def run_session(
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )
+                # Capital playbook ADVERSE/pre-crash owns a new-bases buy block;
+                # do not clear it every cycle (was racing overlays off).
+                playbook_block = bool(
+                    getattr(bridge, "_playbook_block_new_buys", False)
+                )
                 prev_uw = {
                     v: set(bases)
                     for v, bases in (
@@ -900,12 +905,18 @@ async def run_session(
                     bridge.set_buys_blocked(True, new_bases_only=False)
                     bridge.set_underwater_base_blocks({})
                 elif uw_blocked_bases:
-                    bridge.set_buys_blocked(False)
+                    if playbook_block:
+                        bridge.set_buys_blocked(True, new_bases_only=True)
+                    else:
+                        bridge.set_buys_blocked(False)
                     bridge.set_underwater_base_blocks(
                         uw_blocked_bases, new_bases_only=new_base_only
                     )
                 else:
-                    bridge.set_buys_blocked(False)
+                    if playbook_block:
+                        bridge.set_buys_blocked(True, new_bases_only=True)
+                    else:
+                        bridge.set_buys_blocked(False)
                     bridge.set_underwater_base_blocks({})
                 # Stuck book → strategy: underwater bases do not fill the active ring.
                 try:

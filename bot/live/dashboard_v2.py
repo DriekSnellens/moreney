@@ -341,7 +341,10 @@ def dashboard_css() -> str:
       grid-template-columns: 1fr 1fr;
     }
     @media (min-width: 720px) {
-      .pnl-split { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .pnl-split { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    }
+    @media (min-width: 720px) and (max-width: 1100px) {
+      .pnl-split { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
     .pnl-split-intro {
       margin: 0 0 .35rem;

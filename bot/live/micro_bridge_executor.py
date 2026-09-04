@@ -4444,6 +4444,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._daily_kill_active = False
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
+        self._playbook_block_new_buys = False
+        self._playbook_owns_buy_block = False
         self.set_buys_blocked(False)
         self.set_underwater_base_blocks({})
         self._session_started_ms = time.time() * 1000.0
@@ -4451,6 +4453,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         clear_history()
         clear_calendar_pnl_cache()
         anchor = set_operator_pnl_anchor()
+        try:
+            self.refresh_capital_playbook(force=True)
+        except Exception:  # noqa: BLE001
+            logger.exception("CAPITAL_PLAYBOOK_REFRESH_AFTER_DASHBOARD_RESET")
         self.persist_runtime_state()
         logger.info(
             "OPERATOR_DASHBOARD_RESET portfolio=%s realized=0 fills=0 anchor=%s",

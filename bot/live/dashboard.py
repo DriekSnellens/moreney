@@ -977,12 +977,17 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
 
     kpi_grid_html = f"""
     <section aria-label="Geïnd vs open">
-      <p class="pnl-split-intro">Geïnd = winst op <strong>verkopen</strong> vandaag. Open = totaal unrealized op alle bags (niet vandaag). <strong>Portfolio-winst</strong> = portfolio Δ sinds 00:00 NL (geïnd + MTM-beweging vandaag).</p>
+      <p class="pnl-split-intro">Geïnd = winst op <strong>verkopen</strong> (FIFO). Open = unrealized op bags. <strong>Portfolio-winst</strong> = equity Δ sinds 00:00 NL. <strong>Week geïnd</strong> = Ma–zo NL.</p>
       <div class="pnl-split">
         <article class="card split-harvest">
           <p class="label">Geïnd vandaag (verkopen)</p>
           <p class="value {daily_realized_class}" id="kpi-harvested-today">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
           <p class="hint">Coins verkocht · FIFO · sinds 00:00 NL</p>
+        </article>
+        <article class="card split-week">
+          <p class="label">Week geïnd</p>
+          <p class="value {weekly_realized_class}" id="kpi-weekly-split">{_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else "—")}</p>
+          <p class="hint">Ma–zo NL · FIFO exchange</p>
         </article>
         <article class="card split-open">
           <p class="label">Open (unrealized)</p>
@@ -1012,7 +1017,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         <p class="value {daily_realized_class}" id="kpi-daily-realized">{_esc(_eur(daily_realized, signed=True) if daily_realized is not None else "—")}</p>
         <p class="hint">Alleen verkopen · FIFO</p>
       </article>
-      <article class="card">
+      <article class="card hero">
         <p class="label">Week geïnd</p>
         <p class="value {weekly_realized_class}" id="kpi-weekly-realized">{_esc(_eur(weekly_realized, signed=True) if weekly_realized is not None else "—")}</p>
         <p class="hint">Ma–zo NL · FIFO exchange</p>
@@ -1272,6 +1277,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       set('kpi-portfolio-pnl-hero', eurFmt(m.portfolio_pnl_eur, true));
       set('kpi-session-pnl', eurFmt(m.session_pnl_eur, true));
       set('kpi-weekly-realized', eurFmt(m.weekly_realized_eur, true));
+      set('kpi-weekly-split', eurFmt(m.weekly_realized_eur, true));
       set('kpi-winnable', eurFmt(m.winnable_eur, true));
       set('kpi-winnable-harvest', eurFmt(m.winnable_eur, true));
       set('kpi-unrealized', eurFmt(m.unrealized_eur, true));
@@ -1292,6 +1298,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       paint('kpi-portfolio-pnl-hero', m.portfolio_pnl_eur);
       paint('kpi-session-pnl', m.session_pnl_eur);
       paint('kpi-weekly-realized', m.weekly_realized_eur);
+      paint('kpi-weekly-split', m.weekly_realized_eur);
       paint('kpi-realized', m.session_realized_eur);
       paint('kpi-winnable', m.winnable_eur);
       paint('kpi-winnable-harvest', m.winnable_eur);
