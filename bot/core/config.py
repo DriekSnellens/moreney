@@ -519,6 +519,18 @@ class Settings(BaseSettings):
     live_micro_early_cut_momentum_max_return: float = Field(
         default=0.0, ge=-0.01, le=0.01
     )
+    # Tiered underwater recycle (sleeve-capped intentional small losses to free capital).
+    # Keeps cut_loss=0 / never-loss for normal exits; only trail_uw_recycle may sell < BE.
+    live_micro_uw_recycle_enabled: bool = False
+    live_micro_uw_dust_max_notional_eur: float = Field(default=25.0, ge=0.0, le=100.0)
+    live_micro_uw_dust_below_be_pct: float = Field(default=0.003, ge=0.0, le=0.05)
+    live_micro_uw_near_below_be_pct: float = Field(default=0.008, ge=0.0, le=0.05)
+    live_micro_uw_near_max_depth_pct: float = Field(default=0.015, ge=0.0, le=0.10)
+    live_micro_uw_near_min_age_sec: float = Field(default=2700.0, ge=60.0, le=86400.0)
+    live_micro_uw_non_alphai_below_be_pct: float = Field(default=0.01, ge=0.0, le=0.05)
+    live_micro_uw_non_alphai_min_age_sec: float = Field(default=3600.0, ge=60.0, le=86400.0)
+    live_micro_uw_alphai_below_be_pct: float = Field(default=0.02, ge=0.0, le=0.10)
+    live_micro_uw_alphai_min_age_sec: float = Field(default=10800.0, ge=300.0, le=172800.0)
     # Downward momentum: rolling return ≤ −this → exit (default 0.3%).
     live_micro_momentum_exit_min_return: float = Field(default=0.003, ge=0.0, le=0.10)
     # Defensive exit floor: never sell below BE + this cushion (default 0.5%).

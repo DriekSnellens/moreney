@@ -274,6 +274,37 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._cut_loss_new_bases_only = bool(
             getattr(settings, "live_micro_cut_loss_new_bases_only", False)
         )
+        self._uw_recycle_enabled = bool(
+            getattr(settings, "live_micro_uw_recycle_enabled", False)
+        )
+        self._uw_dust_max_notional = Decimal(
+            str(getattr(settings, "live_micro_uw_dust_max_notional_eur", 25) or 25)
+        )
+        self._uw_dust_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_dust_below_be_pct", 0.003) or 0)
+        )
+        self._uw_near_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_near_below_be_pct", 0.008) or 0)
+        )
+        self._uw_near_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_near_max_depth_pct", 0.015) or 0)
+        )
+        self._uw_near_min_age_sec = float(
+            getattr(settings, "live_micro_uw_near_min_age_sec", 2700) or 2700
+        )
+        self._uw_non_alphai_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_non_alphai_below_be_pct", 0.01) or 0)
+        )
+        self._uw_non_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_uw_non_alphai_min_age_sec", 3600) or 3600
+        )
+        self._uw_alphai_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_alphai_below_be_pct", 0.02) or 0)
+        )
+        self._uw_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_uw_alphai_min_age_sec", 10800) or 10800
+        )
+        self._uw_recycle_floors: dict[str, Decimal] = {}
         self._momentum_exit_above_be_pct = Decimal(
             str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.005) or 0)
         )
@@ -1581,6 +1612,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "early_cut_new_bases_only": self._early_cut_new_bases_only,
                 "early_cut_momentum_max_return": str(self._early_cut_momentum_max),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
+                "uw_recycle_enabled": self._uw_recycle_enabled,
+                "uw_dust_max_notional_eur": str(self._uw_dust_max_notional),
+                "uw_dust_below_be_pct": str(self._uw_dust_below_be_pct),
+                "uw_near_below_be_pct": str(self._uw_near_below_be_pct),
+                "uw_near_max_depth_pct": str(self._uw_near_max_depth_pct),
+                "uw_near_min_age_sec": self._uw_near_min_age_sec,
+                "uw_non_alphai_below_be_pct": str(self._uw_non_alphai_below_be_pct),
+                "uw_non_alphai_min_age_sec": self._uw_non_alphai_min_age_sec,
+                "uw_alphai_below_be_pct": str(self._uw_alphai_below_be_pct),
+                "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "momentum_exit_min_return": str(self._momentum_exit_min),
                 "momentum_min_return": str(self._momentum_min),
@@ -4352,6 +4393,122 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         return mom <= self._early_cut_momentum_max
 
+    def _position_age_sec(self, venue: str, base: str) -> float:
+        """Seconds since position open; legacy synced bags count as fully aged."""
+        key = self._lots_key(venue, base)
+        opened = self._position_opened_at.get(key)
+        if opened is None or opened <= 0:
+            return 1e9
+        return max(0.0, time.time() - float(opened))
+
+    def _uw_recycle_plan(
+        self,
+        *,
+        venue: str,
+        base: str,
+        symbol: str,
+        mark: Decimal,
+        be: Decimal | None,
+        notional: Decimal,
+    ) -> tuple[str, str, Decimal] | None:
+        """Tiered underwater recycle plan.
+
+        Returns ``(tier, mode, floor)`` where mode is ``band`` (floor ≤ mark < BE)
+        or ``stop`` (mark ≤ floor). ``None`` when recycle must not fire.
+        """
+        if not self._uw_recycle_enabled:
+            return None
+        if self._sleeve_paused or self._daily_kill_active or self._is_long_hold(base):
+            return None
+        if be is None or be <= 0 or mark <= 0 or mark >= be:
+            return None
+        if not self._has_trusted_cost(venue, base):
+            return None
+        depth = (be - mark) / be
+        age = self._position_age_sec(venue, base)
+        is_alphai = self._alphai_bullish_buy(base)
+        flat_or_down = self._momentum_flat_or_down(symbol)
+
+        # Layer 1: dust — free tiny bags within a thin BE band.
+        if (
+            self._uw_dust_max_notional > 0
+            and notional > 0
+            and notional < self._uw_dust_max_notional
+            and self._uw_dust_below_be_pct >= 0
+        ):
+            floor = be * (Decimal("1") - self._uw_dust_below_be_pct)
+            if mark >= floor:
+                return ("dust", "band", floor)
+
+        # Layer 3: AlphaI picks — hold longer; hard age / depth caps.
+        if is_alphai:
+            floor = be * (Decimal("1") - self._uw_alphai_below_be_pct)
+            if depth >= self._uw_alphai_below_be_pct:
+                return ("alphai_deep", "stop", floor)
+            if age >= self._uw_alphai_min_age_sec and flat_or_down:
+                if mark >= floor:
+                    return ("alphai_aged", "band", floor)
+                return ("alphai_aged", "stop", floor)
+            return None
+
+        # Layer 2a: non-AlphaI aged recycle.
+        if age >= self._uw_non_alphai_min_age_sec and flat_or_down:
+            floor = be * (Decimal("1") - self._uw_non_alphai_below_be_pct)
+            if mark >= floor:
+                return ("non_alphai", "band", floor)
+            if depth >= self._uw_non_alphai_below_be_pct:
+                return ("non_alphai", "stop", floor)
+
+        # Layer 2b: near-BE band after shorter wait.
+        if (
+            depth <= self._uw_near_max_depth_pct
+            and age >= self._uw_near_min_age_sec
+            and flat_or_down
+        ):
+            floor = be * (Decimal("1") - self._uw_near_below_be_pct)
+            if mark >= floor:
+                return ("near_be", "band", floor)
+        return None
+
+    def _uw_recycle_sleeve_allows(
+        self, *, notional: Decimal, mark: Decimal, be: Decimal
+    ) -> bool:
+        """Refuse recycle when estimated loss would breach the sleeve daily cap."""
+        if self._sleeve_daily_loss_cap <= 0:
+            return True
+        if be <= 0 or mark >= be:
+            return True
+        est_loss = notional * (be - mark) / be
+        projected = self._sleeve_realized_eur - est_loss
+        return projected >= -self._sleeve_daily_loss_cap
+
+    async def _uw_recycle_exit_quote(
+        self,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        *,
+        floor: Decimal,
+        mode: str,
+    ) -> tuple[Decimal | None, bool, str]:
+        """Hit bid for uw recycle; band mode requires bid ≥ floor."""
+        best_bid = _ZERO
+        client = self._trading_client(venue)
+        symbol = f"{base.upper()}{self._quote}"
+        if client is not None:
+            try:
+                ticker = await client.fetch_ticker(symbol)
+                best_bid = Decimal(str(getattr(ticker, "bid", None) or 0))
+            except Exception:  # noqa: BLE001
+                pass
+        if best_bid <= 0:
+            best_bid = mark
+        if mode == "band" and best_bid < floor:
+            return None, False, "uw_bid_below_floor"
+        if mode == "stop" and mark > floor:
+            return None, False, "uw_above_stop_floor"
+        return best_bid, False, f"hit_bid_uw_{mode}"
+
     async def _cut_loss_exit_quote(
         self,
         venue: str,
@@ -5642,6 +5799,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     else free,
                 )
                 reason = "trail_early_cut_loss"
+            if not reason and be is not None and mark < be:
+                free_uw = await self._refresh_free(venue, symbol, asset, locked)
+                notional_uw = free_uw * mark
+                plan = self._uw_recycle_plan(
+                    venue=venue,
+                    base=asset,
+                    symbol=symbol,
+                    mark=mark,
+                    be=be,
+                    notional=notional_uw,
+                )
+                if plan is not None:
+                    tier, mode, floor = plan
+                    if self._uw_recycle_sleeve_allows(
+                        notional=notional_uw, mark=mark, be=be
+                    ):
+                        sell_qty = min(
+                            free_uw,
+                            self._session_qty(venue, asset)
+                            if self._trail_session_only
+                            else free_uw,
+                        )
+                        reason = "trail_uw_recycle"
+                        self._uw_recycle_floors[trail_key] = floor
+                        st["uw_recycle_tier"] = tier
+                        st["uw_recycle_mode"] = mode
+                        st["sleeve"] = True  # attribute realized PnL to sleeve loss cap
+                    else:
+                        self._bump_skip("uw_recycle_sleeve_cap")
             cut_floor = self._cut_loss_floor_price(venue, asset)
             if (
                 not reason
@@ -5926,6 +6112,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 exit_px, exit_post_only, quote_reason = await self._cut_loss_exit_quote(
                     venue, asset, mark, floor=cut_floor
                 )
+            elif reason == "trail_uw_recycle":
+                floor = self._uw_recycle_floors.get(trail_key)
+                mode = str(st.get("uw_recycle_mode") or "band")
+                if floor is None:
+                    self._bump_skip("uw_recycle_no_floor")
+                    continue
+                exit_px, exit_post_only, quote_reason = await self._uw_recycle_exit_quote(
+                    venue, asset, mark, floor=floor, mode=mode
+                )
             else:
                 # D: aggressive touch quotes for all profitable trail exits.
                 force_taker = self._should_force_taker_exit(venue, asset)
@@ -5946,7 +6141,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     exit_px = max(exit_px, mom_target)
                     limit_px = max(limit_px or _ZERO, mom_target)
 
-            if reason not in {"trail_cut_loss", "trail_early_cut_loss"}:
+            if reason not in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
                 ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
                 if not ok_sell:
                     self._bump_skip(gate_reason)
@@ -5960,7 +6155,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             if limit_px is None or limit_px < exit_px:
                 limit_px = exit_px
-            if reason in {"trail_cut_loss", "trail_early_cut_loss"}:
+            if reason in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
                 limit_px = exit_px
                 post_only = exit_post_only
             elif reason != "trail_recovery_be":
@@ -6063,6 +6258,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "trail_consolidation_wind_down",
                     "trail_cut_loss",
                     "trail_early_cut_loss",
+                    "trail_uw_recycle",
                     "trail_momentum_be_exit",
                     "time_stop_breakeven",
                 }:
@@ -6071,6 +6267,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if rem_free * mark < notional_floor:
                         self._trail.pop(trail_key, None)
                         self._position_opened_mono.pop(trail_key, None)
+                        self._uw_recycle_floors.pop(trail_key, None)
                     else:
                         st["triggered"] = False
             else:
@@ -6976,9 +7173,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 qty = live_base.quantize(Decimal("0.00000001"))
                 order_request = order_request.model_copy(update={"quantity": qty})
             # Hard floor: NEVER sell below fee-adjusted cost + profit buffer.
-            # Cut-loss exits (new-base stop) may sell below BE when floor is breached.
+            # Cut-loss / uw-recycle exits may sell below BE within a configured floor.
             exit_reason = str(meta.get("exit_reason") or strategy or "")
-            cut_loss_exit = exit_reason in {"trail_cut_loss", "trail_early_cut_loss"}
+            cut_loss_exit = exit_reason in {
+                "trail_cut_loss",
+                "trail_early_cut_loss",
+                "trail_uw_recycle",
+            }
             be = self._break_even_sell_price(venue, base)
             if be is None:
                 self._bump_skip("sell_no_trusted_cost")
@@ -6991,27 +7192,57 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ),
                 )
             if cut_loss_exit:
-                floor = self._cut_loss_floor_for_reason(venue, base, exit_reason)
-                if floor is None:
-                    self._bump_skip("cut_loss_not_configured")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="CUT_LOSS_DISABLED",
-                        message=f"cut-loss not enabled for {venue}:{base}",
-                    )
+                if exit_reason == "trail_uw_recycle":
+                    floor = self._uw_recycle_floors.get(self._lots_key(venue, base))
+                    mode = "band"
+                    trail_st = self._trail.get(self._lots_key(venue, base)) or {}
+                    mode = str(trail_st.get("uw_recycle_mode") or mode)
+                    if floor is None:
+                        self._bump_skip("uw_recycle_no_floor")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="UW_RECYCLE_NO_FLOOR",
+                            message=f"uw recycle floor missing for {venue}:{base}",
+                        )
+                else:
+                    floor = self._cut_loss_floor_for_reason(venue, base, exit_reason)
+                    mode = "stop"
+                    if floor is None:
+                        self._bump_skip("cut_loss_not_configured")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="CUT_LOSS_DISABLED",
+                            message=f"cut-loss not enabled for {venue}:{base}",
+                        )
                 mark_ref = px
                 if order_book is not None and order_book.bids:
                     try:
                         mark_ref = Decimal(str(order_book.bids[0].price))
                     except Exception:  # noqa: BLE001
                         pass
-                if mark_ref > floor:
+                if exit_reason == "trail_uw_recycle" and mode == "band":
+                    if mark_ref < floor:
+                        self._bump_skip("uw_recycle_bid_below_floor")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="UW_RECYCLE_BELOW_FLOOR",
+                            message=f"bid {mark_ref} below uw recycle floor {floor}",
+                        )
+                elif mark_ref > floor and exit_reason != "trail_uw_recycle":
                     self._bump_skip("cut_loss_above_floor")
                     return await self._reject_before_live(
                         order_request,
                         reason="CUT_LOSS_ABOVE_FLOOR",
                         message=f"mark {mark_ref} above cut-loss floor {floor}",
                     )
+                elif (
+                    exit_reason == "trail_uw_recycle"
+                    and mode == "stop"
+                    and mark_ref > floor
+                    and px > floor
+                ):
+                    # Stop mode: allow when mark breached floor; prefer bid.
+                    pass
             elif be > px:
                 px = be
                 order_request = order_request.model_copy(update={"limit_price": px})
@@ -7026,6 +7257,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     best_bid = _ZERO
                 if cut_loss_exit:
                     if best_bid > 0:
+                        if exit_reason == "trail_uw_recycle":
+                            floor = self._uw_recycle_floors.get(
+                                self._lots_key(venue, base)
+                            ) or _ZERO
+                            mode = str(
+                                (
+                                    self._trail.get(self._lots_key(venue, base)) or {}
+                                ).get("uw_recycle_mode")
+                                or "band"
+                            )
+                            if mode == "band" and best_bid < floor:
+                                self._bump_skip("uw_recycle_bid_below_floor")
+                                return await self._reject_before_live(
+                                    order_request,
+                                    reason="UW_RECYCLE_BELOW_FLOOR",
+                                    message=(
+                                        f"best bid {best_bid} below uw floor {floor}"
+                                    ),
+                                )
                         px = best_bid
                         order_request = order_request.model_copy(update={"limit_price": px})
                         meta = dict(order_request.metadata or {})

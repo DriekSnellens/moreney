@@ -219,6 +219,11 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
     assert cfg.alphai_require_bullish_new_buys is True
     assert float(cfg.live_micro_okx_ring_clip_eur) == 140.0
+    assert cfg.live_micro_uw_recycle_enabled is True
+    assert float(cfg.live_micro_uw_dust_max_notional_eur) == 25.0
+    assert float(cfg.live_micro_uw_near_below_be_pct) == 0.008
+    assert float(cfg.live_micro_uw_alphai_below_be_pct) == 0.02
+    assert float(cfg.live_micro_uw_alphai_min_age_sec) == 10800.0
     assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
@@ -3711,3 +3716,123 @@ def test_maybe_utc_day_rollover_resets_sleeve_and_baseline() -> None:
     assert bridge._sleeve_paused is False
     assert bridge._sleeve_realized_eur == Decimal("0")
     assert bridge.session_start_realized_eur == Decimal("-10")
+
+
+def test_uw_recycle_plan_tiers(tmp_path: Path) -> None:
+    from bot.integrations.alphai.signals import build_trading_signals
+    from bot.integrations.alphai.parse import AlphaIRegimeState
+
+    settings = _unlocked(
+        live_micro_uw_recycle_enabled=True,
+        live_micro_uw_dust_max_notional_eur=25.0,
+        live_micro_uw_dust_below_be_pct=0.003,
+        live_micro_uw_near_below_be_pct=0.008,
+        live_micro_uw_near_max_depth_pct=0.015,
+        live_micro_uw_near_min_age_sec=2700.0,
+        live_micro_uw_non_alphai_below_be_pct=0.01,
+        live_micro_uw_non_alphai_min_age_sec=3600.0,
+        live_micro_uw_alphai_below_be_pct=0.02,
+        live_micro_uw_alphai_min_age_sec=10800.0,
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_early_cut_momentum_max_return=0.0,
+        alphai_require_bullish_new_buys=True,
+        alphai_bullish_buy_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "uw.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    # Flat/down tape for momentum gates.
+    series = bridge._series_for("ADAEUR")  # noqa: SLF001
+    px = Decimal("1")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    be = Decimal("1.0")
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("20"), be]]  # noqa: SLF001
+    bridge._cost_lots["okx:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    bridge._cost_lots["bitvavo:NEAR"] = [[Decimal("80"), be]]  # noqa: SLF001
+    bridge._mark_cost_trusted("bitvavo", "ADA")  # noqa: SLF001
+    bridge._mark_cost_trusted("okx", "SOL")  # noqa: SLF001
+    bridge._mark_cost_trusted("bitvavo", "NEAR")  # noqa: SLF001
+
+    # Dust within band.
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="ADA",
+        symbol="ADAEUR",
+        mark=Decimal("0.998"),
+        be=be,
+        notional=Decimal("20"),
+    )
+    assert plan is not None
+    assert plan[0] == "dust"
+    assert plan[1] == "band"
+
+    # AlphaI deep stop.
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset({"SOL"})),
+        {"picks": [{"base": "SOL", "score": 40.0}], "avoid": []},
+    )
+    series_sol = bridge._series_for("SOLEUR")  # noqa: SLF001
+    px = Decimal("100")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series_sol.push(px)
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="okx",
+        base="SOL",
+        symbol="SOLEUR",
+        mark=Decimal("97.5"),
+        be=Decimal("100"),
+        notional=Decimal("100"),
+    )
+    assert plan is not None
+    assert plan[0] == "alphai_deep"
+    assert plan[1] == "stop"
+
+    # Non-AlphaI near-BE after age (legacy → age infinite).
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset()),
+        {"picks": [{"base": "SOL", "score": 40.0}], "avoid": []},
+    )
+    series_near = bridge._series_for("NEAREUR")  # noqa: SLF001
+    px = Decimal("1")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series_near.push(px)
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="NEAR",
+        symbol="NEAREUR",
+        mark=Decimal("0.992"),
+        be=be,
+        notional=Decimal("80"),
+    )
+    assert plan is not None
+    assert plan[0] in {"near_be", "non_alphai"}
+
+    # Sleeve cap blocks oversized estimated loss.
+    bridge._sleeve_realized_eur = Decimal("-49")  # noqa: SLF001
+    bridge._sleeve_daily_loss_cap = Decimal("50")  # noqa: SLF001
+    assert (
+        bridge._uw_recycle_sleeve_allows(  # noqa: SLF001
+            notional=Decimal("100"),
+            mark=Decimal("0.98"),
+            be=Decimal("1.0"),
+        )
+        is False
+    )
+    assert (
+        bridge._uw_recycle_sleeve_allows(  # noqa: SLF001
+            notional=Decimal("20"),
+            mark=Decimal("0.998"),
+            be=Decimal("1.0"),
+        )
+        is True
+    )

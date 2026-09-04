@@ -359,14 +359,23 @@ def _session_settings(
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
-            # Hard cut-loss off until legacy underwater bags are cleared.
+            # Hard cut-loss off (vault). Intentional small losses only via uw_recycle + sleeve cap.
             "live_micro_cut_loss_below_be_pct": 0.0,
             "live_micro_cut_loss_new_bases_only": False,
-            # Early cut: new-session bags at −1.5% BE + flat/down momentum → free capital.
-            # Early cut off: never realize intentional losses (target ~€30/day, no red exits).
             "live_micro_early_cut_loss_below_be_pct": 0.0,
             "live_micro_early_cut_new_bases_only": True,
             "live_micro_early_cut_momentum_max_return": 0.0,
+            # Tiered underwater recycle: free stuck capital within €50 sleeve loss budget.
+            "live_micro_uw_recycle_enabled": True,
+            "live_micro_uw_dust_max_notional_eur": 25.0,
+            "live_micro_uw_dust_below_be_pct": 0.003,
+            "live_micro_uw_near_below_be_pct": 0.008,
+            "live_micro_uw_near_max_depth_pct": 0.015,
+            "live_micro_uw_near_min_age_sec": 2700.0,
+            "live_micro_uw_non_alphai_below_be_pct": 0.01,
+            "live_micro_uw_non_alphai_min_age_sec": 3600.0,
+            "live_micro_uw_alphai_below_be_pct": 0.02,
+            "live_micro_uw_alphai_min_age_sec": 10800.0,
             "live_micro_momentum_exit_min_return": 0.002,
             "live_micro_momentum_exit_above_be_pct": 0.005,
             "global_max_strategy_exposure_pct": 100.0,
