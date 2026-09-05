@@ -5455,11 +5455,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return ("avoid_idle", "stop", floor)
 
 
-        # Deadlock unlock: free non-strong bags at mild depth/age so capital rotates.
+        # Deadlock unlock: free bags at mild depth/age so capital rotates.
+        # Overrides strong_hold except for rising sleeve-priority names we still nurse.
         # Does not require same-venue free cash (capital is often locked IN the bag).
         if (
             self._uw_deadlock_unlock_enabled
-            and not strong_hold
             and age >= self._uw_deadlock_min_age_sec
             and depth >= self._uw_deadlock_below_be_pct
             and self._capital_deadlocked(venue)
@@ -5479,11 +5479,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     return ("deadlock_aged", "stop", floor)
                 return ("deadlock_unlock", "stop", floor)
 
-        # Layer 1b: idle-pressure — free non-strong bags when venue cash is idle
-        # OR when UW vault has locked the ring (low free on the bag's venue).
+        # Layer 1b: idle-pressure — free bags when venue cash is idle OR when UW
+        # vault has locked the ring. Deadlock also overrides strong_hold here.
+        deadlocked = self._capital_deadlocked(venue)
         if (
             self._uw_idle_pressure_enabled
-            and not strong_hold
+            and (not strong_hold or deadlocked)
             and age >= self._uw_idle_min_age_sec
             and depth >= self._uw_idle_below_be_pct
         ):

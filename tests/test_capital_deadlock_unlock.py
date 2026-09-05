@@ -144,3 +144,29 @@ def test_soft_momentum_desk_bias_no_nameerror() -> None:
     b._underwater_book_notional = lambda venue: Decimal("0")  # type: ignore[method-assign]
     b._active_book_notional = lambda venue: Decimal("0")  # type: ignore[method-assign]
     assert b._ring_soft_momentum_eligible("bitvavo") is True
+
+
+def test_deadlock_overrides_strong_hold_when_sleeve_not_rising() -> None:
+    """SOL-class strong holds must still unlock when capital is deadlocked."""
+    b = _bridge()
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 400.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: True  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_sleeve_priority_buy = lambda base, top_n=2: True  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    b._underwater_book_notional = lambda venue: Decimal("280")  # type: ignore[method-assign]
+    b._active_book_notional = lambda venue: Decimal("0")  # type: ignore[method-assign]
+    b._venue_budget_remaining = lambda venue: Decimal("10")  # type: ignore[method-assign]
+    b._sleeve_has_unheld_priority = lambda top_n=2: True  # type: ignore[method-assign]
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="SOL",
+        symbol="SOLEUR",
+        mark=Decimal("99.70"),
+        be=Decimal("100"),
+        notional=Decimal("280"),
+    )
+    assert plan is not None
+    assert str(plan[0]).startswith("deadlock_")
