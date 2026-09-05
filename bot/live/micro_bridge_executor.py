@@ -742,6 +742,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_near_max_depth_pct": self._uw_near_max_depth_pct,
             "uw_alphai_below_be_pct": self._uw_alphai_below_be_pct,
             "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
+            "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
+            "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
+            "uw_deadlock_below_be_pct": self._uw_deadlock_below_be_pct,
             "early_cut_loss_below_be_pct": self._early_cut_loss_below_be_pct,
             "trail_hold_rising_n": self._trail_hold_rising_n,
             "alphai_intraday_min_freshness": self._alphai_intraday_min_freshness,
@@ -1350,15 +1353,29 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             or getattr(self._capital_playbook, "value", "")
         )
         min_free = float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
+        locked_uw = _ZERO
+        capital_deadlocked = False
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                locked_uw += self._underwater_book_notional(venue)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if self._capital_deadlocked(venue):
+                    capital_deadlocked = True
+            except Exception:  # noqa: BLE001
+                pass
         recorded: list[str] = []
         try:
-            if float(free_total) >= min_free:
+            if float(free_total) >= min_free or capital_deadlocked:
                 row = self._desk_lessons.record_missed_deploy(
                     sleeve_bases=sleeve,
                     free_cash_eur=float(free_total),
                     held_non_picks=sorted(held_non),
                     playbook=playbook,
                     min_free_eur=min_free,
+                    capital_deadlocked=capital_deadlocked,
+                    locked_eur=float(locked_uw),
                 )
                 if row:
                     recorded.append("missed_deploy")
@@ -1751,6 +1768,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         _dec("uw_near_max_depth_pct", "_uw_near_max_depth_pct")
         _dec("uw_alphai_below_be_pct", "_uw_alphai_below_be_pct")
         _float("uw_alphai_min_age_sec", "_uw_alphai_min_age_sec")
+        _bool("uw_deadlock_unlock_enabled", "_uw_deadlock_unlock_enabled")
+        _float("uw_deadlock_min_age_sec", "_uw_deadlock_min_age_sec")
+        _dec("uw_deadlock_below_be_pct", "_uw_deadlock_below_be_pct")
         _dec("early_cut_loss_below_be_pct", "_early_cut_loss_below_be_pct")
         _int("trail_hold_rising_n", "_trail_hold_rising_n")
         _dec("alphai_intraday_min_freshness", "_alphai_intraday_min_freshness")
@@ -3166,6 +3186,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     bullish_cluster = len(sig.bullish_buy_bases()) >= 3
                 except Exception:  # noqa: BLE001
                     bullish_cluster = False
+            capital_deadlocked = False
+            for v in getattr(self, "_execute_venues", ()) or ():
+                try:
+                    if self._capital_deadlocked(str(v)):
+                        capital_deadlocked = True
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
             cap_state = assess_capital_state(
                 total_budget_eur=self._budget,
                 deployed_eur=self._economic_diagnostics._capital_deployed_eur,  # noqa: SLF001
@@ -3176,6 +3204,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 is_opportunity_burst=regime.regime.value == "OPPORTUNITY_BURST",
                 alphai_macro_active=self._alphai_macro_active,
                 alphai_bullish_cluster=bullish_cluster,
+                capital_deadlocked=capital_deadlocked,
             )
             self._capital_state_snapshot = {
                 "capital_available_eur": str(cap_state.available_eur.quantize(Decimal("0.01"))),
@@ -3183,6 +3212,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
                 "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
                 "capital_reasons": ",".join(cap_state.reasons),
+                "capital_deadlocked": capital_deadlocked,
             }
             base_sym = symbol.upper()
             for quote in ("EUR", "USDT", "USDC", "USD"):
@@ -5383,6 +5413,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Large UW vault + empty active book is still a deadlock without sleeve picks.
         return uw >= min_uw and active < Decimal("50")
 
+    def _any_capital_deadlocked(self) -> bool:
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                if self._capital_deadlocked(str(venue)):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _uw_recycle_priority(self, base: str) -> int:
+        """Lower = recycle sooner when unlocking capital for the AlphaI sleeve."""
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return 9
+        try:
+            if self._alphai_is_avoid_base(bu):
+                return 0
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if not self._alphai_bullish_buy(bu):
+                return 1
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_weak_bullish_hold(bu):
+                return 2
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_sleeve_priority_buy(bu):
+                return 4
+        except Exception:  # noqa: BLE001
+            pass
+        return 3
+
     def _uw_recycle_plan(
         self,
         *,
@@ -6842,6 +6908,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         bals = await self._fetch_balances_cached(venue)
         triggered: list[dict[str, Any]] = []
         armed_now: list[str] = []
+        # When capital is deadlocked, recycle avoid/non-sleeve bags before sleeve names.
+        try:
+            if self._capital_deadlocked(venue):
+                bals = sorted(
+                    list(bals),
+                    key=lambda bal: self._uw_recycle_priority(
+                        str(getattr(bal, "asset", "") or "")
+                    ),
+                )
+        except Exception:  # noqa: BLE001
+            pass
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
             if not asset or asset == self._quote:
@@ -7782,6 +7859,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     order_request,
                     reason="ALPHAI_MACRO_BLOCK",
                     message="AlphaI macro reduce-only blocks all new buys",
+                )
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and self._sleeve_has_unheld_priority()
+            and self._any_capital_deadlocked()
+        ):
+            new_base = self._is_new_base_buy(venue, base)
+            if new_base and not self._alphai_sleeve_priority_buy(base):
+                self._bump_skip("capital_deadlock_sleeve_only")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CAPITAL_DEADLOCK_SLEEVE_ONLY",
+                    message=(
+                        "capital deadlocked in UW vault — only AlphaI rank-1/2 "
+                        f"sleeve new bases allowed (not {base})"
+                    ),
                 )
         if (
             side_is_buy

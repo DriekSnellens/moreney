@@ -53,6 +53,7 @@ def assess_capital_state(
     is_opportunity_burst: bool = False,
     alphai_macro_active: bool = False,
     alphai_bullish_cluster: bool = False,
+    capital_deadlocked: bool = False,
     realized_net_per_hour: Decimal | None = None,
     config: CapitalIntelligenceConfig | None = None,
 ) -> CapitalState:
@@ -87,6 +88,12 @@ def assess_capital_state(
     elif alphai_bullish_cluster and is_opportunity_burst:
         reserve_pct -= Decimal("0.03")
         reasons.append("alphai_burst_deploy")
+
+    # UW vault starving the active ring: keep more cash free for sleeve redeploy
+    # after deadlock unlock frees inventory (do not spray into non-sleeve names).
+    if capital_deadlocked:
+        reserve_pct += Decimal("0.08")
+        reasons.append("capital_deadlock_unlock")
 
     if market_volatility is not None and market_volatility > Decimal("0.006"):
         reserve_pct += Decimal("0.05")

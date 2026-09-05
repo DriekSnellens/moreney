@@ -170,3 +170,54 @@ def test_deadlock_overrides_strong_hold_when_sleeve_not_rising() -> None:
     )
     assert plan is not None
     assert str(plan[0]).startswith("deadlock_")
+
+
+def test_recycle_priority_prefers_avoid_over_sleeve() -> None:
+    b = _bridge()
+    b._alphai_is_avoid_base = lambda base: str(base).upper() == "ETH"  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: str(base).upper() in {"BNB", "ADA"}  # type: ignore[method-assign]
+    b._alphai_weak_bullish_hold = lambda base: False  # type: ignore[method-assign]
+    b._alphai_sleeve_priority_buy = lambda base, top_n=2: str(base).upper() in {"BNB", "ADA"}  # type: ignore[method-assign]
+    assert b._uw_recycle_priority("ETH") < b._uw_recycle_priority("SOL")
+    assert b._uw_recycle_priority("SOL") < b._uw_recycle_priority("BNB")
+
+
+def test_playbook_overlay_tightens_deadlock_age() -> None:
+    b = _bridge()
+    b._playbook_baselines = {
+        "uw_deadlock_unlock_enabled": True,
+        "uw_deadlock_min_age_sec": 300.0,
+        "uw_deadlock_below_be_pct": Decimal("0.0025"),
+        "active_ring_eur": b._active_ring_eur,
+        "ring_soft_max_active_eur": Decimal("1850"),
+        "winner_add_enabled": True,
+        "alphai_strong_clip_eur": Decimal("220"),
+        "exit_taker_cushion_bps": Decimal("5"),
+        "exit_taker_after_maker_fails": 1,
+        "be_harvest_min_gain_pct": Decimal("0.004"),
+        "be_harvest_partial_pct": Decimal("0.5"),
+        "uw_near_min_age_sec": 2700.0,
+        "uw_non_alphai_min_age_sec": 3600.0,
+        "uw_idle_min_age_sec": 600.0,
+        "uw_idle_below_be_pct": Decimal("0.004"),
+        "uw_near_below_be_pct": Decimal("0.008"),
+        "uw_near_max_depth_pct": Decimal("0.015"),
+        "uw_alphai_below_be_pct": Decimal("0.02"),
+        "uw_alphai_min_age_sec": 10800.0,
+        "early_cut_loss_below_be_pct": Decimal("0.01"),
+        "trail_hold_rising_n": 3,
+        "alphai_intraday_min_freshness": Decimal("0.4"),
+        "alphai_intraday_require_rising": False,
+        "alphai_cross_venue_deploy": True,
+        "alphai_idle_deploy_blocked": False,
+    }
+    b._playbook_owns_buy_block = False
+    b._daily_kill_active = False
+    b._buys_blocked = False
+    b._buys_blocked_new_bases_only = False
+    b.set_buys_blocked = lambda *a, **k: None  # type: ignore[method-assign]
+    b._apply_capital_playbook_overlays(
+        {"uw_deadlock_min_age_sec": 180.0, "uw_deadlock_below_be_pct": 0.002}
+    )
+    assert b._uw_deadlock_min_age_sec == 180.0
+    assert b._uw_deadlock_below_be_pct == Decimal("0.002")
