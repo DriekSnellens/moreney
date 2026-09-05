@@ -480,6 +480,13 @@ class Settings(BaseSettings):
     alphai_base_reliability_min_n: int = Field(default=3, ge=2, le=30)
     alphai_pick_outcomes_enabled: bool = True
     alphai_pick_outcomes_path: str = "./data/alphai/pick_outcomes.json"
+    # Desk lesson loop: record missed deploy / early harvest / avoid-vs-sleeve,
+    # settle with outcomes, optional capped feedback into live knobs.
+    alphai_desk_lessons_enabled: bool = True
+    alphai_desk_lessons_path: str = "./data/alphai/desk_lessons.json"
+    alphai_desk_lessons_auto_apply: bool = False
+    alphai_desk_lessons_min_free_eur: float = Field(default=150.0, ge=25.0, le=2000.0)
+    alphai_desk_lessons_observe_sec: float = Field(default=60.0, ge=15.0, le=600.0)
     # Intraday AND-gate: AlphaI pick × freshness × low adverse × momentum not down.
     alphai_intraday_gate_enabled: bool = False
     alphai_intraday_gate_shadow_only: bool = True

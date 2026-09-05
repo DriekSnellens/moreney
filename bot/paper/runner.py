@@ -2270,6 +2270,9 @@ class PaperRunner:
                     fetch_bitvavo_day_returns,
                     sync_pick_outcomes,
                 )
+                from bot.integrations.alphai.desk_lessons import (
+                    sync_desk_lessons_day_returns,
+                )
                 from bot.integrations.alphai.price_confirm import (
                     adaptive_lag_threshold,
                     enrich_daily_with_price_check,
@@ -2337,6 +2340,29 @@ class PaperRunner:
                     except Exception:  # noqa: BLE001
                         # Persist is best-effort; live demotion must still apply.
                         logger.exception("ALPHAI_PICK_OUTCOMES_PERSIST_FAILED")
+                if bool(getattr(self._settings, "alphai_desk_lessons_enabled", True)):
+                    try:
+                        await asyncio.to_thread(
+                            sync_desk_lessons_day_returns,
+                            str(
+                                getattr(
+                                    self._settings,
+                                    "alphai_desk_lessons_path",
+                                    "./data/alphai/desk_lessons.json",
+                                )
+                            ),
+                            day_rets,
+                            enabled=True,
+                            auto_apply=bool(
+                                getattr(
+                                    self._settings,
+                                    "alphai_desk_lessons_auto_apply",
+                                    False,
+                                )
+                            ),
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("ALPHAI_DESK_LESSONS_SETTLE_FAILED")
             except Exception:  # noqa: BLE001
                 logger.exception("ALPHAI_PRICE_CONFIRM_FAILED")
         signals = build_trading_signals(state, daily)
