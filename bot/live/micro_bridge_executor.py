@@ -1258,6 +1258,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         )
 
+
+    def _alphai_sleeve_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
+        """True for AlphaI rank-1/2 sleeve targets (structural deploy list)."""
+        if not self._alphai_bullish_buy(base):
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        if hasattr(sig, "is_slot_priority_buy"):
+            try:
+                return bool(sig.is_slot_priority_buy(base, top_n=top_n))
+            except TypeError:
+                return bool(sig.is_slot_priority_buy(base))
+        if hasattr(sig, "is_top_pick"):
+            try:
+                return bool(sig.is_top_pick(base, top_n=top_n))
+            except TypeError:
+                return bool(sig.is_top_pick(base))
+        return self._alphai_strong_bullish_buy(base)
+
+
     def _alphai_signal_fresh_enough(self, base: str) -> bool:
         """Reject strong-clip / winner-add when AlphaI pick set is stale."""
         try:
@@ -5436,8 +5457,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if not self._alphai_bullish_buy(base):
             return False
-        if self._sleeve_paused or self._daily_kill_active or self._buys_blocked:
+        if self._sleeve_paused or self._daily_kill_active:
             return False
+        if self._buys_blocked:
+            # Playbook ADVERSE uses new-bases-only block; keep AlphaI rank-1/2 live.
+            if not self._buys_blocked_new_bases_only:
+                return False
+            if not self._alphai_sleeve_priority_buy(base):
+                return False
         if not self._ring_needs_deploy(venue):
             return False
         # Lagging / weak RS names must not soak idle cash on red tape.
@@ -5707,7 +5734,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self._alphai_bullish_buy(base) and self._alphai_priority_clip_eur > 0:
             sig = self._alphai_signals
             if sig is not None and hasattr(sig, "is_slot_priority_buy"):
-                if sig.is_slot_priority_buy(base, top_n=5):
+                # Structural sleeve: concentrate capital on AlphaI rank-1/2.
+                if sig.is_slot_priority_buy(base, top_n=2):
                     return self._alphai_priority_clip_eur
             elif self._alphai_priority_clip_eur > first:
                 return self._alphai_priority_clip_eur
@@ -7251,14 +7279,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             new_base = self._is_new_base_buy(venue, base)
             if self._buys_blocked_new_bases_only:
-                if new_base:
+                if new_base and not self._alphai_sleeve_priority_buy(base):
                     self._bump_skip("regime_block_buys")
                     return await self._reject_before_live(
                         order_request,
                         reason="REGIME_BLOCK_BUYS_NEW",
                         message=(
                             "new-base buys blocked while underwater bags pile up "
-                            "(adds to existing still allowed)"
+                            "(AlphaI rank-1/2 sleeve and adds still allowed)"
                         ),
                     )
             else:

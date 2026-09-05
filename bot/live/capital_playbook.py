@@ -1,9 +1,9 @@
 """Capital playbook router — TREND / FLAT / ADVERSE for live micro.
 
 Chooses a capital-allocation playbook from session velocity + tape health,
-then returns knob overlays the bridge applies live. Never-loss on normal
-BE+ harvests is unchanged; FLAT/ADVERSE only loosen fill-seeking / recycle
-within the existing sleeve and risk caps.
+then returns knob overlays the bridge applies live. Never-loss on normal BE+ harvests is unchanged. Soft-ADVERSE keeps an
+AlphaI rank-1/2 deploy sleeve (no full buy freeze); harvest waits for a
+real gain / peak-fade instead of tiny BE drips.
 
 Pre-crash FLAT: when sell velocity dies with high near-BE inventory, force
 de-risk to cash *before* an underwater cluster (today's 12:28 MTM cliff).
@@ -58,59 +58,65 @@ PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
         # Empty → restore session baselines (max-deploy).
     },
     CapitalPlaybook.FLAT: {
-        "active_ring_eur": 1200.0,
-        "ring_soft_max_active_eur": 1200.0,
+        "active_ring_eur": 1400.0,
+        "ring_soft_max_active_eur": 1400.0,
         "winner_add_enabled": False,
-        "alphai_strong_clip_eur": 160.0,
+        "alphai_strong_clip_eur": 220.0,
         "exit_taker_cushion_bps": 2.0,
         "exit_taker_after_maker_fails": 1,
-        "be_harvest_min_gain_pct": 0.00005,
-        "be_harvest_partial_pct": 0.85,
+        # Hold for a real move; tiny BE drip was the velocity leak.
+        "be_harvest_min_gain_pct": 0.006,
+        "be_harvest_partial_pct": 0.45,
         "uw_near_min_age_sec": 600.0,
         "uw_non_alphai_min_age_sec": 900.0,
         "uw_idle_min_age_sec": 300.0,
         "uw_idle_below_be_pct": 0.003,
         "uw_near_below_be_pct": 0.004,
+        "trail_hold_rising_n": 2,
         "alphai_intraday_min_freshness": 0.45,
+        "alphai_idle_deploy_blocked": False,
         "block_new_buys": False,
     },
     CapitalPlaybook.ADVERSE: {
-        "active_ring_eur": 700.0,
-        "ring_soft_max_active_eur": 700.0,
+        # Keep room for AlphaI rank-1/2 sleeve even on soft-adverse days.
+        "active_ring_eur": 1200.0,
+        "ring_soft_max_active_eur": 1200.0,
         "winner_add_enabled": False,
-        "alphai_strong_clip_eur": 0.0,
+        "alphai_strong_clip_eur": 220.0,
         "exit_taker_cushion_bps": 2.0,
         "exit_taker_after_maker_fails": 1,
-        "be_harvest_min_gain_pct": 0.00005,
-        "be_harvest_partial_pct": 0.90,
+        # Peak-fade harvest — not 1bp BE snips.
+        "be_harvest_min_gain_pct": 0.008,
+        "be_harvest_partial_pct": 0.40,
         "uw_near_min_age_sec": 300.0,
         "uw_non_alphai_min_age_sec": 450.0,
         "uw_idle_min_age_sec": 120.0,
         "uw_idle_below_be_pct": 0.003,
         "uw_near_below_be_pct": 0.005,
-        # Faster AlphaI recycle on red days (was 1.5%/3600s — bags stayed stuck).
+        # Recycle non-sleeve bags faster; AlphaI winners hold while rising.
         "uw_alphai_below_be_pct": 0.010,
         "uw_alphai_min_age_sec": 900.0,
         "early_cut_loss_below_be_pct": 0.008,
-        "trail_hold_rising_n": 0,
+        "trail_hold_rising_n": 2,
         "alphai_intraday_min_freshness": 0.55,
         "alphai_intraday_require_rising": True,
-        "alphai_cross_venue_deploy": False,
-        "alphai_idle_deploy_blocked": True,
-        "block_new_buys": True,  # new bases only
+        "alphai_cross_venue_deploy": True,
+        "alphai_idle_deploy_blocked": False,
+        # New bases blocked except AlphaI rank-1/2 sleeve (bridge exemption).
+        "block_new_buys": True,
     },
 }
 
 # Stronger FLAT when velocity is dead with capital still near BE (pre-crash).
 PRE_CRASH_FLAT_OVERLAYS: dict[str, Any] = {
-    "active_ring_eur": 500.0,
-    "ring_soft_max_active_eur": 500.0,
+    "active_ring_eur": 900.0,
+    "ring_soft_max_active_eur": 900.0,
     "winner_add_enabled": False,
-    "alphai_strong_clip_eur": 0.0,
+    "alphai_strong_clip_eur": 160.0,
     "exit_taker_cushion_bps": 2.0,
     "exit_taker_after_maker_fails": 1,
-    "be_harvest_min_gain_pct": 0.00005,
-    "be_harvest_partial_pct": 0.90,
+    "be_harvest_min_gain_pct": 0.005,
+    "be_harvest_partial_pct": 0.45,
     "uw_near_min_age_sec": 180.0,
     "uw_non_alphai_min_age_sec": 300.0,
     "uw_idle_min_age_sec": 90.0,
@@ -120,11 +126,12 @@ PRE_CRASH_FLAT_OVERLAYS: dict[str, Any] = {
     "uw_alphai_below_be_pct": 0.008,
     "uw_alphai_min_age_sec": 600.0,
     "early_cut_loss_below_be_pct": 0.008,
-    "trail_hold_rising_n": 0,
+    "trail_hold_rising_n": 1,
     "alphai_intraday_min_freshness": 0.50,
     "alphai_intraday_require_rising": True,
-    "alphai_cross_venue_deploy": False,
-    "alphai_idle_deploy_blocked": True,
+    "alphai_cross_venue_deploy": True,
+    "alphai_idle_deploy_blocked": False,
+    # Still block spray — AlphaI rank-1/2 sleeve remains deployable.
     "block_new_buys": True,
 }
 

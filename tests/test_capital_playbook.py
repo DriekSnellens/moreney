@@ -30,7 +30,7 @@ def test_flat_day_low_velocity_classifies_flat() -> None:
     assert decision.playbook == CapitalPlaybook.FLAT
     assert decision.pre_crash is True
     assert "pre_crash_derisk" in decision.reasons
-    assert decision.overlays.get("active_ring_eur") == 500.0
+    assert decision.overlays.get("active_ring_eur") == 900.0
     assert decision.overlays.get("block_new_buys") is True
 
 
@@ -108,7 +108,7 @@ def test_adverse_macro_and_underwater() -> None:
     )
     assert decision.playbook == CapitalPlaybook.ADVERSE
     assert decision.overlays.get("block_new_buys") is True
-    assert decision.overlays.get("alphai_strong_clip_eur") == 0.0
+    assert decision.overlays.get("alphai_strong_clip_eur") == 220.0
 
 
 def test_trend_healthy_velocity() -> None:
@@ -165,13 +165,30 @@ def test_adverse_and_precrash_speed_up_recycle_and_block_deploy() -> None:
     adverse = PLAYBOOK_OVERLAYS[CapitalPlaybook.ADVERSE]
     assert adverse["uw_alphai_min_age_sec"] <= 900.0
     assert adverse["uw_alphai_below_be_pct"] <= 0.010
-    assert adverse["trail_hold_rising_n"] == 0
-    assert adverse["alphai_idle_deploy_blocked"] is True
+    # Soft-ADVERSE: keep AlphaI sleeve deployable + hold winners while rising.
+    assert adverse["active_ring_eur"] >= 1200.0
+    assert adverse["alphai_strong_clip_eur"] >= 200.0
+    assert adverse["be_harvest_min_gain_pct"] >= 0.006
+    assert adverse["be_harvest_partial_pct"] <= 0.50
+    assert adverse["trail_hold_rising_n"] >= 2
+    assert adverse["alphai_idle_deploy_blocked"] is False
     assert adverse["alphai_intraday_require_rising"] is True
     assert adverse["early_cut_loss_below_be_pct"] <= 0.008
+    assert adverse["block_new_buys"] is True  # non-sleeve new bases still blocked
 
     pre = PRE_CRASH_FLAT_OVERLAYS
     assert pre["uw_alphai_min_age_sec"] <= 600.0
-    assert pre["trail_hold_rising_n"] == 0
-    assert pre["alphai_idle_deploy_blocked"] is True
+    assert pre["active_ring_eur"] >= 800.0
+    assert pre["alphai_strong_clip_eur"] >= 150.0
+    assert pre["trail_hold_rising_n"] >= 1
+    assert pre["alphai_idle_deploy_blocked"] is False
     assert pre["block_new_buys"] is True
+
+
+def test_adverse_keeps_alphai_sleeve_capacity() -> None:
+    """Soft-ADVERSE must not zero the AlphaI deploy sleeve."""
+    adverse = PLAYBOOK_OVERLAYS[CapitalPlaybook.ADVERSE]
+    trend_ring = 1850.0  # micro session baseline active ring
+    assert adverse["active_ring_eur"] >= 1200.0
+    assert adverse["active_ring_eur"] < trend_ring
+    assert adverse["alphai_cross_venue_deploy"] is True
