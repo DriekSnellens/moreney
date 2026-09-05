@@ -1283,6 +1283,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         """Record structural misses when idle cash / avoid bags block the sleeve."""
         if not getattr(self, "_desk_lessons_enabled", False):
             return {"enabled": False}
+        # Reload so paper-runner day settles are visible in-process.
+        try:
+            disk = DeskLessonStore.load(self._desk_lessons_path)
+            disk.auto_apply = bool(self._desk_lessons.auto_apply)
+            self._desk_lessons = disk
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_RELOAD_FAILED")
         now = time.monotonic()
         interval = float(getattr(self, "_desk_lessons_observe_sec", 60.0) or 60.0)
         last = float(getattr(self, "_desk_lessons_last_observe_mono", 0.0) or 0.0)
