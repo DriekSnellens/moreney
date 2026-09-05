@@ -450,6 +450,12 @@ def _session_settings(
             "alphai_adaptive_lag_enabled": True,
             "alphai_pick_outcomes_enabled": True,
             "alphai_pick_outcomes_path": "./data/alphai/pick_outcomes.json",
+            # Desk learn-loop: observe → settle → shadow feedback (opt-in apply).
+            "alphai_desk_lessons_enabled": True,
+            "alphai_desk_lessons_path": "./data/alphai/desk_lessons.json",
+            "alphai_desk_lessons_auto_apply": False,
+            "alphai_desk_lessons_min_free_eur": 150.0,
+            "alphai_desk_lessons_observe_sec": 60.0,
             # Capital playbook router (TREND/FLAT/ADVERSE) — live enforce.
             "live_micro_capital_playbook_enabled": True,
             "live_micro_capital_playbook_min_hold_sec": 900.0,

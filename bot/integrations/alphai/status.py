@@ -75,6 +75,19 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
     except Exception:  # noqa: BLE001
         outcomes_summary = {}
 
+    desk_lessons_summary: dict[str, Any] = {}
+    try:
+        from bot.integrations.alphai.desk_lessons import DeskLessonStore
+
+        desk_path = getattr(
+            get_settings(),
+            "alphai_desk_lessons_path",
+            "./data/alphai/desk_lessons.json",
+        )
+        desk_lessons_summary = DeskLessonStore.load(desk_path).summary()
+    except Exception:  # noqa: BLE001
+        desk_lessons_summary = {}
+
     price_check = daily.get("price_check") if isinstance(daily.get("price_check"), dict) else {}
 
     return {
@@ -103,4 +116,20 @@ def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str,
         "alphai_pick_beat_btc_rate": outcomes_summary.get("beat_btc_rate"),
         "alphai_pick_lag_rate": outcomes_summary.get("lag_rate"),
         "alphai_pick_avg_vs_btc_pp": outcomes_summary.get("avg_vs_btc_pp"),
+        "alphai_desk_lessons_open": desk_lessons_summary.get("open_count"),
+        "alphai_desk_lessons_settled": desk_lessons_summary.get("settled_count"),
+        "alphai_desk_lessons_auto_apply": desk_lessons_summary.get("auto_apply"),
+        "alphai_desk_lessons_deploy_bias": (
+            (desk_lessons_summary.get("feedback") or {}).get("deploy_urgency_bias")
+        ),
+        "alphai_desk_lessons_harvest_scale": (
+            (desk_lessons_summary.get("feedback") or {}).get("harvest_floor_scale")
+        ),
+        "alphai_desk_lessons_avoid_age_scale": (
+            (desk_lessons_summary.get("feedback") or {}).get("avoid_recycle_age_scale")
+        ),
+        "alphai_desk_lessons_sum_missed_eur": (
+            (desk_lessons_summary.get("feedback") or {}).get("sum_missed_eur")
+        ),
+        "alphai_desk_lessons_latest_kind": desk_lessons_summary.get("latest_kind"),
     }

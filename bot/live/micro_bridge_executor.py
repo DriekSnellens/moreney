@@ -56,6 +56,7 @@ from bot.integrations.alphai.attribution import (
     AlphaIAttributionEvent,
     AlphaIAttributionStore,
 )
+from bot.integrations.alphai.desk_lessons import DeskLessonStore
 from bot.integrations.alphai.features import (
     AlphaIFeatureAssessment,
     alphai_feature_from_signals_snapshot,
@@ -498,6 +499,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         )
         self._alphai_attribution.auto_apply = False
+        self._desk_lessons_enabled = bool(
+            getattr(settings, "alphai_desk_lessons_enabled", True)
+        )
+        self._desk_lessons_path = str(
+            getattr(
+                settings,
+                "alphai_desk_lessons_path",
+                "./data/alphai/desk_lessons.json",
+            )
+        )
+        self._desk_lessons = DeskLessonStore.load(self._desk_lessons_path)
+        self._desk_lessons.auto_apply = bool(
+            getattr(settings, "alphai_desk_lessons_auto_apply", False)
+        )
+        self._desk_lessons_min_free_eur = float(
+            getattr(settings, "alphai_desk_lessons_min_free_eur", 150.0) or 150.0
+        )
+        self._desk_lessons_observe_sec = float(
+            getattr(settings, "alphai_desk_lessons_observe_sec", 60.0) or 60.0
+        )
+        self._desk_lessons_last_observe_mono = 0.0
         self._alphai_feature_snapshot: dict[str, Any] = {}
         self._alphai_daily_generated_at: str | None = None
         self._alphai_intraday_gate_enabled = bool(
@@ -1201,7 +1223,200 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return bool(sig.exit_urgency(base))
 
     def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
-        return self._alphai_feature_for(base).be_harvest_gain_scale
+        scale = self._alphai_feature_for(base).be_harvest_gain_scale
+        try:
+            applied = self._desk_lessons.applied_feedback()
+            scale = scale * Decimal(str(applied.harvest_floor_scale or 1.0))
+        except Exception:  # noqa: BLE001
+            pass
+        return scale
+
+    def _desk_lesson_deploy_bias(self) -> Decimal:
+        try:
+            return Decimal(
+                str(self._desk_lessons.applied_feedback().deploy_urgency_bias or 1.0)
+            )
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _desk_lesson_avoid_age_scale(self) -> float:
+        try:
+            return float(
+                self._desk_lessons.applied_feedback().avoid_recycle_age_scale or 1.0
+            )
+        except Exception:  # noqa: BLE001
+            return 1.0
+
+    def _desk_sleeve_unheld_bases(self, *, top_n: int = 2) -> list[str]:
+        """Unheld AlphaI sleeve bases (rank-1/2); empty when fully held."""
+        if not self._sleeve_has_unheld_priority(top_n=top_n):
+            return []
+        sig = self._alphai_signals
+        if sig is None:
+            return []
+        held: set[str] = set()
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                held |= self._held_alt_bases(venue, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                continue
+        if hasattr(sig, "unheld_priority_buys"):
+            try:
+                unheld = sig.unheld_priority_buys(held, top_n=top_n)
+                if unheld:
+                    return sorted({str(b).upper() for b in unheld})
+            except Exception:  # noqa: BLE001
+                pass
+        out: list[str] = []
+        scores = getattr(sig, "daily_pick_scores", None) or {}
+        if isinstance(scores, dict) and scores:
+            ranked = sorted(
+                scores, key=lambda b: float(scores.get(b) or 0), reverse=True
+            )
+            for b in ranked[:top_n]:
+                bu = str(b).upper()
+                if bu not in held and self._alphai_sleeve_priority_buy(bu):
+                    out.append(bu)
+        return out
+
+    def _maybe_observe_desk_lessons(self, *, force: bool = False) -> dict[str, Any]:
+        """Record structural misses when idle cash / avoid bags block the sleeve."""
+        if not getattr(self, "_desk_lessons_enabled", False):
+            return {"enabled": False}
+        # Reload so paper-runner day settles are visible in-process.
+        try:
+            disk = DeskLessonStore.load(self._desk_lessons_path)
+            disk.auto_apply = bool(self._desk_lessons.auto_apply)
+            self._desk_lessons = disk
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_RELOAD_FAILED")
+        now = time.monotonic()
+        interval = float(getattr(self, "_desk_lessons_observe_sec", 60.0) or 60.0)
+        last = float(getattr(self, "_desk_lessons_last_observe_mono", 0.0) or 0.0)
+        if not force and last > 0 and (now - last) < interval:
+            return {"enabled": True, "skipped": "interval"}
+        self._desk_lessons_last_observe_mono = now
+
+        sleeve = self._desk_sleeve_unheld_bases()
+        if not sleeve:
+            return {"enabled": True, "sleeve_unheld": []}
+
+        free_total = _ZERO
+        held_non: set[str] = set()
+        avoid_held: set[str] = set()
+        avoid_notional = _ZERO
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                free_total += self._venue_budget_remaining(venue)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                held = self._held_alt_bases(venue, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                held = set()
+            for base in held:
+                if self._alphai_sleeve_priority_buy(base):
+                    continue
+                held_non.add(base)
+                if self._alphai_is_avoid_base(base):
+                    avoid_held.add(base)
+                    try:
+                        symbol = f"{base}{self._quote}"
+                        mark = Decimal(
+                            str(
+                                (getattr(self, "_trail_state", {}) or {})
+                                .get(f"{venue}:{base}", {})
+                                .get("last_mark")
+                                or 0
+                            )
+                        )
+                        qty = self._session_qty(venue, base)
+                        if mark > 0 and qty > 0:
+                            avoid_notional += mark * qty
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        playbook = str(
+            (self._capital_playbook_decision or {}).get("playbook")
+            or getattr(self._capital_playbook, "value", "")
+        )
+        min_free = float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
+        recorded: list[str] = []
+        try:
+            if float(free_total) >= min_free:
+                row = self._desk_lessons.record_missed_deploy(
+                    sleeve_bases=sleeve,
+                    free_cash_eur=float(free_total),
+                    held_non_picks=sorted(held_non),
+                    playbook=playbook,
+                    min_free_eur=min_free,
+                )
+                if row:
+                    recorded.append("missed_deploy")
+            if avoid_held and (
+                float(avoid_notional) >= 25.0 or float(free_total) >= min_free
+            ):
+                row = self._desk_lessons.record_avoid_vs_sleeve(
+                    avoid_bases=sorted(avoid_held),
+                    sleeve_bases=sleeve,
+                    avoid_notional_eur=float(avoid_notional),
+                    free_cash_eur=float(free_total),
+                    playbook=playbook,
+                )
+                if row:
+                    recorded.append("avoid_vs_sleeve")
+            if recorded:
+                self._desk_lessons.save(self._desk_lessons_path)
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_OBSERVE_FAILED")
+            return {"enabled": True, "error": True}
+        return {
+            "enabled": True,
+            "sleeve_unheld": sleeve,
+            "free_cash_eur": float(free_total),
+            "recorded": recorded,
+        }
+
+    def _record_desk_early_harvest(
+        self,
+        *,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        gain_now: Decimal,
+        peak_px: Decimal,
+        be: Decimal | None,
+        soft_arm: Decimal,
+        sell_qty: Decimal,
+        reason: str,
+    ) -> None:
+        if not getattr(self, "_desk_lessons_enabled", False):
+            return
+        if not self._alphai_sleeve_priority_buy(base):
+            return
+        try:
+            exit_gain = float(gain_now)
+            peak_gain = 0.0
+            if be is not None and be > 0 and peak_px > 0:
+                peak_gain = float((peak_px - be) / be)
+            notional = float(sell_qty * mark) if sell_qty > 0 and mark > 0 else 0.0
+            row = self._desk_lessons.record_early_harvest(
+                base=base,
+                venue=venue,
+                exit_gain_pct=exit_gain,
+                peak_gain_pct=peak_gain,
+                notional_eur=notional,
+                soft_arm_pct=float(soft_arm),
+                reason=reason,
+            )
+            if row and not row.get("settled"):
+                self._desk_lessons.settle_early_harvest_immediate(
+                    str(row.get("id") or "")
+                )
+                self._desk_lessons.save(self._desk_lessons_path)
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_EARLY_HARVEST_FAILED")
+
 
     def _alphai_trail_hold_scale(self, base: str) -> Decimal:
         return self._alphai_feature_for(base).trail_hold_scale
@@ -1634,6 +1849,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "enabled": True,
         }
         self._capital_playbook_last_refresh_mono = now
+        self._maybe_observe_desk_lessons()
         return self._capital_playbook_decision
 
     def _alphai_intraday_entry_gate(
@@ -2827,6 +3043,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "alphai_intraday_gate_shadow": self._alphai_intraday_gate_shadow_only,
             "alphai_intraday_min_freshness": str(self._alphai_intraday_min_freshness),
             "capital_playbook": self._capital_playbook_decision,
+            **(
+                self._desk_lessons.snapshot()
+                if getattr(self, "_desk_lessons_enabled", False)
+                else {}
+            ),
         }
         if opp is not None:
             return opp.snapshot(economic_extra={
@@ -5159,6 +5380,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if self._sleeve_has_unheld_priority():
                 below = min(below, Decimal("0.004"))
                 min_age = min(min_age, 180.0)
+            # Desk lesson feedback: recycle avoid bags faster after avoid-vs-sleeve misses.
+            min_age = max(60.0, float(min_age) * float(self._desk_lesson_avoid_age_scale()))
             floor = be * (Decimal("1") - below)
             if depth >= below:
                 return ("avoid_deep", "stop", floor)
@@ -5367,7 +5590,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         adds remain blocked via ``UNDERWATER_BASE_BLOCK`` / buy-quality gates.
         """
         if not self._ring_needs_deploy(venue):
-            return False
+            # Desk lesson urgency: still deploy sleeve into idle cash after missed deploys.
+            bias = float(self._desk_lesson_deploy_bias())
+            if (
+                bias <= 1.01
+                or not self._alphai_sleeve_priority_buy(base)
+                or float(self._venue_budget_remaining(venue))
+                < float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
+            ):
+                return False
         if (
             not self._ring_util_b_ignore_underwater
             and self._ring_soft_block_underwater_eur > 0
@@ -6907,6 +7138,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     notional_floor=partial_min,
                 )
                 reason = "trail_be_harvest"
+                self._record_desk_early_harvest(
+                    venue=venue,
+                    base=asset,
+                    mark=mark,
+                    gain_now=gain_now,
+                    peak_px=peak_px,
+                    be=be,
+                    soft_arm=soft_arm_now,
+                    sell_qty=sell_qty,
+                    reason=reason,
+                )
             elif (
                 self._exit_engine_enabled
                 and self._exit_soft_armed_work
