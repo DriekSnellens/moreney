@@ -1300,7 +1300,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return self._position_age_sec(venue, base) >= min_age
 
     def _alphai_sleeve_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
-        """True for AlphaI rank-1/2 sleeve targets (structural deploy list)."""
+        """True for AlphaI rank-1/2 sleeve targets (structural deploy list).
+
+        When daily picks are empty under macro caution but live bullish buys
+        still exist (e.g. AVAX headline), treat the top live bullish names as
+        the sleeve so ADVERSE new-base blocks do not idle the desk.
+        """
         if not self._alphai_bullish_buy(base):
             return False
         sig = self._alphai_signals
@@ -1308,14 +1313,45 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if hasattr(sig, "is_slot_priority_buy"):
             try:
-                return bool(sig.is_slot_priority_buy(base, top_n=top_n))
+                if bool(sig.is_slot_priority_buy(base, top_n=top_n)):
+                    return True
             except TypeError:
-                return bool(sig.is_slot_priority_buy(base))
+                if bool(sig.is_slot_priority_buy(base)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
         if hasattr(sig, "is_top_pick"):
             try:
-                return bool(sig.is_top_pick(base, top_n=top_n))
+                if bool(sig.is_top_pick(base, top_n=top_n)):
+                    return True
             except TypeError:
-                return bool(sig.is_top_pick(base))
+                if bool(sig.is_top_pick(base)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        # Only when the daily pick sleeve is empty/thin — do not promote rank-3+
+        # bullish names while BNB/ADA already occupy the slot list.
+        daily_scores = getattr(sig, "daily_pick_scores", None) or {}
+        positive_daily = [
+            b
+            for b, s in daily_scores.items()
+            if float(s or 0) > 0
+            and str(b).upper() not in set(getattr(sig, "avoid_bases", ()) or ())
+            and str(b).upper() not in set(getattr(sig, "blocked_bases", ()) or ())
+        ]
+        if len(positive_daily) >= top_n:
+            return self._alphai_strong_bullish_buy(base)
+        # Fallback: live bullish sleeve when daily pick list is empty/thin.
+        live_buys: list[str] = []
+        if hasattr(sig, "bullish_buy_bases"):
+            try:
+                live_buys = sorted({str(b).upper() for b in sig.bullish_buy_bases()})
+            except Exception:  # noqa: BLE001
+                live_buys = []
+        if not live_buys and hasattr(sig, "bullish_bases"):
+            live_buys = sorted({str(b).upper() for b in (sig.bullish_bases or ())})
+        if live_buys and str(base).upper() in set(live_buys[: max(1, top_n)]):
+            return True
         return self._alphai_strong_bullish_buy(base)
 
 

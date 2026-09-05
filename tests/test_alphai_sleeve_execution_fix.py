@@ -173,6 +173,39 @@ def test_avoid_recycles_faster_when_sleeve_unheld() -> None:
     assert str(plan[0]).startswith("avoid_")
 
 
+def test_live_bullish_fills_sleeve_when_daily_picks_empty() -> None:
+    """Macro can empty daily picks while live bullish (AVAX) still exists."""
+
+    class _LiveOnly:
+        daily_pick_bases = frozenset()
+        daily_pick_scores: dict[str, float] = {}
+        bullish_bases = frozenset({"AVAX"})
+        avoid_bases = frozenset({"ETH"})
+        blocked_bases = frozenset()
+
+        def is_bullish_buy(self, base: str, *, ring_fallback: bool = False) -> bool:
+            return str(base).upper() in self.bullish_bases
+
+        def is_strong_bullish_buy(self, base: str, *, ring_fallback: bool = False) -> bool:
+            return False
+
+        def is_slot_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
+            return False
+
+        def bullish_buy_bases(self):
+            return self.bullish_bases
+
+    b = MicroBudgetLiveExecutor.__new__(MicroBudgetLiveExecutor)
+    b._alphai_signals = _LiveOnly()
+    b._settings = SimpleNamespace(
+        alphai_bullish_buy_enabled=True,
+        alphai_require_bullish_new_buys=True,
+    )
+    b._alphai_ring_fallback_active = lambda: False  # type: ignore[method-assign]
+    assert b._alphai_sleeve_priority_buy("AVAX") is True
+    assert b._alphai_sleeve_priority_buy("ETH") is False
+
+
 def test_pick_outcomes_preserve_settled_on_empty_rerecord() -> None:
     store = PickOutcomeStore()
     report = {
