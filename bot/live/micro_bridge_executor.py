@@ -305,6 +305,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_non_alphai_min_age_sec = float(
             getattr(settings, "live_micro_uw_non_alphai_min_age_sec", 3600) or 3600
         )
+        self._uw_avoid_max_age_sec = float(
+            getattr(settings, "live_micro_uw_avoid_max_age_sec", 900) or 900
+        )
         self._uw_alphai_below_be_pct = Decimal(
             str(getattr(settings, "live_micro_uw_alphai_below_be_pct", 0.02) or 0)
         )
@@ -1188,6 +1191,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return _ONE
 
     def _alphai_exit_urgency(self, base: str) -> bool:
+        if self._alphai_is_avoid_base(base):
+            return True
         if self._alphai_feature_for(base).exit_urgency:
             return True
         sig = self._alphai_signals
@@ -1258,6 +1263,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         )
 
+
+
+    def _alphai_is_avoid_base(self, base: str) -> bool:
+        """True when AlphaI marks base as avoid/bearish — recycle, do not redeploy."""
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        b = str(base or "").upper()
+        if not b:
+            return False
+        try:
+            if hasattr(sig, "is_bearish") and bool(sig.is_bearish(b)):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        avoid = getattr(sig, "avoid_bases", None) or frozenset()
+        return b in {str(x).upper() for x in avoid}
+
+    def _provisional_be_exit_allowed(self, venue: str, base: str) -> bool:
+        """Allow BE+ exits on aged/avoid bags even when cost is still provisional.
+
+        Unlocks capital stuck behind sell_no_trusted_cost / trail_no_trusted_cost
+        without trusting mark-seeded lots for profitable size math forever.
+        """
+        if self._has_trusted_cost(venue, base):
+            return True
+        if self._unit_cost(venue, base) is None:
+            return False
+        min_age = float(
+            getattr(self._settings, "live_micro_provisional_be_exit_min_age_sec", 1800.0)
+            or 1800.0
+        )
+        if self._alphai_is_avoid_base(base):
+            min_age = min(min_age, 600.0)
+        return self._position_age_sec(venue, base) >= min_age
 
     def _alphai_sleeve_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
         """True for AlphaI rank-1/2 sleeve targets (structural deploy list)."""
@@ -4872,12 +4912,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _sell_allowed_at(
         self, venue: str, base: str, price: Decimal
     ) -> tuple[bool, str, Decimal | None]:
-        """Gate every auto-sell: trusted cost and price >= fee-aware break-even."""
+        """Gate every auto-sell: trusted (or aged provisional) cost and price >= BE."""
         if price <= 0:
             return False, "invalid_price", None
-        if not self._has_trusted_cost(venue, base):
+        provisional_ok = self._provisional_be_exit_allowed(venue, base)
+        if not self._has_trusted_cost(venue, base) and not provisional_ok:
             return False, "sell_no_trusted_cost", None
-        be = self._break_even_sell_price(venue, base)
+        be = self._break_even_sell_price(
+            venue, base, allow_provisional=provisional_ok
+        )
         if be is None:
             return False, "sell_no_break_even", None
         if price < be:
@@ -5017,6 +5060,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return ("dust", "stop", floor)
 
         strong_hold = self._alphai_protects_from_cuts(base)
+
+        # Avoid / bearish bags: free capital for the AlphaI sleeve quickly.
+        if self._alphai_is_avoid_base(base) and not strong_hold:
+            below = max(self._uw_non_alphai_below_be_pct, Decimal("0.006"))
+            min_age = min(float(self._uw_non_alphai_min_age_sec), float(self._uw_avoid_max_age_sec))
+            floor = be * (Decimal("1") - below)
+            if depth >= below:
+                return ("avoid_deep", "stop", floor)
+            if age >= min_age and flat_or_down:
+                if mark >= floor:
+                    return ("avoid_aged", "band", floor)
+                return ("avoid_aged", "stop", floor)
+            # Idle cash + avoid: recycle even sooner when free capital is abundant.
+            if (
+                self._uw_idle_pressure_enabled
+                and age >= min(min_age, 300.0)
+                and self._venue_budget_remaining(venue) >= self._uw_idle_min_free_eur
+            ):
+                if mark >= floor:
+                    return ("avoid_idle", "band", floor)
+                return ("avoid_idle", "stop", floor)
+
 
         # Layer 1b: idle-pressure — free non-strong bags when venue cash is idle.
         # Deep enough underwater: stop without waiting for momentum samples.
@@ -5460,10 +5525,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self._sleeve_paused or self._daily_kill_active:
             return False
         if self._buys_blocked:
-            # Playbook ADVERSE uses new-bases-only block; keep AlphaI rank-1/2 live.
+            # Playbook ADVERSE / macro new-bases-only: keep AlphaI rank-1/2 live.
             if not self._buys_blocked_new_bases_only:
                 return False
             if not self._alphai_sleeve_priority_buy(base):
+                return False
+        # Concentrate idle cash on the sleeve first.
+        if not self._alphai_sleeve_priority_buy(base):
+            # Non-sleeve only when sleeve picks are already held / unavailable.
+            held: set[str] = set()
+            for v in self._execute_venues:
+                held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+            sig = self._alphai_signals
+            unheld = None
+            if sig is not None and hasattr(sig, "unheld_priority_buys"):
+                try:
+                    unheld = sig.unheld_priority_buys(held, top_n=2)
+                except Exception:  # noqa: BLE001
+                    unheld = None
+            if unheld:
                 return False
         if not self._ring_needs_deploy(venue):
             return False
@@ -5547,15 +5627,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if be is None or mark < be:
             return False
-        # Neutral/bearish/weak AlphaI bags: do not hold for rising tape — recycle at BE+.
+        # Avoid / exit-urgent bags recycle at BE+; all other rising bags (NEAR lesson)
+        # keep riding until peak-fade — even when not an AlphaI pick.
         base = infer_base_asset(symbol, self._quote)
         if base and (
             self._alphai_exit_urgency(base)
+            or self._alphai_is_avoid_base(base)
             or self._alphai_weak_bullish_hold(base)
-            or (
-                bool(getattr(self._settings, "alphai_require_bullish_new_buys", False))
-                and not self._alphai_bullish_buy(base)
-            )
         ):
             return False
         if self._momentum_still_rising(symbol):
@@ -6411,11 +6489,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Sleeve loss exits (uw/cut) may use provisional unit cost so bags are not
             # frozen forever when hydration lags (Sep-4: trail_no_trusted_cost ×700).
             provisional_cost = False
+            soft_trust_be = False
             if not self._has_trusted_cost(venue, asset):
                 self._bump_skip("trail_no_trusted_cost")
                 if self._unit_cost(venue, asset) is None:
                     continue
                 provisional_cost = True
+                # Aged / avoid: allow BE+ harvests on provisional cost without
+                # permanently trusting mark-seeded lots (never-loss intact).
+                if self._provisional_be_exit_allowed(venue, asset):
+                    soft_trust_be = True
+                    self._bump_skip("provisional_be_exit_enabled")
 
             symbol = f"{asset}{self._quote}"
             mark = await self._mark_price(venue, symbol)
@@ -6424,14 +6508,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._note_position_opened(venue, asset)
             st = self._trail_update_state(venue, asset, cost=cost, mark=mark)
             be = self._break_even_sell_price(
-                venue, asset, allow_provisional=provisional_cost
+                venue, asset, allow_provisional=(provisional_cost or soft_trust_be)
             )
-            if provisional_cost:
+            if provisional_cost and not soft_trust_be:
                 st["provisional_cost"] = True
                 # Only sleeve loss paths below; skip BE+ harvest/arm logic.
                 if be is None or mark >= be:
                     self._bump_skip("uw_recycle_no_trusted_cost")
                     continue
+            elif soft_trust_be:
+                st["provisional_soft_trust"] = True
 
             # Loss → BE (rising through): arm recovery trail, do not sell yet.
             self._maybe_recovery_arm_from_loss(
@@ -6479,17 +6565,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and gain_now > 0
                 and peak_px > 0
                 and mark <= peak_px * Decimal("0.997")  # ≥0.3% off peak
-                and (
-                    self._alphai_bullish_buy(asset)
-                    or asset.upper()
-                    in (
-                        getattr(self._alphai_signals, "daily_pick_bases", frozenset())
-                        or frozenset()
-                    )
-                )
                 and self._momentum_enabled
                 and self._momentum_flat_or_down(symbol)
             ):
+                # Peak-fade harvest for any BE+ bag (winners we already hold).
                 alphai_peak_past = True
                 harvest_gain_floor = harvest_gain_floor * Decimal("0.70")
             early_floor = self._early_cut_loss_floor_price(venue, asset)
@@ -6570,11 +6649,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 else:
                     self._bump_skip("cut_loss_sleeve_cap")
             # Provisional cost: never BE+ harvest — only sleeve loss exits.
-            if provisional_cost and reason not in {
-                "trail_early_cut_loss",
-                "trail_uw_recycle",
-                "trail_cut_loss",
-            }:
+            if (
+                provisional_cost
+                and not soft_trust_be
+                and reason
+                not in {
+                    "trail_early_cut_loss",
+                    "trail_uw_recycle",
+                    "trail_cut_loss",
+                }
+            ):
                 if be is not None and mark < be:
                     self._bump_skip("uw_recycle_provisional_pending")
                 continue
