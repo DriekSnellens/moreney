@@ -237,7 +237,9 @@ class AlphaITradingSignals:
         scale = Decimal(str(round(0.70 + 0.30 * conv, 2)))
         if self.is_headline_mixed(base):
             scale = min(scale, Decimal("0.80"))
-        if self.macro_active:
+        # Macro softens early harvest for non-sleeve names only — rank-1/2 winners
+        # must keep full conviction floor (desk was clipping BNB/ADA under caution).
+        if self.macro_active and not self.is_slot_priority_buy(base, top_n=2):
             scale = min(scale, Decimal("0.80"))
         return scale
 
