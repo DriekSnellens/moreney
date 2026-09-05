@@ -97,9 +97,16 @@ class DeskLessonStore:
         playbook: str = "",
         min_free_eur: float = 150.0,
         day: str | None = None,
+        capital_deadlocked: bool = False,
+        locked_eur: float = 0.0,
     ) -> dict[str, Any] | None:
-        """Idle deployable cash while rank-1/2 sleeve is unheld."""
+        """Idle deployable cash (or capital-deadlocked UW vault) while sleeve unheld."""
         sleeve = [str(b).upper() for b in sleeve_bases if str(b or "").strip()]
+        # Deadlock: capital is locked in UW bags — still a missed sleeve deploy.
+        effective_free = max(float(free_cash_eur), float(locked_eur or 0.0))
+        if capital_deadlocked:
+            min_free_eur = 0.0
+            free_cash_eur = effective_free
         if not sleeve or free_cash_eur < min_free_eur:
             return None
         day_k = day or _day_key()
@@ -117,6 +124,11 @@ class DeskLessonStore:
                 | {str(b).upper() for b in held_non_picks if b}
             )
             existing["playbook"] = playbook or existing.get("playbook")
+            if capital_deadlocked:
+                existing["capital_deadlocked"] = True
+                existing["locked_eur"] = max(
+                    _f(existing.get("locked_eur")), float(locked_eur or 0.0)
+                )
             existing["updated_at"] = _now_iso()
             return existing
         entry = {
@@ -134,6 +146,9 @@ class DeskLessonStore:
             "playbook": playbook,
             "outcome": None,
         }
+        if capital_deadlocked:
+            entry["capital_deadlocked"] = True
+            entry["locked_eur"] = round(float(locked_eur or 0.0), 2)
         self._append(entry)
         return entry
 

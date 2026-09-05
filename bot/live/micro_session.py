@@ -384,6 +384,10 @@ def _session_settings(
             "live_micro_uw_idle_min_free_eur": 150.0,
             "live_micro_uw_idle_min_age_sec": 600.0,
             "live_micro_uw_idle_below_be_pct": 0.004,
+            # Deadlock unlock: UW vault must not freeze the desk (mild recycle + redeploy).
+            "live_micro_uw_deadlock_unlock_enabled": True,
+            "live_micro_uw_deadlock_below_be_pct": 0.0025,
+            "live_micro_uw_deadlock_min_age_sec": 300.0,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
             "live_micro_alphai_cross_venue_deploy": True,
             "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,

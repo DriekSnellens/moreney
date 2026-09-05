@@ -35,3 +35,21 @@ def test_alphai_burst_can_reduce_reserve() -> None:
         alphai_bullish_cluster=True,
     )
     assert "alphai_burst_deploy" in out.reasons or "opportunity_burst" in out.reasons
+
+
+def test_capital_deadlock_boosts_reserve() -> None:
+    base = assess_capital_state(
+        total_budget_eur=Decimal("2000"),
+        deployed_eur=Decimal("0"),
+        locked_eur=Decimal("280"),
+        avg_opportunity_score=Decimal("70"),
+    )
+    locked = assess_capital_state(
+        total_budget_eur=Decimal("2000"),
+        deployed_eur=Decimal("0"),
+        locked_eur=Decimal("280"),
+        avg_opportunity_score=Decimal("70"),
+        capital_deadlocked=True,
+    )
+    assert locked.reserve_need_pct > base.reserve_need_pct
+    assert "capital_deadlock_unlock" in locked.reasons

@@ -158,3 +158,19 @@ def test_debounce_missed_deploy_same_day(tmp_path: Path) -> None:
     )
     assert open_n == 1
     assert float(b["free_cash_eur"]) >= 900.0
+
+
+def test_missed_deploy_records_when_capital_deadlocked(tmp_path: Path) -> None:
+    store = DeskLessonStore.load(tmp_path / "desk_deadlock.json")
+    row = store.record_missed_deploy(
+        sleeve_bases=["BNB"],
+        free_cash_eur=20.0,
+        held_non_picks=["SOL"],
+        playbook="FLAT",
+        min_free_eur=150.0,
+        capital_deadlocked=True,
+        locked_eur=280.0,
+    )
+    assert row is not None
+    assert row.get("capital_deadlocked") is True
+    assert float(row.get("locked_eur") or 0) >= 280.0

@@ -327,6 +327,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_idle_below_be_pct = Decimal(
             str(getattr(settings, "live_micro_uw_idle_below_be_pct", 0.004) or 0)
         )
+        self._uw_deadlock_unlock_enabled = bool(
+            getattr(settings, "live_micro_uw_deadlock_unlock_enabled", True)
+        )
+        self._uw_deadlock_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_below_be_pct", 0.0025) or 0)
+        )
+        self._uw_deadlock_min_age_sec = float(
+            getattr(settings, "live_micro_uw_deadlock_min_age_sec", 300) or 300
+        )
         self._alphai_cross_venue_deploy = bool(
             getattr(settings, "live_micro_alphai_cross_venue_deploy", True)
         )
@@ -733,6 +742,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_near_max_depth_pct": self._uw_near_max_depth_pct,
             "uw_alphai_below_be_pct": self._uw_alphai_below_be_pct,
             "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
+            "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
+            "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
+            "uw_deadlock_below_be_pct": self._uw_deadlock_below_be_pct,
             "early_cut_loss_below_be_pct": self._early_cut_loss_below_be_pct,
             "trail_hold_rising_n": self._trail_hold_rising_n,
             "alphai_intraday_min_freshness": self._alphai_intraday_min_freshness,
@@ -1341,15 +1353,29 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             or getattr(self._capital_playbook, "value", "")
         )
         min_free = float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
+        locked_uw = _ZERO
+        capital_deadlocked = False
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                locked_uw += self._underwater_book_notional(venue)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if self._capital_deadlocked(venue):
+                    capital_deadlocked = True
+            except Exception:  # noqa: BLE001
+                pass
         recorded: list[str] = []
         try:
-            if float(free_total) >= min_free:
+            if float(free_total) >= min_free or capital_deadlocked:
                 row = self._desk_lessons.record_missed_deploy(
                     sleeve_bases=sleeve,
                     free_cash_eur=float(free_total),
                     held_non_picks=sorted(held_non),
                     playbook=playbook,
                     min_free_eur=min_free,
+                    capital_deadlocked=capital_deadlocked,
+                    locked_eur=float(locked_uw),
                 )
                 if row:
                     recorded.append("missed_deploy")
@@ -1742,6 +1768,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         _dec("uw_near_max_depth_pct", "_uw_near_max_depth_pct")
         _dec("uw_alphai_below_be_pct", "_uw_alphai_below_be_pct")
         _float("uw_alphai_min_age_sec", "_uw_alphai_min_age_sec")
+        _bool("uw_deadlock_unlock_enabled", "_uw_deadlock_unlock_enabled")
+        _float("uw_deadlock_min_age_sec", "_uw_deadlock_min_age_sec")
+        _dec("uw_deadlock_below_be_pct", "_uw_deadlock_below_be_pct")
         _dec("early_cut_loss_below_be_pct", "_early_cut_loss_below_be_pct")
         _int("trail_hold_rising_n", "_trail_hold_rising_n")
         _dec("alphai_intraday_min_freshness", "_alphai_intraday_min_freshness")
@@ -2498,6 +2527,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_idle_min_free_eur": str(self._uw_idle_min_free_eur),
                 "uw_idle_min_age_sec": self._uw_idle_min_age_sec,
                 "uw_idle_below_be_pct": str(self._uw_idle_below_be_pct),
+                "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
+                "uw_deadlock_below_be_pct": str(self._uw_deadlock_below_be_pct),
+                "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
                 "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
                 "alphai_cross_venue_max_other_depth_pct": str(
                     self._alphai_cross_venue_max_other_depth
@@ -3154,6 +3186,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     bullish_cluster = len(sig.bullish_buy_bases()) >= 3
                 except Exception:  # noqa: BLE001
                     bullish_cluster = False
+            capital_deadlocked = False
+            for v in getattr(self, "_execute_venues", ()) or ():
+                try:
+                    if self._capital_deadlocked(str(v)):
+                        capital_deadlocked = True
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
             cap_state = assess_capital_state(
                 total_budget_eur=self._budget,
                 deployed_eur=self._economic_diagnostics._capital_deployed_eur,  # noqa: SLF001
@@ -3164,6 +3204,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 is_opportunity_burst=regime.regime.value == "OPPORTUNITY_BURST",
                 alphai_macro_active=self._alphai_macro_active,
                 alphai_bullish_cluster=bullish_cluster,
+                capital_deadlocked=capital_deadlocked,
             )
             self._capital_state_snapshot = {
                 "capital_available_eur": str(cap_state.available_eur.quantize(Decimal("0.01"))),
@@ -3171,6 +3212,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
                 "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
                 "capital_reasons": ",".join(cap_state.reasons),
+                "capital_deadlocked": capital_deadlocked,
             }
             base_sym = symbol.upper()
             for quote in ("EUR", "USDT", "USDC", "USD"):
@@ -5328,6 +5370,85 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return 1e9
         return max(0.0, time.time() - float(opened))
 
+    def _capital_deadlocked(self, venue: str) -> bool:
+        """True when underwater vault starves the active ring while capital waits.
+
+        Classic lock: inventory sits below BE (never-loss), active ring looks empty
+        because UW bags do not count, and free EUR / sleeve targets sit idle.
+        """
+        if not self._uw_deadlock_unlock_enabled:
+            return False
+        if self._active_ring_eur <= 0:
+            return False
+        soft = self._ring_soft_block_underwater_eur
+        min_uw = soft if soft > 0 else Decimal("25")
+        uw = self._underwater_book_notional(venue)
+        free_here = self._venue_budget_remaining(venue)
+        uw_all = uw
+        free_all = free_here
+        for other in getattr(self, "_execute_venues", ()) or ():
+            other_l = str(other or "").strip().lower()
+            if not other_l or other_l == str(venue or "").strip().lower():
+                continue
+            try:
+                uw_all += self._underwater_book_notional(other_l)
+                free_all += self._venue_budget_remaining(other_l)
+            except Exception:  # noqa: BLE001
+                continue
+        if uw < min_uw and uw_all < min_uw:
+            return False
+        active = self._active_book_notional(venue)
+        # Ring starved: UW inventory does not count toward the deploy ring.
+        if active >= self._active_ring_eur * Decimal("0.40"):
+            return False
+        # Idle free cash elsewhere, or capital locked inside the UW vault itself.
+        if not (
+            free_here >= self._uw_idle_min_free_eur
+            or free_all >= self._uw_idle_min_free_eur
+            or uw >= min_uw
+        ):
+            return False
+        if self._sleeve_has_unheld_priority():
+            return True
+        # Large UW vault + empty active book is still a deadlock without sleeve picks.
+        return uw >= min_uw and active < Decimal("50")
+
+    def _any_capital_deadlocked(self) -> bool:
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                if self._capital_deadlocked(str(venue)):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _uw_recycle_priority(self, base: str) -> int:
+        """Lower = recycle sooner when unlocking capital for the AlphaI sleeve."""
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return 9
+        try:
+            if self._alphai_is_avoid_base(bu):
+                return 0
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if not self._alphai_bullish_buy(bu):
+                return 1
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_weak_bullish_hold(bu):
+                return 2
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_sleeve_priority_buy(bu):
+                return 4
+        except Exception:  # noqa: BLE001
+            pass
+        return 3
+
     def _uw_recycle_plan(
         self,
         *,
@@ -5400,16 +5521,49 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return ("avoid_idle", "stop", floor)
 
 
-        # Layer 1b: idle-pressure — free non-strong bags when venue cash is idle.
-        # Deep enough underwater: stop without waiting for momentum samples.
+        # Deadlock unlock: free bags at mild depth/age so capital rotates.
+        # Overrides strong_hold except for rising sleeve-priority names we still nurse.
+        # Does not require same-venue free cash (capital is often locked IN the bag).
+        if (
+            self._uw_deadlock_unlock_enabled
+            and age >= self._uw_deadlock_min_age_sec
+            and depth >= self._uw_deadlock_below_be_pct
+            and self._capital_deadlocked(venue)
+        ):
+            sleeve_rising = (
+                is_alphai
+                and self._alphai_sleeve_priority_buy(base)
+                and not flat_or_down
+            )
+            if not sleeve_rising:
+                floor = be * (Decimal("1") - self._uw_deadlock_below_be_pct)
+                if depth >= self._uw_deadlock_below_be_pct * Decimal("1.5"):
+                    return ("deadlock_deep", "stop", floor)
+                if flat_or_down and mark >= floor:
+                    return ("deadlock_aged", "band", floor)
+                if flat_or_down:
+                    return ("deadlock_aged", "stop", floor)
+                return ("deadlock_unlock", "stop", floor)
+
+        # Layer 1b: idle-pressure — free bags when venue cash is idle OR when UW
+        # vault has locked the ring. Deadlock also overrides strong_hold here.
+        deadlocked = self._capital_deadlocked(venue)
         if (
             self._uw_idle_pressure_enabled
-            and not strong_hold
+            and (not strong_hold or deadlocked)
             and age >= self._uw_idle_min_age_sec
             and depth >= self._uw_idle_below_be_pct
         ):
             free_est = self._venue_budget_remaining(venue)
-            if free_est >= self._uw_idle_min_free_eur:
+            uw_book = self._underwater_book_notional(venue)
+            soft = self._ring_soft_block_underwater_eur
+            locked_starved = (
+                soft > 0
+                and uw_book >= soft
+                and self._active_book_notional(venue)
+                < self._active_ring_eur * Decimal("0.40")
+            )
+            if free_est >= self._uw_idle_min_free_eur or locked_starved:
                 floor = be * (Decimal("1") - self._uw_idle_below_be_pct)
                 if depth >= self._uw_idle_below_be_pct * Decimal("1.5") or not flat_or_down:
                     # Clearly underwater or momentum unknown → hit bid.
@@ -5594,7 +5748,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             bias = float(self._desk_lesson_deploy_bias())
             if (
                 bias <= 1.01
-                or not self._alphai_sleeve_priority_buy(base)
+                or not self._sleeve_has_unheld_priority()
                 or float(self._venue_budget_remaining(venue))
                 < float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
             ):
@@ -6754,6 +6908,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         bals = await self._fetch_balances_cached(venue)
         triggered: list[dict[str, Any]] = []
         armed_now: list[str] = []
+        # When capital is deadlocked, recycle avoid/non-sleeve bags before sleeve names.
+        try:
+            if self._capital_deadlocked(venue):
+                bals = sorted(
+                    list(bals),
+                    key=lambda bal: self._uw_recycle_priority(
+                        str(getattr(bal, "asset", "") or "")
+                    ),
+                )
+        except Exception:  # noqa: BLE001
+            pass
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
             if not asset or asset == self._quote:
@@ -7694,6 +7859,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     order_request,
                     reason="ALPHAI_MACRO_BLOCK",
                     message="AlphaI macro reduce-only blocks all new buys",
+                )
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and self._sleeve_has_unheld_priority()
+            and self._any_capital_deadlocked()
+        ):
+            new_base = self._is_new_base_buy(venue, base)
+            if new_base and not self._alphai_sleeve_priority_buy(base):
+                self._bump_skip("capital_deadlock_sleeve_only")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CAPITAL_DEADLOCK_SLEEVE_ONLY",
+                    message=(
+                        "capital deadlocked in UW vault — only AlphaI rank-1/2 "
+                        f"sleeve new bases allowed (not {base})"
+                    ),
                 )
         if (
             side_is_buy
