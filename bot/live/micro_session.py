@@ -368,6 +368,8 @@ def _session_settings(
             "live_micro_early_cut_momentum_max_return": 0.0,
             # Faster underwater recycle — minimize idle capital, keep losses small.
             "live_micro_uw_recycle_enabled": True,
+            "live_micro_provisional_be_exit_min_age_sec": 1800.0,
+            "live_micro_uw_avoid_max_age_sec": 900.0,
             "live_micro_uw_dust_max_notional_eur": 25.0,
             "live_micro_uw_dust_below_be_pct": 0.003,
             "live_micro_uw_near_below_be_pct": 0.006,
@@ -421,6 +423,7 @@ def _session_settings(
                 getattr(base, "alphai_macro_reduce_only", True)
             ),
             "alphai_poll_macro": bool(getattr(base, "alphai_poll_macro", True)),
+            "alphai_macro_allow_bullish_buys": True,
             "alphai_poll_actionable": bool(
                 getattr(base, "alphai_poll_actionable", True)
             ),
@@ -872,7 +875,12 @@ async def run_session(
                     alphai_box.get("macro_reduce_only")
                     or alphai_box.get("global_reduce_only")
                 )
+                # Macro caution is sleeve-aware reduce-only: never a full desk freeze.
+                # Spray (non-sleeve new bases) pauses; AlphaI rank-1/2 stay deployable
+                # via bridge new-bases-only + sleeve exemption.
+                macro_new_bases_only = bool(alphai_macro_ro)
                 if alphai_macro_ro and allow_bullish_macro:
+                    # Bullish macro path: still constrain spray, but do not full-block.
                     alphai_macro_ro = False
                 uw_block = int(
                     getattr(cfg, "live_micro_underwater_buy_block", 3) or 0
@@ -892,7 +900,8 @@ async def run_session(
                             uw_blocked_bases.setdefault(v.strip().lower(), set()).add(
                                 base
                             )
-                block_buys_full = reduce_only or toxic or alphai_macro_ro
+                # Toxic/reduce-only still full-freeze; macro alone does NOT.
+                block_buys_full = reduce_only or toxic
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )
@@ -900,7 +909,7 @@ async def run_session(
                 # do not clear it every cycle (was racing overlays off).
                 playbook_block = bool(
                     getattr(bridge, "_playbook_block_new_buys", False)
-                )
+                ) or macro_new_bases_only
                 prev_uw = {
                     v: set(bases)
                     for v, bases in (

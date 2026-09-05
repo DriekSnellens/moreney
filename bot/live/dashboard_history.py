@@ -17,6 +17,13 @@ _DEFAULT_PATH = Path("./data/dashboard_history.jsonl")
 _MAX_POINTS = 4320  # ~72h at 1/min
 _MIN_INTERVAL_SEC = 55.0
 _last_record_mono = 0.0
+_last_good_portfolio_eur: Decimal | None = None
+_last_good_free_eur: Decimal | None = None
+_last_good_realized_eur: Decimal | None = None
+_SPIKE_ABS_EUR = Decimal("40")
+_SPIKE_PCT = Decimal("0.012")
+_SPIKE_FREE_TOL_EUR = Decimal("2")
+_SPIKE_REALIZED_TOL_EUR = Decimal("0.50")
 _OPERATOR_TZ = ZoneInfo("Europe/Amsterdam")
 _history_cache: list[dict[str, Any]] | None = None
 _history_cache_mtime: float = 0.0
@@ -39,6 +46,7 @@ def history_path() -> Path:
 def clear_history(*, path: Path | None = None) -> None:
     """Remove dashboard chart history for a clean operator slate."""
     global _last_record_mono, _history_cache, _history_cache_mtime, _history_cache_path  # noqa: PLW0603
+    global _last_good_portfolio_eur, _last_good_free_eur, _last_good_realized_eur  # noqa: PLW0603
     target = path or history_path()
     try:
         if target.exists():
@@ -46,6 +54,9 @@ def clear_history(*, path: Path | None = None) -> None:
     except OSError:
         logger.exception("dashboard history clear failed path=%s", target)
     _last_record_mono = 0.0
+    _last_good_portfolio_eur = None
+    _last_good_free_eur = None
+    _last_good_realized_eur = None
     _history_cache = None
     _history_cache_mtime = 0.0
     _history_cache_path = None
@@ -168,6 +179,60 @@ def extract_metrics(payload: dict[str, Any]) -> dict[str, str] | None:
     return out
 
 
+
+def _filter_portfolio_mtm_spike(point: dict[str, str]) -> dict[str, str] | None:
+    """Clamp one-tick portfolio spikes when free/realized cash did not move."""
+    global _last_good_portfolio_eur, _last_good_free_eur, _last_good_realized_eur
+
+    def _d(key: str) -> Decimal | None:
+        return _to_decimal(point.get(key))
+
+    portfolio = _d("portfolio_eur")
+    free = _d("free_eur")
+    realized = _d("realized_pnl_eur")
+    if portfolio is None:
+        return point
+
+    prev = _last_good_portfolio_eur
+    if prev is not None and prev > 0:
+        jump = abs(portfolio - prev)
+        pct = jump / prev
+        free_flat = (
+            free is not None
+            and _last_good_free_eur is not None
+            and abs(free - _last_good_free_eur) <= _SPIKE_FREE_TOL_EUR
+        )
+        realized_flat = (
+            realized is None
+            or _last_good_realized_eur is None
+            or abs(realized - _last_good_realized_eur) <= _SPIKE_REALIZED_TOL_EUR
+        )
+        if (
+            jump >= _SPIKE_ABS_EUR
+            and pct >= _SPIKE_PCT
+            and free_flat
+            and realized_flat
+        ):
+            out = dict(point)
+            out["portfolio_eur"] = str(prev)
+            out["spike_filtered"] = "1"
+            if "session_pnl_eur" in out and _d("session_pnl_eur") is not None:
+                # Keep session pnl coherent with clamped portfolio when start known.
+                try:
+                    start = prev - _d("session_pnl_eur")  # type: ignore[operator]
+                    # leave session_pnl unchanged — chart uses portfolio primarily
+                except Exception:  # noqa: BLE001
+                    pass
+            return out
+
+    _last_good_portfolio_eur = portfolio
+    if free is not None:
+        _last_good_free_eur = free
+    if realized is not None:
+        _last_good_realized_eur = realized
+    return point
+
+
 def record_snapshot(
     payload: dict[str, Any],
     *,
@@ -180,6 +245,9 @@ def record_snapshot(
     if not force and now - _last_record_mono < _MIN_INTERVAL_SEC:
         return False
     point = extract_metrics(payload)
+    if point is None:
+        return False
+    point = _filter_portfolio_mtm_spike(point)
     if point is None:
         return False
     target = path or history_path()
