@@ -100,6 +100,10 @@ class PickOutcomeStore:
                 rank = 0
             picks.append({"base": base, "score": score, "rank": rank})
 
+        prior = next(
+            (s for s in self.sessions if s.get("session_id") == session_id),
+            None,
+        )
         entry = {
             "session_id": session_id,
             "generated_at": str(report.get("generated_at") or ""),
@@ -111,6 +115,15 @@ class PickOutcomeStore:
             "outcomes": [],
             "lesson": None,
         }
+        # Re-record wipe was zeroing settled lessons on empty day-return fetches.
+        # Keep prior settlement until a fresh settle replaces it.
+        if prior and prior.get("settled") and not (settle and day_returns_pct):
+            entry["settled"] = True
+            entry["btc_day_pct"] = prior.get("btc_day_pct")
+            entry["outcomes"] = list(prior.get("outcomes") or [])
+            entry["lesson"] = prior.get("lesson")
+            if prior.get("settled_at"):
+                entry["settled_at"] = prior.get("settled_at")
         # Replace same session_id if present.
         self.sessions = [s for s in self.sessions if s.get("session_id") != session_id]
         self.sessions.append(entry)

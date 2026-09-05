@@ -1300,7 +1300,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return self._position_age_sec(venue, base) >= min_age
 
     def _alphai_sleeve_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
-        """True for AlphaI rank-1/2 sleeve targets (structural deploy list)."""
+        """True for AlphaI rank-1/2 sleeve targets (structural deploy list).
+
+        When daily picks are empty under macro caution but live bullish buys
+        still exist (e.g. AVAX headline), treat the top live bullish names as
+        the sleeve so ADVERSE new-base blocks do not idle the desk.
+        """
         if not self._alphai_bullish_buy(base):
             return False
         sig = self._alphai_signals
@@ -1308,16 +1313,84 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if hasattr(sig, "is_slot_priority_buy"):
             try:
-                return bool(sig.is_slot_priority_buy(base, top_n=top_n))
+                if bool(sig.is_slot_priority_buy(base, top_n=top_n)):
+                    return True
             except TypeError:
-                return bool(sig.is_slot_priority_buy(base))
+                if bool(sig.is_slot_priority_buy(base)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
         if hasattr(sig, "is_top_pick"):
             try:
-                return bool(sig.is_top_pick(base, top_n=top_n))
+                if bool(sig.is_top_pick(base, top_n=top_n)):
+                    return True
             except TypeError:
-                return bool(sig.is_top_pick(base))
+                if bool(sig.is_top_pick(base)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        # Only when the daily pick sleeve is empty/thin — do not promote rank-3+
+        # bullish names while BNB/ADA already occupy the slot list.
+        daily_scores = getattr(sig, "daily_pick_scores", None) or {}
+        positive_daily = [
+            b
+            for b, s in daily_scores.items()
+            if float(s or 0) > 0
+            and str(b).upper() not in set(getattr(sig, "avoid_bases", ()) or ())
+            and str(b).upper() not in set(getattr(sig, "blocked_bases", ()) or ())
+        ]
+        if len(positive_daily) >= top_n:
+            return self._alphai_strong_bullish_buy(base)
+        # Fallback: live bullish sleeve when daily pick list is empty/thin.
+        live_buys: list[str] = []
+        if hasattr(sig, "bullish_buy_bases"):
+            try:
+                live_buys = sorted({str(b).upper() for b in sig.bullish_buy_bases()})
+            except Exception:  # noqa: BLE001
+                live_buys = []
+        if not live_buys and hasattr(sig, "bullish_bases"):
+            live_buys = sorted({str(b).upper() for b in (sig.bullish_bases or ())})
+        if live_buys and str(base).upper() in set(live_buys[: max(1, top_n)]):
+            return True
         return self._alphai_strong_bullish_buy(base)
 
+
+    
+    def _sleeve_has_unheld_priority(self, *, top_n: int = 2) -> bool:
+        """True when AlphaI rank-1/2 sleeve still has an unheld deploy target."""
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        held: set[str] = set()
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                held |= self._held_alt_bases(venue, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                continue
+        if hasattr(sig, "unheld_priority_buys"):
+            try:
+                unheld = sig.unheld_priority_buys(held, top_n=top_n)
+            except TypeError:
+                try:
+                    unheld = sig.unheld_priority_buys(held)
+                except Exception:  # noqa: BLE001
+                    unheld = None
+            except Exception:  # noqa: BLE001
+                unheld = None
+            if unheld:
+                return True
+        # Fallback: any sleeve priority base not held.
+        candidates: set[str] = set()
+        scores = getattr(sig, "daily_pick_scores", None) or {}
+        if isinstance(scores, dict) and scores:
+            ranked = sorted(scores, key=lambda b: float(scores.get(b) or 0), reverse=True)
+            candidates = {str(b).upper() for b in ranked[:top_n]}
+        else:
+            picks = getattr(sig, "daily_pick_bases", None) or frozenset()
+            candidates = {str(b).upper() for b in picks}
+        if not candidates:
+            return False
+        return any(b not in held and self._alphai_sleeve_priority_buy(b) for b in candidates)
 
     def _alphai_signal_fresh_enough(self, base: str) -> bool:
         """Reject strong-clip / winner-add when AlphaI pick set is stale."""
@@ -1616,6 +1689,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     confirm_scale = Decimal(str(sig.price_confirm_scale(base)))
                 except Exception:  # noqa: BLE001
                     confirm_scale = None
+        # Soft-ADVERSE rising-strict was starving rank-1/2 sleeve buys on flat
+        # red tape (BNB/ADA miss). Sleeve keeps deployable with softer confirm.
+        sleeve = self._alphai_sleeve_priority_buy(base)
+        require_rising = bool(
+            getattr(self, "_alphai_intraday_require_rising", False)
+        )
+        min_fresh = self._alphai_intraday_min_freshness
+        min_confirm = Decimal("0.45")
+        gate_lagging = price_lagging
+        if sleeve:
+            require_rising = False
+            min_fresh = min(min_fresh, Decimal("0.40"))
+            min_confirm = Decimal("0.35")
+            if price_lagging:
+                # Shrink clip instead of hard WAIT — still prefer sleeve names.
+                gate_lagging = False
+                if confirm_scale is None or confirm_scale > Decimal("0.40"):
+                    confirm_scale = Decimal("0.40")
         gate = evaluate_intraday_entry_gate(
             is_alphai_buy=self._alphai_bullish_buy(base),
             freshness=feat.freshness,
@@ -1624,15 +1715,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             momentum_down=mom_down,
             momentum_rising=mom_rising,
             headline_mixed=mixed,
-            min_freshness=self._alphai_intraday_min_freshness,
+            min_freshness=min_fresh,
             adverse_wait_threshold=self._alphai_feature_config.adverse_bullish_wait_threshold,
             adverse_reduce_threshold=self._alphai_feature_config.adverse_bullish_reduce_threshold,
-            price_lagging=price_lagging,
+            price_lagging=gate_lagging,
             price_confirm_scale=confirm_scale,
-            min_confirm_scale=Decimal("0.45"),
-            require_momentum_rising=bool(
-                getattr(self, "_alphai_intraday_require_rising", False)
-            ),
+            min_confirm_scale=min_confirm,
+            require_momentum_rising=require_rising,
         )
         return gate.action, gate.size_multiplier, gate.reasons
 
@@ -5065,6 +5154,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self._alphai_is_avoid_base(base) and not strong_hold:
             below = max(self._uw_non_alphai_below_be_pct, Decimal("0.006"))
             min_age = min(float(self._uw_non_alphai_min_age_sec), float(self._uw_avoid_max_age_sec))
+            # When rank-1/2 sleeve still needs a slot, recycle avoid bags faster
+            # (ETH/XRP stuck while BNB/ADA were the picks).
+            if self._sleeve_has_unheld_priority():
+                below = min(below, Decimal("0.004"))
+                min_age = min(min_age, 180.0)
             floor = be * (Decimal("1") - below)
             if depth >= below:
                 return ("avoid_deep", "stop", floor)
@@ -5547,9 +5641,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return False
         if not self._ring_needs_deploy(venue):
             return False
-        # Lagging / weak RS names must not soak idle cash on red tape.
+        # Lagging / weak RS names must not soak idle cash on red tape —
+        # except AlphaI rank-1/2 sleeve (those are the deploy target).
         sig = self._alphai_signals
-        if sig is not None:
+        if sig is not None and not self._alphai_sleeve_priority_buy(base):
             try:
                 if hasattr(sig, "is_price_lagging") and bool(sig.is_price_lagging(base)):
                     return False
@@ -6558,19 +6653,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # sooner (policy: hold with momentum, exit when peak is past).
             alphai_peak_past = False
             peak_px = Decimal(str(st.get("peak") or 0) or 0)
+            sleeve_hold = self._alphai_sleeve_priority_buy(asset)
+            # Sleeve winners need a clearer peak fade (≥0.5%) before early harvest;
+            # mild 0.3% dips were clipping BNB/ADA under macro.
+            peak_fade_mult = Decimal("0.995") if sleeve_hold else Decimal("0.997")
             if (
                 not exit_urgency
                 and be is not None
                 and mark >= be
                 and gain_now > 0
                 and peak_px > 0
-                and mark <= peak_px * Decimal("0.997")  # ≥0.3% off peak
+                and mark <= peak_px * peak_fade_mult
                 and self._momentum_enabled
                 and self._momentum_flat_or_down(symbol)
             ):
                 # Peak-fade harvest for any BE+ bag (winners we already hold).
                 alphai_peak_past = True
-                harvest_gain_floor = harvest_gain_floor * Decimal("0.70")
+                if not sleeve_hold:
+                    harvest_gain_floor = harvest_gain_floor * Decimal("0.70")
             early_floor = self._early_cut_loss_floor_price(venue, asset)
             if (
                 early_floor is not None
@@ -6892,9 +6992,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         )
                 continue
 
+            # Sleeve priority: keep deferring while rising even after mild peak-fade
+            # so macro BE harvest does not clip rank-1/2 winners mid-move.
+            peak_blocks_defer = alphai_peak_past and not sleeve_hold
             if (
                 not exit_urgency
-                and not alphai_peak_past
+                and not peak_blocks_defer
                 and self._defer_harvest_while_rising(
                     symbol, mark=mark, be=be, st=st, reason=reason
                 )
@@ -7648,6 +7751,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     allow_unknown_short=momentum_allow_unknown_short,
                 )
             if not momentum_ok and strong_bullish and not self._momentum_down(symbol):
+                momentum_ok = True
+            # Rank-1/2 sleeve: same soft pass as strong bullish when tape is not
+            # actively falling — ADVERSE rising-N was blocking all sleeve fills.
+            if (
+                not momentum_ok
+                and self._alphai_sleeve_priority_buy(base)
+                and not self._momentum_down(symbol)
+            ):
                 momentum_ok = True
             if not momentum_ok:
                 self._bump_skip("momentum_block")
