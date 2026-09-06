@@ -584,6 +584,10 @@ class Settings(BaseSettings):
     live_micro_uw_mid_flat_recycle_enabled: bool = True
     live_micro_uw_mid_flat_max_depth_pct: float = Field(default=0.015, ge=0.0, le=0.05)
     live_micro_uw_mid_flat_min_age_sec: float = Field(default=300.0, ge=60.0, le=86400.0)
+    # Aged flat mild-UW bags while sleeve targets wait: partial rotate (not a 4% hard SL).
+    live_micro_uw_lag_time_partial_enabled: bool = True
+    live_micro_uw_lag_time_partial_min_age_sec: float = Field(default=1800.0, ge=120.0, le=86400.0)
+    live_micro_uw_lag_time_partial_max_depth_pct: float = Field(default=0.020, ge=0.0, le=0.05)
     # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
     live_micro_alphai_cross_venue_deploy: bool = True
     live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(

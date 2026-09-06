@@ -73,6 +73,10 @@ def _bridge() -> MicroBudgetLiveExecutor:
     b._uw_mid_flat_recycle_enabled = True
     b._uw_mid_flat_max_depth_pct = Decimal("0.012")
     b._uw_mid_flat_min_age_sec = 600.0
+    b._uw_lag_time_partial_enabled = True
+    b._uw_lag_time_partial_min_age_sec = 1800.0
+    b._uw_lag_time_partial_max_depth_pct = Decimal("0.020")
+    b._cut_loss_below_be_pct = Decimal("0.025")
     b._uw_non_alphai_below_be_pct = Decimal("0.01")
     b._uw_non_alphai_min_age_sec = 3600.0
     b._uw_avoid_max_age_sec = 900.0
@@ -438,3 +442,105 @@ def test_mid_flat_skips_would_buy_today() -> None:
         notional=Decimal("200"),
     )
     assert plan is None or plan[0] != "mid_flat"
+
+
+def test_lag_time_partial_for_aged_mild_uw() -> None:
+    """Aged lagging UNI under BE rotates while LINK/ADA sleeve targets wait."""
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = False  # force lag-time path, not mid_flat
+    b._uw_lag_time_partial_enabled = True
+    b._uw_lag_time_partial_min_age_sec = 1800.0
+    b._uw_lag_time_partial_max_depth_pct = Decimal("0.020")
+    b._cut_loss_below_be_pct = Decimal("0.025")
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._uw_non_alphai_min_age_sec = 99999.0
+    b._uw_alphai_min_age_sec = 99999.0
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 2000.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_weak_bullish_hold = lambda base: True  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: False  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    b._sleeve_held_fills_slot = lambda base: False  # type: ignore[method-assign]
+    b._sleeve_deploy_targets = lambda top_n=2: ["ADA", "LINK"]  # type: ignore[method-assign]
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="UNI",
+        symbol="UNIEUR",
+        mark=Decimal("99.60"),  # -0.40%
+        be=Decimal("100"),
+        notional=Decimal("200"),
+    )
+    assert plan is not None
+    assert plan[0] == "lag_time_partial"
+
+
+def test_lag_time_partial_skipped_without_sleeve_targets() -> None:
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = False
+    b._uw_lag_time_partial_enabled = True
+    b._uw_lag_time_partial_min_age_sec = 1800.0
+    b._uw_lag_time_partial_max_depth_pct = Decimal("0.020")
+    b._cut_loss_below_be_pct = Decimal("0.025")
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._uw_non_alphai_min_age_sec = 99999.0
+    b._uw_alphai_min_age_sec = 99999.0
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 2000.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_weak_bullish_hold = lambda base: True  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: False  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    b._sleeve_deploy_targets = lambda top_n=2: []  # type: ignore[method-assign]
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="UNI",
+        symbol="UNIEUR",
+        mark=Decimal("99.60"),
+        be=Decimal("100"),
+        notional=Decimal("200"),
+    )
+    assert plan is None or plan[0] != "lag_time_partial"
+
+
+def test_lag_time_partial_respects_hard_cut_ceiling() -> None:
+    """Lag-time max depth stays below hard cut so 4%-style dumps cannot sneak in."""
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = False
+    b._uw_lag_time_partial_enabled = True
+    b._uw_lag_time_partial_min_age_sec = 1800.0
+    b._uw_lag_time_partial_max_depth_pct = Decimal("0.040")  # would-be 4%
+    b._cut_loss_below_be_pct = Decimal("0.025")
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._uw_non_alphai_min_age_sec = 99999.0
+    b._uw_alphai_min_age_sec = 99999.0
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 2000.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_weak_bullish_hold = lambda base: True  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: False  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    b._sleeve_held_fills_slot = lambda base: False  # type: ignore[method-assign]
+    b._sleeve_deploy_targets = lambda top_n=2: ["LINK"]  # type: ignore[method-assign]
+    # -3.0% is past 80% of 2.5% hard cut (=2.0%) → lag-time must NOT fire
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="UNI",
+        symbol="UNIEUR",
+        mark=Decimal("97.00"),
+        be=Decimal("100"),
+        notional=Decimal("200"),
+    )
+    assert plan is None or plan[0] != "lag_time_partial"

@@ -396,7 +396,11 @@ def _session_settings(
             "live_micro_uw_deadlock_would_buy_gate": True,
             "live_micro_uw_mid_flat_recycle_enabled": True,
             "live_micro_uw_mid_flat_max_depth_pct": 0.015,
-            "live_micro_uw_mid_flat_min_age_sec": 300.0,
+            "live_micro_uw_mid_flat_min_age_sec": 180.0,
+            # Hybrid: keep hard cut 2.5%; accelerate mild UW via lag-time partial (≤2%).
+            "live_micro_uw_lag_time_partial_enabled": True,
+            "live_micro_uw_lag_time_partial_min_age_sec": 1800.0,
+            "live_micro_uw_lag_time_partial_max_depth_pct": 0.020,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
             "live_micro_alphai_cross_venue_deploy": True,
             "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,

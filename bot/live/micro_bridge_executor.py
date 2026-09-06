@@ -363,6 +363,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_mid_flat_min_age_sec = float(
             getattr(settings, "live_micro_uw_mid_flat_min_age_sec", 600) or 600
         )
+        # Aged flat mild-UW rotate while sleeve targets wait (hybrid vs never-loss /
+        # vs blind 4% hard SL — hard cut stays ~2.5%).
+        self._uw_lag_time_partial_enabled = bool(
+            getattr(settings, "live_micro_uw_lag_time_partial_enabled", True)
+        )
+        self._uw_lag_time_partial_min_age_sec = float(
+            getattr(settings, "live_micro_uw_lag_time_partial_min_age_sec", 1800) or 1800
+        )
+        self._uw_lag_time_partial_max_depth_pct = Decimal(
+            str(
+                getattr(settings, "live_micro_uw_lag_time_partial_max_depth_pct", 0.020)
+                or 0.020
+            )
+        )
         self._uw_deadlock_day_key = ""
         self._uw_deadlock_day_loss_eur = _ZERO
         self._uw_deadlock_unlock_remaining_eur = _ZERO
@@ -2656,6 +2670,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_mid_flat_recycle_enabled": self._uw_mid_flat_recycle_enabled,
                 "uw_mid_flat_max_depth_pct": str(self._uw_mid_flat_max_depth_pct),
                 "uw_mid_flat_min_age_sec": self._uw_mid_flat_min_age_sec,
+                "uw_lag_time_partial_enabled": self._uw_lag_time_partial_enabled,
+                "uw_lag_time_partial_min_age_sec": self._uw_lag_time_partial_min_age_sec,
+                "uw_lag_time_partial_max_depth_pct": str(
+                    self._uw_lag_time_partial_max_depth_pct
+                ),
                 "desk_lessons_auto_apply_modes": sorted(
                     getattr(self._desk_lessons, "auto_apply_modes", set()) or []
                 ),
@@ -5882,11 +5901,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 ):
                     slot_blocker = True
             if slot_blocker:
-                mid_flat_min_age = min(mid_flat_min_age, 120.0)
+                # Faster / shallower than generic mid-flat — free mild UW capital
+                # for open sleeve targets without waiting for a deep hard cut.
+                mid_flat_min_age = min(mid_flat_min_age, 90.0)
                 mid_flat_min_depth = min(
                     mid_flat_min_depth,
                     self._uw_deadlock_below_be_pct,
-                    Decimal("0.002"),
+                    Decimal("0.001"),
                 )
                 mid_flat_max_depth = max(mid_flat_max_depth, Decimal("0.015"))
         except Exception:  # noqa: BLE001
@@ -5904,6 +5925,49 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if mark >= floor:
                 return ("mid_flat", "band", floor)
             return ("mid_flat", "stop", floor)
+
+        # Lag-time partial: aged flat mild-UW while sleeve targets wait.
+        # Opportunity-cost rotate (day-loss capped) — NOT a blind 4% hard stop.
+        # Hard cut (~2.5%) remains the deep safety net above this band.
+        try:
+            lag_targets = self._sleeve_deploy_targets(top_n=2)
+        except Exception:  # noqa: BLE001
+            lag_targets = []
+        lag_weak = False
+        try:
+            lag_weak = bool(self._alphai_weak_bullish_hold(base))
+        except Exception:  # noqa: BLE001
+            lag_weak = False
+        lag_fills = True
+        try:
+            lag_fills = bool(self._sleeve_held_fills_slot(base))
+        except Exception:  # noqa: BLE001
+            lag_fills = True
+        lag_max = self._uw_lag_time_partial_max_depth_pct
+        if lag_max <= 0:
+            lag_max = Decimal("0.020")
+        # Never reach into hard-cut territory via this path.
+        try:
+            hard_cut = Decimal(str(self._cut_loss_below_be_pct or 0))
+            if hard_cut > 0:
+                lag_max = min(lag_max, hard_cut * Decimal("0.80"))
+        except Exception:  # noqa: BLE001
+            pass
+        if (
+            self._uw_lag_time_partial_enabled
+            and flat_or_down
+            and not strong_hold
+            and not self._uw_would_buy_today(base, symbol)
+            and bool(lag_targets)
+            and age >= float(self._uw_lag_time_partial_min_age_sec or 1800.0)
+            and depth > Decimal("0.001")
+            and depth <= lag_max
+            and (lag_weak or (not lag_fills) or depth >= Decimal("0.0025"))
+        ):
+            floor = be * (Decimal("1") - lag_max)
+            if mark >= floor:
+                return ("lag_time_partial", "band", floor)
+            return ("lag_time_partial", "stop", floor)
 
         # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
         if is_alphai:
@@ -7472,7 +7536,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if (
                         (
                             str(tier).startswith("deadlock_")
-                            or str(tier) == "mid_flat"
+                            or str(tier) in {"mid_flat", "lag_time_partial"}
                         )
                         and self._uw_deadlock_partial_enabled
                     ):
@@ -7481,7 +7545,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                             mark=mark,
                             be=be,
                             session_cap=session_cap,
-                            rotate_inventory=str(tier) == "mid_flat",
+                            rotate_inventory=str(tier)
+                            in {"mid_flat", "lag_time_partial"},
                         )
                         if sell_qty <= 0:
                             self._bump_skip("uw_deadlock_partial_budget")
@@ -7498,7 +7563,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         st["uw_recycle_tier"] = tier
                         st["uw_recycle_mode"] = mode
                         st["sleeve"] = True  # attribute realized PnL to sleeve loss cap
-                        if str(tier).startswith("deadlock_") or str(tier) == "mid_flat":
+                        if str(tier).startswith("deadlock_") or str(tier) in {
+                            "mid_flat",
+                            "lag_time_partial",
+                        }:
                             # Reserve budget so later bags this pass do not over-unlock.
                             self._uw_deadlock_unlock_remaining_eur = max(
                                 _ZERO,
