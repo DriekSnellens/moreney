@@ -1660,7 +1660,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         try:
             for venue in getattr(self, "_execute_venues", ()) or ():
                 depth = self._underwater_depth_on_venue(str(venue), bu)
-                if depth is not None and depth > Decimal("0.0025"):
+                # Any material UW (≥0.1%) is opportunity-cost inventory — do not
+                # let it fill a sleeve slot while fresher unheld targets wait.
+                # (0.25% was too deep: UNI @ -0.21% still blocked ADA/LINK.)
+                if depth is not None and depth > Decimal("0.001"):
                     return False
         except Exception:  # noqa: BLE001
             pass
@@ -5895,7 +5898,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if targets:
                 if (not self._sleeve_held_fills_slot(base)) or weak_hold:
                     slot_blocker = True
-                elif depth >= Decimal("0.0025") and (
+                elif depth >= Decimal("0.001") and (
                     self._alphai_sleeve_priority_buy(base)
                     or self._alphai_bullish_buy(base)
                 ):
@@ -5962,7 +5965,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and age >= float(self._uw_lag_time_partial_min_age_sec or 1800.0)
             and depth > Decimal("0.001")
             and depth <= lag_max
-            and (lag_weak or (not lag_fills) or depth >= Decimal("0.0025"))
+            and (lag_weak or (not lag_fills) or depth >= Decimal("0.001"))
         ):
             floor = be * (Decimal("1") - lag_max)
             if mark >= floor:

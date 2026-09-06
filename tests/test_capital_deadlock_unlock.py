@@ -412,6 +412,60 @@ def test_mid_flat_slot_blocker_uses_shallower_depth() -> None:
     assert plan[0] == "mid_flat"
 
 
+def test_sleeve_held_fills_slot_rejects_mild_uw() -> None:
+    """Mild UW (≥0.1%) must not fill a sleeve slot (UNI @ -0.21% live gap)."""
+    b = _bridge()
+    b._alphai_weak_bullish_hold = lambda base: False  # type: ignore[method-assign]
+    b._alphai_signals = None
+    b._underwater_depth_on_venue = (  # type: ignore[method-assign]
+        lambda venue, base: Decimal("0.0021")
+    )
+    assert b._sleeve_held_fills_slot("UNI") is False
+    b._underwater_depth_on_venue = (  # type: ignore[method-assign]
+        lambda venue, base: Decimal("0.0005")
+    )
+    assert b._sleeve_held_fills_slot("UNI") is True
+
+
+def test_mid_flat_for_mild_uw_slot_blocker_below_near_floor() -> None:
+    """UNI @ -0.21% mid-flats when it no longer fills the sleeve slot."""
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = True
+    b._uw_mid_flat_max_depth_pct = Decimal("0.015")
+    b._uw_mid_flat_min_age_sec = 180.0
+    b._uw_near_below_be_pct = Decimal("0.004")
+    b._uw_deadlock_below_be_pct = Decimal("0.0025")
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._uw_non_alphai_min_age_sec = 99999.0
+    b._uw_alphai_min_age_sec = 99999.0
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 900.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_weak_bullish_hold = lambda base: False  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: False  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    # Real fills_slot path via depth (not stubbed False): -0.21% > 0.1% gate.
+    b._underwater_depth_on_venue = (  # type: ignore[method-assign]
+        lambda venue, base: Decimal("0.0021")
+    )
+    b._alphai_signals = None
+    b._sleeve_deploy_targets = lambda top_n=2: ["ADA", "LINK"]  # type: ignore[method-assign]
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="UNI",
+        symbol="UNIEUR",
+        mark=Decimal("99.79"),  # -0.21% — below idle 0.3% and near 0.4%
+        be=Decimal("100"),
+        notional=Decimal("215"),
+    )
+    assert plan is not None
+    assert plan[0] == "mid_flat"
+
+
 def test_mid_flat_skips_would_buy_today() -> None:
     b = _bridge()
     b._uw_mid_flat_recycle_enabled = True
