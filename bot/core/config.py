@@ -688,6 +688,16 @@ class Settings(BaseSettings):
     live_micro_velocity_sleeve_daily_loss_cap_eur: float = Field(
         default=25.0, ge=0.0, le=500.0
     )
+    # Core/satellite split: core stays cash (or light BTC/ETH); satellite = trend sleeve.
+    live_micro_capital_split_enabled: bool = True
+    live_micro_core_fraction: float = Field(default=0.65, ge=0.0, le=0.95)
+    live_micro_satellite_fraction: float = Field(default=0.35, ge=0.05, le=0.95)
+    # cash = idle EUR vault; btc_eth = mark BTC/ETH as long-hold core (manual/light beta).
+    live_micro_core_mode: str = "cash"
+    live_micro_core_long_hold_bases: str = "BTC,ETH"
+    # Populated by session overrides for dashboard/status (0 = unset).
+    live_micro_core_eur: float = Field(default=0.0, ge=0.0, le=10000.0)
+    live_micro_satellite_eur: float = Field(default=0.0, ge=0.0, le=10000.0)
     # D: Exit engine — soft-armed / BE+ sells seek fills (touch/improve, fast reprice).
     # Never sells below fee-aware BE; taker only when bid ≥ taker BE.
     live_micro_exit_engine_enabled: bool = True

@@ -142,6 +142,8 @@ def _session_settings(
     persist_path: Path,
 ) -> Settings:
     """Paper mode + micro unlocks already in env; € pocket capital, live arb path."""
+    from bot.live.capital_split import resolve_capital_split, split_session_overrides
+
     mode = getattr(base, "market_data_mode", "local") or "local"
     # Direct WebSockets for live — do not depend on shared Redis publisher.
     mode = "local"
@@ -155,8 +157,24 @@ def _session_settings(
         "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
         "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
     )
-    return base.model_copy(
-        update={
+    n_venues = max(len(execute_venues) if execute_venues else (2 if cross_venue else 1), 1)
+    split_plan = resolve_capital_split(
+        budget_f,
+        n_venues=n_venues,
+        enabled=bool(getattr(base, "live_micro_capital_split_enabled", True)),
+        core_fraction=float(getattr(base, "live_micro_core_fraction", 0.65) or 0.65),
+        satellite_fraction=float(
+            getattr(base, "live_micro_satellite_fraction", 0.35) or 0.35
+        ),
+        core_mode=str(getattr(base, "live_micro_core_mode", "cash") or "cash"),
+        cut_loss_below_be_pct=0.025,
+        early_cut_loss_below_be_pct=0.01,
+        core_long_hold_bases=str(
+            getattr(base, "live_micro_core_long_hold_bases", "BTC,ETH") or "BTC,ETH"
+        ),
+    )
+    split_over = split_session_overrides(split_plan)
+    updates: dict = {
             # Internal engine host only — env keeps PAPER_TRADING_ENABLED=false so
             # the API never exposes paper lab UI or auto-start on :8020.
             "execution_mode": ExecutionMode.PAPER,
@@ -548,8 +566,11 @@ def _session_settings(
             "market_data_exchanges": "binance,kraken,coinbase,bitvavo,okx,bybit"
             if cross_venue
             else base.market_data_exchanges,
-        }
-    )
+    }
+    # Core/satellite allocation overrides legacy full-pocket ring defaults.
+    if split_over:
+        updates.update(split_over)
+    return base.model_copy(update=updates)
 
 
 def attach_micro_bridge(

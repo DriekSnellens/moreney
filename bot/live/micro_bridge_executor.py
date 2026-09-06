@@ -747,6 +747,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
+        self._capital_split_enabled = bool(
+            getattr(settings, "live_micro_capital_split_enabled", False)
+        )
+        self._core_eur = Decimal(
+            str(getattr(settings, "live_micro_core_eur", 0) or 0)
+        )
+        self._satellite_eur = Decimal(
+            str(
+                getattr(settings, "live_micro_satellite_eur", 0)
+                or self._velocity_sleeve_eur
+                or 0
+            )
+        )
+        self._core_mode = str(
+            getattr(settings, "live_micro_core_mode", "cash") or "cash"
+        ).strip().lower()
         # D: exit engine — aggressive BE+ / soft-armed fill seeking.
         self._exit_engine_enabled = bool(
             getattr(settings, "live_micro_exit_engine_enabled", True)
@@ -2742,6 +2758,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
             "sleeve_paused": bool(self._sleeve_paused),
+            "capital_split": {
+                "enabled": bool(self._capital_split_enabled),
+                "core_mode": self._core_mode,
+                "core_eur": str(self._core_eur),
+                "satellite_eur": str(self._satellite_eur),
+                "velocity_sleeve_eur": str(self._velocity_sleeve_eur),
+                "active_ring_eur": str(self._active_ring_eur),
+            },
             "exit_engine": {
                 "enabled": self._exit_engine_enabled,
                 "resting_max_age_sec": self._exit_resting_max_age_sec,
@@ -8319,6 +8343,38 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     f"sleeve buys paused (vault holds)"
                 ),
             )
+        if (
+            side_is_buy
+            and self._velocity_sleeve_eur > 0
+            and not meta.get("dust_top_up")
+            and not self._is_long_hold(base)
+        ):
+            try:
+                locked = Decimal(
+                    str(self._mtm_summary().get("micro_locked_notional_eur") or 0)
+                )
+            except Exception:  # noqa: BLE001
+                locked = _ZERO
+            try:
+                px = Decimal(str(order_request.price or 0))
+                qty = Decimal(str(order_request.quantity or 0))
+                order_notional = px * qty if px > 0 and qty > 0 else _ZERO
+            except Exception:  # noqa: BLE001
+                order_notional = _ZERO
+            headroom = self._velocity_sleeve_eur - locked
+            if headroom <= 0 or (
+                order_notional > 0 and order_notional > headroom + Decimal("1")
+            ):
+                self._bump_skip("sleeve_size_full")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="SLEEVE_SIZE_FULL",
+                    message=(
+                        f"satellite sleeve full: micro locked €{locked} "
+                        f"/ sleeve €{self._velocity_sleeve_eur} "
+                        f"(core vault €{self._core_eur} untouched)"
+                    ),
+                )
         if (
             side_is_buy
             and self._alphai_macro_active
