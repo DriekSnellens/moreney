@@ -363,6 +363,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_mid_flat_min_age_sec = float(
             getattr(settings, "live_micro_uw_mid_flat_min_age_sec", 600) or 600
         )
+        # Aged flat mild-UW rotate while sleeve targets wait (hybrid vs never-loss /
+        # vs blind 4% hard SL — hard cut stays ~2.5%).
+        self._uw_lag_time_partial_enabled = bool(
+            getattr(settings, "live_micro_uw_lag_time_partial_enabled", True)
+        )
+        self._uw_lag_time_partial_min_age_sec = float(
+            getattr(settings, "live_micro_uw_lag_time_partial_min_age_sec", 1800) or 1800
+        )
+        self._uw_lag_time_partial_max_depth_pct = Decimal(
+            str(
+                getattr(settings, "live_micro_uw_lag_time_partial_max_depth_pct", 0.020)
+                or 0.020
+            )
+        )
         self._uw_deadlock_day_key = ""
         self._uw_deadlock_day_loss_eur = _ZERO
         self._uw_deadlock_unlock_remaining_eur = _ZERO
@@ -1646,7 +1660,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         try:
             for venue in getattr(self, "_execute_venues", ()) or ():
                 depth = self._underwater_depth_on_venue(str(venue), bu)
-                if depth is not None and depth > Decimal("0.0025"):
+                # Any material UW (≥0.1%) is opportunity-cost inventory — do not
+                # let it fill a sleeve slot while fresher unheld targets wait.
+                # (0.25% was too deep: UNI @ -0.21% still blocked ADA/LINK.)
+                if depth is not None and depth > Decimal("0.001"):
                     return False
         except Exception:  # noqa: BLE001
             pass
@@ -2656,6 +2673,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_mid_flat_recycle_enabled": self._uw_mid_flat_recycle_enabled,
                 "uw_mid_flat_max_depth_pct": str(self._uw_mid_flat_max_depth_pct),
                 "uw_mid_flat_min_age_sec": self._uw_mid_flat_min_age_sec,
+                "uw_lag_time_partial_enabled": self._uw_lag_time_partial_enabled,
+                "uw_lag_time_partial_min_age_sec": self._uw_lag_time_partial_min_age_sec,
+                "uw_lag_time_partial_max_depth_pct": str(
+                    self._uw_lag_time_partial_max_depth_pct
+                ),
                 "desk_lessons_auto_apply_modes": sorted(
                     getattr(self._desk_lessons, "auto_apply_modes", set()) or []
                 ),
@@ -5684,9 +5706,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     ) -> Decimal:
         """Size unlock to remaining sleeve-cash need and day-loss budget.
 
-        ``rotate_inventory`` (mid-flat opportunity-cost): when free cash already
-        covers the sleeve clip, still allow one clip of weak UW inventory so
-        capital can rotate into fresher deploy targets.
+        ``rotate_inventory`` (mid-flat / lag-time / deadlock-with-sleeve-targets):
+        when free cash already covers the sleeve clip, still allow one clip of
+        weak UW inventory so capital can rotate into fresher deploy targets.
         """
         if free_qty <= 0 or mark <= 0 or be <= 0 or mark >= be:
             return _ZERO
@@ -5809,13 +5831,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and self._alphai_sleeve_priority_buy(base)
                 and not flat_or_down
             )
-            # Would-buy-today gate: nurse names we would still deploy into.
+            # Would-buy-today gate: nurse names we would still deploy into —
+            # except mild-UW slot blockers while fresher sleeve targets wait.
             if (
                 self._uw_deadlock_would_buy_gate
                 and not self._alphai_is_avoid_base(base)
                 and self._uw_would_buy_today(base, symbol)
             ):
-                sleeve_rising = True
+                nurse = True
+                try:
+                    targets = self._sleeve_deploy_targets(top_n=2)
+                    if targets and not self._sleeve_held_fills_slot(base):
+                        nurse = False
+                except Exception:  # noqa: BLE001
+                    nurse = True
+                if nurse:
+                    sleeve_rising = True
             if self._uw_deadlock_day_loss_remaining() <= 0:
                 pass  # day unlock budget spent — fall through to milder paths
             elif not sleeve_rising:
@@ -5840,13 +5871,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             free_est = self._venue_budget_remaining(venue)
             uw_book = self._underwater_book_notional(venue)
             soft = self._ring_soft_block_underwater_eur
+            if soft <= 0:
+                soft = Decimal("25")
             locked_starved = (
-                soft > 0
-                and uw_book >= soft
+                uw_book >= soft
                 and self._active_book_notional(venue)
                 < self._active_ring_eur * Decimal("0.40")
             )
-            if free_est >= self._uw_idle_min_free_eur or locked_starved:
+            # Free-cash probe can read 0 on multi-venue ledger glitches; also
+            # treat fat UW vault + starved ring as idle pressure by itself.
+            if (
+                free_est >= self._uw_idle_min_free_eur
+                or locked_starved
+                or uw_book >= soft
+            ):
                 floor = be * (Decimal("1") - self._uw_idle_below_be_pct)
                 if depth >= self._uw_idle_below_be_pct * Decimal("1.5") or not flat_or_down:
                     # Clearly underwater or momentum unknown → hit bid.
@@ -5876,34 +5914,86 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if targets:
                 if (not self._sleeve_held_fills_slot(base)) or weak_hold:
                     slot_blocker = True
-                elif depth >= Decimal("0.0025") and (
+                elif depth >= Decimal("0.001") and (
                     self._alphai_sleeve_priority_buy(base)
                     or self._alphai_bullish_buy(base)
                 ):
                     slot_blocker = True
             if slot_blocker:
-                mid_flat_min_age = min(mid_flat_min_age, 120.0)
+                # Faster / shallower than generic mid-flat — free mild UW capital
+                # for open sleeve targets without waiting for a deep hard cut.
+                mid_flat_min_age = min(mid_flat_min_age, 90.0)
                 mid_flat_min_depth = min(
                     mid_flat_min_depth,
                     self._uw_deadlock_below_be_pct,
-                    Decimal("0.002"),
+                    Decimal("0.001"),
                 )
                 mid_flat_max_depth = max(mid_flat_max_depth, Decimal("0.015"))
         except Exception:  # noqa: BLE001
             pass
         if (
             self._uw_mid_flat_recycle_enabled
-            and flat_or_down
             and not strong_hold
-            and not self._uw_would_buy_today(base, symbol)
             and age >= mid_flat_min_age
             and depth > mid_flat_min_depth
             and depth <= mid_flat_max_depth
+            and (
+                # Opportunity-cost: slot blockers rotate even on a mild bounce
+                # (would-buy / rising tape must not park capital over ADA/LINK).
+                slot_blocker
+                or (
+                    flat_or_down
+                    and not self._uw_would_buy_today(base, symbol)
+                )
+            )
         ):
             floor = be * (Decimal("1") - mid_flat_max_depth)
             if mark >= floor:
                 return ("mid_flat", "band", floor)
             return ("mid_flat", "stop", floor)
+
+        # Lag-time partial: aged flat mild-UW while sleeve targets wait.
+        # Opportunity-cost rotate (day-loss capped) — NOT a blind 4% hard stop.
+        # Hard cut (~2.5%) remains the deep safety net above this band.
+        try:
+            lag_targets = self._sleeve_deploy_targets(top_n=2)
+        except Exception:  # noqa: BLE001
+            lag_targets = []
+        lag_weak = False
+        try:
+            lag_weak = bool(self._alphai_weak_bullish_hold(base))
+        except Exception:  # noqa: BLE001
+            lag_weak = False
+        lag_fills = True
+        try:
+            lag_fills = bool(self._sleeve_held_fills_slot(base))
+        except Exception:  # noqa: BLE001
+            lag_fills = True
+        lag_max = self._uw_lag_time_partial_max_depth_pct
+        if lag_max <= 0:
+            lag_max = Decimal("0.020")
+        # Never reach into hard-cut territory via this path.
+        try:
+            hard_cut = Decimal(str(self._cut_loss_below_be_pct or 0))
+            if hard_cut > 0:
+                lag_max = min(lag_max, hard_cut * Decimal("0.80"))
+        except Exception:  # noqa: BLE001
+            pass
+        if (
+            self._uw_lag_time_partial_enabled
+            and flat_or_down
+            and not strong_hold
+            and not self._uw_would_buy_today(base, symbol)
+            and bool(lag_targets)
+            and age >= float(self._uw_lag_time_partial_min_age_sec or 1800.0)
+            and depth > Decimal("0.001")
+            and depth <= lag_max
+            and (lag_weak or (not lag_fills) or depth >= Decimal("0.001"))
+        ):
+            floor = be * (Decimal("1") - lag_max)
+            if mark >= floor:
+                return ("lag_time_partial", "band", floor)
+            return ("lag_time_partial", "stop", floor)
 
         # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
         if is_alphai:
@@ -7472,16 +7562,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if (
                         (
                             str(tier).startswith("deadlock_")
-                            or str(tier) == "mid_flat"
+                            or str(tier) in {"mid_flat", "lag_time_partial"}
                         )
                         and self._uw_deadlock_partial_enabled
                     ):
+                        # Opportunity-cost: when free cash already covers the
+                        # sleeve clip, still rotate mild-UW / deadlock bags if
+                        # unheld sleeve targets are waiting (else unlock_remaining
+                        # stays 0 and UNI-class bags never clip).
+                        rotate = str(tier) in {"mid_flat", "lag_time_partial"}
+                        if not rotate and str(tier).startswith("deadlock_"):
+                            try:
+                                rotate = bool(self._sleeve_has_unheld_priority())
+                            except Exception:  # noqa: BLE001
+                                rotate = False
                         sell_qty = self._uw_deadlock_partial_sell_qty(
                             free_qty=free_uw,
                             mark=mark,
                             be=be,
                             session_cap=session_cap,
-                            rotate_inventory=str(tier) == "mid_flat",
+                            rotate_inventory=rotate,
                         )
                         if sell_qty <= 0:
                             self._bump_skip("uw_deadlock_partial_budget")
@@ -7498,7 +7598,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         st["uw_recycle_tier"] = tier
                         st["uw_recycle_mode"] = mode
                         st["sleeve"] = True  # attribute realized PnL to sleeve loss cap
-                        if str(tier).startswith("deadlock_") or str(tier) == "mid_flat":
+                        if str(tier).startswith("deadlock_") or str(tier) in {
+                            "mid_flat",
+                            "lag_time_partial",
+                        }:
                             # Reserve budget so later bags this pass do not over-unlock.
                             self._uw_deadlock_unlock_remaining_eur = max(
                                 _ZERO,
