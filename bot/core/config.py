@@ -698,6 +698,34 @@ class Settings(BaseSettings):
     # Populated by session overrides for dashboard/status (0 = unset).
     live_micro_core_eur: float = Field(default=0.0, ge=0.0, le=10000.0)
     live_micro_satellite_eur: float = Field(default=0.0, ge=0.0, le=10000.0)
+    # Sharp AlphaI daytrader: satellite entries need confirmed picks; non-picks /
+    # failed picks recycle on time/urgency (not BE-first forever). Coin-agnostic.
+    live_micro_alphai_daytrader_enabled: bool = True
+    live_micro_daytrader_min_confirm_scale: float = Field(
+        default=0.50, ge=0.20, le=0.95
+    )
+    live_micro_daytrader_sleeve_min_confirm_scale: float = Field(
+        default=0.40, ge=0.15, le=0.90
+    )
+    live_micro_daytrader_require_rising: bool = True
+    live_micro_daytrader_non_alphai_min_age_sec: float = Field(
+        default=120.0, ge=30.0, le=3600.0
+    )
+    live_micro_daytrader_non_alphai_below_be_pct: float = Field(
+        default=0.005, ge=0.001, le=0.05
+    )
+    live_micro_daytrader_near_min_age_sec: float = Field(
+        default=90.0, ge=30.0, le=3600.0
+    )
+    live_micro_daytrader_weak_alphai_min_age_sec: float = Field(
+        default=480.0, ge=60.0, le=7200.0
+    )
+    live_micro_daytrader_lag_time_min_age_sec: float = Field(
+        default=600.0, ge=120.0, le=7200.0
+    )
+    live_micro_daytrader_provisional_be_exit_min_age_sec: float = Field(
+        default=300.0, ge=60.0, le=7200.0
+    )
     # D: Exit engine — soft-armed / BE+ sells seek fills (touch/improve, fast reprice).
     # Never sells below fee-aware BE; taker only when bid ≥ taker BE.
     live_micro_exit_engine_enabled: bool = True

@@ -247,7 +247,8 @@ def _session_settings(
             "paper_ladder_buy_enabled": False,
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 2700.0,  # Phase A: earlier BE recovery-arm (was 1h)
+            # AlphaI daytrader: earlier BE recovery-arm so capital rotates same-day.
+            "paper_time_stop_sec": 1800.0,
             "paper_time_stop_min_profit_bps": 25.0,  # diagnostics / floor helper only
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
@@ -386,26 +387,26 @@ def _session_settings(
             "live_micro_early_cut_momentum_max_return": 0.0,
             # Faster underwater recycle — minimize idle capital, keep losses small.
             "live_micro_uw_recycle_enabled": True,
-            "live_micro_provisional_be_exit_min_age_sec": 1800.0,
-            "live_micro_uw_avoid_max_age_sec": 900.0,
+            "live_micro_provisional_be_exit_min_age_sec": 600.0,
+            "live_micro_uw_avoid_max_age_sec": 600.0,
             "live_micro_uw_dust_max_notional_eur": 25.0,
             "live_micro_uw_dust_below_be_pct": 0.003,
-            "live_micro_uw_near_below_be_pct": 0.006,
+            "live_micro_uw_near_below_be_pct": 0.005,
             "live_micro_uw_near_max_depth_pct": 0.012,
-            "live_micro_uw_near_min_age_sec": 900.0,
-            "live_micro_uw_non_alphai_below_be_pct": 0.008,
-            "live_micro_uw_non_alphai_min_age_sec": 1200.0,
-            "live_micro_uw_alphai_below_be_pct": 0.015,
-            "live_micro_uw_alphai_min_age_sec": 3600.0,
+            "live_micro_uw_near_min_age_sec": 180.0,
+            "live_micro_uw_non_alphai_below_be_pct": 0.006,
+            "live_micro_uw_non_alphai_min_age_sec": 300.0,
+            "live_micro_uw_alphai_below_be_pct": 0.012,
+            "live_micro_uw_alphai_min_age_sec": 1800.0,
             # Idle pressure: if venue has free cash, recycle non-strong bags sooner.
             "live_micro_uw_idle_pressure_enabled": True,
-            "live_micro_uw_idle_min_free_eur": 150.0,
-            "live_micro_uw_idle_min_age_sec": 600.0,
-            "live_micro_uw_idle_below_be_pct": 0.004,
+            "live_micro_uw_idle_min_free_eur": 100.0,
+            "live_micro_uw_idle_min_age_sec": 300.0,
+            "live_micro_uw_idle_below_be_pct": 0.003,
             # Deadlock unlock: UW vault must not freeze the desk (mild recycle + redeploy).
             "live_micro_uw_deadlock_unlock_enabled": True,
             "live_micro_uw_deadlock_below_be_pct": 0.0025,
-            "live_micro_uw_deadlock_min_age_sec": 300.0,
+            "live_micro_uw_deadlock_min_age_sec": 180.0,
             "live_micro_uw_deadlock_partial_enabled": True,
             "live_micro_uw_deadlock_target_free_eur": 220.0,
             "live_micro_uw_deadlock_partial_clip_eur": 220.0,
@@ -414,10 +415,10 @@ def _session_settings(
             "live_micro_uw_deadlock_would_buy_gate": True,
             "live_micro_uw_mid_flat_recycle_enabled": True,
             "live_micro_uw_mid_flat_max_depth_pct": 0.015,
-            "live_micro_uw_mid_flat_min_age_sec": 180.0,
-            # Hybrid: keep hard cut 2.5%; accelerate mild UW via lag-time partial (≤2%).
+            "live_micro_uw_mid_flat_min_age_sec": 120.0,
+            # Keep hard cut 2.5%; accelerate mild UW via lag-time partial (≤2%).
             "live_micro_uw_lag_time_partial_enabled": True,
-            "live_micro_uw_lag_time_partial_min_age_sec": 1800.0,
+            "live_micro_uw_lag_time_partial_min_age_sec": 600.0,
             "live_micro_uw_lag_time_partial_max_depth_pct": 0.020,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
             "live_micro_alphai_cross_venue_deploy": True,
@@ -478,7 +479,7 @@ def _session_settings(
             # Intraday timing gate: AlphaI × fresh × adverse × momentum (enforce).
             "alphai_intraday_gate_enabled": True,
             "alphai_intraday_gate_shadow_only": False,
-            "alphai_intraday_min_freshness": 0.35,
+            "alphai_intraday_min_freshness": 0.40,
             # Learn: dynamic RS + outcomes reliability (no per-coin hardcoding).
             "alphai_price_confirm_enabled": True,
             "alphai_price_lag_vs_btc_pp": 1.5,
@@ -570,6 +571,61 @@ def _session_settings(
     # Core/satellite allocation overrides legacy full-pocket ring defaults.
     if split_over:
         updates.update(split_over)
+    # Sharp AlphaI daytrader: on by default with capital split (coin-agnostic).
+    daytrader = bool(
+        getattr(base, "live_micro_alphai_daytrader_enabled", True)
+    ) and bool(updates.get("live_micro_capital_split_enabled", False) or split_over)
+    if daytrader:
+        updates.update(
+            {
+                "live_micro_alphai_daytrader_enabled": True,
+                "live_micro_daytrader_min_confirm_scale": float(
+                    getattr(base, "live_micro_daytrader_min_confirm_scale", 0.50)
+                    or 0.50
+                ),
+                "live_micro_daytrader_sleeve_min_confirm_scale": float(
+                    getattr(base, "live_micro_daytrader_sleeve_min_confirm_scale", 0.40)
+                    or 0.40
+                ),
+                "live_micro_daytrader_require_rising": bool(
+                    getattr(base, "live_micro_daytrader_require_rising", True)
+                ),
+                "live_micro_daytrader_non_alphai_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_non_alphai_min_age_sec", 120.0)
+                    or 120.0
+                ),
+                "live_micro_daytrader_non_alphai_below_be_pct": float(
+                    getattr(base, "live_micro_daytrader_non_alphai_below_be_pct", 0.005)
+                    or 0.005
+                ),
+                "live_micro_daytrader_near_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_near_min_age_sec", 90.0) or 90.0
+                ),
+                "live_micro_daytrader_weak_alphai_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_weak_alphai_min_age_sec", 480.0)
+                    or 480.0
+                ),
+                "live_micro_daytrader_lag_time_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_lag_time_min_age_sec", 600.0)
+                    or 600.0
+                ),
+                "live_micro_daytrader_provisional_be_exit_min_age_sec": float(
+                    getattr(
+                        base,
+                        "live_micro_daytrader_provisional_be_exit_min_age_sec",
+                        300.0,
+                    )
+                    or 300.0
+                ),
+                # Entries: only confirmed AlphaI (already require_bullish); rising tape.
+                "alphai_require_bullish_new_buys": True,
+                "alphai_bullish_buy_enabled": True,
+                "alphai_price_confirm_enabled": True,
+                "alphai_intraday_gate_enabled": True,
+            }
+        )
+    else:
+        updates.setdefault("live_micro_alphai_daytrader_enabled", False)
     return base.model_copy(update=updates)
 
 

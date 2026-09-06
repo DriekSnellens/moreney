@@ -763,6 +763,54 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._core_mode = str(
             getattr(settings, "live_micro_core_mode", "cash") or "cash"
         ).strip().lower()
+        # Sharp AlphaI daytrader: confirmed picks only; time-first non-pick exits.
+        self._alphai_daytrader_enabled = bool(
+            getattr(settings, "live_micro_alphai_daytrader_enabled", False)
+        ) and bool(self._capital_split_enabled)
+        self._daytrader_min_confirm = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_min_confirm_scale", 0.50)
+                or 0.50
+            )
+        )
+        self._daytrader_sleeve_min_confirm = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_sleeve_min_confirm_scale", 0.40)
+                or 0.40
+            )
+        )
+        self._daytrader_require_rising = bool(
+            getattr(settings, "live_micro_daytrader_require_rising", True)
+        )
+        self._daytrader_non_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_non_alphai_min_age_sec", 120.0)
+            or 120.0
+        )
+        self._daytrader_non_alphai_below_be_pct = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_non_alphai_below_be_pct", 0.005)
+                or 0.005
+            )
+        )
+        self._daytrader_near_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_near_min_age_sec", 90.0) or 90.0
+        )
+        self._daytrader_weak_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_weak_alphai_min_age_sec", 480.0)
+            or 480.0
+        )
+        self._daytrader_lag_time_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_lag_time_min_age_sec", 600.0)
+            or 600.0
+        )
+        self._daytrader_provisional_be_exit_min_age_sec = float(
+            getattr(
+                settings,
+                "live_micro_daytrader_provisional_be_exit_min_age_sec",
+                300.0,
+            )
+            or 300.0
+        )
         # D: exit engine — aggressive BE+ / soft-armed fill seeking.
         self._exit_engine_enabled = bool(
             getattr(settings, "live_micro_exit_engine_enabled", True)
@@ -1314,11 +1362,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _daytrade_rotate_non_picks(self) -> bool:
         """True when satellite daytrade should free non-AlphaI bags first.
 
-        Generic attribute gate: capital-split on, and either FLAT playbook or
-        unheld AlphaI sleeve targets waiting — never a per-coin special case.
+        Generic attribute gate: capital-split on, and either sharp daytrader
+        mode, FLAT playbook, or unheld AlphaI sleeve targets waiting —
+        never a per-coin special case.
         """
         if not bool(getattr(self, "_capital_split_enabled", False)):
             return False
+        if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+            return True
         try:
             from bot.live.capital_playbook import CapitalPlaybook
 
@@ -1620,6 +1671,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         if self._alphai_is_avoid_base(base):
             min_age = min(min_age, 600.0)
+        # Daytrader: free provisional non-picks / weak holds sooner so satellite rotates.
+        try:
+            if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+                day_age = float(
+                    getattr(self, "_daytrader_provisional_be_exit_min_age_sec", 300.0)
+                    or 300.0
+                )
+                if not self._alphai_bullish_buy(base) or self._alphai_weak_bullish_hold(
+                    base
+                ):
+                    min_age = min(min_age, day_age)
+        except Exception:  # noqa: BLE001
+            pass
         return self._position_age_sec(venue, base) >= min_age
 
     def _all_held_alt_bases(self, *, min_notional_eur: Decimal = Decimal("1")) -> set[str]:
@@ -2111,17 +2175,39 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     confirm_scale = None
         # Soft-ADVERSE rising-strict was starving rank-1/2 sleeve buys on flat
         # red tape (BNB/ADA miss). Sleeve keeps deployable with softer confirm.
+        # Daytrader: non-sleeve needs confirmed tape + rising; sleeve stays softer.
         sleeve = self._alphai_sleeve_priority_buy(base)
+        daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
         require_rising = bool(
             getattr(self, "_alphai_intraday_require_rising", False)
         )
+        if daytrader and bool(getattr(self, "_daytrader_require_rising", True)):
+            require_rising = True
         min_fresh = self._alphai_intraday_min_freshness
         min_confirm = Decimal("0.45")
+        if daytrader:
+            min_confirm = max(
+                min_confirm,
+                Decimal(str(getattr(self, "_daytrader_min_confirm", Decimal("0.50")))),
+            )
         gate_lagging = price_lagging
         if sleeve:
             require_rising = False
             min_fresh = min(min_fresh, Decimal("0.40"))
             min_confirm = Decimal("0.35")
+            if daytrader:
+                min_confirm = max(
+                    min_confirm,
+                    Decimal(
+                        str(
+                            getattr(
+                                self,
+                                "_daytrader_sleeve_min_confirm",
+                                Decimal("0.40"),
+                            )
+                        )
+                    ),
+                )
             if price_lagging:
                 # Shrink clip instead of hard WAIT — still prefer sleeve names.
                 gate_lagging = False
@@ -2791,6 +2877,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "satellite_eur": str(self._satellite_eur),
                 "velocity_sleeve_eur": str(self._velocity_sleeve_eur),
                 "active_ring_eur": str(self._active_ring_eur),
+                "alphai_daytrader": bool(
+                    getattr(self, "_alphai_daytrader_enabled", False)
+                ),
+                "daytrade_rotate_non_picks": bool(self._daytrade_rotate_non_picks()),
             },
             "exit_engine": {
                 "enabled": self._exit_engine_enabled,
@@ -6035,7 +6125,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not strong_hold
             and not self._uw_would_buy_today(base, symbol)
             and bool(lag_targets)
-            and age >= float(self._uw_lag_time_partial_min_age_sec or 1800.0)
+            and age
+            >= float(
+                min(
+                    float(self._uw_lag_time_partial_min_age_sec or 1800.0),
+                    float(
+                        getattr(self, "_daytrader_lag_time_min_age_sec", 600.0) or 600.0
+                    )
+                    if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                    else float(self._uw_lag_time_partial_min_age_sec or 1800.0),
+                )
+            )
             and depth > Decimal("0.001")
             and depth <= lag_max
             and (lag_weak or (not lag_fills) or depth >= Decimal("0.001"))
@@ -6059,6 +6159,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 min_age = self._uw_non_alphai_min_age_sec + (
                     self._uw_alphai_min_age_sec - self._uw_non_alphai_min_age_sec
                 ) * max(0.0, min(1.0, conv))
+                # Daytrader: failed/weak picks free capital for confirmed satellite entries.
+                if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+                    min_age = min(
+                        float(min_age),
+                        float(
+                            getattr(self, "_daytrader_weak_alphai_min_age_sec", 480.0)
+                            or 480.0
+                        ),
+                    )
                 tier_prefix = "alphai_weak"
             else:
                 below = self._uw_alphai_below_be_pct
@@ -6077,8 +6186,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         non_alphai_age = float(self._uw_non_alphai_min_age_sec)
         non_alphai_below = self._uw_non_alphai_below_be_pct
         if self._daytrade_rotate_non_picks():
-            non_alphai_age = min(non_alphai_age, 180.0)
-            non_alphai_below = min(non_alphai_below, Decimal("0.006"))
+            non_alphai_age = min(
+                non_alphai_age,
+                float(getattr(self, "_daytrader_non_alphai_min_age_sec", 120.0) or 120.0)
+                if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                else 180.0,
+            )
+            non_alphai_below = min(
+                non_alphai_below,
+                Decimal(
+                    str(
+                        getattr(self, "_daytrader_non_alphai_below_be_pct", Decimal("0.005"))
+                    )
+                )
+                if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                else Decimal("0.006"),
+            )
         if age >= non_alphai_age:
             floor = be * (Decimal("1") - non_alphai_below)
             if depth >= non_alphai_below:
@@ -6090,7 +6213,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Layer 2b: near-BE band after shorter wait.
         near_age = float(self._uw_near_min_age_sec)
         if self._daytrade_rotate_non_picks():
-            near_age = min(near_age, 120.0)
+            near_age = min(
+                near_age,
+                float(getattr(self, "_daytrader_near_min_age_sec", 90.0) or 90.0)
+                if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                else 120.0,
+            )
         if (
             depth <= self._uw_near_max_depth_pct
             and age >= near_age
