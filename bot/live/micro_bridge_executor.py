@@ -1307,36 +1307,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return 1.0
 
     def _desk_sleeve_unheld_bases(self, *, top_n: int = 2) -> list[str]:
-        """Unheld AlphaI sleeve bases (rank-1/2); empty when fully held."""
-        if not self._sleeve_has_unheld_priority(top_n=top_n):
-            return []
-        sig = self._alphai_signals
-        if sig is None:
-            return []
-        held: set[str] = set()
-        for venue in getattr(self, "_execute_venues", ()) or ():
-            try:
-                held |= self._held_alt_bases(venue, min_notional_eur=Decimal("1"))
-            except Exception:  # noqa: BLE001
-                continue
-        if hasattr(sig, "unheld_priority_buys"):
-            try:
-                unheld = sig.unheld_priority_buys(held, top_n=top_n)
-                if unheld:
-                    return sorted({str(b).upper() for b in unheld})
-            except Exception:  # noqa: BLE001
-                pass
-        out: list[str] = []
-        scores = getattr(sig, "daily_pick_scores", None) or {}
-        if isinstance(scores, dict) and scores:
-            ranked = sorted(
-                scores, key=lambda b: float(scores.get(b) or 0), reverse=True
-            )
-            for b in ranked[:top_n]:
-                bu = str(b).upper()
-                if bu not in held and self._alphai_sleeve_priority_buy(bu):
-                    out.append(bu)
-        return out
+        """Unheld AlphaI sleeve bases (rank-1/2); empty when fully held.
+
+        Uses opportunity-cost slot accounting: weak / underwater held picks do
+        not fill sleeve slots, so the next ranked unheld names stay deployable.
+        """
+        return list(self._sleeve_deploy_targets(top_n=top_n))
 
     def _maybe_observe_desk_lessons(self, *, force: bool = False) -> dict[str, Any]:
         """Record structural misses when idle cash / avoid bags block the sleeve."""
@@ -1590,18 +1566,114 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             min_age = min(min_age, 600.0)
         return self._position_age_sec(venue, base) >= min_age
 
+    def _all_held_alt_bases(self, *, min_notional_eur: Decimal = Decimal("1")) -> set[str]:
+        held: set[str] = set()
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                held |= self._held_alt_bases(venue, min_notional_eur=min_notional_eur)
+            except Exception:  # noqa: BLE001
+                continue
+        return held
+
+    def _alphai_priority_ranked(self, *, limit: int = 8) -> list[str]:
+        """Positive daily priority names ranked best-first (blocked/avoid excluded)."""
+        sig = self._alphai_signals
+        if sig is None:
+            return []
+        scores = getattr(sig, "daily_pick_scores", None) or {}
+        picks = set(getattr(sig, "daily_pick_bases", None) or ())
+        avoid = {str(b).upper() for b in (getattr(sig, "avoid_bases", None) or ())}
+        blocked = {str(b).upper() for b in (getattr(sig, "blocked_bases", None) or ())}
+        ranked: list[tuple[str, float]] = []
+        if isinstance(scores, dict) and scores:
+            for b, s in scores.items():
+                bu = str(b).upper()
+                if picks and bu not in {str(p).upper() for p in picks}:
+                    continue
+                try:
+                    score = float(s or 0)
+                except (TypeError, ValueError):
+                    score = 0.0
+                if score <= 0 or bu in avoid or bu in blocked:
+                    continue
+                ranked.append((bu, score))
+            ranked.sort(key=lambda row: row[1], reverse=True)
+            return [b for b, _ in ranked[: max(1, int(limit))]]
+        if hasattr(sig, "priority_buy_bases"):
+            try:
+                bases = {
+                    str(b).upper()
+                    for b in sig.priority_buy_bases(top_n=max(1, int(limit)))
+                }
+            except TypeError:
+                try:
+                    bases = {str(b).upper() for b in sig.priority_buy_bases()}
+                except Exception:  # noqa: BLE001
+                    bases = set()
+            except Exception:  # noqa: BLE001
+                bases = set()
+            return sorted(bases)[: max(1, int(limit))]
+        return []
+
+    def _sleeve_held_fills_slot(self, base: str) -> bool:
+        """Held bag fills a sleeve slot only when it is still a healthy deploy.
+
+        Weak / lagging / materially underwater bags lock capital — they must not
+        block the next ranked unheld pick (inventory opportunity-cost).
+        """
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return False
+        try:
+            if self._alphai_weak_bullish_hold(bu):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            for venue in getattr(self, "_execute_venues", ()) or ():
+                depth = self._underwater_depth_on_venue(str(venue), bu)
+                if depth is not None and depth > Decimal("0.003"):
+                    return False
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    def _sleeve_deploy_targets(self, *, top_n: int = 2) -> list[str]:
+        """Unheld sleeve deploy targets after opportunity-cost slot accounting."""
+        n = max(1, int(top_n))
+        ranked = self._alphai_priority_ranked(limit=max(n + 4, 6))
+        if not ranked:
+            return []
+        held = self._all_held_alt_bases()
+        slots_filled = 0
+        targets: list[str] = []
+        for bu in ranked:
+            if bu in held:
+                if self._sleeve_held_fills_slot(bu):
+                    slots_filled += 1
+                continue
+            if slots_filled + len(targets) < n:
+                targets.append(bu)
+            if slots_filled + len(targets) >= n:
+                break
+        return targets
+
     def _alphai_sleeve_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
         """True for AlphaI rank-1/2 sleeve targets (structural deploy list).
 
         When daily picks are empty under macro caution but live bullish buys
         still exist (e.g. AVAX headline), treat the top live bullish names as
         the sleeve so ADVERSE new-base blocks do not idle the desk.
+
+        Opportunity-cost expansion: when a structural top-N hold is weak or
+        underwater, the next ranked unheld priority names also qualify.
         """
         if not self._alphai_bullish_buy(base):
             return False
         sig = self._alphai_signals
         if sig is None:
             return False
+        bu = str(base or "").strip().upper()
         if hasattr(sig, "is_slot_priority_buy"):
             try:
                 if bool(sig.is_slot_priority_buy(base, top_n=top_n)):
@@ -1620,6 +1692,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     return True
             except Exception:  # noqa: BLE001
                 pass
+        # Expand past weak/UW held slots so capital can rotate into fresher picks.
+        try:
+            if bu in set(self._sleeve_deploy_targets(top_n=top_n)):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
         # Only when the daily pick sleeve is empty/thin — do not promote rank-3+
         # bullish names while BNB/ADA already occupy the slot list.
         daily_scores = getattr(sig, "daily_pick_scores", None) or {}
@@ -1641,47 +1719,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 live_buys = []
         if not live_buys and hasattr(sig, "bullish_bases"):
             live_buys = sorted({str(b).upper() for b in (sig.bullish_bases or ())})
-        if live_buys and str(base).upper() in set(live_buys[: max(1, top_n)]):
+        if live_buys and bu in set(live_buys[: max(1, top_n)]):
             return True
         return self._alphai_strong_bullish_buy(base)
 
-
-    
     def _sleeve_has_unheld_priority(self, *, top_n: int = 2) -> bool:
-        """True when AlphaI rank-1/2 sleeve still has an unheld deploy target."""
-        sig = self._alphai_signals
-        if sig is None:
+        """True when AlphaI sleeve still has an unheld deploy target.
+
+        Weak / underwater held priority bags do not count as filling the sleeve.
+        """
+        try:
+            return bool(self._sleeve_deploy_targets(top_n=top_n))
+        except Exception:  # noqa: BLE001
             return False
-        held: set[str] = set()
-        for venue in getattr(self, "_execute_venues", ()) or ():
-            try:
-                held |= self._held_alt_bases(venue, min_notional_eur=Decimal("1"))
-            except Exception:  # noqa: BLE001
-                continue
-        if hasattr(sig, "unheld_priority_buys"):
-            try:
-                unheld = sig.unheld_priority_buys(held, top_n=top_n)
-            except TypeError:
-                try:
-                    unheld = sig.unheld_priority_buys(held)
-                except Exception:  # noqa: BLE001
-                    unheld = None
-            except Exception:  # noqa: BLE001
-                unheld = None
-            if unheld:
-                return True
-        # Fallback: any sleeve priority base not held.
-        candidates: set[str] = set()
-        scores = getattr(sig, "daily_pick_scores", None) or {}
-        if isinstance(scores, dict) and scores:
-            ranked = sorted(scores, key=lambda b: float(scores.get(b) or 0), reverse=True)
-            candidates = {str(b).upper() for b in ranked[:top_n]}
-        else:
-            picks = getattr(sig, "daily_pick_bases", None) or frozenset()
-            candidates = {str(b).upper() for b in picks}
-        if not candidates:
-            return False
-        return any(b not in held and self._alphai_sleeve_priority_buy(b) for b in candidates)
 
     def _alphai_signal_fresh_enough(self, base: str) -> bool:
         """Reject strong-clip / winner-add when AlphaI pick set is stale."""
@@ -5787,12 +5837,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Mid-depth flat recycle: bags past near_be but before alphai deep-hold,
         # that we would NOT buy today — free capital for the sleeve (partial-sized
         # by caller when deadlock_partial tooling is active).
+        mid_flat_min_age = self._uw_mid_flat_min_age_sec
+        try:
+            # Weak held priority bags that do not fill a sleeve slot: free capital
+            # faster so opportunity-cost deploy targets (e.g. LINK) can enter.
+            if (
+                not self._sleeve_held_fills_slot(base)
+                and self._sleeve_deploy_targets(top_n=2)
+            ):
+                mid_flat_min_age = min(mid_flat_min_age, 180.0)
+        except Exception:  # noqa: BLE001
+            pass
         if (
             self._uw_mid_flat_recycle_enabled
             and flat_or_down
             and not strong_hold
             and not self._uw_would_buy_today(base, symbol)
-            and age >= self._uw_mid_flat_min_age_sec
+            and age >= mid_flat_min_age
             and depth > self._uw_near_below_be_pct
             and depth <= self._uw_mid_flat_max_depth_pct
         ):

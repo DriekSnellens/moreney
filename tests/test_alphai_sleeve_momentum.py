@@ -46,7 +46,38 @@ def test_sleeve_priority_buy_ranks_top_two() -> None:
         alphai_require_bullish_new_buys=False,
     )
     bridge._alphai_ring_fallback_active = lambda: False  # type: ignore[method-assign]
+    bridge._all_held_alt_bases = lambda min_notional_eur=None: set()  # type: ignore[method-assign]
     assert bridge._alphai_sleeve_priority_buy("BNB") is True
     assert bridge._alphai_sleeve_priority_buy("ADA") is True
     assert bridge._alphai_sleeve_priority_buy("AVAX") is False
     assert bridge._alphai_sleeve_priority_buy("DOGE") is False
+
+
+def test_weak_held_sleeve_slot_promotes_next_unheld() -> None:
+    """Underwater/weak UNI must not block LINK when ring needs AlphaI deploy."""
+    from decimal import Decimal
+
+    bridge = MicroBudgetLiveExecutor.__new__(MicroBudgetLiveExecutor)
+    bridge._alphai_signals = _Sig()
+    bridge._settings = SimpleNamespace(
+        alphai_bullish_buy_enabled=True,
+        alphai_require_bullish_new_buys=False,
+    )
+    bridge._alphai_ring_fallback_active = lambda: False  # type: ignore[method-assign]
+    bridge._execute_venues = ("bitvavo",)
+    # Structural top-2 BNB+ADA held, but both weak → slots stay open for AVAX/LINK.
+    bridge._all_held_alt_bases = (  # type: ignore[method-assign]
+        lambda min_notional_eur=None: {"BNB", "ADA"}
+    )
+    bridge._alphai_weak_bullish_hold = (  # type: ignore[method-assign]
+        lambda base: str(base).upper() in {"BNB", "ADA"}
+    )
+    bridge._underwater_depth_on_venue = (  # type: ignore[method-assign]
+        lambda venue, base: Decimal("0.007")
+    )
+
+    assert bridge._sleeve_deploy_targets(top_n=2) == ["AVAX", "LINK"]
+    assert bridge._sleeve_has_unheld_priority() is True
+    assert bridge._alphai_sleeve_priority_buy("AVAX") is True
+    assert bridge._alphai_sleeve_priority_buy("LINK") is True
+    assert bridge._desk_sleeve_unheld_bases() == ["AVAX", "LINK"]
