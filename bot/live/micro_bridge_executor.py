@@ -1311,11 +1311,37 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         return bool(sig.exit_urgency(base))
 
+    def _daytrade_rotate_non_picks(self) -> bool:
+        """True when satellite daytrade should free non-AlphaI bags first.
+
+        Generic attribute gate: capital-split on, and either FLAT playbook or
+        unheld AlphaI sleeve targets waiting — never a per-coin special case.
+        """
+        if not bool(getattr(self, "_capital_split_enabled", False)):
+            return False
+        try:
+            from bot.live.capital_playbook import CapitalPlaybook
+
+            if self._capital_playbook == CapitalPlaybook.FLAT:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            return bool(self._sleeve_deploy_targets(top_n=2))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
         scale = self._alphai_feature_for(base).be_harvest_gain_scale
         try:
             applied = self._desk_lessons.applied_feedback()
             scale = scale * Decimal(str(applied.harvest_floor_scale or 1.0))
+        except Exception:  # noqa: BLE001
+            pass
+        # Non-pick bags: harvest sooner so AlphaI satellite entries get capital.
+        try:
+            if self._daytrade_rotate_non_picks() and not self._alphai_bullish_buy(base):
+                scale = scale * Decimal("0.40")
         except Exception:  # noqa: BLE001
             pass
         return scale
@@ -6047,19 +6073,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return (f"{tier_prefix}_aged", "stop", floor)
             return None
 
-        # Layer 2a: non-AlphaI aged recycle.
-        if age >= self._uw_non_alphai_min_age_sec:
-            floor = be * (Decimal("1") - self._uw_non_alphai_below_be_pct)
-            if depth >= self._uw_non_alphai_below_be_pct:
+        # Layer 2a: non-AlphaI aged recycle (faster under daytrade rotate pressure).
+        non_alphai_age = float(self._uw_non_alphai_min_age_sec)
+        non_alphai_below = self._uw_non_alphai_below_be_pct
+        if self._daytrade_rotate_non_picks():
+            non_alphai_age = min(non_alphai_age, 180.0)
+            non_alphai_below = min(non_alphai_below, Decimal("0.006"))
+        if age >= non_alphai_age:
+            floor = be * (Decimal("1") - non_alphai_below)
+            if depth >= non_alphai_below:
                 return ("non_alphai", "stop", floor)
             if flat_or_down:
                 if mark >= floor:
                     return ("non_alphai", "band", floor)
 
         # Layer 2b: near-BE band after shorter wait.
+        near_age = float(self._uw_near_min_age_sec)
+        if self._daytrade_rotate_non_picks():
+            near_age = min(near_age, 120.0)
         if (
             depth <= self._uw_near_max_depth_pct
-            and age >= self._uw_near_min_age_sec
+            and age >= near_age
             and flat_or_down
         ):
             floor = be * (Decimal("1") - self._uw_near_below_be_pct)

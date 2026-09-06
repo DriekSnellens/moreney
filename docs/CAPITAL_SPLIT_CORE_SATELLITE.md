@@ -23,6 +23,11 @@ Last ~3 days: majors were soft/negative while the full-pocket velocity desk stay
 - `live_micro_core_mode`: `cash` | `btc_eth`
 - Enforced in bridge: buys reject with `SLEEVE_SIZE_FULL` when micro locked ≥ satellite sleeve
 
-## Disable
+## Path to AlphaI daytrader
 
-Set `LIVE_MICRO_CAPITAL_SPLIT_ENABLED=false` to restore legacy ~€1850 full-pocket ring.
+1. **Satellite only** takes risk (~35%); core stays cash.
+2. **Entries**: only AlphaI bullish + price-confirm + intraday gate.
+3. **Exits**: AlphaI urgency / trail / hard 2.5% cut; non-pick bags recycle first.
+4. **FLAT daytrade rotate**: when split is on and FLAT (or unheld sleeve targets wait), non-AlphaI bags free faster (age/depth + lower BE-harvest floor) — still coin-agnostic (`not in bullish set`).
+
+Measure: satellite NET/hour, pick hit-rate, non-pick inventory EUR → 0 while confirmed picks exist.
