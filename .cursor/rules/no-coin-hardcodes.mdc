@@ -1,0 +1,14 @@
+---
+description: Never hardcode bot improvements to a specific coin
+alwaysApply: true
+---
+
+# No per-coin hardcodes
+
+When improving the live desk, strategies, exits, entries, or capital logic:
+
+- **Never** special-case a single base/coin (e.g. `if base == "UNI"`, SOL-only boosts, ETH-only blocks).
+- Prefer **generic** levers: thresholds, regimes, fees, util/sleeve caps, momentum/quality scores, venue economics, inventory age/depth.
+- Lists like focus bases or deploy universes are OK as **config/universes**, not as one-off exception logic for one ticker.
+- Comments may cite a coin as an example of why a generic threshold changed; the code path itself must stay coin-agnostic.
+- If a coin looks toxic, fix via **measurable attributes** (spread, adverse selection, fill rate, AlphaI score) that apply to any symbol.
