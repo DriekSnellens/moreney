@@ -346,6 +346,68 @@ def test_mid_flat_recycle_for_non_would_buy() -> None:
     assert plan[0] == "mid_flat"
 
 
+def test_mid_flat_partial_rotates_when_free_cash_already_high() -> None:
+    """Opportunity-cost: mid-flat must still clip when unlock_remaining is 0."""
+    b = _bridge()
+    b._uw_deadlock_partial_enabled = True
+    b._uw_deadlock_unlock_remaining_eur = Decimal("0")
+    b._uw_deadlock_partial_clip_eur = Decimal("220")
+    b._uw_deadlock_target_free_eur = Decimal("220")
+    b._uw_deadlock_partial_min_eur = Decimal("40")
+    b._uw_deadlock_day_loss_remaining = lambda: Decimal("15")  # type: ignore[method-assign]
+    qty = b._uw_deadlock_partial_sell_qty(
+        free_qty=Decimal("50"),
+        mark=Decimal("6"),
+        be=Decimal("6.04"),
+        session_cap=Decimal("50"),
+        rotate_inventory=True,
+    )
+    assert qty > 0
+    assert qty * Decimal("6") <= Decimal("220") + Decimal("0.01")
+    assert (
+        b._uw_deadlock_partial_sell_qty(
+            free_qty=Decimal("50"),
+            mark=Decimal("6"),
+            be=Decimal("6.04"),
+            session_cap=Decimal("50"),
+            rotate_inventory=False,
+        )
+        == Decimal("0")
+    )
+
+
+def test_mid_flat_slot_blocker_uses_shallower_depth() -> None:
+    """Weak held UNI at ~0.35% should mid-flat when sleeve targets remain open."""
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = True
+    b._uw_mid_flat_max_depth_pct = Decimal("0.012")
+    b._uw_mid_flat_min_age_sec = 600.0
+    b._uw_near_below_be_pct = Decimal("0.005")  # live pre-crash near floor
+    b._uw_deadlock_below_be_pct = Decimal("0.002")
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 400.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: False  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    b._sleeve_held_fills_slot = lambda base: False  # type: ignore[method-assign]
+    b._sleeve_deploy_targets = lambda top_n=2: ["ADA", "LINK"]  # type: ignore[method-assign]
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="UNI",
+        symbol="UNIEUR",
+        mark=Decimal("99.58"),  # -0.42% — below near_be 0.5% floor
+        be=Decimal("100"),
+        notional=Decimal("200"),
+    )
+    assert plan is not None
+    assert plan[0] == "mid_flat"
+
+
 def test_mid_flat_skips_would_buy_today() -> None:
     b = _bridge()
     b._uw_mid_flat_recycle_enabled = True
