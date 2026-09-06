@@ -6,6 +6,9 @@ and exposes capped feedback multipliers for deploy / harvest / avoid recycle.
 
 ``auto_apply`` defaults False (shadow). When True, bridge multiplies live
 knobs by the feedback scales (still hard-capped).
+
+``auto_apply_modes`` can selectively enable individual feedback channels
+(e.g. ``{"deploy_urgency"}``) without turning on harvest/avoid scales.
 """
 
 from __future__ import annotations
@@ -83,6 +86,8 @@ class DeskLessonStore:
 
     lessons: list[dict[str, Any]] = field(default_factory=list)
     auto_apply: bool = False
+    # Selective apply without full auto_apply (e.g. {"deploy_urgency"}).
+    auto_apply_modes: set[str] = field(default_factory=set)
     feedback: DeskLessonFeedback = field(default_factory=DeskLessonFeedback)
     _path: str | None = field(default=None, repr=False)
 
@@ -414,10 +419,31 @@ class DeskLessonStore:
         return fb
 
     def applied_feedback(self) -> DeskLessonFeedback:
-        """Return live multipliers; identity when auto_apply is off."""
-        if not self.auto_apply:
+        """Return live multipliers; identity when auto_apply is off.
+
+        Selective ``auto_apply_modes`` can expose only deploy urgency (etc.)
+        while harvest/avoid stay at identity until more samples accumulate.
+        """
+        if self.auto_apply:
+            return self.feedback
+        modes = {str(m).strip().lower() for m in (self.auto_apply_modes or set()) if m}
+        if not modes:
             return DeskLessonFeedback()
-        return self.feedback
+        fb = DeskLessonFeedback()
+        if "deploy_urgency" in modes or "deploy" in modes:
+            fb.deploy_urgency_bias = float(self.feedback.deploy_urgency_bias or 1.0)
+            fb.missed_deploy_hits = int(self.feedback.missed_deploy_hits or 0)
+            fb.sum_missed_eur = float(self.feedback.sum_missed_eur or 0.0)
+            fb.sample_n = int(self.feedback.sample_n or 0)
+        if "harvest" in modes or "harvest_floor" in modes:
+            fb.harvest_floor_scale = float(self.feedback.harvest_floor_scale or 1.0)
+            fb.early_harvest_hits = int(self.feedback.early_harvest_hits or 0)
+        if "avoid" in modes or "avoid_age" in modes:
+            fb.avoid_recycle_age_scale = float(
+                self.feedback.avoid_recycle_age_scale or 1.0
+            )
+            fb.avoid_vs_sleeve_hits = int(self.feedback.avoid_vs_sleeve_hits or 0)
+        return fb
 
     # --- summary / persist ------------------------------------------------
 
@@ -430,6 +456,7 @@ class DeskLessonStore:
             "open_count": open_n,
             "settled_count": settled_n,
             "auto_apply": self.auto_apply,
+            "auto_apply_modes": sorted(self.auto_apply_modes),
             "feedback": self.feedback.as_dict(),
             "applied_feedback": self.applied_feedback().as_dict(),
             "latest_kind": (latest or {}).get("kind"),
@@ -468,6 +495,7 @@ class DeskLessonStore:
     def to_dict(self) -> dict[str, Any]:
         return {
             "auto_apply": self.auto_apply,
+            "auto_apply_modes": sorted(self.auto_apply_modes),
             "feedback": self.feedback.as_dict(),
             "lessons": self.lessons[-400:],
         }
@@ -478,6 +506,13 @@ class DeskLessonStore:
         if not isinstance(raw, dict):
             return store
         store.auto_apply = bool(raw.get("auto_apply") or False)
+        modes_raw = raw.get("auto_apply_modes") or []
+        if isinstance(modes_raw, str):
+            modes_raw = [x.strip() for x in modes_raw.split(",") if x.strip()]
+        if isinstance(modes_raw, (list, tuple, set)):
+            store.auto_apply_modes = {
+                str(m).strip().lower() for m in modes_raw if str(m).strip()
+            }
         lessons = raw.get("lessons")
         if isinstance(lessons, list):
             store.lessons = [x for x in lessons if isinstance(x, dict)][-400:]
@@ -560,6 +595,7 @@ def sync_desk_lessons_day_returns(
     *,
     enabled: bool = True,
     auto_apply: bool | None = None,
+    auto_apply_modes: set[str] | list[str] | str | None = None,
 ) -> dict[str, Any] | None:
     """Settle open desk lessons with day returns; return summary."""
     if not enabled or not day_returns_pct:
@@ -567,6 +603,13 @@ def sync_desk_lessons_day_returns(
     store = DeskLessonStore.load(path)
     if auto_apply is not None:
         store.auto_apply = bool(auto_apply)
+    if auto_apply_modes is not None:
+        modes = auto_apply_modes
+        if isinstance(modes, str):
+            modes = [x.strip() for x in modes.split(",") if x.strip()]
+        store.auto_apply_modes = {
+            str(m).strip().lower() for m in (modes or []) if str(m).strip()
+        }
     n = store.settle_open_with_day_returns(day_returns_pct)
     store.save(path)
     summary = store.summary()

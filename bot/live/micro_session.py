@@ -394,6 +394,9 @@ def _session_settings(
             "live_micro_uw_deadlock_partial_min_eur": 40.0,
             "live_micro_uw_deadlock_day_loss_cap_eur": 15.0,
             "live_micro_uw_deadlock_would_buy_gate": True,
+            "live_micro_uw_mid_flat_recycle_enabled": True,
+            "live_micro_uw_mid_flat_max_depth_pct": 0.012,
+            "live_micro_uw_mid_flat_min_age_sec": 600.0,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
             "live_micro_alphai_cross_venue_deploy": True,
             "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,
@@ -464,6 +467,7 @@ def _session_settings(
             "alphai_desk_lessons_enabled": True,
             "alphai_desk_lessons_path": "./data/alphai/desk_lessons.json",
             "alphai_desk_lessons_auto_apply": False,
+            "alphai_desk_lessons_auto_apply_modes": "deploy_urgency",
             "alphai_desk_lessons_min_free_eur": 150.0,
             "alphai_desk_lessons_observe_sec": 60.0,
             # Capital playbook router (TREND/FLAT/ADVERSE) — live enforce.
