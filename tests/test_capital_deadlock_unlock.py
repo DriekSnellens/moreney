@@ -70,6 +70,9 @@ def _bridge() -> MicroBudgetLiveExecutor:
     b._uw_deadlock_unlock_remaining_eur = Decimal("220")
     b._alphai_priority_clip_eur = Decimal("220")
     b._alphai_strong_clip_eur = Decimal("0")
+    b._uw_mid_flat_recycle_enabled = True
+    b._uw_mid_flat_max_depth_pct = Decimal("0.012")
+    b._uw_mid_flat_min_age_sec = 600.0
     b._uw_non_alphai_below_be_pct = Decimal("0.01")
     b._uw_non_alphai_min_age_sec = 3600.0
     b._uw_avoid_max_age_sec = 900.0
@@ -310,3 +313,66 @@ def test_playbook_has_partial_unlock_overlays() -> None:
     assert flat["uw_deadlock_target_free_eur"] == 220.0
     assert flat["uw_deadlock_day_loss_cap_eur"] == 12.0
     assert PRE_CRASH_FLAT_OVERLAYS["uw_deadlock_day_loss_cap_eur"] == 10.0
+
+
+
+def test_mid_flat_recycle_for_non_would_buy() -> None:
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = True
+    b._uw_mid_flat_max_depth_pct = Decimal("0.012")
+    b._uw_mid_flat_min_age_sec = 600.0
+    b._uw_near_below_be_pct = Decimal("0.004")
+    b._uw_near_max_depth_pct = Decimal("0.006")
+    b._uw_near_min_age_sec = 2700.0
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 900.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: False  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: False  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="UNI",
+        symbol="UNIEUR",
+        mark=Decimal("99.10"),  # -0.90% mid-depth
+        be=Decimal("100"),
+        notional=Decimal("200"),
+    )
+    assert plan is not None
+    assert plan[0] == "mid_flat"
+
+
+def test_mid_flat_skips_would_buy_today() -> None:
+    b = _bridge()
+    b._uw_mid_flat_recycle_enabled = True
+    b._uw_mid_flat_max_depth_pct = Decimal("0.012")
+    b._uw_mid_flat_min_age_sec = 600.0
+    b._uw_near_below_be_pct = Decimal("0.004")
+    b._uw_deadlock_unlock_enabled = False
+    b._uw_idle_pressure_enabled = False
+    b._uw_dust_max_notional = Decimal("0")
+    b._uw_non_alphai_min_age_sec = 99999.0
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 900.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_weak_bullish_hold = lambda base: False  # type: ignore[method-assign]
+    b._alphai_hold_conviction = lambda base: 0.9  # type: ignore[method-assign]
+    b._uw_would_buy_today = lambda base, symbol: True  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    b._uw_alphai_below_be_pct = Decimal("0.02")
+    b._uw_alphai_min_age_sec = 10800.0
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="SOL",
+        symbol="SOLEUR",
+        mark=Decimal("99.10"),
+        be=Decimal("100"),
+        notional=Decimal("200"),
+    )
+    assert plan is None or plan[0] != "mid_flat"

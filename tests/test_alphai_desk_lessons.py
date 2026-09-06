@@ -174,3 +174,29 @@ def test_missed_deploy_records_when_capital_deadlocked(tmp_path: Path) -> None:
     assert row is not None
     assert row.get("capital_deadlocked") is True
     assert float(row.get("locked_eur") or 0) >= 280.0
+
+
+
+def test_selective_deploy_urgency_apply_mode(tmp_path: Path) -> None:
+    store = DeskLessonStore.load(tmp_path / "desk_modes.json")
+    store.auto_apply = False
+    store.auto_apply_modes = {"deploy_urgency"}
+    store.record_missed_deploy(
+        sleeve_bases=["BNB"],
+        free_cash_eur=1800.0,
+        held_non_picks=["ETH"],
+        playbook="FLAT",
+        min_free_eur=150.0,
+    )
+    store.settle_open_with_day_returns({"BNB": 5.0, "ETH": -1.0})
+    store.recompute_feedback()
+    # Shadow feedback moved
+    assert store.feedback.deploy_urgency_bias > 1.0
+    applied = store.applied_feedback()
+    assert applied.deploy_urgency_bias > 1.0
+    assert applied.harvest_floor_scale == 1.0
+    # Persist modes
+    store.save(tmp_path / "desk_modes.json")
+    loaded = DeskLessonStore.load(tmp_path / "desk_modes.json")
+    assert "deploy_urgency" in loaded.auto_apply_modes
+    assert loaded.applied_feedback().deploy_urgency_bias > 1.0

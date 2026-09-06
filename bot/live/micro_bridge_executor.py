@@ -354,6 +354,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_deadlock_would_buy_gate = bool(
             getattr(settings, "live_micro_uw_deadlock_would_buy_gate", True)
         )
+        self._uw_mid_flat_recycle_enabled = bool(
+            getattr(settings, "live_micro_uw_mid_flat_recycle_enabled", True)
+        )
+        self._uw_mid_flat_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_mid_flat_max_depth_pct", 0.012) or 0.012)
+        )
+        self._uw_mid_flat_min_age_sec = float(
+            getattr(settings, "live_micro_uw_mid_flat_min_age_sec", 600) or 600
+        )
         self._uw_deadlock_day_key = ""
         self._uw_deadlock_day_loss_eur = _ZERO
         self._uw_deadlock_unlock_remaining_eur = _ZERO
@@ -543,6 +552,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._desk_lessons.auto_apply = bool(
             getattr(settings, "alphai_desk_lessons_auto_apply", False)
         )
+        modes_raw = getattr(settings, "alphai_desk_lessons_auto_apply_modes", "deploy_urgency")
+        if isinstance(modes_raw, str):
+            modes_raw = [x.strip() for x in modes_raw.split(",") if x.strip()]
+        self._desk_lessons.auto_apply_modes = {
+            str(m).strip().lower() for m in (modes_raw or []) if str(m).strip()
+        }
         self._desk_lessons_min_free_eur = float(
             getattr(settings, "alphai_desk_lessons_min_free_eur", 150.0) or 150.0
         )
@@ -1331,6 +1346,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         try:
             disk = DeskLessonStore.load(self._desk_lessons_path)
             disk.auto_apply = bool(self._desk_lessons.auto_apply)
+            disk.auto_apply_modes = set(
+                getattr(self._desk_lessons, "auto_apply_modes", set()) or set()
+            )
             self._desk_lessons = disk
         except Exception:  # noqa: BLE001
             logger.exception("DESK_LESSONS_RELOAD_FAILED")
@@ -2571,6 +2589,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_deadlock_day_loss_cap_eur": str(self._uw_deadlock_day_loss_cap_eur),
                 "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
                 "uw_deadlock_would_buy_gate": self._uw_deadlock_would_buy_gate,
+                "uw_mid_flat_recycle_enabled": self._uw_mid_flat_recycle_enabled,
+                "uw_mid_flat_max_depth_pct": str(self._uw_mid_flat_max_depth_pct),
+                "uw_mid_flat_min_age_sec": self._uw_mid_flat_min_age_sec,
+                "desk_lessons_auto_apply_modes": sorted(
+                    getattr(self._desk_lessons, "auto_apply_modes", set()) or []
+                ),
                 "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
                 "alphai_cross_venue_max_other_depth_pct": str(
                     self._alphai_cross_venue_max_other_depth
@@ -4835,6 +4859,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ):
                         base = infer_base_asset(symbol)
                         fails = self._bump_exit_maker_fail(venue, base)
+                        if strategy in {
+                            "trail_be_harvest",
+                            "trail_recovery_be_partial",
+                        }:
+                            # Stale harvest must retry (optionally as taker after fails).
+                            trail_key = self._lots_key(venue, base)
+                            st = self._trail.get(trail_key)
+                            if isinstance(st, dict):
+                                self._clear_partial_done(st, strategy)
                         logger.info(
                             "EXIT_MAKER_STALE venue=%s base=%s fails=%s strategy=%s",
                             venue,
@@ -5751,6 +5784,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if flat_or_down:
                     return ("idle_pressure", "stop", floor)
 
+        # Mid-depth flat recycle: bags past near_be but before alphai deep-hold,
+        # that we would NOT buy today — free capital for the sleeve (partial-sized
+        # by caller when deadlock_partial tooling is active).
+        if (
+            self._uw_mid_flat_recycle_enabled
+            and flat_or_down
+            and not strong_hold
+            and not self._uw_would_buy_today(base, symbol)
+            and age >= self._uw_mid_flat_min_age_sec
+            and depth > self._uw_near_below_be_pct
+            and depth <= self._uw_mid_flat_max_depth_pct
+        ):
+            floor = be * (Decimal("1") - self._uw_mid_flat_max_depth_pct)
+            if mark >= floor:
+                return ("mid_flat", "band", floor)
+            return ("mid_flat", "stop", floor)
+
         # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
         if is_alphai:
             weak = self._alphai_weak_bullish_hold(base)
@@ -5951,6 +6001,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         if base:
             floor *= self._alphai_momentum_floor_scale(base)
+            # Sleeve deploy urgency: after missed deploys / empty ring, ease entry.
+            try:
+                if (
+                    self._alphai_sleeve_priority_buy(base)
+                    and self._ring_needs_deploy(venue)
+                ):
+                    bias = float(self._desk_lesson_deploy_bias())
+                    if bias > 1.01:
+                        floor = floor / Decimal(str(min(bias, 1.25)))
+            except Exception:  # noqa: BLE001
+                pass
         return floor
 
     def _momentum_ok(
@@ -7293,7 +7354,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         if self._trail_session_only
                         else free_uw
                     )
-                    if str(tier).startswith("deadlock_") and self._uw_deadlock_partial_enabled:
+                    if (
+                        (
+                            str(tier).startswith("deadlock_")
+                            or str(tier) == "mid_flat"
+                        )
+                        and self._uw_deadlock_partial_enabled
+                    ):
                         sell_qty = self._uw_deadlock_partial_sell_qty(
                             free_qty=free_uw,
                             mark=mark,
@@ -7315,7 +7382,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         st["uw_recycle_tier"] = tier
                         st["uw_recycle_mode"] = mode
                         st["sleeve"] = True  # attribute realized PnL to sleeve loss cap
-                        if str(tier).startswith("deadlock_"):
+                        if str(tier).startswith("deadlock_") or str(tier) == "mid_flat":
                             # Reserve budget so later bags this pass do not over-unlock.
                             self._uw_deadlock_unlock_remaining_eur = max(
                                 _ZERO,
@@ -7741,18 +7808,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_exit_stat(self._exit_reject_counts, f"reason:{reason}")
                 if quote_reason in {"rest_touch_maker", "rest_maker_be"}:
                     self._bump_exit_maker_fail(venue, asset)
-                if reason != "trail_be_harvest":
-                    self._clear_partial_done(st, reason)
+                # Always clear — including BE harvest — so stale/reject can retry.
+                self._clear_partial_done(st, reason)
                 self._bump_skip(f"{reason}_reject")
             elif reason == "trail_be_harvest":
-                # Lock after submit — resting fills must not re-trigger 35% spam.
-                self._set_partial_done(st, reason)
                 status_l = str(result.status.value).lower()
                 if status_l in {"filled", "partially_filled"}:
+                    # Lock only on real fill (pending/resting must remain retryable).
+                    self._set_partial_done(st, reason)
                     self._clear_exit_maker_fail(venue, asset)
                     self._bump_exit_stat(self._exit_fill_counts, quote_reason)
                     self._bump_exit_stat(self._exit_fill_counts, f"reason:{reason}")
                 else:
+                    # Resting/pending: do not lock harvest; maker-fail path can force taker.
                     self._bump_exit_stat(self._exit_pending_counts, quote_reason)
                     self._bump_exit_stat(self._exit_pending_counts, f"reason:{reason}")
                 logger.info(
@@ -8526,18 +8594,37 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 meta["alphai_intraday_reasons"] = ",".join(gate_reasons)
                 order_request = order_request.model_copy(update={"metadata": meta})
                 if action == "WAIT":
-                    self._bump_skip("alphai_intraday_wait")
-                    for reason in gate_reasons:
-                        self._bump_skip(f"intraday_{reason}")
-                    if not self._alphai_intraday_gate_shadow_only:
-                        return await self._reject_before_live(
-                            order_request,
-                            reason="ALPHAI_INTRADAY_WAIT",
-                            message=(
-                                f"intraday gate WAIT for {base}: "
-                                + ",".join(gate_reasons)
-                            ),
+                    # Sleeve urgency: empty ring + free cash → REDUCE instead of hard WAIT.
+                    sleeve_urgency = False
+                    try:
+                        sleeve_urgency = bool(
+                            self._alphai_sleeve_priority_buy(base)
+                            and self._ring_needs_deploy(venue)
+                            and float(self._venue_budget_remaining(venue)) >= 50.0
                         )
+                    except Exception:  # noqa: BLE001
+                        sleeve_urgency = False
+                    if sleeve_urgency:
+                        action = "REDUCE"
+                        gate_mult = min(gate_mult if gate_mult > 0 else _ONE, Decimal("0.40"))
+                        meta["alphai_intraday_gate"] = action
+                        meta["alphai_intraday_sleeve_urgency"] = True
+                        meta["alphai_intraday_size_mult"] = str(gate_mult)
+                        order_request = order_request.model_copy(update={"metadata": meta})
+                        self._bump_skip("alphai_intraday_sleeve_urgency")
+                    else:
+                        self._bump_skip("alphai_intraday_wait")
+                        for reason in gate_reasons:
+                            self._bump_skip(f"intraday_{reason}")
+                        if not self._alphai_intraday_gate_shadow_only:
+                            return await self._reject_before_live(
+                                order_request,
+                                reason="ALPHAI_INTRADAY_WAIT",
+                                message=(
+                                    f"intraday gate WAIT for {base}: "
+                                    + ",".join(gate_reasons)
+                                ),
+                            )
                 elif action == "REDUCE" and gate_mult < _ONE:
                     meta["alphai_intraday_size_mult"] = str(gate_mult)
                     order_request = order_request.model_copy(update={"metadata": meta})

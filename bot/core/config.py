@@ -485,6 +485,8 @@ class Settings(BaseSettings):
     alphai_desk_lessons_enabled: bool = True
     alphai_desk_lessons_path: str = "./data/alphai/desk_lessons.json"
     alphai_desk_lessons_auto_apply: bool = False
+    # Selective apply without full auto_apply (comma list). Default: deploy urgency only.
+    alphai_desk_lessons_auto_apply_modes: str = "deploy_urgency"
     alphai_desk_lessons_min_free_eur: float = Field(default=150.0, ge=25.0, le=2000.0)
     alphai_desk_lessons_observe_sec: float = Field(default=60.0, ge=15.0, le=600.0)
     # Intraday AND-gate: AlphaI pick × freshness × low adverse × momentum not down.
@@ -578,6 +580,10 @@ class Settings(BaseSettings):
     live_micro_uw_deadlock_partial_min_eur: float = Field(default=40.0, ge=0.0, le=1000.0)
     live_micro_uw_deadlock_day_loss_cap_eur: float = Field(default=15.0, ge=0.0, le=500.0)
     live_micro_uw_deadlock_would_buy_gate: bool = True
+    # Mid-depth flat UW recycle for bags we would not buy today (gap between near_be and alphai hold).
+    live_micro_uw_mid_flat_recycle_enabled: bool = True
+    live_micro_uw_mid_flat_max_depth_pct: float = Field(default=0.012, ge=0.0, le=0.05)
+    live_micro_uw_mid_flat_min_age_sec: float = Field(default=600.0, ge=60.0, le=86400.0)
     # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
     live_micro_alphai_cross_venue_deploy: bool = True
     live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(
