@@ -1629,10 +1629,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return False
         except Exception:  # noqa: BLE001
             pass
+        sig = self._alphai_signals
+        if sig is not None:
+            try:
+                if hasattr(sig, "is_price_lagging") and bool(sig.is_price_lagging(bu)):
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if hasattr(sig, "price_confirm_scale") and float(
+                    sig.price_confirm_scale(bu)
+                ) < 0.45:
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
         try:
             for venue in getattr(self, "_execute_venues", ()) or ():
                 depth = self._underwater_depth_on_venue(str(venue), bu)
-                if depth is not None and depth > Decimal("0.003"):
+                if depth is not None and depth > Decimal("0.0025"):
                     return False
         except Exception:  # noqa: BLE001
             pass
@@ -5850,12 +5864,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mid_flat_max_depth = self._uw_mid_flat_max_depth_pct
         slot_blocker = False
         try:
-            # Weak held priority bags that do not fill a sleeve slot: free capital
-            # faster / deeper so opportunity-cost deploy targets (e.g. LINK) can enter.
-            slot_blocker = (
-                not self._sleeve_held_fills_slot(base)
-                and bool(self._sleeve_deploy_targets(top_n=2))
-            )
+            # Weak / mild-UW held priority bags must not keep capital idle while
+            # fresher unheld sleeve targets wait (UNI @ -0.4% was missing the
+            # near_be floor of 0.5% and never entered mid_flat).
+            targets = self._sleeve_deploy_targets(top_n=2)
+            weak_hold = False
+            try:
+                weak_hold = bool(self._alphai_weak_bullish_hold(base))
+            except Exception:  # noqa: BLE001
+                weak_hold = False
+            if targets:
+                if (not self._sleeve_held_fills_slot(base)) or weak_hold:
+                    slot_blocker = True
+                elif depth >= Decimal("0.0025") and (
+                    self._alphai_sleeve_priority_buy(base)
+                    or self._alphai_bullish_buy(base)
+                ):
+                    slot_blocker = True
             if slot_blocker:
                 mid_flat_min_age = min(mid_flat_min_age, 120.0)
                 mid_flat_min_depth = min(

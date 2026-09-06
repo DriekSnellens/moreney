@@ -382,7 +382,7 @@ def test_mid_flat_slot_blocker_uses_shallower_depth() -> None:
     b._uw_mid_flat_recycle_enabled = True
     b._uw_mid_flat_max_depth_pct = Decimal("0.012")
     b._uw_mid_flat_min_age_sec = 600.0
-    b._uw_near_below_be_pct = Decimal("0.005")
+    b._uw_near_below_be_pct = Decimal("0.005")  # live pre-crash near floor
     b._uw_deadlock_below_be_pct = Decimal("0.002")
     b._uw_deadlock_unlock_enabled = False
     b._uw_idle_pressure_enabled = False
@@ -400,7 +400,7 @@ def test_mid_flat_slot_blocker_uses_shallower_depth() -> None:
         venue="bitvavo",
         base="UNI",
         symbol="UNIEUR",
-        mark=Decimal("99.65"),  # -0.35% — below old near_be floor
+        mark=Decimal("99.58"),  # -0.42% — below near_be 0.5% floor
         be=Decimal("100"),
         notional=Decimal("200"),
     )
