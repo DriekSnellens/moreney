@@ -5831,13 +5831,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and self._alphai_sleeve_priority_buy(base)
                 and not flat_or_down
             )
-            # Would-buy-today gate: nurse names we would still deploy into.
+            # Would-buy-today gate: nurse names we would still deploy into —
+            # except mild-UW slot blockers while fresher sleeve targets wait.
             if (
                 self._uw_deadlock_would_buy_gate
                 and not self._alphai_is_avoid_base(base)
                 and self._uw_would_buy_today(base, symbol)
             ):
-                sleeve_rising = True
+                nurse = True
+                try:
+                    targets = self._sleeve_deploy_targets(top_n=2)
+                    if targets and not self._sleeve_held_fills_slot(base):
+                        nurse = False
+                except Exception:  # noqa: BLE001
+                    nurse = True
+                if nurse:
+                    sleeve_rising = True
             if self._uw_deadlock_day_loss_remaining() <= 0:
                 pass  # day unlock budget spent — fall through to milder paths
             elif not sleeve_rising:
@@ -5862,13 +5871,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             free_est = self._venue_budget_remaining(venue)
             uw_book = self._underwater_book_notional(venue)
             soft = self._ring_soft_block_underwater_eur
+            if soft <= 0:
+                soft = Decimal("25")
             locked_starved = (
-                soft > 0
-                and uw_book >= soft
+                uw_book >= soft
                 and self._active_book_notional(venue)
                 < self._active_ring_eur * Decimal("0.40")
             )
-            if free_est >= self._uw_idle_min_free_eur or locked_starved:
+            # Free-cash probe can read 0 on multi-venue ledger glitches; also
+            # treat fat UW vault + starved ring as idle pressure by itself.
+            if (
+                free_est >= self._uw_idle_min_free_eur
+                or locked_starved
+                or uw_book >= soft
+            ):
                 floor = be * (Decimal("1") - self._uw_idle_below_be_pct)
                 if depth >= self._uw_idle_below_be_pct * Decimal("1.5") or not flat_or_down:
                     # Clearly underwater or momentum unknown → hit bid.
@@ -5917,12 +5933,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             pass
         if (
             self._uw_mid_flat_recycle_enabled
-            and flat_or_down
             and not strong_hold
-            and not self._uw_would_buy_today(base, symbol)
             and age >= mid_flat_min_age
             and depth > mid_flat_min_depth
             and depth <= mid_flat_max_depth
+            and (
+                # Opportunity-cost: slot blockers rotate even on a mild bounce
+                # (would-buy / rising tape must not park capital over ADA/LINK).
+                slot_blocker
+                or (
+                    flat_or_down
+                    and not self._uw_would_buy_today(base, symbol)
+                )
+            )
         ):
             floor = be * (Decimal("1") - mid_flat_max_depth)
             if mark >= floor:
