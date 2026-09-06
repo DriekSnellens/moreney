@@ -129,11 +129,20 @@ class MicroSessionManager:
             budget_f = float(budget) if budget is not None else 2000.0
         except (TypeError, ValueError):
             budget_f = 2000.0
-        return {
+        symbols_raw = raw.get("symbols") or raw.get("symbols_sample") or []
+        symbols: list[str] | None = None
+        if isinstance(symbols_raw, str) and symbols_raw.strip():
+            symbols = [s.strip() for s in symbols_raw.split(",") if s.strip()]
+        elif isinstance(symbols_raw, list) and symbols_raw:
+            symbols = [str(s).strip() for s in symbols_raw if str(s).strip()]
+        out: dict[str, Any] = {
             "minutes": None,
             "budget_eur": budget_f,
             "exclude_btc": bool(raw.get("exclude_btc", False)),
         }
+        if symbols:
+            out["symbols"] = symbols
+        return out
 
     async def resume_if_interrupted(self) -> dict[str, Any] | None:
         """Restart a continuous session that died with the process."""
@@ -188,6 +197,7 @@ class MicroSessionManager:
                     "minutes": None if continuous else minutes,
                     "budget_eur": str(budget_eur),
                     "exclude_btc": exclude_btc,
+                    "symbols": list(symbols) if symbols else None,
                     "started_at": datetime.now(UTC).isoformat(),
                     "finished_at": None,
                     "report": None,

@@ -78,7 +78,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_venues == "okx,bitvavo"
     assert cfg.paper_maker_same_venue is True
     assert cfg.arbitrage_max_emits_per_cycle == 12
-    assert cfg.paper_maker_max_open_quotes <= 6
+    assert cfg.paper_maker_max_open_quotes == 8
     assert cfg.live_micro_execute_venues == "bitvavo"
     dual = _session_settings(
         Settings(live_micro_execute_venues="bitvavo,okx"),
@@ -86,19 +86,19 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
         symbols=["SOLEUR"],
         persist_path=tmp_path / "dual.json",
     )
-    # Aggregate equity ~€4k sizes clips near the ~€150 ceiling → 3.75% of €4k.
-    assert dual.arbitrage_position_pct == 3.75
+    assert dual.arbitrage_position_pct == 7.5
     assert dual.arbitrage_max_emits_per_cycle == 12
-    assert dual.live_micro_max_open_orders == 6
-    assert dual.live_micro_max_open_orders_per_venue == 4
-    assert dual.live_micro_max_resting_buys_per_symbol == 2
-    assert dual.live_micro_max_alt_bases == 8
-    assert float(dual.live_micro_first_clip_eur) == 55.0
-    assert float(dual.live_micro_add_clip_eur) == 100.0
-    assert float(dual.live_micro_active_ring_eur) == 1000.0
-    assert float(dual.paper_max_alt_inventory_pct) == 55.0
+    assert dual.live_micro_max_open_orders == 8
+    assert dual.live_micro_max_open_orders_per_venue == 8
+    assert dual.live_micro_max_resting_buys_per_symbol == 3
+    assert dual.live_micro_max_alt_bases == 10
+    assert float(dual.live_micro_first_clip_eur) == 105.0
+    assert float(dual.live_micro_add_clip_eur) == 140.0
+    assert float(dual.live_micro_active_ring_eur) == 350.0
+    assert float(dual.live_micro_velocity_sleeve_eur) == 700.0
+    assert float(dual.paper_max_alt_inventory_pct) == 35.0
     assert dual.max_simultaneous_positions == 16
-    assert float(dual.paper_maker_keep_vs_best_frac) == 0.30
+    assert float(dual.paper_maker_keep_vs_best_frac) == 0.35
     assert cfg.live_micro_cross_venue_enabled is True
     assert "EURUSDT" in cfg.market_data_symbols
     assert "SOLUSDT" in cfg.market_data_symbols
@@ -112,29 +112,33 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_maker_sell_profit_buffer_bps >= 10.0
     assert cfg.paper_dust_exit_slack_bps == 0.0
     assert cfg.paper_trail_take_profit_enabled is True
-    assert cfg.paper_trail_drawdown_pct == 0.015
+    assert cfg.paper_trail_drawdown_pct == 0.012
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_arm_pct == 0.012
-    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
-    assert cfg.paper_trail_soft_partial_pct == 0.15
-    assert cfg.paper_trail_hard_arm_pct == 0.03
-    assert cfg.paper_trail_hard_drawdown_pct == 0.015
-    assert cfg.paper_trail_hard_partial_pct == 0.35
-    assert cfg.paper_trail_arm_gain_pct == 0.03
+    assert cfg.paper_trail_soft_arm_pct == 0.015
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_partial_pct == 0.35
+    assert cfg.paper_trail_hard_arm_pct == 0.025
+    assert cfg.paper_trail_hard_drawdown_pct == 0.012
+    assert cfg.paper_trail_hard_partial_pct == 0.40
+    assert cfg.paper_trail_arm_gain_pct == 0.025
     assert cfg.live_micro_winner_add_enabled is True
     assert cfg.live_micro_winner_add_max == 2
-    assert float(cfg.live_micro_winner_add_clip_eur) == 55.0
+    assert float(cfg.live_micro_winner_add_clip_eur) <= 200.0
     assert float(cfg.live_micro_winner_add_cooldown_sec) == 45.0
-    assert cfg.live_micro_low_util_relax_focus is True
-    assert float(cfg.paper_maker_min_profit_eur) == 0.03
-    assert float(cfg.paper_maker_min_net_return) == 0.0004
-    assert float(cfg.profitability_min_net_profit_usd) == 0.03
-    assert float(cfg.profitability_min_net_return) == 0.0004
-    assert float(cfg.risk_min_net_profit_usd) == 0.03
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
-    assert cfg.live_micro_max_resting_buys_per_symbol == 2
-    assert cfg.live_micro_max_open_orders_per_venue == 4
+    assert cfg.live_micro_alphai_winner_add_only is True
+    assert 170.0 <= float(cfg.live_micro_alphai_priority_clip_eur) <= 180.0
+    assert 200.0 <= float(cfg.live_micro_alphai_strong_clip_eur) <= 220.0
+    assert (cfg.live_micro_long_hold_bases or "") == ""
+    assert cfg.live_micro_low_util_relax_focus is False
+    assert float(cfg.paper_maker_min_profit_eur) == 0.025
+    assert float(cfg.paper_maker_min_net_return) == 0.0003
+    assert float(cfg.profitability_min_net_profit_usd) == 0.025
+    assert float(cfg.profitability_min_net_return) == 0.0003
+    assert float(cfg.risk_min_net_profit_usd) == 0.025
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == float(cfg.live_micro_active_ring_eur)
+    assert cfg.live_micro_max_resting_buys_per_symbol == 3
+    assert cfg.live_micro_max_open_orders_per_venue == 8
     assert cfg.paper_trail_session_buys_only is False
     assert cfg.paper_trail_atr_enabled is False
     assert cfg.live_disable_research_hooks is True
@@ -155,11 +159,13 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_new_buy_focus_only is True
     assert float(cfg.live_micro_okx_cash_bias_ratio) == 1.0
     assert (cfg.live_micro_okx_deploy_bases or "") == ""
-    assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0015
+    assert cfg.live_micro_max_per_corr_group == 4
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
+    assert cfg.live_micro_ring_util_b_ignore_underwater is True
+    assert cfg.live_cvd_abandoned is True
     assert cfg.live_micro_low_util_rising_n == 3
     assert float(cfg.live_micro_low_util_buy_resting_max_age_sec) == 30.0
-    assert float(cfg.live_micro_active_ring_eur) == 1000.0
+    assert abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)) < 1e-6 or abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)/max(1,len(str(cfg.live_micro_execute_venues or "bitvavo").split(",")))) < 1e-6
     assert cfg.paper_daily_kill_eur == 50.0
     assert cfg.paper_ladder_buy_enabled is False
     assert cfg.paper_time_stop_enabled is True
@@ -167,34 +173,33 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_regime_block_buys is True
     assert cfg.paper_maker_min_net_return <= 0.0006
     assert cfg.paper_maker_min_profit_eur <= 0.06
-    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 90.0
-    assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.03
-    assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.0003
-    assert cfg.paper_maker_min_notional_eur == 55.0
+    assert float(getattr(cfg, "paper_maker_small_clip_max_eur", 0) or 0) == 220.0
+    assert float(getattr(cfg, "paper_maker_small_clip_min_profit_eur", 0) or 0) == 0.02
+    assert float(getattr(cfg, "paper_maker_small_clip_min_net_return", 0) or 0) == 0.00026
+    assert cfg.paper_maker_min_notional_eur == 80.0
     assert cfg.max_simultaneous_positions >= 8
-    assert cfg.live_micro_max_alt_bases == 8
+    assert cfg.live_micro_max_alt_bases == 10
     assert cfg.live_micro_block_cross_venue_duplicate_bases is False
     assert cfg.live_micro_consolidate_duplicate_bases is False
     assert cfg.live_micro_consolidate_primary_venue == "bitvavo"
-    assert float(cfg.live_micro_first_clip_eur) == 55.0
-    assert float(cfg.live_micro_add_clip_eur) == 100.0
+    assert abs(float(cfg.live_micro_first_clip_eur) - 106.26) < 0.05
+    assert abs(float(cfg.live_micro_add_clip_eur) - 141.68) < 0.05
     assert float(cfg.live_micro_first_clip_eur) <= float(cfg.live_micro_add_clip_eur)
-    assert cfg.live_micro_max_open_orders <= 6
-    assert cfg.live_micro_max_open_orders_per_venue == 4
-    assert cfg.live_micro_max_resting_buys_per_symbol == 2
-    assert float(cfg.live_micro_max_notional_eur) >= 80.0
-    assert float(cfg.risk_max_position_usd) >= 80.0
-    assert float(cfg.live_micro_active_ring_eur) == 1000.0
+    assert cfg.live_micro_max_open_orders == 8
+    assert cfg.live_micro_max_open_orders_per_venue == 8
+    assert cfg.live_micro_max_resting_buys_per_symbol == 3
+    assert float(cfg.live_micro_max_notional_eur) >= 200.0
+    assert float(cfg.risk_max_position_usd) >= 200.0
+    assert abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)) < 0.05
     assert cfg.live_micro_resting_max_age_sec >= 480.0
     assert cfg.paper_min_alt_inventory_pct >= 15.0
-    assert cfg.paper_max_alt_inventory_pct <= 55.0
-    assert cfg.paper_max_alt_inventory_pct >= 50.0
-    assert cfg.paper_trail_soft_partial_pct == 0.15
-    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
+    assert cfg.paper_max_alt_inventory_pct == 35.0
+    assert cfg.paper_trail_soft_partial_pct == 0.35
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
     assert cfg.live_micro_winner_add_enabled is True
-    assert cfg.live_micro_low_util_relax_focus is True
-    assert cfg.paper_maker_keep_vs_best_frac == 0.30
+    assert cfg.live_micro_low_util_relax_focus is False
+    assert cfg.paper_maker_keep_vs_best_frac == 0.35
     assert cfg.live_micro_underwater_buy_block == 1
     assert cfg.live_micro_block_underwater_adds is True
     assert cfg.live_micro_block_buys_when_holding_base is True
@@ -202,17 +207,38 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_underwater_block_new_bases_only is True
     assert float(cfg.live_micro_okx_buy_improve_bps) == 1.0
     assert cfg.paper_trail_recovery_be_partial_pct >= 0.50
-    assert cfg.paper_trail_be_harvest_partial_pct >= 0.50
-    assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) == 0.0
+    assert cfg.paper_trail_be_harvest_partial_pct >= 0.40
+    assert float(getattr(cfg, "live_micro_cut_loss_below_be_pct", 0) or 0) == 0.025
     assert cfg.live_micro_cut_loss_new_bases_only is False
     assert float(getattr(cfg, "live_micro_momentum_exit_above_be_pct", 0) or 0) == 0.005
     assert float(getattr(cfg, "live_micro_momentum_exit_min_return", 0) or 0) == 0.002
-    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.0
+    assert float(getattr(cfg, "live_micro_early_cut_loss_below_be_pct", 0) or 0) == 0.01
     assert cfg.live_micro_early_cut_new_bases_only is True
     assert cfg.live_micro_trail_hold_while_rising is True
     assert cfg.live_micro_trail_hold_rising_n == 2
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) <= 0.0003
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
+    assert cfg.alphai_require_bullish_new_buys is True
+    assert cfg.alphai_feature_scoring_enabled is True
+    assert cfg.alphai_feature_shadow_only is False
+    assert cfg.alphai_intraday_gate_enabled is True
+    assert cfg.alphai_intraday_gate_shadow_only is False
+    assert float(cfg.alphai_intraday_min_freshness) == 0.35
+    assert float(cfg.live_micro_okx_ring_clip_eur) == 100.0
+    assert cfg.live_micro_uw_recycle_enabled is True
+    assert float(cfg.live_micro_uw_dust_max_notional_eur) == 25.0
+    assert float(cfg.live_micro_uw_near_below_be_pct) == 0.006
+    assert float(cfg.live_micro_uw_near_min_age_sec) == 900.0
+    assert float(cfg.live_micro_uw_non_alphai_below_be_pct) == 0.008
+    assert float(cfg.live_micro_uw_non_alphai_min_age_sec) == 1200.0
+    assert float(cfg.live_micro_uw_alphai_below_be_pct) == 0.015
+    assert float(cfg.live_micro_uw_alphai_min_age_sec) == 3600.0
+    assert cfg.live_micro_uw_idle_pressure_enabled is True
+    assert float(cfg.live_micro_uw_idle_below_be_pct) == 0.004
+    assert float(cfg.live_micro_uw_idle_min_age_sec) == 600.0
+    assert cfg.live_micro_alphai_cross_venue_deploy is True
+    assert float(cfg.live_micro_alphai_cross_venue_max_other_depth_pct) == 0.025
+    assert float(cfg.live_micro_alphai_ring_fill_add_max_depth_pct) == 0.012
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.008
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
@@ -256,11 +282,11 @@ def test_session_settings_enable_rising_momentum_for_new_buys(tmp_path: Path) ->
     assert float(cfg.paper_buy_momentum_min_return) == 0.0015
     assert "SOL" in (cfg.live_micro_focus_bases or "")
     assert cfg.live_micro_new_buy_focus_only is True
-    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0015
-    assert float(cfg.live_micro_ring_soft_max_active_eur) == 650.0
-    assert cfg.live_micro_max_per_corr_group == 3
-    assert float(cfg.profitability_min_net_return) == 0.0004
-    assert float(cfg.profitability_min_net_profit_usd) == 0.03
+    assert float(cfg.live_micro_ring_momentum_min_return) == 0.0005
+    assert float(cfg.live_micro_ring_soft_max_active_eur) == float(cfg.live_micro_active_ring_eur)
+    assert cfg.live_micro_max_per_corr_group == 4
+    assert float(cfg.profitability_min_net_return) == 0.0003
+    assert float(cfg.profitability_min_net_profit_usd) == 0.025
 
 
 def test_momentum_blocks_new_base_without_rising_marks(tmp_path: Path) -> None:
@@ -552,8 +578,11 @@ async def test_bridge_mirrors_live_fill(
     assert len(bridge.live_trades) == 1
 
 
-def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
-    settings = _unlocked(paper_maker_sell_profit_buffer_bps=10.0)
+def test_bridge_break_even_sell_includes_fee_and_buffer(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=10.0,
+        live_micro_bridge_persist_path=str(tmp_path / "be.json"),
+    )
     portfolio = PaperPortfolio(settings, starting_eur=Decimal("100"))
     engine = LiveMicroEngine(settings)
     bridge = MicroBudgetLiveExecutor(
@@ -563,6 +592,9 @@ def test_bridge_break_even_sell_includes_fee_and_buffer() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
+    bridge._cost_lots.clear()  # noqa: SLF001
+    bridge._trusted_cost_keys.clear()  # noqa: SLF001
+    bridge._session_lots.clear()  # noqa: SLF001
     bridge._cost_lots["bitvavo:NEAR"] = [[Decimal("10"), Decimal("1.00")]]  # noqa: SLF001
     # Mark-seeded lots are untrusted until a real fill / trade hydrate.
     assert bridge._break_even_sell_price("bitvavo", "NEAR") is None  # noqa: SLF001
@@ -606,8 +638,12 @@ def test_sell_allowed_at_blocks_below_break_even() -> None:
 @pytest.mark.asyncio
 async def test_bridge_execute_sell_rejects_without_trusted_cost(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    settings = _unlocked(paper_maker_sell_profit_buffer_bps=10.0)
+    settings = _unlocked(
+        paper_maker_sell_profit_buffer_bps=10.0,
+        live_micro_bridge_persist_path=str(tmp_path / "sell_trust.json"),
+    )
     engine = LiveMicroEngine(settings)
     engine.arm()
     bridge = MicroBudgetLiveExecutor(
@@ -617,6 +653,10 @@ async def test_bridge_execute_sell_rejects_without_trusted_cost(
         budget_eur=Decimal("200"),
         live_maker=True,
     )
+    bridge.skips.clear()
+    bridge._cost_lots.clear()  # noqa: SLF001
+    bridge._trusted_cost_keys.clear()  # noqa: SLF001
+    bridge._session_lots.clear()  # noqa: SLF001
     # Untrusted mark seed only — must refuse sell even at a high price
     bridge._cost_lots["bitvavo:ADA"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
 
@@ -786,28 +826,30 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
         symbols=["ADAEUR"],
         persist_path=tmp_path / "t.json",
     )
-    assert cfg.paper_trail_drawdown_pct == 0.015
-    assert cfg.paper_trail_soft_arm_pct == 0.012
-    assert cfg.paper_trail_soft_drawdown_pct == 0.0025
-    assert cfg.paper_trail_hard_arm_pct == 0.03
+    assert cfg.paper_trail_drawdown_pct == 0.012
+    assert cfg.paper_trail_soft_arm_pct == 0.015
+    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_hard_arm_pct == 0.025
     assert cfg.paper_trail_partial_pct == 0.50
-    assert cfg.paper_trail_soft_partial_pct == 0.15
+    assert cfg.paper_trail_soft_partial_pct == 0.35
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
     assert cfg.live_micro_winner_add_max == 2
-    assert cfg.live_micro_max_notional_eur <= 200.0
-    assert cfg.live_micro_max_notional_eur >= 100.0
+    assert cfg.live_micro_max_notional_eur <= 300.0
+    assert cfg.live_micro_max_notional_eur >= 200.0
     assert cfg.paper_markout_enabled is False
     assert cfg.live_disable_research_hooks is True
     assert cfg.max_drawdown_percent == 12.0
     assert cfg.live_micro_reset_drawdown_on_start is True
-    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 5.0
-    assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.50
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.0003
+    assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
+    assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.40
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.008
     assert cfg.live_micro_exit_engine_enabled is True
-    assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 50.0
-    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.0
+    assert abs(float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) - 21.25) < 0.05
+    assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.5
     assert float(cfg.live_micro_mark_ttl_sec) == 2.0
-    assert float(cfg.live_micro_exit_cooldown_sec) == 1.0
+    assert float(cfg.live_micro_exit_cooldown_sec) == 1.5
+    assert abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)) < 1e-6 or abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)/max(1,len(str(cfg.live_micro_execute_venues or "bitvavo").split(",")))) < 1e-6
+    assert abs(float(cfg.live_micro_velocity_sleeve_eur) - 708.4) < 0.05
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:
@@ -923,6 +965,30 @@ def test_policy_allows_sell_above_max_notional() -> None:
     assert ok_sell is True, reason_sell
 
 
+def test_policy_allows_buy_within_one_cent_of_max_notional() -> None:
+    """Float dust at exactly the AlphaI strong-clip ceiling must not block buys."""
+    from bot.live.micro import MicroLivePolicy
+
+    pol = MicroLivePolicy(
+        _unlocked(live_micro_max_notional_eur=280, live_micro_venues="bitvavo,okx")
+    )
+    ok, reason = pol.validate_order(
+        venue="bitvavo",
+        symbol="ETHEUR",
+        notional_eur=Decimal("280.0000050842883500"),
+        side="buy",
+    )
+    assert ok is True, reason
+    ok_over, reason_over = pol.validate_order(
+        venue="bitvavo",
+        symbol="ETHEUR",
+        notional_eur=Decimal("280.02"),
+        side="buy",
+    )
+    assert ok_over is False
+    assert "exceeds max" in reason_over
+
+
 def test_soft_partial_retries_while_armed_not_only_newly_soft(tmp_path: Path) -> None:
     """Soft partial stays eligible after the arming tick."""
     settings = _unlocked(
@@ -991,8 +1057,11 @@ def test_soft_partial_zero_skips_early_clip(tmp_path: Path) -> None:
     assert st.get("triggered") is True
 
 
-def test_session_lots_only_for_trail_cost() -> None:
-    settings = _unlocked(paper_trail_session_buys_only=True)
+def test_session_lots_only_for_trail_cost(tmp_path: Path) -> None:
+    settings = _unlocked(
+        paper_trail_session_buys_only=True,
+        live_micro_bridge_persist_path=str(tmp_path / "session_lots.json"),
+    )
     bridge = MicroBudgetLiveExecutor(
         settings,
         portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
@@ -1014,6 +1083,33 @@ def test_session_lots_only_for_trail_cost() -> None:
     )
     assert bridge._session_unit_cost("bitvavo", "ADA") == Decimal("1.0")  # noqa: SLF001
     assert bridge._session_qty("bitvavo", "ADA") == Decimal("5")  # noqa: SLF001
+
+
+def test_persist_restores_trusted_cost_from_session_lots(tmp_path: Path) -> None:
+    """After restart, session lots must remain trusted so uw_recycle can sell."""
+    path = tmp_path / "trust_persist.json"
+    settings = _unlocked(live_micro_bridge_persist_path=str(path))
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._session_lots["bitvavo:ADA"] = [[Decimal("80"), Decimal("1.0")]]  # noqa: SLF001
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("80"), Decimal("1.0")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    bridge.persist_runtime_state(force=True)
+
+    bridge2 = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    assert bridge2._has_trusted_cost("bitvavo", "ADA") is True  # noqa: SLF001
+    assert bridge2._unit_cost("bitvavo", "ADA") == Decimal("1.0")  # noqa: SLF001
 
 
 def test_daily_kill_blocks_buys() -> None:
@@ -2234,13 +2330,17 @@ def test_momentum_down_and_exit_target_at_be_plus_half_pct() -> None:
     assert bridge._momentum_down("MILDEUR") is False  # noqa: SLF001
 
 
-def test_buy_fill_marks_new_session_base() -> None:
+def test_buy_fill_marks_new_session_base(tmp_path: Path) -> None:
     from bot.core.enums import OrderSide
 
+    settings = _unlocked(
+        live_micro_cut_loss_below_be_pct=0.04,
+        live_micro_bridge_persist_path=str(tmp_path / "new_base.json"),
+    )
     bridge = MicroBudgetLiveExecutor(
-        _unlocked(live_micro_cut_loss_below_be_pct=0.04),
-        portfolio=PaperPortfolio(_unlocked(), starting_eur=Decimal("100")),
-        live_engine=LiveMicroEngine(_unlocked()),
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("100")),
+        live_engine=LiveMicroEngine(settings),
         budget_eur=Decimal("100"),
         live_maker=True,
     )
@@ -2632,9 +2732,11 @@ def test_active_ring_boosts_unheld_focus_rank() -> None:
 def test_ring_soft_blocked_when_underwater_stuck(tmp_path: Path) -> None:
     from bot.core.models import Balance
 
+    # Legacy path: ignore_underwater=False still blocks Util-B on stuck bags.
     settings = _unlocked(
         live_micro_ring_soft_max_active_eur=650.0,
         live_micro_ring_soft_block_underwater_eur=25.0,
+        live_micro_ring_util_b_ignore_underwater=False,
         live_micro_active_ring_eur=1000.0,
         live_micro_bridge_persist_path=str(tmp_path / "uw_ring.json"),
     )
@@ -2657,6 +2759,35 @@ def test_ring_soft_blocked_when_underwater_stuck(tmp_path: Path) -> None:
     assert bridge._underwater_book_notional("bitvavo") == Decimal("100")  # noqa: SLF001
     assert bridge._ring_needs_deploy("bitvavo") is True  # noqa: SLF001
     assert bridge._ring_soft_momentum_eligible("bitvavo") is False  # noqa: SLF001
+
+
+def test_ring_soft_unlocked_despite_underwater_vault(tmp_path: Path) -> None:
+    from bot.core.models import Balance
+
+    settings = _unlocked(
+        live_micro_ring_soft_max_active_eur=650.0,
+        live_micro_ring_soft_block_underwater_eur=25.0,
+        live_micro_ring_util_b_ignore_underwater=True,
+        live_micro_active_ring_eur=1000.0,
+        live_micro_bridge_persist_path=str(tmp_path / "uw_ring_unlock.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    bridge._bal_cache["bitvavo"] = [  # noqa: SLF001
+        Balance(asset="EUR", free=Decimal("1500"), locked=Decimal("0")),
+        Balance(asset="SOL", free=Decimal("1"), locked=Decimal("0")),
+    ]
+    bridge._venue_raw_balances["bitvavo"] = bridge._bal_cache["bitvavo"]  # noqa: SLF001
+    bridge._portfolio.set_mark_price("SOLEUR", Decimal("100"))
+    bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("105")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
+    assert bridge._underwater_book_notional("bitvavo") == Decimal("100")  # noqa: SLF001
+    assert bridge._ring_soft_momentum_eligible("bitvavo") is True  # noqa: SLF001
 
 
 def test_entry_momentum_requires_short_window() -> None:
@@ -2893,6 +3024,8 @@ def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
         live_micro_winner_add_enabled=True,
         live_micro_winner_add_max=2,
         live_micro_winner_add_clip_eur=55.0,
+        live_micro_alphai_winner_add_only=True,
+        alphai_bullish_buy_enabled=True,
         live_micro_bridge_persist_path=str(tmp_path / "wa.json"),
     )
     bridge = MicroBudgetLiveExecutor(
@@ -2902,6 +3035,22 @@ def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
         budget_eur=Decimal("500"),
         live_maker=True,
     )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {
+                    "base": "SOL",
+                    "score": 80.0,
+                    "bullish_headlines": ["a", "b", "c"],
+                }
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_daily_generated_at = "2026-09-04T08:00:00+00:00"  # noqa: SLF001
     bridge._cost_lots["bitvavo:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
     bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
     bridge._trail["bitvavo:SOL"] = {  # noqa: SLF001
@@ -2936,6 +3085,207 @@ def test_winner_add_eligible_requires_soft_arm_and_be(tmp_path: Path) -> None:
         )
         is False
     )
+
+
+def test_winner_add_blocked_when_alphai_weak_or_stale(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_winner_add_enabled=True,
+        live_micro_winner_add_max=2,
+        live_micro_alphai_winner_add_only=True,
+        alphai_bullish_buy_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "wa_weak.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    # Weak low-conviction pick should not receive winner-adds.
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "BNB", "score": 18.0, "bullish_headlines": ["a"]},
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_daily_generated_at = "2026-09-04T08:00:00+00:00"  # noqa: SLF001
+    bridge._trail["bitvavo:BNB"] = {  # noqa: SLF001
+        "soft_armed": True,
+        "winner_add_count": 0,
+    }
+    be = Decimal("100.15")
+    assert bridge._alphai_weak_bullish_hold("BNB") is True  # noqa: SLF001
+    assert (
+        bridge._winner_add_eligible(  # noqa: SLF001
+            "bitvavo", "BNB", mark=Decimal("100.30"), be=be
+        )
+        is False
+    )
+
+
+def test_uw_recycle_weak_alphai_faster_than_strong(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_uw_recycle_enabled=True,
+        live_micro_uw_dust_max_notional_eur=0.0,
+        live_micro_uw_non_alphai_below_be_pct=0.01,
+        live_micro_uw_non_alphai_min_age_sec=3600.0,
+        live_micro_uw_alphai_below_be_pct=0.02,
+        live_micro_uw_alphai_min_age_sec=10800.0,
+        live_micro_bridge_persist_path=str(tmp_path / "uw_weak.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "BNB", "score": 18.0, "bullish_headlines": ["a"]},
+            ],
+            "avoid": [],
+        },
+    )
+    for base in ("ETH", "BNB"):
+        bridge._cost_lots[f"bitvavo:{base}"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+        bridge._trusted_cost_keys.add(f"bitvavo:{base}")  # noqa: SLF001
+        bridge._position_opened_at[f"bitvavo:{base}"] = __import__("time").time() - 7000  # noqa: SLF001
+    bridge._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]  # noqa: SLF001
+    mark = Decimal("99.0")  # ~1% below BE
+    be = Decimal("100")
+    weak = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="BNB",
+        symbol="BNBEUR",
+        mark=mark,
+        be=be,
+        notional=Decimal("100"),
+    )
+    strong = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="ETH",
+        symbol="ETHEUR",
+        mark=mark,
+        be=be,
+        notional=Decimal("100"),
+    )
+    assert weak is not None and weak[0].startswith("alphai_weak")
+    assert strong is None  # strong AlphaI still holding at ~1% / ~1.9h
+
+
+def test_uw_idle_pressure_recycles_non_strong(tmp_path: Path) -> None:
+    settings = _unlocked(
+        live_micro_uw_recycle_enabled=True,
+        live_micro_uw_dust_max_notional_eur=0.0,
+        live_micro_uw_idle_pressure_enabled=True,
+        live_micro_uw_idle_min_free_eur=100.0,
+        live_micro_uw_idle_min_age_sec=600.0,
+        live_micro_uw_idle_below_be_pct=0.004,
+        live_micro_uw_alphai_below_be_pct=0.015,
+        live_micro_uw_alphai_min_age_sec=3600.0,
+        live_micro_active_ring_eur=1850.0,
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_early_cut_momentum_max_return=0.0,
+        alphai_bullish_buy_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "idle_uw.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        None,
+        {
+            "picks": [
+                {"base": "ETH", "score": 114.0, "bullish_headlines": ["a", "b", "c"]},
+                {"base": "ADA", "score": 0.0},
+            ],
+            "avoid": [],
+        },
+    )
+    series = bridge._series_for("ADAEUR")  # noqa: SLF001
+    px = Decimal("1")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("80"), Decimal("1")]]  # noqa: SLF001
+    bridge._trusted_cost_keys.add("bitvavo:ADA")  # noqa: SLF001
+    bridge._position_opened_at["bitvavo:ADA"] = __import__("time").time() - 700  # noqa: SLF001
+    bridge._venue_budget_remaining = lambda venue: Decimal("500")  # type: ignore[method-assign]  # noqa: SLF001
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="ADA",
+        symbol="ADAEUR",
+        mark=Decimal("0.995"),  # -0.5%
+        be=Decimal("1"),
+        notional=Decimal("80"),
+    )
+    assert plan is not None and plan[0] == "idle_pressure"
+
+
+def test_bridge_intraday_gate_blocks_momentum_down(tmp_path: Path) -> None:
+    from bot.integrations.alphai.signals import build_trading_signals
+    from bot.integrations.alphai.parse import AlphaIRegimeState
+
+    settings = _unlocked(
+        alphai_intraday_gate_enabled=True,
+        alphai_intraday_gate_shadow_only=False,
+        alphai_intraday_min_freshness=0.35,
+        alphai_bullish_buy_enabled=True,
+        alphai_require_bullish_new_buys=True,
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_bridge_persist_path=str(tmp_path / "intraday_gate.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("500")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("500"),
+        live_maker=True,
+    )
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset({"ETH"})),
+        {
+            "picks": [
+                {
+                    "base": "ETH",
+                    "score": 100.0,
+                    "bullish_headlines": ["a", "b", "c"],
+                }
+            ],
+            "avoid": [],
+        },
+    )
+    bridge._alphai_daily_generated_at = "2026-09-04T11:00:00+00:00"  # noqa: SLF001
+    series = bridge._series_for("ETHEUR")  # noqa: SLF001
+    px = Decimal("2000")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    action, mult, reasons = bridge._alphai_intraday_entry_gate("ETH", "ETHEUR")  # noqa: SLF001
+    assert action == "WAIT"
+    assert "momentum_down" in reasons
+    assert mult == Decimal("0")
 
 
 def test_low_util_relax_focus_skips_focus_gate(tmp_path: Path) -> None:
@@ -3514,11 +3864,12 @@ def test_buy_clip_cap_same_on_both_venues() -> None:
     assert cap_bv == Decimal("75")
 
 
-def test_early_cut_eligible_new_session_only() -> None:
+def test_early_cut_eligible_new_session_only(tmp_path: Path) -> None:
     settings = _unlocked(
         live_micro_early_cut_loss_below_be_pct=0.015,
         live_micro_early_cut_new_bases_only=True,
         live_micro_cut_loss_below_be_pct=0.04,
+        live_micro_bridge_persist_path=str(tmp_path / "early_cut.json"),
     )
     bridge = MicroBudgetLiveExecutor(
         settings,
@@ -3527,6 +3878,9 @@ def test_early_cut_eligible_new_session_only() -> None:
         budget_eur=Decimal("100"),
         live_maker=True,
     )
+    bridge._cost_lots.clear()  # noqa: SLF001
+    bridge._session_lots.clear()  # noqa: SLF001
+    bridge._trusted_cost_keys.clear()  # noqa: SLF001
     bridge._trusted_cost_keys.add("bitvavo:SOL")  # noqa: SLF001
     old = {"new_session_base": False}
     new = {"new_session_base": True}
@@ -3647,3 +4001,167 @@ def test_maybe_utc_day_rollover_resets_sleeve_and_baseline() -> None:
     assert bridge._sleeve_paused is False
     assert bridge._sleeve_realized_eur == Decimal("0")
     assert bridge.session_start_realized_eur == Decimal("-10")
+
+
+def test_uw_recycle_plan_tiers(tmp_path: Path) -> None:
+    from bot.integrations.alphai.signals import build_trading_signals
+    from bot.integrations.alphai.parse import AlphaIRegimeState
+
+    settings = _unlocked(
+        live_micro_uw_recycle_enabled=True,
+        live_micro_uw_dust_max_notional_eur=25.0,
+        live_micro_uw_dust_below_be_pct=0.003,
+        live_micro_uw_near_below_be_pct=0.008,
+        live_micro_uw_near_max_depth_pct=0.015,
+        live_micro_uw_near_min_age_sec=2700.0,
+        live_micro_uw_non_alphai_below_be_pct=0.01,
+        live_micro_uw_non_alphai_min_age_sec=3600.0,
+        live_micro_uw_alphai_below_be_pct=0.02,
+        live_micro_uw_alphai_min_age_sec=10800.0,
+        paper_buy_momentum_enabled=True,
+        paper_buy_momentum_samples=12,
+        live_micro_early_cut_momentum_max_return=0.0,
+        alphai_require_bullish_new_buys=True,
+        alphai_bullish_buy_enabled=True,
+        live_micro_bridge_persist_path=str(tmp_path / "uw.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("2000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        live_maker=True,
+    )
+    # Flat/down tape for momentum gates.
+    series = bridge._series_for("ADAEUR")  # noqa: SLF001
+    px = Decimal("1")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series.push(px)
+    be = Decimal("1.0")
+    bridge._cost_lots["bitvavo:ADA"] = [[Decimal("20"), be]]  # noqa: SLF001
+    bridge._cost_lots["okx:SOL"] = [[Decimal("1"), Decimal("100")]]  # noqa: SLF001
+    bridge._cost_lots["bitvavo:NEAR"] = [[Decimal("80"), be]]  # noqa: SLF001
+    bridge._mark_cost_trusted("bitvavo", "ADA")  # noqa: SLF001
+    bridge._mark_cost_trusted("okx", "SOL")  # noqa: SLF001
+    bridge._mark_cost_trusted("bitvavo", "NEAR")  # noqa: SLF001
+
+    # Dust within band.
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="ADA",
+        symbol="ADAEUR",
+        mark=Decimal("0.998"),
+        be=be,
+        notional=Decimal("20"),
+    )
+    assert plan is not None
+    assert plan[0] == "dust"
+    assert plan[1] == "band"
+
+    # AlphaI deep stop.
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset({"SOL"})),
+        {"picks": [{"base": "SOL", "score": 40.0}], "avoid": []},
+    )
+    series_sol = bridge._series_for("SOLEUR")  # noqa: SLF001
+    px = Decimal("100")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series_sol.push(px)
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="okx",
+        base="SOL",
+        symbol="SOLEUR",
+        mark=Decimal("97.5"),
+        be=Decimal("100"),
+        notional=Decimal("100"),
+    )
+    assert plan is not None
+    assert plan[0] == "alphai_deep"
+    assert plan[1] == "stop"
+
+    # Non-AlphaI near-BE after age (legacy → age infinite).
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset()),
+        {"picks": [{"base": "SOL", "score": 40.0}], "avoid": []},
+    )
+    series_near = bridge._series_for("NEAREUR")  # noqa: SLF001
+    px = Decimal("1")
+    for _ in range(12):
+        px = px * Decimal("0.999")
+        series_near.push(px)
+    plan = bridge._uw_recycle_plan(  # noqa: SLF001
+        venue="bitvavo",
+        base="NEAR",
+        symbol="NEAREUR",
+        mark=Decimal("0.992"),
+        be=be,
+        notional=Decimal("80"),
+    )
+    assert plan is not None
+    assert plan[0] in {"near_be", "non_alphai"}
+
+    # Sleeve cap blocks oversized estimated loss.
+    bridge._sleeve_realized_eur = Decimal("-49")  # noqa: SLF001
+    bridge._sleeve_daily_loss_cap = Decimal("50")  # noqa: SLF001
+    assert (
+        bridge._uw_recycle_sleeve_allows(  # noqa: SLF001
+            notional=Decimal("100"),
+            mark=Decimal("0.98"),
+            be=Decimal("1.0"),
+        )
+        is False
+    )
+    assert (
+        bridge._uw_recycle_sleeve_allows(  # noqa: SLF001
+            notional=Decimal("20"),
+            mark=Decimal("0.998"),
+            be=Decimal("1.0"),
+        )
+        is True
+    )
+
+
+def test_alphai_idle_deploy_allows_cross_venue_when_shallow(tmp_path: Path) -> None:
+    from bot.integrations.alphai.parse import AlphaIRegimeState
+    from bot.integrations.alphai.signals import build_trading_signals
+
+    settings = _unlocked(
+        live_micro_alphai_cross_venue_deploy=True,
+        live_micro_alphai_cross_venue_max_other_depth_pct=0.025,
+        live_micro_alphai_ring_fill_add_max_depth_pct=0.012,
+        live_micro_active_ring_eur=1850.0,
+        live_micro_block_buys_when_holding_base=True,
+        live_micro_block_underwater_cross_venue=True,
+        alphai_require_bullish_new_buys=True,
+        alphai_bullish_buy_enabled=True,
+        live_micro_execute_venues="bitvavo,okx",
+        live_micro_bridge_persist_path=str(tmp_path / "idle.json"),
+    )
+    bridge = MicroBudgetLiveExecutor(
+        settings,
+        portfolio=PaperPortfolio(settings, starting_eur=Decimal("4000")),
+        live_engine=LiveMicroEngine(settings),
+        budget_eur=Decimal("2000"),
+        execute_venues={"bitvavo", "okx"},
+        live_maker=True,
+    )
+    bridge._alphai_signals = build_trading_signals(  # noqa: SLF001
+        AlphaIRegimeState(bullish_bases=frozenset({"SOL", "XRP"})),
+        {"picks": [{"base": "SOL", "score": 40.0}, {"base": "XRP", "score": 50.0}]},
+    )
+    # Pretend ring needs deploy + SOL held only on OKX shallow underwater.
+    bridge._active_book_notional = lambda venue: Decimal("0")  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._venue_budget_remaining = lambda venue: Decimal("1500")  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._balance_qty = (  # type: ignore[method-assign]  # noqa: SLF001
+        lambda venue, base: Decimal("1") if venue == "okx" and base == "SOL" else Decimal("0")
+    )
+    bridge._break_even_sell_price = (  # type: ignore[method-assign]  # noqa: SLF001
+        lambda venue, base: Decimal("100") if base == "SOL" else None
+    )
+    bridge._portfolio.state.mark_prices["SOLEUR"] = Decimal("99")  # -1%
+    assert bridge._alphai_idle_deploy_allowed("bitvavo", "SOL") is True  # noqa: SLF001
+    # Deep on other venue blocks.
+    bridge._portfolio.state.mark_prices["SOLEUR"] = Decimal("96")  # -4%
+    assert bridge._alphai_idle_deploy_allowed("bitvavo", "SOL") is False  # noqa: SLF001

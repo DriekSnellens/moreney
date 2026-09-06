@@ -231,6 +231,7 @@ class PaperRunner:
             ),
         )
         self._hmm_reduce_only = False
+        self._alphai_reduce_only = False
         self._hmm_last: RegimePrediction | None = None
         self._hmm_inventory_target = float(
             getattr(settings, "paper_hmm_normal_inventory_pct", 0.30) or 0.30
@@ -260,10 +261,23 @@ class PaperRunner:
                 # Phase D remains off unless both flags intentionally flipped;
                 # still do not auto-execute from observer.
                 pass
+        self._alphai_monitor = None
+        if getattr(settings, "alphai_enabled", False):
+            try:
+                from bot.integrations.alphai import AlphaINewsMonitor
+
+                self._alphai_monitor = AlphaINewsMonitor(settings)
+                logger.info(
+                    "ALPHAI monitor enabled observation=%s",
+                    getattr(settings, "alphai_observation_mode", False),
+                )
+            except Exception:
+                logger.exception("ALPHAI_INIT_FAILED")
         self._shadow_observer = None
+        self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
         self._live_disable_research = bool(
             getattr(settings, "live_disable_research_hooks", False)
-        )
+        ) or self._cvd_abandoned
         if not self._live_disable_research:
             try:
                 import os
@@ -708,6 +722,10 @@ class PaperRunner:
         with metrics.span("hmm_regime"):
             await self._apply_hmm_regime_guardrail(books=books)
 
+        # AlphaI news guardrail: bearish catalysts → per-base / macro reduce-only.
+        with metrics.span("alphai_regime"):
+            await self._apply_alphai_news_guardrail()
+
         with metrics.span("match_expire"):
             await self._match_and_expire_quotes(books=books)
 
@@ -801,7 +819,7 @@ class PaperRunner:
             "execution_mode": ExecutionMode.PAPER.value,
             "universe_scan": True,
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else None,
-            "reduce_only": self._hmm_reduce_only,
+            "reduce_only": self._effective_reduce_only(),
             "inventory_target_pct": self._hmm_inventory_target,
             "latency": metrics.report() if metrics.enabled else None,
         }
@@ -917,6 +935,17 @@ class PaperRunner:
             "fx_refilled": len(getattr(self, "_fx_refilled", set())),
         }
 
+    def _effective_reduce_only(self) -> bool:
+        """Global reduce-only for status/micro bridge (excludes macro when bullish buys allowed)."""
+        alphai_ro = self._alphai_reduce_only
+        if alphai_ro and bool(
+            getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+        ):
+            alphai_ro = False
+        maker = self._maker_strategy()
+        maker_ro = bool(getattr(maker, "reduce_only", False)) if maker else False
+        return bool(self._hmm_reduce_only or alphai_ro or maker_ro)
+
     def status(self) -> dict[str, Any]:
         snap = self._tracker.snapshot()
         ks = None
@@ -957,6 +986,12 @@ class PaperRunner:
             "markout": self._markout.snapshot() if hasattr(self, "_markout") else {},
             "inventory": self._inventory_snapshot(),
             "hmm_regime": self._hmm.snapshot() if self._hmm_enabled else {"enabled": False},
+            "reduce_only": self._effective_reduce_only(),
+            "alphai": (
+                self._alphai_monitor.snapshot()
+                if getattr(self, "_alphai_monitor", None) is not None
+                else {"enabled": False}
+            ),
             "desk_scan": (
                 (self._last_cycle or {}).get("scan") or {}
             ),
@@ -2006,6 +2041,8 @@ class PaperRunner:
         self, result: TradeCycleResult, books: dict[str, dict[str, Any]]
     ) -> None:
         """Create frozen CVD candidates at decision time (research path only)."""
+        if getattr(self, "_cvd_abandoned", False):
+            return
         if getattr(self, "_live_disable_research", False):
             return
         if evaluate_frozen_research_economics is None:
@@ -2205,6 +2242,165 @@ class PaperRunner:
                 target * 100.0,
             )
             await self._cancel_all_bids(reason="hmm_toxic_flow")
+
+    async def _apply_alphai_news_guardrail(self) -> None:
+        """Poll AlphaI headlines and block toxic new-base entries."""
+        monitor = getattr(self, "_alphai_monitor", None)
+        if monitor is None:
+            return
+        state = await monitor.maybe_refresh()
+        from bot.integrations.alphai.signals import build_trading_signals
+
+        observation = bool(getattr(self._settings, "alphai_observation_mode", False))
+        allow_bullish_macro = bool(
+            getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+        )
+        self._alphai_reduce_only = bool(
+            state.global_reduce_only and not observation
+        )
+        daily = monitor.daily_picks_snapshot()
+        # Dynamic price confirmation + outcomes learning (no per-coin hardcoding).
+        if (
+            isinstance(daily, dict)
+            and bool(getattr(self._settings, "alphai_price_confirm_enabled", True))
+        ):
+            try:
+                from bot.integrations.alphai.pick_outcomes import (
+                    PickOutcomeStore,
+                    fetch_bitvavo_day_returns,
+                    sync_pick_outcomes,
+                )
+                from bot.integrations.alphai.desk_lessons import (
+                    sync_desk_lessons_day_returns,
+                )
+                from bot.integrations.alphai.price_confirm import (
+                    adaptive_lag_threshold,
+                    enrich_daily_with_price_check,
+                )
+
+                pick_bases = [
+                    str(p.get("base") or "").upper()
+                    for p in (daily.get("picks") or [])
+                    if isinstance(p, dict) and p.get("base")
+                ]
+                bases = sorted(set(pick_bases) | {"BTC"})
+                day_rets = await asyncio.to_thread(fetch_bitvavo_day_returns, bases)
+                default_lag = float(
+                    getattr(self._settings, "alphai_price_lag_vs_btc_pp", 1.5) or 1.5
+                )
+                path = str(
+                    getattr(
+                        self._settings,
+                        "alphai_pick_outcomes_path",
+                        "./data/alphai/pick_outcomes.json",
+                    )
+                )
+                store = PickOutcomeStore.load(path)
+                adaptive = bool(
+                    getattr(self._settings, "alphai_adaptive_lag_enabled", True)
+                )
+                lag_pp = default_lag
+                if adaptive:
+                    lag_pp = adaptive_lag_threshold(
+                        store.recent_excesses(),
+                        default_pp=default_lag,
+                        min_samples=int(
+                            getattr(self._settings, "alphai_adaptive_lag_min_samples", 20)
+                            or 20
+                        ),
+                    )
+                reliability = store.base_reliability(
+                    min_n=int(
+                        getattr(self._settings, "alphai_base_reliability_min_n", 3) or 3
+                    )
+                )
+                daily = enrich_daily_with_price_check(
+                    daily,
+                    day_rets,
+                    lag_vs_btc_pp=lag_pp,
+                    full_pp=float(
+                        getattr(self._settings, "alphai_price_confirm_full_pp", 0.0) or 0.0
+                    ),
+                    scale_cutoff=float(
+                        getattr(self._settings, "alphai_price_scale_cutoff", 0.45) or 0.45
+                    ),
+                    base_reliability=reliability,
+                    adaptive=adaptive and abs(lag_pp - default_lag) > 1e-9,
+                )
+                if bool(getattr(self._settings, "alphai_pick_outcomes_enabled", True)):
+                    try:
+                        await asyncio.to_thread(
+                            sync_pick_outcomes,
+                            daily,
+                            path,
+                            day_returns_pct=day_rets,
+                            enabled=True,
+                            lag_vs_btc_pp=lag_pp,
+                        )
+                    except Exception:  # noqa: BLE001
+                        # Persist is best-effort; live demotion must still apply.
+                        logger.exception("ALPHAI_PICK_OUTCOMES_PERSIST_FAILED")
+                if bool(getattr(self._settings, "alphai_desk_lessons_enabled", True)):
+                    try:
+                        await asyncio.to_thread(
+                            sync_desk_lessons_day_returns,
+                            str(
+                                getattr(
+                                    self._settings,
+                                    "alphai_desk_lessons_path",
+                                    "./data/alphai/desk_lessons.json",
+                                )
+                            ),
+                            day_rets,
+                            enabled=True,
+                            auto_apply=bool(
+                                getattr(
+                                    self._settings,
+                                    "alphai_desk_lessons_auto_apply",
+                                    False,
+                                )
+                            ),
+                            auto_apply_modes=getattr(
+                                self._settings,
+                                "alphai_desk_lessons_auto_apply_modes",
+                                "deploy_urgency,avoid",
+                            ),
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("ALPHAI_DESK_LESSONS_SETTLE_FAILED")
+            except Exception:  # noqa: BLE001
+                logger.exception("ALPHAI_PRICE_CONFIRM_FAILED")
+        signals = build_trading_signals(state, daily)
+        maker = self._maker_strategy()
+        if maker is not None:
+            hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))
+            maker.set_reduce_only(hmm_ro)
+            maker.set_news_blocked_bases(set(state.blocked_bases))
+            if hasattr(maker, "set_alphai_macro_caution"):
+                maker.set_alphai_macro_caution(
+                    self._alphai_reduce_only and allow_bullish_macro
+                )
+            if hasattr(maker, "apply_alphai_signals"):
+                maker.apply_alphai_signals(signals)
+        executor = self._executor
+        if hasattr(executor, "apply_alphai_regime"):
+            executor.apply_alphai_regime(
+                state,
+                observation_mode=observation,
+                allow_bullish_buys=allow_bullish_macro,
+            )
+        if hasattr(executor, "apply_alphai_trading_signals"):
+            executor.apply_alphai_trading_signals(signals)
+        if self._alphai_reduce_only and not allow_bullish_macro:
+            await self._cancel_all_bids(reason="alphai_macro_reduce_only")
+
+    def ingest_alphai_article(self, article: dict[str, Any]) -> dict[str, Any]:
+        """Push webhook article into the live monitor (Pro tier)."""
+        monitor = getattr(self, "_alphai_monitor", None)
+        if monitor is None:
+            return {"ok": False, "reason": "alphai_disabled"}
+        state = monitor.ingest_webhook_article(article)
+        return state.to_public_dict()
 
     async def _cancel_all_bids(self, *, reason: str) -> None:
         from bot.core.enums import OrderSide

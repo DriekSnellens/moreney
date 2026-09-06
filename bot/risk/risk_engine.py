@@ -112,7 +112,9 @@ class RiskEngine:
             )
 
         # --- Profitability gate (does not rewrite PnL) ---
-        if not (profitability.trade_allowed or profitability.is_profitable):
+        meta = opportunity.metadata or {}
+        alphai_inv = bool(meta.get("alphai_inventory_build"))
+        if not alphai_inv and not (profitability.trade_allowed or profitability.is_profitable):
             return await self._reject(
                 opportunity,
                 reason_code=RiskRejectReason.NOT_PROFITABLE,
@@ -124,7 +126,7 @@ class RiskEngine:
                 requested_size=opportunity.quantity * opportunity.entry_price,
                 allowed_size=_ZERO,
             )
-        if profitability.net_profit_usd < self._min_net_profit:
+        if not alphai_inv and profitability.net_profit_usd < self._min_net_profit:
             return await self._reject(
                 opportunity,
                 reason_code=RiskRejectReason.NOT_PROFITABLE,

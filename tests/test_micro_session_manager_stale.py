@@ -53,6 +53,7 @@ def test_interrupted_continuous_resume_kwargs(tmp_path: Path) -> None:
                 "updated_at": "2026-08-24T21:08:08+00:00",
                 "budget_eur": "2000.0",
                 "exclude_btc": True,
+                "symbols": ["SOLEUR", "ADAEUR"],
             }
         ),
         encoding="utf-8",
@@ -63,4 +64,5 @@ def test_interrupted_continuous_resume_kwargs(tmp_path: Path) -> None:
         "minutes": None,
         "budget_eur": 2000.0,
         "exclude_btc": True,
+        "symbols": ["SOLEUR", "ADAEUR"],
     }

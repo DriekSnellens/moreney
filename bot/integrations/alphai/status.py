@@ -1,0 +1,135 @@
+"""Merge AlphaI monitor + live bridge snapshots for dashboards."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def merge_alphai_status(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str, Any]:
+    """Combine PaperRunner monitor fields with live bridge block state."""
+    runner = session.get("alphai") if isinstance(session.get("alphai"), dict) else {}
+    bridge_box = bridge.get("alphai") if isinstance(bridge.get("alphai"), dict) else {}
+    out: dict[str, Any] = dict(runner)
+    for key in (
+        "enabled",
+        "macro_active",
+        "macro_reduce_only",
+        "blocked_bases",
+        "blocked_detail",
+        "skips",
+    ):
+        if key in bridge_box and bridge_box.get(key) is not None:
+            out[key] = bridge_box.get(key)
+    if bridge_box.get("macro_active") is not None:
+        out["macro_active"] = bridge_box.get("macro_active")
+    if not out.get("blocked_bases") and bridge.get("alphai_blocked_bases"):
+        out["blocked_bases"] = bridge.get("alphai_blocked_bases")
+    if not out.get("blocked_detail") and bridge.get("alphai_blocked_detail"):
+        out["blocked_detail"] = bridge.get("alphai_blocked_detail")
+    if out.get("macro_active") is None and bridge.get("alphai_macro_active") is not None:
+        out["macro_active"] = bridge.get("alphai_macro_active")
+    if out.get("enabled") is None:
+        out["enabled"] = bool(bridge.get("alphai_enabled"))
+    return out
+
+
+def alphai_metrics(session: dict[str, Any], bridge: dict[str, Any]) -> dict[str, Any]:
+    box = merge_alphai_status(session, bridge)
+    blocked = box.get("blocked_bases") or []
+    headlines = box.get("headlines") or []
+    top_headline = None
+    if isinstance(headlines, list) and headlines:
+        first = headlines[0]
+        if isinstance(first, dict):
+            top_headline = str(first.get("title") or "")[:120] or None
+    blocked_list = blocked if isinstance(blocked, list) else list(blocked)
+    detail = box.get("blocked_detail") if isinstance(box.get("blocked_detail"), dict) else {}
+    would_block = {
+        str(k): str(v)
+        for k, v in detail.items()
+        if k and str(k) != "_MACRO_" and not str(k).startswith("_")
+    }
+    headline_rows = [h for h in headlines if isinstance(h, dict)][:8]
+    from bot.core.config import get_settings
+    from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+
+    picks_path = getattr(
+        get_settings(),
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    daily = load_daily_recommendations(picks_path) or {}
+    pick_bases = [p.get("base") for p in (daily.get("picks") or []) if isinstance(p, dict)]
+    avoid_bases = [p.get("base") for p in (daily.get("avoid") or []) if isinstance(p, dict)]
+
+    outcomes_summary: dict[str, Any] = {}
+    try:
+        from bot.integrations.alphai.pick_outcomes import PickOutcomeStore
+
+        outcomes_path = getattr(
+            get_settings(),
+            "alphai_pick_outcomes_path",
+            "./data/alphai/pick_outcomes.json",
+        )
+        outcomes_summary = PickOutcomeStore.load(outcomes_path).summary()
+    except Exception:  # noqa: BLE001
+        outcomes_summary = {}
+
+    desk_lessons_summary: dict[str, Any] = {}
+    try:
+        from bot.integrations.alphai.desk_lessons import DeskLessonStore
+
+        desk_path = getattr(
+            get_settings(),
+            "alphai_desk_lessons_path",
+            "./data/alphai/desk_lessons.json",
+        )
+        desk_lessons_summary = DeskLessonStore.load(desk_path).summary()
+    except Exception:  # noqa: BLE001
+        desk_lessons_summary = {}
+
+    price_check = daily.get("price_check") if isinstance(daily.get("price_check"), dict) else {}
+
+    return {
+        "alphai_enabled": bool(box.get("enabled")),
+        "alphai_observation_mode": bool(box.get("observation_mode")),
+        "alphai_macro_active": bool(box.get("macro_active") or box.get("macro_reduce_only")),
+        "alphai_blocked_bases": blocked_list,
+        "alphai_blocked_count": len(blocked_list),
+        "alphai_would_block_count": len(would_block),
+        "alphai_would_block": would_block,
+        "alphai_macro_headline": detail.get("_MACRO_"),
+        "alphai_rate_limit_remaining": box.get("rate_limit_remaining"),
+        "alphai_polls": box.get("polls"),
+        "alphai_skips": box.get("skips"),
+        "alphai_last_poll_at": box.get("last_poll_at"),
+        "alphai_last_error": box.get("last_error"),
+        "alphai_headline_count": box.get("headline_count")
+        if box.get("headline_count") is not None
+        else (len(headlines) if isinstance(headlines, list) else 0),
+        "alphai_top_headline": top_headline,
+        "alphai_headlines": headline_rows,
+        "alphai_pick_bases": pick_bases,
+        "alphai_avoid_bases": avoid_bases,
+        "alphai_price_lagging": list(price_check.get("lagging") or []),
+        "alphai_pick_lesson": outcomes_summary.get("latest_lesson"),
+        "alphai_pick_beat_btc_rate": outcomes_summary.get("beat_btc_rate"),
+        "alphai_pick_lag_rate": outcomes_summary.get("lag_rate"),
+        "alphai_pick_avg_vs_btc_pp": outcomes_summary.get("avg_vs_btc_pp"),
+        "alphai_desk_lessons_open": desk_lessons_summary.get("open_count"),
+        "alphai_desk_lessons_settled": desk_lessons_summary.get("settled_count"),
+        "alphai_desk_lessons_auto_apply": desk_lessons_summary.get("auto_apply"),
+        "alphai_desk_lessons_deploy_bias": (
+            (desk_lessons_summary.get("feedback") or {}).get("deploy_urgency_bias")
+        ),
+        "alphai_desk_lessons_harvest_scale": (
+            (desk_lessons_summary.get("feedback") or {}).get("harvest_floor_scale")
+        ),
+        "alphai_desk_lessons_avoid_age_scale": (
+            (desk_lessons_summary.get("feedback") or {}).get("avoid_recycle_age_scale")
+        ),
+        "alphai_desk_lessons_sum_missed_eur": (
+            (desk_lessons_summary.get("feedback") or {}).get("sum_missed_eur")
+        ),
+        "alphai_desk_lessons_latest_kind": desk_lessons_summary.get("latest_kind"),
+    }
