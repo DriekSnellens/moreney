@@ -336,6 +336,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_deadlock_min_age_sec = float(
             getattr(settings, "live_micro_uw_deadlock_min_age_sec", 300) or 300
         )
+        self._uw_deadlock_partial_enabled = bool(
+            getattr(settings, "live_micro_uw_deadlock_partial_enabled", True)
+        )
+        self._uw_deadlock_target_free_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_target_free_eur", 220) or 220)
+        )
+        self._uw_deadlock_partial_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_partial_clip_eur", 220) or 220)
+        )
+        self._uw_deadlock_partial_min_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_partial_min_eur", 40) or 40)
+        )
+        self._uw_deadlock_day_loss_cap_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_day_loss_cap_eur", 15) or 15)
+        )
+        self._uw_deadlock_would_buy_gate = bool(
+            getattr(settings, "live_micro_uw_deadlock_would_buy_gate", True)
+        )
+        self._uw_deadlock_day_key = ""
+        self._uw_deadlock_day_loss_eur = _ZERO
+        self._uw_deadlock_unlock_remaining_eur = _ZERO
         self._alphai_cross_venue_deploy = bool(
             getattr(settings, "live_micro_alphai_cross_venue_deploy", True)
         )
@@ -745,6 +766,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
             "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
             "uw_deadlock_below_be_pct": self._uw_deadlock_below_be_pct,
+            "uw_deadlock_target_free_eur": self._uw_deadlock_target_free_eur,
+            "uw_deadlock_day_loss_cap_eur": self._uw_deadlock_day_loss_cap_eur,
             "early_cut_loss_below_be_pct": self._early_cut_loss_below_be_pct,
             "trail_hold_rising_n": self._trail_hold_rising_n,
             "alphai_intraday_min_freshness": self._alphai_intraday_min_freshness,
@@ -980,6 +1003,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "live_transaction_count": int(self.live_transaction_count),
             "realized_trade_pnl_eur": str(self.realized_trade_pnl_eur),
             "sleeve_realized_eur": str(self._sleeve_realized_eur),
+            "uw_deadlock_day_key": self._uw_deadlock_day_key,
+            "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_paused": bool(self._sleeve_paused),
         }
 
@@ -1072,6 +1097,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         except Exception:  # noqa: BLE001
             self._sleeve_realized_eur = _ZERO
+        self._uw_deadlock_day_key = str(raw.get("uw_deadlock_day_key") or "")
+        try:
+            self._uw_deadlock_day_loss_eur = Decimal(
+                str(raw.get("uw_deadlock_day_loss_eur") or 0)
+            )
+        except Exception:  # noqa: BLE001
+            self._uw_deadlock_day_loss_eur = _ZERO
         self._sleeve_paused = bool(raw.get("sleeve_paused"))
         self._check_sleeve_loss_cap()
         if raw.get("session_started_ms") is not None:
@@ -1771,6 +1803,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         _bool("uw_deadlock_unlock_enabled", "_uw_deadlock_unlock_enabled")
         _float("uw_deadlock_min_age_sec", "_uw_deadlock_min_age_sec")
         _dec("uw_deadlock_below_be_pct", "_uw_deadlock_below_be_pct")
+        _dec("uw_deadlock_target_free_eur", "_uw_deadlock_target_free_eur")
+        _dec("uw_deadlock_day_loss_cap_eur", "_uw_deadlock_day_loss_cap_eur")
         _dec("early_cut_loss_below_be_pct", "_early_cut_loss_below_be_pct")
         _int("trail_hold_rising_n", "_trail_hold_rising_n")
         _dec("alphai_intraday_min_freshness", "_alphai_intraday_min_freshness")
@@ -2530,6 +2564,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
                 "uw_deadlock_below_be_pct": str(self._uw_deadlock_below_be_pct),
                 "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
+                "uw_deadlock_partial_enabled": self._uw_deadlock_partial_enabled,
+                "uw_deadlock_target_free_eur": str(self._uw_deadlock_target_free_eur),
+                "uw_deadlock_partial_clip_eur": str(self._uw_deadlock_partial_clip_eur),
+                "uw_deadlock_partial_min_eur": str(self._uw_deadlock_partial_min_eur),
+                "uw_deadlock_day_loss_cap_eur": str(self._uw_deadlock_day_loss_cap_eur),
+                "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
+                "uw_deadlock_would_buy_gate": self._uw_deadlock_would_buy_gate,
                 "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
                 "alphai_cross_venue_max_other_depth_pct": str(
                     self._alphai_cross_venue_max_other_depth
@@ -2587,6 +2628,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "active_ring_eur": str(self._active_ring_eur),
             "velocity_sleeve_eur": str(self._velocity_sleeve_eur),
             "sleeve_realized_eur": str(self._sleeve_realized_eur),
+            "uw_deadlock_day_key": self._uw_deadlock_day_key,
+            "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
             "sleeve_paused": bool(self._sleeve_paused),
             "exit_engine": {
@@ -4135,12 +4178,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     toxic=toxic,
                 )
         # A: attribute PnL to velocity sleeve when session inventory was sold.
+        trail_st = self._trail.get(lot_key) or {}
         if sess_consumed > 0 or bool(
-            (self._trail.get(lot_key) or {}).get("sleeve")
-            or (self._trail.get(lot_key) or {}).get("new_session_base")
+            trail_st.get("sleeve") or trail_st.get("new_session_base")
         ):
             self._sleeve_realized_eur += trade_pnl
             self._check_sleeve_loss_cap()
+        # Deadlock partial unlock day-loss budget (absolute loss only).
+        tier = str(trail_st.get("uw_recycle_tier") or "")
+        if tier.startswith("deadlock_") and trade_pnl < 0:
+            self._uw_deadlock_note_loss(-trade_pnl)
         self._check_daily_kill()
         if not lots:
             self._position_opened_mono.pop(lot_key, None)
@@ -5449,6 +5496,128 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             pass
         return 3
 
+    def _uw_deadlock_roll_day(self) -> None:
+        """Reset UTC-day realized unlock loss budget."""
+        import datetime as _dt
+
+        day = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        if self._uw_deadlock_day_key != day:
+            self._uw_deadlock_day_key = day
+            self._uw_deadlock_day_loss_eur = _ZERO
+
+    def _uw_deadlock_day_loss_remaining(self) -> Decimal:
+        self._uw_deadlock_roll_day()
+        cap = self._uw_deadlock_day_loss_cap_eur
+        if cap <= 0:
+            return Decimal("1e9")
+        return max(_ZERO, cap - self._uw_deadlock_day_loss_eur)
+
+    def _uw_deadlock_note_loss(self, loss_eur: Decimal) -> None:
+        if loss_eur <= 0:
+            return
+        self._uw_deadlock_roll_day()
+        self._uw_deadlock_day_loss_eur += loss_eur
+
+    def _uw_deadlock_sleeve_target_eur(self) -> Decimal:
+        """One sleeve clip of free cash is enough to break the deadlock."""
+        for cand in (
+            self._uw_deadlock_target_free_eur,
+            self._alphai_priority_clip_eur,
+            self._alphai_strong_clip_eur,
+        ):
+            try:
+                v = Decimal(str(cand or 0))
+            except Exception:  # noqa: BLE001
+                v = _ZERO
+            if v > 0:
+                return v
+        return Decimal("220")
+
+    def _uw_deadlock_free_quote_eur(self) -> Decimal:
+        total = _ZERO
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                total += self._venue_budget_remaining(str(venue))
+            except Exception:  # noqa: BLE001
+                continue
+        return max(_ZERO, total)
+
+    def _uw_deadlock_needed_free_eur(self) -> Decimal:
+        return max(_ZERO, self._uw_deadlock_sleeve_target_eur() - self._uw_deadlock_free_quote_eur())
+
+    def _uw_would_buy_today(self, base: str, symbol: str) -> bool:
+        """Forward-looking: would we deploy fresh cash into this name now?
+
+        Avoid names never qualify. Rising sleeve / bullish names do — those we
+        nurse instead of unlocking during deadlock.
+        """
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return False
+        try:
+            if self._alphai_is_avoid_base(bu):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        flat_or_down = True
+        try:
+            flat_or_down = bool(self._momentum_flat_or_down(symbol))
+        except Exception:  # noqa: BLE001
+            flat_or_down = True
+        try:
+            if self._alphai_sleeve_priority_buy(bu) and not flat_or_down:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_bullish_buy(bu) and not flat_or_down:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _uw_deadlock_partial_sell_qty(
+        self,
+        *,
+        free_qty: Decimal,
+        mark: Decimal,
+        be: Decimal,
+        session_cap: Decimal,
+    ) -> Decimal:
+        """Size unlock to remaining sleeve-cash need and day-loss budget."""
+        if free_qty <= 0 or mark <= 0 or be <= 0 or mark >= be:
+            return _ZERO
+        cap_qty = min(free_qty, session_cap) if session_cap > 0 else free_qty
+        if not self._uw_deadlock_partial_enabled:
+            return cap_qty
+        needed = self._uw_deadlock_unlock_remaining_eur
+        if needed <= 0:
+            return _ZERO
+        clip = self._uw_deadlock_partial_clip_eur
+        if clip <= 0:
+            clip = needed
+        target_eur = min(needed, clip)
+        depth = (be - mark) / be
+        rem_loss = self._uw_deadlock_day_loss_remaining()
+        if rem_loss <= 0:
+            return _ZERO
+        if depth > 0:
+            max_by_loss = rem_loss / depth
+            target_eur = min(target_eur, max_by_loss)
+        min_eur = self._uw_deadlock_partial_min_eur
+        bag_eur = cap_qty * mark
+        if target_eur < min_eur:
+            # Take the whole bag only when it is itself a small unlock clip.
+            loss_ok = True if depth <= 0 else bag_eur <= (rem_loss / depth)
+            if bag_eur <= max(min_eur, needed) and loss_ok:
+                return cap_qty
+            return _ZERO
+        qty = (target_eur / mark).quantize(Decimal("0.00000001"))
+        qty = min(qty, cap_qty)
+        if qty * mark < min_eur and bag_eur >= min_eur:
+            qty = min(cap_qty, (min_eur / mark).quantize(Decimal("0.00000001")))
+        return qty if qty > 0 else _ZERO
+
     def _uw_recycle_plan(
         self,
         *,
@@ -5535,7 +5704,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and self._alphai_sleeve_priority_buy(base)
                 and not flat_or_down
             )
-            if not sleeve_rising:
+            # Would-buy-today gate: nurse names we would still deploy into.
+            if (
+                self._uw_deadlock_would_buy_gate
+                and not self._alphai_is_avoid_base(base)
+                and self._uw_would_buy_today(base, symbol)
+            ):
+                sleeve_rising = True
+            if self._uw_deadlock_day_loss_remaining() <= 0:
+                pass  # day unlock budget spent — fall through to milder paths
+            elif not sleeve_rising:
                 floor = be * (Decimal("1") - self._uw_deadlock_below_be_pct)
                 if depth >= self._uw_deadlock_below_be_pct * Decimal("1.5"):
                     return ("deadlock_deep", "stop", floor)
@@ -6909,7 +7087,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         triggered: list[dict[str, Any]] = []
         armed_now: list[str] = []
         # When capital is deadlocked, recycle avoid/non-sleeve bags before sleeve names.
+        # Only free enough cash for one sleeve clip (partial unlock budget).
         try:
+            self._uw_deadlock_roll_day()
             if self._capital_deadlocked(venue):
                 bals = sorted(
                     list(bals),
@@ -6917,8 +7097,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         str(getattr(bal, "asset", "") or "")
                     ),
                 )
+                self._uw_deadlock_unlock_remaining_eur = self._uw_deadlock_needed_free_eur()
+            else:
+                self._uw_deadlock_unlock_remaining_eur = _ZERO
         except Exception:  # noqa: BLE001
-            pass
+            self._uw_deadlock_unlock_remaining_eur = _ZERO
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
             if not asset or asset == self._quote:
@@ -7105,22 +7288,42 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 if plan is not None:
                     tier, mode, floor = plan
-                    if self._uw_recycle_sleeve_allows(
+                    session_cap = (
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free_uw
+                    )
+                    if str(tier).startswith("deadlock_") and self._uw_deadlock_partial_enabled:
+                        sell_qty = self._uw_deadlock_partial_sell_qty(
+                            free_qty=free_uw,
+                            mark=mark,
+                            be=be,
+                            session_cap=session_cap,
+                        )
+                        if sell_qty <= 0:
+                            self._bump_skip("uw_deadlock_partial_budget")
+                            sell_qty = _ZERO
+                            plan = None
+                        notional_uw = sell_qty * mark
+                    else:
+                        sell_qty = min(free_uw, session_cap)
+                    if plan is not None and self._uw_recycle_sleeve_allows(
                         notional=notional_uw, mark=mark, be=be
                     ):
-                        sell_qty = min(
-                            free_uw,
-                            self._session_qty(venue, asset)
-                            if self._trail_session_only
-                            else free_uw,
-                        )
                         reason = "trail_uw_recycle"
                         self._uw_recycle_floors[trail_key] = floor
                         st["uw_recycle_tier"] = tier
                         st["uw_recycle_mode"] = mode
                         st["sleeve"] = True  # attribute realized PnL to sleeve loss cap
-                    else:
+                        if str(tier).startswith("deadlock_"):
+                            # Reserve budget so later bags this pass do not over-unlock.
+                            self._uw_deadlock_unlock_remaining_eur = max(
+                                _ZERO,
+                                self._uw_deadlock_unlock_remaining_eur - notional_uw,
+                            )
+                    elif plan is not None:
                         self._bump_skip("uw_recycle_sleeve_cap")
+                        sell_qty = _ZERO
             cut_floor = self._cut_loss_floor_price(venue, asset)
             if (
                 not reason

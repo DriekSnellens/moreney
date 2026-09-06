@@ -388,6 +388,12 @@ def _session_settings(
             "live_micro_uw_deadlock_unlock_enabled": True,
             "live_micro_uw_deadlock_below_be_pct": 0.0025,
             "live_micro_uw_deadlock_min_age_sec": 300.0,
+            "live_micro_uw_deadlock_partial_enabled": True,
+            "live_micro_uw_deadlock_target_free_eur": 220.0,
+            "live_micro_uw_deadlock_partial_clip_eur": 220.0,
+            "live_micro_uw_deadlock_partial_min_eur": 40.0,
+            "live_micro_uw_deadlock_day_loss_cap_eur": 15.0,
+            "live_micro_uw_deadlock_would_buy_gate": True,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
             "live_micro_alphai_cross_venue_deploy": True,
             "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,
