@@ -5666,19 +5666,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         mark: Decimal,
         be: Decimal,
         session_cap: Decimal,
+        rotate_inventory: bool = False,
     ) -> Decimal:
-        """Size unlock to remaining sleeve-cash need and day-loss budget."""
+        """Size unlock to remaining sleeve-cash need and day-loss budget.
+
+        ``rotate_inventory`` (mid-flat opportunity-cost): when free cash already
+        covers the sleeve clip, still allow one clip of weak UW inventory so
+        capital can rotate into fresher deploy targets.
+        """
         if free_qty <= 0 or mark <= 0 or be <= 0 or mark >= be:
             return _ZERO
         cap_qty = min(free_qty, session_cap) if session_cap > 0 else free_qty
         if not self._uw_deadlock_partial_enabled:
             return cap_qty
         needed = self._uw_deadlock_unlock_remaining_eur
-        if needed <= 0:
-            return _ZERO
         clip = self._uw_deadlock_partial_clip_eur
         if clip <= 0:
-            clip = needed
+            clip = self._uw_deadlock_target_free_eur or Decimal("220")
+        if needed <= 0 and rotate_inventory:
+            needed = clip
+        if needed <= 0:
+            return _ZERO
         target_eur = min(needed, clip)
         depth = (be - mark) / be
         rem_loss = self._uw_deadlock_day_loss_remaining()
@@ -5838,14 +5846,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # that we would NOT buy today — free capital for the sleeve (partial-sized
         # by caller when deadlock_partial tooling is active).
         mid_flat_min_age = self._uw_mid_flat_min_age_sec
+        mid_flat_min_depth = self._uw_near_below_be_pct
+        mid_flat_max_depth = self._uw_mid_flat_max_depth_pct
+        slot_blocker = False
         try:
             # Weak held priority bags that do not fill a sleeve slot: free capital
-            # faster so opportunity-cost deploy targets (e.g. LINK) can enter.
-            if (
+            # faster / deeper so opportunity-cost deploy targets (e.g. LINK) can enter.
+            slot_blocker = (
                 not self._sleeve_held_fills_slot(base)
-                and self._sleeve_deploy_targets(top_n=2)
-            ):
-                mid_flat_min_age = min(mid_flat_min_age, 180.0)
+                and bool(self._sleeve_deploy_targets(top_n=2))
+            )
+            if slot_blocker:
+                mid_flat_min_age = min(mid_flat_min_age, 120.0)
+                mid_flat_min_depth = min(
+                    mid_flat_min_depth,
+                    self._uw_deadlock_below_be_pct,
+                    Decimal("0.002"),
+                )
+                mid_flat_max_depth = max(mid_flat_max_depth, Decimal("0.015"))
         except Exception:  # noqa: BLE001
             pass
         if (
@@ -5854,10 +5872,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not strong_hold
             and not self._uw_would_buy_today(base, symbol)
             and age >= mid_flat_min_age
-            and depth > self._uw_near_below_be_pct
-            and depth <= self._uw_mid_flat_max_depth_pct
+            and depth > mid_flat_min_depth
+            and depth <= mid_flat_max_depth
         ):
-            floor = be * (Decimal("1") - self._uw_mid_flat_max_depth_pct)
+            floor = be * (Decimal("1") - mid_flat_max_depth)
             if mark >= floor:
                 return ("mid_flat", "band", floor)
             return ("mid_flat", "stop", floor)
@@ -6062,15 +6080,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         if base:
             floor *= self._alphai_momentum_floor_scale(base)
-            # Sleeve deploy urgency: after missed deploys / empty ring, ease entry.
+            # Sleeve deploy urgency: empty ring → ease entry even without desk bias.
             try:
                 if (
                     self._alphai_sleeve_priority_buy(base)
                     and self._ring_needs_deploy(venue)
                 ):
                     bias = float(self._desk_lesson_deploy_bias())
-                    if bias > 1.01:
-                        floor = floor / Decimal(str(min(bias, 1.25)))
+                    scale = max(bias, 1.20)  # at least 20% softer for sleeve deploy
+                    floor = floor / Decimal(str(min(scale, 1.35)))
             except Exception:  # noqa: BLE001
                 pass
         return floor
@@ -7219,7 +7237,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         str(getattr(bal, "asset", "") or "")
                     ),
                 )
-                self._uw_deadlock_unlock_remaining_eur = self._uw_deadlock_needed_free_eur()
+                needed = self._uw_deadlock_needed_free_eur()
+                # Free cash can already exceed the sleeve clip while weak UW bags
+                # still block opportunity-cost rotation — keep one clip of budget.
+                if needed <= 0 and self._sleeve_has_unheld_priority():
+                    needed = self._uw_deadlock_partial_clip_eur or Decimal("220")
+                self._uw_deadlock_unlock_remaining_eur = needed
+            elif self._sleeve_has_unheld_priority() and self._ring_needs_deploy(venue):
+                # Not cash-deadlocked, but ring empty + sleeve open: allow mid-flat
+                # inventory rotation up to one sleeve clip.
+                self._uw_deadlock_unlock_remaining_eur = (
+                    self._uw_deadlock_partial_clip_eur or Decimal("220")
+                )
             else:
                 self._uw_deadlock_unlock_remaining_eur = _ZERO
         except Exception:  # noqa: BLE001
@@ -7427,6 +7456,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                             mark=mark,
                             be=be,
                             session_cap=session_cap,
+                            rotate_inventory=str(tier) == "mid_flat",
                         )
                         if sell_qty <= 0:
                             self._bump_skip("uw_deadlock_partial_budget")
@@ -8517,6 +8547,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and not self._momentum_down(symbol)
             ):
                 momentum_ok = True
+            # Deploy-target sleeve under empty ring: tolerate flat tape (not falling).
+            if (
+                not momentum_ok
+                and self._ring_needs_deploy(venue)
+                and self._alphai_sleeve_priority_buy(base)
+                and not self._momentum_down(symbol)
+            ):
+                short = self._series_for(symbol).momentum_return_last(
+                    max(2, self._entry_short_momentum_samples // 2)
+                )
+                if short is None or short >= (self._entry_short_momentum_min * Decimal("0.25")):
+                    momentum_ok = True
+                    meta["sleeve_momentum_soft"] = True
             if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
@@ -8658,16 +8701,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     # Sleeve urgency: empty ring + free cash → REDUCE instead of hard WAIT.
                     sleeve_urgency = False
                     try:
-                        sleeve_urgency = bool(
-                            self._alphai_sleeve_priority_buy(base)
-                            and self._ring_needs_deploy(venue)
+                        ring_hungry = bool(
+                            self._ring_needs_deploy(venue)
                             and float(self._venue_budget_remaining(venue)) >= 50.0
                         )
+                        sleeve_urgency = bool(
+                            ring_hungry and self._alphai_sleeve_priority_buy(base)
+                        )
+                        # High-confirm AlphaI bullish under empty ring: same urgency
+                        # even if structural top-N is occupied by weak held bags.
+                        if not sleeve_urgency and ring_hungry and self._alphai_bullish_buy(base):
+                            confirm = None
+                            sig = self._alphai_signals
+                            if sig is not None and hasattr(sig, "price_confirm_scale"):
+                                try:
+                                    confirm = float(sig.price_confirm_scale(base))
+                                except Exception:  # noqa: BLE001
+                                    confirm = None
+                            if confirm is None or confirm >= 0.55:
+                                sleeve_urgency = True
                     except Exception:  # noqa: BLE001
                         sleeve_urgency = False
                     if sleeve_urgency:
                         action = "REDUCE"
-                        gate_mult = min(gate_mult if gate_mult > 0 else _ONE, Decimal("0.40"))
+                        gate_mult = min(gate_mult if gate_mult > 0 else _ONE, Decimal("0.55"))
                         meta["alphai_intraday_gate"] = action
                         meta["alphai_intraday_sleeve_urgency"] = True
                         meta["alphai_intraday_size_mult"] = str(gate_mult)

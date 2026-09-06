@@ -582,8 +582,8 @@ class Settings(BaseSettings):
     live_micro_uw_deadlock_would_buy_gate: bool = True
     # Mid-depth flat UW recycle for bags we would not buy today (gap between near_be and alphai hold).
     live_micro_uw_mid_flat_recycle_enabled: bool = True
-    live_micro_uw_mid_flat_max_depth_pct: float = Field(default=0.012, ge=0.0, le=0.05)
-    live_micro_uw_mid_flat_min_age_sec: float = Field(default=600.0, ge=60.0, le=86400.0)
+    live_micro_uw_mid_flat_max_depth_pct: float = Field(default=0.015, ge=0.0, le=0.05)
+    live_micro_uw_mid_flat_min_age_sec: float = Field(default=300.0, ge=60.0, le=86400.0)
     # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
     live_micro_alphai_cross_venue_deploy: bool = True
     live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(

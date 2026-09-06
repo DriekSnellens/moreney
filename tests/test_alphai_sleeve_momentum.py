@@ -81,3 +81,20 @@ def test_weak_held_sleeve_slot_promotes_next_unheld() -> None:
     assert bridge._alphai_sleeve_priority_buy("AVAX") is True
     assert bridge._alphai_sleeve_priority_buy("LINK") is True
     assert bridge._desk_sleeve_unheld_bases() == ["AVAX", "LINK"]
+
+
+def test_sleeve_momentum_floor_eases_without_desk_bias() -> None:
+    """Empty ring + sleeve target must soften momentum floor even at bias 1.0."""
+    from decimal import Decimal
+
+    bridge = MicroBudgetLiveExecutor.__new__(MicroBudgetLiveExecutor)
+    bridge._momentum_min = Decimal("0.004")
+    bridge._ring_momentum_min = Decimal("0.001")
+    bridge._ring_soft_momentum_eligible = lambda venue: True  # type: ignore[method-assign]
+    bridge._alphai_momentum_floor_scale = lambda base: Decimal("1")  # type: ignore[method-assign]
+    bridge._alphai_sleeve_priority_buy = lambda base: True  # type: ignore[method-assign]
+    bridge._ring_needs_deploy = lambda venue: True  # type: ignore[method-assign]
+    bridge._desk_lesson_deploy_bias = lambda: 1.0  # type: ignore[method-assign]
+    floor = bridge._momentum_floor_for_buy("bitvavo", "LINK")
+    assert floor < Decimal("0.001")
+    assert floor <= Decimal("0.001") / Decimal("1.20")
