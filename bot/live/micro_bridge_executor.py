@@ -5706,9 +5706,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     ) -> Decimal:
         """Size unlock to remaining sleeve-cash need and day-loss budget.
 
-        ``rotate_inventory`` (mid-flat opportunity-cost): when free cash already
-        covers the sleeve clip, still allow one clip of weak UW inventory so
-        capital can rotate into fresher deploy targets.
+        ``rotate_inventory`` (mid-flat / lag-time / deadlock-with-sleeve-targets):
+        when free cash already covers the sleeve clip, still allow one clip of
+        weak UW inventory so capital can rotate into fresher deploy targets.
         """
         if free_qty <= 0 or mark <= 0 or be <= 0 or mark >= be:
             return _ZERO
@@ -7543,13 +7543,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         )
                         and self._uw_deadlock_partial_enabled
                     ):
+                        # Opportunity-cost: when free cash already covers the
+                        # sleeve clip, still rotate mild-UW / deadlock bags if
+                        # unheld sleeve targets are waiting (else unlock_remaining
+                        # stays 0 and UNI-class bags never clip).
+                        rotate = str(tier) in {"mid_flat", "lag_time_partial"}
+                        if not rotate and str(tier).startswith("deadlock_"):
+                            try:
+                                rotate = bool(self._sleeve_has_unheld_priority())
+                            except Exception:  # noqa: BLE001
+                                rotate = False
                         sell_qty = self._uw_deadlock_partial_sell_qty(
                             free_qty=free_uw,
                             mark=mark,
                             be=be,
                             session_cap=session_cap,
-                            rotate_inventory=str(tier)
-                            in {"mid_flat", "lag_time_partial"},
+                            rotate_inventory=rotate,
                         )
                         if sell_qty <= 0:
                             self._bump_skip("uw_deadlock_partial_budget")
