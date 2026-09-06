@@ -129,7 +129,7 @@ class MicroSessionManager:
             budget_f = float(budget) if budget is not None else 2000.0
         except (TypeError, ValueError):
             budget_f = 2000.0
-        symbols_raw = raw.get("symbols") or []
+        symbols_raw = raw.get("symbols") or raw.get("symbols_sample") or []
         symbols: list[str] | None = None
         if isinstance(symbols_raw, str) and symbols_raw.strip():
             symbols = [s.strip() for s in symbols_raw.split(",") if s.strip()]
