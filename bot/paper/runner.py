@@ -2360,6 +2360,11 @@ class PaperRunner:
                                     False,
                                 )
                             ),
+                            auto_apply_modes=getattr(
+                                self._settings,
+                                "alphai_desk_lessons_auto_apply_modes",
+                                "deploy_urgency,avoid",
+                            ),
                         )
                     except Exception:  # noqa: BLE001
                         logger.exception("ALPHAI_DESK_LESSONS_SETTLE_FAILED")

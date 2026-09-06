@@ -490,7 +490,7 @@ def _session_settings(
             "alphai_desk_lessons_enabled": True,
             "alphai_desk_lessons_path": "./data/alphai/desk_lessons.json",
             "alphai_desk_lessons_auto_apply": False,
-            "alphai_desk_lessons_auto_apply_modes": "deploy_urgency",
+            "alphai_desk_lessons_auto_apply_modes": "deploy_urgency,avoid",
             "alphai_desk_lessons_min_free_eur": 150.0,
             "alphai_desk_lessons_observe_sec": 60.0,
             # Capital playbook router (TREND/FLAT/ADVERSE) — live enforce.
@@ -622,6 +622,11 @@ def _session_settings(
                 "alphai_bullish_buy_enabled": True,
                 "alphai_price_confirm_enabled": True,
                 "alphai_intraday_gate_enabled": True,
+                # 24/7 accuracy: apply settled desk lessons (deploy + avoid recycle).
+                "alphai_desk_lessons_enabled": True,
+                "alphai_desk_lessons_auto_apply_modes": "deploy_urgency,avoid",
+                "alphai_adaptive_lag_enabled": True,
+                "alphai_pick_outcomes_enabled": True,
             }
         )
     else:

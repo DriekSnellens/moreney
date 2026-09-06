@@ -58,6 +58,9 @@ PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
         # Empty → restore session baselines (max-deploy).
     },
     CapitalPlaybook.FLAT: {
+        # Fraction of session baseline ring (works at €350 satellite and €1850 legacy).
+        "active_ring_fraction": 0.85,
+        "ring_soft_max_active_fraction": 0.85,
         "active_ring_eur": 1400.0,
         "ring_soft_max_active_eur": 1400.0,
         "winner_add_enabled": False,
@@ -84,6 +87,8 @@ PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
     },
     CapitalPlaybook.ADVERSE: {
         # Keep room for AlphaI rank-1/2 sleeve even on soft-adverse days.
+        "active_ring_fraction": 0.70,
+        "ring_soft_max_active_fraction": 0.70,
         "active_ring_eur": 1200.0,
         "ring_soft_max_active_eur": 1200.0,
         "winner_add_enabled": False,
@@ -118,6 +123,8 @@ PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
 
 # Stronger FLAT when velocity is dead with capital still near BE (pre-crash).
 PRE_CRASH_FLAT_OVERLAYS: dict[str, Any] = {
+    "active_ring_fraction": 0.55,
+    "ring_soft_max_active_fraction": 0.55,
     "active_ring_eur": 900.0,
     "ring_soft_max_active_eur": 900.0,
     "winner_add_enabled": False,

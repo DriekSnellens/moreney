@@ -486,7 +486,7 @@ class Settings(BaseSettings):
     alphai_desk_lessons_path: str = "./data/alphai/desk_lessons.json"
     alphai_desk_lessons_auto_apply: bool = False
     # Selective apply without full auto_apply (comma list). Default: deploy urgency only.
-    alphai_desk_lessons_auto_apply_modes: str = "deploy_urgency"
+    alphai_desk_lessons_auto_apply_modes: str = "deploy_urgency,avoid"
     alphai_desk_lessons_min_free_eur: float = Field(default=150.0, ge=25.0, le=2000.0)
     alphai_desk_lessons_observe_sec: float = Field(default=60.0, ge=15.0, le=600.0)
     # Intraday AND-gate: AlphaI pick × freshness × low adverse × momentum not down.

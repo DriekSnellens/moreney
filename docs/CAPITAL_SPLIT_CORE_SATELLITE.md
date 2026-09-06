@@ -41,4 +41,13 @@ Last ~3 days: majors were soft/negative while the full-pocket velocity desk stay
 | `live_micro_daytrader_lag_time_min_age_sec` | 600 | Lag-time partial while targets wait |
 | `live_micro_daytrader_provisional_be_exit_min_age_sec` | 300 | Provisional-cost BE+ unlock |
 
-Measure: satellite NET/hour, pick hit-rate, non-pick inventory EUR → 0 while confirmed picks exist.
+## 24/7 accurate operation (lessons baked in)
+
+- **Continuous by default** (`minutes=null`); systemd restart auto-resumes running continuous sessions and restores symbol universe.
+- **Desk lessons applied**: `deploy_urgency,avoid` (settled missed-deploy / avoid-vs-sleeve feedback) — harvest stays shadow until early-harvest samples accumulate.
+- **Provisional cost unlock**: aged non-picks / UW-cut exits may use unit-cost BE when trusted-cost hydration lags (never invents cost; never opens generic below-BE harvests).
+- **Playbook ring shrink** uses fractions of the satellite baseline (FLAT ~85%, ADVERSE ~70%) so €350 rings still derisk.
+- **Risk rails**: sleeve daily loss cap (~€21) pauses satellite buys first; pocket daily kill scales to ~10% of satellite (~€70) as hard vault rail; hard cut 2.5% unchanged.
+- **Accuracy stack kept live**: price-confirm + adaptive lag + pick outcomes + intraday gate + require-bullish entries.
+
+Measure: satellite NET/hour, pick hit-rate, non-pick inventory EUR → 0 while confirmed picks exist; session stays `running+continuous` across restarts.

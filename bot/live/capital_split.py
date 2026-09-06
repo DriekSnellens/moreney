@@ -158,4 +158,10 @@ def split_session_overrides(plan: CapitalSplitPlan) -> dict[str, Any]:
         "live_micro_alphai_priority_clip_eur": min(180.0, add_clip * 1.25),
         "live_micro_alphai_strong_clip_eur": min(220.0, add_clip * 1.5),
         "live_micro_okx_ring_clip_eur": min(100.0, first_clip),
+        # 24/7 daytrader: sleeve loss cap is primary buy-pause; pocket daily kill
+        # stays as hard vault rail (~10% satellite, floored at 2.5× sleeve cap).
+        "paper_daily_kill_eur": max(
+            float(plan.sleeve_daily_loss_cap_eur) * 2.5,
+            round(float(plan.satellite_eur) * 0.10, 2),
+        ),
     }

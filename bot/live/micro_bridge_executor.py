@@ -1989,6 +1989,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if key in merged and merged[key] is not None:
                 setattr(self, attr, bool(merged[key]))
 
+        # Prefer fractional ring shrink so FLAT/ADVERSE works on €350 satellite rings.
+        try:
+            base_ring = Decimal(str(self._playbook_baselines.get("active_ring_eur") or 0))
+            frac = merged.get("active_ring_fraction")
+            if frac is not None and base_ring > 0:
+                merged["active_ring_eur"] = float(base_ring * Decimal(str(frac)))
+            soft_base = Decimal(
+                str(self._playbook_baselines.get("ring_soft_max_active_eur") or base_ring or 0)
+            )
+            soft_frac = merged.get("ring_soft_max_active_fraction")
+            if soft_frac is not None and soft_base > 0:
+                merged["ring_soft_max_active_eur"] = float(
+                    soft_base * Decimal(str(soft_frac))
+                )
+        except Exception:  # noqa: BLE001
+            pass
         _dec("active_ring_eur", "_active_ring_eur", cap_to_baseline=True)
         _dec("ring_soft_max_active_eur", "_ring_soft_max_active_eur", cap_to_baseline=True)
         _bool("winner_add_enabled", "_winner_add_enabled")
@@ -2018,6 +2034,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         _bool("alphai_idle_deploy_blocked", "_alphai_idle_deploy_blocked")
 
         self._playbook_block_new_buys = block_new
+        # Daytrader+split: keep playbook recycle ages from undoing sharp satellite clocks.
+        if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+            try:
+                self._uw_non_alphai_min_age_sec = min(
+                    float(self._uw_non_alphai_min_age_sec),
+                    float(getattr(self, "_daytrader_non_alphai_min_age_sec", 120.0) or 120.0),
+                )
+                self._uw_near_min_age_sec = min(
+                    float(self._uw_near_min_age_sec),
+                    float(getattr(self, "_daytrader_near_min_age_sec", 90.0) or 90.0),
+                )
+                self._uw_idle_min_age_sec = min(
+                    float(self._uw_idle_min_age_sec),
+                    float(getattr(self, "_daytrader_near_min_age_sec", 90.0) or 90.0) * 2.0,
+                )
+            except Exception:  # noqa: BLE001
+                pass
         if block_new and not self._daily_kill_active:
             self.set_buys_blocked(True, new_bases_only=True)
             self._playbook_owns_buy_block = True
@@ -9348,7 +9381,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "trail_early_cut_loss",
                 "trail_uw_recycle",
             }
-            be = self._break_even_sell_price(venue, base)
+            # Daytrader / hydration lag: allow provisional unit-cost BE for
+            # aged BE+ harvests and sleeve UW/cut exits (never invent cost).
+            allow_provisional = False
+            if cut_loss_exit and self._unit_cost(venue, base) is not None:
+                allow_provisional = True
+            elif self._provisional_be_exit_allowed(venue, base):
+                allow_provisional = True
+            be = self._break_even_sell_price(
+                venue, base, allow_provisional=allow_provisional
+            )
             if be is None:
                 self._bump_skip("sell_no_trusted_cost")
                 return await self._reject_before_live(

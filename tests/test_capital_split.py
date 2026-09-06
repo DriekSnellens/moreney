@@ -50,6 +50,11 @@ def test_session_settings_apply_capital_split(tmp_path: Path) -> None:
     assert float(cfg.live_micro_early_cut_loss_below_be_pct) == 0.01
     assert (cfg.live_micro_long_hold_bases or "") == ""
     assert float(cfg.live_micro_first_clip_eur) <= 120.0
+    # 24/7 vault rail scales with satellite (~10% / ≥2.5× sleeve cap).
+    assert float(cfg.paper_daily_kill_eur) == 70.0
+    assert cfg.live_micro_alphai_daytrader_enabled is True
+    assert "avoid" in str(cfg.alphai_desk_lessons_auto_apply_modes)
+    assert "deploy_urgency" in str(cfg.alphai_desk_lessons_auto_apply_modes)
 
 
 def test_session_settings_can_disable_split(tmp_path: Path) -> None:
