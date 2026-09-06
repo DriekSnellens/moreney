@@ -59,6 +59,17 @@ def _bridge() -> MicroBudgetLiveExecutor:
     b._uw_deadlock_unlock_enabled = True
     b._uw_deadlock_below_be_pct = Decimal("0.0025")
     b._uw_deadlock_min_age_sec = 300.0
+    b._uw_deadlock_partial_enabled = True
+    b._uw_deadlock_target_free_eur = Decimal("220")
+    b._uw_deadlock_partial_clip_eur = Decimal("220")
+    b._uw_deadlock_partial_min_eur = Decimal("40")
+    b._uw_deadlock_day_loss_cap_eur = Decimal("15")
+    b._uw_deadlock_would_buy_gate = True
+    b._uw_deadlock_day_key = ""
+    b._uw_deadlock_day_loss_eur = Decimal("0")
+    b._uw_deadlock_unlock_remaining_eur = Decimal("220")
+    b._alphai_priority_clip_eur = Decimal("220")
+    b._alphai_strong_clip_eur = Decimal("0")
     b._uw_non_alphai_below_be_pct = Decimal("0.01")
     b._uw_non_alphai_min_age_sec = 3600.0
     b._uw_avoid_max_age_sec = 900.0
@@ -221,3 +232,81 @@ def test_playbook_overlay_tightens_deadlock_age() -> None:
     )
     assert b._uw_deadlock_min_age_sec == 180.0
     assert b._uw_deadlock_below_be_pct == Decimal("0.002")
+
+
+
+def test_partial_unlock_sizes_to_sleeve_clip() -> None:
+    b = _bridge()
+    b._uw_deadlock_unlock_remaining_eur = Decimal("220")
+    b._uw_deadlock_day_loss_eur = Decimal("0")
+    qty = b._uw_deadlock_partial_sell_qty(
+        free_qty=Decimal("10"),  # 10 * 99.7 ~= 997 EUR bag
+        mark=Decimal("99.7"),
+        be=Decimal("100"),
+        session_cap=Decimal("10"),
+    )
+    # ~220 EUR / 99.7 ≈ 2.2066
+    assert qty > 0
+    assert qty < Decimal("10")
+    assert abs(qty * Decimal("99.7") - Decimal("220")) < Decimal("1")
+
+
+def test_partial_unlock_blocked_when_day_loss_cap_spent() -> None:
+    import datetime as dt
+    b = _bridge()
+    b._uw_deadlock_day_key = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    b._uw_deadlock_day_loss_eur = Decimal("15")
+    b._uw_deadlock_unlock_remaining_eur = Decimal("220")
+    qty = b._uw_deadlock_partial_sell_qty(
+        free_qty=Decimal("10"),
+        mark=Decimal("99.7"),
+        be=Decimal("100"),
+        session_cap=Decimal("10"),
+    )
+    assert qty == Decimal("0")
+
+
+def test_would_buy_today_nurses_rising_sleeve() -> None:
+    b = _bridge()
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_sleeve_priority_buy = lambda base, top_n=2: True  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: False  # type: ignore[method-assign]
+    assert b._uw_would_buy_today("BNB", "BNBEUR") is True
+    b._momentum_flat_or_down = lambda symbol: True  # type: ignore[method-assign]
+    assert b._uw_would_buy_today("BNB", "BNBEUR") is False
+
+
+def test_deadlock_plan_skips_when_would_buy_today() -> None:
+    b = _bridge()
+    b._unit_cost = lambda venue, base: Decimal("100")  # type: ignore[method-assign]
+    b._position_age_sec = lambda venue, base: 400.0  # type: ignore[method-assign]
+    b._alphai_bullish_buy = lambda base: True  # type: ignore[method-assign]
+    b._alphai_protects_from_cuts = lambda base: False  # type: ignore[method-assign]
+    b._alphai_is_avoid_base = lambda base: False  # type: ignore[method-assign]
+    b._alphai_sleeve_priority_buy = lambda base, top_n=2: True  # type: ignore[method-assign]
+    b._momentum_flat_or_down = lambda symbol: False  # type: ignore[method-assign]  # rising
+    b._underwater_book_notional = lambda venue: Decimal("280")  # type: ignore[method-assign]
+    b._active_book_notional = lambda venue: Decimal("0")  # type: ignore[method-assign]
+    b._venue_budget_remaining = lambda venue: Decimal("10")  # type: ignore[method-assign]
+    b._sleeve_has_unheld_priority = lambda top_n=2: True  # type: ignore[method-assign]
+    b._uw_dust_max_notional = Decimal("0")
+    # Rising sleeve would-buy → no deadlock tier
+    plan = b._uw_recycle_plan(
+        venue="bitvavo",
+        base="BNB",
+        symbol="BNBEUR",
+        mark=Decimal("99.70"),
+        be=Decimal("100"),
+        notional=Decimal("280"),
+    )
+    assert plan is None or not str(plan[0]).startswith("deadlock_")
+
+
+def test_playbook_has_partial_unlock_overlays() -> None:
+    from bot.live.capital_playbook import PLAYBOOK_OVERLAYS, PRE_CRASH_FLAT_OVERLAYS, CapitalPlaybook
+
+    flat = PLAYBOOK_OVERLAYS[CapitalPlaybook.FLAT]
+    assert flat["uw_deadlock_target_free_eur"] == 220.0
+    assert flat["uw_deadlock_day_loss_cap_eur"] == 12.0
+    assert PRE_CRASH_FLAT_OVERLAYS["uw_deadlock_day_loss_cap_eur"] == 10.0

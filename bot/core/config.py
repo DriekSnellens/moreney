@@ -571,6 +571,13 @@ class Settings(BaseSettings):
     live_micro_uw_deadlock_unlock_enabled: bool = True
     live_micro_uw_deadlock_below_be_pct: float = Field(default=0.0025, ge=0.0, le=0.05)
     live_micro_uw_deadlock_min_age_sec: float = Field(default=300.0, ge=60.0, le=86400.0)
+    # Partial ranked unlock: free only enough for one sleeve clip, with day loss cap.
+    live_micro_uw_deadlock_partial_enabled: bool = True
+    live_micro_uw_deadlock_target_free_eur: float = Field(default=220.0, ge=0.0, le=5000.0)
+    live_micro_uw_deadlock_partial_clip_eur: float = Field(default=220.0, ge=0.0, le=5000.0)
+    live_micro_uw_deadlock_partial_min_eur: float = Field(default=40.0, ge=0.0, le=1000.0)
+    live_micro_uw_deadlock_day_loss_cap_eur: float = Field(default=15.0, ge=0.0, le=500.0)
+    live_micro_uw_deadlock_would_buy_gate: bool = True
     # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
     live_micro_alphai_cross_venue_deploy: bool = True
     live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(
