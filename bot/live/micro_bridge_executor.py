@@ -8024,6 +8024,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     be=be,
                     notional=notional_uw,
                 )
+                if plan is None:
+                    st.pop("uw_recycle_tier", None)
+                    st.pop("uw_recycle_mode", None)
                 if plan is not None:
                     tier, mode, floor = plan
                     session_cap = (
@@ -8069,6 +8072,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                             self._bump_skip("uw_deadlock_partial_budget")
                             sell_qty = _ZERO
                             plan = None
+                            st.pop("uw_recycle_tier", None)
+                            st.pop("uw_recycle_mode", None)
                         notional_uw = sell_qty * mark
                     else:
                         sell_qty = min(free_uw, session_cap)
@@ -8152,15 +8157,116 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if be is not None and mark < be:
                     self._bump_skip("uw_recycle_provisional_pending")
                 continue
-            if (
-                not reason
-                and be is not None
-                and self._momentum_enabled
-                and self._momentum_down(symbol)
-                and not st.get("momentum_be_exit_done")
-            ):
-                mom_target = self._momentum_exit_target_price(venue, asset)
-                if mom_target is not None and mark >= be:
+            # BE+ harvest chain must not run (or fall through to continue)
+            # after sleeve-loss exits already set reason — that discarded
+            # trail_uw_recycle / cut-loss sells for underwater AlphaI rotates.
+            if not reason:
+                if (
+                    be is not None
+                    and self._momentum_enabled
+                    and self._momentum_down(symbol)
+                    and not st.get("momentum_be_exit_done")
+                ):
+                    mom_target = self._momentum_exit_target_price(venue, asset)
+                    if mom_target is not None and mark >= be:
+                        free = await self._refresh_free(venue, symbol, asset, locked)
+                        sell_qty = min(
+                            free,
+                            self._session_qty(venue, asset)
+                            if self._trail_session_only
+                            else free,
+                        )
+                        reason = "trail_momentum_be_exit"
+                        limit_px = mom_target if mark >= mom_target else None
+                elif (
+                    st.get("soft_armed")
+                    and not st.get("recovery_armed")
+                    and self._trail_partial_enabled
+                    and self._soft_partial > 0
+                    and not st.get("soft_partial_done")
+                    and gain_now >= soft_arm_now
+                ):
+                    # Retry every cycle until a soft partial lands (not only the
+                    # arming tick — large bags used to fail max-notional once and
+                    # never retry because newly_soft is one-shot).
+                    # soft_partial=0 → skip; full bag waits for soft/hard drawdown exit.
+                    # Recovery-from-loss bags never soft-partial at BE; they ride for
+                    # profit and only floor-exit on pullback to BE / trail drawdown.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
+                        )
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
+                    sell_qty = self._trail_partial_qty(
+                        cap=cap,
+                        partial_pct=self._soft_partial,
+                        mark=mark,
+                        notional_floor=partial_min,
+                    )
+                    reason = "trail_soft_partial"
+                elif (
+                    st.get("hard_armed")
+                    and self._trail_partial_enabled
+                    and not st.get("hard_partial_done")
+                ):
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
+                        )
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
+                    sell_qty = self._trail_partial_qty(
+                        cap=cap,
+                        partial_pct=self._hard_partial,
+                        mark=mark,
+                        notional_floor=partial_min,
+                    )
+                    reason = "trail_hard_partial"
+                elif (
+                    self._consolidate_duplicates
+                    and self._is_consolidation_secondary(venue, asset)
+                    and be is not None
+                    and mark >= be
+                    and not st.get("consolidation_wind_down_done")
+                ):
+                    # Wind down OKX duplicate at BE+; Bitvavo remains primary bag.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    sell_qty = cap
+                    reason = "trail_consolidation_wind_down"
+                elif st.get("triggered"):
                     free = await self._refresh_free(venue, symbol, asset, locked)
                     sell_qty = min(
                         free,
@@ -8168,230 +8274,151 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         if self._trail_session_only
                         else free,
                     )
-                    reason = "trail_momentum_be_exit"
-                    limit_px = mom_target if mark >= mom_target else None
-            elif (
-                not reason
-                and st.get("soft_armed")
-                and not st.get("recovery_armed")
-                and self._trail_partial_enabled
-                and self._soft_partial > 0
-                and not st.get("soft_partial_done")
-                and gain_now >= soft_arm_now
-            ):
-                # Retry every cycle until a soft partial lands (not only the
-                # arming tick — large bags used to fail max-notional once and
-                # never retry because newly_soft is one-shot).
-                # soft_partial=0 → skip; full bag waits for soft/hard drawdown exit.
-                # Recovery-from-loss bags never soft-partial at BE; they ride for
-                # profit and only floor-exit on pullback to BE / trail drawdown.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                sell_qty = self._trail_partial_qty(
-                    cap=cap,
-                    partial_pct=self._soft_partial,
-                    mark=mark,
-                    notional_floor=partial_min,
-                )
-                reason = "trail_soft_partial"
-            elif (
-                st.get("hard_armed")
-                and self._trail_partial_enabled
-                and not st.get("hard_partial_done")
-            ):
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                sell_qty = self._trail_partial_qty(
-                    cap=cap,
-                    partial_pct=self._hard_partial,
-                    mark=mark,
-                    notional_floor=partial_min,
-                )
-                reason = "trail_hard_partial"
-            elif (
-                self._consolidate_duplicates
-                and self._is_consolidation_secondary(venue, asset)
-                and be is not None
-                and mark >= be
-                and not st.get("consolidation_wind_down_done")
-            ):
-                # Wind down OKX duplicate at BE+; Bitvavo remains primary bag.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                sell_qty = cap
-                reason = "trail_consolidation_wind_down"
-            elif st.get("triggered"):
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_drawdown"
-            elif (
-                be is not None
-                and mark >= be
-                and self._be_harvest_partial > 0
-                and not self._be_harvest_already_done(st)
-                and gain_now
-                >= (
-                    min(harvest_gain_floor, Decimal("0.00015"))
-                    if st.get("recovery_armed")
-                    else harvest_gain_floor
-                )
-                and not self._soft_partial_would_fire(
-                    st, gain_now=gain_now, soft_arm_now=soft_arm_now
-                )
-            ):
-                # Fee-positive harvest at BE+ (recovery bags, small MTM wins).
-                # Recovery bags use a slightly lower min-gain so underwater→BE+
-                # recycles capital before the next dip.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                sell_qty = self._trail_partial_qty(
-                    cap=cap,
-                    partial_pct=self._be_harvest_partial,
-                    mark=mark,
-                    notional_floor=partial_min,
-                )
-                reason = "trail_be_harvest"
-                self._record_desk_early_harvest(
-                    venue=venue,
-                    base=asset,
-                    mark=mark,
-                    gain_now=gain_now,
-                    peak_px=peak_px,
-                    be=be,
-                    soft_arm=soft_arm_now,
-                    sell_qty=sell_qty,
-                    reason=reason,
-                )
-            elif (
-                self._exit_engine_enabled
-                and self._exit_soft_armed_work
-                and st.get("soft_armed")
-                and be is not None
-                and mark >= be
-                and gain_now
-                >= (
-                    harvest_gain_floor * Decimal("0.85")
-                    if (exit_urgency or alphai_peak_past)
-                    else harvest_gain_floor
-                )
-                # B3: let soft partial / runner window run first; then work remainder.
-                and (
-                    self._soft_partial <= 0
-                    or st.get("soft_partial_done")
-                    or exit_urgency
-                    or alphai_peak_past
-                )
-            ):
-                # D: keep working BE+ inventory at touch while soft-armed
-                # (do not wait for drawdown — spikes die in seconds).
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                if self._exit_soft_armed_partial >= Decimal("1"):
-                    sell_qty = cap
-                else:
+                    reason = "trail_drawdown"
+                elif (
+                    be is not None
+                    and mark >= be
+                    and self._be_harvest_partial > 0
+                    and not self._be_harvest_already_done(st)
+                    and gain_now
+                    >= (
+                        min(harvest_gain_floor, Decimal("0.00015"))
+                        if st.get("recovery_armed")
+                        else harvest_gain_floor
+                    )
+                    and not self._soft_partial_would_fire(
+                        st, gain_now=gain_now, soft_arm_now=soft_arm_now
+                    )
+                ):
+                    # Fee-positive harvest at BE+ (recovery bags, small MTM wins).
+                    # Recovery bags use a slightly lower min-gain so underwater→BE+
+                    # recycles capital before the next dip.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
+                        )
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
                     sell_qty = self._trail_partial_qty(
                         cap=cap,
-                        partial_pct=self._exit_soft_armed_partial,
+                        partial_pct=self._be_harvest_partial,
                         mark=mark,
                         notional_floor=partial_min,
                     )
-                reason = "trail_exit_work"
-            elif (
-                st.get("recovery_armed")
-                and be is not None
-                and Decimal(str(st.get("peak") or 0)) > be
-                and mark <= be
-            ):
-                # Grew above BE after recovery-arm, then fell back to BE → exit.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_recovery_be"
-                limit_px = max(be, mark * Decimal("0.999"))
-                post_only = True
-            else:
-                # B3: no exit this tick → maybe scale into soft-armed BE+ winner.
-                if not st.get("triggered"):
-                    add = await self._maybe_submit_winner_add(
+                    reason = "trail_be_harvest"
+                    self._record_desk_early_harvest(
                         venue=venue,
                         base=asset,
-                        symbol=symbol,
                         mark=mark,
+                        gain_now=gain_now,
+                        peak_px=peak_px,
                         be=be,
-                        st=st,
+                        soft_arm=soft_arm_now,
+                        sell_qty=sell_qty,
+                        reason=reason,
                     )
-                    if add is not None:
-                        triggered.append(
-                            {
-                                "venue": venue,
-                                "base": asset,
-                                "reason": "winner_add",
-                                "detail": add,
-                            }
+                elif (
+                    self._exit_engine_enabled
+                    and self._exit_soft_armed_work
+                    and st.get("soft_armed")
+                    and be is not None
+                    and mark >= be
+                    and gain_now
+                    >= (
+                        harvest_gain_floor * Decimal("0.85")
+                        if (exit_urgency or alphai_peak_past)
+                        else harvest_gain_floor
+                    )
+                    # B3: let soft partial / runner window run first; then work remainder.
+                    and (
+                        self._soft_partial <= 0
+                        or st.get("soft_partial_done")
+                        or exit_urgency
+                        or alphai_peak_past
+                    )
+                ):
+                    # D: keep working BE+ inventory at touch while soft-armed
+                    # (do not wait for drawdown — spikes die in seconds).
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
                         )
-                continue
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
+                    if self._exit_soft_armed_partial >= Decimal("1"):
+                        sell_qty = cap
+                    else:
+                        sell_qty = self._trail_partial_qty(
+                            cap=cap,
+                            partial_pct=self._exit_soft_armed_partial,
+                            mark=mark,
+                            notional_floor=partial_min,
+                        )
+                    reason = "trail_exit_work"
+                elif (
+                    st.get("recovery_armed")
+                    and be is not None
+                    and Decimal(str(st.get("peak") or 0)) > be
+                    and mark <= be
+                ):
+                    # Grew above BE after recovery-arm, then fell back to BE → exit.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_recovery_be"
+                    limit_px = max(be, mark * Decimal("0.999"))
+                    post_only = True
+                else:
+                    # B3: no exit this tick → maybe scale into soft-armed BE+ winner.
+                    if not st.get("triggered"):
+                        add = await self._maybe_submit_winner_add(
+                            venue=venue,
+                            base=asset,
+                            symbol=symbol,
+                            mark=mark,
+                            be=be,
+                            st=st,
+                        )
+                        if add is not None:
+                            triggered.append(
+                                {
+                                    "venue": venue,
+                                    "base": asset,
+                                    "reason": "winner_add",
+                                    "detail": add,
+                                }
+                            )
+                    continue
 
             # Sleeve priority: keep deferring while rising even after mild peak-fade
             # so macro BE harvest does not clip rank-1/2 winners mid-move.
