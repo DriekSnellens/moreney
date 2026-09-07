@@ -9725,6 +9725,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if short is None or short >= (self._entry_short_momentum_min * Decimal("0.25")):
                     momentum_ok = True
                     meta["sleeve_momentum_soft"] = True
+            # Tape leader (24h RS confirmed): same soft pass — block only when the
+            # intraday tape is actively falling or short momentum is negative.
+            if not momentum_ok and tape_buy and not self._momentum_down(symbol):
+                short = self._series_for(symbol).momentum_return_last(
+                    max(2, self._entry_short_momentum_samples // 2)
+                )
+                if short is None or short >= 0:
+                    momentum_ok = True
+                    meta["tape_momentum_soft"] = True
             if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
