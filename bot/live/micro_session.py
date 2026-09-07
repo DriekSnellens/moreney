@@ -976,6 +976,8 @@ async def run_session(
                 "strategy": st.get("strategy"),
                 "approved_opportunities": st.get("approved_opportunities"),
                 "executed_opportunities": st.get("executed_opportunities"),
+                "maker_reject_counts": st.get("reject_counts") or {},
+                "why_not_trade": st.get("why_not_trade"),
                 "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
                 "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),
                 "portfolio_value_eur": (
