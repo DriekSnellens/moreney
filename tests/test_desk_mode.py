@@ -132,6 +132,6 @@ def test_underwater_book_forces_certainty() -> None:
 
 
 def test_overlay_constants_survive() -> None:
-    assert CERTAINTY_OVERLAYS["be_harvest_min_gain_pct"] == 0.010
-    assert VELOCITY_OVERLAYS["be_harvest_min_gain_pct"] == 0.012
+    assert CERTAINTY_OVERLAYS["be_harvest_min_gain_pct"] == 0.012
+    assert VELOCITY_OVERLAYS["be_harvest_min_gain_pct"] == 0.015
     assert VELOCITY_OVERLAYS["allow_ring_expand_above_baseline"] is True

@@ -238,7 +238,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.live_micro_alphai_cross_venue_deploy is True
     assert float(cfg.live_micro_alphai_cross_venue_max_other_depth_pct) == 0.025
     assert float(cfg.live_micro_alphai_ring_fill_add_max_depth_pct) == 0.012
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.012
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.015
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
@@ -842,7 +842,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.live_micro_reset_drawdown_on_start is True
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
     assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.40
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.012
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.015
     assert cfg.live_micro_exit_engine_enabled is True
     # 3% of satellite (50% of €2024 budget) → €30.36.
     assert abs(float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) - 30.36) < 0.05

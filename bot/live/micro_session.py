@@ -237,7 +237,7 @@ def _session_settings(
             "paper_trail_be_harvest_partial_pct": 0.40,
             # 222/534 round trips exited at 0..+0.5% gross: gross +20.75, fees 35.59,
             # net -14.84. Below ~+1% gross a "BE+ harvest" is a fee donation.
-            "paper_trail_be_harvest_min_gain_pct": 0.012,
+            "paper_trail_be_harvest_min_gain_pct": 0.015,  # = soft-arm: one ladder, not two partials 0.3% apart
             "live_micro_be_harvest_cooldown_sec": 2.0,
             "paper_trail_hard_arm_pct": 0.025,
             "paper_trail_hard_drawdown_pct": 0.012,

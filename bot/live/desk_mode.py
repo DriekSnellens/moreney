@@ -57,7 +57,7 @@ class DeskModeDecision:
 # where we want to reinforce survival vs accidental playbook expansion.
 CERTAINTY_OVERLAYS: dict[str, Any] = {
     "winner_add_enabled": False,
-    "be_harvest_min_gain_pct": 0.010,
+    "be_harvest_min_gain_pct": 0.012,
     "be_harvest_partial_pct": 0.40,
     "allow_ring_expand_above_baseline": False,
     "daytrader_sleeve_urgency_enabled": False,
@@ -67,7 +67,7 @@ CERTAINTY_OVERLAYS: dict[str, Any] = {
 # Ring grows toward satellite (applied in bridge; not capped to certainty baseline).
 VELOCITY_OVERLAYS: dict[str, Any] = {
     "winner_add_enabled": True,
-    "be_harvest_min_gain_pct": 0.012,
+    "be_harvest_min_gain_pct": 0.015,
     "be_harvest_partial_pct": 0.40,
     "allow_ring_expand_above_baseline": True,
     "trail_hold_rising_n": 2,
