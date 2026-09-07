@@ -613,6 +613,53 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._playbook_block_new_buys = False
         self._playbook_owns_buy_block = False
         self._playbook_baselines: dict[str, Any] = {}
+        # Auto CERTAINTY ↔ VELOCITY desk mode (on by default with daytrader).
+        from bot.live.desk_mode import DeskMode
+
+        self._desk_mode_auto_enabled = bool(
+            getattr(settings, "live_micro_desk_mode_auto_enabled", True)
+        )
+        self._desk_mode_min_hold_sec = float(
+            getattr(settings, "live_micro_desk_mode_min_hold_sec", 900.0) or 900.0
+        )
+        self._desk_mode_min_confirm = float(
+            getattr(settings, "live_micro_desk_mode_min_confirm", 0.55) or 0.55
+        )
+        self._desk_mode_min_conviction = float(
+            getattr(settings, "live_micro_desk_mode_min_conviction", 0.25) or 0.25
+        )
+        self._desk_mode_min_confirmed_picks = int(
+            getattr(settings, "live_micro_desk_mode_min_confirmed_picks", 1) or 1
+        )
+        self._desk_mode_max_underwater_eur = float(
+            getattr(settings, "live_micro_desk_mode_max_underwater_eur", 120.0) or 120.0
+        )
+        self._desk_mode_velocity_ring_fraction = float(
+            getattr(
+                settings, "live_micro_desk_mode_velocity_ring_fraction_of_satellite", 0.90
+            )
+            or 0.90
+        )
+        self._desk_mode_velocity_ring_mult = float(
+            getattr(settings, "live_micro_desk_mode_velocity_ring_mult_of_certainty", 2.0)
+            or 2.0
+        )
+        self._desk_mode_velocity_sleeve_loss_cap = Decimal(
+            str(
+                getattr(settings, "live_micro_desk_mode_velocity_sleeve_loss_cap_eur", 35.0)
+                or 35.0
+            )
+        )
+        self._desk_mode: DeskMode = DeskMode.CERTAINTY
+        self._desk_mode_since_mono = time.monotonic()
+        self._desk_mode_decision: dict[str, Any] = {
+            "mode": DeskMode.CERTAINTY.value,
+            "confidence": 0.0,
+            "reasons": ["cold_start"],
+            "overlays": {},
+        }
+        self._certainty_ring_baseline_eur = Decimal(str(self._active_ring_eur or 0))
+        self._sleeve_loss_cap_baseline = Decimal(str(self._sleeve_daily_loss_cap or 0))
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -2055,11 +2102,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if overlays:
             merged.update(dict(overlays))
         block_new = bool(merged.pop("block_new_buys", False))
+        allow_ring_expand = bool(merged.pop("allow_ring_expand_above_baseline", False))
+        urgency_overlay = merged.pop("daytrader_sleeve_urgency_enabled", None)
+        sleeve_cap_overlay = merged.pop("sleeve_daily_loss_cap_eur", None)
 
         def _dec(key: str, attr: str, *, cap_to_baseline: bool = False) -> None:
             if key in merged and merged[key] is not None:
                 val = Decimal(str(merged[key]))
-                if cap_to_baseline and key in self._playbook_baselines:
+                if (
+                    cap_to_baseline
+                    and not allow_ring_expand
+                    and key in self._playbook_baselines
+                ):
                     base_v = Decimal(str(self._playbook_baselines[key]))
                     if base_v > 0:
                         val = min(val, base_v)
@@ -2093,10 +2147,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
         except Exception:  # noqa: BLE001
             pass
-        _dec("active_ring_eur", "_active_ring_eur", cap_to_baseline=True)
-        _dec("ring_soft_max_active_eur", "_ring_soft_max_active_eur", cap_to_baseline=True)
+        _dec(
+            "active_ring_eur",
+            "_active_ring_eur",
+            cap_to_baseline=not allow_ring_expand,
+        )
+        _dec(
+            "ring_soft_max_active_eur",
+            "_ring_soft_max_active_eur",
+            cap_to_baseline=not allow_ring_expand,
+        )
         _bool("winner_add_enabled", "_winner_add_enabled")
-        _dec("alphai_strong_clip_eur", "_alphai_strong_clip_eur", cap_to_baseline=True)
+        _dec(
+            "alphai_strong_clip_eur",
+            "_alphai_strong_clip_eur",
+            cap_to_baseline=not allow_ring_expand,
+        )
         _dec("exit_taker_cushion_bps", "_exit_taker_cushion_bps")
         _int("exit_taker_after_maker_fails", "_exit_taker_after_maker_fails")
         _dec("be_harvest_min_gain_pct", "_be_harvest_min_gain")
@@ -2122,6 +2188,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         _bool("alphai_idle_deploy_blocked", "_alphai_idle_deploy_blocked")
 
         self._playbook_block_new_buys = block_new
+        if urgency_overlay is not None:
+            self._daytrader_sleeve_urgency_enabled = bool(urgency_overlay)
+        if sleeve_cap_overlay is not None:
+            try:
+                self._sleeve_daily_loss_cap = Decimal(str(sleeve_cap_overlay))
+            except Exception:  # noqa: BLE001
+                pass
+        elif getattr(self, "_sleeve_loss_cap_baseline", None) is not None:
+            self._sleeve_daily_loss_cap = Decimal(str(self._sleeve_loss_cap_baseline))
         # Daytrader+split: keep playbook recycle ages from undoing sharp satellite clocks.
         if bool(getattr(self, "_alphai_daytrader_enabled", False)):
             try:
@@ -2219,7 +2294,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 f"{' PRE_CRASH' if decision.pre_crash else ''} "
                 f"({','.join(decision.reasons[:4])})",
             )
-        self._apply_capital_playbook_overlays(decision.overlays)
+        merged_overlays: dict[str, Any] = dict(decision.overlays or {})
+        desk_public: dict[str, Any] = dict(self._desk_mode_decision or {})
+        if self._desk_mode_auto_enabled:
+            desk_public = self._refresh_desk_mode(
+                playbook=decision.playbook.value,
+                pre_crash=bool(decision.pre_crash),
+                underwater_bag_count=uw_n,
+                underwater_notional_eur=uw_eur,
+                sell_fills_last_60m=inputs.sell_fills_last_60m,
+                median_mom=inputs.median_mom,
+                now_mono=now,
+            )
+            desk_overlays = desk_public.get("overlays") or {}
+            if isinstance(desk_overlays, Mapping):
+                merged_overlays.update(dict(desk_overlays))
+        self._apply_capital_playbook_overlays(merged_overlays)
         self._capital_playbook_decision = {
             **decision_public_dict(decision),
             "held_sec": round(now - self._capital_playbook_since_mono, 1),
@@ -2235,11 +2325,162 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "winnable_gap_eur": round(inputs.winnable_gap_eur, 2),
                 "macro": inputs.alphai_macro_active,
             },
+            "desk_mode": desk_public,
             "enabled": True,
         }
         self._capital_playbook_last_refresh_mono = now
         self._maybe_observe_desk_lessons()
         return self._capital_playbook_decision
+
+    def _desk_mode_alphai_stats(self) -> tuple[int, float, float]:
+        """Return (confirmed_count, best_confirm, best_conviction) from AlphaI."""
+        sig = self._alphai_signals
+        if sig is None:
+            return 0, 0.0, 0.0
+        min_confirm = float(self._desk_mode_min_confirm or 0.55)
+        confirmed = 0
+        best_confirm = 0.0
+        best_conviction = 0.0
+        bases: set[str] = set()
+        try:
+            if hasattr(sig, "bullish_buy_bases"):
+                bases |= {str(b).upper() for b in (sig.bullish_buy_bases() or [])}
+        except Exception:  # noqa: BLE001
+            pass
+        if not bases:
+            try:
+                pub = sig.to_public_dict() if hasattr(sig, "to_public_dict") else {}
+                for b in pub.get("bullish_buy_bases") or []:
+                    bases.add(str(b).upper())
+            except Exception:  # noqa: BLE001
+                pass
+        for base in bases:
+            confirm = 0.0
+            conviction = 0.0
+            try:
+                if hasattr(sig, "price_confirm_scale"):
+                    confirm = float(sig.price_confirm_scale(base) or 0.0)
+            except Exception:  # noqa: BLE001
+                confirm = 0.0
+            try:
+                if hasattr(sig, "pick_conviction"):
+                    conviction = float(sig.pick_conviction(base) or 0.0)
+            except Exception:  # noqa: BLE001
+                conviction = 0.0
+            best_confirm = max(best_confirm, confirm)
+            best_conviction = max(best_conviction, conviction)
+            if confirm >= min_confirm:
+                confirmed += 1
+        return int(confirmed), float(best_confirm), float(best_conviction)
+
+    def _refresh_desk_mode(
+        self,
+        *,
+        playbook: str,
+        pre_crash: bool,
+        underwater_bag_count: int,
+        underwater_notional_eur: float,
+        sell_fills_last_60m: int,
+        median_mom: float | None,
+        now_mono: float,
+    ) -> dict[str, Any]:
+        """Classify CERTAINTY/VELOCITY and store public decision (no apply)."""
+        from bot.live.desk_mode import (
+            DeskMode,
+            DeskModeInputs,
+            classify_desk_mode,
+            decision_public_dict as desk_decision_public_dict,
+        )
+
+        confirmed_n, best_confirm, best_conviction = self._desk_mode_alphai_stats()
+        certainty_ring = float(self._certainty_ring_baseline_eur or 0)
+        if certainty_ring <= 0:
+            try:
+                certainty_ring = float(
+                    self._playbook_baselines.get("active_ring_eur")
+                    or self._active_ring_eur
+                    or 0
+                )
+            except Exception:  # noqa: BLE001
+                certainty_ring = float(self._active_ring_eur or 0)
+            self._certainty_ring_baseline_eur = Decimal(str(certainty_ring))
+        satellite = float(self._satellite_eur or 0)
+        if satellite <= 0:
+            satellite = max(certainty_ring * 2.0, 700.0)
+        held = now_mono - float(self._desk_mode_since_mono or now_mono)
+        # First real classification: skip hysteresis from cold CERTAINTY default.
+        cold = (self._desk_mode_decision or {}).get("reasons") == ["cold_start"]
+        current = None if cold else self._desk_mode
+        decision = classify_desk_mode(
+            DeskModeInputs(
+                playbook=str(playbook or "TREND"),
+                pre_crash=bool(pre_crash),
+                alphai_macro_active=bool(self._alphai_macro_active),
+                confirmed_pick_count=confirmed_n,
+                best_confirm=best_confirm,
+                best_conviction=best_conviction,
+                underwater_bag_count=int(underwater_bag_count),
+                underwater_notional_eur=float(underwater_notional_eur),
+                sell_fills_last_60m=int(sell_fills_last_60m),
+                median_mom=median_mom,
+                satellite_eur=satellite,
+                certainty_ring_eur=certainty_ring,
+            ),
+            current=current,
+            held_sec=held,
+            min_hold_sec=float(self._desk_mode_min_hold_sec or 900.0),
+            min_confirm=float(self._desk_mode_min_confirm or 0.55),
+            min_conviction=float(self._desk_mode_min_conviction or 0.25),
+            min_confirmed_picks=int(self._desk_mode_min_confirmed_picks or 1),
+            max_underwater_eur=float(self._desk_mode_max_underwater_eur or 120.0),
+            velocity_ring_fraction_of_satellite=float(
+                self._desk_mode_velocity_ring_fraction or 0.90
+            ),
+            velocity_ring_mult_of_certainty=float(
+                self._desk_mode_velocity_ring_mult or 2.0
+            ),
+            velocity_sleeve_loss_cap_eur=(
+                float(self._desk_mode_velocity_sleeve_loss_cap)
+                if self._desk_mode_velocity_sleeve_loss_cap > 0
+                else None
+            ),
+        )
+        prev = self._desk_mode
+        if decision.mode != prev:
+            self._desk_mode = decision.mode
+            self._desk_mode_since_mono = now_mono
+            logger.info(
+                "DESK_MODE_SWITCH %s -> %s confidence=%.2f reasons=%s confirmed=%s",
+                prev.value,
+                decision.mode.value,
+                decision.confidence,
+                ",".join(decision.reasons),
+                confirmed_n,
+            )
+            self._push_alert(
+                "desk_mode",
+                f"{prev.value}→{decision.mode.value} "
+                f"({','.join(decision.reasons[:4])})",
+            )
+        self._desk_mode_decision = {
+            **desk_decision_public_dict(decision),
+            "auto_enabled": True,
+            "held_sec": round(now_mono - self._desk_mode_since_mono, 1),
+            "inputs": {
+                "playbook": str(playbook or ""),
+                "pre_crash": bool(pre_crash),
+                "confirmed_picks": confirmed_n,
+                "best_confirm": round(best_confirm, 3),
+                "best_conviction": round(best_conviction, 3),
+                "underwater_bags": int(underwater_bag_count),
+                "underwater_eur": round(float(underwater_notional_eur), 2),
+                "sell_fills_60m": int(sell_fills_last_60m),
+                "median_mom": median_mom,
+                "certainty_ring_eur": round(certainty_ring, 2),
+                "satellite_eur": round(satellite, 2),
+            },
+        }
+        return self._desk_mode_decision
 
     def _alphai_intraday_entry_gate(
         self,
@@ -3064,6 +3305,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "exit_taker_cushion_bps": str(self._exit_taker_cushion_bps),
                 "winner_add_enabled": self._winner_add_enabled,
                 "block_new_buys": self._playbook_block_new_buys,
+            },
+            "desk_mode": {
+                "auto_enabled": bool(self._desk_mode_auto_enabled),
+                "mode": getattr(self._desk_mode, "value", str(self._desk_mode)),
+                **(self._desk_mode_decision or {}),
+                "active_ring_eur": str(self._active_ring_eur),
+                "certainty_ring_baseline_eur": str(self._certainty_ring_baseline_eur),
+                "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
             },
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))

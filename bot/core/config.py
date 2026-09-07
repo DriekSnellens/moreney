@@ -501,6 +501,32 @@ class Settings(BaseSettings):
     live_micro_capital_playbook_refresh_sec: float = Field(
         default=60.0, ge=15.0, le=600.0
     )
+    # Auto desk mode: CERTAINTY (default) ↔ VELOCITY when confirmed picks + healthy tape.
+    live_micro_desk_mode_auto_enabled: bool = True
+    live_micro_desk_mode_min_hold_sec: float = Field(
+        default=900.0, ge=60.0, le=7200.0
+    )
+    live_micro_desk_mode_min_confirm: float = Field(
+        default=0.55, ge=0.0, le=1.0
+    )
+    live_micro_desk_mode_min_conviction: float = Field(
+        default=0.25, ge=0.0, le=1.0
+    )
+    live_micro_desk_mode_min_confirmed_picks: int = Field(
+        default=1, ge=0, le=20
+    )
+    live_micro_desk_mode_max_underwater_eur: float = Field(
+        default=120.0, ge=0.0, le=5000.0
+    )
+    live_micro_desk_mode_velocity_ring_fraction_of_satellite: float = Field(
+        default=0.90, ge=0.1, le=1.0
+    )
+    live_micro_desk_mode_velocity_ring_mult_of_certainty: float = Field(
+        default=2.0, ge=1.0, le=5.0
+    )
+    live_micro_desk_mode_velocity_sleeve_loss_cap_eur: float = Field(
+        default=35.0, ge=0.0, le=500.0
+    )
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
