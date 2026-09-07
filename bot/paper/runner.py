@@ -2459,16 +2459,22 @@ class PaperRunner:
             if bool(getattr(signals, "macro_active", False)):
                 return signals
             native = signals.native_bullish_buy_bases() if hasattr(signals, "native_bullish_buy_bases") else frozenset()
-            # Only a *tradable* native pick suppresses tape leaders. A pick outside
-            # the session universe (e.g. SUI when only EUR majors are quoted) must
-            # not leave the desk fully in cash while the tape is leading.
-            tradable = self._tape_tradable_bases()
-            if native and (not tradable or any(b in tradable for b in native)):
-                return signals
+            # AlphaI picks and tape leaders are complementary, not exclusive:
+            # settled pick outcomes show rank-1 names beat BTC only ~1 in 5 while
+            # the desk sat in cash (32 missed-deploy lessons). AlphaI stays the
+            # universe filter (avoid/blocked always win) and keeps slot priority;
+            # tape leaders fill the remaining ring when they are not already picks.
+            union = bool(getattr(self._settings, "live_micro_tape_union_with_picks", True))
+            if native and not union:
+                tradable = self._tape_tradable_bases()
+                if not tradable or any(b in tradable for b in native):
+                    return signals
             leaders = frozenset(
                 b
                 for b in snap.leader_bases()
-                if b not in signals.avoid_bases and b not in signals.blocked_bases
+                if b not in signals.avoid_bases
+                and b not in signals.blocked_bases
+                and b not in native
             )
             if not leaders:
                 return signals

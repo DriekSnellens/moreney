@@ -538,6 +538,11 @@ class Settings(BaseSettings):
     live_micro_tape_min_breadth: float = Field(default=0.50, ge=0.0, le=1.0)
     live_micro_tape_top_n: int = Field(default=4, ge=1, le=10)
     live_micro_tape_max_bases_per_venue: int = Field(default=2, ge=0, le=6)
+    # Tape leaders complement native AlphaI picks (union) instead of being
+    # suppressed whenever a pick exists; avoid/blocked always win.
+    live_micro_tape_union_with_picks: bool = True
+    # Observed fee rates (per venue/side) lift break-even above the static table.
+    live_micro_observed_fee_calibration: bool = True
     # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)

@@ -374,8 +374,15 @@ def test_tape_injected_when_native_pick_is_not_tradable() -> None:
     assert out.tape_confirmed_bases == frozenset({"LTC", "AVAX"})
     assert applied and applied[-1] is snap
 
-    # Tradable native pick (AVAX) → AlphaI leads, no tape injection.
+    # Tradable native pick (AVAX): union mode keeps the other leader (LTC) and
+    # never re-labels the pick itself as tape.
     sig = _signals(daily_pick_scores={"AVAX": 40.0}, daily_pick_bases=frozenset({"AVAX"}))
+    out = asyncio.run(inject(self, sig))
+    assert out.tape_confirmed_bases == frozenset({"LTC"})
+    assert out.native_bullish_buy_bases() == frozenset({"AVAX"})
+
+    # Legacy exclusive mode: a tradable native pick suppresses tape leaders.
+    self._settings.live_micro_tape_union_with_picks = False
     out = asyncio.run(inject(self, sig))
     assert out.tape_confirmed_bases == frozenset()
 

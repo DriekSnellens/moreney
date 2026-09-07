@@ -6158,6 +6158,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
 
         table = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        if not bool(
+            getattr(
+                getattr(self, "_settings", None), "live_micro_observed_fee_calibration", True
+            )
+        ):
+            return table
         store = getattr(self, "_observed_fee_rates", None) or {}
         observed = store.get(self._fee_key(venue, taker))
         if observed is None:
