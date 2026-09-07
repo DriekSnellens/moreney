@@ -1018,6 +1018,14 @@ class MomentumDeskManager:
         )
 
 
+def momentum_desk_flagged_running(settings: Settings | None = None) -> bool:
+    """True when the desk should own the book after a process restart."""
+    settings = settings or get_settings()
+    state_path = str(getattr(settings, "momentum_desk_state_path", RunnerOptions.state_path))
+    flag = _read_flag(state_path)
+    return bool(flag and flag.get("running"))
+
+
 def _flag_path(state_path: str) -> Path:
     return Path(state_path).with_name("momentum_desk_running.json")
 
@@ -1068,6 +1076,7 @@ __all__ = [
     "desk_config_from_settings",
     "engine_settings_for_desk",
     "get_momentum_desk_manager",
+    "momentum_desk_flagged_running",
     "parse_venues",
     "reset_momentum_desk_manager",
 ]

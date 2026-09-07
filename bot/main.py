@@ -57,7 +57,7 @@ from bot.live.micro_session_manager import (
     reset_micro_session_manager,
 )
 from bot.live.momentum_dashboard import render_momentum_dashboard
-from bot.live.momentum_runner import get_momentum_desk_manager
+from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -217,14 +217,20 @@ async def lifespan(_app: FastAPI):
     # Live micro: resume continuous session after uvicorn restart. Skip on
     # pure paper lab processes so they never touch live micro state.
     elif bool(settings.live_micro_enabled or settings.live_trading_enabled):
-        try:
-            resume = await get_micro_session_manager().resume_if_interrupted()
-            if resume and resume.get("started"):
-                logger.info("auto-resumed continuous micro session after process start")
-            elif resume and not resume.get("started"):
-                logger.warning("micro session auto-resume did not start: %s", resume)
-        except Exception:  # noqa: BLE001
-            logger.exception("failed to auto-resume interrupted micro session")
+        # The two desks share the venue cash; only one may own the book. When
+        # the momentum desk is flagged running the legacy maker session never
+        # auto-resumes, even if its status file still claims to be running.
+        if momentum_desk_flagged_running(settings):
+            logger.warning("momentum desk owns the book; legacy micro session not resumed")
+        else:
+            try:
+                resume = await get_micro_session_manager().resume_if_interrupted()
+                if resume and resume.get("started"):
+                    logger.info("auto-resumed continuous micro session after process start")
+                elif resume and not resume.get("started"):
+                    logger.warning("micro session auto-resume did not start: %s", resume)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to auto-resume interrupted micro session")
         try:
             resumed = await get_momentum_desk_manager().resume_if_flagged()
             if resumed and resumed.get("started"):
@@ -558,6 +564,15 @@ async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dic
         symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
     elif isinstance(symbols_raw, list):
         symbols = [str(s).strip().upper() for s in symbols_raw if str(s).strip()]
+    force = body.get("force", False)
+    if isinstance(force, str):
+        force = force.strip().lower() not in {"0", "false", "no"}
+    if get_momentum_desk_manager().running() and not bool(force):
+        return {
+            "started": False,
+            "reason": "momentum_desk_running",
+            "message": "stop the momentum desk first or pass force=true",
+        }
     return await get_micro_session_manager().start(
         minutes=minutes,
         budget_eur=budget,
