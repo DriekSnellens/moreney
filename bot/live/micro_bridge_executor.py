@@ -82,6 +82,20 @@ logger = logging.getLogger(__name__)
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
 _MIN_LIVE_NOTIONAL = Decimal("5")
+# Profit-taking while price is still up: fee-aware maker exits, not taker hits.
+_PATIENT_EXIT_REASONS = frozenset(
+    {
+        "trail_soft_partial",
+        "trail_hard_partial",
+        "trail_be_harvest",
+        "trail_recovery_be",
+        "trail_recovery_be_partial",
+        "trail_exit_work",
+        "trail_consolidation_wind_down",
+        "time_stop_breakeven",
+        "trail_uw_recycle_band",
+    }
+)
 _FILL_POLL_SECONDS = 1.5
 _FILL_POLL_INTERVAL = 0.15
 _DEFAULT_RESTING_MAX_AGE_SEC = 90.0
@@ -971,6 +985,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         self._exit_taker_after_maker_fails = int(
             getattr(settings, "live_micro_exit_taker_after_maker_fails", 1) or 1
+        )
+        # Patient exits (profit-taking while price is still up): rest as maker at
+        # the ask for longer and escalate to taker only after several fails.
+        # Urgent exits (drawdown / stops / momentum break) keep the fast path.
+        self._exit_patient_enabled = bool(
+            getattr(settings, "live_micro_exit_patient_enabled", True)
+        )
+        self._exit_patient_resting_sec = float(
+            getattr(settings, "live_micro_exit_patient_resting_sec", 20.0) or 20.0
+        )
+        self._exit_patient_taker_after_fails = int(
+            getattr(settings, "live_micro_exit_patient_taker_after_fails", 3) or 3
         )
         self._playbook_baselines = {
             "active_ring_eur": self._active_ring_eur,
@@ -2554,7 +2580,6 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     ) -> dict[str, Any]:
         """Classify CERTAINTY/VELOCITY and store public decision (no apply)."""
         from bot.live.desk_mode import (
-            DeskMode,
             DeskModeInputs,
             classify_desk_mode,
             decision_public_dict as desk_decision_public_dict,
@@ -2841,8 +2866,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             return False
 
-    def _effective_exit_resting_max_age_sec(self, base: str) -> float:
+    def _is_patient_exit(self, reason: str | None) -> bool:
+        return bool(
+            self._exit_patient_enabled and str(reason or "") in _PATIENT_EXIT_REASONS
+        )
+
+    def _uw_band_active(self, venue: str, base: str) -> bool:
+        st = self._trail.get(self._lots_key(venue, base))
+        return isinstance(st, dict) and str(st.get("uw_recycle_mode") or "") == "band"
+
+    def _effective_exit_resting_max_age_sec(
+        self, base: str, reason: str | None = None, venue: str | None = None
+    ) -> float:
         age = self._exit_resting_max_age_sec
+        patient = self._is_patient_exit(reason)
+        if (
+            not patient
+            and str(reason or "") == "trail_uw_recycle"
+            and venue
+            and self._exit_patient_enabled
+        ):
+            try:
+                patient = self._uw_band_active(venue, base)
+            except Exception:  # noqa: BLE001
+                patient = False
+        if patient:
+            age = max(age, self._exit_patient_resting_sec)
         scale = float(self._alphai_trail_hold_scale(base))
         if self._alphai_exit_urgency(base):
             return min(age, max(3.0, 5.0 * min(scale, 1.0)))
@@ -3018,11 +3067,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _clear_exit_maker_fail(self, venue: str, base: str) -> None:
         self._exit_maker_fail_counts.pop(self._exit_fail_key(venue, base), None)
 
-    def _should_force_taker_exit(self, venue: str, base: str) -> bool:
-        if self._exit_taker_after_maker_fails <= 0:
+    def _should_force_taker_exit(
+        self, venue: str, base: str, reason: str | None = None
+    ) -> bool:
+        threshold = self._exit_taker_after_maker_fails
+        if self._is_patient_exit(reason):
+            threshold = max(threshold, self._exit_patient_taker_after_fails)
+        if threshold <= 0:
             return False
         key = self._exit_fail_key(venue, base)
-        return int(self._exit_maker_fail_counts.get(key, 0)) >= self._exit_taker_after_maker_fails
+        return int(self._exit_maker_fail_counts.get(key, 0)) >= threshold
 
     def maybe_utc_day_rollover(self) -> bool:
         """Reset sleeve daily cap and session PnL baseline at UTC midnight."""
@@ -5737,7 +5791,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             ):
                 base_asset = infer_base_asset(symbol)
                 row_max_age = min(
-                    max_age, self._effective_exit_resting_max_age_sec(base_asset)
+                    max_age,
+                    self._effective_exit_resting_max_age_sec(
+                        base_asset, strategy, venue_l
+                    ),
                 )
             if age >= row_max_age:
                 try:
@@ -6162,6 +6219,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         *,
         aggressive: bool = False,
         force_taker: bool = False,
+        patient: bool = False,
     ) -> tuple[Decimal | None, bool, str]:
         """Pick a fillable exit price that still clears fee-aware break-even.
 
@@ -6170,6 +6228,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         ``aggressive`` (exit engine): join inside the spread near the bid touch
         instead of resting at the ask — captures short soft-armed spikes.
+        ``patient`` (profit-taking while price is up): never cross the spread;
+        rest post-only just inside the ask so the fill earns maker fees plus
+        the spread. Escalation to taker happens via ``force_taker`` (after
+        repeated stale maker quotes) or when the trail flips to a drawdown exit.
         Never quotes below maker BE; taker only when bid ≥ taker BE.
         """
         be_maker = self._break_even_sell_price(venue, base, taker=False)
@@ -6200,6 +6262,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return best_bid, False, "hit_bid_taker"
         if force_taker and mark >= be_taker:
             return max(be_taker, best_bid), False, "limit_taker_be"
+
+        if patient:
+            # Join just inside the ask (queue priority) but never at/below the bid.
+            tick = best_ask * Decimal("0.00005")
+            improve = best_ask * (self._exit_touch_improve_bps / Decimal("10000"))
+            ask_px = best_ask - max(tick, min(improve, (best_ask - best_bid) / Decimal("3")))
+            if ask_px <= best_bid:
+                ask_px = best_bid + max(tick, best_bid * Decimal("0.00005"))
+            maker_px = max(be_maker, ask_px)
+            return maker_px, True, "rest_ask_maker"
 
         # Bid already clears taker BE → take liquidity for a sure profitable fill.
         if best_bid >= be_taker:
@@ -7021,18 +7093,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         floor while remaining below break-even (AlphaI rotate leak).
         """
         best_bid = _ZERO
+        best_ask = _ZERO
         client = self._trading_client(venue)
         symbol = f"{base.upper()}{self._quote}"
         if client is not None:
             try:
                 ticker = await client.fetch_ticker(symbol)
                 best_bid = Decimal(str(getattr(ticker, "bid", None) or 0))
+                best_ask = Decimal(str(getattr(ticker, "ask", None) or 0))
             except Exception:  # noqa: BLE001
                 pass
         if best_bid <= 0:
             best_bid = mark
         if mode == "band" and best_bid < floor:
             return None, False, "uw_bid_below_floor"
+        if mode == "band" and self._exit_patient_enabled and best_ask > best_bid:
+            # Band = aged bag inside [floor, BE): not a stop. Rest post-only just
+            # inside the ask first (maker fee, no spread paid); escalate to the
+            # bid only after repeated stale quotes.
+            if not self._should_force_taker_exit(venue, base, "trail_uw_recycle_band"):
+                tick = best_ask * Decimal("0.00005")
+                ask_px = best_ask - tick
+                if ask_px <= best_bid:
+                    ask_px = best_bid + tick
+                return ask_px, True, "rest_ask_uw_band"
         if mode == "stop":
             # Prefer live BE when available; fall back to floor comparison.
             be = None
@@ -9060,14 +9144,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     venue, asset, mark, floor=floor, mode=mode
                 )
             else:
-                # D: aggressive touch quotes for all profitable trail exits.
-                force_taker = self._should_force_taker_exit(venue, asset)
+                # D: aggressive touch quotes for urgent trail exits; patient
+                # profit-taking rests at the ask as maker (fee-aware).
+                force_taker = self._should_force_taker_exit(venue, asset, reason)
                 exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
                     venue,
                     asset,
                     mark,
                     aggressive=self._exit_engine_enabled,
                     force_taker=force_taker,
+                    patient=self._is_patient_exit(reason),
                 )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")

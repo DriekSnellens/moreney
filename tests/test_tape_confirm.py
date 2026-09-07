@@ -263,3 +263,72 @@ def test_venue_cash_excess_fixed_once_and_persisted() -> None:
     assert MicroBudgetLiveExecutor._venue_cash_excess_for(self, "bitvavo", later) == Decimal("94")
     pocket = Decimal("1974") - ex + Decimal("17.777") * Decimal("6.75")
     assert abs(pocket - Decimal("2000")) < Decimal("0.01")
+
+
+def test_patient_exit_rests_at_ask_not_bid() -> None:
+    import asyncio
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+
+    class _Client:
+        async def fetch_ticker(self, symbol: str):
+            return SimpleNamespace(bid=Decimal("6.780"), ask=Decimal("6.790"))
+
+    self = SimpleNamespace(
+        _quote="EUR",
+        _exit_engine_enabled=True,
+        _exit_touch_improve_bps=Decimal("2"),
+        _exit_taker_cushion_bps=Decimal("2"),
+        _break_even_sell_price=lambda venue, base, taker=False: Decimal("6.70")
+        if not taker
+        else Decimal("6.71"),
+        _trading_client=lambda venue: _Client(),
+    )
+    fn = MicroBudgetLiveExecutor._profitable_exit_quote
+    # Urgent (default): bid clears taker BE → hits the bid as taker.
+    px, post_only, why = asyncio.run(fn(self, "bitvavo", "AVAX", Decimal("6.785")))
+    assert why == "hit_bid_taker" and post_only is False and px == Decimal("6.780")
+    # Patient: rest post-only inside the ask, above the bid.
+    px, post_only, why = asyncio.run(
+        fn(self, "bitvavo", "AVAX", Decimal("6.785"), aggressive=True, patient=True)
+    )
+    assert why == "rest_ask_maker" and post_only is True
+    assert Decimal("6.780") < px < Decimal("6.790")
+    # Patient + forced taker (after repeated stale quotes) → bid.
+    px, post_only, why = asyncio.run(
+        fn(self, "bitvavo", "AVAX", Decimal("6.785"), patient=True, force_taker=True)
+    )
+    assert why == "hit_bid_taker" and post_only is False
+
+
+def test_patient_exit_reasons_get_longer_rest_and_more_fails() -> None:
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+
+    self = SimpleNamespace(
+        _exit_patient_enabled=True,
+        _exit_resting_max_age_sec=1.5,
+        _exit_patient_resting_sec=20.0,
+        _exit_taker_after_maker_fails=1,
+        _exit_patient_taker_after_fails=3,
+        _exit_maker_fail_counts={"bitvavo:AVAX": 1},
+        _alphai_trail_hold_scale=lambda base: 1.0,
+        _alphai_exit_urgency=lambda base: False,
+        _alphai_macro_active=False,
+        _trail={},
+        _lots_key=lambda v, b: f"{v}:{b}",
+    )
+    self._is_patient_exit = lambda r: MicroBudgetLiveExecutor._is_patient_exit(self, r)
+    self._uw_band_active = lambda v, b: MicroBudgetLiveExecutor._uw_band_active(self, v, b)
+    self._exit_fail_key = MicroBudgetLiveExecutor._exit_fail_key
+    age = MicroBudgetLiveExecutor._effective_exit_resting_max_age_sec
+    assert age(self, "AVAX", "trail_drawdown") == 1.5
+    assert age(self, "AVAX", "trail_hard_partial") == 20.0
+    force = MicroBudgetLiveExecutor._should_force_taker_exit
+    assert force(self, "bitvavo", "AVAX", "trail_drawdown") is True
+    assert force(self, "bitvavo", "AVAX", "trail_hard_partial") is False
+    self._exit_maker_fail_counts["bitvavo:AVAX"] = 3
+    assert force(self, "bitvavo", "AVAX", "trail_hard_partial") is True
