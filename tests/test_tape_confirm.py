@@ -166,3 +166,55 @@ def test_desk_stats_do_not_count_tape_as_confirmed() -> None:
     confirmed, best_confirm, _ = MicroBudgetLiveExecutor._desk_mode_alphai_stats(self)
     assert confirmed == 0
     assert best_confirm == 0.0
+
+
+def test_intraday_gate_tape_leader_skips_strict_rising() -> None:
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+
+    sig = _signals(tape_confirmed_bases=frozenset({"LTC"}))
+
+    class _Series:
+        def __len__(self) -> int:
+            return 5
+
+        def last_n_rising(self, n: int) -> bool:
+            return False
+
+    feat = SimpleNamespace(entry_timing="NORMAL", freshness=Decimal("1"))
+    cfg = SimpleNamespace(
+        adverse_bullish_wait_threshold=Decimal("0.8"),
+        adverse_bullish_reduce_threshold=Decimal("0.6"),
+    )
+    self = SimpleNamespace(
+        _alphai_intraday_gate_enabled=True,
+        _alphai_signals=sig,
+        _alphai_feature_for=lambda base, adverse_score=None: feat,
+        _momentum_enabled=True,
+        _momentum_down=lambda symbol: False,
+        _series_for=lambda symbol: _Series(),
+        _momentum_require_last_n_rising=2,
+        _alphai_sleeve_priority_buy=lambda base: False,
+        _alphai_daytrader_enabled=True,
+        _daytrader_require_rising=True,
+        _alphai_intraday_require_rising=True,
+        _alphai_intraday_min_freshness=Decimal("0.5"),
+        _daytrader_min_confirm=Decimal("0.55"),
+        _daytrader_min_conviction=0.25,
+        _alphai_hold_conviction=lambda base: 0.5,
+        _alphai_bullish_buy=lambda base: True,
+        _alphai_feature_config=cfg,
+    )
+    action, mult, reasons = MicroBudgetLiveExecutor._alphai_intraday_entry_gate(
+        self, "LTC", "LTCEUR"
+    )
+    assert action != "WAIT", reasons
+    assert "momentum_not_rising_strict" not in reasons
+    # Falling tape still blocks.
+    self._momentum_down = lambda symbol: True
+    action, _, reasons = MicroBudgetLiveExecutor._alphai_intraday_entry_gate(
+        self, "LTC", "LTCEUR"
+    )
+    assert action == "WAIT" and "momentum_down" in reasons

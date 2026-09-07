@@ -977,6 +977,25 @@ async def run_session(
                 "approved_opportunities": st.get("approved_opportunities"),
                 "executed_opportunities": st.get("executed_opportunities"),
                 "maker_reject_counts": st.get("reject_counts") or {},
+                "maker_last_reject_by_symbol": (
+                    ((st.get("last_cycle") or {}).get("scan") or {}).get(
+                        "last_reject_by_symbol"
+                    )
+                    or {}
+                ),
+                "maker_scan": {
+                    k: ((st.get("last_cycle") or {}).get("scan") or {}).get(k)
+                    for k in (
+                        "reduce_only",
+                        "hmm_regime_id",
+                        "dump_symbols",
+                        "news_blocked_bases",
+                        "inventory_mode",
+                        "venue_inventory_modes",
+                        "alt_inventory_pct",
+                        "opportunities_emitted",
+                    )
+                },
                 "why_not_trade": st.get("why_not_trade"),
                 "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
                 "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),

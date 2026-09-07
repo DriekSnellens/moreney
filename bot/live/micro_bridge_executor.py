@@ -2728,6 +2728,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if bool(getattr(self, "_daytrader_sleeve_require_rising", True)):
                 require_rising = True
             # Keep gate_lagging / confirm_scale as measured — no floor bypass.
+        # Tape leader (24h RS confirmed, no AlphaI headline): strict last-N rising
+        # is tick timing, not signal — it starved every tape entry. momentum_down
+        # still hard-WAITs; confirm/conviction stay as measured.
+        tape_only = False
+        if sig is not None and hasattr(sig, "is_tape_confirmed"):
+            try:
+                tape_only = bool(sig.is_tape_confirmed(base))
+            except Exception:  # noqa: BLE001
+                tape_only = False
+        if tape_only:
+            require_rising = False
         if daytrader:
             min_conv = float(getattr(self, "_daytrader_min_conviction", 0.25) or 0.0)
             if min_conv > 0:
