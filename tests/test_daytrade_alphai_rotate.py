@@ -84,8 +84,12 @@ def test_session_enables_alphai_daytrader_with_capital_split(tmp_path) -> None:
     )
     assert cfg.live_micro_capital_split_enabled is True
     assert cfg.live_micro_alphai_daytrader_enabled is True
-    assert cfg.live_micro_daytrader_min_confirm_scale >= 0.50
+    assert cfg.live_micro_daytrader_min_confirm_scale >= 0.55
     assert cfg.live_micro_daytrader_non_alphai_min_age_sec <= 120.0
+    assert cfg.live_micro_daytrader_sleeve_min_confirm_scale >= 0.55
+    assert cfg.live_micro_daytrader_min_conviction >= 0.25
+    assert cfg.live_micro_daytrader_sleeve_urgency_enabled is False
     assert cfg.alphai_require_bullish_new_buys is True
     assert cfg.alphai_intraday_gate_enabled is True
     assert cfg.alphai_price_confirm_enabled is True
+    assert cfg.live_micro_entry_quality_min_score >= 65.0

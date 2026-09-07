@@ -702,12 +702,25 @@ class Settings(BaseSettings):
     # failed picks recycle on time/urgency (not BE-first forever). Coin-agnostic.
     live_micro_alphai_daytrader_enabled: bool = True
     live_micro_daytrader_min_confirm_scale: float = Field(
-        default=0.50, ge=0.20, le=0.95
+        default=0.55, ge=0.20, le=0.95
     )
     live_micro_daytrader_sleeve_min_confirm_scale: float = Field(
-        default=0.40, ge=0.15, le=0.90
+        default=0.55, ge=0.15, le=0.90
     )
     live_micro_daytrader_require_rising: bool = True
+    # Sleeve daytrader: keep rising/confirm hard (no soft lag floor / urgency bypass).
+    live_micro_daytrader_sleeve_require_rising: bool = True
+    live_micro_daytrader_min_conviction: float = Field(
+        default=0.25, ge=0.0, le=1.0
+    )
+    live_micro_daytrader_sleeve_urgency_enabled: bool = False
+    # Confirm-ranked clips: strong/priority only when tape confirms enough.
+    live_micro_daytrader_priority_clip_min_confirm: float = Field(
+        default=0.60, ge=0.20, le=0.95
+    )
+    live_micro_daytrader_strong_clip_min_confirm: float = Field(
+        default=0.75, ge=0.30, le=0.95
+    )
     live_micro_daytrader_non_alphai_min_age_sec: float = Field(
         default=120.0, ge=30.0, le=3600.0
     )
