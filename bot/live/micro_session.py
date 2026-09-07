@@ -996,7 +996,6 @@ async def run_session(
                         "opportunities_emitted",
                     )
                 },
-                "why_not_trade": st.get("why_not_trade"),
                 "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
                 "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),
                 "portfolio_value_eur": (
