@@ -430,6 +430,33 @@ def test_decision_runs_once_per_hour_and_enters(tmp_path):
     assert status["positions"][0]["base"] == "SOL" and status["risk"]["entries_allowed"]
 
 
+def test_manual_decision_preview_then_execute(tmp_path):
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    gw = FakeGateway(bid=100.0, ask=100.2, fill_maker_after_polls=1)
+    # 00:32 UTC: past the scheduled slot's grace window, so no scheduled decision.
+    clock = FakeClock((T0 + 32 * 60_000) / 1000)
+    r = _runner(
+        tmp_path, gw, clock, feed=FakeFeed(candles), universe=("SOL", "LINK"), min_volume_eur=0.0
+    )
+    asyncio.run(r.tick())
+    assert r.holdings == [] and r.last_regime == {}
+    scheduled_marker = r.last_decision_hour_ms
+    preview = asyncio.run(r.decide_now(execute=False))
+    assert preview["trigger"] == "manual" and not preview["executed"]
+    assert preview["entries"] == ["SOL"] and preview["planned"][0]["clip_eur"] == 500.0
+    assert any(x["base"] == "LINK" and x["why"] == "excess_low" for x in preview["rejected"])
+    assert r.holdings == [] and gw.placed == [] and not (tmp_path / "ledger.jsonl").exists()
+    done = asyncio.run(r.decide_now(execute=True))
+    assert done["executed"] and [h.pos.base for h in r.holdings] == ["SOL"]
+    assert r.last_regime["trigger"] == "manual"
+    ledger = (tmp_path / "ledger.jsonl").read_text().splitlines()
+    assert '"event": "decision"' in ledger[0] and '"event": "entry"' in ledger[-1]
+    # Same base is blocked for the rest of the day; the scheduled hour is untouched.
+    again = asyncio.run(r.decide_now(execute=True))
+    assert again["entries"] == [] and len(r.holdings) == 1
+    assert r.last_decision_hour_ms == scheduled_marker
+
+
 def test_dashboard_renders_positions_decision_and_ledger():
     from bot.live.momentum_dashboard import render_momentum_dashboard
 

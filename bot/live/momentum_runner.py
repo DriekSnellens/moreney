@@ -300,6 +300,7 @@ class MomentumDeskRunner:
         self.marks: dict[str, float] = {}
         self.cash_by_venue: dict[str, float] = {}
         self._cash_ts: float = 0.0
+        self._lock = asyncio.Lock()
         self.started_at = datetime.now(UTC).isoformat()
         self._load_state()
 
@@ -440,11 +441,12 @@ class MomentumDeskRunner:
             await self._sleep(self.opt.tick_sec)
 
     async def tick(self) -> None:
-        now_ms = int(self._clock() * 1000)
-        await self._manage_exits(now_ms)
-        # Cash first: the venue router needs fresh balances at the decision hour.
-        await self._refresh_cash()
-        await self._maybe_decide(now_ms)
+        async with self._lock:
+            now_ms = int(self._clock() * 1000)
+            await self._manage_exits(now_ms)
+            # Cash first: the venue router needs fresh balances at the decision hour.
+            await self._refresh_cash()
+            await self._maybe_decide(now_ms)
 
     async def _refresh_cash(self) -> None:
         if self._clock() - self._cash_ts < 60.0:
@@ -613,6 +615,26 @@ class MomentumDeskRunner:
         if hour_ms is None:
             return
         self.last_decision_hour_ms = hour_ms
+        await self._decide(hour_ms, now_ms, execute=True, trigger="schedule")
+
+    async def decide_now(self, *, execute: bool) -> dict[str, Any]:
+        """Operator-triggered decision on the latest closed bar.
+
+        ``execute=False`` previews (no orders, no ledger row, no state change);
+        ``execute=True`` trades exactly like the scheduled decision, under the
+        same risk ledger and one-entry-per-base-per-day rule. The scheduled
+        decision hour is left untouched.
+        """
+        async with self._lock:
+            now_ms = int(self._clock() * 1000)
+            await self._refresh_cash()
+            return await self._decide(
+                (now_ms // BAR_MS) * BAR_MS, now_ms, execute=execute, trigger="manual"
+            )
+
+    async def _decide(
+        self, t_ms: int, now_ms: int, *, execute: bool, trigger: str
+    ) -> dict[str, Any]:
         candles: dict[str, Sequence[Candle]] = {}
         for base in ("BTC", *self.cfg.universe):
             try:
@@ -620,8 +642,8 @@ class MomentumDeskRunner:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("momentum desk: candles failed for %s: %s", base, exc)
         alphai = self._alphai_view()
-        stats = universe_stats(candles, hour_ms, self.cfg)
-        btc = bar_stats("BTC", candles["BTC"], hour_ms) if candles.get("BTC") else None
+        stats = universe_stats(candles, t_ms, self.cfg)
+        btc = bar_stats("BTC", candles["BTC"], t_ms) if candles.get("BTC") else None
         regime = classify_regime(btc, stats, self.cfg, alphai=alphai)
         cands = (
             rank_candidates(stats, regime.btc_ret or 0.0, self.cfg, alphai=alphai)
@@ -641,17 +663,58 @@ class MomentumDeskRunner:
                 ),
                 alphai=alphai,
             )
-        self.last_regime = {
-            "at": datetime.fromtimestamp(hour_ms / 1000, UTC).isoformat(),
+        # Why the leaders that did not qualify were dropped, for the operator.
+        rejected = []
+        if regime.ok:
+            btc_ret = regime.btc_ret or 0.0
+            for base, st in sorted(
+                stats.items(), key=lambda kv: kv[1].ret_24h - btc_ret, reverse=True
+            )[:8]:
+                if any(c.base == base for c in cands):
+                    continue
+                excess = st.ret_24h - btc_ret
+                why_not = (
+                    "alphai_avoid"
+                    if base in alphai.avoid
+                    else "excess_low"
+                    if excess < self.cfg.min_excess
+                    else "far_from_high"
+                    if st.from_high < -self.cfg.max_from_high
+                    else "volume_low"
+                    if st.volume_eur < self.cfg.min_volume_eur
+                    else "other"
+                )
+                rejected.append(
+                    {
+                        "base": base,
+                        "excess": round(excess, 4),
+                        "from_high": round(st.from_high, 4),
+                        "why": why_not,
+                    }
+                )
+        summary = {
+            "at": datetime.fromtimestamp(t_ms / 1000, UTC).isoformat(),
+            "trigger": trigger,
+            "executed": execute,
             "ok": regime.ok,
             "btc_ret": round(regime.btc_ret, 4) if regime.btc_ret is not None else None,
             "breadth": round(regime.breadth, 3),
             "reasons": list(regime.reasons),
             "candidates": [
-                {"base": c.base, "excess": round(c.excess, 4), "from_high": round(c.from_high, 4)}
+                {
+                    "base": c.base,
+                    "excess": round(c.excess, 4),
+                    "from_high": round(c.from_high, 4),
+                    "alphai_pick": c.alphai_pick,
+                }
                 for c in cands[:6]
             ],
+            "rejected": rejected[:6],
             "entries": [e.base for e in entries],
+            "planned": [
+                {"base": e.base, "clip_eur": e.clip_eur, "reasons": list(e.reasons)}
+                for e in entries
+            ],
             "risk_block": "" if allowed else why,
             "alphai": {
                 "macro_caution": alphai.macro_caution,
@@ -659,9 +722,14 @@ class MomentumDeskRunner:
                 "picks": sorted(alphai.picks),
             },
         }
-        self._ledger_append({"event": "decision", **self.last_regime})
+        if not execute:
+            return summary
+        self.last_regime = summary
+        self._ledger_append({"event": "decision", **summary})
         for entry in entries:
             await self._enter(entry.base, entry.clip_eur, ",".join(entry.reasons), now_ms)
+        self._save_state()
+        return summary
 
     async def _enter(self, base: str, clip_eur: float, reason: str, now_ms: int) -> None:
         route = self._route_entry(clip_eur)
@@ -991,6 +1059,12 @@ class MomentumDeskManager:
             venues=list(venues),
         )
         return {"started": True, "status": self.status()}
+
+    async def decide(self, *, execute: bool) -> dict[str, Any]:
+        if self._runner is None or not self.running():
+            return {"ok": False, "reason": "not_running"}
+        summary = await self._runner.decide_now(execute=execute)
+        return {"ok": True, "decision": summary, "status": self.status()}
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True

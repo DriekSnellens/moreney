@@ -607,6 +607,17 @@ async def live_momentum_start(payload: dict[str, Any] | None = None) -> dict[str
     )
 
 
+@app.post("/live/momentum/decide")
+async def live_momentum_decide(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the desk's entry decision now. Default is a preview (no orders);
+    pass ``{"execute": true}`` to trade under the normal risk rules."""
+    body = payload or {}
+    execute = body.get("execute", False)
+    if isinstance(execute, str):
+        execute = execute.strip().lower() not in {"0", "false", "no"}
+    return await get_momentum_desk_manager().decide(execute=bool(execute))
+
+
 @app.post("/live/momentum/stop")
 async def live_momentum_stop() -> dict[str, Any]:
     """Stop the Daily Momentum Desk loop (open positions stay on the exchange)."""
