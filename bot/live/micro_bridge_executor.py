@@ -1261,6 +1261,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "venue_cash_excess": {
                 k: str(v) for k, v in (getattr(self, "_venue_cash_excess", None) or {}).items()
             },
+            "observed_fee_rates": {
+                k: str(v) for k, v in (getattr(self, "_observed_fee_rates", None) or {}).items()
+            },
         }
 
     def _try_load_persisted_state(self) -> bool:
@@ -1369,6 +1372,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 except Exception:  # noqa: BLE001
                     continue
             self._venue_cash_excess = loaded
+        fees_raw = raw.get("observed_fee_rates")
+        if isinstance(fees_raw, Mapping):
+            fee_loaded: dict[str, Decimal] = {}
+            for k, v in fees_raw.items():
+                try:
+                    rate = Decimal(str(v))
+                except Exception:  # noqa: BLE001
+                    continue
+                if 0 < rate <= Decimal("0.01"):
+                    fee_loaded[str(k).lower()] = rate
+            self._observed_fee_rates = fee_loaded
         self._check_sleeve_loss_cap()
         if raw.get("session_started_ms") is not None:
             self._session_started_ms = float(raw.get("session_started_ms"))
@@ -3530,6 +3544,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "patient_resting_sec": self._exit_patient_resting_sec,
                 "patient_taker_after_fails": self._exit_patient_taker_after_fails,
                 "patient_reasons": sorted(_PATIENT_EXIT_REASONS),
+                "observed_fee_rates": {
+                    k: f"{float(v) * 100:.3f}%"
+                    for k, v in (getattr(self, "_observed_fee_rates", None) or {}).items()
+                },
+                "effective_fee_rates": {
+                    f"{v}:{s}": f"{float(self._effective_fee_rate(v, taker=(s == 'taker'))) * 100:.3f}%"
+                    for v in ("bitvavo", "okx")
+                    for s in ("maker", "taker")
+                },
                 "mark_ttl_sec": self._mark_ttl_sec,
                 "maker_fail_counts": dict(self._exit_maker_fail_counts),
                 "soft_armed_work": self._exit_soft_armed_work,
@@ -4804,6 +4827,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._mirrored_trade_ids.add(mirror_key)
             return False
         fee_quote, fee_cur = self._trade_fee_quote(trade, base=base, amt=amt, px=px)
+        try:
+            self._note_observed_fee(
+                venue, trade.get("takerOrMaker"), Decimal(str(fee_quote or 0)), amt * px
+            )
+        except Exception:  # noqa: BLE001
+            pass
         symbol = f"{base}{self._quote}"
         if side == "buy" and self._has_trusted_cost(venue, base):
             self._mirrored_trade_ids.add(mirror_key)
@@ -6094,6 +6123,47 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(pos.average_entry_price))
         return None
 
+    @staticmethod
+    def _fee_key(venue: str, taker: bool) -> str:
+        return f"{str(venue or '').strip().lower()}:{'taker' if taker else 'maker'}"
+
+    def _note_observed_fee(
+        self, venue: str, liquidity: str | None, fee_quote: Decimal, notional: Decimal
+    ) -> None:
+        """Learn the effective fee rate per venue/side from real fills (EMA).
+
+        The static table assumed OKX 0.08%/0.10% while EUR pairs actually bill
+        0.20%/0.35%: every "BE+" exit there was a hidden loss. Observed rates
+        make break-even self-correcting; only sane values (0 < r <= 1%) count.
+        """
+        liq = str(liquidity or "").strip().lower()
+        if liq not in {"maker", "taker"} or fee_quote <= 0 or notional <= 0:
+            return
+        rate = fee_quote / notional
+        if rate <= 0 or rate > Decimal("0.01"):
+            return
+        store = getattr(self, "_observed_fee_rates", None)
+        if store is None:
+            store = {}
+            self._observed_fee_rates = store
+        key = self._fee_key(venue, liq == "taker")
+        prev = store.get(key)
+        if prev is None:
+            store[key] = rate
+        else:
+            store[key] = prev * Decimal("0.7") + rate * Decimal("0.3")
+
+    def _effective_fee_rate(self, venue: str, *, taker: bool) -> Decimal:
+        """Fee-table rate, lifted to the observed live rate when fills bill more."""
+        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
+
+        table = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        store = getattr(self, "_observed_fee_rates", None) or {}
+        observed = store.get(self._fee_key(venue, taker))
+        if observed is None:
+            return table
+        return max(table, observed)
+
     def _break_even_sell_price(
         self, venue: str, base: str, *, taker: bool = False, allow_provisional: bool = False
     ) -> Decimal | None:
@@ -6107,9 +6177,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         unit = self._unit_cost(venue, base)
         if unit is None or unit <= 0:
             return None
-        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
-
-        fee = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        fee = self._effective_fee_rate(venue, taker=taker)
         denom = Decimal("1") - fee
         if denom <= 0:
             return None

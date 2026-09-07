@@ -378,3 +378,24 @@ def test_tape_injected_when_native_pick_is_not_tradable() -> None:
     sig = _signals(daily_pick_scores={"AVAX": 40.0}, daily_pick_bases=frozenset({"AVAX"}))
     out = asyncio.run(inject(self, sig))
     assert out.tape_confirmed_bases == frozenset()
+
+
+def test_observed_fee_rates_lift_break_even() -> None:
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor as B
+
+    self = SimpleNamespace(_observed_fee_rates={})
+    self._fee_key = B._fee_key
+    # Table says OKX maker 0.20%; live fills billing 0.25% lift the rate.
+    B._note_observed_fee(self, "okx", "maker", Decimal("0.25"), Decimal("100"))
+    assert B._effective_fee_rate(self, "okx", taker=False) == Decimal("0.0025")
+    # Cheaper-than-table fills never lower the (conservative) table rate.
+    B._note_observed_fee(self, "bitvavo", "taker", Decimal("0.10"), Decimal("100"))
+    assert B._effective_fee_rate(self, "bitvavo", taker=True) == Decimal("0.0025")
+    # Garbage is ignored: unknown liquidity flag, zero fee, absurd rate.
+    B._note_observed_fee(self, "okx", None, Decimal("1"), Decimal("100"))
+    B._note_observed_fee(self, "okx", "taker", Decimal("0"), Decimal("100"))
+    B._note_observed_fee(self, "okx", "taker", Decimal("5"), Decimal("100"))
+    assert "okx:taker" not in self._observed_fee_rates

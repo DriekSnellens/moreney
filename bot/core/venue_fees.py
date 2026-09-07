@@ -10,7 +10,9 @@ VENUE_TAKER_FEE: dict[str, Decimal] = {
     "kraken": Decimal("0.0026"),
     "coinbase": Decimal("0.006"),
     "bitvavo": Decimal("0.0025"),
-    "okx": Decimal("0.001"),
+    # OKX EUR spot pairs (regular tier) bill 0.35% taker / 0.20% maker — observed
+    # on 300+ live fills; the USDT-pair schedule (0.10/0.08) does not apply.
+    "okx": Decimal("0.0035"),
     "bybit": Decimal("0.001"),
 }
 
@@ -20,7 +22,7 @@ VENUE_MAKER_FEE: dict[str, Decimal] = {
     "kraken": Decimal("0.0016"),
     "coinbase": Decimal("0.004"),
     "bitvavo": Decimal("0.0015"),
-    "okx": Decimal("0.0008"),
+    "okx": Decimal("0.0020"),
     "bybit": Decimal("0.001"),
 }
 

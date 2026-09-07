@@ -219,7 +219,7 @@ def _session_settings(
             "paper_maker_spread_fee_buffer_bps": 1.0,
             "paper_maker_allow_buy_only": True,
             # Still fee-aware never-loss; thinner buffer = asks clear sooner.
-            "paper_maker_sell_profit_buffer_bps": 10.0,
+            "paper_maker_sell_profit_buffer_bps": 15.0,
             # Phase A velocity: arm earlier, harvest larger partials, recycle winners.
             # Still never below BE (never-loss unchanged).
             "paper_trail_take_profit_enabled": True,
@@ -232,7 +232,9 @@ def _session_settings(
             "paper_trail_soft_partial_pct": 0.35,
             "paper_trail_recovery_be_partial_pct": 0.60,
             "paper_trail_be_harvest_partial_pct": 0.40,
-            "paper_trail_be_harvest_min_gain_pct": 0.008,
+            # 222/534 round trips exited at 0..+0.5% gross: gross +20.75, fees 35.59,
+            # net -14.84. Below ~+1% gross a "BE+ harvest" is a fee donation.
+            "paper_trail_be_harvest_min_gain_pct": 0.012,
             "live_micro_be_harvest_cooldown_sec": 2.0,
             "paper_trail_hard_arm_pct": 0.025,
             "paper_trail_hard_drawdown_pct": 0.012,
@@ -395,31 +397,35 @@ def _session_settings(
             "live_micro_uw_dust_below_be_pct": 0.003,
             "live_micro_uw_near_below_be_pct": 0.005,
             "live_micro_uw_near_max_depth_pct": 0.012,
-            "live_micro_uw_near_min_age_sec": 180.0,
+            "live_micro_uw_near_min_age_sec": 900.0,
             "live_micro_uw_non_alphai_below_be_pct": 0.006,
-            "live_micro_uw_non_alphai_min_age_sec": 300.0,
+            "live_micro_uw_non_alphai_min_age_sec": 900.0,
             "live_micro_uw_alphai_below_be_pct": 0.012,
             "live_micro_uw_alphai_min_age_sec": 1800.0,
-            # Idle pressure: if venue has free cash, recycle non-strong bags sooner.
-            "live_micro_uw_idle_pressure_enabled": True,
+            # 14d fill forensics: idle-pressure / mid-flat / lag-time recycles produced
+            # 54 round trips at -0.5..0% with a 2-minute median hold (net -20 EUR,
+            # pure fees). Off: an aged mild-UW bag is nursed to recovery-arm; only
+            # dust, avoid-list, deadlock (would-buy gated, day-capped) and the hard
+            # cuts may realise a loss.
+            "live_micro_uw_idle_pressure_enabled": False,
             "live_micro_uw_idle_min_free_eur": 100.0,
             "live_micro_uw_idle_min_age_sec": 300.0,
             "live_micro_uw_idle_below_be_pct": 0.003,
             # Deadlock unlock: UW vault must not freeze the desk (mild recycle + redeploy).
             "live_micro_uw_deadlock_unlock_enabled": True,
             "live_micro_uw_deadlock_below_be_pct": 0.0025,
-            "live_micro_uw_deadlock_min_age_sec": 180.0,
+            "live_micro_uw_deadlock_min_age_sec": 900.0,
             "live_micro_uw_deadlock_partial_enabled": True,
             "live_micro_uw_deadlock_target_free_eur": 220.0,
             "live_micro_uw_deadlock_partial_clip_eur": 220.0,
             "live_micro_uw_deadlock_partial_min_eur": 40.0,
-            "live_micro_uw_deadlock_day_loss_cap_eur": 15.0,
+            "live_micro_uw_deadlock_day_loss_cap_eur": 8.0,
             "live_micro_uw_deadlock_would_buy_gate": True,
-            "live_micro_uw_mid_flat_recycle_enabled": True,
+            "live_micro_uw_mid_flat_recycle_enabled": False,
             "live_micro_uw_mid_flat_max_depth_pct": 0.015,
             "live_micro_uw_mid_flat_min_age_sec": 120.0,
             # Keep hard cut 2.5%; accelerate mild UW via lag-time partial (≤2%).
-            "live_micro_uw_lag_time_partial_enabled": True,
+            "live_micro_uw_lag_time_partial_enabled": False,
             "live_micro_uw_lag_time_partial_min_age_sec": 600.0,
             "live_micro_uw_lag_time_partial_max_depth_pct": 0.020,
             # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
