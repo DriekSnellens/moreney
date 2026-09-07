@@ -163,9 +163,9 @@ def test_overlays_defined_for_all_playbooks() -> None:
 
 def test_adverse_and_precrash_speed_up_recycle_and_block_deploy() -> None:
     adverse = PLAYBOOK_OVERLAYS[CapitalPlaybook.ADVERSE]
-    assert adverse["uw_deadlock_min_age_sec"] <= 180.0
+    assert adverse["uw_deadlock_min_age_sec"] <= 900.0
     assert adverse["uw_deadlock_below_be_pct"] <= 0.0025
-    assert PLAYBOOK_OVERLAYS[CapitalPlaybook.FLAT]["uw_deadlock_min_age_sec"] <= 240.0
+    assert PLAYBOOK_OVERLAYS[CapitalPlaybook.FLAT]["uw_deadlock_min_age_sec"] <= 900.0
     assert adverse["uw_alphai_min_age_sec"] <= 900.0
     assert adverse["uw_alphai_below_be_pct"] <= 0.010
     # Soft-ADVERSE: keep AlphaI sleeve deployable + hold winners while rising.
@@ -186,7 +186,7 @@ def test_adverse_and_precrash_speed_up_recycle_and_block_deploy() -> None:
     assert pre["trail_hold_rising_n"] >= 1
     assert pre["alphai_idle_deploy_blocked"] is False
     assert pre["block_new_buys"] is True
-    assert pre["uw_deadlock_min_age_sec"] <= 120.0
+    assert pre["uw_deadlock_min_age_sec"] <= 900.0
 
 
 def test_adverse_keeps_alphai_sleeve_capacity() -> None:

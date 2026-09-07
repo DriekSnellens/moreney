@@ -545,6 +545,8 @@ class Settings(BaseSettings):
     live_micro_observed_fee_calibration: bool = True
     # "venue:maker:taker,..." applied process-wide by the live runner (empty = table).
     live_venue_fee_overrides: str = ""
+    # Voluntary profit harvests never below mult x maker round-trip fee (0 = off).
+    live_micro_harvest_fee_floor_mult: float = Field(default=2.5, ge=0.0, le=10.0)
     # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)

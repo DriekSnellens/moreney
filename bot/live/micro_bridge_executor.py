@@ -1624,6 +1624,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             return False
 
+    def _harvest_fee_floor(self, venue: str) -> Decimal:
+        """Absolute floor for any voluntary profit harvest: fees ≤ ~40% of gross.
+
+        2.5x the maker round trip (Bitvavo 0.30% → 0.75%, OKX 0.40% → 1.0%).
+        Scales (AlphaI feature, desk lessons, non-pick 0.40x) may not push the
+        harvest gain below this — 222 round trips at 0..+0.5% gross netted -14.84.
+        """
+        mult = Decimal(
+            str(getattr(self._settings, "live_micro_harvest_fee_floor_mult", 2.5) or 0)
+        )
+        if mult <= 0:
+            return _ZERO
+        try:
+            rt = self._effective_fee_rate(venue, taker=False) * Decimal("2")
+        except Exception:  # noqa: BLE001
+            return _ZERO
+        return rt * mult
+
     def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
         scale = self._alphai_feature_for(base).be_harvest_gain_scale
         try:
@@ -8711,8 +8729,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
-            harvest_gain_floor = self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(
-                asset
+            harvest_gain_floor = max(
+                self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(asset),
+                self._harvest_fee_floor(venue),
             )
             exit_urgency = self._alphai_exit_urgency(asset)
             # AlphaI hold: when momentum goes flat/down after a peak, harvest BE+

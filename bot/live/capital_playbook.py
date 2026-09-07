@@ -53,6 +53,9 @@ class CapitalPlaybookDecision:
 
 # Overlay keys applied onto MicroBridgeExecutor private fields.
 # Values are Python natives; the bridge coerces to Decimal/float/bool.
+# Fee floor (14d fill forensics): no regime harvests below +1.0% gross — 222
+# round trips at 0..+0.5% netted -14.84 EUR after fees — and no regime recycles
+# a mild-UW bag younger than 10-15 min (54 two-minute recycles netted -20 EUR).
 PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
     CapitalPlaybook.TREND: {
         # Empty → restore session baselines (max-deploy).
@@ -69,17 +72,17 @@ PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
         "exit_taker_after_maker_fails": 1,
         # Daytrade: still avoid tiny BE snips on AlphaI winners, but free
         # non-pick / near-BE capital faster so the satellite can rotate.
-        "be_harvest_min_gain_pct": 0.004,
+        "be_harvest_min_gain_pct": 0.010,
         "be_harvest_partial_pct": 0.45,
-        "uw_near_min_age_sec": 180.0,
-        "uw_non_alphai_min_age_sec": 300.0,
+        "uw_near_min_age_sec": 900.0,
+        "uw_non_alphai_min_age_sec": 900.0,
         "uw_idle_min_age_sec": 180.0,
         "uw_idle_below_be_pct": 0.003,
         "uw_near_below_be_pct": 0.003,
-        "uw_deadlock_min_age_sec": 180.0,
+        "uw_deadlock_min_age_sec": 600.0,
         "uw_deadlock_below_be_pct": 0.0025,
         "uw_deadlock_target_free_eur": 220.0,
-        "uw_deadlock_day_loss_cap_eur": 12.0,
+        "uw_deadlock_day_loss_cap_eur": 8.0,
         "trail_hold_rising_n": 2,
         "alphai_intraday_min_freshness": 0.45,
         "alphai_idle_deploy_blocked": False,
@@ -96,20 +99,20 @@ PLAYBOOK_OVERLAYS: dict[CapitalPlaybook, dict[str, Any]] = {
         "exit_taker_cushion_bps": 2.0,
         "exit_taker_after_maker_fails": 1,
         # Peak-fade harvest — not 1bp BE snips.
-        "be_harvest_min_gain_pct": 0.008,
+        "be_harvest_min_gain_pct": 0.010,
         "be_harvest_partial_pct": 0.40,
-        "uw_near_min_age_sec": 300.0,
-        "uw_non_alphai_min_age_sec": 450.0,
+        "uw_near_min_age_sec": 900.0,
+        "uw_non_alphai_min_age_sec": 900.0,
         "uw_idle_min_age_sec": 120.0,
         "uw_idle_below_be_pct": 0.003,
         "uw_near_below_be_pct": 0.005,
         # Recycle non-sleeve bags faster; AlphaI winners hold while rising.
         "uw_alphai_below_be_pct": 0.010,
         "uw_alphai_min_age_sec": 900.0,
-        "uw_deadlock_min_age_sec": 180.0,
+        "uw_deadlock_min_age_sec": 600.0,
         "uw_deadlock_below_be_pct": 0.0020,
         "uw_deadlock_target_free_eur": 220.0,
-        "uw_deadlock_day_loss_cap_eur": 15.0,
+        "uw_deadlock_day_loss_cap_eur": 8.0,
         "early_cut_loss_below_be_pct": 0.008,
         "trail_hold_rising_n": 2,
         "alphai_intraday_min_freshness": 0.55,
@@ -131,20 +134,20 @@ PRE_CRASH_FLAT_OVERLAYS: dict[str, Any] = {
     "alphai_strong_clip_eur": 160.0,
     "exit_taker_cushion_bps": 2.0,
     "exit_taker_after_maker_fails": 1,
-    "be_harvest_min_gain_pct": 0.005,
+    "be_harvest_min_gain_pct": 0.010,
     "be_harvest_partial_pct": 0.45,
-    "uw_near_min_age_sec": 180.0,
-    "uw_non_alphai_min_age_sec": 300.0,
+    "uw_near_min_age_sec": 900.0,
+    "uw_non_alphai_min_age_sec": 900.0,
     "uw_idle_min_age_sec": 90.0,
     "uw_idle_below_be_pct": 0.005,
     "uw_near_below_be_pct": 0.005,
     "uw_near_max_depth_pct": 0.008,
     "uw_alphai_below_be_pct": 0.008,
     "uw_alphai_min_age_sec": 600.0,
-    "uw_deadlock_min_age_sec": 120.0,
+    "uw_deadlock_min_age_sec": 600.0,
     "uw_deadlock_below_be_pct": 0.0020,
     "uw_deadlock_target_free_eur": 160.0,
-    "uw_deadlock_day_loss_cap_eur": 10.0,
+    "uw_deadlock_day_loss_cap_eur": 8.0,
     "early_cut_loss_below_be_pct": 0.008,
     "trail_hold_rising_n": 1,
     "alphai_intraday_min_freshness": 0.50,

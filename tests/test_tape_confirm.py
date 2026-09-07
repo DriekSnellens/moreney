@@ -435,3 +435,21 @@ def test_live_venue_fee_overrides_apply_only_when_set() -> None:
     finally:
         set_venue_fee_overrides(None)
     assert venue_maker_fee("okx") == Decimal("0.0008")
+
+
+def test_harvest_fee_floor_scales_with_venue_fees() -> None:
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor as B
+
+    self = SimpleNamespace(
+        _settings=SimpleNamespace(live_micro_harvest_fee_floor_mult=2.5),
+        _observed_fee_rates={"okx:maker": Decimal("0.0020")},
+    )
+    self._fee_key = B._fee_key
+    self._effective_fee_rate = lambda v, taker: B._effective_fee_rate(self, v, taker=taker)
+    assert B._harvest_fee_floor(self, "bitvavo") == Decimal("0.0075")
+    assert B._harvest_fee_floor(self, "okx") == Decimal("0.0100")
+    self._settings.live_micro_harvest_fee_floor_mult = 0
+    assert B._harvest_fee_floor(self, "okx") == 0
