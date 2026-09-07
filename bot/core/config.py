@@ -547,6 +547,14 @@ class Settings(BaseSettings):
     live_venue_fee_overrides: str = ""
     # Voluntary profit harvests never below mult x maker round-trip fee (0 = off).
     live_micro_harvest_fee_floor_mult: float = Field(default=2.5, ge=0.0, le=10.0)
+    # Underwater policy: "simple" (3 rules) or "legacy" (tiered recycle stack).
+    live_micro_uw_policy: str = "legacy"
+    live_micro_uw_simple_max_depth_pct: float = Field(default=0.012, ge=0.0, le=0.05)
+    live_micro_uw_simple_unsupported_age_sec: float = Field(default=86400.0, ge=0.0)
+    live_micro_uw_simple_avoid_age_sec: float = Field(default=7200.0, ge=0.0)
+    live_micro_uw_simple_rotate_min_age_sec: float = Field(default=900.0, ge=0.0)
+    # Fee routing: prefer the cheaper venue for a base quoted on both (empty = off).
+    live_micro_preferred_entry_venue: str = "bitvavo"
     # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)

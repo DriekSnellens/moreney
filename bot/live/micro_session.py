@@ -392,7 +392,15 @@ def _session_settings(
             "live_micro_early_cut_loss_below_be_pct": 0.01,
             "live_micro_early_cut_new_bases_only": True,
             "live_micro_early_cut_momentum_max_return": 0.0,
-            # Faster underwater recycle — minimize idle capital, keep losses small.
+            # Underwater policy: 3 rules (hard stops / aged unsupported bag at mild
+            # depth / rotate only against a confirmed replacement, day-capped).
+            "live_micro_uw_policy": "simple",
+            "live_micro_uw_simple_max_depth_pct": 0.012,
+            "live_micro_uw_simple_unsupported_age_sec": 86400.0,
+            "live_micro_uw_simple_avoid_age_sec": 7200.0,
+            "live_micro_uw_simple_rotate_min_age_sec": 900.0,
+            # Fee routing: Bitvavo bills 0.15/0.25, OKX (Lv1, all spot pairs) 0.20/0.35.
+            "live_micro_preferred_entry_venue": "bitvavo",
             "live_micro_uw_recycle_enabled": True,
             "live_micro_provisional_be_exit_min_age_sec": 600.0,
             "live_micro_uw_avoid_max_age_sec": 600.0,

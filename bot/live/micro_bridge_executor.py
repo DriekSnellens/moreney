@@ -346,6 +346,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_fresh_entry_grace_sec = float(
             getattr(settings, "live_micro_uw_fresh_entry_grace_sec", 1800.0) or 0.0
         )
+        # Underwater policy: "simple" = 3 rules (hard stops / aged unsupported /
+        # rotate against confirmed replacement); "legacy" = tiered recycle stack.
+        self._uw_policy = str(getattr(settings, "live_micro_uw_policy", "legacy") or "legacy")
+        self._uw_simple_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_simple_max_depth_pct", 0.012) or 0)
+        )
+        self._uw_simple_unsupported_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_unsupported_age_sec", 86400.0) or 0.0
+        )
+        self._uw_simple_avoid_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_avoid_age_sec", 7200.0) or 0.0
+        )
+        self._uw_simple_rotate_min_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_rotate_min_age_sec", 900.0) or 0.0
+        )
         # After a loss exit, block re-entering the same base on that venue
         # unless the mark has reclaimed exit price + reclaim bps.
         self._loss_exit_cooldown_sec = float(
@@ -3423,6 +3438,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "early_cut_momentum_max_return": str(self._early_cut_momentum_max),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "uw_recycle_enabled": self._uw_recycle_enabled,
+                "uw_policy": getattr(self, "_uw_policy", "legacy"),
+                "uw_simple_max_depth_pct": str(getattr(self, "_uw_simple_max_depth_pct", "")),
+                "uw_simple_unsupported_age_sec": getattr(self, "_uw_simple_unsupported_age_sec", None),
+                "uw_simple_avoid_age_sec": getattr(self, "_uw_simple_avoid_age_sec", None),
+                "uw_simple_rotate_min_age_sec": getattr(self, "_uw_simple_rotate_min_age_sec", None),
+                "preferred_entry_venue": str(
+                    getattr(self._settings, "live_micro_preferred_entry_venue", "") or ""
+                ),
                 "uw_dust_max_notional_eur": str(self._uw_dust_max_notional),
                 "uw_dust_below_be_pct": str(self._uw_dust_below_be_pct),
                 "uw_near_below_be_pct": str(self._uw_near_below_be_pct),
@@ -5157,7 +5180,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._check_sleeve_loss_cap()
         # Deadlock partial unlock day-loss budget (absolute loss only).
         tier = str(trail_st.get("uw_recycle_tier") or "")
-        if tier.startswith("deadlock_") and trade_pnl < 0:
+        if tier.startswith(("deadlock_", "rotate_", "aged_")) and trade_pnl < 0:
+            # Every voluntary (non-stop) loss exit draws on the same daily budget.
             self._uw_deadlock_note_loss(-trade_pnl)
         self._check_daily_kill()
         if not lots:
@@ -6648,6 +6672,96 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _uw_deadlock_needed_free_eur(self) -> Decimal:
         return max(_ZERO, self._uw_deadlock_sleeve_target_eur() - self._uw_deadlock_free_quote_eur())
 
+    def _uw_bag_supported(self, base: str) -> bool:
+        """A bag has support when AlphaI still buys it or the tape still leads it."""
+        bu = str(base or "").strip().upper()
+        for probe in (
+            lambda: self._alphai_sleeve_priority_buy(bu),
+            lambda: self._alphai_bullish_buy(bu),
+            lambda: bu in self._tape_leader_bases(),
+        ):
+            try:
+                if probe():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _uw_confirmed_replacement(self, venue: str, base: str) -> str | None:
+        """An unheld name we would deploy into right now (sleeve target or tape leader)."""
+        bu = str(base or "").strip().upper()
+        try:
+            held = self._all_held_alt_bases()
+        except Exception:  # noqa: BLE001
+            held = set()
+        candidates: list[str] = []
+        try:
+            candidates.extend(self._sleeve_deploy_targets(top_n=2))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            candidates.extend(sorted(self._tape_leader_bases()))
+        except Exception:  # noqa: BLE001
+            pass
+        for cand in candidates:
+            cu = str(cand or "").upper()
+            if not cu or cu == bu or cu in held:
+                continue
+            try:
+                if self._alphai_is_avoid_base(cu) or self._alphai_blocks_base(cu):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+            return cu
+        return None
+
+    def _uw_recycle_plan_simple(
+        self,
+        *,
+        venue: str,
+        base: str,
+        symbol: str,
+        be: Decimal,
+        depth: Decimal,
+        age: float,
+    ) -> tuple[str, str, Decimal] | None:
+        """Three-rule underwater policy (replaces the tiered recycle stack).
+
+        1. Hard stops live outside this plan (early-cut -1% / cut-loss -2.5%).
+        2. Aged bag without support (AlphaI not buying, tape not leading) at a
+           mild depth: patient maker exit at the ask. Avoid-list bags age faster.
+        3. Rotate only against a *confirmed* replacement while capital is
+           deadlocked, within the daily voluntary-loss budget.
+        Deeper bags are nursed to recovery-arm or the hard cut — never dumped
+        at -1..-3% for "capital rotation" (37 such exits netted -38 EUR in 3 days).
+        """
+        max_depth = self._uw_simple_max_depth_pct
+        if max_depth <= 0 or depth > max_depth:
+            return None
+        floor = be * (Decimal("1") - max_depth)
+        grace = float(getattr(self, "_uw_fresh_entry_grace_sec", 0.0) or 0.0)
+        if grace > 0 and age < grace:
+            return None
+        if self._uw_bag_supported(base):
+            return None
+        avoid = False
+        try:
+            avoid = bool(self._alphai_is_avoid_base(base))
+        except Exception:  # noqa: BLE001
+            avoid = False
+        aged_after = self._uw_simple_avoid_age_sec if avoid else self._uw_simple_unsupported_age_sec
+        if aged_after > 0 and age >= aged_after:
+            return ("aged_avoid" if avoid else "aged_unsupported", "band", floor)
+        if (
+            age >= self._uw_simple_rotate_min_age_sec
+            and not self._uw_would_buy_today(base, symbol)
+            and self._capital_deadlocked(venue)
+            and self._uw_deadlock_day_loss_remaining() > 0
+            and self._uw_confirmed_replacement(venue, base) is not None
+        ):
+            return ("rotate_replacement", "band", floor)
+        return None
+
     def _uw_would_buy_today(self, base: str, symbol: str) -> bool:
         """Forward-looking: would we deploy fresh cash into this name now?
 
@@ -6769,6 +6883,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if mark >= floor:
                 return ("dust", "band", floor)
             return ("dust", "stop", floor)
+
+        if str(getattr(self, "_uw_policy", "legacy") or "legacy").lower() == "simple":
+            return self._uw_recycle_plan_simple(
+                venue=venue,
+                base=base,
+                symbol=symbol,
+                be=be,
+                depth=depth,
+                age=age,
+            )
 
         strong_hold = self._alphai_protects_from_cuts(base)
         rotate_exit = False
@@ -8538,6 +8662,45 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         key = f"{str(venue).lower()}:{str(base).upper()}"
         self._loss_exits[key] = (time.monotonic(), Decimal(str(price)))
 
+    def _fee_route_block(self, venue: str, base: str, notional: Decimal) -> str | None:
+        """Route a new-base entry to the cheaper venue when it can take the clip.
+
+        Bitvavo bills 0.15/0.25, OKX (Lv1, every spot pair incl. USDT) 0.20/0.35:
+        a maker round trip costs 0.30% vs 0.40%. While the preferred venue is live,
+        not holding the base, not blocked on it and has the free ring for this
+        clip, the more expensive venue must not open the position.
+        """
+        pref = str(
+            getattr(self._settings, "live_micro_preferred_entry_venue", "") or ""
+        ).strip().lower()
+        v = str(venue or "").strip().lower()
+        if not pref or v == pref:
+            return None
+        if pref not in (getattr(self, "_execute_venues", ()) or ()):
+            return None
+        bu = str(base or "").upper()
+        try:
+            if bu in self._held_alt_bases(pref):
+                return None
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            if bu in (self._underwater_blocked_bases.get(pref) or set()):
+                return None
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            free = self._venue_budget_remaining(pref)
+        except Exception:  # noqa: BLE001
+            return None
+        need = max(notional, _MIN_LIVE_NOTIONAL) if notional > 0 else _MIN_LIVE_NOTIONAL
+        if free < need:
+            return None
+        return (
+            f"routed to {pref} (fees {float(self._effective_fee_rate(pref, taker=False)) * 100:.2f}% vs "
+            f"{float(self._effective_fee_rate(v, taker=False)) * 100:.2f}% maker; free={free:.0f})"
+        )
+
     def _loss_exit_block(self, venue: str, base: str, mark: Decimal | None) -> str | None:
         """Reason string when a fresh re-entry after a loss exit must wait."""
         if self._loss_exit_cooldown_sec <= 0:
@@ -9965,6 +10128,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     order_request,
                     reason="LOSS_EXIT_COOLDOWN",
                     message=f"{base} on {venue}: {block}",
+                )
+            try:
+                route_notional = Decimal(str(order_request.price or 0)) * Decimal(
+                    str(order_request.quantity or 0)
+                )
+            except Exception:  # noqa: BLE001
+                route_notional = _ZERO
+            route = self._fee_route_block(venue, base, route_notional)
+            if route:
+                self._bump_skip("fee_route_preferred_venue")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="FEE_ROUTE_PREFERRED_VENUE",
+                    message=f"{base} on {venue}: {route}",
                 )
         if (
             side_is_buy
