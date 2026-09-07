@@ -543,6 +543,8 @@ class Settings(BaseSettings):
     live_micro_tape_union_with_picks: bool = True
     # Observed fee rates (per venue/side) lift break-even above the static table.
     live_micro_observed_fee_calibration: bool = True
+    # "venue:maker:taker,..." applied process-wide by the live runner (empty = table).
+    live_venue_fee_overrides: str = ""
     # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)

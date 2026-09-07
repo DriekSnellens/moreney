@@ -24,6 +24,13 @@ def _isolate_paper_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("PAPER_PERSIST_PATH", str(path))
     monkeypatch.setenv("PAPER_AUTO_START", "false")
     get_settings.cache_clear()
+    # Live micro sessions install process-wide venue fee overrides; keep research
+    # / maker fixtures on the static table regardless of test order.
+    from bot.core.venue_fees import set_venue_fee_overrides
+
+    set_venue_fee_overrides(None)
+    yield
+    set_venue_fee_overrides(None)
 
 
 @pytest.fixture

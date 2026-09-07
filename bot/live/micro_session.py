@@ -23,6 +23,7 @@ from bot.engine.orchestrator import TradingEngine
 from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
 from bot.live.micro_engine import LiveMicroEngine, reset_micro_engine
 from bot.market_data.service import MarketDataService
+from bot.core.venue_fees import LIVE_VENUE_FEE_OVERRIDES
 from bot.paper.runner import PaperRunner
 from bot.paper.store import PaperTradingStore
 from bot.funding.multi_venue import parse_venue_list
@@ -220,6 +221,8 @@ def _session_settings(
             "paper_maker_allow_buy_only": True,
             # Still fee-aware never-loss; thinner buffer = asks clear sooner.
             "paper_maker_sell_profit_buffer_bps": 15.0,
+            # OKX EUR pairs bill 0.20%/0.35% (observed), not the 0.08%/0.10% table.
+            "live_venue_fee_overrides": LIVE_VENUE_FEE_OVERRIDES,
             # Phase A velocity: arm earlier, harvest larger partials, recycle winners.
             # Still never below BE (never-loss unchanged).
             "paper_trail_take_profit_enabled": True,

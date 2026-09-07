@@ -16,8 +16,7 @@ from tests.execution.conftest import make_book
 
 
 def test_venue_maker_fee_is_below_or_equal_taker() -> None:
-    assert venue_maker_fee("okx") == Decimal("0.0020")
-    assert venue_taker_fee("okx") == Decimal("0.0035")
+    assert venue_maker_fee("okx") == Decimal("0.0008")
     assert venue_maker_fee("kraken") == Decimal("0.0016")
     assert venue_taker_fee("kraken") == Decimal("0.0026")
     assert venue_maker_fee("kraken") < venue_taker_fee("kraken")

@@ -248,6 +248,13 @@ class PaperRunner:
         )
         self._opportunity_engine = self._build_opportunity_engine(gate)
         set_fee_tier(getattr(settings, "paper_fee_tier", "retail"))
+        fee_overrides = str(getattr(settings, "live_venue_fee_overrides", "") or "")
+        if fee_overrides.strip():
+            # Live desk only (set by the micro session): bill venues at their
+            # observed EUR-pair schedule; research fixtures keep the static table.
+            from bot.core.venue_fees import set_venue_fee_overrides
+
+            set_venue_fee_overrides(fee_overrides)
         self._lead_lag_observer = None
         if getattr(settings, "lead_lag_enabled", True):
             from bot.opportunity.lead_lag.observer import LeadLagObserver

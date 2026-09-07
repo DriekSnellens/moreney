@@ -406,3 +406,32 @@ def test_observed_fee_rates_lift_break_even() -> None:
     B._note_observed_fee(self, "okx", "taker", Decimal("0"), Decimal("100"))
     B._note_observed_fee(self, "okx", "taker", Decimal("5"), Decimal("100"))
     assert "okx:taker" not in self._observed_fee_rates
+
+
+def test_live_venue_fee_overrides_apply_only_when_set() -> None:
+    from decimal import Decimal
+
+    from bot.core.venue_fees import (
+        LIVE_VENUE_FEE_OVERRIDES,
+        set_venue_fee_overrides,
+        venue_maker_fee,
+        venue_taker_fee,
+    )
+
+    try:
+        assert venue_maker_fee("okx") == Decimal("0.0008")
+        set_venue_fee_overrides(LIVE_VENUE_FEE_OVERRIDES)
+        assert venue_maker_fee("okx") == Decimal("0.0020")
+        assert venue_taker_fee("okx") == Decimal("0.0035")
+        assert venue_maker_fee("bitvavo") == Decimal("0.0015")
+        # Partial override keeps the table value for the empty side.
+        set_venue_fee_overrides("okx::0.0030")
+        assert venue_maker_fee("okx") == Decimal("0.0008")
+        assert venue_taker_fee("okx") == Decimal("0.0030")
+        # Garbage / out-of-range values are ignored.
+        set_venue_fee_overrides("okx:abc:0.5")
+        assert venue_maker_fee("okx") == Decimal("0.0008")
+        assert venue_taker_fee("okx") == Decimal("0.001")
+    finally:
+        set_venue_fee_overrides(None)
+    assert venue_maker_fee("okx") == Decimal("0.0008")
