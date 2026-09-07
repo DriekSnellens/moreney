@@ -457,6 +457,127 @@ def test_manual_decision_preview_then_execute(tmp_path):
     assert r.last_decision_hour_ms == scheduled_marker
 
 
+def test_preview_rows_and_commit_binding(tmp_path):
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    clock = FakeClock((T0 + 32 * 60_000) / 1000)
+    r, gws = _multi_runner(
+        tmp_path,
+        clock,
+        bitvavo_cash=300.0,
+        okx_cash=1900.0,
+        feed=FakeFeed(candles),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+    )
+    preview = asyncio.run(r.decide_now(execute=False))
+    row = preview["planned"][0]
+    assert row["base"] == "SOL" and row["venue"] == "okx" and row["clip_eur"] == 500.0
+    assert row["price"] > 0 and row["qty"] == pytest.approx(500.0 / row["price"], rel=1e-6)
+    assert row["hard_stop_eur"] == pytest.approx(-500 * 0.03 - 500 * 0.003)
+    assert row["break_even"] > row["price"] > row["hard_stop_price"]
+    # Commit bound to a different set than the desk would choose -> refused.
+    res = asyncio.run(r.decide_now(execute=True, expect_bases=["LINK"]))
+    assert res.get("mismatch") and res["expected"] == ["LINK"] and r.holdings == []
+    assert not gws["okx"].placed
+    ledger = (tmp_path / "ledger.jsonl").read_text().splitlines()
+    assert '"event": "commit_rejected"' in ledger[-1]
+    # Matching commit executes.
+    res = asyncio.run(r.decide_now(execute=True, expect_bases=["sol"]))
+    assert not res.get("mismatch") and [h.pos.base for h in r.holdings] == ["SOL"]
+
+
+def test_manager_commit_runs_in_background(tmp_path):
+    from bot.live.momentum_runner import MomentumDeskManager
+
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    clock = FakeClock((T0 + 32 * 60_000) / 1000)
+    r, gws = _multi_runner(
+        tmp_path,
+        clock,
+        bitvavo_cash=2000.0,
+        okx_cash=0.0,
+        feed=FakeFeed(candles),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+    )
+
+    async def scenario():
+        m = MomentumDeskManager()
+        assert m.commit(["SOL"])["reason"] == "not_running"
+        m._runner = r
+        m._task = asyncio.create_task(asyncio.sleep(10))
+        out = m.commit(["SOL"])
+        assert out["ok"] and m.commit(["SOL"])["reason"] == "commit_in_progress"
+        await m._commit_task
+        m._task.cancel()
+        return m.status()
+
+    status = asyncio.run(scenario())
+    assert status["commit"]["done"] and status["commit"]["result"]["entries"] == ["SOL"]
+    assert [h.pos.base for h in r.holdings] == ["SOL"]
+
+
+def test_dashboard_renders_preview_with_scenarios_and_commit_form():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    status = {
+        "running": True,
+        "venues": ["bitvavo", "okx"],
+        "config": {
+            k: (list(v) if isinstance(v, tuple) else v) for k, v in DeskConfig().__dict__.items()
+        },
+        "positions": [],
+        "risk": {"entries_allowed": True},
+        "last_regime": {},
+        "cash_eur": 4000.0,
+    }
+    preview = {
+        "at": "2026-09-07T17:45:00+00:00",
+        "ok": True,
+        "btc_ret": -0.0089,
+        "breadth": 0.625,
+        "reasons": [],
+        "risk_block": "",
+        "alphai": {"macro_caution": True, "avoid": ["ETH"], "picks": []},
+        "rejected": [{"base": "DOT", "excess": 0.12, "from_high": -0.02, "why": "far_from_high"}],
+        "planned": [
+            {
+                "base": "FET",
+                "venue": "bitvavo",
+                "clip_eur": 420.0,
+                "price": 0.5,
+                "qty": 840.0,
+                "fee_in_eur": 0.63,
+                "fee_out_eur": 0.63,
+                "break_even": 0.5015,
+                "hard_stop_price": 0.485,
+                "hard_stop_eur": -13.86,
+                "hard_stop_pct": 0.03,
+                "trail_pct": 0.03,
+                "reasons": ["excess=+0.08", "macro_reduce"],
+            }
+        ],
+    }
+    html = render_momentum_dashboard(status, [], preview=preview).body.decode()
+    assert "Simulatie" in html and "FET" in html and "exit +5%" in html
+    # +5% on 420 minus 1.26 fees = +19.74; hard stop -3% = -13.86
+    assert "+19.74 €" in html and "-13.86 €" in html
+    assert 'action="/live/momentum/commit?bases=FET&amp;at=2026-09-07T17:45:00+00:00"' in html
+    assert "echt geld" in html and 'http-equiv="refresh"' not in html
+    assert "<script" not in html
+    # Commit in progress hides the button and shows the notice.
+    status["commit"] = {"started_at": "2026-09-07T17:50:00+00:00", "bases": ["FET"], "done": False}
+    html = render_momentum_dashboard(status, [], preview=preview).body.decode()
+    assert "Uitvoering bezig" in html and "/live/momentum/commit?" not in html
+    # Empty preview: nothing to commit, but the simulate button stays.
+    html = render_momentum_dashboard(
+        status, [], preview={**preview, "planned": [], "ok": False, "reasons": ["btc_weak"]}
+    ).body.decode()
+    assert "niets kopen" in html and "btc_weak" in html and "Simuleer beslissing nu" in html
+
+
 def test_dashboard_renders_positions_decision_and_ledger():
     from bot.live.momentum_dashboard import render_momentum_dashboard
 

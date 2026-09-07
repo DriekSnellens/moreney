@@ -24,7 +24,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,8 +36,10 @@ from bot.core.config import Settings, get_settings
 from bot.live.momentum_desk import (
     BAR_MS,
     AlphaIView,
+    BaseStats,
     Candle,
     DeskConfig,
+    Entry,
     ExitDecision,
     Position,
     RiskLedger,
@@ -617,23 +619,39 @@ class MomentumDeskRunner:
         self.last_decision_hour_ms = hour_ms
         await self._decide(hour_ms, now_ms, execute=True, trigger="schedule")
 
-    async def decide_now(self, *, execute: bool) -> dict[str, Any]:
+    async def decide_now(
+        self, *, execute: bool, expect_bases: Iterable[str] | None = None
+    ) -> dict[str, Any]:
         """Operator-triggered decision on the latest closed bar.
 
         ``execute=False`` previews (no orders, no ledger row, no state change);
         ``execute=True`` trades exactly like the scheduled decision, under the
         same risk ledger and one-entry-per-base-per-day rule. The scheduled
-        decision hour is left untouched.
+        decision hour is left untouched. ``expect_bases`` binds a commit to the
+        preview the operator saw: if the desk would now enter a different set
+        of bases nothing is bought and ``mismatch`` is set.
         """
         async with self._lock:
             now_ms = int(self._clock() * 1000)
             await self._refresh_cash()
             return await self._decide(
-                (now_ms // BAR_MS) * BAR_MS, now_ms, execute=execute, trigger="manual"
+                (now_ms // BAR_MS) * BAR_MS,
+                now_ms,
+                execute=execute,
+                trigger="manual",
+                expect_bases=(
+                    {b.upper() for b in expect_bases} if expect_bases is not None else None
+                ),
             )
 
     async def _decide(
-        self, t_ms: int, now_ms: int, *, execute: bool, trigger: str
+        self,
+        t_ms: int,
+        now_ms: int,
+        *,
+        execute: bool,
+        trigger: str,
+        expect_bases: set[str] | None = None,
     ) -> dict[str, Any]:
         candles: dict[str, Sequence[Candle]] = {}
         for base in ("BTC", *self.cfg.universe):
@@ -711,10 +729,7 @@ class MomentumDeskRunner:
             ],
             "rejected": rejected[:6],
             "entries": [e.base for e in entries],
-            "planned": [
-                {"base": e.base, "clip_eur": e.clip_eur, "reasons": list(e.reasons)}
-                for e in entries
-            ],
+            "planned": [self._plan_row(e, stats) for e in entries],
             "risk_block": "" if allowed else why,
             "alphai": {
                 "macro_caution": alphai.macro_caution,
@@ -724,12 +739,53 @@ class MomentumDeskRunner:
         }
         if not execute:
             return summary
+        if expect_bases is not None and {e.base for e in entries} != expect_bases:
+            summary["mismatch"] = True
+            summary["expected"] = sorted(expect_bases)
+            self._ledger_append(
+                {
+                    "event": "commit_rejected",
+                    "expected": sorted(expect_bases),
+                    "planned": [e.base for e in entries],
+                }
+            )
+            return summary
         self.last_regime = summary
         self._ledger_append({"event": "decision", **summary})
         for entry in entries:
             await self._enter(entry.base, entry.clip_eur, ",".join(entry.reasons), now_ms)
         self._save_state()
         return summary
+
+    def _plan_row(self, entry: Entry, stats: Mapping[str, BaseStats]) -> dict[str, Any]:
+        """Planned entry with the figures an operator needs to judge it: routed
+        venue, reference price (last 15m close), quantity, fee and stop levels.
+        Execution uses the live book, so fills differ slightly."""
+        route = self._route_entry(entry.clip_eur)
+        venue, clip = route if route is not None else (None, entry.clip_eur)
+        st = stats.get(entry.base)
+        price = st.price if st is not None else None
+        fee_side = self.cfg.fee_rt / 2
+        row: dict[str, Any] = {
+            "base": entry.base,
+            "clip_eur": clip,
+            "reasons": list(entry.reasons),
+            "venue": venue,
+            "price": price,
+            "fee_in_eur": round(clip * fee_side, 2),
+            "fee_out_eur": round(clip * fee_side, 2),
+            "hard_stop_pct": self.cfg.hard_stop_pct,
+            "trail_pct": self.cfg.trail_pct,
+        }
+        if price:
+            qty = clip / price
+            row["qty"] = round(qty, 8)
+            row["break_even"] = round(price * (1 + self.cfg.fee_rt), 8)
+            row["hard_stop_price"] = round(price * (1 - self.cfg.hard_stop_pct), 8)
+            row["hard_stop_eur"] = round(-clip * self.cfg.hard_stop_pct - clip * self.cfg.fee_rt, 2)
+        if route is None:
+            row["blocked"] = "insufficient_cash"
+        return row
 
     async def _enter(self, base: str, clip_eur: float, reason: str, now_ms: int) -> None:
         route = self._route_entry(clip_eur)
@@ -994,6 +1050,8 @@ class MomentumDeskManager:
         self._runner: MomentumDeskRunner | None = None
         self._stop = False
         self._engine: Any = None
+        self._commit_task: asyncio.Task[None] | None = None
+        self._commit: dict[str, Any] = {}
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -1002,6 +1060,8 @@ class MomentumDeskManager:
         base: dict[str, Any] = {"running": self.running()}
         if self._runner is not None:
             base.update(self._runner.status())
+        if self._commit:
+            base["commit"] = dict(self._commit)
         if self._task is not None and self._task.done() and self._task.exception():
             base["task_error"] = repr(self._task.exception())
         return base
@@ -1065,6 +1125,42 @@ class MomentumDeskManager:
             return {"ok": False, "reason": "not_running"}
         summary = await self._runner.decide_now(execute=execute)
         return {"ok": True, "decision": summary, "status": self.status()}
+
+    def commit(self, bases: Sequence[str]) -> dict[str, Any]:
+        """Execute a previewed decision in the background (orders can rest for
+        minutes). Refused while a previous commit is still running."""
+        if self._runner is None or not self.running():
+            return {"ok": False, "reason": "not_running"}
+        if self._commit_task is not None and not self._commit_task.done():
+            return {"ok": False, "reason": "commit_in_progress"}
+        expect = [b.strip().upper() for b in bases if b and b.strip()]
+        runner = self._runner
+        self._commit = {
+            "started_at": datetime.now(UTC).isoformat(),
+            "bases": expect,
+            "done": False,
+            "result": None,
+        }
+
+        async def _run() -> None:
+            try:
+                res = await runner.decide_now(execute=True, expect_bases=expect)
+                self._commit["result"] = {
+                    "entries": res.get("entries"),
+                    "mismatch": bool(res.get("mismatch")),
+                    "planned": [p.get("base") for p in res.get("planned") or []],
+                    "risk_block": res.get("risk_block"),
+                    "ok": res.get("ok"),
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("momentum desk: commit failed")
+                self._commit["result"] = {"error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                self._commit["done"] = True
+                self._commit["finished_at"] = datetime.now(UTC).isoformat()
+
+        self._commit_task = asyncio.create_task(_run(), name="momentum-commit")
+        return {"ok": True, "commit": dict(self._commit)}
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True

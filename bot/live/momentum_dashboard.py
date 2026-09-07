@@ -31,6 +31,22 @@ _CSS = """
       margin: 0 0 .6rem; }
     .stack { display: grid; gap: 1rem; }
     @media (min-width: 980px) { .stack.two { grid-template-columns: 1.15fr .85fr; } }
+    .btn { cursor: pointer; font: inherit; font-size: .8rem; padding: .4rem .8rem;
+      border-radius: .5rem; border: 1px solid var(--line); background: transparent;
+      color: var(--blue); }
+    .btn:hover { border-color: var(--blue); }
+    .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 60%, var(--line));
+      font-weight: 600; }
+    .hint { margin: .6rem 0; padding: .5rem .75rem; border-radius: .5rem; font-size: .82rem;
+      border: 1px solid var(--line); }
+    .hint.bad { color: var(--bad);
+      border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+    .hint.good { color: var(--good);
+      border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
+    .hint.warn { color: var(--warn);
+      border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
+    .card-head h2 { margin: 0; }
 """
 
 
@@ -168,6 +184,172 @@ def _decision_panel(status: Mapping[str, Any]) -> str:
     )
 
 
+_SCENARIOS: tuple[float, ...] = (-0.03, 0.0, 0.03, 0.05, 0.08)
+
+
+def _simulate_button() -> str:
+    return (
+        '<form method="get" action="/live/momentum" style="display:inline">'
+        '<input type="hidden" name="simulate" value="1">'
+        '<button type="submit" class="btn">Simuleer beslissing nu</button></form>'
+    )
+
+
+def _expectancy_line(ledger_rows: Sequence[Mapping[str, Any]]) -> str:
+    exits = [r for r in ledger_rows if r.get("event") == "exit"]
+    if not exits:
+        return (
+            '<p class="muted" style="font-size:.78rem">Nog geen afgesloten trades van deze desk; '
+            "de tabel toont daarom scenario's, geen voorspelling. Winst hangt af van de markt: "
+            "de desk begrenst het verlies (hard stop), de winst loopt mee met de trail.</p>"
+        )
+    nets = [float(r.get("net_eur") or 0) for r in exits]
+    wins = [n for n in nets if n > 0]
+    losses = [n for n in nets if n <= 0]
+    avg = sum(nets) / len(nets)
+    return (
+        f'<p class="muted" style="font-size:.78rem">Historie van deze desk: {len(nets)} trades, '
+        f"win {100 * len(wins) / len(nets):.0f}%, gemiddeld {_fmt_eur(avg)} per trade "
+        f"(winst gem. {_fmt_eur(sum(wins) / len(wins)) if wins else '—'}, "
+        f"verlies gem. {_fmt_eur(sum(losses) / len(losses)) if losses else '—'}).</p>"
+    )
+
+
+def _preview_panel(
+    preview: Mapping[str, Any], ledger_rows: Sequence[Mapping[str, Any]], commit: Mapping[str, Any]
+) -> str:
+    planned = [p for p in preview.get("planned") or []]
+    ok = bool(preview.get("ok"))
+    regime = (
+        f"Regime <strong class='{'good' if ok else 'bad'}'>{'AAN' if ok else 'UIT'}</strong> · "
+        f"BTC 24h {_fmt_pct(preview.get('btc_ret'))} · breadth "
+        f"{100 * float(preview.get('breadth') or 0):.0f}% · bar {_ts(preview.get('at'))}"
+    )
+    if preview.get("reasons"):
+        regime += f" · <span class='bad'>{escape(', '.join(preview['reasons']))}</span>"
+    if preview.get("risk_block"):
+        regime += f" · <span class='bad'>risico-blok: {escape(str(preview['risk_block']))}</span>"
+    ai = preview.get("alphai") or {}
+    ai_bits = []
+    if ai.get("macro_caution"):
+        ai_bits.append("macro caution (clip ×0,7)")
+    if ai.get("avoid"):
+        ai_bits.append("avoid: " + ", ".join(ai["avoid"]))
+    if ai.get("picks"):
+        ai_bits.append("picks: " + ", ".join(ai["picks"]))
+    ai_line = (
+        f"<div class='muted' style='font-size:.78rem'>AlphaI: {escape(' · '.join(ai_bits))}</div>"
+        if ai_bits
+        else ""
+    )
+    out = [f"<p style='margin:.2rem 0 .6rem'>{regime}</p>{ai_line}"]
+    if not planned:
+        out.append(
+            '<p class="muted">De desk zou nu <strong>niets kopen</strong>. Er is dus ook niets '
+            "te committen.</p>"
+        )
+    else:
+        head = "".join(
+            f"<th>{'stop' if s < 0 else 'exit'} {s:+.0%}</th>".replace("+0%", "±0%")
+            for s in _SCENARIOS
+        )
+        out.append(
+            '<table class="desk"><thead><tr><th>Coin</th><th>Venue</th><th>Clip</th>'
+            f"<th>Prijs</th><th>Break-even</th>{head}</tr></thead><tbody>"
+        )
+        totals = [0.0] * len(_SCENARIOS)
+        for p in planned:
+            clip = float(p.get("clip_eur") or 0)
+            fee_rt = float(p.get("fee_in_eur") or 0) + float(p.get("fee_out_eur") or 0)
+            cells = []
+            for i, s in enumerate(_SCENARIOS):
+                pnl = clip * s - fee_rt
+                totals[i] += pnl
+                cells.append(f"<td class='{_cls(pnl)}'>{_fmt_eur(pnl)}</td>")
+            price = p.get("price")
+            be = p.get("break_even")
+            blocked = p.get("blocked")
+            out.append(
+                "<tr>"
+                f"<td><strong>{escape(str(p.get('base')))}</strong>"
+                f"<div class='muted' style='font-size:.7rem'>"
+                f"{escape(', '.join(p.get('reasons') or []))}</div></td>"
+                f"<td>{escape(str(p.get('venue') or '—'))}"
+                f"{(' <span class=bad>' + escape(str(blocked)) + '</span>') if blocked else ''}"
+                "</td>"
+                f"<td class='mono'>{clip:,.0f} €</td>"
+                f"<td class='mono'>{(f'{float(price):,.4f}' if price else '—')}</td>"
+                f"<td class='mono'>{(f'{float(be):,.4f}' if be else '—')}</td>"
+                f"{''.join(cells)}</tr>"
+            )
+        total_cells = "".join(
+            f"<td class='{_cls(t)}'><strong>{_fmt_eur(t)}</strong></td>" for t in totals
+        )
+        out.append(
+            f"<tr><td><strong>Totaal</strong></td><td></td>"
+            f"<td class='mono'><strong>{sum(float(p.get('clip_eur') or 0) for p in planned):,.0f} €"
+            f"</strong></td><td></td><td></td>{total_cells}</tr></tbody></table>"
+        )
+        out.append(
+            "<p class='muted' style='font-size:.75rem;margin-top:.4rem'>Netto na fees. "
+            "Prijs = laatste 15m-close; uitvoering gaat als maker op het live orderboek. "
+            f"Hard stop bij {100 * float(planned[0].get('hard_stop_pct') or 0.03):.0f}%, "
+            f"trail {100 * float(planned[0].get('trail_pct') or 0.03):.0f}% onder de piek "
+            "(1,5% zodra +3% piek).</p>"
+        )
+    out.append(_expectancy_line(ledger_rows))
+    if preview.get("rejected"):
+        rej = " · ".join(
+            f"{escape(str(r['base']))} {_fmt_pct(r.get('excess'))} ({escape(str(r.get('why')))})"
+            for r in preview["rejected"]
+        )
+        out.append(f"<div class='muted' style='font-size:.75rem'>Afgewezen leaders: {rej}</div>")
+    busy = bool(commit) and not commit.get("done")
+    bases = ",".join(str(p.get("base")) for p in planned if not p.get("blocked"))
+    if bases and not busy:
+        out.append(
+            "<div style='margin-top:.8rem;display:flex;gap:.6rem;align-items:center'>"
+            f'<form method="post" action="/live/momentum/commit?bases={escape(bases)}'
+            f'&amp;at={escape(str(preview.get("at") or ""))}" style="display:inline">'
+            '<button type="submit" class="btn danger">Commit: koop nu '
+            f"{escape(bases.replace(',', ' + '))} (echt geld)</button></form>"
+            '<a href="/live/momentum" class="muted" style="font-size:.8rem">'
+            "sluiten zonder kopen</a>"
+            "</div>"
+        )
+    else:
+        out.append(
+            '<p style="margin-top:.8rem"><a href="/live/momentum" class="muted" '
+            'style="font-size:.8rem">terug</a></p>'
+        )
+    return "".join(out)
+
+
+def _commit_notice(commit: Mapping[str, Any]) -> str:
+    if not commit:
+        return ""
+    if not commit.get("done"):
+        return (
+            f'<div class="hint warn">Uitvoering bezig voor '
+            f"{escape(', '.join(commit.get('bases') or []))} sinds "
+            f"{_ts(commit.get('started_at'))}. Orders rusten als maker (tot 90 s per coin).</div>"
+        )
+    res = commit.get("result") or {}
+    if res.get("error"):
+        return f'<div class="hint bad">Commit mislukt: {escape(str(res["error"]))}</div>'
+    if res.get("mismatch"):
+        return (
+            '<div class="hint bad">Commit geweigerd: de desk zou inmiddels '
+            f"{escape(', '.join(res.get('planned') or []) or 'niets')} kopen in plaats van "
+            f"{escape(', '.join(commit.get('bases') or []))}. Simuleer opnieuw.</div>"
+        )
+    entered = res.get("entries") or []
+    return (
+        f'<div class="hint good">Commit uitgevoerd om {_ts(commit.get("finished_at"))}: '
+        f"{escape(', '.join(entered)) if entered else 'geen entries'}. Zie ledger.</div>"
+    )
+
+
 def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
     fills = [r for r in rows if r.get("event") in {"entry", "exit", "entry_failed", "exit_failed"}]
     if not fills:
@@ -245,9 +427,14 @@ def _rules(cfg: Mapping[str, Any]) -> str:
 
 
 def render_momentum_dashboard(
-    status: Mapping[str, Any], ledger_rows: Sequence[Mapping[str, Any]]
+    status: Mapping[str, Any],
+    ledger_rows: Sequence[Mapping[str, Any]],
+    *,
+    preview: Mapping[str, Any] | None = None,
+    notice: str | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
+    commit = status.get("commit") or {}
     dry = bool(status.get("dry_run"))
     if not running:
         pill = '<span class="pill off"><span class="dot"></span>GESTOPT</span>'
@@ -276,6 +463,18 @@ def render_momentum_dashboard(
     task_err = status.get("task_error")
     if task_err:
         err_html += f'<div class="hint bad">Loop gestopt: {escape(str(task_err))}</div>'
+    if notice:
+        err_html += f'<div class="hint warn">{escape(notice)}</div>'
+    err_html += _commit_notice(commit)
+    # A preview is a decision aid: keep the page still while the operator reads it.
+    refresh_meta = "" if preview else '<meta http-equiv="refresh" content="20">'
+    refresh_note = "Simulatie: geen auto-refresh" if preview else "Ververst elke 20s"
+    preview_html = (
+        f'<div class="card section"><div class="card-head"><h2>Simulatie</h2>'
+        f"{_simulate_button()}</div>{_preview_panel(preview, ledger_rows, commit)}</div>"
+        if preview
+        else ""
+    )
 
     heroes = "".join(
         [
@@ -324,7 +523,7 @@ def render_momentum_dashboard(
     html = f"""<!doctype html>
 <html lang="nl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="20">
+{refresh_meta}
 <title>Momentum Desk</title>
 <style>{dashboard_css()}{_CSS}</style></head>
 <body><div class="wrap">
@@ -335,13 +534,15 @@ def render_momentum_dashboard(
 </div>
 {err_html}
 <div class="hero-grid" style="margin-top:1rem">{heroes}</div>
+{preview_html}
 <div class="stack two section">
   <div class="card"><h2>Open posities</h2>{_positions_table(status)}</div>
-  <div class="card"><h2>Laatste beslissing</h2>{_decision_panel(status)}</div>
+  <div class="card"><div class="card-head"><h2>Laatste beslissing</h2>
+  {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
 </div>
 <div class="card section"><h2>Ledger</h2>{_ledger_table(ledger_rows)}</div>
 <div class="card section"><h2>Regels</h2>{_rules(cfg)}</div>
-<p class="muted" style="margin-top:1rem;font-size:.75rem">Ververst elke 20s ·
+<p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
 <a href="/live/momentum/status" style="color:var(--blue)">status JSON</a> ·
 <a href="/live/momentum/ledger" style="color:var(--blue)">ledger JSON</a> ·
 <a href="/live/dashboard/legacy" style="color:var(--muted)">oude desk</a></p>

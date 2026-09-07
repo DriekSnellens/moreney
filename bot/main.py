@@ -818,11 +818,50 @@ async def live_dashboard_legacy(_: None = Depends(require_dashboard_access)) -> 
 
 
 @app.get("/live/momentum", response_class=HTMLResponse, response_model=None)
-async def live_momentum_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    """Momentum desk operator page: equity, positions, last decision, ledger."""
-    status = get_momentum_desk_manager().status()
+async def live_momentum_dashboard(
+    simulate: int = 0,
+    notice: str | None = None,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse:
+    """Momentum desk operator page: equity, positions, last decision, ledger.
+
+    ``?simulate=1`` runs the entry decision as a preview (no orders) and shows
+    the planned trades with a net P&L scenario table and a commit button."""
+    manager = get_momentum_desk_manager()
+    preview: dict[str, Any] | None = None
+    if simulate:
+        res = await manager.decide(execute=False)
+        if res.get("ok"):
+            preview = res.get("decision")
+        else:
+            notice = f"Simulatie niet mogelijk: {res.get('reason')}"
+    status = manager.status()
     ledger = await live_momentum_ledger(limit=400)
-    return render_momentum_dashboard(status, ledger["rows"])
+    return render_momentum_dashboard(
+        status, ledger["rows"], preview=preview, notice=(notice or None)
+    )
+
+
+@app.post("/live/momentum/commit", response_model=None)
+async def live_momentum_commit(
+    bases: str = "",
+    at: str = "",
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Execute a previewed decision (dashboard commit button). The desk only
+    buys if it would still choose exactly ``bases``; otherwise the commit is
+    rejected and the operator is asked to simulate again."""
+    wanted = [b for b in bases.upper().split(",") if b.strip()]
+    if not wanted:
+        return RedirectResponse(
+            url="/live/momentum?notice=Geen+coins+om+te+committen", status_code=303
+        )
+    res = get_momentum_desk_manager().commit(wanted)
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Commit+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
 
 
 @app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
