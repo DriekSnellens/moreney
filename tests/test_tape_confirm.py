@@ -332,3 +332,49 @@ def test_patient_exit_reasons_get_longer_rest_and_more_fails() -> None:
     assert force(self, "bitvavo", "AVAX", "trail_hard_partial") is False
     self._exit_maker_fail_counts["bitvavo:AVAX"] = 3
     assert force(self, "bitvavo", "AVAX", "trail_hard_partial") is True
+
+
+def test_tape_injected_when_native_pick_is_not_tradable() -> None:
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    from bot.live.tape_confirm import TapeLeader, TapeSnapshot
+    from bot.paper.runner import PaperRunner
+
+    now = time.time()
+    snap = TapeSnapshot(
+        now,
+        -0.7,
+        0.7,
+        20,
+        (
+            TapeLeader("LTC", 3.5, 4.2, -0.1, 1_000_000.0, 4.4),
+            TapeLeader("AVAX", 2.3, 3.0, -1.2, 1_100_000.0, 2.6),
+        ),
+        ("leaders",),
+    )
+    applied: list[object] = []
+    self = SimpleNamespace(
+        _settings=SimpleNamespace(
+            live_micro_tape_confirm_enabled=True,
+            live_micro_tape_refresh_sec=120.0,
+            live_micro_symbols="BTCEUR,ETHEUR,LTCEUR,AVAXEUR",
+        ),
+        _tape_snapshot=snap,
+        _tape_last_fetch_ts=now,
+        _executor=SimpleNamespace(apply_tape_snapshot=applied.append),
+    )
+    self._tape_tradable_bases = lambda: PaperRunner._tape_tradable_bases(self)
+    inject = PaperRunner._inject_tape_confirmed
+
+    # SUI pick is outside the EUR universe → tape leaders still injected.
+    sig = _signals(daily_pick_scores={"SUI": 21.0}, daily_pick_bases=frozenset({"SUI"}))
+    out = asyncio.run(inject(self, sig))
+    assert out.tape_confirmed_bases == frozenset({"LTC", "AVAX"})
+    assert applied and applied[-1] is snap
+
+    # Tradable native pick (AVAX) → AlphaI leads, no tape injection.
+    sig = _signals(daily_pick_scores={"AVAX": 40.0}, daily_pick_bases=frozenset({"AVAX"}))
+    out = asyncio.run(inject(self, sig))
+    assert out.tape_confirmed_bases == frozenset()

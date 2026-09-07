@@ -2395,8 +2395,18 @@ class PaperRunner:
         if self._alphai_reduce_only and not allow_bullish_macro:
             await self._cancel_all_bids(reason="alphai_macro_reduce_only")
 
+    def _tape_tradable_bases(self) -> frozenset[str]:
+        """Bases the session can actually quote (live_micro_symbols, EUR quote)."""
+        quote = "EUR"
+        out: set[str] = set()
+        for sym in str(getattr(self._settings, "live_micro_symbols", "") or "").split(","):
+            s = sym.strip().upper()
+            if s.endswith(quote) and len(s) > len(quote):
+                out.add(s[: -len(quote)])
+        return frozenset(out)
+
     async def _inject_tape_confirmed(self, signals: Any) -> Any:
-        """Add tape RS leaders when AlphaI has no native bullish buys.
+        """Add tape RS leaders when AlphaI has no *tradable* native bullish buys.
 
         Single Bitvavo 24h call, TTL-cached; leaders excluded when macro caution,
         weak breadth, or AlphaI avoid/blocked. Coin-agnostic by construction.
@@ -2449,7 +2459,11 @@ class PaperRunner:
             if bool(getattr(signals, "macro_active", False)):
                 return signals
             native = signals.native_bullish_buy_bases() if hasattr(signals, "native_bullish_buy_bases") else frozenset()
-            if native:
+            # Only a *tradable* native pick suppresses tape leaders. A pick outside
+            # the session universe (e.g. SUI when only EUR majors are quoted) must
+            # not leave the desk fully in cash while the tape is leading.
+            tradable = self._tape_tradable_bases()
+            if native and (not tradable or any(b in tradable for b in native)):
                 return signals
             leaders = frozenset(
                 b
