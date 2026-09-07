@@ -2479,14 +2479,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         best_confirm = 0.0
         best_conviction = 0.0
         bases: set[str] = set()
+        native_api = hasattr(sig, "native_bullish_buy_bases")
         try:
-            if hasattr(sig, "native_bullish_buy_bases"):
+            if native_api:
                 bases |= {str(b).upper() for b in (sig.native_bullish_buy_bases() or [])}
             elif hasattr(sig, "bullish_buy_bases"):
                 bases |= {str(b).upper() for b in (sig.bullish_buy_bases() or [])}
         except Exception:  # noqa: BLE001
             pass
-        if not bases:
+        if not bases and not native_api:
+            # Legacy signal objects only — never let tape leaders count as
+            # AlphaI-confirmed picks (they take the damped tape_leaders path).
             try:
                 pub = sig.to_public_dict() if hasattr(sig, "to_public_dict") else {}
                 for b in pub.get("bullish_buy_bases") or []:

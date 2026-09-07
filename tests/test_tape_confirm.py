@@ -154,3 +154,15 @@ def test_gain_scaled_trail_dd() -> None:
     # cap
     self._trail_dd_max = Decimal("0.02")
     assert fn(self, dd, peak=Decimal("110"), cost=cost, hard_arm=arm) == Decimal("0.02")
+
+
+def test_desk_stats_do_not_count_tape_as_confirmed() -> None:
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+
+    sig = _signals(tape_confirmed_bases=frozenset({"LTC", "AVAX", "SUI"}))
+    self = SimpleNamespace(_alphai_signals=sig, _desk_mode_min_confirm=0.55)
+    confirmed, best_confirm, _ = MicroBudgetLiveExecutor._desk_mode_alphai_stats(self)
+    assert confirmed == 0
+    assert best_confirm == 0.0
