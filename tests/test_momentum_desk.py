@@ -13,6 +13,7 @@ from bot.live.momentum_desk import (
     BARS_PER_DAY,
     AlphaIView,
     DeskConfig,
+    ExitDecision,
     Position,
     RiskLedger,
     bar_stats,
@@ -363,6 +364,17 @@ def test_buy_fills_as_maker_without_taker(tmp_path):
     assert fill.avg_price == 100.0 and len(gw.placed) == 1
 
 
+def test_small_quantity_sell_is_still_sent(tmp_path):
+    # 0.2 coins at 100 EUR = 20 EUR notional: qty < 5 must not be mistaken for
+    # a sub-minimum remainder before any fill exists.
+    gw = FakeGateway(fill_maker_after_polls=1)
+    clock = FakeClock(T0 / 1000)
+    r = _runner(tmp_path, gw, clock)
+    fill = asyncio.run(r._sell("ETH", 0.2, urgent=False))
+    assert fill is not None and fill.qty == pytest.approx(0.2) and not fill.taker
+    assert len(gw.placed) == 1
+
+
 def test_urgent_sell_goes_straight_to_taker(tmp_path):
     gw = FakeGateway()
     clock = FakeClock(T0 / 1000)
@@ -501,3 +513,148 @@ def test_engine_settings_cap_notional_to_clip():
     assert out.live_micro_max_notional_eur == pytest.approx(651.0)
     assert out.live_micro_symbols == "*" and out.live_micro_venues == "bitvavo"
     assert out.live_micro_max_open_orders_per_venue == 4
+    multi = engine_settings_for_desk(s, cfg, "Bitvavo, okx,bitvavo")
+    assert multi.live_micro_venues == "bitvavo,okx"
+
+
+# ------------------------------------------------------- multi-venue routing
+
+
+class CashGateway(FakeGateway):
+    def __init__(self, cash: float, **kwargs):
+        super().__init__(**kwargs)
+        self.cash = cash
+
+    async def quote_balance_eur(self):
+        return self.cash
+
+
+def _multi_runner(tmp_path, clock, bitvavo_cash, okx_cash, feed=None, **cfg_kwargs):
+    gws = {
+        "bitvavo": CashGateway(bitvavo_cash, fill_maker_after_polls=1),
+        "okx": CashGateway(okx_cash, bid=100.05, ask=100.25, fill_maker_after_polls=1),
+    }
+    cfg = DeskConfig(**cfg_kwargs)
+    opts = RunnerOptions(
+        venues=("bitvavo", "okx"),
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        alphai_recommendations_path=None,
+        buy_rest_sec=60.0,
+        repeg_sec=20.0,
+        poll_sec=5.0,
+    )
+    r = MomentumDeskRunner(
+        cfg,
+        None,
+        options=opts,
+        feed=feed or FakeFeed({}),
+        clock=clock,
+        sleep=clock.sleep,
+        gateways=gws,
+    )
+    return r, gws
+
+
+def test_route_prefers_primary_and_overflows_to_second_venue(tmp_path):
+    clock = FakeClock(T0 / 1000)
+    r, _ = _multi_runner(tmp_path, clock, bitvavo_cash=700.0, okx_cash=1900.0)
+    asyncio.run(r._refresh_cash())
+    assert r.cash_eur == pytest.approx(2600.0)
+    # Primary has the clip -> primary, even though OKX is richer.
+    assert r._route_entry(600.0) == ("bitvavo", 600.0)
+    r.cash_by_venue["bitvavo"] = 300.0
+    # Primary short -> second venue takes the full clip.
+    assert r._route_entry(600.0) == ("okx", 600.0)
+    # Nobody can fund the clip -> richest venue with a reduced clip (>= 50%).
+    r.cash_by_venue["okx"] = 400.0
+    venue, clip = r._route_entry(600.0)
+    assert venue == "okx" and 395.0 < clip < 400.0
+    # Too little everywhere -> skip.
+    r.cash_by_venue["okx"] = 250.0
+    assert r._route_entry(600.0) is None
+
+
+def test_multi_venue_entry_and_exit_use_position_venue(tmp_path):
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    clock = FakeClock((T0 + 60_000) / 1000)
+    r, gws = _multi_runner(
+        tmp_path,
+        clock,
+        bitvavo_cash=200.0,
+        okx_cash=1900.0,
+        feed=FakeFeed(candles),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+    )
+    asyncio.run(r.tick())
+    assert [h.pos.venue for h in r.holdings] == ["okx"]
+    assert gws["bitvavo"].placed == [] and gws["okx"].placed
+    assert r.cash_by_venue["okx"] < 1900.0 - 499.0
+    ledger = (tmp_path / "ledger.jsonl").read_text().splitlines()
+    assert '"event": "entry"' in ledger[-1] and '"venue": "okx"' in ledger[-1]
+    status = r.status()
+    assert status["positions"][0]["venue"] == "okx" and status["venues"] == ["bitvavo", "okx"]
+    # Restart keeps the venue on the position; the exit goes to that venue.
+    r2, gws2 = _multi_runner(tmp_path, clock, bitvavo_cash=200.0, okx_cash=1400.0, clip_eur=500.0)
+    assert r2.holdings[0].pos.venue == "okx"
+    fill = asyncio.run(r2._exit(r2.holdings[0], ExitDecision("trail", 0.01, False)))
+    assert fill is None  # _exit returns None; verify via gateways
+    assert gws2["bitvavo"].placed == [] and gws2["okx"].placed
+
+
+def test_entry_skipped_when_no_venue_can_fund(tmp_path):
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    clock = FakeClock((T0 + 60_000) / 1000)
+    r, gws = _multi_runner(
+        tmp_path,
+        clock,
+        bitvavo_cash=100.0,
+        okx_cash=120.0,
+        feed=FakeFeed(candles),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+    )
+    asyncio.run(r.tick())
+    assert r.holdings == [] and not gws["bitvavo"].placed and not gws["okx"].placed
+    ledger = (tmp_path / "ledger.jsonl").read_text().splitlines()
+    assert '"event": "entry_skipped"' in ledger[-1] and "insufficient_cash" in ledger[-1]
+
+
+def test_resume_flag_round_trips_venues(tmp_path):
+    from bot.live.momentum_runner import _read_flag, _write_flag
+
+    state = str(tmp_path / "state.json")
+    _write_flag(state, running=True, dry_run=False, venue="bitvavo", venues=["bitvavo", "okx"])
+    flag = _read_flag(state)
+    assert flag["venues"] == ["bitvavo", "okx"] and flag["venue"] == "bitvavo"
+    from bot.live.momentum_runner import parse_venues
+
+    assert parse_venues(flag["venues"]) == ("bitvavo", "okx")
+    assert parse_venues("") == ("bitvavo",)
+
+
+# ------------------------------------------------------- AlphaI on the exit side
+
+
+def test_alphai_avoid_tightens_trail_but_does_not_dump():
+    cfg = DeskConfig(trail_pct=0.03, trail_tight_after=0.0, trail_tight_pct=0.015)
+    bearish = AlphaIView(avoid=frozenset({"SOL"}))
+    # Peak 104, close 102.5: -1.44% from peak -> inside both trails, hold.
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 104.0)
+    assert evaluate_exit(pos, [T0, 103, 104, 102.4, 102.5, 1], cfg, alphai=bearish) is None
+    # -2.0% from peak: normal trail (3%) holds, AlphaI-tightened trail (1.5%) exits.
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 104.0)
+    assert evaluate_exit(pos, [T0, 103, 104, 101.8, 101.92, 1], cfg) is None
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 104.0)
+    d = evaluate_exit(pos, [T0, 103, 104, 101.8, 101.92, 1], cfg, alphai=bearish)
+    assert d is not None and d.reason == "trail_alphai" and not d.urgent
+    # A bearish headline on another base changes nothing.
+    pos = Position("LINK", 100.0, 5.0, 500.0, T0, 104.0)
+    assert evaluate_exit(pos, [T0, 103, 104, 101.8, 101.92, 1], cfg, alphai=bearish) is None
+    # Switch off -> plain trail semantics.
+    off = cfg.with_overrides(alphai_avoid_tightens_trail=False)
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 104.0)
+    assert evaluate_exit(pos, [T0, 103, 104, 101.8, 101.92, 1], off, alphai=bearish) is None

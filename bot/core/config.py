@@ -560,17 +560,20 @@ class Settings(BaseSettings):
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
     # Daily Momentum Desk (bot/live/momentum_desk.py + momentum_runner.py).
     momentum_desk_enabled: bool = False
-    momentum_desk_venue: str = "bitvavo"
+    # Entry venues in preference order (cheapest fees first); later venues are
+    # overflow capital once the primary cannot fund a full clip.
+    momentum_desk_venues: str = "bitvavo,okx"
     momentum_desk_decision_hours_utc: str = "0"
-    momentum_desk_clip_eur: float = Field(default=500.0, gt=0)
-    momentum_desk_max_positions: int = Field(default=3, ge=1, le=10)
+    # Sized for ~4k EUR across both venues: 4 x 600 keeps <= 65% deployed.
+    momentum_desk_clip_eur: float = Field(default=600.0, gt=0)
+    momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
     momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_trail_tight_after: float = Field(default=0.03, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.015, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_time_exit_hours: float = Field(default=48.0, gt=0)
-    momentum_desk_day_loss_limit_eur: float = Field(default=40.0, gt=0)
-    momentum_desk_week_loss_limit_eur: float = Field(default=100.0, gt=0)
+    momentum_desk_day_loss_limit_eur: float = Field(default=50.0, gt=0)
+    momentum_desk_week_loss_limit_eur: float = Field(default=120.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"

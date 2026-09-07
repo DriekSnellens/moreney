@@ -1,10 +1,15 @@
 """Live runner for the Daily Momentum Desk.
 
-Executes ``bot.live.momentum_desk`` decisions against one venue through the
-existing fail-closed ``LiveMicroEngine`` (policy gates + audit). Design:
+Executes ``bot.live.momentum_desk`` decisions against one or more venues
+through the existing fail-closed ``LiveMicroEngine`` (policy gates + audit).
+Design:
 
 * 20s tick. Exits are evaluated once per closed 15m bar; entries once per
   configured decision hour (UTC).
+* Venue routing: signals come from Bitvavo candles for every position; each
+  entry is executed on the first venue in ``RunnerOptions.venues`` (cheapest
+  fees first) that has enough EUR for the clip, so the second venue acts as
+  overflow capital rather than a duplicate book.
 * Buys: post-only maker at the bid, re-pegged for up to ``buy_rest_sec``,
   then one taker fallback. Trail / time exits: maker at the ask for
   ``sell_rest_sec`` then taker. Hard stops: taker immediately.
@@ -244,7 +249,10 @@ class Fill:
 
 @dataclass
 class RunnerOptions:
-    venue: str = "bitvavo"
+    # Preference order for entries; the first venue is the primary (cheapest).
+    venues: tuple[str, ...] = ("bitvavo",)
+    # Below this fraction of the clip a venue's cash is not worth a clip.
+    min_clip_fraction: float = 0.5
     tick_sec: float = 20.0
     buy_rest_sec: float = 90.0
     sell_rest_sec: float = 60.0
@@ -269,10 +277,16 @@ class MomentumDeskRunner:
         feed: CandleFeed | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        gateways: Mapping[str, Gateway] | None = None,
     ) -> None:
         self.cfg = cfg
         self.opt = options or RunnerOptions()
-        self._gw = gateway
+        # ``gateway`` is the primary venue's gateway; ``gateways`` adds the rest.
+        self._gws: dict[str, Gateway] = {}
+        if gateway is not None:
+            self._gws[self.opt.venues[0]] = gateway
+        for venue, gw in (gateways or {}).items():
+            self._gws[venue] = gw
         self._feed = feed or CandleFeed()
         self._clock = clock
         self._sleep = sleep
@@ -284,10 +298,19 @@ class MomentumDeskRunner:
         self.last_regime: dict[str, Any] = {}
         self.last_error: str | None = None
         self.marks: dict[str, float] = {}
-        self.cash_eur: float | None = None
+        self.cash_by_venue: dict[str, float] = {}
         self._cash_ts: float = 0.0
         self.started_at = datetime.now(UTC).isoformat()
         self._load_state()
+
+    @property
+    def cash_eur(self) -> float | None:
+        if not self.cash_by_venue:
+            return None
+        return sum(self.cash_by_venue.values())
+
+    def _gateway(self, venue: str) -> Gateway | None:
+        return self._gws.get(venue)
 
     # ----------------------------------------------------------------- state
 
@@ -347,6 +370,7 @@ class MomentumDeskRunner:
             positions.append(
                 {
                     "base": h.pos.base,
+                    "venue": h.pos.venue,
                     "entry_price": h.pos.entry_price,
                     "quantity": h.pos.quantity,
                     "notional_eur": round(h.pos.notional_eur, 2),
@@ -369,9 +393,11 @@ class MomentumDeskRunner:
         return {
             "desk": "momentum",
             "cash_eur": round(self.cash_eur, 2) if self.cash_eur is not None else None,
+            "cash_by_venue": {k: round(v, 2) for k, v in sorted(self.cash_by_venue.items())},
             "exposure_eur": round(exposure, 2),
             "equity_eur": round(equity, 2) if equity is not None else None,
-            "venue": self.opt.venue,
+            "venue": self.opt.venues[0],
+            "venues": list(self.opt.venues),
             "dry_run": self.opt.dry_run,
             "started_at": self.started_at,
             "config": {
@@ -416,18 +442,54 @@ class MomentumDeskRunner:
     async def tick(self) -> None:
         now_ms = int(self._clock() * 1000)
         await self._manage_exits(now_ms)
-        await self._maybe_decide(now_ms)
+        # Cash first: the venue router needs fresh balances at the decision hour.
         await self._refresh_cash()
+        await self._maybe_decide(now_ms)
 
     async def _refresh_cash(self) -> None:
-        fetch = getattr(self._gw, "quote_balance_eur", None)
-        if fetch is None or self._clock() - self._cash_ts < 60.0:
+        if self._clock() - self._cash_ts < 60.0:
             return
-        try:
-            self.cash_eur = await fetch()
+        fetched_any = False
+        for venue, gw in self._gws.items():
+            fetch = getattr(gw, "quote_balance_eur", None)
+            if fetch is None:
+                continue
+            try:
+                cash = await fetch()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("momentum desk: %s balance fetch failed: %s", venue, exc)
+                continue
+            if cash is not None:
+                self.cash_by_venue[venue] = float(cash)
+                fetched_any = True
+        if fetched_any:
             self._cash_ts = self._clock()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("momentum desk: balance fetch failed: %s", exc)
+
+    def _route_entry(self, clip_eur: float) -> tuple[str, float] | None:
+        """Pick the venue for a clip: first in preference order with enough
+        EUR. Without any gateway (dry-run) or balance data the primary is used.
+        Falls back to the richest venue with a reduced clip if none can take
+        the full clip, and skips the entry when even that is too small."""
+        venues = self.opt.venues
+        if not self._gws or not self.cash_by_venue:
+            return venues[0], clip_eur
+        need = clip_eur * 1.005  # tiny buffer for taker slippage / fee
+        for venue in venues:
+            cash = self.cash_by_venue.get(venue)
+            if cash is not None and cash >= need and venue in self._gws:
+                return venue, clip_eur
+        best = max(
+            ((v, self.cash_by_venue.get(v, 0.0)) for v in venues if v in self._gws),
+            key=lambda item: item[1],
+            default=None,
+        )
+        if best is None:
+            return None
+        venue, cash = best
+        reduced = cash / 1.005
+        if reduced < max(_MIN_ORDER_EUR, clip_eur * self.opt.min_clip_fraction):
+            return None
+        return venue, round(reduced, 2)
 
     # ----------------------------------------------------------------- exits
 
@@ -436,6 +498,7 @@ class MomentumDeskRunner:
             return
         last_closed = (now_ms // BAR_MS) * BAR_MS - BAR_MS
         bar_ready = now_ms >= last_closed + BAR_MS + int(self.opt.bar_close_grace_sec * 1000)
+        alphai = self._alphai_view() if bar_ready else None
         for h in list(self.holdings):
             if h.exiting:
                 continue
@@ -456,19 +519,26 @@ class MomentumDeskRunner:
             if bar is None:
                 continue
             h.last_bar_ms = last_closed
-            decision = evaluate_exit(h.pos, bar, self.cfg)
+            decision = evaluate_exit(h.pos, bar, self.cfg, alphai=alphai)
             if decision is not None:
                 await self._exit(h, decision)
 
     async def _exit(self, h: Holding, decision: ExitDecision) -> None:
         h.exiting = True
         try:
-            fill = await self._sell(h.pos.base, h.pos.quantity, urgent=decision.urgent)
+            fill = await self._sell(
+                h.pos.base, h.pos.quantity, urgent=decision.urgent, venue=h.pos.venue
+            )
         finally:
             h.exiting = False
         if fill is None or fill.qty <= 0:
             self._ledger_append(
-                {"event": "exit_failed", "base": h.pos.base, "reason": decision.reason}
+                {
+                    "event": "exit_failed",
+                    "base": h.pos.base,
+                    "venue": h.pos.venue,
+                    "reason": decision.reason,
+                }
             )
             return
         net = (
@@ -485,6 +555,7 @@ class MomentumDeskRunner:
                 "event": "exit",
                 "holding_id": h.holding_id,
                 "base": h.pos.base,
+                "venue": h.pos.venue,
                 "qty": fill.qty,
                 "price": fill.avg_price,
                 "notional_eur": round(fill.notional, 2),
@@ -593,9 +664,26 @@ class MomentumDeskRunner:
             await self._enter(entry.base, entry.clip_eur, ",".join(entry.reasons), now_ms)
 
     async def _enter(self, base: str, clip_eur: float, reason: str, now_ms: int) -> None:
-        fill = await self._buy(base, clip_eur)
+        route = self._route_entry(clip_eur)
+        if route is None:
+            self._ledger_append(
+                {
+                    "event": "entry_skipped",
+                    "base": base,
+                    "reason": "insufficient_cash",
+                    "cash_by_venue": dict(self.cash_by_venue),
+                    "clip_eur": clip_eur,
+                }
+            )
+            return
+        venue, clip = route
+        if clip != clip_eur:
+            reason = f"{reason},clip_reduced"
+        fill = await self._buy(base, clip, venue=venue)
         if fill is None or fill.qty <= 0:
-            self._ledger_append({"event": "entry_failed", "base": base, "reason": reason})
+            self._ledger_append(
+                {"event": "entry_failed", "base": base, "venue": venue, "reason": reason}
+            )
             return
         pos = Position(
             base=base,
@@ -606,6 +694,7 @@ class MomentumDeskRunner:
             peak=fill.avg_price,
             entry_fee_eur=fill.fee_eur,
             entry_reason=reason,
+            venue=venue,
         )
         holding = Holding(
             pos=pos, holding_id=uuid.uuid4().hex[:10], last_bar_ms=now_ms // BAR_MS * BAR_MS
@@ -613,11 +702,14 @@ class MomentumDeskRunner:
         self.holdings.append(holding)
         self.ledger.note_entry(base, now_ms)
         self.marks[base] = fill.avg_price
+        if venue in self.cash_by_venue:
+            self.cash_by_venue[venue] -= fill.notional + fill.fee_eur
         self._ledger_append(
             {
                 "event": "entry",
                 "holding_id": holding.holding_id,
                 "base": base,
+                "venue": venue,
                 "qty": fill.qty,
                 "price": fill.avg_price,
                 "notional_eur": round(fill.notional, 2),
@@ -630,14 +722,18 @@ class MomentumDeskRunner:
 
     # ------------------------------------------------------------ execution
 
-    async def _buy(self, base: str, notional_eur: float) -> Fill | None:
+    async def _buy(
+        self, base: str, notional_eur: float, *, venue: str | None = None
+    ) -> Fill | None:
         return await self._work_order(
-            base, "buy", notional_eur=notional_eur, rest_sec=self.opt.buy_rest_sec
+            base, "buy", notional_eur=notional_eur, rest_sec=self.opt.buy_rest_sec, venue=venue
         )
 
-    async def _sell(self, base: str, qty: float, *, urgent: bool) -> Fill | None:
+    async def _sell(
+        self, base: str, qty: float, *, urgent: bool, venue: str | None = None
+    ) -> Fill | None:
         return await self._work_order(
-            base, "sell", qty=qty, rest_sec=0.0 if urgent else self.opt.sell_rest_sec
+            base, "sell", qty=qty, rest_sec=0.0 if urgent else self.opt.sell_rest_sec, venue=venue
         )
 
     async def _work_order(
@@ -648,10 +744,13 @@ class MomentumDeskRunner:
         qty: float | None = None,
         notional_eur: float | None = None,
         rest_sec: float,
+        venue: str | None = None,
     ) -> Fill | None:
         symbol = f"{base}EUR"
-        if self.opt.dry_run or self._gw is None:
-            bid, ask = await self._gw.best_bid_ask(symbol) if self._gw else (0.0, 0.0)
+        venue = venue or self.opt.venues[0]
+        gw = self._gateway(venue)
+        if self.opt.dry_run or gw is None:
+            bid, ask = await gw.best_bid_ask(symbol) if gw else (0.0, 0.0)
             px = bid if side == "buy" else ask
             if px <= 0:
                 rows = await self._feed.candles(base, 2)
@@ -666,6 +765,10 @@ class MomentumDeskRunner:
         remaining_qty = qty
         remaining_notional = notional_eur
         deadline = self._clock() + rest_sec
+        # Reference price for the "remainder too small" test before any fill;
+        # without it a sell of < 5 coins would be judged done before it was sent.
+        ref_bid, ref_ask = await gw.best_bid_ask(symbol)
+        ref_px = ref_bid if side == "sell" else ref_ask
 
         async def _settle(state: OrderState) -> None:
             nonlocal filled_qty, filled_cost, fee_eur, remaining_qty, remaining_notional
@@ -682,50 +785,50 @@ class MomentumDeskRunner:
 
         def _done() -> bool:
             if remaining_qty is not None:
-                return (
-                    remaining_qty * (filled_cost / filled_qty if filled_qty else 1.0)
-                    < _MIN_ORDER_EUR
-                )
+                px = filled_cost / filled_qty if filled_qty else ref_px
+                return remaining_qty * px < _MIN_ORDER_EUR
             return (remaining_notional or 0.0) < _MIN_ORDER_EUR
 
         # Maker phase: rest at the touch, re-peg periodically.
         while rest_sec > 0 and self._clock() < deadline and not _done():
-            bid, ask = await self._gw.best_bid_ask(symbol)
+            bid, ask = await gw.best_bid_ask(symbol)
             price = bid if side == "buy" else ask
             q = remaining_qty if remaining_qty is not None else (remaining_notional or 0.0) / price
             try:
-                state = await self._gw.place_limit(symbol, side, q, price, post_only=True)
+                state = await gw.place_limit(symbol, side, q, price, post_only=True)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("momentum desk: maker %s %s rejected: %s", side, symbol, exc)
+                logger.warning(
+                    "momentum desk: maker %s %s@%s rejected: %s", side, symbol, venue, exc
+                )
                 break
             state = await self._poll(
-                state, symbol, min(self.opt.repeg_sec, max(0.0, deadline - self._clock()))
+                gw, state, symbol, min(self.opt.repeg_sec, max(0.0, deadline - self._clock()))
             )
             if state.status == "open":
-                state = await self._cancel_and_refetch(state, symbol)
+                state = await self._cancel_and_refetch(gw, state, symbol)
             elif state.status == "closed":
-                state = await self._refetch(state, symbol)
+                state = await self._refetch(gw, state, symbol)
             await _settle(state)
             if state.status == "rejected":
                 await self._sleep(self.opt.poll_sec)
 
         # Taker phase: cross the spread once for the remainder.
         if not _done():
-            bid, ask = await self._gw.best_bid_ask(symbol)
+            bid, ask = await gw.best_bid_ask(symbol)
             cross = self.opt.taker_cross_bps / 10_000
             price = ask * (1 + cross) if side == "buy" else bid * (1 - cross)
             q = remaining_qty if remaining_qty is not None else (remaining_notional or 0.0) / price
             try:
-                state = await self._gw.place_limit(symbol, side, q, price, post_only=False)
+                state = await gw.place_limit(symbol, side, q, price, post_only=False)
                 taker_used = True
-                state = await self._poll(state, symbol, 30.0)
+                state = await self._poll(gw, state, symbol, 30.0)
                 if state.status == "open":
-                    state = await self._cancel_and_refetch(state, symbol)
+                    state = await self._cancel_and_refetch(gw, state, symbol)
                 elif state.status == "closed":
-                    state = await self._refetch(state, symbol)
+                    state = await self._refetch(gw, state, symbol)
                 await _settle(state)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("momentum desk: taker %s %s failed: %s", side, symbol, exc)
+                logger.warning("momentum desk: taker %s %s@%s failed: %s", side, symbol, venue, exc)
 
         if filled_qty <= 0:
             return None
@@ -733,29 +836,31 @@ class MomentumDeskRunner:
             qty=filled_qty, avg_price=filled_cost / filled_qty, fee_eur=fee_eur, taker=taker_used
         )
 
-    async def _refetch(self, state: OrderState, symbol: str) -> OrderState:
+    async def _refetch(self, gw: Gateway, state: OrderState, symbol: str) -> OrderState:
         """Authoritative fill/fee figures come from fetch_order, not from the
         create/cancel responses (Bitvavo's cancel reply carries neither)."""
         try:
-            return await self._gw.fetch_order(state.order_id, symbol)
+            return await gw.fetch_order(state.order_id, symbol)
         except Exception as exc:  # noqa: BLE001
             logger.warning("momentum desk: refetch failed %s: %s", state.order_id, exc)
             return state
 
-    async def _cancel_and_refetch(self, state: OrderState, symbol: str) -> OrderState:
+    async def _cancel_and_refetch(self, gw: Gateway, state: OrderState, symbol: str) -> OrderState:
         try:
-            await self._gw.cancel_order(state.order_id, symbol)
+            await gw.cancel_order(state.order_id, symbol)
         except Exception as exc:  # noqa: BLE001
             logger.warning("momentum desk: cancel failed %s: %s", state.order_id, exc)
         await self._sleep(1.0)
-        return await self._refetch(state, symbol)
+        return await self._refetch(gw, state, symbol)
 
-    async def _poll(self, state: OrderState, symbol: str, max_sec: float) -> OrderState:
+    async def _poll(
+        self, gw: Gateway, state: OrderState, symbol: str, max_sec: float
+    ) -> OrderState:
         end = self._clock() + max_sec
         while state.status == "open" and self._clock() < end:
             await self._sleep(self.opt.poll_sec)
             try:
-                state = await self._gw.fetch_order(state.order_id, symbol)
+                state = await gw.fetch_order(state.order_id, symbol)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("momentum desk: fetch_order failed %s: %s", state.order_id, exc)
         return state
@@ -787,13 +892,27 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
     )
 
 
-def engine_settings_for_desk(settings: Settings, cfg: DeskConfig, venue: str) -> Settings:
+def parse_venues(raw: Any) -> tuple[str, ...]:
+    """``"bitvavo,okx"`` / ``["bitvavo", "okx"]`` -> deduplicated lowercase tuple."""
+    items = raw if isinstance(raw, (list, tuple, set)) else str(raw or "").split(",")
+    out: list[str] = []
+    for item in items:
+        venue = str(item).strip().lower()
+        if venue and venue not in out:
+            out.append(venue)
+    return tuple(out) or ("bitvavo",)
+
+
+def engine_settings_for_desk(
+    settings: Settings, cfg: DeskConfig, venue: str | Sequence[str]
+) -> Settings:
     """Policy caps sized to the desk so LiveMicroEngine gates stay meaningful."""
     max_clip = cfg.clip_eur * max(1.0, cfg.alphai_clip_mult) + 1.0
+    venues = parse_venues(venue if isinstance(venue, str) else list(venue))
     return settings.model_copy(
         update={
             "live_micro_symbols": "*",
-            "live_micro_venues": venue,
+            "live_micro_venues": ",".join(venues),
             "live_micro_max_notional_eur": float(max_clip),
             "live_micro_max_open_orders_per_venue": int(cfg.max_positions + 1),
             "live_micro_max_daily_loss_eur": float(cfg.day_loss_limit_eur),
@@ -824,14 +943,32 @@ class MomentumDeskManager:
         *,
         settings: Settings | None = None,
         dry_run: bool = False,
-        venue: str = "bitvavo",
+        venue: str | Sequence[str] = "bitvavo",
     ) -> dict[str, Any]:
         if self.running():
             return {"started": False, "reason": "already_running", "status": self.status()}
         settings = settings or get_settings()
         cfg = desk_config_from_settings(settings)
+        venues = parse_venues(venue if isinstance(venue, str) else list(venue))
+        gateways: dict[str, Gateway] = {}
+        if not dry_run:
+            from bot.live.micro_engine import LiveMicroEngine
+
+            engine = LiveMicroEngine(engine_settings_for_desk(settings, cfg, venues))
+            armed = engine.arm()
+            if not armed.get("armed"):
+                return {"started": False, "reason": "arm_failed", "detail": armed}
+            for v in venues:
+                if engine._registry.get_client(v, enable_trading=True) is None:  # noqa: SLF001
+                    logger.warning("momentum desk: no trading credentials for %s; skipped", v)
+                    continue
+                gateways[v] = LiveGateway(engine, v)
+            if not gateways:
+                return {"started": False, "reason": "no_venue_credentials", "venues": venues}
+            venues = tuple(v for v in venues if v in gateways)
+            self._engine = engine
         options = RunnerOptions(
-            venue=venue,
+            venues=venues,
             dry_run=dry_run,
             state_path=str(getattr(settings, "momentum_desk_state_path", RunnerOptions.state_path)),
             ledger_path=str(
@@ -842,21 +979,17 @@ class MomentumDeskManager:
                 or RunnerOptions.alphai_recommendations_path
             ),
         )
-        gateway: Gateway | None = None
-        if not dry_run:
-            from bot.live.micro_engine import LiveMicroEngine
-
-            engine = LiveMicroEngine(engine_settings_for_desk(settings, cfg, venue))
-            armed = engine.arm()
-            if not armed.get("armed"):
-                return {"started": False, "reason": "arm_failed", "detail": armed}
-            self._engine = engine
-            gateway = LiveGateway(engine, venue)
-        self._runner = MomentumDeskRunner(cfg, gateway, options=options)
+        self._runner = MomentumDeskRunner(cfg, None, options=options, gateways=gateways)
         self._stop = False
         self._task = asyncio.create_task(self._runner.run(lambda: self._stop), name="momentum-desk")
         Path(options.state_path).parent.mkdir(parents=True, exist_ok=True)
-        _write_flag(options.state_path, running=True, dry_run=dry_run, venue=venue)
+        _write_flag(
+            options.state_path,
+            running=True,
+            dry_run=dry_run,
+            venue=venues[0],
+            venues=list(venues),
+        )
         return {"started": True, "status": self.status()}
 
     async def stop(self) -> dict[str, Any]:
@@ -881,7 +1014,7 @@ class MomentumDeskManager:
         return await self.start(
             settings=settings,
             dry_run=bool(flag.get("dry_run")),
-            venue=str(flag.get("venue") or "bitvavo"),
+            venue=flag.get("venues") or str(flag.get("venue") or "bitvavo"),
         )
 
 
@@ -935,5 +1068,6 @@ __all__ = [
     "desk_config_from_settings",
     "engine_settings_for_desk",
     "get_momentum_desk_manager",
+    "parse_venues",
     "reset_momentum_desk_manager",
 ]

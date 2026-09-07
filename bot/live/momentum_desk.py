@@ -97,6 +97,10 @@ class DeskConfig:
     # desk 100% cash through an alt rally, so reduce is the default.
     macro_caution_mode: str = "reduce"
     macro_caution_clip_mult: float = 0.7
+    # Exit side of AlphaI: a bearish headline on a held base does not dump the
+    # position (that was fee churn in the old desk) but narrows the trail to
+    # ``trail_tight_pct`` so the winner is protected while the news is fresh.
+    alphai_avoid_tightens_trail: bool = True
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     clusters: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_CLUSTERS))
 
@@ -178,6 +182,7 @@ class Position:
     peak: float
     entry_fee_eur: float = 0.0
     entry_reason: str = ""
+    venue: str = "bitvavo"
 
     def gross_return(self, price: float) -> float:
         return price / self.entry_price - 1.0 if self.entry_price > 0 else 0.0
@@ -351,7 +356,13 @@ def is_decision_time(t_ms: int, cfg: DeskConfig) -> bool:
     return minute_of_day % 60 == 0 and (minute_of_day // 60) in cfg.decision_hours_utc
 
 
-def evaluate_exit(pos: Position, bar: Candle, cfg: DeskConfig) -> ExitDecision | None:
+def evaluate_exit(
+    pos: Position,
+    bar: Candle,
+    cfg: DeskConfig,
+    *,
+    alphai: AlphaIView | None = None,
+) -> ExitDecision | None:
     """Evaluate a closed 15m bar. Mutates ``pos.peak``; returns an exit or None.
 
     Order matters: the hard stop is checked on the close before the trail so a
@@ -369,8 +380,12 @@ def evaluate_exit(pos: Position, bar: Candle, cfg: DeskConfig) -> ExitDecision |
     peak_gain = pos.peak / pos.entry_price - 1.0 if pos.entry_price > 0 else 0.0
     if cfg.trail_tight_after > 0 and peak_gain >= cfg.trail_tight_after:
         trail = min(trail, cfg.trail_tight_pct)
+    base_trail = trail
+    if cfg.alphai_avoid_tightens_trail and alphai is not None and pos.base in alphai.avoid:
+        trail = min(trail, cfg.trail_tight_pct)
     if pos.peak > 0 and close <= pos.peak * (1.0 - trail):
-        return ExitDecision("trail", gross, urgent=False)
+        reason = "trail" if close <= pos.peak * (1.0 - base_trail) else "trail_alphai"
+        return ExitDecision(reason, gross, urgent=False)
     age_ms = bar_end - pos.opened_ms
     if age_ms >= cfg.time_exit_hours * 3600_000 and gross <= cfg.fee_rt:
         return ExitDecision("time_exit", gross, urgent=False)

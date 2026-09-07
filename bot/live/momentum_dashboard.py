@@ -103,7 +103,8 @@ def _positions_table(status: Mapping[str, Any]) -> str:
         out.append(
             "<tr>"
             f"<td><strong>{escape(str(p.get('base')))}</strong>"
-            f"<div class='muted' style='font-size:.7rem'>"
+            f" <span class='muted' style='font-size:.7rem'>{escape(str(p.get('venue') or ''))}"
+            f"</span><div class='muted' style='font-size:.7rem'>"
             f"{escape(str(p.get('entry_reason') or ''))}</div></td>"
             f"<td class='mono'>{entry:,.4f}</td>"
             f"<td class='mono'>{(f'{float(mark):,.4f}' if mark else '—')}</td>"
@@ -182,7 +183,9 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
             "<tr>"
             f"<td>{_ts(r.get('ts'))}</td>"
             f"<td class='{ev_cls}'>{escape(ev)}{' (taker)' if r.get('taker') else ''}</td>"
-            f"<td><strong>{escape(str(r.get('base') or ''))}</strong></td>"
+            f"<td><strong>{escape(str(r.get('base') or ''))}</strong>"
+            f" <span class='muted' style='font-size:.7rem'>{escape(str(r.get('venue') or ''))}"
+            "</span></td>"
             f"<td class='mono'>{(f'{float(r["price"]):,.4f}' if r.get('price') else '—')}</td>"
             f"<td>{_fmt_eur(r.get('notional_eur'), signed=False)}</td>"
             f"<td>{_fmt_eur(r.get('fee_eur'), signed=False)}</td>"
@@ -263,7 +266,13 @@ def render_momentum_dashboard(
     )
     err = status.get("last_error")
     err_html = f'<div class="hint bad">Laatste fout: {escape(str(err))}</div>' if err else ""
-    venue = escape(str(status.get("venue") or ""))
+    venue = escape(" + ".join(status.get("venues") or [str(status.get("venue") or "")]))
+    cash_by_venue = status.get("cash_by_venue") or {}
+    cash_hint = (
+        " · ".join(f"{escape(str(k))} {float(v):,.0f} €" for k, v in cash_by_venue.items())
+        if len(cash_by_venue) > 1
+        else f"cash {_fmt_eur(status.get('cash_eur'), signed=False)}"
+    )
     task_err = status.get("task_error")
     if task_err:
         err_html += f'<div class="hint bad">Loop gestopt: {escape(str(task_err))}</div>'
@@ -273,8 +282,7 @@ def render_momentum_dashboard(
             _hero(
                 "Equity (cash + posities)",
                 _fmt_eur(status.get("equity_eur"), signed=False),
-                hint=f"cash {_fmt_eur(status.get('cash_eur'), signed=False)} · "
-                f"ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}",
+                hint=f"{cash_hint} · ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}",
             ),
             _hero(
                 "Gerealiseerd totaal",

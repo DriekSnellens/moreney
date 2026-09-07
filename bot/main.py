@@ -586,9 +586,9 @@ async def live_momentum_start(payload: dict[str, Any] | None = None) -> dict[str
     if isinstance(dry, str):
         dry = dry.strip().lower() not in {"0", "false", "no"}
     settings = get_settings()
-    venue = str(body.get("venue") or settings.momentum_desk_venue)
+    venues = body.get("venues") or body.get("venue") or settings.momentum_desk_venues
     return await get_momentum_desk_manager().start(
-        settings=settings, dry_run=bool(dry), venue=venue
+        settings=settings, dry_run=bool(dry), venue=venues
     )
 
 
