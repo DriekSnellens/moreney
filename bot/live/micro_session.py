@@ -579,16 +579,43 @@ def _session_settings(
         updates.update(
             {
                 "live_micro_alphai_daytrader_enabled": True,
-                "live_micro_daytrader_min_confirm_scale": float(
-                    getattr(base, "live_micro_daytrader_min_confirm_scale", 0.50)
-                    or 0.50
+                "live_micro_daytrader_min_confirm_scale": max(
+                    float(
+                        getattr(base, "live_micro_daytrader_min_confirm_scale", 0.55)
+                        or 0.55
+                    ),
+                    0.55,
                 ),
-                "live_micro_daytrader_sleeve_min_confirm_scale": float(
-                    getattr(base, "live_micro_daytrader_sleeve_min_confirm_scale", 0.40)
-                    or 0.40
+                "live_micro_daytrader_sleeve_min_confirm_scale": max(
+                    float(
+                        getattr(
+                            base, "live_micro_daytrader_sleeve_min_confirm_scale", 0.55
+                        )
+                        or 0.55
+                    ),
+                    0.55,
                 ),
                 "live_micro_daytrader_require_rising": bool(
                     getattr(base, "live_micro_daytrader_require_rising", True)
+                ),
+                "live_micro_daytrader_sleeve_require_rising": bool(
+                    getattr(base, "live_micro_daytrader_sleeve_require_rising", True)
+                ),
+                "live_micro_daytrader_min_conviction": float(
+                    getattr(base, "live_micro_daytrader_min_conviction", 0.25) or 0.25
+                ),
+                "live_micro_daytrader_sleeve_urgency_enabled": bool(
+                    getattr(base, "live_micro_daytrader_sleeve_urgency_enabled", False)
+                ),
+                "live_micro_daytrader_priority_clip_min_confirm": float(
+                    getattr(
+                        base, "live_micro_daytrader_priority_clip_min_confirm", 0.60
+                    )
+                    or 0.60
+                ),
+                "live_micro_daytrader_strong_clip_min_confirm": float(
+                    getattr(base, "live_micro_daytrader_strong_clip_min_confirm", 0.75)
+                    or 0.75
                 ),
                 "live_micro_daytrader_non_alphai_min_age_sec": float(
                     getattr(base, "live_micro_daytrader_non_alphai_min_age_sec", 120.0)
@@ -622,6 +649,23 @@ def _session_settings(
                 "alphai_bullish_buy_enabled": True,
                 "alphai_price_confirm_enabled": True,
                 "alphai_intraday_gate_enabled": True,
+                # Stricter entry-quality: reject more mediocre tape (less REDUCE spam).
+                "live_micro_entry_quality_min_score": max(
+                    float(getattr(base, "live_micro_entry_quality_min_score", 55) or 55),
+                    65.0,
+                ),
+                "live_micro_entry_reduced_size_score": max(
+                    float(
+                        getattr(base, "live_micro_entry_reduced_size_score", 70) or 70
+                    ),
+                    72.0,
+                ),
+                "live_micro_entry_normal_size_score": max(
+                    float(
+                        getattr(base, "live_micro_entry_normal_size_score", 80) or 80
+                    ),
+                    82.0,
+                ),
                 # 24/7 accuracy: apply settled desk lessons (deploy + avoid recycle).
                 "alphai_desk_lessons_enabled": True,
                 "alphai_desk_lessons_auto_apply_modes": "deploy_urgency,avoid",

@@ -769,18 +769,41 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ) and bool(self._capital_split_enabled)
         self._daytrader_min_confirm = Decimal(
             str(
-                getattr(settings, "live_micro_daytrader_min_confirm_scale", 0.50)
-                or 0.50
+                getattr(settings, "live_micro_daytrader_min_confirm_scale", 0.55)
+                or 0.55
             )
         )
         self._daytrader_sleeve_min_confirm = Decimal(
             str(
-                getattr(settings, "live_micro_daytrader_sleeve_min_confirm_scale", 0.40)
-                or 0.40
+                getattr(settings, "live_micro_daytrader_sleeve_min_confirm_scale", 0.55)
+                or 0.55
             )
         )
         self._daytrader_require_rising = bool(
             getattr(settings, "live_micro_daytrader_require_rising", True)
+        )
+        self._daytrader_sleeve_require_rising = bool(
+            getattr(settings, "live_micro_daytrader_sleeve_require_rising", True)
+        )
+        self._daytrader_min_conviction = float(
+            getattr(settings, "live_micro_daytrader_min_conviction", 0.25) or 0.25
+        )
+        self._daytrader_sleeve_urgency_enabled = bool(
+            getattr(settings, "live_micro_daytrader_sleeve_urgency_enabled", False)
+        )
+        self._daytrader_priority_clip_min_confirm = Decimal(
+            str(
+                getattr(
+                    settings, "live_micro_daytrader_priority_clip_min_confirm", 0.60
+                )
+                or 0.60
+            )
+        )
+        self._daytrader_strong_clip_min_confirm = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_strong_clip_min_confirm", 0.75)
+                or 0.75
+            )
         )
         self._daytrader_non_alphai_min_age_sec = float(
             getattr(settings, "live_micro_daytrader_non_alphai_min_age_sec", 120.0)
@@ -2207,8 +2230,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 except Exception:  # noqa: BLE001
                     confirm_scale = None
         # Soft-ADVERSE rising-strict was starving rank-1/2 sleeve buys on flat
-        # red tape (BNB/ADA miss). Sleeve keeps deployable with softer confirm.
-        # Daytrader: non-sleeve needs confirmed tape + rising; sleeve stays softer.
+        # red tape (BNB/ADA miss). Non-daytrader sleeve stays softer.
+        # Daytrader: tape must confirm — no lag floor, rising kept for sleeve.
         sleeve = self._alphai_sleeve_priority_buy(base)
         daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
         require_rising = bool(
@@ -2221,31 +2244,46 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if daytrader:
             min_confirm = max(
                 min_confirm,
-                Decimal(str(getattr(self, "_daytrader_min_confirm", Decimal("0.50")))),
+                Decimal(str(getattr(self, "_daytrader_min_confirm", Decimal("0.55")))),
             )
         gate_lagging = price_lagging
-        if sleeve:
+        if sleeve and not daytrader:
             require_rising = False
             min_fresh = min(min_fresh, Decimal("0.40"))
             min_confirm = Decimal("0.35")
-            if daytrader:
-                min_confirm = max(
-                    min_confirm,
-                    Decimal(
-                        str(
-                            getattr(
-                                self,
-                                "_daytrader_sleeve_min_confirm",
-                                Decimal("0.40"),
-                            )
-                        )
-                    ),
-                )
             if price_lagging:
                 # Shrink clip instead of hard WAIT — still prefer sleeve names.
                 gate_lagging = False
                 if confirm_scale is None or confirm_scale > Decimal("0.40"):
                     confirm_scale = Decimal("0.40")
+        elif sleeve and daytrader:
+            # Slight freshness soften only; confirm/rising/lag stay hard.
+            min_fresh = min(min_fresh, Decimal("0.40"))
+            min_confirm = max(
+                min_confirm,
+                Decimal(
+                    str(
+                        getattr(
+                            self,
+                            "_daytrader_sleeve_min_confirm",
+                            Decimal("0.55"),
+                        )
+                    )
+                ),
+            )
+            if bool(getattr(self, "_daytrader_sleeve_require_rising", True)):
+                require_rising = True
+            # Keep gate_lagging / confirm_scale as measured — no floor bypass.
+        if daytrader:
+            min_conv = float(getattr(self, "_daytrader_min_conviction", 0.25) or 0.0)
+            if min_conv > 0:
+                conv = self._alphai_hold_conviction(base)
+                if conv < min_conv:
+                    return (
+                        "WAIT",
+                        Decimal("0"),
+                        ("pick_conviction_weak",),
+                    )
         gate = evaluate_intraday_entry_gate(
             is_alphai_buy=self._alphai_bullish_buy(base),
             freshness=feat.freshness,
@@ -2914,6 +2952,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     getattr(self, "_alphai_daytrader_enabled", False)
                 ),
                 "daytrade_rotate_non_picks": bool(self._daytrade_rotate_non_picks()),
+                "daytrader_min_confirm": str(
+                    getattr(self, "_daytrader_min_confirm", "")
+                ),
+                "daytrader_sleeve_min_confirm": str(
+                    getattr(self, "_daytrader_sleeve_min_confirm", "")
+                ),
+                "daytrader_min_conviction": float(
+                    getattr(self, "_daytrader_min_conviction", 0.0) or 0.0
+                ),
+                "daytrader_sleeve_require_rising": bool(
+                    getattr(self, "_daytrader_sleeve_require_rising", True)
+                ),
+                "daytrader_sleeve_urgency_enabled": bool(
+                    getattr(self, "_daytrader_sleeve_urgency_enabled", False)
+                ),
             },
             "exit_engine": {
                 "enabled": self._exit_engine_enabled,
@@ -6938,17 +6991,44 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             return self._winner_add_clip_eur if self._winner_add_clip_eur > 0 else None
         first = self._first_clip_eur
-        # Concentrate working capital on AlphaI: strong > priority > default first clip.
-        if self._alphai_strong_bullish_buy(base) and self._alphai_strong_clip_eur > 0:
-            return self._alphai_strong_clip_eur
-        if self._alphai_bullish_buy(base) and self._alphai_priority_clip_eur > 0:
+        daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
+        confirm = None
+        if daytrader:
             sig = self._alphai_signals
-            if sig is not None and hasattr(sig, "is_slot_priority_buy"):
-                # Structural sleeve: concentrate capital on AlphaI rank-1/2.
-                if sig.is_slot_priority_buy(base, top_n=2):
+            if sig is not None and hasattr(sig, "price_confirm_scale"):
+                try:
+                    confirm = Decimal(str(sig.price_confirm_scale(base)))
+                except Exception:  # noqa: BLE001
+                    confirm = None
+        # Concentrate working capital on AlphaI: strong > priority > default first clip.
+        # Daytrader: only enlarge when tape confirm clears ranked thresholds.
+        if self._alphai_strong_bullish_buy(base) and self._alphai_strong_clip_eur > 0:
+            min_strong = Decimal(
+                str(
+                    getattr(
+                        self, "_daytrader_strong_clip_min_confirm", Decimal("0.75")
+                    )
+                )
+            )
+            if (not daytrader) or confirm is None or confirm >= min_strong:
+                return self._alphai_strong_clip_eur
+        if self._alphai_bullish_buy(base) and self._alphai_priority_clip_eur > 0:
+            min_pri = Decimal(
+                str(
+                    getattr(
+                        self, "_daytrader_priority_clip_min_confirm", Decimal("0.60")
+                    )
+                )
+            )
+            allow_priority = (not daytrader) or confirm is None or confirm >= min_pri
+            if allow_priority:
+                sig = self._alphai_signals
+                if sig is not None and hasattr(sig, "is_slot_priority_buy"):
+                    # Structural sleeve: concentrate capital on AlphaI rank-1/2.
+                    if sig.is_slot_priority_buy(base, top_n=2):
+                        return self._alphai_priority_clip_eur
+                elif self._alphai_priority_clip_eur > first:
                     return self._alphai_priority_clip_eur
-            elif self._alphai_priority_clip_eur > first:
-                return self._alphai_priority_clip_eur
         if first <= 0:
             add = self._add_clip_eur
             return add if add > 0 else None
@@ -9078,29 +9158,59 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 order_request = order_request.model_copy(update={"metadata": meta})
                 if action == "WAIT":
                     # Sleeve urgency: empty ring + free cash → REDUCE instead of hard WAIT.
+                    # Daytrader: off by default — cash beats unconfirmed pick entries.
                     sleeve_urgency = False
-                    try:
-                        ring_hungry = bool(
-                            self._ring_needs_deploy(venue)
-                            and float(self._venue_budget_remaining(venue)) >= 50.0
-                        )
-                        sleeve_urgency = bool(
-                            ring_hungry and self._alphai_sleeve_priority_buy(base)
-                        )
-                        # High-confirm AlphaI bullish under empty ring: same urgency
-                        # even if structural top-N is occupied by weak held bags.
-                        if not sleeve_urgency and ring_hungry and self._alphai_bullish_buy(base):
-                            confirm = None
-                            sig = self._alphai_signals
-                            if sig is not None and hasattr(sig, "price_confirm_scale"):
-                                try:
-                                    confirm = float(sig.price_confirm_scale(base))
-                                except Exception:  # noqa: BLE001
-                                    confirm = None
-                            if confirm is None or confirm >= 0.55:
-                                sleeve_urgency = True
-                    except Exception:  # noqa: BLE001
-                        sleeve_urgency = False
+                    daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
+                    urgency_allowed = (not daytrader) or bool(
+                        getattr(self, "_daytrader_sleeve_urgency_enabled", False)
+                    )
+                    hard_wait_reasons = {
+                        "price_lagging",
+                        "price_confirm_weak",
+                        "pick_conviction_weak",
+                        "momentum_down",
+                        "momentum_not_rising_strict",
+                        "alphai_not_bullish",
+                    }
+                    if urgency_allowed and not hard_wait_reasons.intersection(
+                        gate_reasons
+                    ):
+                        try:
+                            ring_hungry = bool(
+                                self._ring_needs_deploy(venue)
+                                and float(self._venue_budget_remaining(venue)) >= 50.0
+                            )
+                            sleeve_urgency = bool(
+                                ring_hungry and self._alphai_sleeve_priority_buy(base)
+                            )
+                            # High-confirm AlphaI bullish under empty ring: same urgency
+                            # even if structural top-N is occupied by weak held bags.
+                            if (
+                                not sleeve_urgency
+                                and ring_hungry
+                                and self._alphai_bullish_buy(base)
+                            ):
+                                confirm = None
+                                sig = self._alphai_signals
+                                if sig is not None and hasattr(sig, "price_confirm_scale"):
+                                    try:
+                                        confirm = float(sig.price_confirm_scale(base))
+                                    except Exception:  # noqa: BLE001
+                                        confirm = None
+                                min_u = 0.55
+                                if daytrader:
+                                    min_u = float(
+                                        getattr(
+                                            self,
+                                            "_daytrader_sleeve_min_confirm",
+                                            Decimal("0.55"),
+                                        )
+                                        or 0.55
+                                    )
+                                if confirm is None or confirm >= min_u:
+                                    sleeve_urgency = True
+                        except Exception:  # noqa: BLE001
+                            sleeve_urgency = False
                     if sleeve_urgency:
                         action = "REDUCE"
                         gate_mult = min(gate_mult if gate_mult > 0 else _ONE, Decimal("0.55"))
@@ -9113,6 +9223,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         self._bump_skip("alphai_intraday_wait")
                         for reason in gate_reasons:
                             self._bump_skip(f"intraday_{reason}")
+                        if daytrader and hard_wait_reasons.intersection(gate_reasons):
+                            self._bump_skip("daytrader_entry_wait")
                         if not self._alphai_intraday_gate_shadow_only:
                             return await self._reject_before_live(
                                 order_request,
