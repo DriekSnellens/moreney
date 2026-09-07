@@ -315,8 +315,8 @@ def test_playbook_has_partial_unlock_overlays() -> None:
 
     flat = PLAYBOOK_OVERLAYS[CapitalPlaybook.FLAT]
     assert flat["uw_deadlock_target_free_eur"] == 220.0
-    assert flat["uw_deadlock_day_loss_cap_eur"] == 12.0
-    assert PRE_CRASH_FLAT_OVERLAYS["uw_deadlock_day_loss_cap_eur"] == 10.0
+    assert flat["uw_deadlock_day_loss_cap_eur"] == 8.0
+    assert PRE_CRASH_FLAT_OVERLAYS["uw_deadlock_day_loss_cap_eur"] == 8.0
 
 
 

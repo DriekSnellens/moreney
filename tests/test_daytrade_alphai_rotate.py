@@ -9,11 +9,12 @@ from bot.live.capital_playbook import CapitalPlaybook, PLAYBOOK_OVERLAYS
 from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
 
 
-def test_flat_playbook_recycles_non_alphai_faster_for_daytrade() -> None:
+def test_flat_playbook_respects_fee_floor_for_daytrade() -> None:
+    # 14d forensics: sub-1% harvests and <10-min recycles were pure fee bleed.
     flat = PLAYBOOK_OVERLAYS[CapitalPlaybook.FLAT]
-    assert flat["uw_non_alphai_min_age_sec"] <= 300.0
-    assert flat["uw_near_min_age_sec"] <= 180.0
-    assert flat["be_harvest_min_gain_pct"] <= 0.004
+    assert flat["uw_non_alphai_min_age_sec"] >= 600.0
+    assert flat["uw_near_min_age_sec"] >= 600.0
+    assert flat["be_harvest_min_gain_pct"] >= 0.010
 
 
 def test_daytrade_rotate_requires_capital_split() -> None:

@@ -40,18 +40,19 @@ def test_session_settings_apply_capital_split(tmp_path: Path) -> None:
         persist_path=tmp_path / "state.json",
     )
     assert cfg.live_micro_capital_split_enabled is True
-    assert float(cfg.live_micro_core_eur) == 1300.0
-    assert float(cfg.live_micro_satellite_eur) == 700.0
-    assert float(cfg.live_micro_active_ring_eur) == 350.0
-    assert float(cfg.live_micro_velocity_sleeve_eur) == 700.0
-    assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 21.0
-    assert float(cfg.paper_max_alt_inventory_pct) == 35.0
+    # 50/50 core/satellite: €500 ring per venue (2 venues), 3% sleeve cap.
+    assert float(cfg.live_micro_core_eur) == 1000.0
+    assert float(cfg.live_micro_satellite_eur) == 1000.0
+    assert float(cfg.live_micro_active_ring_eur) == 500.0
+    assert float(cfg.live_micro_velocity_sleeve_eur) == 1000.0
+    assert float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) == 30.0
+    assert float(cfg.paper_max_alt_inventory_pct) == 50.0
     assert float(cfg.live_micro_cut_loss_below_be_pct) == 0.025
     assert float(cfg.live_micro_early_cut_loss_below_be_pct) == 0.01
     assert (cfg.live_micro_long_hold_bases or "") == ""
     assert float(cfg.live_micro_first_clip_eur) <= 120.0
     # 24/7 vault rail scales with satellite (~10% / ≥2.5× sleeve cap).
-    assert float(cfg.paper_daily_kill_eur) == 70.0
+    assert float(cfg.paper_daily_kill_eur) == 100.0
     assert cfg.live_micro_alphai_daytrader_enabled is True
     assert "avoid" in str(cfg.alphai_desk_lessons_auto_apply_modes)
     assert "deploy_urgency" in str(cfg.alphai_desk_lessons_auto_apply_modes)

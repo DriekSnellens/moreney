@@ -527,6 +527,37 @@ class Settings(BaseSettings):
     live_micro_desk_mode_velocity_sleeve_loss_cap_eur: float = Field(
         default=35.0, ge=0.0, le=500.0
     )
+    # Tape-confirmed entries when AlphaI has no actionable picks (RS vs BTC,
+    # breadth, liquidity, not fading from high). Coin-agnostic.
+    live_micro_tape_confirm_enabled: bool = True
+    live_micro_tape_refresh_sec: float = Field(default=120.0, ge=30.0, le=900.0)
+    live_micro_tape_min_excess_pp: float = Field(default=2.0, ge=0.0, le=20.0)
+    live_micro_tape_min_ret_pct: float = Field(default=1.0, ge=0.0, le=20.0)
+    live_micro_tape_min_volume_eur: float = Field(default=500_000.0, ge=0.0)
+    live_micro_tape_max_from_high_pct: float = Field(default=3.0, ge=0.5, le=20.0)
+    live_micro_tape_min_breadth: float = Field(default=0.50, ge=0.0, le=1.0)
+    live_micro_tape_top_n: int = Field(default=4, ge=1, le=10)
+    live_micro_tape_max_bases_per_venue: int = Field(default=2, ge=0, le=6)
+    # Tape leaders complement native AlphaI picks (union) instead of being
+    # suppressed whenever a pick exists; avoid/blocked always win.
+    live_micro_tape_union_with_picks: bool = True
+    # Observed fee rates (per venue/side) lift break-even above the static table.
+    live_micro_observed_fee_calibration: bool = True
+    # "venue:maker:taker,..." applied process-wide by the live runner (empty = table).
+    live_venue_fee_overrides: str = ""
+    # Voluntary profit harvests never below mult x maker round-trip fee (0 = off).
+    live_micro_harvest_fee_floor_mult: float = Field(default=2.5, ge=0.0, le=10.0)
+    # Underwater policy: "simple" (3 rules) or "legacy" (tiered recycle stack).
+    live_micro_uw_policy: str = "legacy"
+    live_micro_uw_simple_max_depth_pct: float = Field(default=0.012, ge=0.0, le=0.05)
+    live_micro_uw_simple_unsupported_age_sec: float = Field(default=86400.0, ge=0.0)
+    live_micro_uw_simple_avoid_age_sec: float = Field(default=7200.0, ge=0.0)
+    live_micro_uw_simple_rotate_min_age_sec: float = Field(default=900.0, ge=0.0)
+    # Fee routing: prefer the cheaper venue for a base quoted on both (empty = off).
+    live_micro_preferred_entry_venue: str = "bitvavo"
+    # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
+    live_micro_trail_dd_gain_scale_enabled: bool = True
+    live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
@@ -716,8 +747,10 @@ class Settings(BaseSettings):
     )
     # Core/satellite split: core stays cash (or light BTC/ETH); satellite = trend sleeve.
     live_micro_capital_split_enabled: bool = True
-    live_micro_core_fraction: float = Field(default=0.65, ge=0.0, le=0.95)
-    live_micro_satellite_fraction: float = Field(default=0.35, ge=0.05, le=0.95)
+    # 50/50: €350 rings missed multi-% alt rotations; €500/venue keeps hard
+    # cut-loss exposure (2.5%) at ~€12.5 per full ring sweep.
+    live_micro_core_fraction: float = Field(default=0.50, ge=0.0, le=0.95)
+    live_micro_satellite_fraction: float = Field(default=0.50, ge=0.05, le=0.95)
     # cash = idle EUR vault; btc_eth = mark BTC/ETH as long-hold core (manual/light beta).
     live_micro_core_mode: str = "cash"
     live_micro_core_long_hold_bases: str = "BTC,ETH"

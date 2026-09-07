@@ -82,6 +82,20 @@ logger = logging.getLogger(__name__)
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
 _MIN_LIVE_NOTIONAL = Decimal("5")
+# Profit-taking while price is still up: fee-aware maker exits, not taker hits.
+_PATIENT_EXIT_REASONS = frozenset(
+    {
+        "trail_soft_partial",
+        "trail_hard_partial",
+        "trail_be_harvest",
+        "trail_recovery_be",
+        "trail_recovery_be_partial",
+        "trail_exit_work",
+        "trail_consolidation_wind_down",
+        "time_stop_breakeven",
+        "trail_uw_recycle_band",
+    }
+)
 _FILL_POLL_SECONDS = 1.5
 _FILL_POLL_INTERVAL = 0.15
 _DEFAULT_RESTING_MAX_AGE_SEC = 90.0
@@ -327,6 +341,35 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_idle_below_be_pct = Decimal(
             str(getattr(settings, "live_micro_uw_idle_below_be_pct", 0.004) or 0)
         )
+        # Fresh session entries: bag-recycle tiers (idle / deadlock / mid-flat)
+        # wait this long; only early-cut / cut-loss stops apply before that.
+        self._uw_fresh_entry_grace_sec = float(
+            getattr(settings, "live_micro_uw_fresh_entry_grace_sec", 1800.0) or 0.0
+        )
+        # Underwater policy: "simple" = 3 rules (hard stops / aged unsupported /
+        # rotate against confirmed replacement); "legacy" = tiered recycle stack.
+        self._uw_policy = str(getattr(settings, "live_micro_uw_policy", "legacy") or "legacy")
+        self._uw_simple_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_simple_max_depth_pct", 0.012) or 0)
+        )
+        self._uw_simple_unsupported_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_unsupported_age_sec", 86400.0) or 0.0
+        )
+        self._uw_simple_avoid_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_avoid_age_sec", 7200.0) or 0.0
+        )
+        self._uw_simple_rotate_min_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_rotate_min_age_sec", 900.0) or 0.0
+        )
+        # After a loss exit, block re-entering the same base on that venue
+        # unless the mark has reclaimed exit price + reclaim bps.
+        self._loss_exit_cooldown_sec = float(
+            getattr(settings, "live_micro_loss_exit_cooldown_sec", 1800.0) or 0.0
+        )
+        self._loss_exit_reclaim_bps = Decimal(
+            str(getattr(settings, "live_micro_loss_exit_reclaim_bps", 50) or 0)
+        )
+        self._loss_exits: dict[str, tuple[float, Decimal]] = {}
         self._uw_deadlock_unlock_enabled = bool(
             getattr(settings, "live_micro_uw_deadlock_unlock_enabled", True)
         )
@@ -661,6 +704,40 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Certainty ring / sleeve-cap baselines captured after ring knobs are set.
         self._certainty_ring_baseline_eur = Decimal("0")
         self._sleeve_loss_cap_baseline = Decimal("0")
+        # Tape-confirmed entries (AlphaI-quiet days): RS leaders vs BTC + breadth.
+        self._tape_confirm_enabled = bool(
+            getattr(settings, "live_micro_tape_confirm_enabled", True)
+        )
+        self._tape_refresh_sec = float(
+            getattr(settings, "live_micro_tape_refresh_sec", 120.0) or 120.0
+        )
+        self._tape_min_excess_pp = float(
+            getattr(settings, "live_micro_tape_min_excess_pp", 2.0) or 0.0
+        )
+        self._tape_min_ret_pct = float(
+            getattr(settings, "live_micro_tape_min_ret_pct", 1.0) or 0.0
+        )
+        self._tape_min_volume_eur = float(
+            getattr(settings, "live_micro_tape_min_volume_eur", 500_000.0) or 0.0
+        )
+        self._tape_max_from_high_pct = float(
+            getattr(settings, "live_micro_tape_max_from_high_pct", 3.0) or 3.0
+        )
+        self._tape_min_breadth = float(
+            getattr(settings, "live_micro_tape_min_breadth", 0.50) or 0.0
+        )
+        self._tape_top_n = int(getattr(settings, "live_micro_tape_top_n", 4) or 4)
+        self._tape_max_bases_per_venue = int(
+            getattr(settings, "live_micro_tape_max_bases_per_venue", 2) or 0
+        )
+        self._tape_snapshot: Any = None
+        self._tape_entry_bases: set[str] = set()
+        self._trail_dd_gain_scale_enabled = bool(
+            getattr(settings, "live_micro_trail_dd_gain_scale_enabled", True)
+        )
+        self._trail_dd_max = Decimal(
+            str(getattr(settings, "live_micro_trail_dd_max_pct", 0.03) or 0.03)
+        )
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -924,6 +1001,18 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._exit_taker_after_maker_fails = int(
             getattr(settings, "live_micro_exit_taker_after_maker_fails", 1) or 1
         )
+        # Patient exits (profit-taking while price is still up): rest as maker at
+        # the ask for longer and escalate to taker only after several fails.
+        # Urgent exits (drawdown / stops / momentum break) keep the fast path.
+        self._exit_patient_enabled = bool(
+            getattr(settings, "live_micro_exit_patient_enabled", True)
+        )
+        self._exit_patient_resting_sec = float(
+            getattr(settings, "live_micro_exit_patient_resting_sec", 20.0) or 20.0
+        )
+        self._exit_patient_taker_after_fails = int(
+            getattr(settings, "live_micro_exit_patient_taker_after_fails", 3) or 3
+        )
         self._playbook_baselines = {
             "active_ring_eur": self._active_ring_eur,
             "ring_soft_max_active_eur": self._ring_soft_max_active_eur,
@@ -1184,6 +1273,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_deadlock_day_key": self._uw_deadlock_day_key,
             "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_paused": bool(self._sleeve_paused),
+            "venue_cash_excess": {
+                k: str(v) for k, v in (getattr(self, "_venue_cash_excess", None) or {}).items()
+            },
+            "observed_fee_rates": {
+                k: str(v) for k, v in (getattr(self, "_observed_fee_rates", None) or {}).items()
+            },
         }
 
     def _try_load_persisted_state(self) -> bool:
@@ -1283,6 +1378,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             self._uw_deadlock_day_loss_eur = _ZERO
         self._sleeve_paused = bool(raw.get("sleeve_paused"))
+        excess_raw = raw.get("venue_cash_excess")
+        if isinstance(excess_raw, Mapping):
+            loaded: dict[str, Decimal] = {}
+            for k, v in excess_raw.items():
+                try:
+                    loaded[str(k).lower()] = Decimal(str(v))
+                except Exception:  # noqa: BLE001
+                    continue
+            self._venue_cash_excess = loaded
+        fees_raw = raw.get("observed_fee_rates")
+        if isinstance(fees_raw, Mapping):
+            fee_loaded: dict[str, Decimal] = {}
+            for k, v in fees_raw.items():
+                try:
+                    rate = Decimal(str(v))
+                except Exception:  # noqa: BLE001
+                    continue
+                if 0 < rate <= Decimal("0.01"):
+                    fee_loaded[str(k).lower()] = rate
+            self._observed_fee_rates = fee_loaded
         self._check_sleeve_loss_cap()
         if raw.get("session_started_ms") is not None:
             self._session_started_ms = float(raw.get("session_started_ms"))
@@ -1462,6 +1577,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return True
         except Exception:  # noqa: BLE001
             pass
+        # Tape-confirmed entries are managed by trail / cut-loss, not AlphaI
+        # pick-confidence rotation (they have no pick score by construction).
+        if self._is_tape_entry_base(bu):
+            return False
         try:
             if not self._alphai_bullish_buy(bu):
                 return True
@@ -1520,6 +1639,24 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             return False
 
+    def _harvest_fee_floor(self, venue: str) -> Decimal:
+        """Absolute floor for any voluntary profit harvest: fees ≤ ~40% of gross.
+
+        2.5x the maker round trip (Bitvavo 0.30% → 0.75%, OKX 0.40% → 1.0%).
+        Scales (AlphaI feature, desk lessons, non-pick 0.40x) may not push the
+        harvest gain below this — 222 round trips at 0..+0.5% gross netted -14.84.
+        """
+        mult = Decimal(
+            str(getattr(self._settings, "live_micro_harvest_fee_floor_mult", 2.5) or 0)
+        )
+        if mult <= 0:
+            return _ZERO
+        try:
+            rt = self._effective_fee_rate(venue, taker=False) * Decimal("2")
+        except Exception:  # noqa: BLE001
+            return _ZERO
+        return rt * mult
+
     def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
         scale = self._alphai_feature_for(base).be_harvest_gain_scale
         try:
@@ -1529,7 +1666,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             pass
         # Non-pick bags: harvest sooner so AlphaI satellite entries get capital.
         try:
-            if self._daytrade_rotate_non_picks() and not self._alphai_bullish_buy(base):
+            if (
+                self._daytrade_rotate_non_picks()
+                and not self._alphai_bullish_buy(base)
+                and not self._is_tape_entry_base(base)
+            ):
                 scale = scale * Decimal("0.40")
         except Exception:  # noqa: BLE001
             pass
@@ -1730,6 +1871,98 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return bool(sig.is_bullish_buy(base, ring_fallback=False))
         ring_fb = self._alphai_ring_fallback_active()
         return bool(sig.is_bullish_buy(base, ring_fallback=ring_fb))
+
+    # ------------------------------------------------------------------ tape
+    def apply_tape_snapshot(self, snapshot: object | None) -> None:
+        """Runner-provided 24h tape snapshot (RS leaders, breadth) for display + gates."""
+        self._tape_snapshot = snapshot
+
+    def _tape_snapshot_fresh(self) -> bool:
+        snap = getattr(self, "_tape_snapshot", None)
+        ttl = float(getattr(self, "_tape_refresh_sec", 120.0) or 120.0)
+        try:
+            return snap is not None and snap.age_sec() < ttl * 2.5
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _tape_leader_bases(self) -> frozenset[str]:
+        if not getattr(self, "_tape_confirm_enabled", False) or not self._tape_snapshot_fresh():
+            return frozenset()
+        try:
+            return frozenset(self._tape_snapshot.leader_bases())
+        except Exception:  # noqa: BLE001
+            return frozenset()
+
+    def _tape_breadth(self) -> float:
+        if not self._tape_snapshot_fresh():
+            return 0.0
+        try:
+            return float(self._tape_snapshot.breadth)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _alphai_has_native_bullish(self) -> bool:
+        """AlphaI-native bullish buys exist (tape leaders excluded)."""
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        try:
+            if hasattr(sig, "native_bullish_buy_bases"):
+                return bool(sig.native_bullish_buy_bases())
+            return bool(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _tape_entry_held(self, venue: str | None = None) -> set[str]:
+        tape_bases = getattr(self, "_tape_entry_bases", None) or set()
+        if not tape_bases:
+            return set()
+        held: set[str] = set()
+        venues = [venue] if venue else list(getattr(self, "_execute_venues", ()) or ())
+        for v in venues:
+            try:
+                held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                continue
+        return {b for b in tape_bases if b in held}
+
+    def _is_tape_entry_base(self, base: str) -> bool:
+        bu = str(base or "").upper()
+        tape_bases = getattr(self, "_tape_entry_bases", None) or set()
+        return bool(bu) and bu in tape_bases and bu in self._tape_entry_held()
+
+    def _tape_confirmed_buy(self, venue: str, base: str) -> bool:
+        """Tape leader may open when AlphaI is silent (no unheld bullish picks).
+
+        Requires: tape enabled + fresh, base is an RS leader, not AlphaI
+        avoid/bearish, no macro caution, and per-venue tape slot available.
+        """
+        if not self._tape_confirm_enabled:
+            return False
+        bu = str(base or "").upper()
+        if not bu or bu in self._exclude_bases:
+            return False
+        if bool(self._alphai_macro_active):
+            return False
+        if self._alphai_is_avoid_base(bu):
+            return False
+        sig = self._alphai_signals
+        tape_leader = bu in self._tape_leader_bases()
+        if sig is not None and hasattr(sig, "is_tape_confirmed"):
+            try:
+                tape_leader = tape_leader or bool(sig.is_tape_confirmed(bu))
+            except Exception:  # noqa: BLE001
+                pass
+        if not tape_leader:
+            return False
+        if self._alphai_has_native_bullish():
+            return False
+        if self._tape_max_bases_per_venue <= 0:
+            return False
+        held = self._tape_entry_held(venue)
+        if bu in held:
+            return True
+        return len(held) < self._tape_max_bases_per_venue
 
     def _alphai_ring_fallback_active(self) -> bool:
         """Ring underfilled and all bullish picks held → allow focus non-avoid buys."""
@@ -2345,12 +2578,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         best_confirm = 0.0
         best_conviction = 0.0
         bases: set[str] = set()
+        native_api = hasattr(sig, "native_bullish_buy_bases")
         try:
-            if hasattr(sig, "bullish_buy_bases"):
+            if native_api:
+                bases |= {str(b).upper() for b in (sig.native_bullish_buy_bases() or [])}
+            elif hasattr(sig, "bullish_buy_bases"):
                 bases |= {str(b).upper() for b in (sig.bullish_buy_bases() or [])}
         except Exception:  # noqa: BLE001
             pass
-        if not bases:
+        if not bases and not native_api:
+            # Legacy signal objects only — never let tape leaders count as
+            # AlphaI-confirmed picks (they take the damped tape_leaders path).
             try:
                 pub = sig.to_public_dict() if hasattr(sig, "to_public_dict") else {}
                 for b in pub.get("bullish_buy_bases") or []:
@@ -2389,13 +2627,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     ) -> dict[str, Any]:
         """Classify CERTAINTY/VELOCITY and store public decision (no apply)."""
         from bot.live.desk_mode import (
-            DeskMode,
             DeskModeInputs,
             classify_desk_mode,
             decision_public_dict as desk_decision_public_dict,
         )
 
         confirmed_n, best_confirm, best_conviction = self._desk_mode_alphai_stats()
+        tape_n = len(self._tape_leader_bases())
+        tape_breadth = self._tape_breadth()
         certainty_ring = float(self._certainty_ring_baseline_eur or 0)
         if certainty_ring <= 0:
             try:
@@ -2428,6 +2667,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 median_mom=median_mom,
                 satellite_eur=satellite,
                 certainty_ring_eur=certainty_ring,
+                tape_confirmed_count=int(tape_n),
+                tape_breadth=float(tape_breadth),
             ),
             current=current,
             held_sec=held,
@@ -2481,6 +2722,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "median_mom": median_mom,
                 "certainty_ring_eur": round(certainty_ring, 2),
                 "satellite_eur": round(satellite, 2),
+                "tape_confirmed": int(tape_n),
+                "tape_breadth": round(float(tape_breadth), 3),
             },
         }
         return self._desk_mode_decision
@@ -2583,6 +2826,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if bool(getattr(self, "_daytrader_sleeve_require_rising", True)):
                 require_rising = True
             # Keep gate_lagging / confirm_scale as measured — no floor bypass.
+        # Tape leader (24h RS confirmed, no AlphaI headline): strict last-N rising
+        # is tick timing, not signal — it starved every tape entry. momentum_down
+        # still hard-WAITs; confirm/conviction stay as measured.
+        tape_only = False
+        if sig is not None and hasattr(sig, "is_tape_confirmed"):
+            try:
+                tape_only = bool(sig.is_tape_confirmed(base))
+            except Exception:  # noqa: BLE001
+                tape_only = False
+        if tape_only:
+            require_rising = False
         if daytrader:
             min_conv = float(getattr(self, "_daytrader_min_conviction", 0.25) or 0.0)
             if min_conv > 0:
@@ -2659,8 +2913,32 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             return False
 
-    def _effective_exit_resting_max_age_sec(self, base: str) -> float:
+    def _is_patient_exit(self, reason: str | None) -> bool:
+        return bool(
+            self._exit_patient_enabled and str(reason or "") in _PATIENT_EXIT_REASONS
+        )
+
+    def _uw_band_active(self, venue: str, base: str) -> bool:
+        st = self._trail.get(self._lots_key(venue, base))
+        return isinstance(st, dict) and str(st.get("uw_recycle_mode") or "") == "band"
+
+    def _effective_exit_resting_max_age_sec(
+        self, base: str, reason: str | None = None, venue: str | None = None
+    ) -> float:
         age = self._exit_resting_max_age_sec
+        patient = self._is_patient_exit(reason)
+        if (
+            not patient
+            and str(reason or "") == "trail_uw_recycle"
+            and venue
+            and self._exit_patient_enabled
+        ):
+            try:
+                patient = self._uw_band_active(venue, base)
+            except Exception:  # noqa: BLE001
+                patient = False
+        if patient:
+            age = max(age, self._exit_patient_resting_sec)
         scale = float(self._alphai_trail_hold_scale(base))
         if self._alphai_exit_urgency(base):
             return min(age, max(3.0, 5.0 * min(scale, 1.0)))
@@ -2836,11 +3114,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _clear_exit_maker_fail(self, venue: str, base: str) -> None:
         self._exit_maker_fail_counts.pop(self._exit_fail_key(venue, base), None)
 
-    def _should_force_taker_exit(self, venue: str, base: str) -> bool:
-        if self._exit_taker_after_maker_fails <= 0:
+    def _should_force_taker_exit(
+        self, venue: str, base: str, reason: str | None = None
+    ) -> bool:
+        threshold = self._exit_taker_after_maker_fails
+        if self._is_patient_exit(reason):
+            threshold = max(threshold, self._exit_patient_taker_after_fails)
+        if threshold <= 0:
             return False
         key = self._exit_fail_key(venue, base)
-        return int(self._exit_maker_fail_counts.get(key, 0)) >= self._exit_taker_after_maker_fails
+        return int(self._exit_maker_fail_counts.get(key, 0)) >= threshold
 
     def maybe_utc_day_rollover(self) -> bool:
         """Reset sleeve daily cap and session PnL baseline at UTC midnight."""
@@ -3155,6 +3438,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "early_cut_momentum_max_return": str(self._early_cut_momentum_max),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
                 "uw_recycle_enabled": self._uw_recycle_enabled,
+                "uw_policy": getattr(self, "_uw_policy", "legacy"),
+                "uw_simple_max_depth_pct": str(getattr(self, "_uw_simple_max_depth_pct", "")),
+                "uw_simple_unsupported_age_sec": getattr(self, "_uw_simple_unsupported_age_sec", None),
+                "uw_simple_avoid_age_sec": getattr(self, "_uw_simple_avoid_age_sec", None),
+                "uw_simple_rotate_min_age_sec": getattr(self, "_uw_simple_rotate_min_age_sec", None),
+                "preferred_entry_venue": str(
+                    getattr(self._settings, "live_micro_preferred_entry_venue", "") or ""
+                ),
                 "uw_dust_max_notional_eur": str(self._uw_dust_max_notional),
                 "uw_dust_below_be_pct": str(self._uw_dust_below_be_pct),
                 "uw_near_below_be_pct": str(self._uw_near_below_be_pct),
@@ -3290,6 +3581,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "touch_improve_bps": str(self._exit_touch_improve_bps),
                 "taker_cushion_bps": str(self._exit_taker_cushion_bps),
                 "taker_after_maker_fails": self._exit_taker_after_maker_fails,
+                "patient_enabled": self._exit_patient_enabled,
+                "patient_resting_sec": self._exit_patient_resting_sec,
+                "patient_taker_after_fails": self._exit_patient_taker_after_fails,
+                "patient_reasons": sorted(_PATIENT_EXIT_REASONS),
+                "observed_fee_rates": {
+                    k: f"{float(v) * 100:.3f}%"
+                    for k, v in (getattr(self, "_observed_fee_rates", None) or {}).items()
+                },
+                "effective_fee_rates": {
+                    f"{v}:{s}": f"{float(self._effective_fee_rate(v, taker=(s == 'taker'))) * 100:.3f}%"
+                    for v in ("bitvavo", "okx")
+                    for s in ("maker", "taker")
+                },
                 "mark_ttl_sec": self._mark_ttl_sec,
                 "maker_fail_counts": dict(self._exit_maker_fail_counts),
                 "soft_armed_work": self._exit_soft_armed_work,
@@ -3316,6 +3620,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "active_ring_eur": str(self._active_ring_eur),
                 "certainty_ring_baseline_eur": str(self._certainty_ring_baseline_eur),
                 "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
+            },
+            "tape": {
+                "enabled": bool(self._tape_confirm_enabled),
+                "fresh": self._tape_snapshot_fresh(),
+                "max_bases_per_venue": self._tape_max_bases_per_venue,
+                "entry_bases_held": sorted(self._tape_entry_held()),
+                **(
+                    self._tape_snapshot.as_dict()
+                    if self._tape_snapshot is not None and hasattr(self._tape_snapshot, "as_dict")
+                    else {}
+                ),
             },
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))
@@ -3569,6 +3884,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
         if self._cvd_abandoned:
             hints.append("CVD_ABANDONED")
+        if self._tape_confirm_enabled:
+            snap = self._tape_snapshot
+            if snap is None:
+                hints.append("TAPE no snapshot yet")
+            else:
+                try:
+                    leaders = ",".join(ld.base for ld in snap.leaders) or "-"
+                    hints.append(
+                        f"TAPE breadth={float(snap.breadth):.2f} leaders={leaders} "
+                        f"{'FRESH' if self._tape_snapshot_fresh() else 'STALE'} "
+                        f"held={','.join(sorted(self._tape_entry_held())) or '-'}"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         if self._alphai_enabled:
             if self._alphai_macro_active:
                 hints.append("ALPHAI_MACRO_REDUCE_ONLY")
@@ -4539,6 +4868,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._mirrored_trade_ids.add(mirror_key)
             return False
         fee_quote, fee_cur = self._trade_fee_quote(trade, base=base, amt=amt, px=px)
+        try:
+            self._note_observed_fee(
+                venue, trade.get("takerOrMaker"), Decimal(str(fee_quote or 0)), amt * px
+            )
+        except Exception:  # noqa: BLE001
+            pass
         symbol = f"{base}{self._quote}"
         if side == "buy" and self._has_trusted_cost(venue, base):
             self._mirrored_trade_ids.add(mirror_key)
@@ -4845,7 +5180,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._check_sleeve_loss_cap()
         # Deadlock partial unlock day-loss budget (absolute loss only).
         tier = str(trail_st.get("uw_recycle_tier") or "")
-        if tier.startswith("deadlock_") and trade_pnl < 0:
+        if tier.startswith(("deadlock_", "rotate_", "aged_")) and trade_pnl < 0:
+            # Every voluntary (non-stop) loss exit draws on the same daily budget.
             self._uw_deadlock_note_loss(-trade_pnl)
         self._check_daily_kill()
         if not lots:
@@ -5015,6 +5351,47 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._venue_raw_balances[venue] = bals
         return bals
 
+    def _venue_cash_excess_for(self, venue: str, bals: list[Any]) -> Decimal:
+        """Fixed EUR excess above budget for *venue* (captured once, persisted)."""
+        excess_map = getattr(self, "_venue_cash_excess", None)
+        if excess_map is None:
+            excess_map = {}
+            self._venue_cash_excess = excess_map
+        known = excess_map.get(venue)
+        if known is not None:
+            return known
+        eur = _ZERO
+        for bal in bals:
+            if str(getattr(bal, "asset", "") or "").upper() == self._quote:
+                eur += Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+        # Pocket = EUR + micro crypto; anything above budget at first sight is excess.
+        pocket = eur + self._venue_crypto_mtm(bals)
+        excess = max(_ZERO, pocket - self._budget)
+        excess_map[venue] = excess
+        return excess
+
+    def _venue_crypto_mtm(self, bals: list[Any]) -> Decimal:
+        """Crypto MTM (last known marks) for one venue's balance list."""
+        total = _ZERO
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote:
+                continue
+            try:
+                qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if qty <= 0:
+                continue
+            mark = self._portfolio.state.mark_prices.get(f"{asset}{self._quote}")
+            if mark is not None and mark > 0:
+                total += qty * mark
+        return total
+
     async def refresh_portfolio_value(
         self,
         *,
@@ -5035,7 +5412,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     bals = await self._fetch_balances_cached(v)
                 except Exception:  # noqa: BLE001
                     continue
-            for bal in bals:
+            # Crypto first (marks fetched), EUR last so the pocket-excess capture
+            # sees a complete venue MTM.
+            ordered = sorted(
+                bals,
+                key=lambda b: str(getattr(b, "asset", "") or "").upper() == self._quote,
+            )
+            for bal in ordered:
                 asset = str(getattr(bal, "asset", "") or "").upper()
                 if not asset:
                     continue
@@ -5046,8 +5429,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     continue
                 if asset == self._quote:
                     if venue is None and v in self._venue_raw_balances:
-                        # Cap each venue's EUR when summing total portfolio value.
-                        qty = min(qty, self._budget)
+                        # EUR above the micro budget is outside the pocket. The
+                        # excess is fixed once per venue and subtracted thereafter,
+                        # so a cash→crypto buy no longer "unhides" capped cash
+                        # (fake +€94 portfolio spike on Bitvavo).
+                        qty = max(_ZERO, qty - self._venue_cash_excess_for(v, bals))
                     total += qty
                     continue
                 symbol = f"{asset}{self._quote}"
@@ -5480,7 +5866,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             ):
                 base_asset = infer_base_asset(symbol)
                 row_max_age = min(
-                    max_age, self._effective_exit_resting_max_age_sec(base_asset)
+                    max_age,
+                    self._effective_exit_resting_max_age_sec(
+                        base_asset, strategy, venue_l
+                    ),
                 )
             if age >= row_max_age:
                 try:
@@ -5776,6 +6165,53 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(pos.average_entry_price))
         return None
 
+    @staticmethod
+    def _fee_key(venue: str, taker: bool) -> str:
+        return f"{str(venue or '').strip().lower()}:{'taker' if taker else 'maker'}"
+
+    def _note_observed_fee(
+        self, venue: str, liquidity: str | None, fee_quote: Decimal, notional: Decimal
+    ) -> None:
+        """Learn the effective fee rate per venue/side from real fills (EMA).
+
+        The static table assumed OKX 0.08%/0.10% while EUR pairs actually bill
+        0.20%/0.35%: every "BE+" exit there was a hidden loss. Observed rates
+        make break-even self-correcting; only sane values (0 < r <= 1%) count.
+        """
+        liq = str(liquidity or "").strip().lower()
+        if liq not in {"maker", "taker"} or fee_quote <= 0 or notional <= 0:
+            return
+        rate = fee_quote / notional
+        if rate <= 0 or rate > Decimal("0.01"):
+            return
+        store = getattr(self, "_observed_fee_rates", None)
+        if store is None:
+            store = {}
+            self._observed_fee_rates = store
+        key = self._fee_key(venue, liq == "taker")
+        prev = store.get(key)
+        if prev is None:
+            store[key] = rate
+        else:
+            store[key] = prev * Decimal("0.7") + rate * Decimal("0.3")
+
+    def _effective_fee_rate(self, venue: str, *, taker: bool) -> Decimal:
+        """Fee-table rate, lifted to the observed live rate when fills bill more."""
+        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
+
+        table = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        if not bool(
+            getattr(
+                getattr(self, "_settings", None), "live_micro_observed_fee_calibration", True
+            )
+        ):
+            return table
+        store = getattr(self, "_observed_fee_rates", None) or {}
+        observed = store.get(self._fee_key(venue, taker))
+        if observed is None:
+            return table
+        return max(table, observed)
+
     def _break_even_sell_price(
         self, venue: str, base: str, *, taker: bool = False, allow_provisional: bool = False
     ) -> Decimal | None:
@@ -5789,9 +6225,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         unit = self._unit_cost(venue, base)
         if unit is None or unit <= 0:
             return None
-        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
-
-        fee = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        fee = self._effective_fee_rate(venue, taker=taker)
         denom = Decimal("1") - fee
         if denom <= 0:
             return None
@@ -5905,6 +6339,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         *,
         aggressive: bool = False,
         force_taker: bool = False,
+        patient: bool = False,
     ) -> tuple[Decimal | None, bool, str]:
         """Pick a fillable exit price that still clears fee-aware break-even.
 
@@ -5913,6 +6348,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         ``aggressive`` (exit engine): join inside the spread near the bid touch
         instead of resting at the ask — captures short soft-armed spikes.
+        ``patient`` (profit-taking while price is up): never cross the spread;
+        rest post-only just inside the ask so the fill earns maker fees plus
+        the spread. Escalation to taker happens via ``force_taker`` (after
+        repeated stale maker quotes) or when the trail flips to a drawdown exit.
         Never quotes below maker BE; taker only when bid ≥ taker BE.
         """
         be_maker = self._break_even_sell_price(venue, base, taker=False)
@@ -5943,6 +6382,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return best_bid, False, "hit_bid_taker"
         if force_taker and mark >= be_taker:
             return max(be_taker, best_bid), False, "limit_taker_be"
+
+        if patient:
+            # Join just inside the ask (queue priority) but never at/below the bid.
+            tick = best_ask * Decimal("0.00005")
+            improve = best_ask * (self._exit_touch_improve_bps / Decimal("10000"))
+            ask_px = best_ask - max(tick, min(improve, (best_ask - best_bid) / Decimal("3")))
+            if ask_px <= best_bid:
+                ask_px = best_bid + max(tick, best_bid * Decimal("0.00005"))
+            maker_px = max(be_maker, ask_px)
+            return maker_px, True, "rest_ask_maker"
 
         # Bid already clears taker BE → take liquidity for a sure profitable fill.
         if best_bid >= be_taker:
@@ -6223,6 +6672,96 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _uw_deadlock_needed_free_eur(self) -> Decimal:
         return max(_ZERO, self._uw_deadlock_sleeve_target_eur() - self._uw_deadlock_free_quote_eur())
 
+    def _uw_bag_supported(self, base: str) -> bool:
+        """A bag has support when AlphaI still buys it or the tape still leads it."""
+        bu = str(base or "").strip().upper()
+        for probe in (
+            lambda: self._alphai_sleeve_priority_buy(bu),
+            lambda: self._alphai_bullish_buy(bu),
+            lambda: bu in self._tape_leader_bases(),
+        ):
+            try:
+                if probe():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _uw_confirmed_replacement(self, venue: str, base: str) -> str | None:
+        """An unheld name we would deploy into right now (sleeve target or tape leader)."""
+        bu = str(base or "").strip().upper()
+        try:
+            held = self._all_held_alt_bases()
+        except Exception:  # noqa: BLE001
+            held = set()
+        candidates: list[str] = []
+        try:
+            candidates.extend(self._sleeve_deploy_targets(top_n=2))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            candidates.extend(sorted(self._tape_leader_bases()))
+        except Exception:  # noqa: BLE001
+            pass
+        for cand in candidates:
+            cu = str(cand or "").upper()
+            if not cu or cu == bu or cu in held:
+                continue
+            try:
+                if self._alphai_is_avoid_base(cu) or self._alphai_blocks_base(cu):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+            return cu
+        return None
+
+    def _uw_recycle_plan_simple(
+        self,
+        *,
+        venue: str,
+        base: str,
+        symbol: str,
+        be: Decimal,
+        depth: Decimal,
+        age: float,
+    ) -> tuple[str, str, Decimal] | None:
+        """Three-rule underwater policy (replaces the tiered recycle stack).
+
+        1. Hard stops live outside this plan (early-cut -1% / cut-loss -2.5%).
+        2. Aged bag without support (AlphaI not buying, tape not leading) at a
+           mild depth: patient maker exit at the ask. Avoid-list bags age faster.
+        3. Rotate only against a *confirmed* replacement while capital is
+           deadlocked, within the daily voluntary-loss budget.
+        Deeper bags are nursed to recovery-arm or the hard cut — never dumped
+        at -1..-3% for "capital rotation" (37 such exits netted -38 EUR in 3 days).
+        """
+        max_depth = self._uw_simple_max_depth_pct
+        if max_depth <= 0 or depth > max_depth:
+            return None
+        floor = be * (Decimal("1") - max_depth)
+        grace = float(getattr(self, "_uw_fresh_entry_grace_sec", 0.0) or 0.0)
+        if grace > 0 and age < grace:
+            return None
+        if self._uw_bag_supported(base):
+            return None
+        avoid = False
+        try:
+            avoid = bool(self._alphai_is_avoid_base(base))
+        except Exception:  # noqa: BLE001
+            avoid = False
+        aged_after = self._uw_simple_avoid_age_sec if avoid else self._uw_simple_unsupported_age_sec
+        if aged_after > 0 and age >= aged_after:
+            return ("aged_avoid" if avoid else "aged_unsupported", "band", floor)
+        if (
+            age >= self._uw_simple_rotate_min_age_sec
+            and not self._uw_would_buy_today(base, symbol)
+            and self._capital_deadlocked(venue)
+            and self._uw_deadlock_day_loss_remaining() > 0
+            and self._uw_confirmed_replacement(venue, base) is not None
+        ):
+            return ("rotate_replacement", "band", floor)
+        return None
+
     def _uw_would_buy_today(self, base: str, symbol: str) -> bool:
         """Forward-looking: would we deploy fresh cash into this name now?
 
@@ -6345,6 +6884,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return ("dust", "band", floor)
             return ("dust", "stop", floor)
 
+        if str(getattr(self, "_uw_policy", "legacy") or "legacy").lower() == "simple":
+            return self._uw_recycle_plan_simple(
+                venue=venue,
+                base=base,
+                symbol=symbol,
+                be=be,
+                depth=depth,
+                age=age,
+            )
+
         strong_hold = self._alphai_protects_from_cuts(base)
         rotate_exit = False
         try:
@@ -6450,6 +6999,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     return ("rotate_non_pick_aged", "band", floor)
                 return ("rotate_non_pick_aged", "stop", floor)
 
+
+        # Fresh session entry grace: idle-pressure / deadlock / mid-flat tiers are
+        # bag-recycling tools, not stops. On a 5-minute-old AVAX clip they fired at
+        # -0.5% and the entry gate re-bought 10s later (7 round trips, pure fee
+        # bleed). Only early-cut (-1%) / cut-loss (-2.5%) may exit a fresh entry.
+        grace = float(getattr(self, "_uw_fresh_entry_grace_sec", 0.0) or 0.0)
+        if grace > 0 and age < grace:
+            try:
+                fresh_session_entry = self._session_qty(venue, base) > 0
+            except Exception:  # noqa: BLE001
+                fresh_session_entry = False
+            if fresh_session_entry:
+                return None
 
         # Deadlock unlock: free bags at mild depth/age so capital rotates.
         # Overrides strong_hold except for rising sleeve-priority names we still nurse.
@@ -6751,18 +7313,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         floor while remaining below break-even (AlphaI rotate leak).
         """
         best_bid = _ZERO
+        best_ask = _ZERO
         client = self._trading_client(venue)
         symbol = f"{base.upper()}{self._quote}"
         if client is not None:
             try:
                 ticker = await client.fetch_ticker(symbol)
                 best_bid = Decimal(str(getattr(ticker, "bid", None) or 0))
+                best_ask = Decimal(str(getattr(ticker, "ask", None) or 0))
             except Exception:  # noqa: BLE001
                 pass
         if best_bid <= 0:
             best_bid = mark
         if mode == "band" and best_bid < floor:
             return None, False, "uw_bid_below_floor"
+        if mode == "band" and self._exit_patient_enabled and best_ask > best_bid:
+            # Band = aged bag inside [floor, BE): not a stop. Rest post-only just
+            # inside the ask first (maker fee, no spread paid); escalate to the
+            # bid only after repeated stale quotes.
+            if not self._should_force_taker_exit(venue, base, "trail_uw_recycle_band"):
+                tick = best_ask * Decimal("0.00005")
+                ask_px = best_ask - tick
+                if ask_px <= best_bid:
+                    ask_px = best_bid + tick
+                return ask_px, True, "rest_ask_uw_band"
         if mode == "stop":
             # Prefer live BE when available; fall back to floor comparison.
             be = None
@@ -7679,6 +8253,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         return peak
 
+    def _gain_scaled_trail_dd(
+        self, dd: Decimal, *, peak: Decimal, cost: Decimal, hard_arm: Decimal
+    ) -> Decimal:
+        """Widen hard-trail drawdown with peak gain (room to run, capped).
+
+        peak gain < 2×arm → dd unchanged; 2×arm → ×1.5; ≥3×arm → ×2.0
+        (linear in between), never above ``live_micro_trail_dd_max_pct``.
+        """
+        if not self._trail_dd_gain_scale_enabled or dd <= 0 or cost <= 0 or peak <= 0:
+            return dd
+        if hard_arm <= 0:
+            return dd
+        peak_gain = (peak - cost) / cost
+        ratio = peak_gain / hard_arm
+        two = Decimal("2")
+        three = Decimal("3")
+        if ratio < two:
+            return dd
+        if ratio >= three:
+            mult = Decimal("2.0")
+        else:
+            mult = Decimal("1.5") + (ratio - two) * Decimal("0.5")
+        return min(dd * mult, self._trail_dd_max)
+
     def _sanitize_persisted_trails(self) -> None:
         """Clamp polluted peaks loaded from disk before the first live cycle."""
         for trail_key, st in list(self._trail.items()):
@@ -7891,6 +8489,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             peak=peak,
         )
         active_dd = hard_dd if st.get("hard_armed") else soft_dd
+        if st.get("hard_armed"):
+            active_dd = self._gain_scaled_trail_dd(
+                active_dd, peak=peak, cost=cost, hard_arm=hard_arm
+            )
         peak = self._sanitize_trail_peak(
             st,
             base=base,
@@ -8039,9 +8641,85 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "exit_reason": reason,
             },
         )
-        return await self.execute(
+        result = await self.execute(
             req, strategy=reason, order_type=OrderType.LIMIT
         )
+        if reason in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
+            try:
+                submitted = bool(getattr(result, "status", None)) and str(
+                    getattr(result, "status", "")
+                ).lower() not in {"rejected", "failed", "orderstatus.rejected", "orderstatus.failed"}
+            except Exception:  # noqa: BLE001
+                submitted = True
+            if submitted:
+                self._record_loss_exit(venue, infer_base_asset(symbol), px)
+        return result
+
+    # ----------------------------------------------------------- loss re-entry
+    def _record_loss_exit(self, venue: str, base: str, price: Decimal) -> None:
+        if self._loss_exit_cooldown_sec <= 0:
+            return
+        key = f"{str(venue).lower()}:{str(base).upper()}"
+        self._loss_exits[key] = (time.monotonic(), Decimal(str(price)))
+
+    def _fee_route_block(self, venue: str, base: str, notional: Decimal) -> str | None:
+        """Route a new-base entry to the cheaper venue when it can take the clip.
+
+        Bitvavo bills 0.15/0.25, OKX (Lv1, every spot pair incl. USDT) 0.20/0.35:
+        a maker round trip costs 0.30% vs 0.40%. While the preferred venue is live,
+        not holding the base, not blocked on it and has the free ring for this
+        clip, the more expensive venue must not open the position.
+        """
+        pref = str(
+            getattr(self._settings, "live_micro_preferred_entry_venue", "") or ""
+        ).strip().lower()
+        v = str(venue or "").strip().lower()
+        if not pref or v == pref:
+            return None
+        if pref not in (getattr(self, "_execute_venues", ()) or ()):
+            return None
+        bu = str(base or "").upper()
+        try:
+            if bu in self._held_alt_bases(pref):
+                return None
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            if bu in (self._underwater_blocked_bases.get(pref) or set()):
+                return None
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            free = self._venue_budget_remaining(pref)
+        except Exception:  # noqa: BLE001
+            return None
+        need = max(notional, _MIN_LIVE_NOTIONAL) if notional > 0 else _MIN_LIVE_NOTIONAL
+        if free < need:
+            return None
+        return (
+            f"routed to {pref} (fees {float(self._effective_fee_rate(pref, taker=False)) * 100:.2f}% vs "
+            f"{float(self._effective_fee_rate(v, taker=False)) * 100:.2f}% maker; free={free:.0f})"
+        )
+
+    def _loss_exit_block(self, venue: str, base: str, mark: Decimal | None) -> str | None:
+        """Reason string when a fresh re-entry after a loss exit must wait."""
+        if self._loss_exit_cooldown_sec <= 0:
+            return None
+        key = f"{str(venue).lower()}:{str(base).upper()}"
+        hit = self._loss_exits.get(key)
+        if hit is None:
+            return None
+        ts, exit_px = hit
+        age = time.monotonic() - ts
+        if age >= self._loss_exit_cooldown_sec:
+            self._loss_exits.pop(key, None)
+            return None
+        if mark is not None and mark > 0 and exit_px > 0:
+            reclaim = exit_px * (_ONE + self._loss_exit_reclaim_bps / Decimal("10000"))
+            if mark >= reclaim:
+                return None
+        remaining = int(self._loss_exit_cooldown_sec - age)
+        return f"loss exit {int(age)}s ago at {exit_px}; wait {remaining}s or reclaim +{self._loss_exit_reclaim_bps}bps"
 
     async def _refresh_free(
         self, venue: str, symbol: str, asset: str, locked: Decimal
@@ -8214,8 +8892,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
-            harvest_gain_floor = self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(
-                asset
+            harvest_gain_floor = max(
+                self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(asset),
+                self._harvest_fee_floor(venue),
             )
             exit_urgency = self._alphai_exit_urgency(asset)
             # AlphaI hold: when momentum goes flat/down after a peak, harvest BE+
@@ -8725,14 +9404,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     venue, asset, mark, floor=floor, mode=mode
                 )
             else:
-                # D: aggressive touch quotes for all profitable trail exits.
-                force_taker = self._should_force_taker_exit(venue, asset)
+                # D: aggressive touch quotes for urgent trail exits; patient
+                # profit-taking rests at the ask as maker (fee-aware).
+                force_taker = self._should_force_taker_exit(venue, asset, reason)
                 exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
                     venue,
                     asset,
                     mark,
                     aggressive=self._exit_engine_enabled,
                     force_taker=force_taker,
+                    patient=self._is_patient_exit(reason),
                 )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")
@@ -9396,6 +10077,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             allowed = self._alphai_bullish_buy(base)
             if sig_now is None:
                 allowed = False
+            tape_only = False
+            if allowed and sig_now is not None and hasattr(sig_now, "is_tape_confirmed"):
+                try:
+                    tape_only = bool(sig_now.is_tape_confirmed(base))
+                except Exception:  # noqa: BLE001
+                    tape_only = False
+            if tape_only:
+                # Tape leaders: per-venue slot cap + no macro/avoid — else reject.
+                if self._tape_confirmed_buy(venue, base):
+                    meta["tape_confirmed_buy"] = True
+                    self._tape_entry_bases.add(str(base).upper())
+                    self._bump_skip("tape_confirmed_entry")
+                else:
+                    self._bump_skip("tape_slot_blocked")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="TAPE_SLOT_BLOCKED",
+                        message=(
+                            f"tape leader {base}: per-venue tape slots full "
+                            f"(max {self._tape_max_bases_per_venue}) or tape stale"
+                        ),
+                    )
             if not allowed:
                 self._bump_skip("alphai_bullish_required")
                 return await self._reject_before_live(
@@ -9405,6 +10108,40 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"new {base} buys require AlphaI bullish pick/headline "
                         "(bearish/neutral names recycle at BE+ only)"
                     ),
+                )
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+            and not meta.get("winner_add")
+            and self._is_new_base_buy(venue, base)
+        ):
+            try:
+                mark_now = self._portfolio.state.mark_prices.get(symbol)
+            except Exception:  # noqa: BLE001
+                mark_now = None
+            block = self._loss_exit_block(venue, base, mark_now)
+            if block:
+                self._bump_skip("loss_exit_cooldown")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="LOSS_EXIT_COOLDOWN",
+                    message=f"{base} on {venue}: {block}",
+                )
+            try:
+                route_notional = Decimal(str(order_request.price or 0)) * Decimal(
+                    str(order_request.quantity or 0)
+                )
+            except Exception:  # noqa: BLE001
+                route_notional = _ZERO
+            route = self._fee_route_block(venue, base, route_notional)
+            if route:
+                self._bump_skip("fee_route_preferred_venue")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="FEE_ROUTE_PREFERRED_VENUE",
+                    message=f"{base} on {venue}: {route}",
                 )
         if (
             side_is_buy
@@ -9447,7 +10184,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
             mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
-            bullish_buy = self._alphai_bullish_buy(base)
+            tape_buy = bool(meta.get("tape_confirmed_buy"))
+            bullish_buy = self._alphai_bullish_buy(base) or tape_buy
             strong_bullish = self._alphai_strong_bullish_buy(base)
             # Velocity scale-up: for AlphaI strong bullish picks we allow missing
             # momentum-short history (require_history relax) to avoid "momentum_block"
@@ -9504,6 +10242,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 if short is None or short >= (self._entry_short_momentum_min * Decimal("0.25")):
                     momentum_ok = True
                     meta["sleeve_momentum_soft"] = True
+            # Tape leader (24h RS confirmed): same soft pass — block only when the
+            # intraday tape is actively falling or short momentum is negative.
+            if not momentum_ok and tape_buy and not self._momentum_down(symbol):
+                short = self._series_for(symbol).momentum_return_last(
+                    max(2, self._entry_short_momentum_samples // 2)
+                )
+                if short is None or short >= 0:
+                    momentum_ok = True
+                    meta["tape_momentum_soft"] = True
             if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(

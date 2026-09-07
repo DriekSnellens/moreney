@@ -194,6 +194,7 @@ class MakerInventoryStrategy(BaseStrategy):
         self._scan_rejections = 0
         self._opportunities_emitted = 0
         self._reject_counts: dict[str, int] = {}
+        self._last_reject_by_symbol: dict[str, str] = {}
         self._cv_pairs_evaluated = 0
         self._cv_edges_found = 0
         self._cv_opportunities_emitted = 0
@@ -1921,6 +1922,10 @@ class MakerInventoryStrategy(BaseStrategy):
     def _reject(self, symbol: str, code: str, reason: str, **context: object) -> None:
         self._scan_rejections += 1
         self._reject_counts[code] = self._reject_counts.get(code, 0) + 1
+        venue_tag = str(context.get("buy_exchange") or "")
+        self._last_reject_by_symbol[str(symbol)] = (
+            f"{code}@{venue_tag}: {reason}"[:200] if venue_tag else f"{code}: {reason}"[:200]
+        )
         if self._is_cross_venue(
             str(context.get("buy_exchange") or ""),
             str(context.get("sell_exchange") or ""),
@@ -1945,6 +1950,7 @@ class MakerInventoryStrategy(BaseStrategy):
             "scan_rejections": self._scan_rejections,
             "opportunities_emitted": self._opportunities_emitted,
             "reject_counts": dict(sorted(self._reject_counts.items())),
+            "last_reject_by_symbol": dict(sorted(self._last_reject_by_symbol.items())),
             "cross_venue": {
                 "pairs_evaluated": self._cv_pairs_evaluated,
                 "edges_found": self._cv_edges_found,

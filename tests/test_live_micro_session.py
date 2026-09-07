@@ -116,7 +116,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_trail_partial_enabled is True
     assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_arm_pct == 0.015
-    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_drawdown_pct == 0.005
     assert cfg.paper_trail_soft_partial_pct == 0.35
     assert cfg.paper_trail_hard_arm_pct == 0.025
     assert cfg.paper_trail_hard_drawdown_pct == 0.012
@@ -195,7 +195,7 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert cfg.paper_min_alt_inventory_pct >= 15.0
     assert cfg.paper_max_alt_inventory_pct == 35.0
     assert cfg.paper_trail_soft_partial_pct == 0.35
-    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_drawdown_pct == 0.005
     assert cfg.live_micro_exit_taker_after_maker_fails == 1
     assert cfg.live_micro_winner_add_enabled is True
     assert cfg.live_micro_low_util_relax_focus is False
@@ -232,13 +232,13 @@ def test_session_settings_cap_capital(tmp_path: Path) -> None:
     assert float(cfg.live_micro_uw_non_alphai_min_age_sec) == 1200.0
     assert float(cfg.live_micro_uw_alphai_below_be_pct) == 0.015
     assert float(cfg.live_micro_uw_alphai_min_age_sec) == 3600.0
-    assert cfg.live_micro_uw_idle_pressure_enabled is True
+    assert cfg.live_micro_uw_idle_pressure_enabled is False
     assert float(cfg.live_micro_uw_idle_below_be_pct) == 0.004
     assert float(cfg.live_micro_uw_idle_min_age_sec) == 600.0
     assert cfg.live_micro_alphai_cross_venue_deploy is True
     assert float(cfg.live_micro_alphai_cross_venue_max_other_depth_pct) == 0.025
     assert float(cfg.live_micro_alphai_ring_fill_add_max_depth_pct) == 0.012
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.008
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.015
     assert cfg.live_micro_cross_venue_min_fill_rate == 0.30
     assert cfg.paper_markout_enabled is False
     assert cfg.paper_seed_usdt_pct == 0.0
@@ -828,7 +828,7 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     )
     assert cfg.paper_trail_drawdown_pct == 0.012
     assert cfg.paper_trail_soft_arm_pct == 0.015
-    assert cfg.paper_trail_soft_drawdown_pct == 0.002
+    assert cfg.paper_trail_soft_drawdown_pct == 0.005
     assert cfg.paper_trail_hard_arm_pct == 0.025
     assert cfg.paper_trail_partial_pct == 0.50
     assert cfg.paper_trail_soft_partial_pct == 0.35
@@ -842,14 +842,15 @@ def test_trail_runner_drawdown_uses_12pct_in_session_settings(tmp_path: Path) ->
     assert cfg.live_micro_reset_drawdown_on_start is True
     assert float(cfg.live_micro_be_harvest_cooldown_sec) == 2.0
     assert float(cfg.paper_trail_be_harvest_partial_pct) == 0.40
-    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.008
+    assert float(cfg.paper_trail_be_harvest_min_gain_pct) == 0.015
     assert cfg.live_micro_exit_engine_enabled is True
-    assert abs(float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) - 21.25) < 0.05
+    # 3% of satellite (50% of €2024 budget) → €30.36.
+    assert abs(float(cfg.live_micro_velocity_sleeve_daily_loss_cap_eur) - 30.36) < 0.05
     assert float(cfg.live_micro_exit_resting_max_age_sec) == 1.5
     assert float(cfg.live_micro_mark_ttl_sec) == 2.0
     assert float(cfg.live_micro_exit_cooldown_sec) == 1.5
     assert abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)) < 1e-6 or abs(float(cfg.live_micro_active_ring_eur) - float(cfg.live_micro_satellite_eur)/max(1,len(str(cfg.live_micro_execute_venues or "bitvavo").split(",")))) < 1e-6
-    assert abs(float(cfg.live_micro_velocity_sleeve_eur) - 708.4) < 0.05
+    assert abs(float(cfg.live_micro_velocity_sleeve_eur) - 1012.0) < 0.05
 
 
 def test_reset_drawdown_baseline_rewinds_peak() -> None:
