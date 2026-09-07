@@ -558,6 +558,22 @@ class Settings(BaseSettings):
     # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
+    # Daily Momentum Desk (bot/live/momentum_desk.py + momentum_runner.py).
+    momentum_desk_enabled: bool = False
+    momentum_desk_venue: str = "bitvavo"
+    momentum_desk_decision_hours_utc: str = "0"
+    momentum_desk_clip_eur: float = Field(default=500.0, gt=0)
+    momentum_desk_max_positions: int = Field(default=3, ge=1, le=10)
+    momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
+    momentum_desk_trail_tight_after: float = Field(default=0.03, ge=0, le=0.5)
+    momentum_desk_trail_tight_pct: float = Field(default=0.015, gt=0, le=0.2)
+    momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
+    momentum_desk_time_exit_hours: float = Field(default=48.0, gt=0)
+    momentum_desk_day_loss_limit_eur: float = Field(default=40.0, gt=0)
+    momentum_desk_week_loss_limit_eur: float = Field(default=100.0, gt=0)
+    momentum_desk_macro_caution_mode: str = "reduce"
+    momentum_desk_state_path: str = "./data/momentum_desk_state.json"
+    momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
