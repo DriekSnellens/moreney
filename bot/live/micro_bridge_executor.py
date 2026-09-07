@@ -658,8 +658,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "reasons": ["cold_start"],
             "overlays": {},
         }
-        self._certainty_ring_baseline_eur = Decimal(str(self._active_ring_eur or 0))
-        self._sleeve_loss_cap_baseline = Decimal(str(self._sleeve_daily_loss_cap or 0))
+        # Certainty ring / sleeve-cap baselines captured after ring knobs are set.
+        self._certainty_ring_baseline_eur = Decimal("0")
+        self._sleeve_loss_cap_baseline = Decimal("0")
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -792,6 +793,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 or 25
             )
         )
+        self._certainty_ring_baseline_eur = Decimal(str(self._active_ring_eur or 0))
+        self._sleeve_loss_cap_baseline = Decimal(str(self._sleeve_daily_loss_cap or 0))
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
         self._capital_split_enabled = bool(
