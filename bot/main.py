@@ -7,6 +7,7 @@ Withdrawals remain disabled / non-automatic.
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -55,6 +56,7 @@ from bot.live.micro_session_manager import (
     get_micro_session_manager,
     reset_micro_session_manager,
 )
+from bot.live.momentum_runner import get_momentum_desk_manager
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -222,6 +224,14 @@ async def lifespan(_app: FastAPI):
                 logger.warning("micro session auto-resume did not start: %s", resume)
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume interrupted micro session")
+        try:
+            resumed = await get_momentum_desk_manager().resume_if_flagged()
+            if resumed and resumed.get("started"):
+                logger.info("auto-resumed momentum desk after process start")
+            elif resumed:
+                logger.warning("momentum desk auto-resume did not start: %s", resumed)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume momentum desk")
     yield
     if paper_runner is not None:
         try:
@@ -559,6 +569,52 @@ async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dic
 async def live_micro_session_stop() -> dict[str, Any]:
     """Request stop of the running full-bot micro session."""
     return await get_micro_session_manager().stop()
+
+
+@app.get("/live/momentum/status")
+async def live_momentum_status() -> dict[str, Any]:
+    """Daily Momentum Desk: positions, risk ledger, last decision, next decision."""
+    return get_momentum_desk_manager().status()
+
+
+@app.post("/live/momentum/start")
+async def live_momentum_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start the Daily Momentum Desk (``{"dry_run": true}`` for shadow mode)."""
+    body = payload or {}
+    dry = body.get("dry_run", False)
+    if isinstance(dry, str):
+        dry = dry.strip().lower() not in {"0", "false", "no"}
+    settings = get_settings()
+    venue = str(body.get("venue") or settings.momentum_desk_venue)
+    return await get_momentum_desk_manager().start(
+        settings=settings, dry_run=bool(dry), venue=venue
+    )
+
+
+@app.post("/live/momentum/stop")
+async def live_momentum_stop() -> dict[str, Any]:
+    """Stop the Daily Momentum Desk loop (open positions stay on the exchange)."""
+    return await get_momentum_desk_manager().stop()
+
+
+@app.get("/live/momentum/ledger")
+async def live_momentum_ledger(limit: int = 200) -> dict[str, Any]:
+    """Tail of the momentum desk trade ledger (entries, exits, decisions)."""
+    path = Path(get_settings().momentum_desk_ledger_path)
+    rows: list[dict[str, Any]] = []
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line in lines[-max(1, min(int(limit), 2000)) :]:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+    }
 
 
 @app.post("/live/micro/session/reset-dashboard")
