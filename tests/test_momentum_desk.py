@@ -238,6 +238,7 @@ class FakeGateway:
     bid: float = 100.0
     ask: float = 100.2
     fill_maker_after_polls: int | None = None  # None = never fills as maker
+    partial_on_cancel: bool = False
     placed: list[dict] = field(default_factory=list)
     _orders: dict[str, dict] = field(default_factory=dict)
     _polls: int = 0
@@ -282,8 +283,14 @@ class FakeGateway:
     async def cancel_order(self, order_id, symbol):
         o = self._orders[order_id]
         if o["status"] == "open":
+            if self.partial_on_cancel:
+                # Venue filled part of it just before the cancel landed; the
+                # cancel reply itself (like Bitvavo's) says nothing about it.
+                o.update(
+                    filled=o["qty"] * 0.4, avg=o["price"], fee=o["qty"] * 0.4 * o["price"] * 0.0015
+                )
             o["status"] = "canceled"
-        return OrderState(order_id, o["status"], o["filled"], o["avg"], o["fee"])
+        return OrderState(order_id, "open", 0.0, None, 0.0)
 
 
 class FakeClock:
@@ -332,6 +339,19 @@ def test_buy_rests_as_maker_then_falls_back_to_taker(tmp_path):
     taker = gw.placed[-1]
     assert not taker["post_only"] and taker["price"] == pytest.approx(100.2 * 1.002)
     assert fill.notional == pytest.approx(500.0, rel=1e-3)
+
+
+def test_partial_maker_fill_before_cancel_is_settled_from_refetch(tmp_path):
+    gw = FakeGateway(partial_on_cancel=True)
+    clock = FakeClock(T0 / 1000)
+    r = _runner(tmp_path, gw, clock)
+    fill = asyncio.run(r._buy("SOL", 500.0))
+    assert fill is not None and fill.taker
+    makers = [p for p in gw.placed if p["post_only"]]
+    # Each re-peg only re-posts the unfilled remainder.
+    assert makers[1]["qty"] == pytest.approx(makers[0]["qty"] * 0.6)
+    assert fill.notional == pytest.approx(500.0, rel=2e-3)
+    assert fill.fee_eur > 0
 
 
 def test_buy_fills_as_maker_without_taker(tmp_path):

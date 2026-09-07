@@ -674,11 +674,9 @@ class MomentumDeskRunner:
                 state, symbol, min(self.opt.repeg_sec, max(0.0, deadline - self._clock()))
             )
             if state.status == "open":
-                try:
-                    state = await self._gw.cancel_order(state.order_id, symbol)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("momentum desk: cancel failed %s: %s", state.order_id, exc)
-                    state = await self._gw.fetch_order(state.order_id, symbol)
+                state = await self._cancel_and_refetch(state, symbol)
+            elif state.status == "closed":
+                state = await self._refetch(state, symbol)
             await _settle(state)
             if state.status == "rejected":
                 await self._sleep(self.opt.poll_sec)
@@ -694,7 +692,9 @@ class MomentumDeskRunner:
                 taker_used = True
                 state = await self._poll(state, symbol, 30.0)
                 if state.status == "open":
-                    state = await self._gw.cancel_order(state.order_id, symbol)
+                    state = await self._cancel_and_refetch(state, symbol)
+                elif state.status == "closed":
+                    state = await self._refetch(state, symbol)
                 await _settle(state)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("momentum desk: taker %s %s failed: %s", side, symbol, exc)
@@ -704,6 +704,23 @@ class MomentumDeskRunner:
         return Fill(
             qty=filled_qty, avg_price=filled_cost / filled_qty, fee_eur=fee_eur, taker=taker_used
         )
+
+    async def _refetch(self, state: OrderState, symbol: str) -> OrderState:
+        """Authoritative fill/fee figures come from fetch_order, not from the
+        create/cancel responses (Bitvavo's cancel reply carries neither)."""
+        try:
+            return await self._gw.fetch_order(state.order_id, symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: refetch failed %s: %s", state.order_id, exc)
+            return state
+
+    async def _cancel_and_refetch(self, state: OrderState, symbol: str) -> OrderState:
+        try:
+            await self._gw.cancel_order(state.order_id, symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: cancel failed %s: %s", state.order_id, exc)
+        await self._sleep(1.0)
+        return await self._refetch(state, symbol)
 
     async def _poll(self, state: OrderState, symbol: str, max_sec: float) -> OrderState:
         end = self._clock() + max_sec
