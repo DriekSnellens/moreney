@@ -527,6 +527,20 @@ class Settings(BaseSettings):
     live_micro_desk_mode_velocity_sleeve_loss_cap_eur: float = Field(
         default=35.0, ge=0.0, le=500.0
     )
+    # Tape-confirmed entries when AlphaI has no actionable picks (RS vs BTC,
+    # breadth, liquidity, not fading from high). Coin-agnostic.
+    live_micro_tape_confirm_enabled: bool = True
+    live_micro_tape_refresh_sec: float = Field(default=120.0, ge=30.0, le=900.0)
+    live_micro_tape_min_excess_pp: float = Field(default=2.0, ge=0.0, le=20.0)
+    live_micro_tape_min_ret_pct: float = Field(default=1.0, ge=0.0, le=20.0)
+    live_micro_tape_min_volume_eur: float = Field(default=500_000.0, ge=0.0)
+    live_micro_tape_max_from_high_pct: float = Field(default=3.0, ge=0.5, le=20.0)
+    live_micro_tape_min_breadth: float = Field(default=0.50, ge=0.0, le=1.0)
+    live_micro_tape_top_n: int = Field(default=4, ge=1, le=10)
+    live_micro_tape_max_bases_per_venue: int = Field(default=2, ge=0, le=6)
+    # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
+    live_micro_trail_dd_gain_scale_enabled: bool = True
+    live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
@@ -716,8 +730,10 @@ class Settings(BaseSettings):
     )
     # Core/satellite split: core stays cash (or light BTC/ETH); satellite = trend sleeve.
     live_micro_capital_split_enabled: bool = True
-    live_micro_core_fraction: float = Field(default=0.65, ge=0.0, le=0.95)
-    live_micro_satellite_fraction: float = Field(default=0.35, ge=0.05, le=0.95)
+    # 50/50: €350 rings missed multi-% alt rotations; €500/venue keeps hard
+    # cut-loss exposure (2.5%) at ~€12.5 per full ring sweep.
+    live_micro_core_fraction: float = Field(default=0.50, ge=0.0, le=0.95)
+    live_micro_satellite_fraction: float = Field(default=0.50, ge=0.05, le=0.95)
     # cash = idle EUR vault; btc_eth = mark BTC/ETH as long-hold core (manual/light beta).
     live_micro_core_mode: str = "cash"
     live_micro_core_long_hold_bases: str = "BTC,ETH"

@@ -226,7 +226,9 @@ def _session_settings(
             # Trail all synced inventory (incl. pre-session bags → BE harvest).
             "paper_trail_session_buys_only": False,
             "paper_trail_soft_arm_pct": 0.015,
-            "paper_trail_soft_drawdown_pct": 0.002,
+            # 0.2% clipped +1.5% winners on noise; 0.5% gives room to run
+            # (hard trail widens further with gain via live_micro_trail_dd_gain_scale).
+            "paper_trail_soft_drawdown_pct": 0.005,
             "paper_trail_soft_partial_pct": 0.35,
             "paper_trail_recovery_be_partial_pct": 0.60,
             "paper_trail_be_harvest_partial_pct": 0.40,
