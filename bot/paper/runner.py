@@ -2371,6 +2371,7 @@ class PaperRunner:
             except Exception:  # noqa: BLE001
                 logger.exception("ALPHAI_PRICE_CONFIRM_FAILED")
         signals = build_trading_signals(state, daily)
+        signals = await self._inject_tape_confirmed(signals)
         maker = self._maker_strategy()
         if maker is not None:
             hmm_ro = bool(getattr(self, "_hmm_reduce_only", False))
@@ -2393,6 +2394,74 @@ class PaperRunner:
             executor.apply_alphai_trading_signals(signals)
         if self._alphai_reduce_only and not allow_bullish_macro:
             await self._cancel_all_bids(reason="alphai_macro_reduce_only")
+
+    async def _inject_tape_confirmed(self, signals: Any) -> Any:
+        """Add tape RS leaders when AlphaI has no native bullish buys.
+
+        Single Bitvavo 24h call, TTL-cached; leaders excluded when macro caution,
+        weak breadth, or AlphaI avoid/blocked. Coin-agnostic by construction.
+        """
+        if not bool(getattr(self._settings, "live_micro_tape_confirm_enabled", True)):
+            return signals
+        try:
+            from dataclasses import replace
+
+            from bot.live.tape_confirm import fetch_bitvavo_24h, rank_tape_leaders
+
+            ttl = float(getattr(self._settings, "live_micro_tape_refresh_sec", 120.0) or 120.0)
+            now = time.time()
+            snap = getattr(self, "_tape_snapshot", None)
+            last = float(getattr(self, "_tape_last_fetch_ts", 0.0) or 0.0)
+            if snap is None or (now - last) >= ttl:
+                self._tape_last_fetch_ts = now
+                bases: set[str] = {"BTC"}
+                quote = "EUR"
+                for sym in str(getattr(self._settings, "live_micro_symbols", "") or "").split(","):
+                    s = sym.strip().upper()
+                    if s.endswith(quote):
+                        bases.add(s[: -len(quote)])
+                for raw in str(getattr(self._settings, "live_micro_focus_bases", "") or "").split(","):
+                    b = raw.strip().upper()
+                    if b:
+                        bases.add(b)
+                exclude = set(getattr(signals, "avoid_bases", frozenset()) or ()) | set(
+                    getattr(signals, "blocked_bases", frozenset()) or ()
+                )
+                rows = await asyncio.to_thread(fetch_bitvavo_24h, sorted(bases))
+                if rows:
+                    snap = rank_tape_leaders(
+                        rows,
+                        min_excess_pp=float(getattr(self._settings, "live_micro_tape_min_excess_pp", 2.0) or 0.0),
+                        min_ret_pct=float(getattr(self._settings, "live_micro_tape_min_ret_pct", 1.0) or 0.0),
+                        min_volume_eur=float(getattr(self._settings, "live_micro_tape_min_volume_eur", 500_000.0) or 0.0),
+                        max_from_high_pct=float(getattr(self._settings, "live_micro_tape_max_from_high_pct", 3.0) or 3.0),
+                        min_breadth=float(getattr(self._settings, "live_micro_tape_min_breadth", 0.50) or 0.0),
+                        top_n=int(getattr(self._settings, "live_micro_tape_top_n", 4) or 4),
+                        exclude=exclude,
+                        now_ts=now,
+                    )
+                    self._tape_snapshot = snap
+            executor = self._executor
+            if snap is not None and hasattr(executor, "apply_tape_snapshot"):
+                executor.apply_tape_snapshot(snap)
+            if snap is None or snap.age_sec(now) > ttl * 2.5:
+                return signals
+            if bool(getattr(signals, "macro_active", False)):
+                return signals
+            native = signals.native_bullish_buy_bases() if hasattr(signals, "native_bullish_buy_bases") else frozenset()
+            if native:
+                return signals
+            leaders = frozenset(
+                b
+                for b in snap.leader_bases()
+                if b not in signals.avoid_bases and b not in signals.blocked_bases
+            )
+            if not leaders:
+                return signals
+            return replace(signals, tape_confirmed_bases=leaders)
+        except Exception:  # noqa: BLE001
+            logger.exception("TAPE_CONFIRM_INJECT_FAILED")
+            return signals
 
     def ingest_alphai_article(self, article: dict[str, Any]) -> dict[str, Any]:
         """Push webhook article into the live monitor (Pro tier)."""

@@ -29,6 +29,28 @@ class AlphaITradingSignals:
     price_lag_bases: frozenset[str] = field(default_factory=frozenset)
     price_confirm_scales: dict[str, float] = field(default_factory=dict)
     base_reliability: dict[str, float] = field(default_factory=dict)
+    # Tape-confirmed RS leaders injected only when AlphaI has no native bullish
+    # buys (headline-quiet day). Never overrides avoid/blocked.
+    tape_confirmed_bases: frozenset[str] = field(default_factory=frozenset)
+
+    def is_tape_confirmed(self, base: str) -> bool:
+        """Tape-only entry candidate (not an AlphaI pick / headline name)."""
+        b = str(base or "").upper()
+        if not b or b not in self.tape_confirmed_bases:
+            return False
+        if b in self.avoid_bases or b in self.blocked_bases:
+            return False
+        return b not in self.bullish_bases and not (
+            b in self.daily_pick_bases and self.pick_score(b) > 0
+        )
+
+    def native_bullish_buy_bases(self) -> frozenset[str]:
+        """AlphaI-native bullish buys (headline / positive pick), tape excluded."""
+        return frozenset(
+            b
+            for b in set(self.daily_pick_bases) | set(self.bullish_bases)
+            if self.is_bullish_buy(b) and not self.is_tape_confirmed(b)
+        )
 
     def pick_score(self, base: str) -> float:
         return float(self.daily_pick_scores.get(str(base or "").upper(), 0.0))
@@ -68,11 +90,16 @@ class AlphaITradingSignals:
             and k not in self.blocked_bases
         ]
         if not positive:
-            return 0.75 if b in self.bullish_bases else 0.0
+            if b in self.bullish_bases:
+                return 0.75
+            # Tape leader on a pick-less day: moderate, tape-scaled conviction.
+            return 0.50 * self.price_confirm_scale(b) if self.is_tape_confirmed(b) else 0.0
         ranked = sorted(positive, key=lambda row: row[1], reverse=True)
         score_map = {k: s for k, s in ranked}
         if b not in score_map:
-            return 0.70 if b in self.bullish_bases else 0.0
+            if b in self.bullish_bases:
+                return 0.70
+            return 0.45 * self.price_confirm_scale(b) if self.is_tape_confirmed(b) else 0.0
         n = len(ranked)
         rank_idx = next(i for i, (k, _) in enumerate(ranked) if k == b)
         # Rank #1 → 1.0; last of N → 1/N.
@@ -213,6 +240,8 @@ class AlphaITradingSignals:
             return False
         if b in self.bullish_bases:
             return True
+        if self.is_tape_confirmed(b):
+            return True
         # Top-N positive daily picks (default 5) — expands thin buy universe.
         if self.is_slot_priority_buy(b, top_n=5):
             return True
@@ -276,6 +305,8 @@ class AlphaITradingSignals:
         if b in self.bullish_bases:
             return True
         if b in self.daily_pick_bases and self.pick_score(b) > 0:
+            return True
+        if b in self.tape_confirmed_bases:
             return True
         if ring_fallback:
             if b in self.watch_bases:
@@ -408,6 +439,9 @@ class AlphaITradingSignals:
             return False
         if self.is_strong_bullish_buy(base):
             return True
+        # Tape leader on a pick-less day: first clip may open (normal clip, no strong path).
+        if self.is_tape_confirmed(base):
+            return True
         if not ring_fallback:
             return False
         b = str(base or "").upper()
@@ -423,7 +457,9 @@ class AlphaITradingSignals:
     def bullish_buy_bases(self) -> frozenset[str]:
         return frozenset(
             b
-            for b in set(self.daily_pick_bases) | set(self.bullish_bases)
+            for b in set(self.daily_pick_bases)
+            | set(self.bullish_bases)
+            | set(self.tape_confirmed_bases)
             if self.is_bullish_buy(b)
         )
 
@@ -435,6 +471,8 @@ class AlphaITradingSignals:
             "watch_bases": sorted(self.watch_bases),
             "bullish_bases": sorted(self.bullish_bases),
             "bullish_buy_bases": sorted(self.bullish_buy_bases()),
+            "native_bullish_buy_bases": sorted(self.native_bullish_buy_bases()),
+            "tape_confirmed_bases": sorted(self.tape_confirmed_bases),
             "blocked_bases": sorted(self.blocked_bases),
             "macro_active": self.macro_active,
             "bullish_headline_counts": dict(self.bullish_headline_counts),

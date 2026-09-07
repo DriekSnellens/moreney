@@ -661,6 +661,40 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         # Certainty ring / sleeve-cap baselines captured after ring knobs are set.
         self._certainty_ring_baseline_eur = Decimal("0")
         self._sleeve_loss_cap_baseline = Decimal("0")
+        # Tape-confirmed entries (AlphaI-quiet days): RS leaders vs BTC + breadth.
+        self._tape_confirm_enabled = bool(
+            getattr(settings, "live_micro_tape_confirm_enabled", True)
+        )
+        self._tape_refresh_sec = float(
+            getattr(settings, "live_micro_tape_refresh_sec", 120.0) or 120.0
+        )
+        self._tape_min_excess_pp = float(
+            getattr(settings, "live_micro_tape_min_excess_pp", 2.0) or 0.0
+        )
+        self._tape_min_ret_pct = float(
+            getattr(settings, "live_micro_tape_min_ret_pct", 1.0) or 0.0
+        )
+        self._tape_min_volume_eur = float(
+            getattr(settings, "live_micro_tape_min_volume_eur", 500_000.0) or 0.0
+        )
+        self._tape_max_from_high_pct = float(
+            getattr(settings, "live_micro_tape_max_from_high_pct", 3.0) or 3.0
+        )
+        self._tape_min_breadth = float(
+            getattr(settings, "live_micro_tape_min_breadth", 0.50) or 0.0
+        )
+        self._tape_top_n = int(getattr(settings, "live_micro_tape_top_n", 4) or 4)
+        self._tape_max_bases_per_venue = int(
+            getattr(settings, "live_micro_tape_max_bases_per_venue", 2) or 0
+        )
+        self._tape_snapshot: Any = None
+        self._tape_entry_bases: set[str] = set()
+        self._trail_dd_gain_scale_enabled = bool(
+            getattr(settings, "live_micro_trail_dd_gain_scale_enabled", True)
+        )
+        self._trail_dd_max = Decimal(
+            str(getattr(settings, "live_micro_trail_dd_max_pct", 0.03) or 0.03)
+        )
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -1462,6 +1496,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return True
         except Exception:  # noqa: BLE001
             pass
+        # Tape-confirmed entries are managed by trail / cut-loss, not AlphaI
+        # pick-confidence rotation (they have no pick score by construction).
+        if self._is_tape_entry_base(bu):
+            return False
         try:
             if not self._alphai_bullish_buy(bu):
                 return True
@@ -1529,7 +1567,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             pass
         # Non-pick bags: harvest sooner so AlphaI satellite entries get capital.
         try:
-            if self._daytrade_rotate_non_picks() and not self._alphai_bullish_buy(base):
+            if (
+                self._daytrade_rotate_non_picks()
+                and not self._alphai_bullish_buy(base)
+                and not self._is_tape_entry_base(base)
+            ):
                 scale = scale * Decimal("0.40")
         except Exception:  # noqa: BLE001
             pass
@@ -1730,6 +1772,98 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return bool(sig.is_bullish_buy(base, ring_fallback=False))
         ring_fb = self._alphai_ring_fallback_active()
         return bool(sig.is_bullish_buy(base, ring_fallback=ring_fb))
+
+    # ------------------------------------------------------------------ tape
+    def apply_tape_snapshot(self, snapshot: object | None) -> None:
+        """Runner-provided 24h tape snapshot (RS leaders, breadth) for display + gates."""
+        self._tape_snapshot = snapshot
+
+    def _tape_snapshot_fresh(self) -> bool:
+        snap = getattr(self, "_tape_snapshot", None)
+        ttl = float(getattr(self, "_tape_refresh_sec", 120.0) or 120.0)
+        try:
+            return snap is not None and snap.age_sec() < ttl * 2.5
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _tape_leader_bases(self) -> frozenset[str]:
+        if not getattr(self, "_tape_confirm_enabled", False) or not self._tape_snapshot_fresh():
+            return frozenset()
+        try:
+            return frozenset(self._tape_snapshot.leader_bases())
+        except Exception:  # noqa: BLE001
+            return frozenset()
+
+    def _tape_breadth(self) -> float:
+        if not self._tape_snapshot_fresh():
+            return 0.0
+        try:
+            return float(self._tape_snapshot.breadth)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _alphai_has_native_bullish(self) -> bool:
+        """AlphaI-native bullish buys exist (tape leaders excluded)."""
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        try:
+            if hasattr(sig, "native_bullish_buy_bases"):
+                return bool(sig.native_bullish_buy_bases())
+            return bool(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _tape_entry_held(self, venue: str | None = None) -> set[str]:
+        tape_bases = getattr(self, "_tape_entry_bases", None) or set()
+        if not tape_bases:
+            return set()
+        held: set[str] = set()
+        venues = [venue] if venue else list(getattr(self, "_execute_venues", ()) or ())
+        for v in venues:
+            try:
+                held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                continue
+        return {b for b in tape_bases if b in held}
+
+    def _is_tape_entry_base(self, base: str) -> bool:
+        bu = str(base or "").upper()
+        tape_bases = getattr(self, "_tape_entry_bases", None) or set()
+        return bool(bu) and bu in tape_bases and bu in self._tape_entry_held()
+
+    def _tape_confirmed_buy(self, venue: str, base: str) -> bool:
+        """Tape leader may open when AlphaI is silent (no unheld bullish picks).
+
+        Requires: tape enabled + fresh, base is an RS leader, not AlphaI
+        avoid/bearish, no macro caution, and per-venue tape slot available.
+        """
+        if not self._tape_confirm_enabled:
+            return False
+        bu = str(base or "").upper()
+        if not bu or bu in self._exclude_bases:
+            return False
+        if bool(self._alphai_macro_active):
+            return False
+        if self._alphai_is_avoid_base(bu):
+            return False
+        sig = self._alphai_signals
+        tape_leader = bu in self._tape_leader_bases()
+        if sig is not None and hasattr(sig, "is_tape_confirmed"):
+            try:
+                tape_leader = tape_leader or bool(sig.is_tape_confirmed(bu))
+            except Exception:  # noqa: BLE001
+                pass
+        if not tape_leader:
+            return False
+        if self._alphai_has_native_bullish():
+            return False
+        if self._tape_max_bases_per_venue <= 0:
+            return False
+        held = self._tape_entry_held(venue)
+        if bu in held:
+            return True
+        return len(held) < self._tape_max_bases_per_venue
 
     def _alphai_ring_fallback_active(self) -> bool:
         """Ring underfilled and all bullish picks held → allow focus non-avoid buys."""
@@ -2346,7 +2480,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         best_conviction = 0.0
         bases: set[str] = set()
         try:
-            if hasattr(sig, "bullish_buy_bases"):
+            if hasattr(sig, "native_bullish_buy_bases"):
+                bases |= {str(b).upper() for b in (sig.native_bullish_buy_bases() or [])}
+            elif hasattr(sig, "bullish_buy_bases"):
                 bases |= {str(b).upper() for b in (sig.bullish_buy_bases() or [])}
         except Exception:  # noqa: BLE001
             pass
@@ -2396,6 +2532,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
         confirmed_n, best_confirm, best_conviction = self._desk_mode_alphai_stats()
+        tape_n = len(self._tape_leader_bases())
+        tape_breadth = self._tape_breadth()
         certainty_ring = float(self._certainty_ring_baseline_eur or 0)
         if certainty_ring <= 0:
             try:
@@ -2428,6 +2566,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 median_mom=median_mom,
                 satellite_eur=satellite,
                 certainty_ring_eur=certainty_ring,
+                tape_confirmed_count=int(tape_n),
+                tape_breadth=float(tape_breadth),
             ),
             current=current,
             held_sec=held,
@@ -2481,6 +2621,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "median_mom": median_mom,
                 "certainty_ring_eur": round(certainty_ring, 2),
                 "satellite_eur": round(satellite, 2),
+                "tape_confirmed": int(tape_n),
+                "tape_breadth": round(float(tape_breadth), 3),
             },
         }
         return self._desk_mode_decision
@@ -3317,6 +3459,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "certainty_ring_baseline_eur": str(self._certainty_ring_baseline_eur),
                 "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
             },
+            "tape": {
+                "enabled": bool(self._tape_confirm_enabled),
+                "fresh": self._tape_snapshot_fresh(),
+                "max_bases_per_venue": self._tape_max_bases_per_venue,
+                "entry_bases_held": sorted(self._tape_entry_held()),
+                **(
+                    self._tape_snapshot.as_dict()
+                    if self._tape_snapshot is not None and hasattr(self._tape_snapshot, "as_dict")
+                    else {}
+                ),
+            },
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))
                 for v in sorted(self._execute_venues)
@@ -3569,6 +3722,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
         if self._cvd_abandoned:
             hints.append("CVD_ABANDONED")
+        if self._tape_confirm_enabled:
+            snap = self._tape_snapshot
+            if snap is None:
+                hints.append("TAPE no snapshot yet")
+            else:
+                try:
+                    leaders = ",".join(ld.base for ld in snap.leaders) or "-"
+                    hints.append(
+                        f"TAPE breadth={float(snap.breadth):.2f} leaders={leaders} "
+                        f"{'FRESH' if self._tape_snapshot_fresh() else 'STALE'} "
+                        f"held={','.join(sorted(self._tape_entry_held())) or '-'}"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         if self._alphai_enabled:
             if self._alphai_macro_active:
                 hints.append("ALPHAI_MACRO_REDUCE_ONLY")
@@ -7679,6 +7846,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         return peak
 
+    def _gain_scaled_trail_dd(
+        self, dd: Decimal, *, peak: Decimal, cost: Decimal, hard_arm: Decimal
+    ) -> Decimal:
+        """Widen hard-trail drawdown with peak gain (room to run, capped).
+
+        peak gain < 2×arm → dd unchanged; 2×arm → ×1.5; ≥3×arm → ×2.0
+        (linear in between), never above ``live_micro_trail_dd_max_pct``.
+        """
+        if not self._trail_dd_gain_scale_enabled or dd <= 0 or cost <= 0 or peak <= 0:
+            return dd
+        if hard_arm <= 0:
+            return dd
+        peak_gain = (peak - cost) / cost
+        ratio = peak_gain / hard_arm
+        two = Decimal("2")
+        three = Decimal("3")
+        if ratio < two:
+            return dd
+        if ratio >= three:
+            mult = Decimal("2.0")
+        else:
+            mult = Decimal("1.5") + (ratio - two) * Decimal("0.5")
+        return min(dd * mult, self._trail_dd_max)
+
     def _sanitize_persisted_trails(self) -> None:
         """Clamp polluted peaks loaded from disk before the first live cycle."""
         for trail_key, st in list(self._trail.items()):
@@ -7891,6 +8082,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             peak=peak,
         )
         active_dd = hard_dd if st.get("hard_armed") else soft_dd
+        if st.get("hard_armed"):
+            active_dd = self._gain_scaled_trail_dd(
+                active_dd, peak=peak, cost=cost, hard_arm=hard_arm
+            )
         peak = self._sanitize_trail_peak(
             st,
             base=base,
@@ -9396,6 +9591,28 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             allowed = self._alphai_bullish_buy(base)
             if sig_now is None:
                 allowed = False
+            tape_only = False
+            if allowed and sig_now is not None and hasattr(sig_now, "is_tape_confirmed"):
+                try:
+                    tape_only = bool(sig_now.is_tape_confirmed(base))
+                except Exception:  # noqa: BLE001
+                    tape_only = False
+            if tape_only:
+                # Tape leaders: per-venue slot cap + no macro/avoid — else reject.
+                if self._tape_confirmed_buy(venue, base):
+                    meta["tape_confirmed_buy"] = True
+                    self._tape_entry_bases.add(str(base).upper())
+                    self._bump_skip("tape_confirmed_entry")
+                else:
+                    self._bump_skip("tape_slot_blocked")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="TAPE_SLOT_BLOCKED",
+                        message=(
+                            f"tape leader {base}: per-venue tape slots full "
+                            f"(max {self._tape_max_bases_per_venue}) or tape stale"
+                        ),
+                    )
             if not allowed:
                 self._bump_skip("alphai_bullish_required")
                 return await self._reject_before_live(
@@ -9447,7 +9664,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
             mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
-            bullish_buy = self._alphai_bullish_buy(base)
+            tape_buy = bool(meta.get("tape_confirmed_buy"))
+            bullish_buy = self._alphai_bullish_buy(base) or tape_buy
             strong_bullish = self._alphai_strong_bullish_buy(base)
             # Velocity scale-up: for AlphaI strong bullish picks we allow missing
             # momentum-short history (require_history relax) to avoid "momentum_block"
