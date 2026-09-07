@@ -56,6 +56,7 @@ from bot.live.micro_session_manager import (
     get_micro_session_manager,
     reset_micro_session_manager,
 )
+from bot.live.momentum_dashboard import render_momentum_dashboard
 from bot.live.momentum_runner import get_momentum_desk_manager
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
@@ -775,7 +776,27 @@ async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRes
     settings = get_settings()
     if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
         return RedirectResponse(url="/paper/dashboard", status_code=303)
+    # The momentum desk owns the operator view while it runs and the legacy
+    # maker desk is stopped; the old page stays reachable at /live/dashboard/legacy.
+    if get_momentum_desk_manager().running() and not bool(
+        get_micro_session_manager().status().get("running")
+    ):
+        return RedirectResponse(url="/live/momentum", status_code=303)
     return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/dashboard/legacy", response_class=HTMLResponse, response_model=None)
+async def live_dashboard_legacy(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+    """Legacy maker-desk dashboard (always renders, even when that desk is stopped)."""
+    return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/momentum", response_class=HTMLResponse, response_model=None)
+async def live_momentum_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+    """Momentum desk operator page: equity, positions, last decision, ledger."""
+    status = get_momentum_desk_manager().status()
+    ledger = await live_momentum_ledger(limit=400)
+    return render_momentum_dashboard(status, ledger["rows"])
 
 
 @app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)

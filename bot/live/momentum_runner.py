@@ -133,6 +133,13 @@ class LiveGateway:
         order = await self._client(trading=True).cancel_order(order_id, symbol)
         return _from_exchange_order(order)
 
+    async def quote_balance_eur(self) -> float | None:
+        snap = await self._client(trading=False).get_balances()
+        for bal in snap.balances:
+            if str(bal.asset).upper() == "EUR":
+                return float(bal.total)
+        return 0.0
+
 
 def _norm_status(raw: Any) -> str:
     text = str(getattr(raw, "value", raw) or "").lower()
@@ -277,6 +284,8 @@ class MomentumDeskRunner:
         self.last_regime: dict[str, Any] = {}
         self.last_error: str | None = None
         self.marks: dict[str, float] = {}
+        self.cash_eur: float | None = None
+        self._cash_ts: float = 0.0
         self.started_at = datetime.now(UTC).isoformat()
         self._load_state()
 
@@ -352,8 +361,16 @@ class MomentumDeskRunner:
                 }
             )
         allowed, why = self.ledger.entries_allowed(now_ms)
+        exposure = sum(
+            h.pos.quantity * (self.marks.get(h.pos.base) or h.pos.entry_price)
+            for h in self.holdings
+        )
+        equity = (self.cash_eur + exposure) if self.cash_eur is not None else None
         return {
             "desk": "momentum",
+            "cash_eur": round(self.cash_eur, 2) if self.cash_eur is not None else None,
+            "exposure_eur": round(exposure, 2),
+            "equity_eur": round(equity, 2) if equity is not None else None,
             "venue": self.opt.venue,
             "dry_run": self.opt.dry_run,
             "started_at": self.started_at,
@@ -400,6 +417,17 @@ class MomentumDeskRunner:
         now_ms = int(self._clock() * 1000)
         await self._manage_exits(now_ms)
         await self._maybe_decide(now_ms)
+        await self._refresh_cash()
+
+    async def _refresh_cash(self) -> None:
+        fetch = getattr(self._gw, "quote_balance_eur", None)
+        if fetch is None or self._clock() - self._cash_ts < 60.0:
+            return
+        try:
+            self.cash_eur = await fetch()
+            self._cash_ts = self._clock()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: balance fetch failed: %s", exc)
 
     # ----------------------------------------------------------------- exits
 

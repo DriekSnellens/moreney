@@ -418,6 +418,80 @@ def test_decision_runs_once_per_hour_and_enters(tmp_path):
     assert status["positions"][0]["base"] == "SOL" and status["risk"]["entries_allowed"]
 
 
+def test_dashboard_renders_positions_decision_and_ledger():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    status = {
+        "running": True,
+        "dry_run": False,
+        "venue": "bitvavo",
+        "config": {
+            k: (list(v) if isinstance(v, tuple) else v) for k, v in DeskConfig().__dict__.items()
+        },
+        "positions": [
+            {
+                "base": "DOT",
+                "entry_price": 3.2,
+                "quantity": 156.25,
+                "notional_eur": 500,
+                "age_h": 2.5,
+                "peak_return": 0.045,
+                "mark": 3.3,
+                "gross_return": 0.03125,
+                "unrealized_net_eur": 14.1,
+                "entry_reason": "excess=+0.09",
+            }
+        ],
+        "risk": {"day_realized_eur": -3.0, "week_realized_eur": 12.0, "entries_allowed": True},
+        "last_regime": {
+            "at": "2026-09-08T00:00:00+00:00",
+            "ok": True,
+            "btc_ret": 0.006,
+            "breadth": 0.9,
+            "reasons": [],
+            "candidates": [{"base": "DOT", "excess": 0.09, "from_high": -0.002}],
+            "entries": ["DOT"],
+            "alphai": {"macro_caution": True, "avoid": ["XRP"], "picks": []},
+        },
+        "cash_eur": 1500.0,
+        "exposure_eur": 515.6,
+        "equity_eur": 2015.6,
+        "realized_total_eur": 9.0,
+        "trade_count": 2,
+        "unrealized_net_eur": 14.1,
+        "next_decision": "2026-09-09T00:00:00+00:00",
+    }
+    rows = [
+        {
+            "ts": "2026-09-08T00:00:40+00:00",
+            "event": "entry",
+            "base": "DOT",
+            "price": 3.2,
+            "notional_eur": 500,
+            "fee_eur": 0.75,
+            "reason": "excess=+0.09",
+        },
+        {
+            "ts": "2026-09-08T01:30:00+00:00",
+            "event": "exit",
+            "base": "SOL",
+            "price": 90.1,
+            "notional_eur": 507,
+            "fee_eur": 0.76,
+            "reason": "trail",
+            "gross_return": 0.0156,
+            "peak_return": 0.0495,
+            "net_eur": 6.3,
+        },
+    ]
+    html = render_momentum_dashboard(status, rows).body.decode()
+    assert "LIVE" in html and "REGIME ON" in html
+    assert "DOT" in html and "trail" in html and "2,015.60" in html
+    # Ratchet active (peak 4.5% >= 3%) -> tight trail shown at 1.5%.
+    assert "(1.5%)" in html
+    assert "<script" not in html  # server-rendered, no JS surface
+
+
 def test_engine_settings_cap_notional_to_clip():
     from bot.core.config import Settings
 
