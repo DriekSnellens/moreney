@@ -327,6 +327,20 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._uw_idle_below_be_pct = Decimal(
             str(getattr(settings, "live_micro_uw_idle_below_be_pct", 0.004) or 0)
         )
+        # Fresh session entries: bag-recycle tiers (idle / deadlock / mid-flat)
+        # wait this long; only early-cut / cut-loss stops apply before that.
+        self._uw_fresh_entry_grace_sec = float(
+            getattr(settings, "live_micro_uw_fresh_entry_grace_sec", 1800.0) or 0.0
+        )
+        # After a loss exit, block re-entering the same base on that venue
+        # unless the mark has reclaimed exit price + reclaim bps.
+        self._loss_exit_cooldown_sec = float(
+            getattr(settings, "live_micro_loss_exit_cooldown_sec", 1800.0) or 0.0
+        )
+        self._loss_exit_reclaim_bps = Decimal(
+            str(getattr(settings, "live_micro_loss_exit_reclaim_bps", 50) or 0)
+        )
+        self._loss_exits: dict[str, tuple[float, Decimal]] = {}
         self._uw_deadlock_unlock_enabled = bool(
             getattr(settings, "live_micro_uw_deadlock_unlock_enabled", True)
         )
@@ -1218,6 +1232,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "uw_deadlock_day_key": self._uw_deadlock_day_key,
             "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_paused": bool(self._sleeve_paused),
+            "venue_cash_excess": {
+                k: str(v) for k, v in (getattr(self, "_venue_cash_excess", None) or {}).items()
+            },
         }
 
     def _try_load_persisted_state(self) -> bool:
@@ -1317,6 +1334,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         except Exception:  # noqa: BLE001
             self._uw_deadlock_day_loss_eur = _ZERO
         self._sleeve_paused = bool(raw.get("sleeve_paused"))
+        excess_raw = raw.get("venue_cash_excess")
+        if isinstance(excess_raw, Mapping):
+            loaded: dict[str, Decimal] = {}
+            for k, v in excess_raw.items():
+                try:
+                    loaded[str(k).lower()] = Decimal(str(v))
+                except Exception:  # noqa: BLE001
+                    continue
+            self._venue_cash_excess = loaded
         self._check_sleeve_loss_cap()
         if raw.get("session_started_ms") is not None:
             self._session_started_ms = float(raw.get("session_started_ms"))
@@ -5196,6 +5222,47 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._venue_raw_balances[venue] = bals
         return bals
 
+    def _venue_cash_excess_for(self, venue: str, bals: list[Any]) -> Decimal:
+        """Fixed EUR excess above budget for *venue* (captured once, persisted)."""
+        excess_map = getattr(self, "_venue_cash_excess", None)
+        if excess_map is None:
+            excess_map = {}
+            self._venue_cash_excess = excess_map
+        known = excess_map.get(venue)
+        if known is not None:
+            return known
+        eur = _ZERO
+        for bal in bals:
+            if str(getattr(bal, "asset", "") or "").upper() == self._quote:
+                eur += Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+        # Pocket = EUR + micro crypto; anything above budget at first sight is excess.
+        pocket = eur + self._venue_crypto_mtm(bals)
+        excess = max(_ZERO, pocket - self._budget)
+        excess_map[venue] = excess
+        return excess
+
+    def _venue_crypto_mtm(self, bals: list[Any]) -> Decimal:
+        """Crypto MTM (last known marks) for one venue's balance list."""
+        total = _ZERO
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote:
+                continue
+            try:
+                qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if qty <= 0:
+                continue
+            mark = self._portfolio.state.mark_prices.get(f"{asset}{self._quote}")
+            if mark is not None and mark > 0:
+                total += qty * mark
+        return total
+
     async def refresh_portfolio_value(
         self,
         *,
@@ -5216,7 +5283,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     bals = await self._fetch_balances_cached(v)
                 except Exception:  # noqa: BLE001
                     continue
-            for bal in bals:
+            # Crypto first (marks fetched), EUR last so the pocket-excess capture
+            # sees a complete venue MTM.
+            ordered = sorted(
+                bals,
+                key=lambda b: str(getattr(b, "asset", "") or "").upper() == self._quote,
+            )
+            for bal in ordered:
                 asset = str(getattr(bal, "asset", "") or "").upper()
                 if not asset:
                     continue
@@ -5227,8 +5300,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     continue
                 if asset == self._quote:
                     if venue is None and v in self._venue_raw_balances:
-                        # Cap each venue's EUR when summing total portfolio value.
-                        qty = min(qty, self._budget)
+                        # EUR above the micro budget is outside the pocket. The
+                        # excess is fixed once per venue and subtracted thereafter,
+                        # so a cash→crypto buy no longer "unhides" capped cash
+                        # (fake +€94 portfolio spike on Bitvavo).
+                        qty = max(_ZERO, qty - self._venue_cash_excess_for(v, bals))
                     total += qty
                     continue
                 symbol = f"{asset}{self._quote}"
@@ -6631,6 +6707,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     return ("rotate_non_pick_aged", "band", floor)
                 return ("rotate_non_pick_aged", "stop", floor)
 
+
+        # Fresh session entry grace: idle-pressure / deadlock / mid-flat tiers are
+        # bag-recycling tools, not stops. On a 5-minute-old AVAX clip they fired at
+        # -0.5% and the entry gate re-bought 10s later (7 round trips, pure fee
+        # bleed). Only early-cut (-1%) / cut-loss (-2.5%) may exit a fresh entry.
+        grace = float(getattr(self, "_uw_fresh_entry_grace_sec", 0.0) or 0.0)
+        if grace > 0 and age < grace:
+            try:
+                fresh_session_entry = self._session_qty(venue, base) > 0
+            except Exception:  # noqa: BLE001
+                fresh_session_entry = False
+            if fresh_session_entry:
+                return None
 
         # Deadlock unlock: free bags at mild depth/age so capital rotates.
         # Overrides strong_hold except for rising sleeve-priority names we still nurse.
@@ -8248,9 +8337,46 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "exit_reason": reason,
             },
         )
-        return await self.execute(
+        result = await self.execute(
             req, strategy=reason, order_type=OrderType.LIMIT
         )
+        if reason in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
+            try:
+                submitted = bool(getattr(result, "status", None)) and str(
+                    getattr(result, "status", "")
+                ).lower() not in {"rejected", "failed", "orderstatus.rejected", "orderstatus.failed"}
+            except Exception:  # noqa: BLE001
+                submitted = True
+            if submitted:
+                self._record_loss_exit(venue, infer_base_asset(symbol), px)
+        return result
+
+    # ----------------------------------------------------------- loss re-entry
+    def _record_loss_exit(self, venue: str, base: str, price: Decimal) -> None:
+        if self._loss_exit_cooldown_sec <= 0:
+            return
+        key = f"{str(venue).lower()}:{str(base).upper()}"
+        self._loss_exits[key] = (time.monotonic(), Decimal(str(price)))
+
+    def _loss_exit_block(self, venue: str, base: str, mark: Decimal | None) -> str | None:
+        """Reason string when a fresh re-entry after a loss exit must wait."""
+        if self._loss_exit_cooldown_sec <= 0:
+            return None
+        key = f"{str(venue).lower()}:{str(base).upper()}"
+        hit = self._loss_exits.get(key)
+        if hit is None:
+            return None
+        ts, exit_px = hit
+        age = time.monotonic() - ts
+        if age >= self._loss_exit_cooldown_sec:
+            self._loss_exits.pop(key, None)
+            return None
+        if mark is not None and mark > 0 and exit_px > 0:
+            reclaim = exit_px * (_ONE + self._loss_exit_reclaim_bps / Decimal("10000"))
+            if mark >= reclaim:
+                return None
+        remaining = int(self._loss_exit_cooldown_sec - age)
+        return f"loss exit {int(age)}s ago at {exit_px}; wait {remaining}s or reclaim +{self._loss_exit_reclaim_bps}bps"
 
     async def _refresh_free(
         self, venue: str, symbol: str, asset: str, locked: Decimal
@@ -9636,6 +9762,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"new {base} buys require AlphaI bullish pick/headline "
                         "(bearish/neutral names recycle at BE+ only)"
                     ),
+                )
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+            and not meta.get("winner_add")
+            and self._is_new_base_buy(venue, base)
+        ):
+            try:
+                mark_now = self._portfolio.state.mark_prices.get(symbol)
+            except Exception:  # noqa: BLE001
+                mark_now = None
+            block = self._loss_exit_block(venue, base, mark_now)
+            if block:
+                self._bump_skip("loss_exit_cooldown")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="LOSS_EXIT_COOLDOWN",
+                    message=f"{base} on {venue}: {block}",
                 )
         if (
             side_is_buy

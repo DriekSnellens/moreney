@@ -218,3 +218,48 @@ def test_intraday_gate_tape_leader_skips_strict_rising() -> None:
         self, "LTC", "LTCEUR"
     )
     assert action == "WAIT" and "momentum_down" in reasons
+
+
+def test_loss_exit_cooldown_blocks_until_reclaim() -> None:
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+
+    self = SimpleNamespace(
+        _loss_exit_cooldown_sec=1800.0,
+        _loss_exit_reclaim_bps=Decimal("50"),
+        _loss_exits={},
+    )
+    MicroBudgetLiveExecutor._record_loss_exit(self, "bitvavo", "AVAX", Decimal("6.75"))
+    assert MicroBudgetLiveExecutor._loss_exit_block(self, "bitvavo", "AVAX", Decimal("6.76"))
+    # Other venue / base unaffected.
+    assert MicroBudgetLiveExecutor._loss_exit_block(self, "okx", "AVAX", Decimal("6.76")) is None
+    # Reclaim +0.5% above exit → allowed.
+    assert MicroBudgetLiveExecutor._loss_exit_block(self, "bitvavo", "AVAX", Decimal("6.79")) is None
+
+
+def test_venue_cash_excess_fixed_once_and_persisted() -> None:
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
+
+    marks = {"AVAXEUR": Decimal("6.75")}
+    self = SimpleNamespace(
+        _quote="EUR",
+        _budget=Decimal("2000"),
+        _portfolio=SimpleNamespace(state=SimpleNamespace(mark_prices=marks)),
+    )
+    self._venue_crypto_mtm = lambda bals: MicroBudgetLiveExecutor._venue_crypto_mtm(self, bals)
+    cash = [SimpleNamespace(asset="EUR", free="2094", locked="0")]
+    ex = MicroBudgetLiveExecutor._venue_cash_excess_for(self, "bitvavo", cash)
+    assert ex == Decimal("94")
+    # After buying €120 AVAX the excess stays fixed (no fake jump).
+    later = [
+        SimpleNamespace(asset="EUR", free="1974", locked="0"),
+        SimpleNamespace(asset="AVAX", free="17.777", locked="0"),
+    ]
+    assert MicroBudgetLiveExecutor._venue_cash_excess_for(self, "bitvavo", later) == Decimal("94")
+    pocket = Decimal("1974") - ex + Decimal("17.777") * Decimal("6.75")
+    assert abs(pocket - Decimal("2000")) < Decimal("0.01")
