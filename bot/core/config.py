@@ -739,6 +739,14 @@ class Settings(BaseSettings):
     live_micro_daytrader_provisional_be_exit_min_age_sec: float = Field(
         default=300.0, ge=60.0, le=7200.0
     )
+    # AlphaI-first sells: avoid / non-pick / weak-confirm recycle under BE (daytrader).
+    live_micro_daytrader_rotate_exits_enabled: bool = True
+    live_micro_daytrader_avoid_below_be_pct: float = Field(
+        default=0.0025, ge=0.001, le=0.05
+    )
+    live_micro_daytrader_avoid_min_age_sec: float = Field(
+        default=60.0, ge=15.0, le=1800.0
+    )
     # D: Exit engine — soft-armed / BE+ sells seek fills (touch/improve, fast reprice).
     # Never sells below fee-aware BE; taker only when bid ≥ taker BE.
     live_micro_exit_engine_enabled: bool = True

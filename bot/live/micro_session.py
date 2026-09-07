@@ -644,6 +644,16 @@ def _session_settings(
                     )
                     or 300.0
                 ),
+                "live_micro_daytrader_rotate_exits_enabled": bool(
+                    getattr(base, "live_micro_daytrader_rotate_exits_enabled", True)
+                ),
+                "live_micro_daytrader_avoid_below_be_pct": float(
+                    getattr(base, "live_micro_daytrader_avoid_below_be_pct", 0.0025)
+                    or 0.0025
+                ),
+                "live_micro_daytrader_avoid_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_avoid_min_age_sec", 60.0) or 60.0
+                ),
                 # Entries: only confirmed AlphaI (already require_bullish); rising tape.
                 "alphai_require_bullish_new_buys": True,
                 "alphai_bullish_buy_enabled": True,
