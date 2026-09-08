@@ -565,16 +565,20 @@ class Settings(BaseSettings):
     momentum_desk_venues: str = "bitvavo,okx"
     # 90d sweep: entries 06-14 UTC all positive, 15-23 UTC all negative.
     momentum_desk_decision_hours_utc: str = "7,13"
-    # Sized for ~4k EUR across both venues: 4 x 600 keeps <= 65% deployed.
-    momentum_desk_clip_eur: float = Field(default=600.0, gt=0)
+    # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
+    # positions and fills slot 4 in ~12% of entries, so 4 x 1000 uses the
+    # full book only at peaks; net profit scales ~linearly with the clip
+    # (12-week walk-forward: 600 -> +311 EUR, 1000 -> +518 EUR, same
+    # profit/drawdown ratio). Loss limits are scaled with it.
+    momentum_desk_clip_eur: float = Field(default=1000.0, gt=0)
     momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
     momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_time_exit_hours: float = Field(default=24.0, gt=0)
-    momentum_desk_day_loss_limit_eur: float = Field(default=50.0, gt=0)
-    momentum_desk_week_loss_limit_eur: float = Field(default=120.0, gt=0)
+    momentum_desk_day_loss_limit_eur: float = Field(default=80.0, gt=0)
+    momentum_desk_week_loss_limit_eur: float = Field(default=200.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
