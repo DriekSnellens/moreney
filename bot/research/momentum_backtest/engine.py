@@ -25,6 +25,7 @@ from bot.live.momentum_desk import (
     is_decision_time,
     net_pnl_eur,
     rank_candidates,
+    restrict_by_volume,
     select_entries,
     universe_stats,
 )
@@ -259,7 +260,7 @@ def simulate(
             positions.remove(pos)
         # 2) Entries at decision hours.
         if is_decision_time(t, cfg):
-            stats = universe_stats(candles_by_base, t, cfg)
+            stats = restrict_by_volume(universe_stats(candles_by_base, t, cfg), cfg)
             btc_rows = candles_by_base.get("BTC")
             btc = bar_stats("BTC", btc_rows, t) if btc_rows else None
             regime = classify_regime(btc, stats, cfg, alphai=alphai)

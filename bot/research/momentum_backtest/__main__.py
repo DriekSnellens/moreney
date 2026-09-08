@@ -31,6 +31,18 @@ def main() -> None:
     ap.add_argument(
         "--touch", action="store_true", help="stops trigger on the bar low (minute-level proxy)"
     )
+    ap.add_argument(
+        "--universe",
+        type=str,
+        default=None,
+        help="comma list of bases; prefix with '+' to extend the default universe",
+    )
+    ap.add_argument(
+        "--top-volume",
+        type=int,
+        default=0,
+        help="keep only the K highest-volume bases per decision",
+    )
     ap.add_argument("--refresh", action="store_true", help="ignore candle cache")
     ap.add_argument("--trades", action="store_true", help="print every closed trade")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -41,6 +53,7 @@ def main() -> None:
         "clip_eur": args.clip,
         "decision_every_bar": bool(args.every_bar),
         "exit_on_touch": bool(args.touch),
+        "universe_top_by_volume": int(args.top_volume),
     }
     for key, val in (
         ("trail_pct", args.trail),
@@ -51,6 +64,11 @@ def main() -> None:
     ):
         if val is not None:
             overrides[key] = val
+    if args.universe:
+        raw = args.universe.strip()
+        extra = tuple(b.strip().upper() for b in raw.lstrip("+").split(",") if b.strip())
+        base_universe = DeskConfig().universe if raw.startswith("+") else ()
+        overrides["universe"] = tuple(dict.fromkeys((*base_universe, *extra)))
     cfg = DeskConfig().with_overrides(**overrides)
 
     end_ms = int(time.time() * 1000) // BAR_MS * BAR_MS

@@ -106,6 +106,10 @@ class DeskConfig:
     # monitoring) instead of on the close.
     decision_every_bar: bool = False
     exit_on_touch: bool = False
+    # Dynamic universe: at each decision keep only the K bases with the highest
+    # trailing 24h EUR volume (0 = use the whole universe). Lets a wide pool
+    # follow where the money is without hindsight-picking today's hot names.
+    universe_top_by_volume: int = 0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     clusters: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_CLUSTERS))
 
@@ -253,6 +257,15 @@ def universe_stats(
         if stats is not None:
             out[base] = stats
     return out
+
+
+def restrict_by_volume(stats: Mapping[str, BaseStats], cfg: DeskConfig) -> dict[str, BaseStats]:
+    """Apply ``universe_top_by_volume``; identity when it is 0."""
+    k = int(cfg.universe_top_by_volume or 0)
+    if k <= 0 or len(stats) <= k:
+        return dict(stats)
+    ranked = sorted(stats.values(), key=lambda s: s.volume_eur, reverse=True)[:k]
+    return {s.base: s for s in ranked}
 
 
 def classify_regime(

@@ -198,6 +198,16 @@ def test_exit_on_touch_uses_low_and_prior_peak():
     assert not is_decision_time(T0 + 5 * BAR_MS, cfg)
 
 
+def test_restrict_by_volume_keeps_top_k():
+    from bot.live.momentum_desk import BaseStats, restrict_by_volume
+
+    stats = {
+        b: BaseStats(b, 1.0, 0.0, 0.0, vol) for b, vol in {"A": 5e6, "B": 1e6, "C": 3e6}.items()
+    }
+    assert set(restrict_by_volume(stats, DeskConfig())) == {"A", "B", "C"}
+    assert set(restrict_by_volume(stats, DeskConfig(universe_top_by_volume=2))) == {"A", "C"}
+
+
 def test_risk_ledger_day_week_limits_and_pause():
     cfg = DeskConfig(
         day_loss_limit_eur=40, week_loss_limit_eur=100, pause_hours_after_week_limit=48
