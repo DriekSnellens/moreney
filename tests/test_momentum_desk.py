@@ -172,6 +172,32 @@ def test_exit_rules_hard_stop_trail_ratchet_and_time():
     assert evaluate_exit(pos4, [late, 100, 101, 100, 100.8, 1], cfg) is None  # above BE -> keep
 
 
+def test_exit_on_touch_uses_low_and_prior_peak():
+    cfg = DeskConfig(trail_pct=0.03, trail_tight_after=0.0, hard_stop_pct=0.03, exit_on_touch=True)
+    # Wick to -3.2% but close back at -1%: touch mode stops out at the level,
+    # close mode holds.
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 100.0)
+    d = evaluate_exit(pos, [T0, 100, 100.5, 96.8, 99.0, 1], cfg)
+    assert d is not None and d.reason == "hard_stop" and d.price == pytest.approx(97.0)
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 100.0)
+    assert (
+        evaluate_exit(pos, [T0, 100, 100.5, 96.8, 99.0, 1], cfg.with_overrides(exit_on_touch=False))
+        is None
+    )
+    # Trail is measured against the peak known before the bar; a gap below the
+    # level fills at the open.
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 110.0)
+    d = evaluate_exit(pos, [T0, 105.0, 108.0, 104.0, 107.0, 1], cfg)
+    assert d is not None and d.reason == "trail" and d.price == pytest.approx(105.0)
+    # No touch: the peak still ratchets up.
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 110.0)
+    assert evaluate_exit(pos, [T0, 110.0, 112.0, 109.0, 111.0, 1], cfg) is None
+    assert pos.peak == 112.0
+    # Every-bar decisions fire on each 15m boundary.
+    assert is_decision_time(T0 + 5 * BAR_MS, cfg.with_overrides(decision_every_bar=True))
+    assert not is_decision_time(T0 + 5 * BAR_MS, cfg)
+
+
 def test_risk_ledger_day_week_limits_and_pause():
     cfg = DeskConfig(
         day_loss_limit_eur=40, week_loss_limit_eur=100, pause_hours_after_week_limit=48

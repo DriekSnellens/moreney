@@ -25,12 +25,23 @@ def main() -> None:
     ap.add_argument("--min-excess", type=float, default=None)
     ap.add_argument("--max-positions", type=int, default=None)
     ap.add_argument("--time-exit-hours", type=float, default=None)
+    ap.add_argument(
+        "--every-bar", action="store_true", help="decide on every 15m bar instead of --hours"
+    )
+    ap.add_argument(
+        "--touch", action="store_true", help="stops trigger on the bar low (minute-level proxy)"
+    )
     ap.add_argument("--refresh", action="store_true", help="ignore candle cache")
     ap.add_argument("--trades", action="store_true", help="print every closed trade")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args()
 
-    overrides = {"decision_hours_utc": args.hours, "clip_eur": args.clip}
+    overrides = {
+        "decision_hours_utc": args.hours,
+        "clip_eur": args.clip,
+        "decision_every_bar": bool(args.every_bar),
+        "exit_on_touch": bool(args.touch),
+    }
     for key, val in (
         ("trail_pct", args.trail),
         ("hard_stop_pct", args.stop),

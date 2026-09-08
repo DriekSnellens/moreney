@@ -238,7 +238,7 @@ def simulate(
             decision = evaluate_exit(pos, bar, cfg)
             if decision is None:
                 continue
-            exit_price = float(bar[4])
+            exit_price = decision.price if decision.price is not None else float(bar[4])
             net = net_pnl_eur(pos, exit_price, None, cfg)
             res.closed.append(
                 ClosedTrade(
