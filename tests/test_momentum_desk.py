@@ -35,6 +35,9 @@ from bot.research.momentum_backtest.engine import simulate
 
 DAY_MS = 86_400_000
 T0 = 1_780_000_000_000 // DAY_MS * DAY_MS  # midnight UTC
+# Most tests use a 2-3 coin universe where breadth is trivially 0 or 1; keep
+# tape-strength sizing out of the way unless a test targets it.
+FLAT_SIZING = {"strong_clip_mult": 1.0, "weak_clip_mult": 1.0}
 
 
 def _series(start_ms: int, bars: int, start_px: float, drift_per_bar: float, *, vol: float = 0.0):
@@ -74,7 +77,7 @@ def test_bar_stats_rejects_thin_or_stale_series():
 
 
 def _universe(returns: dict[str, float], btc_ret: float = 0.0, *, from_high: float = 0.0):
-    cfg = DeskConfig(universe=tuple(returns))
+    cfg = DeskConfig(universe=tuple(returns), **FLAT_SIZING)
     candles = {}
     n = 2 * BARS_PER_DAY
     for base, ret in {**returns, "BTC": btc_ret}.items():
@@ -235,11 +238,67 @@ def test_is_decision_time():
     assert not is_decision_time(T0 + BAR_MS, cfg)
 
 
+def test_weekend_entries_skipped_but_exits_unaffected():
+    from bot.live.momentum_desk import is_entry_weekday, is_scheduled_hour
+
+    cfg = DeskConfig(decision_hours_utc=(7, 13))
+    thu, sat, sun, mon = (T0 + k * DAY_MS for k in (0, 2, 3, 4))
+    assert is_entry_weekday(thu, cfg) and is_entry_weekday(mon, cfg)
+    assert not is_entry_weekday(sat, cfg) and not is_entry_weekday(sun, cfg)
+    assert is_decision_time(thu + 7 * 3_600_000, cfg)
+    assert not is_decision_time(sat + 7 * 3_600_000, cfg)
+    assert not is_scheduled_hour(sun + 13 * 3_600_000, cfg)
+    assert is_decision_time(sat + 7 * 3_600_000, cfg.with_overrides(skip_weekend_entries=False))
+    # Exit evaluation has no calendar: a Saturday bar still triggers the stop.
+    pos = Position("X", 100.0, 5.0, 500.0, sat, 100.0)
+    d = evaluate_exit(pos, [sat + BAR_MS, 100, 100, 96, 96.5, 1], cfg)
+    assert d is not None and d.reason == "hard_stop"
+
+
+def test_breadth_scales_clip_up_on_strong_tape_and_down_on_thin_tape():
+    from bot.live.momentum_desk import RegimeDecision, breadth_clip_mult, max_clip_mult
+
+    cfg = DeskConfig(clip_eur=1000.0, strong_clip_mult=1.3, weak_clip_mult=0.7)
+    assert breadth_clip_mult(0.9, cfg) == (1.3, "breadth_strong")
+    assert breadth_clip_mult(0.75, cfg) == (1.0, "")
+    assert breadth_clip_mult(0.6, cfg) == (0.7, "breadth_weak")
+    assert max_clip_mult(cfg) == pytest.approx(1.3 * 1.3)
+    cands = rank_candidates(
+        {"SOL": _stats("SOL", 0.05)}, 0.0, cfg.with_overrides(min_volume_eur=0.0)
+    )
+    strong = RegimeDecision(True, 0.01, 0.9, ())
+    thin = RegimeDecision(True, 0.01, 0.6, ())
+    e_strong = select_entries(cands, strong, cfg, held_bases=[])[0]
+    e_thin = select_entries(cands, thin, cfg, held_bases=[])[0]
+    assert e_strong.clip_eur == pytest.approx(1300.0) and "breadth_strong" in e_strong.reasons
+    assert e_thin.clip_eur == pytest.approx(700.0) and "breadth_weak" in e_thin.reasons
+    # AlphaI pick and strong tape stack.
+    picked = select_entries(
+        rank_candidates(
+            {"SOL": _stats("SOL", 0.05)},
+            0.0,
+            cfg.with_overrides(min_volume_eur=0.0),
+            alphai=AlphaIView(picks=frozenset({"SOL"})),
+        ),
+        strong,
+        cfg,
+        held_bases=[],
+        alphai=AlphaIView(picks=frozenset({"SOL"})),
+    )[0]
+    assert picked.clip_eur == pytest.approx(1000 * 1.3 * 1.3)
+
+
+def _stats(base: str, ret: float):
+    from bot.live.momentum_desk import BaseStats
+
+    return BaseStats(base=base, price=100.0, ret_24h=ret, from_high=0.0, volume_eur=5e6)
+
+
 # ------------------------------------------------------------- backtest
 
 
 def test_simulate_enters_leader_and_exits_on_trail():
-    cfg = DeskConfig(universe=("SOL", "LINK"), min_volume_eur=0.0, clip_eur=500.0)
+    cfg = DeskConfig(universe=("SOL", "LINK"), min_volume_eur=0.0, clip_eur=500.0, **FLAT_SIZING)
     n = 5 * BARS_PER_DAY
     candles = {
         "BTC": _series(T0 - 2 * DAY_MS, n, 100.0, 0.0),
@@ -265,6 +324,15 @@ def test_simulate_enters_leader_and_exits_on_trail():
     assert t.peak_return > 0.05 and t.net_eur > 0
     # Breadth is 0.5 (SOL up, LINK flat) -> regime ON with top_n=2 but LINK has no excess.
     assert res.decisions[0].regime_ok
+    # Book cap mirrors the live router: shrink to the cash left, skip below 50%.
+    capped = simulate(
+        candles, cfg.with_overrides(book_eur=300.0), start_ms=T0 - BAR_MS, end_ms=T0 + DAY_MS
+    )
+    assert capped.closed[0].notional_eur == pytest.approx(300.0)
+    starved = simulate(
+        candles, cfg.with_overrides(book_eur=200.0), start_ms=T0 - BAR_MS, end_ms=T0 + DAY_MS
+    )
+    assert starved.closed == []
 
 
 # ------------------------------------------------------------ live path
@@ -350,7 +418,7 @@ class FakeFeed:
 
 
 def _runner(tmp_path: Path, gw, clock, feed=None, **cfg_kwargs) -> MomentumDeskRunner:
-    cfg = DeskConfig(**cfg_kwargs)
+    cfg = DeskConfig(**{**FLAT_SIZING, **cfg_kwargs})
     opts = RunnerOptions(
         state_path=str(tmp_path / "state.json"),
         ledger_path=str(tmp_path / "ledger.jsonl"),
@@ -692,9 +760,12 @@ def test_engine_settings_cap_notional_to_clip():
     from bot.core.config import Settings
 
     s = Settings(exchange_name="stub", execution_mode="paper")
-    cfg = DeskConfig(clip_eur=500.0, alphai_clip_mult=1.3, max_positions=3)
+    cfg = DeskConfig(clip_eur=500.0, alphai_clip_mult=1.3, max_positions=3, strong_clip_mult=1.0)
     out = engine_settings_for_desk(s, cfg, "bitvavo")
     assert out.live_micro_max_notional_eur == pytest.approx(651.0)
+    # Strong-tape multiplier stacks on the AlphaI multiplier in the cap.
+    strong = engine_settings_for_desk(s, cfg.with_overrides(strong_clip_mult=1.3), "bitvavo")
+    assert strong.live_micro_max_notional_eur == pytest.approx(500 * 1.3 * 1.3 + 1)
     assert out.live_micro_symbols == "*" and out.live_micro_venues == "bitvavo"
     assert out.live_micro_max_open_orders_per_venue == 4
     multi = engine_settings_for_desk(s, cfg, "Bitvavo, okx,bitvavo")
@@ -714,6 +785,7 @@ class CashGateway(FakeGateway):
 
 
 def _multi_runner(tmp_path, clock, bitvavo_cash, okx_cash, feed=None, **cfg_kwargs):
+    cfg_kwargs = {**FLAT_SIZING, **cfg_kwargs}
     gws = {
         "bitvavo": CashGateway(bitvavo_cash, fill_maker_after_polls=1),
         "okx": CashGateway(okx_cash, bid=100.05, ask=100.25, fill_maker_after_polls=1),

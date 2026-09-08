@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 BITVAVO_CANDLES = "https://api.bitvavo.com/v2/{market}/candles"
 _MAX_LIMIT = 1440
+# Same floor as the live router (``RunnerOptions.min_clip_fraction`` / min order).
+_MIN_CLIP_EUR = 5.0
+_MIN_CLIP_FRACTION = 0.5
 
 
 def _fetch_range(base: str, start_ms: int, end_ms: int) -> list[list[float]]:
@@ -281,14 +284,20 @@ def simulate(
                     alphai=alphai,
                 )
             for e in entries:
+                clip = e.clip_eur
+                if cfg.book_eur > 0:
+                    free = cfg.book_eur - sum(p.notional_eur for p in positions)
+                    clip = min(clip, free)
+                    if clip < max(_MIN_CLIP_EUR, e.clip_eur * _MIN_CLIP_FRACTION):
+                        continue
                 price = stats[e.base].price
-                qty = e.clip_eur / price
+                qty = clip / price
                 positions.append(
                     Position(
                         base=e.base,
                         entry_price=price,
                         quantity=qty,
-                        notional_eur=e.clip_eur,
+                        notional_eur=clip,
                         opened_ms=t,
                         peak=price,
                         entry_reason=",".join(e.reasons),

@@ -43,6 +43,9 @@ def main() -> None:
         default=0,
         help="keep only the K highest-volume bases per decision",
     )
+    ap.add_argument(
+        "--book", type=float, default=0.0, help="cap total deployed EUR (0 = unlimited)"
+    )
     ap.add_argument("--refresh", action="store_true", help="ignore candle cache")
     ap.add_argument("--trades", action="store_true", help="print every closed trade")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -54,6 +57,7 @@ def main() -> None:
         "decision_every_bar": bool(args.every_bar),
         "exit_on_touch": bool(args.touch),
         "universe_top_by_volume": int(args.top_volume),
+        "book_eur": float(args.book),
     }
     for key, val in (
         ("trail_pct", args.trail),

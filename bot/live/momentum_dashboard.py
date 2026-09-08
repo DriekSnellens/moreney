@@ -384,12 +384,15 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
 
 def _rules(cfg: Mapping[str, Any]) -> str:
     hours = ", ".join(f"{int(h):02d}:00" for h in (cfg.get("decision_hours_utc") or [0]))
+    weekdays = " (ma–vr)" if cfg.get("skip_weekend_entries") else ""
     items = [
-        ("Beslismoment (UTC)", hours),
+        ("Beslismoment (UTC)", hours + weekdays),
         (
             "Clip",
             f"{float(cfg.get('clip_eur') or 0):,.0f} € "
-            f"(AlphaI-pick ×{cfg.get('alphai_clip_mult')})",
+            f"(AlphaI-pick ×{cfg.get('alphai_clip_mult')}, "
+            f"brede tape ×{cfg.get('strong_clip_mult')}, "
+            f"dunne tape ×{cfg.get('weak_clip_mult')})",
         ),
         ("Max posities", str(cfg.get("max_positions"))),
         (

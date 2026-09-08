@@ -102,6 +102,17 @@ class DeskConfig:
     # desk 100% cash through an alt rally, so reduce is the default.
     macro_caution_mode: str = "reduce"
     macro_caution_clip_mult: float = 0.7
+    # Tape-strength sizing. 12-week attribution at 7/13 UTC: entries taken
+    # with >= 85% of the universe up on the day averaged +13.9 EUR per 1000
+    # EUR clip (n=31) against +3.1 EUR for the rest (n=28); broad rallies
+    # persist, narrow ones fade. Strong tape sizes up, thin tape sizes down.
+    strong_breadth: float = 0.85
+    strong_clip_mult: float = 1.3
+    weak_clip_mult: float = 0.7
+    # Weekend decisions (Sat/Sun UTC) read 24h returns printed on thin
+    # liquidity; they were 18 of 59 trades and netted about zero while
+    # adding a third of the drawdown. Exits keep running on weekends.
+    skip_weekend_entries: bool = True
     # Exit side of AlphaI: a bearish headline on a held base does not dump the
     # position (that was fee churn in the old desk) but narrows the trail to
     # ``trail_tight_pct`` so the winner is protected while the news is fresh.
@@ -115,6 +126,10 @@ class DeskConfig:
     # trailing 24h EUR volume (0 = use the whole universe). Lets a wide pool
     # follow where the money is without hindsight-picking today's hot names.
     universe_top_by_volume: int = 0
+    # Backtest only: total EUR the desk may have deployed at once (0 = no
+    # cap). Mirrors the live router, which shrinks a clip to the cash left
+    # (down to ``min_clip_fraction``) and otherwise skips the entry.
+    book_eur: float = 0.0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     clusters: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_CLUSTERS))
 
@@ -353,6 +368,7 @@ def select_entries(
         if (view.macro_caution and cfg.macro_caution_mode == "reduce")
         else 1.0
     )
+    breadth_mult, breadth_tag = breadth_clip_mult(regime.breadth, cfg)
     out: list[Entry] = []
     for c in cands:
         if len(out) >= min(slots, top_n):
@@ -362,12 +378,19 @@ def select_entries(
         cluster = cfg.clusters.get(c.base)
         if cluster is not None and cluster in clusters_held:
             continue
-        clip = cfg.clip_eur * (cfg.alphai_clip_mult if c.alphai_pick else 1.0) * macro_mult
+        clip = (
+            cfg.clip_eur
+            * (cfg.alphai_clip_mult if c.alphai_pick else 1.0)
+            * macro_mult
+            * breadth_mult
+        )
         reasons = [f"excess={c.excess:+.4f}", f"from_high={c.from_high:+.4f}"]
         if c.alphai_pick:
             reasons.append("alphai_pick")
         if macro_mult != 1.0:
             reasons.append("macro_reduce")
+        if breadth_tag:
+            reasons.append(breadth_tag)
         out.append(
             Entry(base=c.base, clip_eur=round(clip, 2), score=c.score, reasons=tuple(reasons))
         )
@@ -376,11 +399,38 @@ def select_entries(
     return out
 
 
+def breadth_clip_mult(breadth: float, cfg: DeskConfig) -> tuple[float, str]:
+    """Clip multiplier and reason tag for the tape strength at decision time."""
+    if breadth >= cfg.strong_breadth and cfg.strong_clip_mult != 1.0:
+        return cfg.strong_clip_mult, "breadth_strong"
+    if breadth < cfg.broad_breadth and cfg.weak_clip_mult != 1.0:
+        return cfg.weak_clip_mult, "breadth_weak"
+    return 1.0, ""
+
+
+def max_clip_mult(cfg: DeskConfig) -> float:
+    """Largest multiplier ``select_entries`` can apply to ``clip_eur``."""
+    return max(1.0, cfg.alphai_clip_mult) * max(1.0, cfg.strong_clip_mult)
+
+
+def is_entry_weekday(t_ms: int, cfg: DeskConfig) -> bool:
+    """False on Saturday/Sunday UTC when weekend entries are disabled."""
+    if not cfg.skip_weekend_entries:
+        return True
+    # Unix epoch (day 0) was a Thursday, so weekday = (day + 3) % 7 with Mon=0.
+    return ((t_ms // 86_400_000 + 3) % 7) < 5
+
+
+def is_scheduled_hour(hour_start_ms: int, cfg: DeskConfig) -> bool:
+    """True when the hour starting at ``hour_start_ms`` is a decision slot."""
+    hour = (hour_start_ms // 3_600_000) % 24
+    return hour in cfg.decision_hours_utc and is_entry_weekday(hour_start_ms, cfg)
+
+
 def is_decision_time(t_ms: int, cfg: DeskConfig) -> bool:
     if cfg.decision_every_bar:
         return t_ms % BAR_MS == 0
-    minute_of_day = (t_ms // 60000) % (24 * 60)
-    return minute_of_day % 60 == 0 and (minute_of_day // 60) in cfg.decision_hours_utc
+    return t_ms % 3_600_000 == 0 and is_scheduled_hour(t_ms, cfg)
 
 
 def evaluate_exit(

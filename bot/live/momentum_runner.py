@@ -46,6 +46,8 @@ from bot.live.momentum_desk import (
     bar_stats,
     classify_regime,
     evaluate_exit,
+    is_scheduled_hour,
+    max_clip_mult,
     rank_candidates,
     select_entries,
     universe_stats,
@@ -421,10 +423,10 @@ class MomentumDeskRunner:
     def _next_decision_iso(self, now_ms: int) -> str:
         hour_ms = 3_600_000
         cur = now_ms // hour_ms * hour_ms
-        for i in range(0, 25):
+        # Up to 3 days ahead so a Friday-evening dashboard still shows Monday.
+        for i in range(0, 73):
             cand = cur + i * hour_ms
-            hour = (cand // hour_ms) % 24
-            if hour in self.cfg.decision_hours_utc and cand > self.last_decision_hour_ms:
+            if is_scheduled_hour(cand, self.cfg) and cand > self.last_decision_hour_ms:
                 return datetime.fromtimestamp(cand / 1000, UTC).isoformat()
         return ""
 
@@ -586,8 +588,7 @@ class MomentumDeskRunner:
     def _decision_hour_due(self, now_ms: int) -> int | None:
         hour_ms = 3_600_000
         cur = now_ms // hour_ms * hour_ms
-        hour = (cur // hour_ms) % 24
-        if hour not in self.cfg.decision_hours_utc:
+        if not is_scheduled_hour(cur, self.cfg):
             return None
         if cur <= self.last_decision_hour_ms:
             return None
@@ -1013,6 +1014,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 40.0)),
         week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 100.0)),
         macro_caution_mode=str(getattr(settings, "momentum_desk_macro_caution_mode", "reduce")),
+        strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
+        weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),
+        skip_weekend_entries=bool(getattr(settings, "momentum_desk_skip_weekend_entries", True)),
     )
 
 
@@ -1031,7 +1035,7 @@ def engine_settings_for_desk(
     settings: Settings, cfg: DeskConfig, venue: str | Sequence[str]
 ) -> Settings:
     """Policy caps sized to the desk so LiveMicroEngine gates stay meaningful."""
-    max_clip = cfg.clip_eur * max(1.0, cfg.alphai_clip_mult) + 1.0
+    max_clip = cfg.clip_eur * max_clip_mult(cfg) + 1.0
     venues = parse_venues(venue if isinstance(venue, str) else list(venue))
     return settings.model_copy(
         update={

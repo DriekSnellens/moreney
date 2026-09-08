@@ -566,19 +566,24 @@ class Settings(BaseSettings):
     # 90d sweep: entries 06-14 UTC all positive, 15-23 UTC all negative.
     momentum_desk_decision_hours_utc: str = "7,13"
     # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
-    # positions and fills slot 4 in ~12% of entries, so 4 x 1000 uses the
-    # full book only at peaks; net profit scales ~linearly with the clip
-    # (12-week walk-forward: 600 -> +311 EUR, 1000 -> +518 EUR, same
-    # profit/drawdown ratio). Loss limits are scaled with it.
-    momentum_desk_clip_eur: float = Field(default=1000.0, gt=0)
+    # positions, so the base clip can exceed book/4; the router shrinks or
+    # skips clips the venue cash cannot fund. Strong tape (>= 85% of the
+    # universe up) sizes x1.3, thin tape x0.7. 12-week walk-forward under a
+    # 4000 EUR book cap, weekdays only: +749 EUR, maxDD -140, worst week -73.
+    momentum_desk_clip_eur: float = Field(default=1300.0, gt=0)
+    momentum_desk_strong_clip_mult: float = Field(default=1.3, ge=1.0, le=2.0)
+    momentum_desk_weak_clip_mult: float = Field(default=0.7, gt=0, le=1.0)
+    # Weekend 24h signals print on thin liquidity and netted ~0 over 12 weeks
+    # while adding a third of the drawdown; exits keep running on weekends.
+    momentum_desk_skip_weekend_entries: bool = True
     momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
     momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_time_exit_hours: float = Field(default=24.0, gt=0)
-    momentum_desk_day_loss_limit_eur: float = Field(default=80.0, gt=0)
-    momentum_desk_week_loss_limit_eur: float = Field(default=200.0, gt=0)
+    momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
+    momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
