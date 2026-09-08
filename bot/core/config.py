@@ -569,10 +569,10 @@ class Settings(BaseSettings):
     momentum_desk_clip_eur: float = Field(default=600.0, gt=0)
     momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
     momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
-    momentum_desk_trail_tight_after: float = Field(default=0.03, ge=0, le=0.5)
-    momentum_desk_trail_tight_pct: float = Field(default=0.015, gt=0, le=0.2)
+    momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
+    momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
-    momentum_desk_time_exit_hours: float = Field(default=48.0, gt=0)
+    momentum_desk_time_exit_hours: float = Field(default=24.0, gt=0)
     momentum_desk_day_loss_limit_eur: float = Field(default=50.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=120.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"

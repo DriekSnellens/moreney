@@ -683,8 +683,8 @@ def test_dashboard_renders_positions_decision_and_ledger():
     html = render_momentum_dashboard(status, rows).body.decode()
     assert "LIVE" in html and "REGIME ON" in html
     assert "DOT" in html and "trail" in html and "2,015.60" in html
-    # Ratchet active (peak 4.5% >= 3%) -> tight trail shown at 1.5%.
-    assert "(1.5%)" in html
+    # Ratchet active (peak 4.5% >= 4%) -> tight trail shown at 2%.
+    assert "(2.0%)" in html
     assert "<script" not in html  # server-rendered, no JS surface
 
 

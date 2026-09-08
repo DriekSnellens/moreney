@@ -81,12 +81,17 @@ class DeskConfig:
     min_breadth: float = 0.5
     trail_pct: float = 0.03
     # Ratchet: once the peak gain reaches ``trail_tight_after`` the trail
-    # narrows to ``trail_tight_pct`` (0 disables). 90d walk-forward: lifts
-    # net from +17 to +66 EUR per 500 EUR clip and win rate from 41% to 50%.
-    trail_tight_after: float = 0.03
-    trail_tight_pct: float = 0.015
+    # narrows to ``trail_tight_pct`` (0 disables). 12-week walk-forward
+    # (7/13 UTC, 600 EUR clip): 3%->1.5% netted +164 EUR; 4%->2% +308 EUR
+    # and positive in both halves. The tighter ratchet was shaking winners
+    # out on ordinary 2% intraday noise before they reached +5..+9%.
+    trail_tight_after: float = 0.04
+    trail_tight_pct: float = 0.02
     hard_stop_pct: float = 0.03
-    time_exit_hours: float = 48.0
+    # Positions that have done nothing in a day almost always close red
+    # (48h time-exits: -43 EUR over 5 trades). 24h keeps the same total and
+    # trims the worst week from -76 to -54 EUR and max drawdown -118 -> -87.
+    time_exit_hours: float = 24.0
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 40.0
     week_loss_limit_eur: float = 100.0
