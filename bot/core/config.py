@@ -563,7 +563,8 @@ class Settings(BaseSettings):
     # Entry venues in preference order (cheapest fees first); later venues are
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
-    momentum_desk_decision_hours_utc: str = "0"
+    # 90d sweep: entries 06-14 UTC all positive, 15-23 UTC all negative.
+    momentum_desk_decision_hours_utc: str = "7,13"
     # Sized for ~4k EUR across both venues: 4 x 600 keeps <= 65% deployed.
     momentum_desk_clip_eur: float = Field(default=600.0, gt=0)
     momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
