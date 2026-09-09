@@ -258,7 +258,8 @@ def build_daily_report(
         rows = candles_by_base.get(base) or []
         actual = exit_by_base.get(base)
         actual_ms = _parse_ts(actual.get("ts")) if actual else None
-        until_scan = actual_ms or until
+        # Always scan through end-of-day/now so early manual exits can be
+        # compared against a later auto trail/time-exit.
         auto = _simulate_auto_exit(
             base=base,
             entry_price=entry_px,
@@ -266,7 +267,7 @@ def build_daily_report(
             opened_ms=opened,
             candles=rows,
             cfg=cfg,
-            until_ms=until_scan + BAR_MS if actual_ms else until,
+            until_ms=until,
         )
         if actual and actual.get("net_eur") is not None:
             actual_net: float | None = float(actual["net_eur"])

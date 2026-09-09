@@ -1096,10 +1096,12 @@ def test_daily_report_flags_missed_hour_and_early_manual():
     sol = candles["SOL"]
     for _i, row in enumerate(sol):
         if T0 <= row[0] < T0 + DAY_MS:
-            # progressive gain through the day after T0
             hours = (row[0] - T0) / 3_600_000
-            mult = 1.0 + 0.04 + 0.002 * max(0, hours)
+            # Rise through morning; afternoon dump triggers trail after manual exit.
+            mult = 1.0 + 0.04 + 0.002 * max(0, hours) if hours < 10 else 1.02
             row[1] = row[2] = row[3] = row[4] = 100.0 * mult
+            if hours >= 10:
+                row[3] = 100.0 * 1.02  # low
     day = datetime.fromtimestamp(T0 / 1000, UTC).date()
     ledger = [
         {
@@ -1142,7 +1144,10 @@ def test_daily_report_flags_missed_hour_and_early_manual():
     assert d["day"] == day.isoformat()
     assert isinstance(d["missed_entries"], list)
     assert d["exits"] and d["entries"]
-    assert any(o["base"] == "SOL" for o in d["exit_opportunities"])
+    sol_ops = [o for o in d["exit_opportunities"] if o["base"] == "SOL"]
+    assert sol_ops and sol_ops[0]["kind"] == "early_manual"
+    assert sol_ops[0]["auto_net_eur"] is not None
+    assert sol_ops[0]["delta_eur"] is not None
 
 
 def test_dashboard_sell_all_and_report_render():
