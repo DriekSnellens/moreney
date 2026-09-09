@@ -75,7 +75,10 @@ class DeskConfig:
     top_n_broad: int = 3
     broad_breadth: float = 0.7
     min_excess: float = 0.015
-    max_from_high: float = 0.015
+    # 12-week walk-forward (1300 EUR clip, 4000 EUR book): 1.5% -> +749 EUR,
+    # 2.0% -> +821 EUR at the same drawdown, 2.5% -> +468 EUR. 2.0% is the
+    # operator's choice; do not widen further.
+    max_from_high: float = 0.02
     min_volume_eur: float = 1_000_000.0
     btc_min_ret: float = -0.01
     min_breadth: float = 0.5
