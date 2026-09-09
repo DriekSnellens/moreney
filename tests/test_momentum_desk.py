@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -1036,3 +1037,173 @@ def test_sell_clamps_to_free_balance_when_fee_was_taken_in_base(tmp_path):
     assert out["ok"] and out["sold_qty"] == pytest.approx(4.9)
     assert r.holdings == []
     assert gw.placed[-1]["side"] == "sell" and gw.placed[-1]["qty"] == pytest.approx(4.9)
+
+
+def test_sell_all_sells_every_holding(tmp_path):
+    clock = FakeClock((T0 + 60_000) / 1000)
+    gw = FakeGateway(fill_maker_after_polls=1, free_by_base={"SOL": 5.0, "LINK": 4.0})
+    r = _runner(tmp_path, gw, clock, universe=("SOL", "LINK"), clip_eur=500.0, min_volume_eur=0.0)
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_runner import Holding, MomentumDeskManager
+
+    r.holdings = [
+        Holding(pos=Position("SOL", 100.0, 5.0, 500.0, T0, 100.0), holding_id="a"),
+        Holding(pos=Position("LINK", 100.0, 4.0, 400.0, T0, 100.0), holding_id="b"),
+    ]
+    r.marks = {"SOL": 100.0, "LINK": 100.0}
+    r._gws = {"bitvavo": gw}
+
+    async def go():
+        m = MomentumDeskManager()
+        assert m.sell_all()["reason"] == "not_running"
+        m._runner = r
+        m._task = asyncio.create_task(asyncio.sleep(10))
+        out = m.sell_all(urgent=True)
+        assert out["ok"] and m.sell_all()["reason"] == "sell_in_progress"
+        await m._sell_task
+        m._task.cancel()
+        return m.status()
+
+    status = asyncio.run(go())
+    me = status["manual_exit"]
+    assert me["done"] and me["all"] and me["result"]["sold"] == 2
+    assert r.holdings == []
+
+
+def test_daily_report_flags_missed_hour_and_early_manual():
+    from bot.live.momentum_daily_report import build_daily_report, report_as_dict
+    from bot.live.momentum_desk import BARS_PER_DAY
+
+    cfg = DeskConfig(
+        decision_hours_utc=(7, 13),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+        skip_weekend_entries=False,
+        strong_clip_mult=1.0,
+        weak_clip_mult=1.0,
+        max_from_high=0.02,
+    )
+    # Build candles: BTC flat, SOL strong on hour 10 only path.
+    n = 3 * BARS_PER_DAY
+    start = T0 - 2 * DAY_MS
+    candles = {
+        "BTC": _series(start, n, 100.0, 0.0),
+        "LINK": _series(start, n, 100.0, 0.0),
+        "SOL": _series(start, n, 100.0, 0.0),
+    }
+    # Pump SOL so hour-10 stats show excess and near high.
+    sol = candles["SOL"]
+    for _i, row in enumerate(sol):
+        if T0 <= row[0] < T0 + DAY_MS:
+            # progressive gain through the day after T0
+            hours = (row[0] - T0) / 3_600_000
+            mult = 1.0 + 0.04 + 0.002 * max(0, hours)
+            row[1] = row[2] = row[3] = row[4] = 100.0 * mult
+    day = datetime.fromtimestamp(T0 / 1000, UTC).date()
+    ledger = [
+        {
+            "ts": f"{day.isoformat()}T07:00:10+00:00",
+            "event": "decision",
+            "ok": False,
+            "btc_ret": -0.02,
+            "breadth": 0.2,
+            "reasons": ["btc_weak"],
+            "entries": [],
+            "candidates": [],
+        },
+        {
+            "ts": f"{day.isoformat()}T07:30:00+00:00",
+            "event": "entry",
+            "base": "SOL",
+            "qty": 5.0,
+            "price": 104.0,
+            "notional_eur": 520.0,
+        },
+        {
+            "ts": f"{day.isoformat()}T09:00:00+00:00",
+            "event": "exit",
+            "base": "SOL",
+            "qty": 5.0,
+            "price": 104.5,
+            "net_eur": 1.0,
+            "reason": "manual",
+            "peak_return": 0.02,
+        },
+    ]
+    report = build_daily_report(
+        day=day,
+        cfg=cfg,
+        candles_by_base=candles,
+        ledger_rows=ledger,
+        now_ms=T0 + DAY_MS - BAR_MS,
+    )
+    d = report_as_dict(report)
+    assert d["day"] == day.isoformat()
+    assert isinstance(d["missed_entries"], list)
+    assert d["exits"] and d["entries"]
+    assert any(o["base"] == "SOL" for o in d["exit_opportunities"])
+
+
+def test_dashboard_sell_all_and_report_render():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    status = {
+        "running": True,
+        "venues": ["bitvavo"],
+        "config": {
+            k: (list(v) if isinstance(v, tuple) else v) for k, v in DeskConfig().__dict__.items()
+        },
+        "positions": [
+            {
+                "holding_id": "h1",
+                "base": "SOL",
+                "venue": "bitvavo",
+                "entry_price": 100.0,
+                "quantity": 5,
+                "peak_return": 0.02,
+                "mark": 101.0,
+                "gross_return": 0.01,
+                "unrealized_net_eur": 4.0,
+                "age_h": 1.0,
+                "entry_reason": "x",
+            }
+        ],
+        "risk": {"day_realized_eur": 0, "week_realized_eur": 0, "entries_allowed": True},
+        "cash_eur": 1000,
+        "exposure_eur": 500,
+        "equity_eur": 1500,
+        "realized_total_eur": 0,
+        "trade_count": 0,
+        "unrealized_net_eur": 4.0,
+        "next_decision": "2026-09-09T13:00:00+00:00",
+    }
+    html = render_momentum_dashboard(status, []).body.decode()
+    assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
+    assert "pos-cards" in html and 'name="sell" value="h1"' in html
+    confirm = render_momentum_dashboard(status, [], sell_all=True).body.decode()
+    assert "Alles verkopen?" in confirm and "/live/momentum/sell-all" in confirm
+    report = {
+        "day": "2026-09-09",
+        "summary": "test",
+        "realized_net_eur": 12.0,
+        "decisions": [],
+        "entries": [],
+        "exits": [],
+        "missed_entries": [
+            {
+                "hour_utc": 16,
+                "bases": ["DOT"],
+                "btc_ret": 0.01,
+                "breadth": 0.8,
+                "scheduled": False,
+                "note": "buiten schema",
+                "hypothetical": [
+                    {"base": "DOT", "net_eur": 20.0, "reason": "trail", "status": "closed"}
+                ],
+            }
+        ],
+        "exit_opportunities": [],
+    }
+    rep = render_momentum_dashboard(status, [], report=report).body.decode()
+    assert "Gemiste instappen" in rep and "DOT" in rep and 'http-equiv="refresh"' not in rep

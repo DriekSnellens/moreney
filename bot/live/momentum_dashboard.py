@@ -19,9 +19,11 @@ _CSS = """
     table.desk th { color: var(--muted); font-weight: 500; font-size: .72rem;
       letter-spacing: .04em; text-transform: uppercase; }
     table.desk td:first-child, table.desk th:first-child { text-align: left; }
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -.25rem;
+      padding: 0 .25rem; }
     .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
     .muted { color: var(--muted); }
-    .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: .5rem .9rem; font-size: .8rem; }
     .rules div span { display: block; color: var(--muted); font-size: .68rem; }
     .chips span { display: inline-block; margin: .15rem .25rem 0 0; padding: .15rem .5rem;
@@ -31,12 +33,16 @@ _CSS = """
       margin: 0 0 .6rem; }
     .stack { display: grid; gap: 1rem; }
     @media (min-width: 980px) { .stack.two { grid-template-columns: 1.15fr .85fr; } }
-    .btn { cursor: pointer; font: inherit; font-size: .8rem; padding: .4rem .8rem;
-      border-radius: .5rem; border: 1px solid var(--line); background: transparent;
-      color: var(--blue); }
+    .btn { cursor: pointer; font: inherit; font-size: .85rem; padding: .55rem .9rem;
+      min-height: 44px; border-radius: .6rem; border: 1px solid var(--line);
+      background: transparent; color: var(--blue); touch-action: manipulation; }
     .btn:hover { border-color: var(--blue); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
     .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 60%, var(--line));
       font-weight: 600; }
+    .btn.primary { background: color-mix(in srgb, var(--blue) 14%, transparent);
+      border-color: color-mix(in srgb, var(--blue) 55%, var(--line)); font-weight: 600; }
+    .btn.block { width: 100%; display: block; text-align: center; }
     .hint { margin: .6rem 0; padding: .5rem .75rem; border-radius: .5rem; font-size: .82rem;
       border: 1px solid var(--line); }
     .hint.bad { color: var(--bad);
@@ -45,8 +51,42 @@ _CSS = """
       border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
     .hint.warn { color: var(--warn);
       border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
-    .card-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
+    .card-head { display: flex; justify-content: space-between; align-items: center;
+      gap: .6rem; flex-wrap: wrap; }
     .card-head h2 { margin: 0; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: .85rem 0 0; }
+    .toolbar form { display: inline; flex: 1 1 auto; min-width: 9rem; }
+    .toolbar .btn { width: 100%; }
+    .pos-cards { display: none; gap: .65rem; }
+    .pos-card { border: 1px solid var(--line); border-radius: .7rem; padding: .7rem .8rem;
+      background: color-mix(in srgb, var(--panel) 92%, transparent); }
+    .pos-card .row1 { display: flex; justify-content: space-between; align-items: baseline;
+      gap: .5rem; margin-bottom: .35rem; }
+    .pos-card .meta { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem .6rem;
+      font-size: .78rem; }
+    .pos-card .meta span { color: var(--muted); display: block; font-size: .65rem; }
+    .pos-card .actions { margin-top: .55rem; }
+    .sticky-actions { position: sticky; bottom: 0; z-index: 20; margin: 1rem -.25rem 0;
+      padding: .65rem .75rem calc(.65rem + env(safe-area-inset-bottom));
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      border-top: 1px solid var(--line); backdrop-filter: blur(8px); }
+    .sticky-actions .toolbar { margin: 0; }
+    body { padding-bottom: 5.5rem; }
+    @media (max-width: 720px) {
+      .wrap { padding: .75rem .7rem 0; }
+      .topbar { flex-direction: column; align-items: flex-start; gap: .45rem; }
+      .hero-grid { grid-template-columns: 1fr 1fr !important; gap: .55rem !important; }
+      .hero-card .value { font-size: 1.15rem; }
+      .desk-wide { display: none; }
+      .pos-cards { display: grid; }
+      table.desk { font-size: .78rem; }
+      table.desk th, table.desk td { padding: .4rem .4rem; }
+      .btn { font-size: .82rem; }
+    }
+    @media (min-width: 721px) {
+      .sticky-actions { display: none; }
+      body { padding-bottom: 0; }
+    }
 """
 
 
@@ -107,10 +147,12 @@ def _positions_table(status: Mapping[str, Any]) -> str:
     busy = status.get("manual_exit") or {}
     sell_busy = bool(busy) and not busy.get("done")
     out = [
-        '<table class="desk"><thead><tr><th>Base</th><th>Entry</th><th>Mark</th><th>Gross</th>'
+        '<div class="table-scroll desk-wide"><table class="desk"><thead><tr>',
+        "<th>Base</th><th>Entry</th><th>Mark</th><th>Gross</th>"
         "<th>Peak</th><th>Trail-stop</th><th>Hard-stop</th><th>Net</th><th>Age</th>"
-        "<th>Actie</th></tr></thead><tbody>"
+        "<th>Actie</th></tr></thead><tbody>",
     ]
+    cards = ['<div class="pos-cards">']
     for p in rows:
         entry = float(p.get("entry_price") or 0)
         peak_ret = float(p.get("peak_return") or 0)
@@ -119,6 +161,7 @@ def _positions_table(status: Mapping[str, Any]) -> str:
         trail_px = peak_px * (1 - eff_trail)
         stop_px = entry * (1 - stop)
         mark = p.get("mark")
+        sell = _sell_cell(p, disabled=sell_busy)
         out.append(
             "<tr>"
             f"<td><strong>{escape(str(p.get('base')))}</strong>"
@@ -135,10 +178,41 @@ def _positions_table(status: Mapping[str, Any]) -> str:
             f"<td class='{_cls(p.get('unrealized_net_eur'))}'>"
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
             f"<td>{float(p.get('age_h') or 0):.1f}h</td>"
-            f"<td>{_sell_cell(p, disabled=sell_busy)}</td>"
+            f"<td>{sell}</td>"
             "</tr>"
         )
-    out.append("</tbody></table>")
+        cards.append(
+            '<div class="pos-card">'
+            f'<div class="row1"><div><strong>{escape(str(p.get("base")))}</strong> '
+            f'<span class="muted">{escape(str(p.get("venue") or ""))}</span></div>'
+            f'<div class="{_cls(p.get("unrealized_net_eur"))}" style="font-weight:600">'
+            f"{_fmt_eur(p.get('unrealized_net_eur'))}</div></div>"
+            f'<div class="muted" style="font-size:.7rem;margin-bottom:.35rem">'
+            f"{escape(str(p.get('entry_reason') or ''))}</div>"
+            '<div class="meta">'
+            f"<div><span>Entry</span>{entry:,.4f}</div>"
+            f"<div><span>Mark</span>{(f'{float(mark):,.4f}' if mark else '—')}</div>"
+            f'<div><span>Gross</span><span class="{_cls(p.get("gross_return"))}">'
+            f"{_fmt_pct(p.get('gross_return'))}</span></div>"
+            f"<div><span>Peak</span>{_fmt_pct(peak_ret)}</div>"
+            f"<div><span>Trail</span>{trail_px:,.4f} ({100 * eff_trail:.1f}%)</div>"
+            f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
+            f"<div><span>Age</span>{float(p.get('age_h') or 0):.1f}h</div>"
+            "</div>"
+            f'<div class="actions">{sell}</div></div>'
+        )
+    out.append("</tbody></table></div>")
+    cards.append("</div>")
+    out.append("".join(cards))
+    sell_all = ""
+    if rows and not sell_busy:
+        sell_all = (
+            '<div class="toolbar" style="margin-top:.55rem">'
+            '<form method="get" action="/live/momentum">'
+            '<input type="hidden" name="sell_all" value="1">'
+            '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
+        )
+    out.append(sell_all)
     out.append(
         "<p class='muted' style='font-size:.72rem;margin-top:.4rem'>Verkoop = maker-order op de "
         "bied, valt na 60 s terug op taker. Wordt in de ledger geboekt als <em>manual</em>.</p>"
@@ -153,12 +227,11 @@ def _sell_cell(p: Mapping[str, Any], *, disabled: bool) -> str:
     if p.get("exiting"):
         return "<span class='muted' style='font-size:.75rem'>verkoop bezig…</span>"
     dis = " disabled" if disabled else ""
-    # Two-step without JS: this GET renders a confirmation panel, the panel POSTs.
     return (
         f'<form method="get" action="/live/momentum" style="display:inline">'
         f'<input type="hidden" name="sell" value="{escape(hid)}">'
-        f'<button type="submit" class="btn danger" style="font-size:.72rem;padding:.25rem .55rem"'
-        f"{dis}>Verkoop</button></form>"
+        f'<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;'
+        f'min-height:40px"{dis}>Verkoop</button></form>'
     )
 
 
@@ -194,6 +267,193 @@ def _sell_confirm_panel(status: Mapping[str, Any], holding_id: str) -> str:
         "<p class='muted' style='font-size:.75rem;margin-top:.5rem'>Maker: order op de bied, "
         "60 s rusten, daarna taker-fallback. Taker: meteen over de spread, hogere fee.</p></div>"
     )
+
+
+def _sell_all_confirm_panel(status: Mapping[str, Any]) -> str:
+    rows = status.get("positions") or []
+    if not rows:
+        return (
+            '<div class="hint bad">Geen open posities om te verkopen. '
+            '<a href="/live/momentum">terug</a></div>'
+        )
+    lines = []
+    total = 0.0
+    for p in rows:
+        net = float(p.get("unrealized_net_eur") or 0)
+        total += net
+        lines.append(
+            f"<li><strong>{escape(str(p.get('base')))}</strong> "
+            f"({escape(str(p.get('venue') or ''))}) · "
+            f"<span class='{_cls(net)}'>{_fmt_eur(net)}</span></li>"
+        )
+    return (
+        '<div class="card"><h2>Alles verkopen?</h2>'
+        f"<p>{len(rows)} posities, open resultaat nu "
+        f"<span class='{_cls(total)}'>{_fmt_eur(total)}</span>.</p>"
+        f"<ul style='margin:.4rem 0 .8rem;padding-left:1.1rem'>{''.join(lines)}</ul>"
+        "<div class='toolbar'>"
+        '<form method="post" action="/live/momentum/sell-all">'
+        '<button type="submit" class="btn danger">Alles als maker verkopen</button></form>'
+        '<form method="post" action="/live/momentum/sell-all?urgent=1">'
+        '<button type="submit" class="btn danger">Alles direct (taker)</button></form>'
+        '<form method="get" action="/live/momentum">'
+        '<button type="submit" class="btn">Annuleren</button></form>'
+        "</div>"
+        "<p class='muted' style='font-size:.75rem;margin-top:.5rem'>Orders gaan één voor één. "
+        "Tijdens de reeks zijn andere verkopen geblokkeerd.</p></div>"
+    )
+
+
+def _toolbar(*, running: bool, has_positions: bool, hold: bool) -> str:
+    if not running:
+        return ""
+    bits = [
+        '<div class="toolbar">',
+        '<form method="get" action="/live/momentum">'
+        '<input type="hidden" name="simulate" value="1">'
+        '<button type="submit" class="btn primary">Simuleer</button></form>',
+        '<form method="get" action="/live/momentum">'
+        '<input type="hidden" name="report" value="1">'
+        '<button type="submit" class="btn">Daily report</button></form>',
+    ]
+    if has_positions:
+        bits.append(
+            '<form method="get" action="/live/momentum">'
+            '<input type="hidden" name="sell_all" value="1">'
+            '<button type="submit" class="btn danger">Verkoop alles</button></form>'
+        )
+    if hold:
+        bits.append(
+            '<form method="get" action="/live/momentum">'
+            '<button type="submit" class="btn">Sluiten</button></form>'
+        )
+    bits.append("</div>")
+    return "".join(bits)
+
+
+_KIND_NL = {
+    "early_manual": "Te vroeg handmatig verkocht",
+    "late_manual": "Handmatig later dan de auto-regel",
+    "would_have_exited": "Auto-regel had al verkocht (nog open)",
+    "still_open": "Nog open — auto-regel nog niet geraakt",
+    "matched": "Exit in lijn met de regel",
+}
+
+
+def _report_panel(report: Mapping[str, Any]) -> str:
+    out = [
+        '<div class="card section"><div class="card-head"><h2>Daily report</h2>',
+        f'<span class="muted">{escape(str(report.get("day") or ""))} UTC</span></div>',
+        f'<p style="margin:.3rem 0 .7rem">{escape(str(report.get("summary") or ""))}</p>',
+        f'<p>Gerealiseerd vandaag: <strong class="{_cls(report.get("realized_net_eur"))}">'
+        f"{_fmt_eur(report.get('realized_net_eur'))}</strong></p>",
+    ]
+    decs = report.get("decisions") or []
+    out.append("<h3 style='font-size:.9rem;margin:1rem 0 .4rem'>Beslissingen</h3>")
+    if not decs:
+        out.append('<p class="muted">Geen beslissingen in de ledger vandaag.</p>')
+    else:
+        out.append(
+            '<div class="table-scroll"><table class="desk"><thead><tr>'
+            "<th>Tijd</th><th>Regime</th><th>BTC</th><th>Breadth</th>"
+            "<th>Entries</th><th>Redenen</th></tr></thead><tbody>"
+        )
+        for d in decs:
+            ok = bool(d.get("ok"))
+            ents = d.get("entries") or []
+            if isinstance(ents, list) and ents and isinstance(ents[0], dict):
+                ent_s = ", ".join(str(e.get("base") or e) for e in ents)
+            else:
+                ent_s = ", ".join(str(e) for e in ents) if ents else "—"
+            out.append(
+                "<tr>"
+                f"<td>{_ts(d.get('ts'))}</td>"
+                f"<td class='{'good' if ok else 'bad'}'>{'AAN' if ok else 'UIT'}</td>"
+                f"<td>{_fmt_pct(d.get('btc_ret'))}</td>"
+                f"<td>{float(d.get('breadth') or 0):.2f}</td>"
+                f"<td>{escape(ent_s)}</td>"
+                f"<td class='muted' style='text-align:left'>"
+                f"{escape(', '.join(d.get('reasons') or []) or '—')}</td></tr>"
+            )
+        out.append("</tbody></table></div>")
+
+    missed = report.get("missed_entries") or []
+    out.append("<h3 style='font-size:.9rem;margin:1rem 0 .4rem'>Gemiste instappen</h3>")
+    if not missed:
+        out.append('<p class="muted">Geen extra instapmomenten met geldige kandidaten vandaag.</p>')
+    else:
+        out.append(
+            '<div class="table-scroll"><table class="desk"><thead><tr>'
+            "<th>Uur</th><th>Coins</th><th>BTC</th><th>Breadth</th>"
+            "<th>Note</th><th>Hypo netto</th><th>Hypo exit</th></tr></thead><tbody>"
+        )
+        for m in missed:
+            hypos = m.get("hypothetical") or []
+            hypo_net = sum(float(h.get("net_eur") or 0) for h in hypos)
+            hypo_ex = (
+                ", ".join(
+                    f"{h.get('base')} {h.get('reason') or h.get('status')} "
+                    f"{_fmt_eur(h.get('net_eur'))}"
+                    for h in hypos
+                )
+                or "—"
+            )
+            out.append(
+                "<tr>"
+                f"<td class='mono'>{int(m.get('hour_utc') or 0):02d}:00"
+                f"{' ★' if m.get('scheduled') else ''}</td>"
+                f"<td>{escape(', '.join(m.get('bases') or []))}</td>"
+                f"<td>{_fmt_pct(m.get('btc_ret'))}</td>"
+                f"<td>{float(m.get('breadth') or 0):.2f}</td>"
+                f"<td class='muted' style='text-align:left'>"
+                f"{escape(str(m.get('note') or ''))}</td>"
+                f"<td class='{_cls(hypo_net)}'>{_fmt_eur(hypo_net)}</td>"
+                f"<td class='muted' style='text-align:left;white-space:normal'>"
+                f"{escape(hypo_ex)}</td></tr>"
+            )
+        out.append("</tbody></table></div>")
+        out.append(
+            '<p class="muted" style="font-size:.72rem">★ = gepland beslismoment. '
+            "Hypo = wat de exit-regel later met die entry gedaan zou hebben.</p>"
+        )
+
+    ops = report.get("exit_opportunities") or []
+    out.append("<h3 style='font-size:.9rem;margin:1rem 0 .4rem'>Exit-kansen</h3>")
+    if not ops:
+        out.append('<p class="muted">Geen entries vandaag om exits tegen af te zetten.</p>')
+    else:
+        out.append(
+            '<div class="table-scroll"><table class="desk"><thead><tr>'
+            "<th>Coin</th><th>Soort</th><th>Handmatig</th><th>Auto</th>"
+            "<th>Δ netto</th><th>Piek</th></tr></thead><tbody>"
+        )
+        for o in ops:
+            kind = str(o.get("kind") or "")
+            out.append(
+                "<tr>"
+                f"<td><strong>{escape(str(o.get('base') or ''))}</strong></td>"
+                f"<td style='text-align:left;white-space:normal'>"
+                f"{escape(_KIND_NL.get(kind, kind))}</td>"
+                f"<td>{_fmt_eur(o.get('actual_net_eur'))}"
+                f"<div class='muted' style='font-size:.7rem'>"
+                f"{escape(str(o.get('actual_reason') or '—'))} · {_ts(o.get('actual_exit_ts'))}"
+                "</div></td>"
+                f"<td>{_fmt_eur(o.get('auto_net_eur'))}"
+                f"<div class='muted' style='font-size:.7rem'>"
+                f"{escape(str(o.get('auto_reason') or '—'))} · {_ts(o.get('auto_exit_ts'))}"
+                "</div></td>"
+                f"<td class='{_cls(o.get('delta_eur'))}'>{_fmt_eur(o.get('delta_eur'))}</td>"
+                f"<td>{_fmt_pct(o.get('peak_return'))}</td></tr>"
+            )
+        out.append("</tbody></table></div>")
+        out.append(
+            '<p class="muted" style="font-size:.72rem">Δ netto = handmatig − auto. '
+            "Negatief betekent dat de auto-regel meer zou hebben opgeleverd.</p>"
+        )
+    out.append(
+        '<p style="margin-top:.8rem"><a href="/live/momentum" class="muted">terug</a></p></div>'
+    )
+    return "".join(out)
 
 
 def _decision_panel(status: Mapping[str, Any]) -> str:
@@ -388,14 +648,24 @@ def _manual_exit_notice(me: Mapping[str, Any]) -> str:
     if not me:
         return ""
     base = escape(str(me.get("base") or ""))
+    is_all = bool(me.get("all") or (me.get("holding_id") == "*"))
+    label = "Alles" if is_all else base
     if not me.get("done"):
         return (
-            f'<div class="hint warn">Verkoop {base} bezig sinds {_ts(me.get("started_at"))}. '
-            "Order rust als maker (tot 60 s), daarna taker.</div>"
+            f'<div class="hint warn">Verkoop {label} bezig sinds {_ts(me.get("started_at"))}. '
+            "Order rust als maker (tot 60 s per coin), daarna taker.</div>"
         )
     res = me.get("result") or {}
     if res.get("error"):
-        return f'<div class="hint bad">Verkoop {base} mislukt: {escape(str(res["error"]))}</div>'
+        return f'<div class="hint bad">Verkoop {label} mislukt: {escape(str(res["error"]))}</div>'
+    if is_all:
+        sold = int(res.get("sold") or 0)
+        failed = int(res.get("failed") or 0)
+        cls = "good" if sold and not failed else ("warn" if sold else "bad")
+        return (
+            f'<div class="hint {cls}">Sell-all klaar om {_ts(me.get("finished_at"))}: '
+            f"{sold} verkocht, {failed} mislukt. Zie ledger.</div>"
+        )
     if not res.get("ok"):
         why = str(res.get("reason") or "onbekend")
         hint = (
@@ -523,6 +793,8 @@ def render_momentum_dashboard(
     preview: Mapping[str, Any] | None = None,
     notice: str | None = None,
     sell: str | None = None,
+    sell_all: bool = False,
+    report: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -558,11 +830,13 @@ def render_momentum_dashboard(
         err_html += f'<div class="hint warn">{escape(notice)}</div>'
     err_html += _commit_notice(commit)
     err_html += _manual_exit_notice(status.get("manual_exit") or {})
-    # A preview or sell confirmation is a decision aid: keep the page still.
-    hold_page = bool(preview) or bool(sell)
+    hold_page = bool(preview) or bool(sell) or bool(sell_all) or bool(report)
     refresh_meta = "" if hold_page else '<meta http-equiv="refresh" content="20">'
     refresh_note = "Geen auto-refresh tijdens bevestiging" if hold_page else "Ververst elke 20s"
+    toolbar = _toolbar(running=running, has_positions=n_pos > 0, hold=hold_page)
     sell_html = _sell_confirm_panel(status, sell) if sell else ""
+    sell_all_html = _sell_all_confirm_panel(status) if sell_all else ""
+    report_html = _report_panel(report) if report else ""
     preview_html = (
         f'<div class="card section"><div class="card-head"><h2>Simulatie</h2>'
         f"{_simulate_button()}</div>{_preview_panel(preview, ledger_rows, commit)}</div>"
@@ -616,7 +890,8 @@ def render_momentum_dashboard(
     )
     html = f"""<!doctype html>
 <html lang="nl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1419">
 {refresh_meta}
 <title>Momentum Desk</title>
 <style>{dashboard_css()}{_CSS}</style></head>
@@ -627,11 +902,15 @@ def render_momentum_dashboard(
   <div>{pill}</div>
 </div>
 {err_html}
+{toolbar}
 <div class="hero-grid" style="margin-top:1rem">{heroes}</div>
 {preview_html}
+{report_html}
 {sell_html}
+{sell_all_html}
 <div class="stack two section">
-  <div class="card"><h2>Open posities</h2>{_positions_table(status)}</div>
+  <div class="card"><div class="card-head"><h2>Open posities</h2></div>
+  {_positions_table(status)}</div>
   <div class="card"><div class="card-head"><h2>Laatste beslissing</h2>
   {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
 </div>
@@ -641,5 +920,7 @@ def render_momentum_dashboard(
 <a href="/live/momentum/status" style="color:var(--blue)">status JSON</a> ·
 <a href="/live/momentum/ledger" style="color:var(--blue)">ledger JSON</a> ·
 <a href="/live/dashboard/legacy" style="color:var(--muted)">oude desk</a></p>
-</div></body></html>"""
+</div>
+<div class="sticky-actions">{toolbar}</div>
+</body></html>"""
     return HTMLResponse(html)

@@ -822,24 +822,43 @@ async def live_momentum_dashboard(
     simulate: int = 0,
     notice: str | None = None,
     sell: str | None = None,
+    sell_all: int = 0,
+    report: int = 0,
+    day: str | None = None,
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse:
     """Momentum desk operator page: equity, positions, last decision, ledger.
 
     ``?simulate=1`` runs the entry decision as a preview (no orders) and shows
-    the planned trades with a net P&L scenario table and a commit button."""
+    the planned trades with a net P&L scenario table and a commit button.
+    ``?report=1`` builds today's missed-entry / exit-opportunity report.
+    ``?sell_all=1`` opens the sell-everything confirmation.
+    """
     manager = get_momentum_desk_manager()
     preview: dict[str, Any] | None = None
+    report_payload: dict[str, Any] | None = None
     if simulate:
         res = await manager.decide(execute=False)
         if res.get("ok"):
             preview = res.get("decision")
         else:
             notice = f"Simulatie niet mogelijk: {res.get('reason')}"
+    if report:
+        res = await manager.daily_report(day)
+        if res.get("ok"):
+            report_payload = res.get("report")
+        else:
+            notice = f"Report niet mogelijk: {res.get('reason')}"
     status = manager.status()
     ledger = await live_momentum_ledger(limit=400)
     return render_momentum_dashboard(
-        status, ledger["rows"], preview=preview, notice=(notice or None), sell=(sell or None)
+        status,
+        ledger["rows"],
+        preview=preview,
+        notice=(notice or None),
+        sell=(sell or None),
+        sell_all=bool(sell_all),
+        report=report_payload,
     )
 
 
@@ -879,6 +898,20 @@ async def live_momentum_sell(
     if not res.get("ok"):
         return RedirectResponse(
             url=f"/live/momentum?notice=Verkoop+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.post("/live/momentum/sell-all", response_model=None)
+async def live_momentum_sell_all(
+    urgent: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Sell every open momentum-desk holding (dashboard sell-all)."""
+    res = get_momentum_desk_manager().sell_all(urgent=bool(urgent))
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Sell-all+geweigerd:+{res.get('reason')}", status_code=303
         )
     return RedirectResponse(url="/live/momentum", status_code=303)
 

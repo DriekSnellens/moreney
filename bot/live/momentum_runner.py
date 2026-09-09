@@ -648,6 +648,21 @@ class MomentumDeskRunner:
         self._save_state()
         return fill
 
+    async def sell_all_now(self, *, urgent: bool = False) -> dict[str, Any]:
+        """Sell every open holding sequentially (dashboard sell-all)."""
+        ids = [h.holding_id for h in list(self.holdings)]
+        results: list[dict[str, Any]] = []
+        for hid in ids:
+            results.append(await self.sell_now(hid, urgent=urgent))
+        ok_n = sum(1 for r in results if r.get("ok"))
+        return {
+            "ok": ok_n == len(results) and bool(results),
+            "sold": ok_n,
+            "failed": len(results) - ok_n,
+            "results": results,
+            "all": True,
+        }
+
     async def sell_now(self, holding_id: str, *, urgent: bool = False) -> dict[str, Any]:
         """Operator-initiated exit of one holding (dashboard sell button).
 
@@ -1304,6 +1319,81 @@ class MomentumDeskManager:
 
         self._sell_task = asyncio.create_task(_run(), name="momentum-sell")
         return {"ok": True, "manual_exit": dict(self._manual_exit)}
+
+    def sell_all(self, *, urgent: bool = False) -> dict[str, Any]:
+        """Sell every open holding in the background (dashboard sell-all)."""
+        if self._runner is None or not self.running():
+            return {"ok": False, "reason": "not_running"}
+        if self._sell_task is not None and not self._sell_task.done():
+            return {"ok": False, "reason": "sell_in_progress"}
+        runner = self._runner
+        bases = [h.pos.base for h in runner.holdings]
+        if not bases:
+            return {"ok": False, "reason": "no_positions"}
+        self._manual_exit = {
+            "started_at": datetime.now(UTC).isoformat(),
+            "holding_id": "*",
+            "base": ",".join(bases),
+            "bases": bases,
+            "urgent": bool(urgent),
+            "all": True,
+            "done": False,
+            "result": None,
+        }
+
+        async def _run() -> None:
+            try:
+                self._manual_exit["result"] = await runner.sell_all_now(urgent=urgent)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("momentum desk: sell-all failed")
+                self._manual_exit["result"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                self._manual_exit["done"] = True
+                self._manual_exit["finished_at"] = datetime.now(UTC).isoformat()
+
+        self._sell_task = asyncio.create_task(_run(), name="momentum-sell-all")
+        return {"ok": True, "manual_exit": dict(self._manual_exit)}
+
+    async def daily_report(self, day: str | None = None) -> dict[str, Any]:
+        """Build the missed-entry / exit-opportunity report for one UTC day."""
+        from bot.live.momentum_daily_report import build_daily_report, report_as_dict
+
+        if self._runner is None or not self.running():
+            return {"ok": False, "reason": "not_running"}
+        runner = self._runner
+        if day:
+            try:
+                day_d = datetime.fromisoformat(day).date()
+            except ValueError:
+                return {"ok": False, "reason": "bad_day"}
+        else:
+            day_d = datetime.now(UTC).date()
+        # Need BTC + universe candles; reuse the live feed.
+        bases = ("BTC", *runner.cfg.universe)
+        candles: dict[str, list] = {}
+        for base in bases:
+            try:
+                candles[base] = await runner._feed.candles(base, 320)  # noqa: SLF001
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("daily report: candles %s failed: %s", base, exc)
+        # Ledger rows from the flag path.
+        path = Path(runner.opt.ledger_path)
+        rows: list[dict[str, Any]] = []
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines()[-800:]:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        report = build_daily_report(
+            day=day_d,
+            cfg=runner.cfg,
+            candles_by_base=candles,
+            ledger_rows=rows,
+            alphai=runner._alphai_view(),  # noqa: SLF001
+            now_ms=int(runner._clock() * 1000),  # noqa: SLF001
+        )
+        return {"ok": True, "report": report_as_dict(report)}
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True
