@@ -777,6 +777,8 @@ class MomentumDeskRunner:
             "fee_out_eur": round(clip * fee_side, 2),
             "hard_stop_pct": self.cfg.hard_stop_pct,
             "trail_pct": self.cfg.trail_pct,
+            "trail_tight_after": self.cfg.trail_tight_after,
+            "trail_tight_pct": self.cfg.trail_tight_pct,
         }
         if price:
             qty = clip / price

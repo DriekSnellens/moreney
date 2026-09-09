@@ -295,7 +295,8 @@ def _preview_panel(
             "Prijs = laatste 15m-close; uitvoering gaat als maker op het live orderboek. "
             f"Hard stop bij {100 * float(planned[0].get('hard_stop_pct') or 0.03):.0f}%, "
             f"trail {100 * float(planned[0].get('trail_pct') or 0.03):.0f}% onder de piek "
-            "(1,5% zodra +3% piek).</p>"
+            f"({100 * float(planned[0].get('trail_tight_pct') or 0.02):.1f}% zodra "
+            f"+{100 * float(planned[0].get('trail_tight_after') or 0.04):.0f}% piek).</p>"
         )
     out.append(_expectancy_line(ledger_rows))
     if preview.get("rejected"):
