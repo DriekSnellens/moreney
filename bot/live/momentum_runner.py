@@ -374,6 +374,7 @@ class MomentumDeskRunner:
                 unrealized += net
             positions.append(
                 {
+                    "holding_id": h.holding_id,
                     "base": h.pos.base,
                     "venue": h.pos.venue,
                     "entry_price": h.pos.entry_price,
@@ -582,6 +583,35 @@ class MomentumDeskRunner:
             h.pos.quantity = remaining
             h.pos.notional_eur = remaining * h.pos.entry_price
         self._save_state()
+
+    async def sell_now(self, holding_id: str, *, urgent: bool = False) -> dict[str, Any]:
+        """Operator-initiated exit of one holding (dashboard sell button).
+
+        Runs under the tick lock so it cannot race the rule-based exit of the
+        same holding. Patient (maker, taker fallback) unless ``urgent``. The
+        fill is booked in the ledger with reason ``manual`` like any other exit.
+        """
+        async with self._lock:
+            h = next((x for x in self.holdings if x.holding_id == holding_id), None)
+            if h is None:
+                return {"ok": False, "reason": "unknown_holding"}
+            if h.exiting:
+                return {"ok": False, "reason": "exit_in_progress"}
+            base = h.pos.base
+            mark = self.marks.get(base) or h.pos.entry_price
+            qty_before = h.pos.quantity
+            await self._exit(h, ExitDecision("manual", h.pos.gross_return(mark), urgent=urgent))
+            left = h.pos.quantity if h in self.holdings else 0.0
+            sold_qty = qty_before - left
+            if sold_qty <= 0:
+                return {"ok": False, "reason": "exit_failed", "base": base}
+            return {
+                "ok": True,
+                "base": base,
+                "sold_qty": sold_qty,
+                "remaining_qty": left,
+                "partial": left > 0,
+            }
 
     # --------------------------------------------------------------- entries
 
@@ -1058,6 +1088,8 @@ class MomentumDeskManager:
         self._engine: Any = None
         self._commit_task: asyncio.Task[None] | None = None
         self._commit: dict[str, Any] = {}
+        self._sell_task: asyncio.Task[None] | None = None
+        self._manual_exit: dict[str, Any] = {}
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -1068,6 +1100,8 @@ class MomentumDeskManager:
             base.update(self._runner.status())
         if self._commit:
             base["commit"] = dict(self._commit)
+        if self._manual_exit:
+            base["manual_exit"] = dict(self._manual_exit)
         if self._task is not None and self._task.done() and self._task.exception():
             base["task_error"] = repr(self._task.exception())
         return base
@@ -1167,6 +1201,40 @@ class MomentumDeskManager:
 
         self._commit_task = asyncio.create_task(_run(), name="momentum-commit")
         return {"ok": True, "commit": dict(self._commit)}
+
+    def sell(self, holding_id: str, *, urgent: bool = False) -> dict[str, Any]:
+        """Sell one holding in the background (dashboard sell button). A
+        patient sell can rest as maker for a minute, so the request returns at
+        once and the outcome is surfaced via ``status()['manual_exit']``."""
+        if self._runner is None or not self.running():
+            return {"ok": False, "reason": "not_running"}
+        if self._sell_task is not None and not self._sell_task.done():
+            return {"ok": False, "reason": "sell_in_progress"}
+        runner = self._runner
+        h = next((x for x in runner.holdings if x.holding_id == holding_id), None)
+        if h is None:
+            return {"ok": False, "reason": "unknown_holding"}
+        self._manual_exit = {
+            "started_at": datetime.now(UTC).isoformat(),
+            "holding_id": holding_id,
+            "base": h.pos.base,
+            "urgent": bool(urgent),
+            "done": False,
+            "result": None,
+        }
+
+        async def _run() -> None:
+            try:
+                self._manual_exit["result"] = await runner.sell_now(holding_id, urgent=urgent)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("momentum desk: manual sell failed")
+                self._manual_exit["result"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                self._manual_exit["done"] = True
+                self._manual_exit["finished_at"] = datetime.now(UTC).isoformat()
+
+        self._sell_task = asyncio.create_task(_run(), name="momentum-sell")
+        return {"ok": True, "manual_exit": dict(self._manual_exit)}
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True

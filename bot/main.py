@@ -821,6 +821,7 @@ async def live_dashboard_legacy(_: None = Depends(require_dashboard_access)) -> 
 async def live_momentum_dashboard(
     simulate: int = 0,
     notice: str | None = None,
+    sell: str | None = None,
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse:
     """Momentum desk operator page: equity, positions, last decision, ledger.
@@ -838,7 +839,7 @@ async def live_momentum_dashboard(
     status = manager.status()
     ledger = await live_momentum_ledger(limit=400)
     return render_momentum_dashboard(
-        status, ledger["rows"], preview=preview, notice=(notice or None)
+        status, ledger["rows"], preview=preview, notice=(notice or None), sell=(sell or None)
     )
 
 
@@ -860,6 +861,24 @@ async def live_momentum_commit(
     if not res.get("ok"):
         return RedirectResponse(
             url=f"/live/momentum?notice=Commit+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.post("/live/momentum/sell", response_model=None)
+async def live_momentum_sell(
+    holding_id: str = "",
+    urgent: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Sell one open momentum-desk holding now (dashboard sell button).
+    Patient maker exit by default; ``urgent=1`` crosses the spread."""
+    if not holding_id.strip():
+        return RedirectResponse(url="/live/momentum?notice=Geen+positie+opgegeven", status_code=303)
+    res = get_momentum_desk_manager().sell(holding_id.strip(), urgent=bool(urgent))
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Verkoop+geweigerd:+{res.get('reason')}", status_code=303
         )
     return RedirectResponse(url="/live/momentum", status_code=303)
 

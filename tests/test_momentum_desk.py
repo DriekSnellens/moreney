@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -694,6 +695,7 @@ def test_dashboard_renders_positions_decision_and_ledger():
         },
         "positions": [
             {
+                "holding_id": "h-dot",
                 "base": "DOT",
                 "entry_price": 3.2,
                 "quantity": 156.25,
@@ -754,6 +756,74 @@ def test_dashboard_renders_positions_decision_and_ledger():
     # Ratchet active (peak 4.5% >= 4%) -> tight trail shown at 2%.
     assert "(2.0%)" in html
     assert "<script" not in html  # server-rendered, no JS surface
+    # Sell button is a GET to the confirmation step, never a direct POST.
+    assert 'name="sell" value="h-dot"' in html and "/live/momentum/sell" not in html
+    confirm = render_momentum_dashboard(status, rows, sell="h-dot").body.decode()
+    assert "Verkoop bevestigen" in confirm
+    assert 'action="/live/momentum/sell?holding_id=h-dot"' in confirm
+    assert "holding_id=h-dot&amp;urgent=1" in confirm
+    assert 'http-equiv="refresh"' not in confirm  # page holds still while confirming
+    gone = render_momentum_dashboard(status, rows, sell="nope").body.decode()
+    assert "niet (meer) gevonden" in gone
+    busy = dict(
+        status,
+        manual_exit={"base": "DOT", "done": False, "started_at": "2026-09-08T01:00:00+00:00"},
+    )
+    html_busy = render_momentum_dashboard(busy, rows).body.decode()
+    assert "Verkoop DOT bezig" in html_busy and "disabled" in html_busy
+    done = dict(
+        status,
+        manual_exit={
+            "base": "DOT",
+            "done": True,
+            "finished_at": "2026-09-08T01:01:00+00:00",
+            "result": {"ok": True, "partial": False},
+        },
+    )
+    assert "DOT verkocht om" in render_momentum_dashboard(done, rows).body.decode()
+
+
+def test_manual_sell_books_exit_and_runs_in_background(tmp_path):
+    from bot.live.momentum_runner import MomentumDeskManager
+
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    clock = FakeClock((T0 + 32 * 60_000) / 1000)
+    r, gws = _multi_runner(
+        tmp_path,
+        clock,
+        bitvavo_cash=2000.0,
+        okx_cash=0.0,
+        feed=FakeFeed(candles),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+    )
+
+    async def scenario():
+        await r.decide_now(execute=True)
+        assert [h.pos.base for h in r.holdings] == ["SOL"]
+        hid = r.holdings[0].holding_id
+        assert r.status()["positions"][0]["holding_id"] == hid
+        assert (await r.sell_now("nope"))["reason"] == "unknown_holding"
+        m = MomentumDeskManager()
+        assert m.sell(hid)["reason"] == "not_running"
+        m._runner = r
+        m._task = asyncio.create_task(asyncio.sleep(10))
+        assert m.sell("nope")["reason"] == "unknown_holding"
+        out = m.sell(hid)
+        assert out["ok"] and m.sell(hid)["reason"] == "sell_in_progress"
+        await m._sell_task
+        m._task.cancel()
+        return m.status()
+
+    status = asyncio.run(scenario())
+    me = status["manual_exit"]
+    assert me["done"] and me["result"]["ok"] and me["result"]["base"] == "SOL"
+    assert r.holdings == [] and r.trade_count == 1
+    ledger = [json.loads(line) for line in Path(r.opt.ledger_path).read_text().splitlines()]
+    exits = [row for row in ledger if row.get("event") == "exit"]
+    assert len(exits) == 1 and exits[0]["reason"] == "manual" and exits[0]["base"] == "SOL"
+    assert [o["side"] for o in gws["bitvavo"].placed] == ["buy", "sell"]
 
 
 def test_engine_settings_cap_notional_to_clip():

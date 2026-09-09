@@ -104,9 +104,12 @@ def _positions_table(status: Mapping[str, Any]) -> str:
     tight_after = float(cfg.get("trail_tight_after") or 0.0)
     tight = float(cfg.get("trail_tight_pct") or trail)
     stop = float(cfg.get("hard_stop_pct") or 0.03)
+    busy = status.get("manual_exit") or {}
+    sell_busy = bool(busy) and not busy.get("done")
     out = [
         '<table class="desk"><thead><tr><th>Base</th><th>Entry</th><th>Mark</th><th>Gross</th>'
-        "<th>Peak</th><th>Trail-stop</th><th>Hard-stop</th><th>Net</th><th>Age</th></tr></thead><tbody>"
+        "<th>Peak</th><th>Trail-stop</th><th>Hard-stop</th><th>Net</th><th>Age</th>"
+        "<th>Actie</th></tr></thead><tbody>"
     ]
     for p in rows:
         entry = float(p.get("entry_price") or 0)
@@ -132,10 +135,65 @@ def _positions_table(status: Mapping[str, Any]) -> str:
             f"<td class='{_cls(p.get('unrealized_net_eur'))}'>"
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
             f"<td>{float(p.get('age_h') or 0):.1f}h</td>"
+            f"<td>{_sell_cell(p, disabled=sell_busy)}</td>"
             "</tr>"
         )
     out.append("</tbody></table>")
+    out.append(
+        "<p class='muted' style='font-size:.72rem;margin-top:.4rem'>Verkoop = maker-order op de "
+        "bied, valt na 60 s terug op taker. Wordt in de ledger geboekt als <em>manual</em>.</p>"
+    )
     return "".join(out)
+
+
+def _sell_cell(p: Mapping[str, Any], *, disabled: bool) -> str:
+    hid = str(p.get("holding_id") or "")
+    if not hid:
+        return ""
+    if p.get("exiting"):
+        return "<span class='muted' style='font-size:.75rem'>verkoop bezig…</span>"
+    dis = " disabled" if disabled else ""
+    # Two-step without JS: this GET renders a confirmation panel, the panel POSTs.
+    return (
+        f'<form method="get" action="/live/momentum" style="display:inline">'
+        f'<input type="hidden" name="sell" value="{escape(hid)}">'
+        f'<button type="submit" class="btn danger" style="font-size:.72rem;padding:.25rem .55rem"'
+        f"{dis}>Verkoop</button></form>"
+    )
+
+
+def _sell_confirm_panel(status: Mapping[str, Any], holding_id: str) -> str:
+    p = next(
+        (x for x in status.get("positions") or [] if str(x.get("holding_id")) == holding_id), None
+    )
+    if p is None:
+        return (
+            '<div class="hint bad">Positie niet (meer) gevonden; mogelijk al verkocht. '
+            '<a href="/live/momentum">terug</a></div>'
+        )
+    base = escape(str(p.get("base")))
+    mark = p.get("mark")
+    qty = float(p.get("quantity") or 0)
+    value = qty * float(mark) if mark else None
+    return (
+        '<div class="card"><h2>Verkoop bevestigen</h2>'
+        f"<p><strong>{base}</strong> op {escape(str(p.get('venue') or ''))}: "
+        f"{qty:,.6f} stuks, entry {float(p.get('entry_price') or 0):,.4f}, "
+        f"mark {(f'{float(mark):,.4f}' if mark else '—')}, waarde "
+        f"{(f'{value:,.2f} €' if value is not None else '—')}, "
+        f"resultaat nu <span class='{_cls(p.get('unrealized_net_eur'))}'>"
+        f"{_fmt_eur(p.get('unrealized_net_eur'))}</span> netto.</p>"
+        "<div style='display:flex;gap:.6rem;align-items:center;flex-wrap:wrap'>"
+        f'<form method="post" action="/live/momentum/sell?holding_id={escape(holding_id)}" '
+        'style="display:inline"><button type="submit" class="btn danger">'
+        f"Verkoop {base} als maker (echt geld)</button></form>"
+        f'<form method="post" action="/live/momentum/sell?holding_id={escape(holding_id)}'
+        '&amp;urgent=1" style="display:inline"><button type="submit" class="btn danger">'
+        "Verkoop direct (taker)</button></form>"
+        '<a href="/live/momentum" class="muted" style="font-size:.8rem">annuleren</a></div>'
+        "<p class='muted' style='font-size:.75rem;margin-top:.5rem'>Maker: order op de bied, "
+        "60 s rusten, daarna taker-fallback. Taker: meteen over de spread, hogere fee.</p></div>"
+    )
 
 
 def _decision_panel(status: Mapping[str, Any]) -> str:
@@ -326,6 +384,30 @@ def _preview_panel(
     return "".join(out)
 
 
+def _manual_exit_notice(me: Mapping[str, Any]) -> str:
+    if not me:
+        return ""
+    base = escape(str(me.get("base") or ""))
+    if not me.get("done"):
+        return (
+            f'<div class="hint warn">Verkoop {base} bezig sinds {_ts(me.get("started_at"))}. '
+            "Order rust als maker (tot 60 s), daarna taker.</div>"
+        )
+    res = me.get("result") or {}
+    if res.get("error"):
+        return f'<div class="hint bad">Verkoop {base} mislukt: {escape(str(res["error"]))}</div>'
+    if not res.get("ok"):
+        return (
+            f'<div class="hint bad">Verkoop {base} niet uitgevoerd '
+            f"({escape(str(res.get('reason') or 'onbekend'))}).</div>"
+        )
+    tail = " (gedeeltelijk gevuld, rest blijft open)" if res.get("partial") else ""
+    return (
+        f'<div class="hint good">{base} verkocht om {_ts(me.get("finished_at"))}{tail}. '
+        "Zie ledger.</div>"
+    )
+
+
 def _commit_notice(commit: Mapping[str, Any]) -> str:
     if not commit:
         return ""
@@ -436,6 +518,7 @@ def render_momentum_dashboard(
     *,
     preview: Mapping[str, Any] | None = None,
     notice: str | None = None,
+    sell: str | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -470,9 +553,12 @@ def render_momentum_dashboard(
     if notice:
         err_html += f'<div class="hint warn">{escape(notice)}</div>'
     err_html += _commit_notice(commit)
-    # A preview is a decision aid: keep the page still while the operator reads it.
-    refresh_meta = "" if preview else '<meta http-equiv="refresh" content="20">'
-    refresh_note = "Simulatie: geen auto-refresh" if preview else "Ververst elke 20s"
+    err_html += _manual_exit_notice(status.get("manual_exit") or {})
+    # A preview or sell confirmation is a decision aid: keep the page still.
+    hold_page = bool(preview) or bool(sell)
+    refresh_meta = "" if hold_page else '<meta http-equiv="refresh" content="20">'
+    refresh_note = "Geen auto-refresh tijdens bevestiging" if hold_page else "Ververst elke 20s"
+    sell_html = _sell_confirm_panel(status, sell) if sell else ""
     preview_html = (
         f'<div class="card section"><div class="card-head"><h2>Simulatie</h2>'
         f"{_simulate_button()}</div>{_preview_panel(preview, ledger_rows, commit)}</div>"
@@ -539,6 +625,7 @@ def render_momentum_dashboard(
 {err_html}
 <div class="hero-grid" style="margin-top:1rem">{heroes}</div>
 {preview_html}
+{sell_html}
 <div class="stack two section">
   <div class="card"><h2>Open posities</h2>{_positions_table(status)}</div>
   <div class="card"><div class="card-head"><h2>Laatste beslissing</h2>
