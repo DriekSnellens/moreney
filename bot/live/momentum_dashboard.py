@@ -397,10 +397,14 @@ def _manual_exit_notice(me: Mapping[str, Any]) -> str:
     if res.get("error"):
         return f'<div class="hint bad">Verkoop {base} mislukt: {escape(str(res["error"]))}</div>'
     if not res.get("ok"):
-        return (
-            f'<div class="hint bad">Verkoop {base} niet uitgevoerd '
-            f"({escape(str(res.get('reason') or 'onbekend'))}).</div>"
+        why = str(res.get("reason") or "onbekend")
+        hint = (
+            " — OKX had minder coins vrij dan de desk dacht (fee in de coin zelf). "
+            "Probeer opnieuw; de desk clamt nu op de vrije balance."
+            if why == "exit_failed"
+            else ""
         )
+        return f'<div class="hint bad">Verkoop {base} niet uitgevoerd ({escape(why)}){hint}</div>'
     tail = " (gedeeltelijk gevuld, rest blijft open)" if res.get("partial") else ""
     return (
         f'<div class="hint good">{base} verkocht om {_ts(me.get("finished_at"))}{tail}. '

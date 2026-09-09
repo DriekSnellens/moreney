@@ -345,12 +345,18 @@ class FakeGateway:
     ask: float = 100.2
     fill_maker_after_polls: int | None = None  # None = never fills as maker
     partial_on_cancel: bool = False
+    free_by_base: dict[str, float] | None = None  # None = do not report (no clamp)
     placed: list[dict] = field(default_factory=list)
     _orders: dict[str, dict] = field(default_factory=dict)
     _polls: int = 0
 
     async def best_bid_ask(self, symbol):
         return self.bid, self.ask
+
+    async def base_free(self, base: str):
+        if self.free_by_base is None:
+            return None
+        return float(self.free_by_base.get(base.upper(), 0.0))
 
     async def place_limit(self, symbol, side, qty, price, *, post_only):
         oid = f"o{len(self.placed) + 1}"
@@ -926,8 +932,8 @@ def test_multi_venue_entry_and_exit_use_position_venue(tmp_path):
     r2, gws2 = _multi_runner(tmp_path, clock, bitvavo_cash=200.0, okx_cash=1400.0, clip_eur=500.0)
     assert r2.holdings[0].pos.venue == "okx"
     fill = asyncio.run(r2._exit(r2.holdings[0], ExitDecision("trail", 0.01, False)))
-    assert fill is None  # _exit returns None; verify via gateways
-    assert gws2["bitvavo"].placed == [] and gws2["okx"].placed
+    assert fill is not None and fill.qty > 0
+    assert gws2["bitvavo"].placed == [] and [p["side"] for p in gws2["okx"].placed] == ["sell"]
 
 
 def test_entry_skipped_when_no_venue_can_fund(tmp_path):
@@ -984,3 +990,49 @@ def test_alphai_avoid_tightens_trail_but_does_not_dump():
     off = cfg.with_overrides(alphai_avoid_tightens_trail=False)
     pos = Position("SOL", 100.0, 5.0, 500.0, T0, 104.0)
     assert evaluate_exit(pos, [T0, 103, 104, 101.8, 101.92, 1], off, alphai=bearish) is None
+
+
+def test_from_exchange_order_nets_fee_charged_in_base():
+    from types import SimpleNamespace
+
+    from bot.live.momentum_runner import _from_exchange_order
+
+    order = SimpleNamespace(
+        id="1",
+        status="filled",
+        filled_quantity=956.5779,
+        average_price=1.2367,
+        fee_cost=1.9131558,
+        fee_currency="XRP",
+    )
+    st = _from_exchange_order(order, "XRPEUR")
+    assert st.fee_base_qty == pytest.approx(1.9131558)
+    assert st.fee_eur == pytest.approx(1.9131558 * 1.2367)
+    assert st.filled_qty == pytest.approx(956.5779)
+
+
+def test_sell_clamps_to_free_balance_when_fee_was_taken_in_base(tmp_path):
+    """OKX credits fill_qty - fee_in_base; selling the book qty used to fail."""
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock((T0 + 60_000) / 1000)
+    # Venue only has 4.9 of the 5.0 the book thinks it holds.
+    gw = FakeGateway(fill_maker_after_polls=1, free_by_base={"SOL": 4.9})
+    r = _runner(tmp_path, gw, clock, universe=("SOL",), clip_eur=500.0, min_volume_eur=0.0)
+    r.holdings = [
+        Holding(
+            pos=Position("SOL", 100.0, 5.0, 500.0, T0, 100.0, venue="bitvavo"),
+            holding_id="h1",
+        )
+    ]
+    r.marks["SOL"] = 100.0
+    r._gws = {"bitvavo": gw}
+
+    async def go():
+        return await r.sell_now("h1", urgent=True)
+
+    out = asyncio.run(go())
+    assert out["ok"] and out["sold_qty"] == pytest.approx(4.9)
+    assert r.holdings == []
+    assert gw.placed[-1]["side"] == "sell" and gw.placed[-1]["qty"] == pytest.approx(4.9)

@@ -72,6 +72,9 @@ class OrderState:
     filled_qty: float
     avg_price: float | None
     fee_eur: float
+    # Coins taken as fee in the base asset (OKX maker buys). Net coins
+    # credited = filled_qty - fee_base_qty; selling the gross fill fails.
+    fee_base_qty: float = 0.0
 
 
 class Gateway(Protocol):
@@ -136,17 +139,30 @@ class LiveGateway:
 
     async def fetch_order(self, order_id: str, symbol: str) -> OrderState:
         order = await self._client(trading=False).fetch_order(order_id, symbol)
-        return _from_exchange_order(order)
+        return _from_exchange_order(order, symbol)
 
     async def cancel_order(self, order_id: str, symbol: str) -> OrderState:
         order = await self._client(trading=True).cancel_order(order_id, symbol)
-        return _from_exchange_order(order)
+        return _from_exchange_order(order, symbol)
 
     async def quote_balance_eur(self) -> float | None:
         snap = await self._client(trading=False).get_balances()
         for bal in snap.balances:
             if str(bal.asset).upper() == "EUR":
                 return float(bal.total)
+        return 0.0
+
+    async def base_free(self, base: str) -> float | None:
+        """Free units of ``base`` available to sell (None if balance fetch fails)."""
+        try:
+            snap = await self._client(trading=False).get_balances()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: %s balance fetch failed: %s", self._venue, exc)
+            return None
+        want = base.upper()
+        for bal in snap.balances:
+            if str(bal.asset).upper() == want:
+                return float(getattr(bal, "free", None) or bal.total or 0.0)
         return 0.0
 
 
@@ -161,18 +177,28 @@ def _norm_status(raw: Any) -> str:
     return "open"
 
 
-def _from_exchange_order(order: Any) -> OrderState:
-    fee = float(order.fee_cost or 0.0)
+def _from_exchange_order(order: Any, symbol: str | None = None) -> OrderState:
+    fee_raw = float(order.fee_cost or 0.0)
     ccy = str(order.fee_currency or "EUR").upper()
     avg = float(order.average_price) if order.average_price else None
-    if ccy != "EUR" and avg:
-        fee = fee * avg
+    base = ""
+    if symbol:
+        # XRPEUR / XRP-EUR / XRP/EUR
+        cleaned = str(symbol).upper().replace("-", "").replace("/", "")
+        base = cleaned[:-3] if cleaned.endswith("EUR") else cleaned.split("EUR")[0]
+    fee_base = fee_raw if (base and ccy == base and fee_raw > 0) else 0.0
+    fee_eur = fee_raw
+    if fee_base > 0 and avg:
+        fee_eur = fee_base * avg
+    elif ccy != "EUR" and avg and fee_raw > 0:
+        fee_eur = fee_raw * avg
     return OrderState(
         order_id=str(order.id),
         status=_norm_status(order.status),
         filled_qty=float(order.filled_quantity or 0.0),
         avg_price=avg,
-        fee_eur=fee,
+        fee_eur=fee_eur,
+        fee_base_qty=fee_base,
     )
 
 
@@ -530,12 +556,46 @@ class MomentumDeskRunner:
             if decision is not None:
                 await self._exit(h, decision)
 
-    async def _exit(self, h: Holding, decision: ExitDecision) -> None:
-        h.exiting = True
+    async def _available_base(self, base: str, venue: str) -> float | None:
+        gw = self._gateway(venue)
+        fetch = getattr(gw, "base_free", None) if gw is not None else None
+        if fetch is None:
+            return None
         try:
-            fill = await self._sell(
-                h.pos.base, h.pos.quantity, urgent=decision.urgent, venue=h.pos.venue
-            )
+            return await fetch(base)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: %s %s free balance failed: %s", venue, base, exc)
+            return None
+
+    async def _exit(self, h: Holding, decision: ExitDecision) -> Fill | None:
+        h.exiting = True
+        fail_detail: str | None = None
+        try:
+            sell_qty = h.pos.quantity
+            free = await self._available_base(h.pos.base, h.pos.venue)
+            if free is not None and free + 1e-12 < sell_qty:
+                # Typical cause: entry fee was taken in the base asset (OKX), so
+                # the book qty is the gross fill while only ``free`` is sellable.
+                logger.info(
+                    "momentum desk: clamping %s sell %.8f -> free %.8f on %s",
+                    h.pos.base,
+                    sell_qty,
+                    free,
+                    h.pos.venue,
+                )
+                h.pos.quantity = free
+                h.pos.notional_eur = free * h.pos.entry_price
+                sell_qty = free
+            mark = self.marks.get(h.pos.base) or h.pos.entry_price
+            if sell_qty * mark < _MIN_ORDER_EUR:
+                fail_detail = "dust_or_no_balance"
+                fill = None
+            else:
+                fill = await self._sell(
+                    h.pos.base, sell_qty, urgent=decision.urgent, venue=h.pos.venue
+                )
+                if fill is None:
+                    fail_detail = "order_rejected"
         finally:
             h.exiting = False
         if fill is None or fill.qty <= 0:
@@ -545,9 +605,12 @@ class MomentumDeskRunner:
                     "base": h.pos.base,
                     "venue": h.pos.venue,
                     "reason": decision.reason,
+                    "detail": fail_detail,
+                    "book_qty": h.pos.quantity,
                 }
             )
-            return
+            self._save_state()
+            return None
         net = (
             fill.qty * (fill.avg_price - h.pos.entry_price)
             - h.pos.entry_fee_eur * (fill.qty / h.pos.quantity)
@@ -583,6 +646,7 @@ class MomentumDeskRunner:
             h.pos.quantity = remaining
             h.pos.notional_eur = remaining * h.pos.entry_price
         self._save_state()
+        return fill
 
     async def sell_now(self, holding_id: str, *, urgent: bool = False) -> dict[str, Any]:
         """Operator-initiated exit of one holding (dashboard sell button).
@@ -599,16 +663,16 @@ class MomentumDeskRunner:
                 return {"ok": False, "reason": "exit_in_progress"}
             base = h.pos.base
             mark = self.marks.get(base) or h.pos.entry_price
-            qty_before = h.pos.quantity
-            await self._exit(h, ExitDecision("manual", h.pos.gross_return(mark), urgent=urgent))
-            left = h.pos.quantity if h in self.holdings else 0.0
-            sold_qty = qty_before - left
-            if sold_qty <= 0:
+            fill = await self._exit(
+                h, ExitDecision("manual", h.pos.gross_return(mark), urgent=urgent)
+            )
+            if fill is None or fill.qty <= 0:
                 return {"ok": False, "reason": "exit_failed", "base": base}
+            left = h.pos.quantity if h in self.holdings else 0.0
             return {
                 "ok": True,
                 "base": base,
-                "sold_qty": sold_qty,
+                "sold_qty": fill.qty,
                 "remaining_qty": left,
                 "partial": left > 0,
             }
@@ -930,8 +994,13 @@ class MomentumDeskRunner:
         async def _settle(state: OrderState) -> None:
             nonlocal filled_qty, filled_cost, fee_eur, remaining_qty, remaining_notional
             if state.filled_qty > 0 and state.avg_price:
-                filled_qty += state.filled_qty
-                filled_cost += state.filled_qty * state.avg_price
+                # Buys that charge the fee in the base asset credit fewer coins
+                # than the fill size; track the net so later sells don't overshoot.
+                credited = state.filled_qty
+                if side == "buy" and state.fee_base_qty > 0:
+                    credited = max(0.0, state.filled_qty - state.fee_base_qty)
+                filled_qty += credited
+                filled_cost += credited * state.avg_price
                 fee_eur += state.fee_eur
                 if remaining_qty is not None:
                     remaining_qty = max(0.0, remaining_qty - state.filled_qty)
