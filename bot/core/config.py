@@ -454,6 +454,8 @@ class Settings(BaseSettings):
     alphai_recommendations_interval_hours: int = Field(default=1, ge=1, le=24)
     alphai_daily_recommendations_top_n: int = Field(default=8, ge=1, le=20)
     alphai_daily_recommendations_min_relevance: int = Field(default=6, ge=1, le=10)
+    # Separate AlphaI feed for the volatile shadow (midcaps), not the core desk.
+    alphai_volatile_recommendations_path: str = "data/alphai/volatile_recommendations.json"
     # AlphaI scored features (opportunity/capital/adverse timing) — shadow default.
     alphai_feature_scoring_enabled: bool = True
     alphai_feature_shadow_only: bool = True

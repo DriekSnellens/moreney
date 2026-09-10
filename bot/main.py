@@ -947,14 +947,15 @@ async def live_momentum_volatile_shadow(
             live_cfg = None
     days_n = max(1, min(int(days or 14), 120))
     alphai_path = str(
-        getattr(settings, "alphai_daily_recommendations_path", None)
-        or "data/alphai/daily_recommendations.json"
+        getattr(settings, "alphai_volatile_recommendations_path", None)
+        or "data/alphai/volatile_recommendations.json"
     )
     payload = build_volatile_shadow(
         days=days_n,
         live_cfg=live_cfg,
         refresh=bool(refresh),
         alphai_path=alphai_path,
+        refresh_alphai=True,
     )
     if str(format).lower() == "json":
         return JSONResponse(payload)
