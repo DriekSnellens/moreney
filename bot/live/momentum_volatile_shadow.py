@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from bot.live.momentum_desk import (
@@ -105,6 +106,21 @@ def _iso(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _candle_cache_dir() -> Path:
+    """Prefer the shared research cache; fall back to /tmp if not writable."""
+    preferred = Path("./data/momentum_candles")
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        probe = preferred / ".shadow_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return preferred
+    except OSError:
+        fallback = Path("/tmp/moreney_volatile_candles")
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
 def build_volatile_shadow(
     *,
     days: int = 14,
@@ -124,7 +140,13 @@ def build_volatile_shadow(
     end = end_ms if end_ms is not None else int(datetime.now(UTC).timestamp() * 1000)
     end = end // BAR_MS * BAR_MS
     start = end - max(1, int(days)) * 86_400_000
-    candles = load_candles(("BTC", *uni), days=max(int(days) + 2, 5), end_ms=end, refresh=refresh)
+    candles = load_candles(
+        ("BTC", *uni),
+        days=max(int(days) + 2, 5),
+        end_ms=end,
+        refresh=refresh,
+        cache_dir=_candle_cache_dir(),
+    )
     res = simulate(candles, cfg, start_ms=start, end_ms=end)
 
     # Index decisions / entries / exits by UTC day.
