@@ -156,6 +156,7 @@ class TradingEngine:
             or meta.get("ladder_leg")
             or meta.get("trail_take_profit")
             or meta.get("winner_add")
+            or meta.get("alphai_inventory_build")
         )
 
     def _apply_entry_quality(
@@ -961,10 +962,12 @@ class TradingEngine:
     def _should_skip_maker_quote(self, opportunity: TradeOpportunity) -> bool:
         if not self._is_maker_quote(opportunity):
             return False
+        meta = opportunity.metadata or {}
+        if meta.get("alphai_inventory_build"):
+            return False
         if self._maker_slot_taken(opportunity):
             return True
         max_open = self._max_open_quotes_per_venue()
-        meta = opportunity.metadata or {}
         buy = str(meta.get("buy_exchange") or "").strip().lower()
         sell = str(meta.get("sell_exchange") or "").strip().lower()
         sell_only = bool(meta.get("sell_only"))
@@ -978,6 +981,30 @@ class TradingEngine:
         if sell and self._open_maker_quote_count_for(sell) >= max_open:
             return True
         return False
+
+    @staticmethod
+    def _maker_leg_metadata(
+        opportunity: TradeOpportunity,
+        *,
+        leg: str,
+        venue: str,
+        triangle: bool = False,
+        hybrid_hedge: bool = False,
+    ) -> dict[str, Any]:
+        meta = dict(opportunity.metadata or {})
+        meta.update(
+            {
+                "strategy": opportunity.strategy_name,
+                "real_exchange_order": False,
+                "leg": leg,
+                "post_only": True,
+                "fee_role": "maker",
+                "venue": venue,
+                "triangle": triangle,
+                "hybrid_hedge": hybrid_hedge,
+            }
+        )
+        return meta
 
     def _max_open_quotes_per_venue(self) -> int:
         max_open = 4
@@ -1089,16 +1116,13 @@ class TradingEngine:
             side=OpportunitySide.BUY,
             quantity=qty,
             limit_price=buy_limit,
-            metadata={
-                "strategy": opportunity.strategy_name,
-                "real_exchange_order": False,
-                "leg": "buy",
-                "post_only": True,
-                "fee_role": "maker",
-                "venue": buy_venue,
-                "triangle": bool(opportunity.metadata.get("triangle")),
-                "hybrid_hedge": bool(opportunity.metadata.get("hybrid_hedge")),
-            },
+            metadata=self._maker_leg_metadata(
+                opportunity,
+                leg="buy",
+                venue=buy_venue,
+                triangle=bool(opportunity.metadata.get("triangle")),
+                hybrid_hedge=bool(opportunity.metadata.get("hybrid_hedge")),
+            ),
         )
         sell_price = sell_limit
         if sell_price is None:
@@ -1110,16 +1134,13 @@ class TradingEngine:
             side=OpportunitySide.SELL,
             quantity=qty,
             limit_price=sell_price,
-            metadata={
-                "strategy": opportunity.strategy_name,
-                "real_exchange_order": False,
-                "leg": "sell",
-                "post_only": True,
-                "fee_role": "maker",
-                "venue": sell_venue,
-                "triangle": bool(opportunity.metadata.get("triangle")),
-                "hybrid_hedge": bool(opportunity.metadata.get("hybrid_hedge")),
-            },
+            metadata=self._maker_leg_metadata(
+                opportunity,
+                leg="sell",
+                venue=sell_venue,
+                triangle=bool(opportunity.metadata.get("triangle")),
+                hybrid_hedge=bool(opportunity.metadata.get("hybrid_hedge")),
+            ),
         )
         buy_book = order_book
         if buy_book is None or buy_symbol != opportunity.symbol:

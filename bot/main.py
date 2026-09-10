@@ -7,6 +7,7 @@ Withdrawals remain disabled / non-automatic.
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -55,6 +56,8 @@ from bot.live.micro_session_manager import (
     get_micro_session_manager,
     reset_micro_session_manager,
 )
+from bot.live.momentum_dashboard import render_momentum_dashboard
+from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -214,14 +217,28 @@ async def lifespan(_app: FastAPI):
     # Live micro: resume continuous session after uvicorn restart. Skip on
     # pure paper lab processes so they never touch live micro state.
     elif bool(settings.live_micro_enabled or settings.live_trading_enabled):
+        # The two desks share the venue cash; only one may own the book. When
+        # the momentum desk is flagged running the legacy maker session never
+        # auto-resumes, even if its status file still claims to be running.
+        if momentum_desk_flagged_running(settings):
+            logger.warning("momentum desk owns the book; legacy micro session not resumed")
+        else:
+            try:
+                resume = await get_micro_session_manager().resume_if_interrupted()
+                if resume and resume.get("started"):
+                    logger.info("auto-resumed continuous micro session after process start")
+                elif resume and not resume.get("started"):
+                    logger.warning("micro session auto-resume did not start: %s", resume)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to auto-resume interrupted micro session")
         try:
-            resume = await get_micro_session_manager().resume_if_interrupted()
-            if resume and resume.get("started"):
-                logger.info("auto-resumed continuous micro session after process start")
-            elif resume and not resume.get("started"):
-                logger.warning("micro session auto-resume did not start: %s", resume)
+            resumed = await get_momentum_desk_manager().resume_if_flagged()
+            if resumed and resumed.get("started"):
+                logger.info("auto-resumed momentum desk after process start")
+            elif resumed:
+                logger.warning("momentum desk auto-resume did not start: %s", resumed)
         except Exception:  # noqa: BLE001
-            logger.exception("failed to auto-resume interrupted micro session")
+            logger.exception("failed to auto-resume momentum desk")
     yield
     if paper_runner is not None:
         try:
@@ -547,6 +564,15 @@ async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dic
         symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
     elif isinstance(symbols_raw, list):
         symbols = [str(s).strip().upper() for s in symbols_raw if str(s).strip()]
+    force = body.get("force", False)
+    if isinstance(force, str):
+        force = force.strip().lower() not in {"0", "false", "no"}
+    if get_momentum_desk_manager().running() and not bool(force):
+        return {
+            "started": False,
+            "reason": "momentum_desk_running",
+            "message": "stop the momentum desk first or pass force=true",
+        }
     return await get_micro_session_manager().start(
         minutes=minutes,
         budget_eur=budget,
@@ -559,6 +585,63 @@ async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dic
 async def live_micro_session_stop() -> dict[str, Any]:
     """Request stop of the running full-bot micro session."""
     return await get_micro_session_manager().stop()
+
+
+@app.get("/live/momentum/status")
+async def live_momentum_status() -> dict[str, Any]:
+    """Daily Momentum Desk: positions, risk ledger, last decision, next decision."""
+    return get_momentum_desk_manager().status()
+
+
+@app.post("/live/momentum/start")
+async def live_momentum_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start the Daily Momentum Desk (``{"dry_run": true}`` for shadow mode)."""
+    body = payload or {}
+    dry = body.get("dry_run", False)
+    if isinstance(dry, str):
+        dry = dry.strip().lower() not in {"0", "false", "no"}
+    settings = get_settings()
+    venues = body.get("venues") or body.get("venue") or settings.momentum_desk_venues
+    return await get_momentum_desk_manager().start(
+        settings=settings, dry_run=bool(dry), venue=venues
+    )
+
+
+@app.post("/live/momentum/decide")
+async def live_momentum_decide(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the desk's entry decision now. Default is a preview (no orders);
+    pass ``{"execute": true}`` to trade under the normal risk rules."""
+    body = payload or {}
+    execute = body.get("execute", False)
+    if isinstance(execute, str):
+        execute = execute.strip().lower() not in {"0", "false", "no"}
+    return await get_momentum_desk_manager().decide(execute=bool(execute))
+
+
+@app.post("/live/momentum/stop")
+async def live_momentum_stop() -> dict[str, Any]:
+    """Stop the Daily Momentum Desk loop (open positions stay on the exchange)."""
+    return await get_momentum_desk_manager().stop()
+
+
+@app.get("/live/momentum/ledger")
+async def live_momentum_ledger(limit: int = 200) -> dict[str, Any]:
+    """Tail of the momentum desk trade ledger (entries, exits, decisions)."""
+    path = Path(get_settings().momentum_desk_ledger_path)
+    rows: list[dict[str, Any]] = []
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line in lines[-max(1, min(int(limit), 2000)) :]:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+    }
 
 
 @app.post("/live/micro/session/reset-dashboard")
@@ -719,7 +802,163 @@ async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRes
     settings = get_settings()
     if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
         return RedirectResponse(url="/paper/dashboard", status_code=303)
+    # The momentum desk owns the operator view while it runs and the legacy
+    # maker desk is stopped; the old page stays reachable at /live/dashboard/legacy.
+    if get_momentum_desk_manager().running() and not bool(
+        get_micro_session_manager().status().get("running")
+    ):
+        return RedirectResponse(url="/live/momentum", status_code=303)
     return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/dashboard/legacy", response_class=HTMLResponse, response_model=None)
+async def live_dashboard_legacy(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+    """Legacy maker-desk dashboard (always renders, even when that desk is stopped)."""
+    return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/momentum", response_class=HTMLResponse, response_model=None)
+async def live_momentum_dashboard(
+    simulate: int = 0,
+    notice: str | None = None,
+    sell: str | None = None,
+    sell_all: int = 0,
+    report: int = 0,
+    day: str | None = None,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse:
+    """Momentum desk operator page: equity, positions, last decision, ledger.
+
+    ``?simulate=1`` runs the entry decision as a preview (no orders) and shows
+    the planned trades with a net P&L scenario table and a commit button.
+    ``?report=1`` builds today's missed-entry / exit-opportunity report.
+    ``?sell_all=1`` opens the sell-everything confirmation.
+    """
+    manager = get_momentum_desk_manager()
+    preview: dict[str, Any] | None = None
+    report_payload: dict[str, Any] | None = None
+    if simulate:
+        res = await manager.decide(execute=False)
+        if res.get("ok"):
+            preview = res.get("decision")
+        else:
+            notice = f"Simulatie niet mogelijk: {res.get('reason')}"
+    if report:
+        res = await manager.daily_report(day)
+        if res.get("ok"):
+            report_payload = res.get("report")
+        else:
+            notice = f"Report niet mogelijk: {res.get('reason')}"
+    status = manager.status()
+    ledger = await live_momentum_ledger(limit=400)
+    return render_momentum_dashboard(
+        status,
+        ledger["rows"],
+        preview=preview,
+        notice=(notice or None),
+        sell=(sell or None),
+        sell_all=bool(sell_all),
+        report=report_payload,
+    )
+
+
+@app.post("/live/momentum/commit", response_model=None)
+async def live_momentum_commit(
+    bases: str = "",
+    at: str = "",
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Execute a previewed decision (dashboard commit button). The desk only
+    buys if it would still choose exactly ``bases``; otherwise the commit is
+    rejected and the operator is asked to simulate again."""
+    wanted = [b for b in bases.upper().split(",") if b.strip()]
+    if not wanted:
+        return RedirectResponse(
+            url="/live/momentum?notice=Geen+coins+om+te+committen", status_code=303
+        )
+    res = get_momentum_desk_manager().commit(wanted)
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Commit+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.post("/live/momentum/sell", response_model=None)
+async def live_momentum_sell(
+    holding_id: str = "",
+    urgent: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Sell one open momentum-desk holding now (dashboard sell button).
+    Patient maker exit by default; ``urgent=1`` crosses the spread."""
+    if not holding_id.strip():
+        return RedirectResponse(url="/live/momentum?notice=Geen+positie+opgegeven", status_code=303)
+    res = get_momentum_desk_manager().sell(holding_id.strip(), urgent=bool(urgent))
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Verkoop+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.post("/live/momentum/sell-all", response_model=None)
+async def live_momentum_sell_all(
+    urgent: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Sell every open momentum-desk holding (dashboard sell-all)."""
+    res = get_momentum_desk_manager().sell_all(urgent=bool(urgent))
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Sell-all+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.get("/live/momentum/volatile", response_model=None)
+async def live_momentum_volatile_shadow(
+    days: int = 14,
+    format: str = "html",
+    refresh: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse | JSONResponse:
+    """Paper replay of a volatile midcap book — no live orders.
+
+    Shows day-by-day would-have buys, exits and net P&L using the same desk
+    rules on a pool outside the core 16.
+    """
+    from bot.live.momentum_runner import desk_config_from_settings
+    from bot.live.momentum_volatile_shadow import (
+        build_volatile_shadow,
+        render_volatile_shadow_page,
+    )
+
+    manager = get_momentum_desk_manager()
+    live_cfg = None
+    runner = getattr(manager, "_runner", None)
+    settings = get_settings()
+    if runner is not None and getattr(runner, "cfg", None) is not None:
+        live_cfg = runner.cfg
+    else:
+        try:
+            live_cfg = desk_config_from_settings(settings)
+        except Exception:  # noqa: BLE001
+            live_cfg = None
+    days_n = max(1, min(int(days or 14), 120))
+    alphai_path = str(
+        getattr(settings, "alphai_daily_recommendations_path", None)
+        or "data/alphai/daily_recommendations.json"
+    )
+    payload = build_volatile_shadow(
+        days=days_n,
+        live_cfg=live_cfg,
+        refresh=bool(refresh),
+        alphai_path=alphai_path,
+    )
+    if str(format).lower() == "json":
+        return JSONResponse(payload)
+    return HTMLResponse(render_volatile_shadow_page(payload))
 
 
 @app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
@@ -876,6 +1115,169 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
         "status": status.model_dump(mode="json"),
         "micro_session_stop": session_stop,
     }
+
+
+@app.post("/integrations/alphai/webhook")
+async def alphai_webhook(request: Request) -> dict[str, Any]:
+    """Ingest AlphaI Pro push articles (HMAC verified)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    body = await request.body()
+    secret_raw = getattr(settings, "alphai_webhook_secret", None)
+    secret = (
+        secret_raw.get_secret_value()
+        if secret_raw is not None and hasattr(secret_raw, "get_secret_value")
+        else (str(secret_raw).strip() if secret_raw else "")
+    )
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_WEBHOOK_SECRET not configured")
+    from bot.integrations.alphai.webhook import verify_webhook_signature
+
+    sig = request.headers.get("X-Alphai-Signature") or request.headers.get(
+        "x-alphai-signature"
+    )
+    if not verify_webhook_signature(secret, sig, body):
+        raise HTTPException(status_code=401, detail="invalid webhook signature")
+    try:
+        import json
+
+        payload = json.loads(body.decode("utf-8") if body else "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+    article = payload.get("article") if isinstance(payload, dict) else None
+    if not isinstance(article, dict):
+        raise HTTPException(status_code=400, detail="expected { \"article\": {...} }")
+    from bot.integrations.alphai.pending import push_webhook_article
+
+    push_webhook_article(article)
+    try:
+        runner = get_paper_runner()
+        if runner.running:
+            return {"ok": True, **runner.ingest_alphai_article(article)}
+    except Exception:  # noqa: BLE001
+        logger.exception("alphai webhook immediate ingest failed")
+    return {"ok": True, "queued": True}
+
+
+@app.get("/integrations/alphai/status")
+async def alphai_status(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """AlphaI monitor snapshot (runner + live bridge blocks)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        return {"enabled": False}
+    mgr = get_micro_session_manager()
+    session = mgr.status()
+    bridge_snap = (session.get("bridge") or {}) if isinstance(session.get("bridge"), dict) else {}
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        try:
+            bridge_snap = bridge.snapshot_bridge()
+        except Exception:  # noqa: BLE001
+            logger.exception("alphai status bridge snapshot failed")
+    from bot.integrations.alphai.status import merge_alphai_status
+
+    merged = merge_alphai_status(session, bridge_snap)
+    out: dict[str, Any] = {"enabled": True, **merged}
+    try:
+        runner = get_paper_runner()
+        if getattr(runner, "_alphai_monitor", None) is not None:
+            out["monitor"] = runner._alphai_monitor.snapshot()
+    except Exception:  # noqa: BLE001
+        pass
+    import os
+
+    out["api_key_configured"] = bool(
+        getattr(settings, "alphai_api_key", None) or os.environ.get("ALPHAI_API_KEY")
+    )
+    return out
+
+
+@app.get("/integrations/alphai/recommendations/daily")
+async def alphai_daily_recommendations(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Daily buy picks for the current 12:00–12:00 Europe/Amsterdam window."""
+    settings = get_settings()
+    from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+
+    path = getattr(
+        settings,
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    report = load_daily_recommendations(path)
+    if report:
+        return {"ok": True, **report}
+    return {
+        "ok": False,
+        "message": "No daily recommendations yet — refresh after 12:00 NL or POST /integrations/alphai/recommendations/refresh",
+    }
+
+
+@app.post("/integrations/alphai/recommendations/refresh")
+async def alphai_daily_recommendations_refresh(
+    force: bool = Query(default=True),
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Generate/refresh daily crypto picks (normally automatic at 12:00 NL)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    monitor = None
+    try:
+        runner = get_paper_runner()
+        monitor = getattr(runner, "_alphai_monitor", None)
+    except Exception:  # noqa: BLE001
+        pass
+    if monitor is not None:
+        report = await monitor.maybe_refresh_daily_picks(force=force)
+        if report:
+            return {"ok": True, **report}
+    import os
+
+    from bot.integrations.alphai.client import AlphaIClient
+    from bot.integrations.alphai.daily_recommendations import maybe_refresh_daily
+    from bot.integrations.alphai.regime import _parse_csv_bases as parse_bases
+    from bot.integrations.alphai.symbols import LIQUID_EUR_BASES
+
+    key = getattr(settings, "alphai_api_key", None)
+    secret = key.get_secret_value() if key is not None else os.environ.get("ALPHAI_API_KEY", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_API_KEY not configured")
+    focus = parse_bases(
+        getattr(settings, "live_micro_focus_bases", "") or "",
+        fallback=set(LIQUID_EUR_BASES),
+    )
+    client = AlphaIClient(str(secret))
+    path = getattr(
+        settings,
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    report = maybe_refresh_daily(
+        client,
+        path,
+        focus_bases=focus,
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        ),
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8),
+        update_hour_local=int(
+            getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
+        ),
+        interval_minutes=int(
+            getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15
+        ),
+        interval_hours=int(
+            getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
+        ),
+        force=force,
+    )
+    if not report:
+        raise HTTPException(status_code=500, detail="Failed to generate recommendations")
+    return {"ok": True, **report}
 
 
 @app.get("/api")

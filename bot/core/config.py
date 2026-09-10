@@ -422,6 +422,171 @@ class Settings(BaseSettings):
     live_allow_without_research_unlock: bool = False
     # Live-only: skip CVD inject, shadow observer, research status panels in PaperRunner.
     live_disable_research_hooks: bool = True
+    # Product retirement: CVD mid/TOB gap falsified live expectancy (see POST_CVD_VELOCITY_DESK).
+    # When True, research hooks stay off and CVD inject is hard-rejected.
+    live_cvd_abandoned: bool = True
+    # --- AlphaI news intelligence (https://alphai.io) ---
+    alphai_enabled: bool = False
+    alphai_api_key: SecretStr | None = None
+    alphai_min_relevance: int = Field(default=7, ge=1, le=10)
+    alphai_poll_interval_sec: float = Field(default=120.0, ge=30.0, le=3600.0)
+    alphai_block_bearish_bases: bool = True
+    alphai_macro_reduce_only: bool = True
+    alphai_poll_macro: bool = True
+    alphai_poll_actionable: bool = True
+    # When True: log headlines + blocks in status but do not pause buys.
+    alphai_observation_mode: bool = False
+    alphai_bullish_buy_enabled: bool = True
+    # When True: new-base buys require AlphaI bullish (daily pick or headline).
+    # Non-bullish held bags become sell-only at fee-aware BE+ (never-loss unchanged).
+    alphai_require_bullish_new_buys: bool = False
+    # During macro reduce-only, still allow buys on AlphaI bullish picks/headlines.
+    alphai_macro_allow_bullish_buys: bool = True
+    alphai_bullish_inventory_build_enabled: bool = True
+    alphai_webhook_secret: SecretStr | None = None
+    alphai_symbol_cache_path: str = "data/alphai/symbol_cache.json"
+    alphai_daily_recommendations_enabled: bool = True
+    alphai_daily_recommendations_path: str = "data/alphai/daily_recommendations.json"
+    alphai_daily_recommendations_hour: int = Field(default=12, ge=0, le=23)
+    # Sub-hour bullish/bearish pick refresh (default 15 min). Takes precedence over hours.
+    alphai_recommendations_interval_minutes: int = Field(default=15, ge=5, le=1440)
+    # Legacy: 1 = hourly, 24 = noon→noon daily. Used only when minutes unset/0.
+    alphai_recommendations_interval_hours: int = Field(default=1, ge=1, le=24)
+    alphai_daily_recommendations_top_n: int = Field(default=8, ge=1, le=20)
+    alphai_daily_recommendations_min_relevance: int = Field(default=6, ge=1, le=10)
+    # AlphaI scored features (opportunity/capital/adverse timing) — shadow default.
+    alphai_feature_scoring_enabled: bool = True
+    alphai_feature_shadow_only: bool = True
+    alphai_feature_auto_apply: bool = False
+    alphai_opp_weight: float = Field(default=0.06, ge=0.0, le=0.3)
+    alphai_freshness_half_life_hours: float = Field(default=4.0, ge=0.5, le=48.0)
+    alphai_max_freshness_hours: float = Field(default=24.0, ge=1.0, le=72.0)
+    alphai_adverse_bullish_wait_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    alphai_adverse_bullish_reduce_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+    alphai_capital_preference_boost: float = Field(default=0.15, ge=0.0, le=0.5)
+    alphai_capital_avoid_penalty: float = Field(default=0.35, ge=0.0, le=0.8)
+    alphai_exit_urgency_trail_scale: float = Field(default=0.70, ge=0.3, le=1.0)
+    alphai_exit_urgency_be_cushion_scale: float = Field(default=0.55, ge=0.2, le=1.0)
+    alphai_bullish_trail_hold_boost: float = Field(default=1.15, ge=1.0, le=1.5)
+    alphai_attribution_persist_path: str = "./data/alphai/attribution_state.json"
+    # Learn from pick vs tape: demote strong treatment from live RS + outcomes.
+    # No per-coin allow/deny lists — every base is scored from data.
+    alphai_price_confirm_enabled: bool = True
+    alphai_price_lag_vs_btc_pp: float = Field(default=1.5, ge=0.5, le=5.0)
+    alphai_price_confirm_full_pp: float = Field(default=0.0, ge=-1.0, le=3.0)
+    alphai_price_scale_cutoff: float = Field(default=0.45, ge=0.1, le=0.9)
+    alphai_adaptive_lag_enabled: bool = True
+    alphai_adaptive_lag_min_samples: int = Field(default=20, ge=5, le=200)
+    alphai_base_reliability_min_n: int = Field(default=3, ge=2, le=30)
+    alphai_pick_outcomes_enabled: bool = True
+    alphai_pick_outcomes_path: str = "./data/alphai/pick_outcomes.json"
+    # Desk lesson loop: record missed deploy / early harvest / avoid-vs-sleeve,
+    # settle with outcomes, optional capped feedback into live knobs.
+    alphai_desk_lessons_enabled: bool = True
+    alphai_desk_lessons_path: str = "./data/alphai/desk_lessons.json"
+    alphai_desk_lessons_auto_apply: bool = False
+    # Selective apply without full auto_apply (comma list). Default: deploy urgency only.
+    alphai_desk_lessons_auto_apply_modes: str = "deploy_urgency,avoid"
+    alphai_desk_lessons_min_free_eur: float = Field(default=150.0, ge=25.0, le=2000.0)
+    alphai_desk_lessons_observe_sec: float = Field(default=60.0, ge=15.0, le=600.0)
+    # Intraday AND-gate: AlphaI pick × freshness × low adverse × momentum not down.
+    alphai_intraday_gate_enabled: bool = False
+    alphai_intraday_gate_shadow_only: bool = True
+    alphai_intraday_min_freshness: float = Field(default=0.35, ge=0.0, le=1.0)
+    # Capital playbook router: TREND / FLAT / ADVERSE live overlays (enforce).
+    live_micro_capital_playbook_enabled: bool = False
+    live_micro_capital_playbook_min_hold_sec: float = Field(
+        default=900.0, ge=60.0, le=7200.0
+    )
+    live_micro_capital_playbook_refresh_sec: float = Field(
+        default=60.0, ge=15.0, le=600.0
+    )
+    # Auto desk mode: CERTAINTY (default) ↔ VELOCITY when confirmed picks + healthy tape.
+    live_micro_desk_mode_auto_enabled: bool = True
+    live_micro_desk_mode_min_hold_sec: float = Field(
+        default=900.0, ge=60.0, le=7200.0
+    )
+    live_micro_desk_mode_min_confirm: float = Field(
+        default=0.55, ge=0.0, le=1.0
+    )
+    live_micro_desk_mode_min_conviction: float = Field(
+        default=0.25, ge=0.0, le=1.0
+    )
+    live_micro_desk_mode_min_confirmed_picks: int = Field(
+        default=1, ge=0, le=20
+    )
+    live_micro_desk_mode_max_underwater_eur: float = Field(
+        default=120.0, ge=0.0, le=5000.0
+    )
+    live_micro_desk_mode_velocity_ring_fraction_of_satellite: float = Field(
+        default=0.90, ge=0.1, le=1.0
+    )
+    live_micro_desk_mode_velocity_ring_mult_of_certainty: float = Field(
+        default=2.0, ge=1.0, le=5.0
+    )
+    live_micro_desk_mode_velocity_sleeve_loss_cap_eur: float = Field(
+        default=35.0, ge=0.0, le=500.0
+    )
+    # Tape-confirmed entries when AlphaI has no actionable picks (RS vs BTC,
+    # breadth, liquidity, not fading from high). Coin-agnostic.
+    live_micro_tape_confirm_enabled: bool = True
+    live_micro_tape_refresh_sec: float = Field(default=120.0, ge=30.0, le=900.0)
+    live_micro_tape_min_excess_pp: float = Field(default=2.0, ge=0.0, le=20.0)
+    live_micro_tape_min_ret_pct: float = Field(default=1.0, ge=0.0, le=20.0)
+    live_micro_tape_min_volume_eur: float = Field(default=500_000.0, ge=0.0)
+    live_micro_tape_max_from_high_pct: float = Field(default=3.0, ge=0.5, le=20.0)
+    live_micro_tape_min_breadth: float = Field(default=0.50, ge=0.0, le=1.0)
+    live_micro_tape_top_n: int = Field(default=4, ge=1, le=10)
+    live_micro_tape_max_bases_per_venue: int = Field(default=2, ge=0, le=6)
+    # Tape leaders complement native AlphaI picks (union) instead of being
+    # suppressed whenever a pick exists; avoid/blocked always win.
+    live_micro_tape_union_with_picks: bool = True
+    # Observed fee rates (per venue/side) lift break-even above the static table.
+    live_micro_observed_fee_calibration: bool = True
+    # "venue:maker:taker,..." applied process-wide by the live runner (empty = table).
+    live_venue_fee_overrides: str = ""
+    # Voluntary profit harvests never below mult x maker round-trip fee (0 = off).
+    live_micro_harvest_fee_floor_mult: float = Field(default=2.5, ge=0.0, le=10.0)
+    # Underwater policy: "simple" (3 rules) or "legacy" (tiered recycle stack).
+    live_micro_uw_policy: str = "legacy"
+    live_micro_uw_simple_max_depth_pct: float = Field(default=0.012, ge=0.0, le=0.05)
+    live_micro_uw_simple_unsupported_age_sec: float = Field(default=86400.0, ge=0.0)
+    live_micro_uw_simple_avoid_age_sec: float = Field(default=7200.0, ge=0.0)
+    live_micro_uw_simple_rotate_min_age_sec: float = Field(default=900.0, ge=0.0)
+    # Fee routing: prefer the cheaper venue for a base quoted on both (empty = off).
+    live_micro_preferred_entry_venue: str = "bitvavo"
+    # Trail: widen drawdown with realised gain so multi-% runners are not clipped.
+    live_micro_trail_dd_gain_scale_enabled: bool = True
+    live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
+    # Daily Momentum Desk (bot/live/momentum_desk.py + momentum_runner.py).
+    momentum_desk_enabled: bool = False
+    # Entry venues in preference order (cheapest fees first); later venues are
+    # overflow capital once the primary cannot fund a full clip.
+    momentum_desk_venues: str = "bitvavo,okx"
+    # 90d sweep: entries 06-14 UTC all positive, 15-23 UTC all negative.
+    momentum_desk_decision_hours_utc: str = "7,13"
+    # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
+    # positions, so the base clip can exceed book/4; the router shrinks or
+    # skips clips the venue cash cannot fund. Strong tape (>= 85% of the
+    # universe up) sizes x1.3, thin tape x0.7. 12-week walk-forward under a
+    # 4000 EUR book cap, weekdays only: +749 EUR, maxDD -140, worst week -73.
+    momentum_desk_clip_eur: float = Field(default=1300.0, gt=0)
+    momentum_desk_strong_clip_mult: float = Field(default=1.3, ge=1.0, le=2.0)
+    momentum_desk_weak_clip_mult: float = Field(default=0.7, gt=0, le=1.0)
+    # Weekend 24h signals print on thin liquidity and netted ~0 over 12 weeks
+    # while adding a third of the drawdown; exits keep running on weekends.
+    momentum_desk_skip_weekend_entries: bool = True
+    momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
+    momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
+    momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
+    momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
+    momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
+    momentum_desk_time_exit_hours: float = Field(default=24.0, gt=0)
+    momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
+    momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
+    momentum_desk_macro_caution_mode: str = "reduce"
+    momentum_desk_state_path: str = "./data/momentum_desk_state.json"
+    momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
@@ -472,6 +637,51 @@ class Settings(BaseSettings):
     live_micro_early_cut_momentum_max_return: float = Field(
         default=0.0, ge=-0.01, le=0.01
     )
+    # Tiered underwater recycle (sleeve-capped intentional small losses to free capital).
+    # BE+ harvests stay never-loss; uw_recycle / cut_loss may sell < BE within the sleeve cap.
+    live_micro_uw_recycle_enabled: bool = False
+    live_micro_uw_dust_max_notional_eur: float = Field(default=25.0, ge=0.0, le=100.0)
+    live_micro_uw_dust_below_be_pct: float = Field(default=0.003, ge=0.0, le=0.05)
+    live_micro_uw_near_below_be_pct: float = Field(default=0.008, ge=0.0, le=0.05)
+    live_micro_uw_near_max_depth_pct: float = Field(default=0.015, ge=0.0, le=0.10)
+    live_micro_uw_near_min_age_sec: float = Field(default=2700.0, ge=60.0, le=86400.0)
+    live_micro_uw_non_alphai_below_be_pct: float = Field(default=0.01, ge=0.0, le=0.05)
+    live_micro_uw_non_alphai_min_age_sec: float = Field(default=3600.0, ge=60.0, le=86400.0)
+    live_micro_uw_alphai_below_be_pct: float = Field(default=0.02, ge=0.0, le=0.10)
+    live_micro_uw_alphai_min_age_sec: float = Field(default=10800.0, ge=300.0, le=172800.0)
+    # When venue free cash is high, recycle non-strong underwater bags sooner (min loss).
+    live_micro_uw_idle_pressure_enabled: bool = False
+    live_micro_uw_idle_min_free_eur: float = Field(default=150.0, ge=0.0, le=5000.0)
+    live_micro_uw_idle_min_age_sec: float = Field(default=600.0, ge=60.0, le=86400.0)
+    live_micro_uw_idle_below_be_pct: float = Field(default=0.004, ge=0.0, le=0.05)
+    # Deadlock unlock: when UW vault starves the active ring, recycle non-strong
+    # bags at milder depth/age so capital can rotate (never-loss still sleeve-capped).
+    live_micro_uw_deadlock_unlock_enabled: bool = True
+    live_micro_uw_deadlock_below_be_pct: float = Field(default=0.0025, ge=0.0, le=0.05)
+    live_micro_uw_deadlock_min_age_sec: float = Field(default=300.0, ge=60.0, le=86400.0)
+    # Partial ranked unlock: free only enough for one sleeve clip, with day loss cap.
+    live_micro_uw_deadlock_partial_enabled: bool = True
+    live_micro_uw_deadlock_target_free_eur: float = Field(default=220.0, ge=0.0, le=5000.0)
+    live_micro_uw_deadlock_partial_clip_eur: float = Field(default=220.0, ge=0.0, le=5000.0)
+    live_micro_uw_deadlock_partial_min_eur: float = Field(default=40.0, ge=0.0, le=1000.0)
+    live_micro_uw_deadlock_day_loss_cap_eur: float = Field(default=15.0, ge=0.0, le=500.0)
+    live_micro_uw_deadlock_would_buy_gate: bool = True
+    # Mid-depth flat UW recycle for bags we would not buy today (gap between near_be and alphai hold).
+    live_micro_uw_mid_flat_recycle_enabled: bool = True
+    live_micro_uw_mid_flat_max_depth_pct: float = Field(default=0.015, ge=0.0, le=0.05)
+    live_micro_uw_mid_flat_min_age_sec: float = Field(default=300.0, ge=60.0, le=86400.0)
+    # Aged flat mild-UW bags while sleeve targets wait: partial rotate (not a 4% hard SL).
+    live_micro_uw_lag_time_partial_enabled: bool = True
+    live_micro_uw_lag_time_partial_min_age_sec: float = Field(default=1800.0, ge=120.0, le=86400.0)
+    live_micro_uw_lag_time_partial_max_depth_pct: float = Field(default=0.020, ge=0.0, le=0.05)
+    # Deploy idle cash into AlphaI even when the base is already held elsewhere / near BE.
+    live_micro_alphai_cross_venue_deploy: bool = True
+    live_micro_alphai_cross_venue_max_other_depth_pct: float = Field(
+        default=0.015, ge=0.0, le=0.10
+    )
+    live_micro_alphai_ring_fill_add_max_depth_pct: float = Field(
+        default=0.01, ge=0.0, le=0.05
+    )
     # Downward momentum: rolling return ≤ −this → exit (default 0.3%).
     live_micro_momentum_exit_min_return: float = Field(default=0.003, ge=0.0, le=0.10)
     # Defensive exit floor: never sell below BE + this cushion (default 0.5%).
@@ -486,7 +696,8 @@ class Settings(BaseSettings):
     # Scan OKX+Bitvavo books for dislocations; unfunded venues skip live legs.
     live_micro_cross_venue_enabled: bool = True
     # Bases shown as long-hold / outside micro recycle (comma-separated, e.g. ETH).
-    live_micro_long_hold_bases: str = "ETH"
+    # Empty = all focus bases are micro-recyclable (needed when AlphaI tops ETH).
+    live_micro_long_hold_bases: str = ""
     # Durable trail/resting/session counters across micro session restarts.
     live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
     # OKX: prefer deploying free EUR into these liquid bases (not Bitvavo max-base bags).
@@ -503,8 +714,13 @@ class Settings(BaseSettings):
     # Scale into soft-armed BE+ winners (bridge-submitted adds).
     live_micro_winner_add_enabled: bool = False
     live_micro_winner_add_max: int = Field(default=2, ge=0, le=5)
-    live_micro_winner_add_clip_eur: float = Field(default=55.0, ge=10.0, le=200.0)
+    live_micro_winner_add_clip_eur: float = Field(default=55.0, ge=10.0, le=400.0)
     live_micro_winner_add_cooldown_sec: float = Field(default=60.0, ge=5.0, le=600.0)
+    # When True, winner-adds only on AlphaI-allowed (bullish/priority) bags above BE.
+    live_micro_alphai_winner_add_only: bool = True
+    # Larger first-entry clips for AlphaI priority / strong picks (max capital deploy).
+    live_micro_alphai_priority_clip_eur: float = Field(default=0.0, ge=0.0, le=500.0)
+    live_micro_alphai_strong_clip_eur: float = Field(default=0.0, ge=0.0, le=500.0)
     # Per-venue target EUR for active-book (focus, not underwater) deployment.
     # While below target with free cash, prefer unheld focus emits (always-on deploy).
     live_micro_active_ring_eur: float = Field(default=1000.0, ge=0.0, le=5000.0)
@@ -531,6 +747,9 @@ class Settings(BaseSettings):
     live_micro_ring_soft_block_underwater_eur: float = Field(
         default=25.0, ge=0.0, le=5000.0
     )
+    # Capital Velocity Desk unlock: allow Util-B / soft ring momentum while *other*
+    # vault bags are underwater. Same-base underwater adds stay blocked.
+    live_micro_ring_util_b_ignore_underwater: bool = True
     # Minimum rising ticks in low-util mode (never below this even when configured lower).
     live_micro_entry_min_low_util_rising_n: int = Field(default=3, ge=2, le=12)
     # Short-window momentum floor for new-base entries (last N marks).
@@ -555,6 +774,67 @@ class Settings(BaseSettings):
     live_micro_velocity_sleeve_daily_loss_cap_eur: float = Field(
         default=25.0, ge=0.0, le=500.0
     )
+    # Core/satellite split: core stays cash (or light BTC/ETH); satellite = trend sleeve.
+    live_micro_capital_split_enabled: bool = True
+    # 50/50: €350 rings missed multi-% alt rotations; €500/venue keeps hard
+    # cut-loss exposure (2.5%) at ~€12.5 per full ring sweep.
+    live_micro_core_fraction: float = Field(default=0.50, ge=0.0, le=0.95)
+    live_micro_satellite_fraction: float = Field(default=0.50, ge=0.05, le=0.95)
+    # cash = idle EUR vault; btc_eth = mark BTC/ETH as long-hold core (manual/light beta).
+    live_micro_core_mode: str = "cash"
+    live_micro_core_long_hold_bases: str = "BTC,ETH"
+    # Populated by session overrides for dashboard/status (0 = unset).
+    live_micro_core_eur: float = Field(default=0.0, ge=0.0, le=10000.0)
+    live_micro_satellite_eur: float = Field(default=0.0, ge=0.0, le=10000.0)
+    # Sharp AlphaI daytrader: satellite entries need confirmed picks; non-picks /
+    # failed picks recycle on time/urgency (not BE-first forever). Coin-agnostic.
+    live_micro_alphai_daytrader_enabled: bool = True
+    live_micro_daytrader_min_confirm_scale: float = Field(
+        default=0.55, ge=0.20, le=0.95
+    )
+    live_micro_daytrader_sleeve_min_confirm_scale: float = Field(
+        default=0.55, ge=0.15, le=0.90
+    )
+    live_micro_daytrader_require_rising: bool = True
+    # Sleeve daytrader: keep rising/confirm hard (no soft lag floor / urgency bypass).
+    live_micro_daytrader_sleeve_require_rising: bool = True
+    live_micro_daytrader_min_conviction: float = Field(
+        default=0.25, ge=0.0, le=1.0
+    )
+    live_micro_daytrader_sleeve_urgency_enabled: bool = False
+    # Confirm-ranked clips: strong/priority only when tape confirms enough.
+    live_micro_daytrader_priority_clip_min_confirm: float = Field(
+        default=0.60, ge=0.20, le=0.95
+    )
+    live_micro_daytrader_strong_clip_min_confirm: float = Field(
+        default=0.75, ge=0.30, le=0.95
+    )
+    live_micro_daytrader_non_alphai_min_age_sec: float = Field(
+        default=120.0, ge=30.0, le=3600.0
+    )
+    live_micro_daytrader_non_alphai_below_be_pct: float = Field(
+        default=0.005, ge=0.001, le=0.05
+    )
+    live_micro_daytrader_near_min_age_sec: float = Field(
+        default=90.0, ge=30.0, le=3600.0
+    )
+    live_micro_daytrader_weak_alphai_min_age_sec: float = Field(
+        default=480.0, ge=60.0, le=7200.0
+    )
+    live_micro_daytrader_lag_time_min_age_sec: float = Field(
+        default=600.0, ge=120.0, le=7200.0
+    )
+    live_micro_daytrader_provisional_be_exit_min_age_sec: float = Field(
+        default=300.0, ge=60.0, le=7200.0
+    )
+    # AlphaI-first sells: avoid / non-pick / weak-confirm recycle under BE (daytrader).
+    live_micro_daytrader_rotate_exits_enabled: bool = True
+    live_micro_daytrader_avoid_below_be_pct: float = Field(
+        default=0.0025, ge=0.001, le=0.05
+    )
+    live_micro_daytrader_avoid_min_age_sec: float = Field(
+        default=60.0, ge=15.0, le=1800.0
+    )
     # D: Exit engine — soft-armed / BE+ sells seek fills (touch/improve, fast reprice).
     # Never sells below fee-aware BE; taker only when bid ≥ taker BE.
     live_micro_exit_engine_enabled: bool = True
@@ -578,7 +858,7 @@ class Settings(BaseSettings):
     # Reset sleeve cap + session PnL baseline at UTC midnight.
     live_micro_daily_baseline_reset_utc: bool = True
     # OKX active-ring: smaller clips while underfilled → more parallel slots.
-    live_micro_okx_ring_clip_eur: float = Field(default=50.0, ge=20.0, le=200.0)
+    live_micro_okx_ring_clip_eur: float = Field(default=50.0, ge=20.0, le=400.0)
     # OKX emit bias when free EUR ≥ ratio × Bitvavo free EUR (1.0 = equal cash counts).
     live_micro_okx_cash_bias_ratio: float = Field(default=1.0, ge=1.0, le=3.0)
     # Trail partials may use this fraction of maker min-notional (still never below BE).

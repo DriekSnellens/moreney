@@ -16,7 +16,7 @@ import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from bot.core.config import Settings
@@ -52,6 +52,17 @@ from bot.intelligence.adverse_selection import (
     post_fill_adverse_pct,
 )
 from bot.intelligence.capital_intelligence import assess_capital_state
+from bot.integrations.alphai.attribution import (
+    AlphaIAttributionEvent,
+    AlphaIAttributionStore,
+)
+from bot.integrations.alphai.desk_lessons import DeskLessonStore
+from bot.integrations.alphai.features import (
+    AlphaIFeatureAssessment,
+    alphai_feature_from_signals_snapshot,
+    config_from_settings as alphai_feature_config_from_settings,
+    evaluate_intraday_entry_gate,
+)
 from bot.intelligence.market_regime_engine import classify_market_regime, config_from_settings as regime_cfg_from
 from bot.intelligence.outcome_learning import OutcomeRecord
 from bot.intelligence.resting_order_intelligence import (
@@ -59,11 +70,32 @@ from bot.intelligence.resting_order_intelligence import (
     assess_resting_order,
 )
 from bot.intelligence.session import IntelligenceSession
+from bot.live.capital_playbook import (
+    CapitalPlaybook,
+    CapitalPlaybookInputs,
+    classify_capital_playbook,
+    decision_public_dict,
+)
 
 logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
+_ONE = Decimal("1")
 _MIN_LIVE_NOTIONAL = Decimal("5")
+# Profit-taking while price is still up: fee-aware maker exits, not taker hits.
+_PATIENT_EXIT_REASONS = frozenset(
+    {
+        "trail_soft_partial",
+        "trail_hard_partial",
+        "trail_be_harvest",
+        "trail_recovery_be",
+        "trail_recovery_be_partial",
+        "trail_exit_work",
+        "trail_consolidation_wind_down",
+        "time_stop_breakeven",
+        "trail_uw_recycle_band",
+    }
+)
 _FILL_POLL_SECONDS = 1.5
 _FILL_POLL_INTERVAL = 0.15
 _DEFAULT_RESTING_MAX_AGE_SEC = 90.0
@@ -170,11 +202,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
             )
         )
+        raw_long_hold = getattr(settings, "live_micro_long_hold_bases", None)
+        if raw_long_hold is None:
+            raw_long_hold = ""
         self._long_hold_bases = {
             b.strip().upper()
-            for b in str(
-                getattr(settings, "live_micro_long_hold_bases", "ETH") or "ETH"
-            ).split(",")
+            for b in str(raw_long_hold).split(",")
             if b.strip()
         }
         self.portfolio_value_eur: Decimal | None = None
@@ -263,6 +296,153 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._cut_loss_new_bases_only = bool(
             getattr(settings, "live_micro_cut_loss_new_bases_only", False)
         )
+        self._uw_recycle_enabled = bool(
+            getattr(settings, "live_micro_uw_recycle_enabled", False)
+        )
+        self._uw_dust_max_notional = Decimal(
+            str(getattr(settings, "live_micro_uw_dust_max_notional_eur", 25) or 25)
+        )
+        self._uw_dust_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_dust_below_be_pct", 0.003) or 0)
+        )
+        self._uw_near_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_near_below_be_pct", 0.008) or 0)
+        )
+        self._uw_near_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_near_max_depth_pct", 0.015) or 0)
+        )
+        self._uw_near_min_age_sec = float(
+            getattr(settings, "live_micro_uw_near_min_age_sec", 2700) or 2700
+        )
+        self._uw_non_alphai_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_non_alphai_below_be_pct", 0.01) or 0)
+        )
+        self._uw_non_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_uw_non_alphai_min_age_sec", 3600) or 3600
+        )
+        self._uw_avoid_max_age_sec = float(
+            getattr(settings, "live_micro_uw_avoid_max_age_sec", 900) or 900
+        )
+        self._uw_alphai_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_alphai_below_be_pct", 0.02) or 0)
+        )
+        self._uw_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_uw_alphai_min_age_sec", 10800) or 10800
+        )
+        self._uw_idle_pressure_enabled = bool(
+            getattr(settings, "live_micro_uw_idle_pressure_enabled", False)
+        )
+        self._uw_idle_min_free_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_idle_min_free_eur", 150) or 150)
+        )
+        self._uw_idle_min_age_sec = float(
+            getattr(settings, "live_micro_uw_idle_min_age_sec", 600) or 600
+        )
+        self._uw_idle_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_idle_below_be_pct", 0.004) or 0)
+        )
+        # Fresh session entries: bag-recycle tiers (idle / deadlock / mid-flat)
+        # wait this long; only early-cut / cut-loss stops apply before that.
+        self._uw_fresh_entry_grace_sec = float(
+            getattr(settings, "live_micro_uw_fresh_entry_grace_sec", 1800.0) or 0.0
+        )
+        # Underwater policy: "simple" = 3 rules (hard stops / aged unsupported /
+        # rotate against confirmed replacement); "legacy" = tiered recycle stack.
+        self._uw_policy = str(getattr(settings, "live_micro_uw_policy", "legacy") or "legacy")
+        self._uw_simple_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_simple_max_depth_pct", 0.012) or 0)
+        )
+        self._uw_simple_unsupported_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_unsupported_age_sec", 86400.0) or 0.0
+        )
+        self._uw_simple_avoid_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_avoid_age_sec", 7200.0) or 0.0
+        )
+        self._uw_simple_rotate_min_age_sec = float(
+            getattr(settings, "live_micro_uw_simple_rotate_min_age_sec", 900.0) or 0.0
+        )
+        # After a loss exit, block re-entering the same base on that venue
+        # unless the mark has reclaimed exit price + reclaim bps.
+        self._loss_exit_cooldown_sec = float(
+            getattr(settings, "live_micro_loss_exit_cooldown_sec", 1800.0) or 0.0
+        )
+        self._loss_exit_reclaim_bps = Decimal(
+            str(getattr(settings, "live_micro_loss_exit_reclaim_bps", 50) or 0)
+        )
+        self._loss_exits: dict[str, tuple[float, Decimal]] = {}
+        self._uw_deadlock_unlock_enabled = bool(
+            getattr(settings, "live_micro_uw_deadlock_unlock_enabled", True)
+        )
+        self._uw_deadlock_below_be_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_below_be_pct", 0.0025) or 0)
+        )
+        self._uw_deadlock_min_age_sec = float(
+            getattr(settings, "live_micro_uw_deadlock_min_age_sec", 300) or 300
+        )
+        self._uw_deadlock_partial_enabled = bool(
+            getattr(settings, "live_micro_uw_deadlock_partial_enabled", True)
+        )
+        self._uw_deadlock_target_free_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_target_free_eur", 220) or 220)
+        )
+        self._uw_deadlock_partial_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_partial_clip_eur", 220) or 220)
+        )
+        self._uw_deadlock_partial_min_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_partial_min_eur", 40) or 40)
+        )
+        self._uw_deadlock_day_loss_cap_eur = Decimal(
+            str(getattr(settings, "live_micro_uw_deadlock_day_loss_cap_eur", 15) or 15)
+        )
+        self._uw_deadlock_would_buy_gate = bool(
+            getattr(settings, "live_micro_uw_deadlock_would_buy_gate", True)
+        )
+        self._uw_mid_flat_recycle_enabled = bool(
+            getattr(settings, "live_micro_uw_mid_flat_recycle_enabled", True)
+        )
+        self._uw_mid_flat_max_depth_pct = Decimal(
+            str(getattr(settings, "live_micro_uw_mid_flat_max_depth_pct", 0.012) or 0.012)
+        )
+        self._uw_mid_flat_min_age_sec = float(
+            getattr(settings, "live_micro_uw_mid_flat_min_age_sec", 600) or 600
+        )
+        # Aged flat mild-UW rotate while sleeve targets wait (hybrid vs never-loss /
+        # vs blind 4% hard SL — hard cut stays ~2.5%).
+        self._uw_lag_time_partial_enabled = bool(
+            getattr(settings, "live_micro_uw_lag_time_partial_enabled", True)
+        )
+        self._uw_lag_time_partial_min_age_sec = float(
+            getattr(settings, "live_micro_uw_lag_time_partial_min_age_sec", 1800) or 1800
+        )
+        self._uw_lag_time_partial_max_depth_pct = Decimal(
+            str(
+                getattr(settings, "live_micro_uw_lag_time_partial_max_depth_pct", 0.020)
+                or 0.020
+            )
+        )
+        self._uw_deadlock_day_key = ""
+        self._uw_deadlock_day_loss_eur = _ZERO
+        self._uw_deadlock_unlock_remaining_eur = _ZERO
+        self._alphai_cross_venue_deploy = bool(
+            getattr(settings, "live_micro_alphai_cross_venue_deploy", True)
+        )
+        self._alphai_cross_venue_max_other_depth = Decimal(
+            str(
+                getattr(
+                    settings, "live_micro_alphai_cross_venue_max_other_depth_pct", 0.015
+                )
+                or 0
+            )
+        )
+        self._alphai_ring_fill_add_max_depth = Decimal(
+            str(
+                getattr(
+                    settings, "live_micro_alphai_ring_fill_add_max_depth_pct", 0.01
+                )
+                or 0
+            )
+        )
+        self._uw_recycle_floors: dict[str, Decimal] = {}
         self._momentum_exit_above_be_pct = Decimal(
             str(getattr(settings, "live_micro_momentum_exit_above_be_pct", 0.005) or 0)
         )
@@ -394,6 +574,170 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 or 25
             )
         )
+        self._ring_util_b_ignore_underwater = bool(
+            getattr(settings, "live_micro_ring_util_b_ignore_underwater", True)
+        )
+        self._cvd_abandoned = bool(getattr(settings, "live_cvd_abandoned", True))
+        self._alphai_enabled = bool(getattr(settings, "alphai_enabled", False))
+        self._alphai_blocked_bases: frozenset[str] = frozenset()
+        self._alphai_blocked_detail: dict[str, str] = {}
+        self._alphai_macro_active = False
+        self._alphai_signals: object | None = None
+        self._alphai_macro_allow_bullish = True
+        self._alphai_feature_config = alphai_feature_config_from_settings(settings)
+        self._alphai_attribution = AlphaIAttributionStore.load(
+            str(
+                getattr(
+                    settings,
+                    "alphai_attribution_persist_path",
+                    "./data/alphai/attribution_state.json",
+                )
+            )
+        )
+        self._alphai_attribution.auto_apply = False
+        self._desk_lessons_enabled = bool(
+            getattr(settings, "alphai_desk_lessons_enabled", True)
+        )
+        self._desk_lessons_path = str(
+            getattr(
+                settings,
+                "alphai_desk_lessons_path",
+                "./data/alphai/desk_lessons.json",
+            )
+        )
+        self._desk_lessons = DeskLessonStore.load(self._desk_lessons_path)
+        self._desk_lessons.auto_apply = bool(
+            getattr(settings, "alphai_desk_lessons_auto_apply", False)
+        )
+        modes_raw = getattr(settings, "alphai_desk_lessons_auto_apply_modes", "deploy_urgency")
+        if isinstance(modes_raw, str):
+            modes_raw = [x.strip() for x in modes_raw.split(",") if x.strip()]
+        self._desk_lessons.auto_apply_modes = {
+            str(m).strip().lower() for m in (modes_raw or []) if str(m).strip()
+        }
+        self._desk_lessons_min_free_eur = float(
+            getattr(settings, "alphai_desk_lessons_min_free_eur", 150.0) or 150.0
+        )
+        self._desk_lessons_observe_sec = float(
+            getattr(settings, "alphai_desk_lessons_observe_sec", 60.0) or 60.0
+        )
+        self._desk_lessons_last_observe_mono = 0.0
+        self._alphai_feature_snapshot: dict[str, Any] = {}
+        self._alphai_daily_generated_at: str | None = None
+        self._alphai_intraday_gate_enabled = bool(
+            getattr(settings, "alphai_intraday_gate_enabled", False)
+        )
+        self._alphai_intraday_gate_shadow_only = bool(
+            getattr(settings, "alphai_intraday_gate_shadow_only", True)
+        )
+        self._alphai_intraday_min_freshness = Decimal(
+            str(getattr(settings, "alphai_intraday_min_freshness", 0.35) or 0.35)
+        )
+        # Capital playbook router state (baselines captured after ring/exit knobs).
+        self._capital_playbook_enabled = bool(
+            getattr(settings, "live_micro_capital_playbook_enabled", False)
+        )
+        self._capital_playbook_min_hold_sec = float(
+            getattr(settings, "live_micro_capital_playbook_min_hold_sec", 900.0) or 900.0
+        )
+        self._capital_playbook_refresh_sec = float(
+            getattr(settings, "live_micro_capital_playbook_refresh_sec", 60.0) or 60.0
+        )
+        self._capital_playbook: CapitalPlaybook = CapitalPlaybook.TREND
+        self._capital_playbook_since_mono = time.monotonic()
+        self._capital_playbook_last_refresh_mono = 0.0
+        self._capital_playbook_decision: dict[str, Any] = {
+            "playbook": CapitalPlaybook.TREND.value,
+            "confidence": 0.0,
+            "reasons": [],
+            "overlays": {},
+        }
+        self._playbook_sell_fill_mono: list[float] = []
+        self._playbook_block_new_buys = False
+        self._playbook_owns_buy_block = False
+        self._playbook_baselines: dict[str, Any] = {}
+        # Auto CERTAINTY ↔ VELOCITY desk mode (on by default with daytrader).
+        from bot.live.desk_mode import DeskMode
+
+        self._desk_mode_auto_enabled = bool(
+            getattr(settings, "live_micro_desk_mode_auto_enabled", True)
+        )
+        self._desk_mode_min_hold_sec = float(
+            getattr(settings, "live_micro_desk_mode_min_hold_sec", 900.0) or 900.0
+        )
+        self._desk_mode_min_confirm = float(
+            getattr(settings, "live_micro_desk_mode_min_confirm", 0.55) or 0.55
+        )
+        self._desk_mode_min_conviction = float(
+            getattr(settings, "live_micro_desk_mode_min_conviction", 0.25) or 0.25
+        )
+        self._desk_mode_min_confirmed_picks = int(
+            getattr(settings, "live_micro_desk_mode_min_confirmed_picks", 1) or 1
+        )
+        self._desk_mode_max_underwater_eur = float(
+            getattr(settings, "live_micro_desk_mode_max_underwater_eur", 120.0) or 120.0
+        )
+        self._desk_mode_velocity_ring_fraction = float(
+            getattr(
+                settings, "live_micro_desk_mode_velocity_ring_fraction_of_satellite", 0.90
+            )
+            or 0.90
+        )
+        self._desk_mode_velocity_ring_mult = float(
+            getattr(settings, "live_micro_desk_mode_velocity_ring_mult_of_certainty", 2.0)
+            or 2.0
+        )
+        self._desk_mode_velocity_sleeve_loss_cap = Decimal(
+            str(
+                getattr(settings, "live_micro_desk_mode_velocity_sleeve_loss_cap_eur", 35.0)
+                or 35.0
+            )
+        )
+        self._desk_mode: DeskMode = DeskMode.CERTAINTY
+        self._desk_mode_since_mono = time.monotonic()
+        self._desk_mode_decision: dict[str, Any] = {
+            "mode": DeskMode.CERTAINTY.value,
+            "confidence": 0.0,
+            "reasons": ["cold_start"],
+            "overlays": {},
+        }
+        # Certainty ring / sleeve-cap baselines captured after ring knobs are set.
+        self._certainty_ring_baseline_eur = Decimal("0")
+        self._sleeve_loss_cap_baseline = Decimal("0")
+        # Tape-confirmed entries (AlphaI-quiet days): RS leaders vs BTC + breadth.
+        self._tape_confirm_enabled = bool(
+            getattr(settings, "live_micro_tape_confirm_enabled", True)
+        )
+        self._tape_refresh_sec = float(
+            getattr(settings, "live_micro_tape_refresh_sec", 120.0) or 120.0
+        )
+        self._tape_min_excess_pp = float(
+            getattr(settings, "live_micro_tape_min_excess_pp", 2.0) or 0.0
+        )
+        self._tape_min_ret_pct = float(
+            getattr(settings, "live_micro_tape_min_ret_pct", 1.0) or 0.0
+        )
+        self._tape_min_volume_eur = float(
+            getattr(settings, "live_micro_tape_min_volume_eur", 500_000.0) or 0.0
+        )
+        self._tape_max_from_high_pct = float(
+            getattr(settings, "live_micro_tape_max_from_high_pct", 3.0) or 3.0
+        )
+        self._tape_min_breadth = float(
+            getattr(settings, "live_micro_tape_min_breadth", 0.50) or 0.0
+        )
+        self._tape_top_n = int(getattr(settings, "live_micro_tape_top_n", 4) or 4)
+        self._tape_max_bases_per_venue = int(
+            getattr(settings, "live_micro_tape_max_bases_per_venue", 2) or 0
+        )
+        self._tape_snapshot: Any = None
+        self._tape_entry_bases: set[str] = set()
+        self._trail_dd_gain_scale_enabled = bool(
+            getattr(settings, "live_micro_trail_dd_gain_scale_enabled", True)
+        )
+        self._trail_dd_max = Decimal(
+            str(getattr(settings, "live_micro_trail_dd_max_pct", 0.03) or 0.03)
+        )
         self._entry_min_low_util_rising_n = int(
             getattr(settings, "live_micro_entry_min_low_util_rising_n", 3) or 3
         )
@@ -481,6 +825,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._winner_add_cooldown_sec = float(
             getattr(settings, "live_micro_winner_add_cooldown_sec", 60.0) or 60.0
         )
+        self._alphai_winner_add_only = bool(
+            getattr(settings, "live_micro_alphai_winner_add_only", True)
+        )
+        self._alphai_priority_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_alphai_priority_clip_eur", 0) or 0)
+        )
+        self._alphai_strong_clip_eur = Decimal(
+            str(getattr(settings, "live_micro_alphai_strong_clip_eur", 0) or 0)
+        )
         self._position_opened_mono: dict[str, float] = {}
         self._position_opened_at: dict[str, float] = {}
         self._max_alt_bases = int(
@@ -517,8 +870,109 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 or 25
             )
         )
+        self._certainty_ring_baseline_eur = Decimal(str(self._active_ring_eur or 0))
+        self._sleeve_loss_cap_baseline = Decimal(str(self._sleeve_daily_loss_cap or 0))
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
+        self._capital_split_enabled = bool(
+            getattr(settings, "live_micro_capital_split_enabled", False)
+        )
+        self._core_eur = Decimal(
+            str(getattr(settings, "live_micro_core_eur", 0) or 0)
+        )
+        self._satellite_eur = Decimal(
+            str(
+                getattr(settings, "live_micro_satellite_eur", 0)
+                or self._velocity_sleeve_eur
+                or 0
+            )
+        )
+        self._core_mode = str(
+            getattr(settings, "live_micro_core_mode", "cash") or "cash"
+        ).strip().lower()
+        # Sharp AlphaI daytrader: confirmed picks only; time-first non-pick exits.
+        self._alphai_daytrader_enabled = bool(
+            getattr(settings, "live_micro_alphai_daytrader_enabled", False)
+        ) and bool(self._capital_split_enabled)
+        self._daytrader_min_confirm = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_min_confirm_scale", 0.55)
+                or 0.55
+            )
+        )
+        self._daytrader_sleeve_min_confirm = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_sleeve_min_confirm_scale", 0.55)
+                or 0.55
+            )
+        )
+        self._daytrader_require_rising = bool(
+            getattr(settings, "live_micro_daytrader_require_rising", True)
+        )
+        self._daytrader_sleeve_require_rising = bool(
+            getattr(settings, "live_micro_daytrader_sleeve_require_rising", True)
+        )
+        self._daytrader_min_conviction = float(
+            getattr(settings, "live_micro_daytrader_min_conviction", 0.25) or 0.25
+        )
+        self._daytrader_sleeve_urgency_enabled = bool(
+            getattr(settings, "live_micro_daytrader_sleeve_urgency_enabled", False)
+        )
+        self._daytrader_priority_clip_min_confirm = Decimal(
+            str(
+                getattr(
+                    settings, "live_micro_daytrader_priority_clip_min_confirm", 0.60
+                )
+                or 0.60
+            )
+        )
+        self._daytrader_strong_clip_min_confirm = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_strong_clip_min_confirm", 0.75)
+                or 0.75
+            )
+        )
+        self._daytrader_non_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_non_alphai_min_age_sec", 120.0)
+            or 120.0
+        )
+        self._daytrader_non_alphai_below_be_pct = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_non_alphai_below_be_pct", 0.005)
+                or 0.005
+            )
+        )
+        self._daytrader_near_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_near_min_age_sec", 90.0) or 90.0
+        )
+        self._daytrader_weak_alphai_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_weak_alphai_min_age_sec", 480.0)
+            or 480.0
+        )
+        self._daytrader_lag_time_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_lag_time_min_age_sec", 600.0)
+            or 600.0
+        )
+        self._daytrader_provisional_be_exit_min_age_sec = float(
+            getattr(
+                settings,
+                "live_micro_daytrader_provisional_be_exit_min_age_sec",
+                300.0,
+            )
+            or 300.0
+        )
+        self._daytrader_rotate_exits_enabled = bool(
+            getattr(settings, "live_micro_daytrader_rotate_exits_enabled", True)
+        )
+        self._daytrader_avoid_below_be_pct = Decimal(
+            str(
+                getattr(settings, "live_micro_daytrader_avoid_below_be_pct", 0.0025)
+                or 0.0025
+            )
+        )
+        self._daytrader_avoid_min_age_sec = float(
+            getattr(settings, "live_micro_daytrader_avoid_min_age_sec", 60.0) or 60.0
+        )
         # D: exit engine — aggressive BE+ / soft-armed fill seeking.
         self._exit_engine_enabled = bool(
             getattr(settings, "live_micro_exit_engine_enabled", True)
@@ -547,6 +1001,49 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._exit_taker_after_maker_fails = int(
             getattr(settings, "live_micro_exit_taker_after_maker_fails", 1) or 1
         )
+        # Patient exits (profit-taking while price is still up): rest as maker at
+        # the ask for longer and escalate to taker only after several fails.
+        # Urgent exits (drawdown / stops / momentum break) keep the fast path.
+        self._exit_patient_enabled = bool(
+            getattr(settings, "live_micro_exit_patient_enabled", True)
+        )
+        self._exit_patient_resting_sec = float(
+            getattr(settings, "live_micro_exit_patient_resting_sec", 20.0) or 20.0
+        )
+        self._exit_patient_taker_after_fails = int(
+            getattr(settings, "live_micro_exit_patient_taker_after_fails", 3) or 3
+        )
+        self._playbook_baselines = {
+            "active_ring_eur": self._active_ring_eur,
+            "ring_soft_max_active_eur": self._ring_soft_max_active_eur,
+            "winner_add_enabled": self._winner_add_enabled,
+            "alphai_strong_clip_eur": self._alphai_strong_clip_eur,
+            "exit_taker_cushion_bps": self._exit_taker_cushion_bps,
+            "exit_taker_after_maker_fails": self._exit_taker_after_maker_fails,
+            "be_harvest_min_gain_pct": self._be_harvest_min_gain,
+            "be_harvest_partial_pct": self._be_harvest_partial,
+            "uw_near_min_age_sec": self._uw_near_min_age_sec,
+            "uw_non_alphai_min_age_sec": self._uw_non_alphai_min_age_sec,
+            "uw_idle_min_age_sec": self._uw_idle_min_age_sec,
+            "uw_idle_below_be_pct": self._uw_idle_below_be_pct,
+            "uw_near_below_be_pct": self._uw_near_below_be_pct,
+            "uw_near_max_depth_pct": self._uw_near_max_depth_pct,
+            "uw_alphai_below_be_pct": self._uw_alphai_below_be_pct,
+            "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
+            "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
+            "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
+            "uw_deadlock_below_be_pct": self._uw_deadlock_below_be_pct,
+            "uw_deadlock_target_free_eur": self._uw_deadlock_target_free_eur,
+            "uw_deadlock_day_loss_cap_eur": self._uw_deadlock_day_loss_cap_eur,
+            "early_cut_loss_below_be_pct": self._early_cut_loss_below_be_pct,
+            "trail_hold_rising_n": self._trail_hold_rising_n,
+            "alphai_intraday_min_freshness": self._alphai_intraday_min_freshness,
+            "alphai_intraday_require_rising": False,
+            "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
+            "alphai_idle_deploy_blocked": False,
+        }
+        self._alphai_intraday_require_rising = False
+        self._alphai_idle_deploy_blocked = False
         self._winnable_gap_alert_eur = Decimal(
             str(getattr(settings, "live_micro_winnable_gap_alert_eur", 3.0) or 3.0)
         )
@@ -762,6 +1259,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "resting": resting,
             "mirrored_trade_ids": sorted(self._mirrored_trade_ids),
             "session_lots": self._serialize_lots(self._session_lots),
+            "cost_lots": self._serialize_lots(self._cost_lots),
+            "trusted_cost_keys": sorted(self._trusted_cost_keys),
             "position_opened_at": dict(self._position_opened_at),
             "skips": dict(self.skips),
             "session_live_fill_count": int(self.session_live_fill_count),
@@ -771,7 +1270,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "live_transaction_count": int(self.live_transaction_count),
             "realized_trade_pnl_eur": str(self.realized_trade_pnl_eur),
             "sleeve_realized_eur": str(self._sleeve_realized_eur),
+            "uw_deadlock_day_key": self._uw_deadlock_day_key,
+            "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_paused": bool(self._sleeve_paused),
+            "venue_cash_excess": {
+                k: str(v) for k, v in (getattr(self, "_venue_cash_excess", None) or {}).items()
+            },
+            "observed_fee_rates": {
+                k: str(v) for k, v in (getattr(self, "_observed_fee_rates", None) or {}).items()
+            },
         }
 
     def _try_load_persisted_state(self) -> bool:
@@ -813,6 +1320,22 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             str(x) for x in (raw.get("mirrored_trade_ids") or []) if str(x)
         }
         self._session_lots = self._deserialize_lots(raw.get("session_lots"))
+        persisted_cost = self._deserialize_lots(raw.get("cost_lots"))
+        if persisted_cost:
+            self._cost_lots = persisted_cost
+        # Session buys are live fills — always treat as trusted cost for exits/recycle.
+        for lot_key, lots in list(self._session_lots.items()):
+            if not lots:
+                continue
+            if lot_key not in self._cost_lots or not self._cost_lots.get(lot_key):
+                self._cost_lots[lot_key] = [list(row) for row in lots]
+            self._trusted_cost_keys.add(lot_key)
+        for key in raw.get("trusted_cost_keys") or []:
+            k = str(key or "")
+            if k:
+                self._trusted_cost_keys.add(k)
+        # Any restored cost lot without an explicit trust flag stays untrusted
+        # unless it also has session_lots (handled above).
         self._position_opened_at = {
             str(k): float(v)
             for k, v in (raw.get("position_opened_at") or {}).items()
@@ -847,7 +1370,34 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         except Exception:  # noqa: BLE001
             self._sleeve_realized_eur = _ZERO
+        self._uw_deadlock_day_key = str(raw.get("uw_deadlock_day_key") or "")
+        try:
+            self._uw_deadlock_day_loss_eur = Decimal(
+                str(raw.get("uw_deadlock_day_loss_eur") or 0)
+            )
+        except Exception:  # noqa: BLE001
+            self._uw_deadlock_day_loss_eur = _ZERO
         self._sleeve_paused = bool(raw.get("sleeve_paused"))
+        excess_raw = raw.get("venue_cash_excess")
+        if isinstance(excess_raw, Mapping):
+            loaded: dict[str, Decimal] = {}
+            for k, v in excess_raw.items():
+                try:
+                    loaded[str(k).lower()] = Decimal(str(v))
+                except Exception:  # noqa: BLE001
+                    continue
+            self._venue_cash_excess = loaded
+        fees_raw = raw.get("observed_fee_rates")
+        if isinstance(fees_raw, Mapping):
+            fee_loaded: dict[str, Decimal] = {}
+            for k, v in fees_raw.items():
+                try:
+                    rate = Decimal(str(v))
+                except Exception:  # noqa: BLE001
+                    continue
+                if 0 < rate <= Decimal("0.01"):
+                    fee_loaded[str(k).lower()] = rate
+            self._observed_fee_rates = fee_loaded
         self._check_sleeve_loss_cap()
         if raw.get("session_started_ms") is not None:
             self._session_started_ms = float(raw.get("session_started_ms"))
@@ -859,7 +1409,31 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self.session_live_transaction_count,
         )
         self._sanitize_persisted_trails()
+        self._seed_playbook_sell_fills_from_recent()
         return True
+
+    def _seed_playbook_sell_fills_from_recent(self) -> None:
+        """Bootstrap velocity window from recent_live_fills after persist load."""
+        now_wall = datetime.now(UTC)
+        now_mono = time.monotonic()
+        seeded: list[float] = []
+        for f in self.recent_live_fills:
+            if str(f.get("side") or "").lower() != "sell":
+                continue
+            ts_raw = str(f.get("ts") or "")
+            if not ts_raw:
+                continue
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                age = (now_wall - ts).total_seconds()
+            except Exception:  # noqa: BLE001
+                continue
+            if 0 <= age <= 3 * 3600:
+                seeded.append(now_mono - age)
+        if seeded:
+            self._playbook_sell_fill_mono = sorted(seeded)[-200:]
 
     def persist_runtime_state(self, *, force: bool = False) -> None:
         path = self._persist_path
@@ -899,6 +1473,1485 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._buys_blocked_new_bases_only = (
             bool(new_bases_only) and bool(blocked) and not self._daily_kill_active
         )
+
+    def apply_alphai_regime(
+        self,
+        state: object | None,
+        *,
+        observation_mode: bool = False,
+        allow_bullish_buys: bool = True,
+    ) -> None:
+        """Sync AlphaI headline blocks onto the live bridge (from PaperRunner poll)."""
+        if state is None:
+            self._alphai_blocked_bases = frozenset()
+            self._alphai_blocked_detail = {}
+            self._alphai_macro_active = False
+            return
+        blocked = getattr(state, "blocked_bases", frozenset()) or frozenset()
+        detail = getattr(state, "blocked_detail", {}) or {}
+        macro = bool(getattr(state, "macro_reduce_only", False))
+        self._alphai_blocked_bases = frozenset(str(b).upper() for b in blocked if b)
+        self._alphai_blocked_detail = {
+            str(k): str(v) for k, v in dict(detail).items() if k and v
+        }
+        self._alphai_macro_active = macro and not observation_mode
+        self._alphai_macro_allow_bullish = bool(allow_bullish_buys)
+        if (
+            self._alphai_macro_active
+            and self._regime_block_buys
+            and not allow_bullish_buys
+        ):
+            self.set_buys_blocked(True, new_bases_only=False)
+
+    def apply_alphai_trading_signals(self, signals: object | None) -> None:
+        """Daily picks + bullish/avoid for entry sizing, momentum, exit urgency."""
+        self._alphai_signals = signals
+        gen = getattr(signals, "generated_at", None) if signals is not None else None
+        if gen:
+            self._alphai_daily_generated_at = str(gen)
+
+    def _alphai_feature_for(
+        self, base: str, *, adverse_score: Decimal | None = None
+    ) -> AlphaIFeatureAssessment:
+        from bot.integrations.alphai.signals import AlphaITradingSignals
+
+        sigs = (
+            self._alphai_signals
+            if isinstance(self._alphai_signals, AlphaITradingSignals)
+            else None
+        )
+        return alphai_feature_from_signals_snapshot(
+            base,
+            sigs,
+            daily_generated_at=self._alphai_daily_generated_at,
+            adverse_score=adverse_score,
+            config=self._alphai_feature_config,
+        )
+
+    def _alphai_entry_multiplier(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        feat = self._alphai_feature_for(base)
+        base_mult = _ONE
+        if sig is not None and hasattr(sig, "entry_size_multiplier"):
+            try:
+                base_mult = Decimal(str(sig.entry_size_multiplier(base)))
+            except Exception:  # noqa: BLE001
+                base_mult = _ONE
+        combined = base_mult * feat.capital_preference * feat.size_multiplier
+        return max(Decimal("0.50"), min(combined, Decimal("1.50")))
+
+    def _alphai_momentum_floor_scale(self, base: str) -> Decimal:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "momentum_floor_scale"):
+            return _ONE
+        try:
+            return Decimal(str(sig.momentum_floor_scale(base)))
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _alphai_exit_urgency(self, base: str) -> bool:
+        if self._alphai_is_avoid_base(base):
+            return True
+        if self._alphai_feature_for(base).exit_urgency:
+            return True
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "exit_urgency"):
+            return False
+        return bool(sig.exit_urgency(base))
+
+    def _alphai_daytrader_rotate_exit(self, base: str) -> bool:
+        """True when daytrader should free this bag under BE (AlphaI rotate).
+
+        Avoid / non-pick / weak-confirm / weak-conviction — capital belongs in
+        confirmed satellite targets, not never-loss babysitting.
+        """
+        if not bool(getattr(self, "_alphai_daytrader_enabled", False)):
+            return False
+        if not bool(getattr(self, "_daytrader_rotate_exits_enabled", True)):
+            return False
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return False
+        try:
+            if self._alphai_is_avoid_base(bu):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        # Tape-confirmed entries are managed by trail / cut-loss, not AlphaI
+        # pick-confidence rotation (they have no pick score by construction).
+        if self._is_tape_entry_base(bu):
+            return False
+        try:
+            if not self._alphai_bullish_buy(bu):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_weak_bullish_hold(bu):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        sig = self._alphai_signals
+        if sig is not None:
+            try:
+                if hasattr(sig, "is_price_lagging") and bool(sig.is_price_lagging(bu)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if hasattr(sig, "price_confirm_scale"):
+                    min_c = float(
+                        getattr(self, "_daytrader_sleeve_min_confirm", Decimal("0.55"))
+                        or 0.55
+                    )
+                    if float(sig.price_confirm_scale(bu)) < min_c:
+                        return True
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            min_conv = float(getattr(self, "_daytrader_min_conviction", 0.25) or 0.0)
+            if min_conv > 0 and self._alphai_hold_conviction(bu) < min_conv:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _daytrade_rotate_non_picks(self) -> bool:
+        """True when satellite daytrade should free non-AlphaI bags first.
+
+        Generic attribute gate: capital-split on, and either sharp daytrader
+        mode, FLAT playbook, or unheld AlphaI sleeve targets waiting —
+        never a per-coin special case.
+        """
+        if not bool(getattr(self, "_capital_split_enabled", False)):
+            return False
+        if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+            return True
+        try:
+            from bot.live.capital_playbook import CapitalPlaybook
+
+            if self._capital_playbook == CapitalPlaybook.FLAT:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            return bool(self._sleeve_deploy_targets(top_n=2))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _harvest_fee_floor(self, venue: str) -> Decimal:
+        """Absolute floor for any voluntary profit harvest: fees ≤ ~40% of gross.
+
+        2.5x the maker round trip (Bitvavo 0.30% → 0.75%, OKX 0.40% → 1.0%).
+        Scales (AlphaI feature, desk lessons, non-pick 0.40x) may not push the
+        harvest gain below this — 222 round trips at 0..+0.5% gross netted -14.84.
+        """
+        mult = Decimal(
+            str(getattr(self._settings, "live_micro_harvest_fee_floor_mult", 2.5) or 0)
+        )
+        if mult <= 0:
+            return _ZERO
+        try:
+            rt = self._effective_fee_rate(venue, taker=False) * Decimal("2")
+        except Exception:  # noqa: BLE001
+            return _ZERO
+        return rt * mult
+
+    def _alphai_be_harvest_gain_scale(self, base: str) -> Decimal:
+        scale = self._alphai_feature_for(base).be_harvest_gain_scale
+        try:
+            applied = self._desk_lessons.applied_feedback()
+            scale = scale * Decimal(str(applied.harvest_floor_scale or 1.0))
+        except Exception:  # noqa: BLE001
+            pass
+        # Non-pick bags: harvest sooner so AlphaI satellite entries get capital.
+        try:
+            if (
+                self._daytrade_rotate_non_picks()
+                and not self._alphai_bullish_buy(base)
+                and not self._is_tape_entry_base(base)
+            ):
+                scale = scale * Decimal("0.40")
+        except Exception:  # noqa: BLE001
+            pass
+        return scale
+
+    def _desk_lesson_deploy_bias(self) -> Decimal:
+        try:
+            return Decimal(
+                str(self._desk_lessons.applied_feedback().deploy_urgency_bias or 1.0)
+            )
+        except Exception:  # noqa: BLE001
+            return _ONE
+
+    def _desk_lesson_avoid_age_scale(self) -> float:
+        try:
+            return float(
+                self._desk_lessons.applied_feedback().avoid_recycle_age_scale or 1.0
+            )
+        except Exception:  # noqa: BLE001
+            return 1.0
+
+    def _desk_sleeve_unheld_bases(self, *, top_n: int = 2) -> list[str]:
+        """Unheld AlphaI sleeve bases (rank-1/2); empty when fully held.
+
+        Uses opportunity-cost slot accounting: weak / underwater held picks do
+        not fill sleeve slots, so the next ranked unheld names stay deployable.
+        """
+        return list(self._sleeve_deploy_targets(top_n=top_n))
+
+    def _maybe_observe_desk_lessons(self, *, force: bool = False) -> dict[str, Any]:
+        """Record structural misses when idle cash / avoid bags block the sleeve."""
+        if not getattr(self, "_desk_lessons_enabled", False):
+            return {"enabled": False}
+        # Reload so paper-runner day settles are visible in-process.
+        try:
+            disk = DeskLessonStore.load(self._desk_lessons_path)
+            disk.auto_apply = bool(self._desk_lessons.auto_apply)
+            disk.auto_apply_modes = set(
+                getattr(self._desk_lessons, "auto_apply_modes", set()) or set()
+            )
+            self._desk_lessons = disk
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_RELOAD_FAILED")
+        now = time.monotonic()
+        interval = float(getattr(self, "_desk_lessons_observe_sec", 60.0) or 60.0)
+        last = float(getattr(self, "_desk_lessons_last_observe_mono", 0.0) or 0.0)
+        if not force and last > 0 and (now - last) < interval:
+            return {"enabled": True, "skipped": "interval"}
+        self._desk_lessons_last_observe_mono = now
+
+        sleeve = self._desk_sleeve_unheld_bases()
+        if not sleeve:
+            return {"enabled": True, "sleeve_unheld": []}
+
+        free_total = _ZERO
+        held_non: set[str] = set()
+        avoid_held: set[str] = set()
+        avoid_notional = _ZERO
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                free_total += self._venue_budget_remaining(venue)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                held = self._held_alt_bases(venue, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                held = set()
+            for base in held:
+                if self._alphai_sleeve_priority_buy(base):
+                    continue
+                held_non.add(base)
+                if self._alphai_is_avoid_base(base):
+                    avoid_held.add(base)
+                    try:
+                        symbol = f"{base}{self._quote}"
+                        mark = Decimal(
+                            str(
+                                (getattr(self, "_trail_state", {}) or {})
+                                .get(f"{venue}:{base}", {})
+                                .get("last_mark")
+                                or 0
+                            )
+                        )
+                        qty = self._session_qty(venue, base)
+                        if mark > 0 and qty > 0:
+                            avoid_notional += mark * qty
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        playbook = str(
+            (self._capital_playbook_decision or {}).get("playbook")
+            or getattr(self._capital_playbook, "value", "")
+        )
+        min_free = float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
+        locked_uw = _ZERO
+        capital_deadlocked = False
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                locked_uw += self._underwater_book_notional(venue)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if self._capital_deadlocked(venue):
+                    capital_deadlocked = True
+            except Exception:  # noqa: BLE001
+                pass
+        recorded: list[str] = []
+        try:
+            if float(free_total) >= min_free or capital_deadlocked:
+                row = self._desk_lessons.record_missed_deploy(
+                    sleeve_bases=sleeve,
+                    free_cash_eur=float(free_total),
+                    held_non_picks=sorted(held_non),
+                    playbook=playbook,
+                    min_free_eur=min_free,
+                    capital_deadlocked=capital_deadlocked,
+                    locked_eur=float(locked_uw),
+                )
+                if row:
+                    recorded.append("missed_deploy")
+            if avoid_held and (
+                float(avoid_notional) >= 25.0 or float(free_total) >= min_free
+            ):
+                row = self._desk_lessons.record_avoid_vs_sleeve(
+                    avoid_bases=sorted(avoid_held),
+                    sleeve_bases=sleeve,
+                    avoid_notional_eur=float(avoid_notional),
+                    free_cash_eur=float(free_total),
+                    playbook=playbook,
+                )
+                if row:
+                    recorded.append("avoid_vs_sleeve")
+            if recorded:
+                self._desk_lessons.save(self._desk_lessons_path)
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_OBSERVE_FAILED")
+            return {"enabled": True, "error": True}
+        return {
+            "enabled": True,
+            "sleeve_unheld": sleeve,
+            "free_cash_eur": float(free_total),
+            "recorded": recorded,
+        }
+
+    def _record_desk_early_harvest(
+        self,
+        *,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        gain_now: Decimal,
+        peak_px: Decimal,
+        be: Decimal | None,
+        soft_arm: Decimal,
+        sell_qty: Decimal,
+        reason: str,
+    ) -> None:
+        if not getattr(self, "_desk_lessons_enabled", False):
+            return
+        if not self._alphai_sleeve_priority_buy(base):
+            return
+        try:
+            exit_gain = float(gain_now)
+            peak_gain = 0.0
+            if be is not None and be > 0 and peak_px > 0:
+                peak_gain = float((peak_px - be) / be)
+            notional = float(sell_qty * mark) if sell_qty > 0 and mark > 0 else 0.0
+            row = self._desk_lessons.record_early_harvest(
+                base=base,
+                venue=venue,
+                exit_gain_pct=exit_gain,
+                peak_gain_pct=peak_gain,
+                notional_eur=notional,
+                soft_arm_pct=float(soft_arm),
+                reason=reason,
+            )
+            if row and not row.get("settled"):
+                self._desk_lessons.settle_early_harvest_immediate(
+                    str(row.get("id") or "")
+                )
+                self._desk_lessons.save(self._desk_lessons_path)
+        except Exception:  # noqa: BLE001
+            logger.exception("DESK_LESSONS_EARLY_HARVEST_FAILED")
+
+
+    def _alphai_trail_hold_scale(self, base: str) -> Decimal:
+        return self._alphai_feature_for(base).trail_hold_scale
+
+    def _alphai_bullish_buy(self, base: str) -> bool:
+        if not bool(getattr(self._settings, "alphai_bullish_buy_enabled", True)):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_bullish_buy"):
+            return False
+        if bool(getattr(self._settings, "alphai_require_bullish_new_buys", False)):
+            if hasattr(sig, "allows_new_buy"):
+                return bool(sig.allows_new_buy(base))
+            return bool(sig.is_bullish_buy(base, ring_fallback=False))
+        ring_fb = self._alphai_ring_fallback_active()
+        return bool(sig.is_bullish_buy(base, ring_fallback=ring_fb))
+
+    # ------------------------------------------------------------------ tape
+    def apply_tape_snapshot(self, snapshot: object | None) -> None:
+        """Runner-provided 24h tape snapshot (RS leaders, breadth) for display + gates."""
+        self._tape_snapshot = snapshot
+
+    def _tape_snapshot_fresh(self) -> bool:
+        snap = getattr(self, "_tape_snapshot", None)
+        ttl = float(getattr(self, "_tape_refresh_sec", 120.0) or 120.0)
+        try:
+            return snap is not None and snap.age_sec() < ttl * 2.5
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _tape_leader_bases(self) -> frozenset[str]:
+        if not getattr(self, "_tape_confirm_enabled", False) or not self._tape_snapshot_fresh():
+            return frozenset()
+        try:
+            return frozenset(self._tape_snapshot.leader_bases())
+        except Exception:  # noqa: BLE001
+            return frozenset()
+
+    def _tape_breadth(self) -> float:
+        if not self._tape_snapshot_fresh():
+            return 0.0
+        try:
+            return float(self._tape_snapshot.breadth)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _alphai_has_native_bullish(self) -> bool:
+        """AlphaI-native bullish buys exist (tape leaders excluded)."""
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        try:
+            if hasattr(sig, "native_bullish_buy_bases"):
+                return bool(sig.native_bullish_buy_bases())
+            return bool(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _tape_entry_held(self, venue: str | None = None) -> set[str]:
+        tape_bases = getattr(self, "_tape_entry_bases", None) or set()
+        if not tape_bases:
+            return set()
+        held: set[str] = set()
+        venues = [venue] if venue else list(getattr(self, "_execute_venues", ()) or ())
+        for v in venues:
+            try:
+                held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+            except Exception:  # noqa: BLE001
+                continue
+        return {b for b in tape_bases if b in held}
+
+    def _is_tape_entry_base(self, base: str) -> bool:
+        bu = str(base or "").upper()
+        tape_bases = getattr(self, "_tape_entry_bases", None) or set()
+        return bool(bu) and bu in tape_bases and bu in self._tape_entry_held()
+
+    def _tape_confirmed_buy(self, venue: str, base: str) -> bool:
+        """Tape leader may open when AlphaI is silent (no unheld bullish picks).
+
+        Requires: tape enabled + fresh, base is an RS leader, not AlphaI
+        avoid/bearish, no macro caution, and per-venue tape slot available.
+        """
+        if not self._tape_confirm_enabled:
+            return False
+        bu = str(base or "").upper()
+        if not bu or bu in self._exclude_bases:
+            return False
+        if bool(self._alphai_macro_active):
+            return False
+        if self._alphai_is_avoid_base(bu):
+            return False
+        sig = self._alphai_signals
+        tape_leader = bu in self._tape_leader_bases()
+        if sig is not None and hasattr(sig, "is_tape_confirmed"):
+            try:
+                tape_leader = tape_leader or bool(sig.is_tape_confirmed(bu))
+            except Exception:  # noqa: BLE001
+                pass
+        if not tape_leader:
+            return False
+        if self._alphai_has_native_bullish():
+            return False
+        if self._tape_max_bases_per_venue <= 0:
+            return False
+        held = self._tape_entry_held(venue)
+        if bu in held:
+            return True
+        return len(held) < self._tape_max_bases_per_venue
+
+    def _alphai_ring_fallback_active(self) -> bool:
+        """Ring underfilled and all bullish picks held → allow focus non-avoid buys."""
+        if bool(getattr(self._settings, "alphai_require_bullish_new_buys", False)):
+            return False
+        if self._active_ring_eur <= 0:
+            return False
+        # Any execute venue needs deploy and has free cash.
+        needs = False
+        for venue in self._execute_venues:
+            active = self._active_book_notional(venue)
+            free = self._venue_budget_remaining(venue)
+            if active < self._active_ring_eur and free >= Decimal("50"):
+                needs = True
+                break
+        if not needs:
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        held: set[str] = set()
+        for v in self._execute_venues:
+            held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+        if hasattr(sig, "all_bullish_held"):
+            return bool(sig.all_bullish_held(held))
+        buys = set(getattr(sig, "bullish_buy_bases", lambda: frozenset())())
+        if not buys:
+            return True
+        return buys.issubset(held)
+
+    def _alphai_strong_bullish_buy(self, base: str) -> bool:
+        if not self._alphai_bullish_buy(base):
+            return False
+        # Stale AlphaI: no max-clip path (priority clip still allowed).
+        if not self._alphai_signal_fresh_enough(base):
+            return False
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_strong_bullish_buy"):
+            return False
+        return bool(
+            sig.is_strong_bullish_buy(
+                base, ring_fallback=self._alphai_ring_fallback_active()
+            )
+        )
+
+
+
+    def _alphai_is_avoid_base(self, base: str) -> bool:
+        """True when AlphaI marks base as avoid/bearish — recycle, do not redeploy."""
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        b = str(base or "").upper()
+        if not b:
+            return False
+        try:
+            if hasattr(sig, "is_bearish") and bool(sig.is_bearish(b)):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        avoid = getattr(sig, "avoid_bases", None) or frozenset()
+        return b in {str(x).upper() for x in avoid}
+
+    def _provisional_be_exit_allowed(self, venue: str, base: str) -> bool:
+        """Allow BE+ exits on aged/avoid bags even when cost is still provisional.
+
+        Unlocks capital stuck behind sell_no_trusted_cost / trail_no_trusted_cost
+        without trusting mark-seeded lots for profitable size math forever.
+        """
+        if self._has_trusted_cost(venue, base):
+            return True
+        if self._unit_cost(venue, base) is None:
+            return False
+        min_age = float(
+            getattr(self._settings, "live_micro_provisional_be_exit_min_age_sec", 1800.0)
+            or 1800.0
+        )
+        if self._alphai_is_avoid_base(base):
+            min_age = min(min_age, 600.0)
+        # Daytrader: free provisional non-picks / weak holds sooner so satellite rotates.
+        try:
+            if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+                day_age = float(
+                    getattr(self, "_daytrader_provisional_be_exit_min_age_sec", 300.0)
+                    or 300.0
+                )
+                if not self._alphai_bullish_buy(base) or self._alphai_weak_bullish_hold(
+                    base
+                ):
+                    min_age = min(min_age, day_age)
+        except Exception:  # noqa: BLE001
+            pass
+        return self._position_age_sec(venue, base) >= min_age
+
+    def _all_held_alt_bases(self, *, min_notional_eur: Decimal = Decimal("1")) -> set[str]:
+        held: set[str] = set()
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                held |= self._held_alt_bases(venue, min_notional_eur=min_notional_eur)
+            except Exception:  # noqa: BLE001
+                continue
+        return held
+
+    def _alphai_priority_ranked(self, *, limit: int = 8) -> list[str]:
+        """Positive daily priority names ranked best-first (blocked/avoid excluded)."""
+        sig = self._alphai_signals
+        if sig is None:
+            return []
+        scores = getattr(sig, "daily_pick_scores", None) or {}
+        picks = set(getattr(sig, "daily_pick_bases", None) or ())
+        avoid = {str(b).upper() for b in (getattr(sig, "avoid_bases", None) or ())}
+        blocked = {str(b).upper() for b in (getattr(sig, "blocked_bases", None) or ())}
+        ranked: list[tuple[str, float]] = []
+        if isinstance(scores, dict) and scores:
+            for b, s in scores.items():
+                bu = str(b).upper()
+                if picks and bu not in {str(p).upper() for p in picks}:
+                    continue
+                try:
+                    score = float(s or 0)
+                except (TypeError, ValueError):
+                    score = 0.0
+                if score <= 0 or bu in avoid or bu in blocked:
+                    continue
+                ranked.append((bu, score))
+            ranked.sort(key=lambda row: row[1], reverse=True)
+            return [b for b, _ in ranked[: max(1, int(limit))]]
+        if hasattr(sig, "priority_buy_bases"):
+            try:
+                bases = {
+                    str(b).upper()
+                    for b in sig.priority_buy_bases(top_n=max(1, int(limit)))
+                }
+            except TypeError:
+                try:
+                    bases = {str(b).upper() for b in sig.priority_buy_bases()}
+                except Exception:  # noqa: BLE001
+                    bases = set()
+            except Exception:  # noqa: BLE001
+                bases = set()
+            return sorted(bases)[: max(1, int(limit))]
+        return []
+
+    def _sleeve_held_fills_slot(self, base: str) -> bool:
+        """Held bag fills a sleeve slot only when it is still a healthy deploy.
+
+        Weak / lagging / materially underwater bags lock capital — they must not
+        block the next ranked unheld pick (inventory opportunity-cost).
+        """
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return False
+        try:
+            if self._alphai_weak_bullish_hold(bu):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        sig = self._alphai_signals
+        if sig is not None:
+            try:
+                if hasattr(sig, "is_price_lagging") and bool(sig.is_price_lagging(bu)):
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if hasattr(sig, "price_confirm_scale") and float(
+                    sig.price_confirm_scale(bu)
+                ) < 0.45:
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            for venue in getattr(self, "_execute_venues", ()) or ():
+                depth = self._underwater_depth_on_venue(str(venue), bu)
+                # Any material UW (≥0.1%) is opportunity-cost inventory — do not
+                # let it fill a sleeve slot while fresher unheld targets wait.
+                # (0.25% was too deep: UNI @ -0.21% still blocked ADA/LINK.)
+                if depth is not None and depth > Decimal("0.001"):
+                    return False
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    def _sleeve_deploy_targets(self, *, top_n: int = 2) -> list[str]:
+        """Unheld sleeve deploy targets after opportunity-cost slot accounting."""
+        n = max(1, int(top_n))
+        ranked = self._alphai_priority_ranked(limit=max(n + 4, 6))
+        if not ranked:
+            return []
+        held = self._all_held_alt_bases()
+        slots_filled = 0
+        targets: list[str] = []
+        for bu in ranked:
+            if bu in held:
+                if self._sleeve_held_fills_slot(bu):
+                    slots_filled += 1
+                continue
+            if slots_filled + len(targets) < n:
+                targets.append(bu)
+            if slots_filled + len(targets) >= n:
+                break
+        return targets
+
+    def _alphai_sleeve_priority_buy(self, base: str, *, top_n: int = 2) -> bool:
+        """True for AlphaI rank-1/2 sleeve targets (structural deploy list).
+
+        When daily picks are empty under macro caution but live bullish buys
+        still exist (e.g. AVAX headline), treat the top live bullish names as
+        the sleeve so ADVERSE new-base blocks do not idle the desk.
+
+        Opportunity-cost expansion: when a structural top-N hold is weak or
+        underwater, the next ranked unheld priority names also qualify.
+        """
+        if not self._alphai_bullish_buy(base):
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return False
+        bu = str(base or "").strip().upper()
+        if hasattr(sig, "is_slot_priority_buy"):
+            try:
+                if bool(sig.is_slot_priority_buy(base, top_n=top_n)):
+                    return True
+            except TypeError:
+                if bool(sig.is_slot_priority_buy(base)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        if hasattr(sig, "is_top_pick"):
+            try:
+                if bool(sig.is_top_pick(base, top_n=top_n)):
+                    return True
+            except TypeError:
+                if bool(sig.is_top_pick(base)):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        # Expand past weak/UW held slots so capital can rotate into fresher picks.
+        try:
+            if bu in set(self._sleeve_deploy_targets(top_n=top_n)):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        # Only when the daily pick sleeve is empty/thin — do not promote rank-3+
+        # bullish names while BNB/ADA already occupy the slot list.
+        daily_scores = getattr(sig, "daily_pick_scores", None) or {}
+        positive_daily = [
+            b
+            for b, s in daily_scores.items()
+            if float(s or 0) > 0
+            and str(b).upper() not in set(getattr(sig, "avoid_bases", ()) or ())
+            and str(b).upper() not in set(getattr(sig, "blocked_bases", ()) or ())
+        ]
+        if len(positive_daily) >= top_n:
+            return self._alphai_strong_bullish_buy(base)
+        # Fallback: live bullish sleeve when daily pick list is empty/thin.
+        live_buys: list[str] = []
+        if hasattr(sig, "bullish_buy_bases"):
+            try:
+                live_buys = sorted({str(b).upper() for b in sig.bullish_buy_bases()})
+            except Exception:  # noqa: BLE001
+                live_buys = []
+        if not live_buys and hasattr(sig, "bullish_bases"):
+            live_buys = sorted({str(b).upper() for b in (sig.bullish_bases or ())})
+        if live_buys and bu in set(live_buys[: max(1, top_n)]):
+            return True
+        return self._alphai_strong_bullish_buy(base)
+
+    def _sleeve_has_unheld_priority(self, *, top_n: int = 2) -> bool:
+        """True when AlphaI sleeve still has an unheld deploy target.
+
+        Weak / underwater held priority bags do not count as filling the sleeve.
+        """
+        try:
+            return bool(self._sleeve_deploy_targets(top_n=top_n))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _alphai_signal_fresh_enough(self, base: str) -> bool:
+        """Reject strong-clip / winner-add when AlphaI pick set is stale."""
+        try:
+            return self._alphai_feature_for(base).freshness >= Decimal("0.35")
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _note_playbook_sell_fill(self) -> None:
+        now = time.monotonic()
+        self._playbook_sell_fill_mono.append(now)
+        cutoff = now - 3 * 3600.0
+        self._playbook_sell_fill_mono = [
+            t for t in self._playbook_sell_fill_mono if t >= cutoff
+        ]
+
+    def _playbook_sell_fills_in(self, window_sec: float) -> int:
+        cutoff = time.monotonic() - window_sec
+        return sum(1 for t in self._playbook_sell_fill_mono if t >= cutoff)
+
+    def _playbook_bag_stats(self) -> tuple[int, float, int, float]:
+        """Return (uw_count, uw_notional, near_be_count, near_be_notional).
+
+        Near-BE = within ±0.5% of cost (aged ≥10m or meaningful size) — used for
+        pre-crash derisk before bags go deep underwater.
+        """
+        uw_n = 0
+        uw_eur = 0.0
+        near_stuck = 0
+        near_eur = 0.0
+        for trail_key, st in self._trail.items():
+            try:
+                cost = Decimal(str(st.get("cost") or 0))
+                mark = Decimal(str(st.get("last_mark") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if cost <= 0 or mark <= 0:
+                continue
+            venue = str(st.get("venue") or trail_key.split(":", 1)[0])
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            if self._is_long_hold(base):
+                continue
+            qty = self._balance_qty(venue, base)
+            if qty <= 0:
+                qty = Decimal(str(st.get("session_qty") or 0))
+            if qty <= 0:
+                continue
+            notional = float(qty * mark)
+            if notional < 20.0:
+                continue
+            depth = float((mark - cost) / cost)
+            age = self._position_age_sec(venue, base)
+            if depth < -0.005:
+                uw_n += 1
+                uw_eur += notional
+            elif abs(depth) <= 0.005:
+                if age >= 600.0 or notional >= 40.0:
+                    near_stuck += 1
+                    near_eur += notional
+        return uw_n, uw_eur, near_stuck, near_eur
+
+    def _playbook_median_mom(self) -> float | None:
+        rets: list[float] = []
+        for trail_key, st in list(self._trail.items())[:24]:
+            base = str(st.get("base") or trail_key.split(":", 1)[-1])
+            if self._is_long_hold(base):
+                continue
+            symbol = f"{base}{self._quote}"
+            marks = self.mark_history(symbol)
+            if len(marks) < 6:
+                continue
+            a, b = marks[-6], marks[-1]
+            if a <= 0:
+                continue
+            rets.append(float((b - a) / a))
+        if not rets:
+            return None
+        rets.sort()
+        mid = len(rets) // 2
+        if len(rets) % 2:
+            return rets[mid]
+        return (rets[mid - 1] + rets[mid]) / 2.0
+
+    def _playbook_alphai_wait_ratio(self) -> float:
+        snap = self._alphai_feature_snapshot or {}
+        timing = str(snap.get("entry_timing") or snap.get("alphai_entry_timing") or "")
+        if timing.upper() == "WAIT":
+            return 0.7
+        if self._alphai_macro_active:
+            return 0.8
+        return 0.0
+
+    def _apply_capital_playbook_overlays(self, overlays: Mapping[str, Any] | None) -> None:
+        """Reset to baselines then apply playbook overlays (enforce)."""
+        merged: dict[str, Any] = dict(self._playbook_baselines)
+        if overlays:
+            merged.update(dict(overlays))
+        block_new = bool(merged.pop("block_new_buys", False))
+        allow_ring_expand = bool(merged.pop("allow_ring_expand_above_baseline", False))
+        urgency_overlay = merged.pop("daytrader_sleeve_urgency_enabled", None)
+        sleeve_cap_overlay = merged.pop("sleeve_daily_loss_cap_eur", None)
+
+        def _dec(key: str, attr: str, *, cap_to_baseline: bool = False) -> None:
+            if key in merged and merged[key] is not None:
+                val = Decimal(str(merged[key]))
+                if (
+                    cap_to_baseline
+                    and not allow_ring_expand
+                    and key in self._playbook_baselines
+                ):
+                    base_v = Decimal(str(self._playbook_baselines[key]))
+                    if base_v > 0:
+                        val = min(val, base_v)
+                setattr(self, attr, val)
+
+        def _float(key: str, attr: str) -> None:
+            if key in merged and merged[key] is not None:
+                setattr(self, attr, float(merged[key]))
+
+        def _int(key: str, attr: str) -> None:
+            if key in merged and merged[key] is not None:
+                setattr(self, attr, int(merged[key]))
+
+        def _bool(key: str, attr: str) -> None:
+            if key in merged and merged[key] is not None:
+                setattr(self, attr, bool(merged[key]))
+
+        # Prefer fractional ring shrink so FLAT/ADVERSE works on €350 satellite rings.
+        try:
+            base_ring = Decimal(str(self._playbook_baselines.get("active_ring_eur") or 0))
+            frac = merged.get("active_ring_fraction")
+            if frac is not None and base_ring > 0:
+                merged["active_ring_eur"] = float(base_ring * Decimal(str(frac)))
+            soft_base = Decimal(
+                str(self._playbook_baselines.get("ring_soft_max_active_eur") or base_ring or 0)
+            )
+            soft_frac = merged.get("ring_soft_max_active_fraction")
+            if soft_frac is not None and soft_base > 0:
+                merged["ring_soft_max_active_eur"] = float(
+                    soft_base * Decimal(str(soft_frac))
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        _dec(
+            "active_ring_eur",
+            "_active_ring_eur",
+            cap_to_baseline=not allow_ring_expand,
+        )
+        _dec(
+            "ring_soft_max_active_eur",
+            "_ring_soft_max_active_eur",
+            cap_to_baseline=not allow_ring_expand,
+        )
+        _bool("winner_add_enabled", "_winner_add_enabled")
+        _dec(
+            "alphai_strong_clip_eur",
+            "_alphai_strong_clip_eur",
+            cap_to_baseline=not allow_ring_expand,
+        )
+        _dec("exit_taker_cushion_bps", "_exit_taker_cushion_bps")
+        _int("exit_taker_after_maker_fails", "_exit_taker_after_maker_fails")
+        _dec("be_harvest_min_gain_pct", "_be_harvest_min_gain")
+        _dec("be_harvest_partial_pct", "_be_harvest_partial")
+        _float("uw_near_min_age_sec", "_uw_near_min_age_sec")
+        _float("uw_non_alphai_min_age_sec", "_uw_non_alphai_min_age_sec")
+        _float("uw_idle_min_age_sec", "_uw_idle_min_age_sec")
+        _dec("uw_idle_below_be_pct", "_uw_idle_below_be_pct")
+        _dec("uw_near_below_be_pct", "_uw_near_below_be_pct")
+        _dec("uw_near_max_depth_pct", "_uw_near_max_depth_pct")
+        _dec("uw_alphai_below_be_pct", "_uw_alphai_below_be_pct")
+        _float("uw_alphai_min_age_sec", "_uw_alphai_min_age_sec")
+        _bool("uw_deadlock_unlock_enabled", "_uw_deadlock_unlock_enabled")
+        _float("uw_deadlock_min_age_sec", "_uw_deadlock_min_age_sec")
+        _dec("uw_deadlock_below_be_pct", "_uw_deadlock_below_be_pct")
+        _dec("uw_deadlock_target_free_eur", "_uw_deadlock_target_free_eur")
+        _dec("uw_deadlock_day_loss_cap_eur", "_uw_deadlock_day_loss_cap_eur")
+        _dec("early_cut_loss_below_be_pct", "_early_cut_loss_below_be_pct")
+        _int("trail_hold_rising_n", "_trail_hold_rising_n")
+        _dec("alphai_intraday_min_freshness", "_alphai_intraday_min_freshness")
+        _bool("alphai_intraday_require_rising", "_alphai_intraday_require_rising")
+        _bool("alphai_cross_venue_deploy", "_alphai_cross_venue_deploy")
+        _bool("alphai_idle_deploy_blocked", "_alphai_idle_deploy_blocked")
+
+        self._playbook_block_new_buys = block_new
+        if urgency_overlay is not None:
+            self._daytrader_sleeve_urgency_enabled = bool(urgency_overlay)
+        if sleeve_cap_overlay is not None:
+            try:
+                self._sleeve_daily_loss_cap = Decimal(str(sleeve_cap_overlay))
+            except Exception:  # noqa: BLE001
+                pass
+        elif getattr(self, "_sleeve_loss_cap_baseline", None) is not None:
+            self._sleeve_daily_loss_cap = Decimal(str(self._sleeve_loss_cap_baseline))
+        # Daytrader+split: keep playbook recycle ages from undoing sharp satellite clocks.
+        if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+            try:
+                self._uw_non_alphai_min_age_sec = min(
+                    float(self._uw_non_alphai_min_age_sec),
+                    float(getattr(self, "_daytrader_non_alphai_min_age_sec", 120.0) or 120.0),
+                )
+                self._uw_near_min_age_sec = min(
+                    float(self._uw_near_min_age_sec),
+                    float(getattr(self, "_daytrader_near_min_age_sec", 90.0) or 90.0),
+                )
+                self._uw_idle_min_age_sec = min(
+                    float(self._uw_idle_min_age_sec),
+                    float(getattr(self, "_daytrader_near_min_age_sec", 90.0) or 90.0) * 2.0,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        if block_new and not self._daily_kill_active:
+            self.set_buys_blocked(True, new_bases_only=True)
+            self._playbook_owns_buy_block = True
+        elif (
+            not block_new
+            and self._playbook_owns_buy_block
+            and not self._daily_kill_active
+            and not self._sleeve_paused
+        ):
+            self.set_buys_blocked(False)
+            self._playbook_owns_buy_block = False
+
+    def refresh_capital_playbook(self, *, force: bool = False) -> dict[str, Any]:
+        """Reclassify TREND/FLAT/ADVERSE and apply live overlays."""
+        if not self._capital_playbook_enabled:
+            return {"enabled": False, "playbook": self._capital_playbook.value}
+        now = time.monotonic()
+        if (
+            not force
+            and self._capital_playbook_last_refresh_mono > 0
+            and (now - self._capital_playbook_last_refresh_mono)
+            < self._capital_playbook_refresh_sec
+        ):
+            return {"enabled": True, **self._capital_playbook_decision}
+
+        uw_n, uw_eur, near_stuck, near_eur = self._playbook_bag_stats()
+        mtm = self._mtm_summary()
+        try:
+            winnable_gap = float(mtm.get("winnable_gap_eur") or 0)
+            locked = float(mtm.get("micro_locked_notional_eur") or 0)
+        except Exception:  # noqa: BLE001
+            winnable_gap = 0.0
+            locked = 0.0
+        inputs = CapitalPlaybookInputs(
+            sell_fills_last_60m=self._playbook_sell_fills_in(3600.0),
+            sell_fills_last_180m=self._playbook_sell_fills_in(3 * 3600.0),
+            underwater_bag_count=uw_n,
+            underwater_notional_eur=uw_eur,
+            near_be_stuck_count=near_stuck,
+            near_be_notional_eur=near_eur,
+            alphai_macro_active=bool(self._alphai_macro_active),
+            alphai_wait_ratio=self._playbook_alphai_wait_ratio(),
+            median_mom=self._playbook_median_mom(),
+            free_quote_eur=float(self.free_quote_eur or 0),
+            inventory_mtm_eur=locked,
+            time_stop_below_be_skips=int(
+                self.skips.get("time_stop_below_be", 0) or 0
+            ),
+            winnable_gap_eur=winnable_gap,
+        )
+        held = now - self._capital_playbook_since_mono
+        # First classification applies immediately (no hysteresis from cold TREND default).
+        current = (
+            None
+            if self._capital_playbook_last_refresh_mono <= 0
+            else self._capital_playbook
+        )
+        decision = classify_capital_playbook(
+            inputs,
+            current=current,
+            held_sec=held,
+            min_hold_sec=self._capital_playbook_min_hold_sec,
+        )
+        prev = self._capital_playbook
+        if decision.playbook != prev:
+            self._capital_playbook = decision.playbook
+            self._capital_playbook_since_mono = now
+            logger.info(
+                "CAPITAL_PLAYBOOK_SWITCH %s -> %s confidence=%.2f reasons=%s",
+                prev.value,
+                decision.playbook.value,
+                decision.confidence,
+                ",".join(decision.reasons),
+            )
+            self._push_alert(
+                "capital_playbook",
+                f"{prev.value}→{decision.playbook.value}"
+                f"{' PRE_CRASH' if decision.pre_crash else ''} "
+                f"({','.join(decision.reasons[:4])})",
+            )
+        merged_overlays: dict[str, Any] = dict(decision.overlays or {})
+        desk_public: dict[str, Any] = dict(self._desk_mode_decision or {})
+        if self._desk_mode_auto_enabled:
+            desk_public = self._refresh_desk_mode(
+                playbook=decision.playbook.value,
+                pre_crash=bool(decision.pre_crash),
+                underwater_bag_count=uw_n,
+                underwater_notional_eur=uw_eur,
+                sell_fills_last_60m=inputs.sell_fills_last_60m,
+                median_mom=inputs.median_mom,
+                now_mono=now,
+            )
+            desk_overlays = desk_public.get("overlays") or {}
+            if isinstance(desk_overlays, Mapping):
+                merged_overlays.update(dict(desk_overlays))
+        self._apply_capital_playbook_overlays(merged_overlays)
+        self._capital_playbook_decision = {
+            **decision_public_dict(decision),
+            "held_sec": round(now - self._capital_playbook_since_mono, 1),
+            "inputs": {
+                "sell_fills_60m": inputs.sell_fills_last_60m,
+                "sell_fills_180m": inputs.sell_fills_last_180m,
+                "underwater_bags": inputs.underwater_bag_count,
+                "underwater_eur": round(inputs.underwater_notional_eur, 2),
+                "near_be_stuck": inputs.near_be_stuck_count,
+                "near_be_eur": round(inputs.near_be_notional_eur, 2),
+                "inventory_eur": round(inputs.inventory_mtm_eur, 2),
+                "median_mom": inputs.median_mom,
+                "winnable_gap_eur": round(inputs.winnable_gap_eur, 2),
+                "macro": inputs.alphai_macro_active,
+            },
+            "desk_mode": desk_public,
+            "enabled": True,
+        }
+        self._capital_playbook_last_refresh_mono = now
+        self._maybe_observe_desk_lessons()
+        return self._capital_playbook_decision
+
+    def _desk_mode_alphai_stats(self) -> tuple[int, float, float]:
+        """Return (confirmed_count, best_confirm, best_conviction) from AlphaI."""
+        sig = self._alphai_signals
+        if sig is None:
+            return 0, 0.0, 0.0
+        min_confirm = float(self._desk_mode_min_confirm or 0.55)
+        confirmed = 0
+        best_confirm = 0.0
+        best_conviction = 0.0
+        bases: set[str] = set()
+        native_api = hasattr(sig, "native_bullish_buy_bases")
+        try:
+            if native_api:
+                bases |= {str(b).upper() for b in (sig.native_bullish_buy_bases() or [])}
+            elif hasattr(sig, "bullish_buy_bases"):
+                bases |= {str(b).upper() for b in (sig.bullish_buy_bases() or [])}
+        except Exception:  # noqa: BLE001
+            pass
+        if not bases and not native_api:
+            # Legacy signal objects only — never let tape leaders count as
+            # AlphaI-confirmed picks (they take the damped tape_leaders path).
+            try:
+                pub = sig.to_public_dict() if hasattr(sig, "to_public_dict") else {}
+                for b in pub.get("bullish_buy_bases") or []:
+                    bases.add(str(b).upper())
+            except Exception:  # noqa: BLE001
+                pass
+        for base in bases:
+            confirm = 0.0
+            conviction = 0.0
+            try:
+                if hasattr(sig, "price_confirm_scale"):
+                    confirm = float(sig.price_confirm_scale(base) or 0.0)
+            except Exception:  # noqa: BLE001
+                confirm = 0.0
+            try:
+                if hasattr(sig, "pick_conviction"):
+                    conviction = float(sig.pick_conviction(base) or 0.0)
+            except Exception:  # noqa: BLE001
+                conviction = 0.0
+            best_confirm = max(best_confirm, confirm)
+            best_conviction = max(best_conviction, conviction)
+            if confirm >= min_confirm:
+                confirmed += 1
+        return int(confirmed), float(best_confirm), float(best_conviction)
+
+    def _refresh_desk_mode(
+        self,
+        *,
+        playbook: str,
+        pre_crash: bool,
+        underwater_bag_count: int,
+        underwater_notional_eur: float,
+        sell_fills_last_60m: int,
+        median_mom: float | None,
+        now_mono: float,
+    ) -> dict[str, Any]:
+        """Classify CERTAINTY/VELOCITY and store public decision (no apply)."""
+        from bot.live.desk_mode import (
+            DeskModeInputs,
+            classify_desk_mode,
+            decision_public_dict as desk_decision_public_dict,
+        )
+
+        confirmed_n, best_confirm, best_conviction = self._desk_mode_alphai_stats()
+        tape_n = len(self._tape_leader_bases())
+        tape_breadth = self._tape_breadth()
+        certainty_ring = float(self._certainty_ring_baseline_eur or 0)
+        if certainty_ring <= 0:
+            try:
+                certainty_ring = float(
+                    self._playbook_baselines.get("active_ring_eur")
+                    or self._active_ring_eur
+                    or 0
+                )
+            except Exception:  # noqa: BLE001
+                certainty_ring = float(self._active_ring_eur or 0)
+            self._certainty_ring_baseline_eur = Decimal(str(certainty_ring))
+        satellite = float(self._satellite_eur or 0)
+        if satellite <= 0:
+            satellite = max(certainty_ring * 2.0, 700.0)
+        held = now_mono - float(self._desk_mode_since_mono or now_mono)
+        # First real classification: skip hysteresis from cold CERTAINTY default.
+        cold = (self._desk_mode_decision or {}).get("reasons") == ["cold_start"]
+        current = None if cold else self._desk_mode
+        decision = classify_desk_mode(
+            DeskModeInputs(
+                playbook=str(playbook or "TREND"),
+                pre_crash=bool(pre_crash),
+                alphai_macro_active=bool(self._alphai_macro_active),
+                confirmed_pick_count=confirmed_n,
+                best_confirm=best_confirm,
+                best_conviction=best_conviction,
+                underwater_bag_count=int(underwater_bag_count),
+                underwater_notional_eur=float(underwater_notional_eur),
+                sell_fills_last_60m=int(sell_fills_last_60m),
+                median_mom=median_mom,
+                satellite_eur=satellite,
+                certainty_ring_eur=certainty_ring,
+                tape_confirmed_count=int(tape_n),
+                tape_breadth=float(tape_breadth),
+            ),
+            current=current,
+            held_sec=held,
+            min_hold_sec=float(self._desk_mode_min_hold_sec or 900.0),
+            min_confirm=float(self._desk_mode_min_confirm or 0.55),
+            min_conviction=float(self._desk_mode_min_conviction or 0.25),
+            min_confirmed_picks=int(self._desk_mode_min_confirmed_picks or 1),
+            max_underwater_eur=float(self._desk_mode_max_underwater_eur or 120.0),
+            velocity_ring_fraction_of_satellite=float(
+                self._desk_mode_velocity_ring_fraction or 0.90
+            ),
+            velocity_ring_mult_of_certainty=float(
+                self._desk_mode_velocity_ring_mult or 2.0
+            ),
+            velocity_sleeve_loss_cap_eur=(
+                float(self._desk_mode_velocity_sleeve_loss_cap)
+                if self._desk_mode_velocity_sleeve_loss_cap > 0
+                else None
+            ),
+        )
+        prev = self._desk_mode
+        if decision.mode != prev:
+            self._desk_mode = decision.mode
+            self._desk_mode_since_mono = now_mono
+            logger.info(
+                "DESK_MODE_SWITCH %s -> %s confidence=%.2f reasons=%s confirmed=%s",
+                prev.value,
+                decision.mode.value,
+                decision.confidence,
+                ",".join(decision.reasons),
+                confirmed_n,
+            )
+            self._push_alert(
+                "desk_mode",
+                f"{prev.value}→{decision.mode.value} "
+                f"({','.join(decision.reasons[:4])})",
+            )
+        self._desk_mode_decision = {
+            **desk_decision_public_dict(decision),
+            "auto_enabled": True,
+            "held_sec": round(now_mono - self._desk_mode_since_mono, 1),
+            "inputs": {
+                "playbook": str(playbook or ""),
+                "pre_crash": bool(pre_crash),
+                "confirmed_picks": confirmed_n,
+                "best_confirm": round(best_confirm, 3),
+                "best_conviction": round(best_conviction, 3),
+                "underwater_bags": int(underwater_bag_count),
+                "underwater_eur": round(float(underwater_notional_eur), 2),
+                "sell_fills_60m": int(sell_fills_last_60m),
+                "median_mom": median_mom,
+                "certainty_ring_eur": round(certainty_ring, 2),
+                "satellite_eur": round(satellite, 2),
+                "tape_confirmed": int(tape_n),
+                "tape_breadth": round(float(tape_breadth), 3),
+            },
+        }
+        return self._desk_mode_decision
+
+    def _alphai_intraday_entry_gate(
+        self,
+        base: str,
+        symbol: str,
+        *,
+        adverse_score: Decimal | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> tuple[str, Decimal, tuple[str, ...]]:
+        """AND-gate: AlphaI buy × freshness × adverse × momentum.
+
+        Returns ``(action, size_multiplier, reasons)`` where action is
+        ALLOW | REDUCE | WAIT.
+        """
+        if not self._alphai_intraday_gate_enabled:
+            return "ALLOW", _ONE, ("gate_disabled",)
+        meta = meta or {}
+        adv = adverse_score
+        if adv is None:
+            raw = meta.get("adverse_selection_score") or meta.get("alphai_adverse_score")
+            if raw is not None:
+                try:
+                    adv = Decimal(str(raw))
+                except Exception:  # noqa: BLE001
+                    adv = None
+        feat = self._alphai_feature_for(base, adverse_score=adv)
+        timing = str(meta.get("alphai_entry_timing") or feat.entry_timing or "NORMAL")
+        mixed = False
+        sig = self._alphai_signals
+        if sig is not None and hasattr(sig, "is_headline_mixed"):
+            try:
+                mixed = bool(sig.is_headline_mixed(base))
+            except Exception:  # noqa: BLE001
+                mixed = False
+        mom_down = self._momentum_down(symbol) if self._momentum_enabled else False
+        mom_rising = False
+        if self._momentum_enabled:
+            series = self._series_for(symbol)
+            rising_n = max(1, int(self._momentum_require_last_n_rising or 1))
+            if len(series) >= max(3, rising_n):
+                mom_rising = bool(series.last_n_rising(rising_n))
+        price_lagging = False
+        confirm_scale = None
+        if sig is not None:
+            if hasattr(sig, "is_price_lagging"):
+                try:
+                    price_lagging = bool(sig.is_price_lagging(base))
+                except Exception:  # noqa: BLE001
+                    price_lagging = False
+            if hasattr(sig, "price_confirm_scale"):
+                try:
+                    confirm_scale = Decimal(str(sig.price_confirm_scale(base)))
+                except Exception:  # noqa: BLE001
+                    confirm_scale = None
+        # Soft-ADVERSE rising-strict was starving rank-1/2 sleeve buys on flat
+        # red tape (BNB/ADA miss). Non-daytrader sleeve stays softer.
+        # Daytrader: tape must confirm — no lag floor, rising kept for sleeve.
+        sleeve = self._alphai_sleeve_priority_buy(base)
+        daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
+        require_rising = bool(
+            getattr(self, "_alphai_intraday_require_rising", False)
+        )
+        if daytrader and bool(getattr(self, "_daytrader_require_rising", True)):
+            require_rising = True
+        min_fresh = self._alphai_intraday_min_freshness
+        min_confirm = Decimal("0.45")
+        if daytrader:
+            min_confirm = max(
+                min_confirm,
+                Decimal(str(getattr(self, "_daytrader_min_confirm", Decimal("0.55")))),
+            )
+        gate_lagging = price_lagging
+        if sleeve and not daytrader:
+            require_rising = False
+            min_fresh = min(min_fresh, Decimal("0.40"))
+            min_confirm = Decimal("0.35")
+            if price_lagging:
+                # Shrink clip instead of hard WAIT — still prefer sleeve names.
+                gate_lagging = False
+                if confirm_scale is None or confirm_scale > Decimal("0.40"):
+                    confirm_scale = Decimal("0.40")
+        elif sleeve and daytrader:
+            # Slight freshness soften only; confirm/rising/lag stay hard.
+            min_fresh = min(min_fresh, Decimal("0.40"))
+            min_confirm = max(
+                min_confirm,
+                Decimal(
+                    str(
+                        getattr(
+                            self,
+                            "_daytrader_sleeve_min_confirm",
+                            Decimal("0.55"),
+                        )
+                    )
+                ),
+            )
+            if bool(getattr(self, "_daytrader_sleeve_require_rising", True)):
+                require_rising = True
+            # Keep gate_lagging / confirm_scale as measured — no floor bypass.
+        # Tape leader (24h RS confirmed, no AlphaI headline): strict last-N rising
+        # is tick timing, not signal — it starved every tape entry. momentum_down
+        # still hard-WAITs; confirm/conviction stay as measured.
+        tape_only = False
+        if sig is not None and hasattr(sig, "is_tape_confirmed"):
+            try:
+                tape_only = bool(sig.is_tape_confirmed(base))
+            except Exception:  # noqa: BLE001
+                tape_only = False
+        if tape_only:
+            require_rising = False
+        if daytrader:
+            min_conv = float(getattr(self, "_daytrader_min_conviction", 0.25) or 0.0)
+            if min_conv > 0:
+                conv = self._alphai_hold_conviction(base)
+                if conv < min_conv:
+                    return (
+                        "WAIT",
+                        Decimal("0"),
+                        ("pick_conviction_weak",),
+                    )
+        gate = evaluate_intraday_entry_gate(
+            is_alphai_buy=self._alphai_bullish_buy(base),
+            freshness=feat.freshness,
+            adverse_score=adv if adv is not None else _ZERO,
+            entry_timing=timing,
+            momentum_down=mom_down,
+            momentum_rising=mom_rising,
+            headline_mixed=mixed,
+            min_freshness=min_fresh,
+            adverse_wait_threshold=self._alphai_feature_config.adverse_bullish_wait_threshold,
+            adverse_reduce_threshold=self._alphai_feature_config.adverse_bullish_reduce_threshold,
+            price_lagging=gate_lagging,
+            price_confirm_scale=confirm_scale,
+            min_confirm_scale=min_confirm,
+            require_momentum_rising=require_rising,
+        )
+        return gate.action, gate.size_multiplier, gate.reasons
+
+    def _alphai_protects_from_cuts(self, base: str) -> bool:
+        """Strong AlphaI hold exemption — revoked when tape/reliability disagree.
+
+        Narrative bullish alone must not keep bags exempt from sleeve cuts on
+        red days (Sep-4 lesson: lagging picks sat behind never-loss).
+        """
+        if not self._alphai_strong_bullish_buy(base):
+            return False
+        if self._alphai_weak_bullish_hold(base):
+            return False
+        if self._alphai_hold_conviction(base) < 0.70:
+            return False
+        sig = self._alphai_signals
+        if sig is None:
+            return True
+        try:
+            if hasattr(sig, "is_price_lagging") and bool(sig.is_price_lagging(base)):
+                return False
+            if hasattr(sig, "price_confirm_scale"):
+                scale = float(sig.price_confirm_scale(base))
+                if scale < 0.55:
+                    return False
+            if hasattr(sig, "base_reliability_mult"):
+                rel = float(sig.base_reliability_mult(base))
+                if rel < 0.75:
+                    return False
+        except Exception:  # noqa: BLE001
+            return True
+        return True
+
+    def _alphai_hold_conviction(self, base: str) -> float:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "pick_conviction"):
+            return 1.0 if self._alphai_bullish_buy(base) else 0.0
+        try:
+            return float(sig.pick_conviction(base))
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _alphai_weak_bullish_hold(self, base: str) -> bool:
+        sig = self._alphai_signals
+        if sig is None or not hasattr(sig, "is_weak_bullish_hold"):
+            return False
+        try:
+            return bool(sig.is_weak_bullish_hold(base))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _is_patient_exit(self, reason: str | None) -> bool:
+        return bool(
+            self._exit_patient_enabled and str(reason or "") in _PATIENT_EXIT_REASONS
+        )
+
+    def _uw_band_active(self, venue: str, base: str) -> bool:
+        st = self._trail.get(self._lots_key(venue, base))
+        return isinstance(st, dict) and str(st.get("uw_recycle_mode") or "") == "band"
+
+    def _effective_exit_resting_max_age_sec(
+        self, base: str, reason: str | None = None, venue: str | None = None
+    ) -> float:
+        age = self._exit_resting_max_age_sec
+        patient = self._is_patient_exit(reason)
+        if (
+            not patient
+            and str(reason or "") == "trail_uw_recycle"
+            and venue
+            and self._exit_patient_enabled
+        ):
+            try:
+                patient = self._uw_band_active(venue, base)
+            except Exception:  # noqa: BLE001
+                patient = False
+        if patient:
+            age = max(age, self._exit_patient_resting_sec)
+        scale = float(self._alphai_trail_hold_scale(base))
+        if self._alphai_exit_urgency(base):
+            return min(age, max(3.0, 5.0 * min(scale, 1.0)))
+        if self._alphai_macro_active:
+            return min(age, 6.0)
+        if scale > 1.0:
+            return min(age * scale, age * 1.25)
+        return age
+
+    def _alphai_blocks_base(self, base: str) -> bool:
+        if not self._alphai_enabled:
+            return False
+        return str(base or "").upper() in self._alphai_blocked_bases
 
     def set_underwater_base_blocks(
         self,
@@ -1061,11 +3114,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _clear_exit_maker_fail(self, venue: str, base: str) -> None:
         self._exit_maker_fail_counts.pop(self._exit_fail_key(venue, base), None)
 
-    def _should_force_taker_exit(self, venue: str, base: str) -> bool:
-        if self._exit_taker_after_maker_fails <= 0:
+    def _should_force_taker_exit(
+        self, venue: str, base: str, reason: str | None = None
+    ) -> bool:
+        threshold = self._exit_taker_after_maker_fails
+        if self._is_patient_exit(reason):
+            threshold = max(threshold, self._exit_patient_taker_after_fails)
+        if threshold <= 0:
             return False
         key = self._exit_fail_key(venue, base)
-        return int(self._exit_maker_fail_counts.get(key, 0)) >= self._exit_taker_after_maker_fails
+        return int(self._exit_maker_fail_counts.get(key, 0)) >= threshold
 
     def maybe_utc_day_rollover(self) -> bool:
         """Reset sleeve daily cap and session PnL baseline at UTC midnight."""
@@ -1331,6 +3389,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "exclude_bases": sorted(self._exclude_bases),
             "live_maker": self._live_maker,
             "skips": dict(self.skips),
+            "alphai": {
+                "enabled": self._alphai_enabled,
+                "macro_active": self._alphai_macro_active,
+                "blocked_bases": sorted(self._alphai_blocked_bases),
+                "blocked_detail": dict(self._alphai_blocked_detail),
+                "skips": int(self.skips.get("alphai_news_block", 0) or 0),
+                "signals": (
+                    self._alphai_signals.to_public_dict()
+                    if self._alphai_signals is not None
+                    and hasattr(self._alphai_signals, "to_public_dict")
+                    else None
+                ),
+            },
             "live_trade_count": len(self.live_trades),
             "live_fill_count": int(self.session_live_fill_count),
             "live_transaction_count": int(self.session_live_transaction_count),
@@ -1366,12 +3437,68 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "early_cut_new_bases_only": self._early_cut_new_bases_only,
                 "early_cut_momentum_max_return": str(self._early_cut_momentum_max),
                 "cut_loss_new_bases_only": self._cut_loss_new_bases_only,
+                "uw_recycle_enabled": self._uw_recycle_enabled,
+                "uw_policy": getattr(self, "_uw_policy", "legacy"),
+                "uw_simple_max_depth_pct": str(getattr(self, "_uw_simple_max_depth_pct", "")),
+                "uw_simple_unsupported_age_sec": getattr(self, "_uw_simple_unsupported_age_sec", None),
+                "uw_simple_avoid_age_sec": getattr(self, "_uw_simple_avoid_age_sec", None),
+                "uw_simple_rotate_min_age_sec": getattr(self, "_uw_simple_rotate_min_age_sec", None),
+                "preferred_entry_venue": str(
+                    getattr(self._settings, "live_micro_preferred_entry_venue", "") or ""
+                ),
+                "uw_dust_max_notional_eur": str(self._uw_dust_max_notional),
+                "uw_dust_below_be_pct": str(self._uw_dust_below_be_pct),
+                "uw_near_below_be_pct": str(self._uw_near_below_be_pct),
+                "uw_near_max_depth_pct": str(self._uw_near_max_depth_pct),
+                "uw_near_min_age_sec": self._uw_near_min_age_sec,
+                "uw_non_alphai_below_be_pct": str(self._uw_non_alphai_below_be_pct),
+                "uw_non_alphai_min_age_sec": self._uw_non_alphai_min_age_sec,
+                "uw_alphai_below_be_pct": str(self._uw_alphai_below_be_pct),
+                "uw_alphai_min_age_sec": self._uw_alphai_min_age_sec,
+                "uw_idle_pressure_enabled": self._uw_idle_pressure_enabled,
+                "uw_idle_min_free_eur": str(self._uw_idle_min_free_eur),
+                "uw_idle_min_age_sec": self._uw_idle_min_age_sec,
+                "uw_idle_below_be_pct": str(self._uw_idle_below_be_pct),
+                "uw_deadlock_unlock_enabled": self._uw_deadlock_unlock_enabled,
+                "uw_deadlock_below_be_pct": str(self._uw_deadlock_below_be_pct),
+                "uw_deadlock_min_age_sec": self._uw_deadlock_min_age_sec,
+                "uw_deadlock_partial_enabled": self._uw_deadlock_partial_enabled,
+                "uw_deadlock_target_free_eur": str(self._uw_deadlock_target_free_eur),
+                "uw_deadlock_partial_clip_eur": str(self._uw_deadlock_partial_clip_eur),
+                "uw_deadlock_partial_min_eur": str(self._uw_deadlock_partial_min_eur),
+                "uw_deadlock_day_loss_cap_eur": str(self._uw_deadlock_day_loss_cap_eur),
+                "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
+                "uw_deadlock_would_buy_gate": self._uw_deadlock_would_buy_gate,
+                "uw_mid_flat_recycle_enabled": self._uw_mid_flat_recycle_enabled,
+                "uw_mid_flat_max_depth_pct": str(self._uw_mid_flat_max_depth_pct),
+                "uw_mid_flat_min_age_sec": self._uw_mid_flat_min_age_sec,
+                "uw_lag_time_partial_enabled": self._uw_lag_time_partial_enabled,
+                "uw_lag_time_partial_min_age_sec": self._uw_lag_time_partial_min_age_sec,
+                "uw_lag_time_partial_max_depth_pct": str(
+                    self._uw_lag_time_partial_max_depth_pct
+                ),
+                "desk_lessons_auto_apply_modes": sorted(
+                    getattr(self._desk_lessons, "auto_apply_modes", set()) or []
+                ),
+                "alphai_cross_venue_deploy": self._alphai_cross_venue_deploy,
+                "alphai_cross_venue_max_other_depth_pct": str(
+                    self._alphai_cross_venue_max_other_depth
+                ),
+                "alphai_ring_fill_add_max_depth_pct": str(
+                    self._alphai_ring_fill_add_max_depth
+                ),
                 "momentum_exit_above_be_pct": str(self._momentum_exit_above_be_pct),
                 "momentum_exit_min_return": str(self._momentum_exit_min),
                 "momentum_min_return": str(self._momentum_min),
                 "ring_momentum_min_return": str(self._ring_momentum_min),
                 "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
                 "ring_soft_block_underwater_eur": str(self._ring_soft_block_underwater_eur),
+                "ring_util_b_ignore_underwater": self._ring_util_b_ignore_underwater,
+                "cvd_abandoned": self._cvd_abandoned,
+                "alphai_enabled": self._alphai_enabled,
+                "alphai_blocked_bases": sorted(self._alphai_blocked_bases),
+                "alphai_blocked_detail": dict(self._alphai_blocked_detail),
+                "alphai_macro_active": self._alphai_macro_active,
                 "entry_short_momentum_samples": self._entry_short_momentum_samples,
                 "entry_short_momentum_min_return": str(self._entry_short_momentum_min),
                 "entry_min_low_util_rising_n": self._entry_min_low_util_rising_n,
@@ -1385,6 +3512,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "winner_add_max": self._winner_add_max,
                 "winner_add_clip_eur": str(self._winner_add_clip_eur),
                 "winner_add_cooldown_sec": self._winner_add_cooldown_sec,
+                "alphai_winner_add_only": self._alphai_winner_add_only,
+                "alphai_priority_clip_eur": str(self._alphai_priority_clip_eur),
+                "alphai_strong_clip_eur": str(self._alphai_strong_clip_eur),
                 "cancel_buy_on_flat_momentum": self._cancel_buy_on_flat_momentum,
                 "momentum_require_last_n_rising": self._momentum_require_last_n_rising,
                 "trail_hold_while_rising": self._trail_hold_while_rising,
@@ -1407,8 +3537,43 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             "active_ring_eur": str(self._active_ring_eur),
             "velocity_sleeve_eur": str(self._velocity_sleeve_eur),
             "sleeve_realized_eur": str(self._sleeve_realized_eur),
+            "uw_deadlock_day_key": self._uw_deadlock_day_key,
+            "uw_deadlock_day_loss_eur": str(self._uw_deadlock_day_loss_eur),
             "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
             "sleeve_paused": bool(self._sleeve_paused),
+            "capital_split": {
+                "enabled": bool(self._capital_split_enabled),
+                "core_mode": self._core_mode,
+                "core_eur": str(self._core_eur),
+                "satellite_eur": str(self._satellite_eur),
+                "velocity_sleeve_eur": str(self._velocity_sleeve_eur),
+                "active_ring_eur": str(self._active_ring_eur),
+                "alphai_daytrader": bool(
+                    getattr(self, "_alphai_daytrader_enabled", False)
+                ),
+                "daytrade_rotate_non_picks": bool(self._daytrade_rotate_non_picks()),
+                "daytrader_min_confirm": str(
+                    getattr(self, "_daytrader_min_confirm", "")
+                ),
+                "daytrader_sleeve_min_confirm": str(
+                    getattr(self, "_daytrader_sleeve_min_confirm", "")
+                ),
+                "daytrader_min_conviction": float(
+                    getattr(self, "_daytrader_min_conviction", 0.0) or 0.0
+                ),
+                "daytrader_sleeve_require_rising": bool(
+                    getattr(self, "_daytrader_sleeve_require_rising", True)
+                ),
+                "daytrader_sleeve_urgency_enabled": bool(
+                    getattr(self, "_daytrader_sleeve_urgency_enabled", False)
+                ),
+                "daytrader_rotate_exits": bool(
+                    getattr(self, "_daytrader_rotate_exits_enabled", True)
+                ),
+                "daytrader_avoid_below_be_pct": str(
+                    getattr(self, "_daytrader_avoid_below_be_pct", "")
+                ),
+            },
             "exit_engine": {
                 "enabled": self._exit_engine_enabled,
                 "resting_max_age_sec": self._exit_resting_max_age_sec,
@@ -1416,6 +3581,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "touch_improve_bps": str(self._exit_touch_improve_bps),
                 "taker_cushion_bps": str(self._exit_taker_cushion_bps),
                 "taker_after_maker_fails": self._exit_taker_after_maker_fails,
+                "patient_enabled": self._exit_patient_enabled,
+                "patient_resting_sec": self._exit_patient_resting_sec,
+                "patient_taker_after_fails": self._exit_patient_taker_after_fails,
+                "patient_reasons": sorted(_PATIENT_EXIT_REASONS),
+                "observed_fee_rates": {
+                    k: f"{float(v) * 100:.3f}%"
+                    for k, v in (getattr(self, "_observed_fee_rates", None) or {}).items()
+                },
+                "effective_fee_rates": {
+                    f"{v}:{s}": f"{float(self._effective_fee_rate(v, taker=(s == 'taker'))) * 100:.3f}%"
+                    for v in ("bitvavo", "okx")
+                    for s in ("maker", "taker")
+                },
                 "mark_ttl_sec": self._mark_ttl_sec,
                 "maker_fail_counts": dict(self._exit_maker_fail_counts),
                 "soft_armed_work": self._exit_soft_armed_work,
@@ -1426,6 +3604,34 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "rejects": dict(self._exit_reject_counts),
             },
             "okx_ring_clip_eur": str(self._okx_ring_clip_eur),
+            "capital_playbook": {
+                "enabled": self._capital_playbook_enabled,
+                **(self._capital_playbook_decision or {}),
+                "active_ring_eur": str(self._active_ring_eur),
+                "ring_soft_max_active_eur": str(self._ring_soft_max_active_eur),
+                "exit_taker_cushion_bps": str(self._exit_taker_cushion_bps),
+                "winner_add_enabled": self._winner_add_enabled,
+                "block_new_buys": self._playbook_block_new_buys,
+            },
+            "desk_mode": {
+                "auto_enabled": bool(self._desk_mode_auto_enabled),
+                "mode": getattr(self._desk_mode, "value", str(self._desk_mode)),
+                **(self._desk_mode_decision or {}),
+                "active_ring_eur": str(self._active_ring_eur),
+                "certainty_ring_baseline_eur": str(self._certainty_ring_baseline_eur),
+                "sleeve_daily_loss_cap_eur": str(self._sleeve_daily_loss_cap),
+            },
+            "tape": {
+                "enabled": bool(self._tape_confirm_enabled),
+                "fresh": self._tape_snapshot_fresh(),
+                "max_bases_per_venue": self._tape_max_bases_per_venue,
+                "entry_bases_held": sorted(self._tape_entry_held()),
+                **(
+                    self._tape_snapshot.as_dict()
+                    if self._tape_snapshot is not None and hasattr(self._tape_snapshot, "as_dict")
+                    else {}
+                ),
+            },
             "active_book_notional_by_venue": {
                 v: str(self._active_book_notional(v))
                 for v in sorted(self._execute_venues)
@@ -1676,6 +3882,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             if self._sleeve_paused:
                 sleeve_bits.append("PAUSED")
             hints.append("VELOCITY_SLEEVE " + " ".join(sleeve_bits))
+        if self._cvd_abandoned:
+            hints.append("CVD_ABANDONED")
+        if self._tape_confirm_enabled:
+            snap = self._tape_snapshot
+            if snap is None:
+                hints.append("TAPE no snapshot yet")
+            else:
+                try:
+                    leaders = ",".join(ld.base for ld in snap.leaders) or "-"
+                    hints.append(
+                        f"TAPE breadth={float(snap.breadth):.2f} leaders={leaders} "
+                        f"{'FRESH' if self._tape_snapshot_fresh() else 'STALE'} "
+                        f"held={','.join(sorted(self._tape_entry_held())) or '-'}"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        if self._alphai_enabled:
+            if self._alphai_macro_active:
+                hints.append("ALPHAI_MACRO_REDUCE_ONLY")
+            if self._alphai_blocked_bases:
+                bases = ",".join(sorted(self._alphai_blocked_bases)[:8])
+                hints.append(f"ALPHAI_NEWS_BLOCK {bases}")
+        if self._ring_util_b_ignore_underwater:
+            hints.append("UTIL_B_IGNORE_UNDERWATER on")
         if self._exit_engine_enabled:
             q = self._exit_quote_counts
             f = self._exit_fill_counts
@@ -1867,17 +4097,34 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         opp = getattr(self, "_opportunity_diagnostics", None)
         intel = self._intelligence.snapshot() if hasattr(self, "_intelligence") else {}
         cap = self._capital_state_snapshot or {}
+        alphai_extra = {
+            **self._alphai_attribution.snapshot(),
+            **(self._alphai_feature_snapshot or {}),
+            "alphai_feature_shadow": self._alphai_feature_config.shadow_only,
+            "alphai_feature_enabled": self._alphai_feature_config.enabled,
+            "alphai_intraday_gate_enabled": self._alphai_intraday_gate_enabled,
+            "alphai_intraday_gate_shadow": self._alphai_intraday_gate_shadow_only,
+            "alphai_intraday_min_freshness": str(self._alphai_intraday_min_freshness),
+            "capital_playbook": self._capital_playbook_decision,
+            **(
+                self._desk_lessons.snapshot()
+                if getattr(self, "_desk_lessons_enabled", False)
+                else {}
+            ),
+        }
         if opp is not None:
             return opp.snapshot(economic_extra={
                 **eq_extra,
                 **self._economic_diagnostics.snapshot(),
                 **intel,
                 **cap,
+                **alphai_extra,
             })
         return self._economic_diagnostics.snapshot(entry_quality_extra={
             **eq_extra,
             **intel,
             **cap,
+            **alphai_extra,
         })
 
     def entry_quality_diagnostics_snapshot(self) -> dict[str, Any]:
@@ -1959,8 +4206,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 candidate_count=int(self._opportunity_diagnostics.candidates),
                 outcome_store=self._intelligence.outcome_store,
                 learning_config=self._intelligence.learning_config,
+                alphai_signals=self._alphai_signals,
+                alphai_feature_config=self._alphai_feature_config,
             )
             self._opportunity_diagnostics.record(opp_assessment)
+            bullish_cluster = False
+            sig = self._alphai_signals
+            if sig is not None and hasattr(sig, "bullish_buy_bases"):
+                try:
+                    bullish_cluster = len(sig.bullish_buy_bases()) >= 3
+                except Exception:  # noqa: BLE001
+                    bullish_cluster = False
+            capital_deadlocked = False
+            for v in getattr(self, "_execute_venues", ()) or ():
+                try:
+                    if self._capital_deadlocked(str(v)):
+                        capital_deadlocked = True
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
             cap_state = assess_capital_state(
                 total_budget_eur=self._budget,
                 deployed_eur=self._economic_diagnostics._capital_deployed_eur,  # noqa: SLF001
@@ -1969,13 +4233,58 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 avg_opportunity_score=opp_assessment.opportunity_score,
                 is_dead_market=regime.regime.value == "DEAD_MARKET",
                 is_opportunity_burst=regime.regime.value == "OPPORTUNITY_BURST",
+                alphai_macro_active=self._alphai_macro_active,
+                alphai_bullish_cluster=bullish_cluster,
+                capital_deadlocked=capital_deadlocked,
             )
             self._capital_state_snapshot = {
                 "capital_available_eur": str(cap_state.available_eur.quantize(Decimal("0.01"))),
                 "capital_reserved_eur": str(cap_state.reserved_eur.quantize(Decimal("0.01"))),
                 "capital_deployable_eur": str(cap_state.deployable_eur.quantize(Decimal("0.01"))),
                 "capital_reserve_need_pct": str(cap_state.reserve_need_pct.quantize(Decimal("0.01"))),
+                "capital_reasons": ",".join(cap_state.reasons),
+                "capital_deadlocked": capital_deadlocked,
             }
+            base_sym = symbol.upper()
+            for quote in ("EUR", "USDT", "USDC", "USD"):
+                if base_sym.endswith(quote):
+                    base_sym = base_sym[: -len(quote)]
+                    break
+            feat = self._alphai_feature_for(
+                base_sym, adverse_score=opp_assessment.adverse_selection_score
+            )
+            self._alphai_feature_snapshot = {
+                k: str(v) if isinstance(v, Decimal) else v
+                for k, v in feat.as_dict().items()
+            }
+            meta["alphai_feature_score"] = str(feat.feature_score)
+            meta["alphai_freshness"] = str(feat.freshness)
+            meta["alphai_entry_timing"] = feat.entry_timing
+            meta["alphai_capital_preference"] = str(feat.capital_preference)
+            if feat.entry_timing == "WAIT":
+                self._alphai_attribution.record(
+                    AlphaIAttributionEvent(
+                        kind="adverse_wait",
+                        base=base_sym,
+                        venue=str(meta.get("buy_exchange") or meta.get("venue") or "bitvavo"),
+                        estimated_net_delta_eur=_ZERO,
+                        baseline_net_eur=opp_assessment.expected_net_profit_eur,
+                        alphai_net_eur=_ZERO,
+                        reasons=feat.reasons,
+                    )
+                )
+            if opp_assessment.alphai_feature_score is not None:
+                self._alphai_attribution.record(
+                    AlphaIAttributionEvent(
+                        kind="score_feature",
+                        base=base_sym,
+                        venue=str(meta.get("buy_exchange") or meta.get("venue") or "bitvavo"),
+                        estimated_net_delta_eur=_ZERO,
+                        baseline_net_eur=opp_assessment.expected_net_profit_eur,
+                        alphai_net_eur=opp_assessment.expected_net_profit_eur,
+                        reasons=feat.reasons,
+                    )
+                )
         return assessment
 
     def _note_position_opened(self, venue: str, base: str) -> None:
@@ -2470,6 +4779,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
         if len(self.recent_live_fills) > 24:
             self.recent_live_fills = self.recent_live_fills[-24:]
+        if str(side or "").lower() == "sell":
+            self._note_playbook_sell_fill()
 
     def _maybe_note_fill_display(
         self,
@@ -2557,6 +4868,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             self._mirrored_trade_ids.add(mirror_key)
             return False
         fee_quote, fee_cur = self._trade_fee_quote(trade, base=base, amt=amt, px=px)
+        try:
+            self._note_observed_fee(
+                venue, trade.get("takerOrMaker"), Decimal(str(fee_quote or 0)), amt * px
+            )
+        except Exception:  # noqa: BLE001
+            pass
         symbol = f"{base}{self._quote}"
         if side == "buy" and self._has_trusted_cost(venue, base):
             self._mirrored_trade_ids.add(mirror_key)
@@ -2855,12 +5172,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     toxic=toxic,
                 )
         # A: attribute PnL to velocity sleeve when session inventory was sold.
+        trail_st = self._trail.get(lot_key) or {}
         if sess_consumed > 0 or bool(
-            (self._trail.get(lot_key) or {}).get("sleeve")
-            or (self._trail.get(lot_key) or {}).get("new_session_base")
+            trail_st.get("sleeve") or trail_st.get("new_session_base")
         ):
             self._sleeve_realized_eur += trade_pnl
             self._check_sleeve_loss_cap()
+        # Deadlock partial unlock day-loss budget (absolute loss only).
+        tier = str(trail_st.get("uw_recycle_tier") or "")
+        if tier.startswith(("deadlock_", "rotate_", "aged_")) and trade_pnl < 0:
+            # Every voluntary (non-stop) loss exit draws on the same daily budget.
+            self._uw_deadlock_note_loss(-trade_pnl)
         self._check_daily_kill()
         if not lots:
             self._position_opened_mono.pop(lot_key, None)
@@ -3029,6 +5351,47 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._venue_raw_balances[venue] = bals
         return bals
 
+    def _venue_cash_excess_for(self, venue: str, bals: list[Any]) -> Decimal:
+        """Fixed EUR excess above budget for *venue* (captured once, persisted)."""
+        excess_map = getattr(self, "_venue_cash_excess", None)
+        if excess_map is None:
+            excess_map = {}
+            self._venue_cash_excess = excess_map
+        known = excess_map.get(venue)
+        if known is not None:
+            return known
+        eur = _ZERO
+        for bal in bals:
+            if str(getattr(bal, "asset", "") or "").upper() == self._quote:
+                eur += Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+        # Pocket = EUR + micro crypto; anything above budget at first sight is excess.
+        pocket = eur + self._venue_crypto_mtm(bals)
+        excess = max(_ZERO, pocket - self._budget)
+        excess_map[venue] = excess
+        return excess
+
+    def _venue_crypto_mtm(self, bals: list[Any]) -> Decimal:
+        """Crypto MTM (last known marks) for one venue's balance list."""
+        total = _ZERO
+        for bal in bals:
+            asset = str(getattr(bal, "asset", "") or "").upper()
+            if not asset or asset == self._quote:
+                continue
+            try:
+                qty = Decimal(str(getattr(bal, "free", 0) or 0)) + Decimal(
+                    str(getattr(bal, "locked", 0) or 0)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if qty <= 0:
+                continue
+            mark = self._portfolio.state.mark_prices.get(f"{asset}{self._quote}")
+            if mark is not None and mark > 0:
+                total += qty * mark
+        return total
+
     async def refresh_portfolio_value(
         self,
         *,
@@ -3049,7 +5412,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     bals = await self._fetch_balances_cached(v)
                 except Exception:  # noqa: BLE001
                     continue
-            for bal in bals:
+            # Crypto first (marks fetched), EUR last so the pocket-excess capture
+            # sees a complete venue MTM.
+            ordered = sorted(
+                bals,
+                key=lambda b: str(getattr(b, "asset", "") or "").upper() == self._quote,
+            )
+            for bal in ordered:
                 asset = str(getattr(bal, "asset", "") or "").upper()
                 if not asset:
                     continue
@@ -3060,8 +5429,11 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     continue
                 if asset == self._quote:
                     if venue is None and v in self._venue_raw_balances:
-                        # Cap each venue's EUR when summing total portfolio value.
-                        qty = min(qty, self._budget)
+                        # EUR above the micro budget is outside the pocket. The
+                        # excess is fixed once per venue and subtracted thereafter,
+                        # so a cash→crypto buy no longer "unhides" capped cash
+                        # (fake +€94 portfolio spike on Bitvavo).
+                        qty = max(_ZERO, qty - self._venue_cash_excess_for(v, bals))
                     total += qty
                     continue
                 symbol = f"{asset}{self._quote}"
@@ -3181,7 +5553,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if client is None:
             return 0
         venue_l = venue.strip().lower()
-        held = self._held_alt_bases(venue)
+        held = self._held_alt_bases()  # portfolio-wide: any venue holds → cancel buys
         by_symbol: dict[str, list[dict[str, Any]]] = {}
         cancelled = 0
         still: list[dict[str, Any]] = []
@@ -3492,7 +5864,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     or strategy in {"dust_exit", "time_stop_breakeven"}
                 )
             ):
-                row_max_age = min(max_age, self._exit_resting_max_age_sec)
+                base_asset = infer_base_asset(symbol)
+                row_max_age = min(
+                    max_age,
+                    self._effective_exit_resting_max_age_sec(
+                        base_asset, strategy, venue_l
+                    ),
+                )
             if age >= row_max_age:
                 try:
                     await client.cancel_order(oid, symbol)
@@ -3505,6 +5883,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ):
                         base = infer_base_asset(symbol)
                         fails = self._bump_exit_maker_fail(venue, base)
+                        if strategy in {
+                            "trail_be_harvest",
+                            "trail_recovery_be_partial",
+                        }:
+                            # Stale harvest must retry (optionally as taker after fails).
+                            trail_key = self._lots_key(venue, base)
+                            st = self._trail.get(trail_key)
+                            if isinstance(st, dict):
+                                self._clear_partial_done(st, strategy)
                         logger.info(
                             "EXIT_MAKER_STALE venue=%s base=%s fails=%s strategy=%s",
                             venue,
@@ -3637,6 +6024,8 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self._daily_kill_active = False
         self._sleeve_realized_eur = _ZERO
         self._sleeve_paused = False
+        self._playbook_block_new_buys = False
+        self._playbook_owns_buy_block = False
         self.set_buys_blocked(False)
         self.set_underwater_base_blocks({})
         self._session_started_ms = time.time() * 1000.0
@@ -3644,6 +6033,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         clear_history()
         clear_calendar_pnl_cache()
         anchor = set_operator_pnl_anchor()
+        try:
+            self.refresh_capital_playbook(force=True)
+        except Exception:  # noqa: BLE001
+            logger.exception("CAPITAL_PLAYBOOK_REFRESH_AFTER_DASHBOARD_RESET")
         self.persist_runtime_state()
         logger.info(
             "OPERATOR_DASHBOARD_RESET portfolio=%s realized=0 fills=0 anchor=%s",
@@ -3772,18 +6165,67 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return Decimal(str(pos.average_entry_price))
         return None
 
+    @staticmethod
+    def _fee_key(venue: str, taker: bool) -> str:
+        return f"{str(venue or '').strip().lower()}:{'taker' if taker else 'maker'}"
+
+    def _note_observed_fee(
+        self, venue: str, liquidity: str | None, fee_quote: Decimal, notional: Decimal
+    ) -> None:
+        """Learn the effective fee rate per venue/side from real fills (EMA).
+
+        The static table assumed OKX 0.08%/0.10% while EUR pairs actually bill
+        0.20%/0.35%: every "BE+" exit there was a hidden loss. Observed rates
+        make break-even self-correcting; only sane values (0 < r <= 1%) count.
+        """
+        liq = str(liquidity or "").strip().lower()
+        if liq not in {"maker", "taker"} or fee_quote <= 0 or notional <= 0:
+            return
+        rate = fee_quote / notional
+        if rate <= 0 or rate > Decimal("0.01"):
+            return
+        store = getattr(self, "_observed_fee_rates", None)
+        if store is None:
+            store = {}
+            self._observed_fee_rates = store
+        key = self._fee_key(venue, liq == "taker")
+        prev = store.get(key)
+        if prev is None:
+            store[key] = rate
+        else:
+            store[key] = prev * Decimal("0.7") + rate * Decimal("0.3")
+
+    def _effective_fee_rate(self, venue: str, *, taker: bool) -> Decimal:
+        """Fee-table rate, lifted to the observed live rate when fills bill more."""
+        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
+
+        table = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        if not bool(
+            getattr(
+                getattr(self, "_settings", None), "live_micro_observed_fee_calibration", True
+            )
+        ):
+            return table
+        store = getattr(self, "_observed_fee_rates", None) or {}
+        observed = store.get(self._fee_key(venue, taker))
+        if observed is None:
+            return table
+        return max(table, observed)
+
     def _break_even_sell_price(
-        self, venue: str, base: str, *, taker: bool = False
+        self, venue: str, base: str, *, taker: bool = False, allow_provisional: bool = False
     ) -> Decimal | None:
-        """Min sell price that nets profit after fees + buffer. Requires trusted cost."""
-        if not self._has_trusted_cost(venue, base):
+        """Min sell price that nets profit after fees + buffer.
+
+        Requires trusted cost by default. ``allow_provisional=True`` uses FIFO /
+        portfolio unit cost for sleeve loss exits when trust hydration lagged.
+        """
+        if not self._has_trusted_cost(venue, base) and not allow_provisional:
             return None
         unit = self._unit_cost(venue, base)
         if unit is None or unit <= 0:
             return None
-        from bot.core.venue_fees import venue_maker_fee, venue_taker_fee
-
-        fee = venue_taker_fee(venue) if taker else venue_maker_fee(venue)
+        fee = self._effective_fee_rate(venue, taker=taker)
         denom = Decimal("1") - fee
         if denom <= 0:
             return None
@@ -3897,6 +6339,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         *,
         aggressive: bool = False,
         force_taker: bool = False,
+        patient: bool = False,
     ) -> tuple[Decimal | None, bool, str]:
         """Pick a fillable exit price that still clears fee-aware break-even.
 
@@ -3905,6 +6348,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
         ``aggressive`` (exit engine): join inside the spread near the bid touch
         instead of resting at the ask — captures short soft-armed spikes.
+        ``patient`` (profit-taking while price is up): never cross the spread;
+        rest post-only just inside the ask so the fill earns maker fees plus
+        the spread. Escalation to taker happens via ``force_taker`` (after
+        repeated stale maker quotes) or when the trail flips to a drawdown exit.
         Never quotes below maker BE; taker only when bid ≥ taker BE.
         """
         be_maker = self._break_even_sell_price(venue, base, taker=False)
@@ -3935,6 +6382,16 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return best_bid, False, "hit_bid_taker"
         if force_taker and mark >= be_taker:
             return max(be_taker, best_bid), False, "limit_taker_be"
+
+        if patient:
+            # Join just inside the ask (queue priority) but never at/below the bid.
+            tick = best_ask * Decimal("0.00005")
+            improve = best_ask * (self._exit_touch_improve_bps / Decimal("10000"))
+            ask_px = best_ask - max(tick, min(improve, (best_ask - best_bid) / Decimal("3")))
+            if ask_px <= best_bid:
+                ask_px = best_bid + max(tick, best_bid * Decimal("0.00005"))
+            maker_px = max(be_maker, ask_px)
+            return maker_px, True, "rest_ask_maker"
 
         # Bid already clears taker BE → take liquidity for a sure profitable fill.
         if best_bid >= be_taker:
@@ -3971,12 +6428,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
     def _sell_allowed_at(
         self, venue: str, base: str, price: Decimal
     ) -> tuple[bool, str, Decimal | None]:
-        """Gate every auto-sell: trusted cost and price >= fee-aware break-even."""
+        """Gate every auto-sell: trusted (or aged provisional) cost and price >= BE."""
         if price <= 0:
             return False, "invalid_price", None
-        if not self._has_trusted_cost(venue, base):
+        provisional_ok = self._provisional_be_exit_allowed(venue, base)
+        if not self._has_trusted_cost(venue, base) and not provisional_ok:
             return False, "sell_no_trusted_cost", None
-        be = self._break_even_sell_price(venue, base)
+        be = self._break_even_sell_price(
+            venue, base, allow_provisional=provisional_ok
+        )
         if be is None:
             return False, "sell_no_break_even", None
         if price < be:
@@ -4026,34 +6486,872 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return False
         if self._cut_loss_new_bases_only and not st.get("new_session_base"):
             return False
-        if not self._has_trusted_cost(venue, base):
+        # Trusted preferred; provisional unit cost OK for sleeve cuts.
+        if not self._has_trusted_cost(venue, base) and self._unit_cost(venue, base) is None:
+            return False
+        # Strong fresh AlphaI: prefer uw_recycle tiers; cut is last-resort deep stop only.
+        # Weak / lagging / low-reliability bags are NOT protected.
+        if self._alphai_protects_from_cuts(base):
             return False
         return True
 
     def _early_cut_eligible(
         self, st: dict[str, Any], *, venue: str, base: str
     ) -> bool:
-        """Early cut: free new-session bags that fail quickly (vault untouched)."""
+        """Early cut: free new-session bags that fail quickly (sleeve-capped)."""
         if self._early_cut_loss_below_be_pct <= 0 or self._is_long_hold(base):
             return False
-        if self._early_cut_new_bases_only and not st.get("new_session_base"):
+        # Daytrader AlphaI-rotate: avoid/non-pick bags cut early even if legacy.
+        rotate = False
+        try:
+            rotate = bool(self._alphai_daytrader_rotate_exit(base))
+        except Exception:  # noqa: BLE001
+            rotate = False
+        if (
+            self._early_cut_new_bases_only
+            and not st.get("new_session_base")
+            and not rotate
+        ):
             return False
-        if not self._has_trusted_cost(venue, base):
+        if not self._has_trusted_cost(venue, base) and self._unit_cost(venue, base) is None:
+            return False
+        if self._alphai_protects_from_cuts(base) and not rotate:
             return False
         return True
 
     def _momentum_flat_or_down(self, symbol: str) -> bool:
-        """True when rolling mark return ≤ early-cut momentum max (default 0 = flat/down)."""
+        """True when rolling mark return ≤ early-cut momentum max (default 0 = flat/down).
+
+        Cold series (not enough samples yet, e.g. right after restart) counts as
+        flat so underwater recycle/cut paths are not frozen until the tape warms.
+        """
         if not self._momentum_enabled:
-            return False
+            return True
         series = self._series_for(symbol)
         need = max(3, min(6, self._momentum_samples // 2))
         if len(series) < need:
-            return False
+            return True
         mom = series.momentum_return()
         if mom is None:
-            return False
+            return True
         return mom <= self._early_cut_momentum_max
+
+    def _position_age_sec(self, venue: str, base: str) -> float:
+        """Seconds since position open; legacy synced bags count as fully aged."""
+        key = self._lots_key(venue, base)
+        opened = self._position_opened_at.get(key)
+        if opened is None or opened <= 0:
+            return 1e9
+        return max(0.0, time.time() - float(opened))
+
+    def _capital_deadlocked(self, venue: str) -> bool:
+        """True when underwater vault starves the active ring while capital waits.
+
+        Classic lock: inventory sits below BE (never-loss), active ring looks empty
+        because UW bags do not count, and free EUR / sleeve targets sit idle.
+        """
+        if not self._uw_deadlock_unlock_enabled:
+            return False
+        if self._active_ring_eur <= 0:
+            return False
+        soft = self._ring_soft_block_underwater_eur
+        min_uw = soft if soft > 0 else Decimal("25")
+        uw = self._underwater_book_notional(venue)
+        free_here = self._venue_budget_remaining(venue)
+        uw_all = uw
+        free_all = free_here
+        for other in getattr(self, "_execute_venues", ()) or ():
+            other_l = str(other or "").strip().lower()
+            if not other_l or other_l == str(venue or "").strip().lower():
+                continue
+            try:
+                uw_all += self._underwater_book_notional(other_l)
+                free_all += self._venue_budget_remaining(other_l)
+            except Exception:  # noqa: BLE001
+                continue
+        if uw < min_uw and uw_all < min_uw:
+            return False
+        active = self._active_book_notional(venue)
+        # Ring starved: UW inventory does not count toward the deploy ring.
+        if active >= self._active_ring_eur * Decimal("0.40"):
+            return False
+        # Idle free cash elsewhere, or capital locked inside the UW vault itself.
+        if not (
+            free_here >= self._uw_idle_min_free_eur
+            or free_all >= self._uw_idle_min_free_eur
+            or uw >= min_uw
+        ):
+            return False
+        if self._sleeve_has_unheld_priority():
+            return True
+        # Large UW vault + empty active book is still a deadlock without sleeve picks.
+        return uw >= min_uw and active < Decimal("50")
+
+    def _any_capital_deadlocked(self) -> bool:
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                if self._capital_deadlocked(str(venue)):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _uw_recycle_priority(self, base: str) -> int:
+        """Lower = recycle sooner when unlocking capital for the AlphaI sleeve."""
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return 9
+        try:
+            if self._alphai_is_avoid_base(bu):
+                return 0
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if not self._alphai_bullish_buy(bu):
+                return 1
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_weak_bullish_hold(bu):
+                return 2
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_sleeve_priority_buy(bu):
+                return 4
+        except Exception:  # noqa: BLE001
+            pass
+        return 3
+
+    def _uw_deadlock_roll_day(self) -> None:
+        """Reset UTC-day realized unlock loss budget."""
+        import datetime as _dt
+
+        day = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        if self._uw_deadlock_day_key != day:
+            self._uw_deadlock_day_key = day
+            self._uw_deadlock_day_loss_eur = _ZERO
+
+    def _uw_deadlock_day_loss_remaining(self) -> Decimal:
+        self._uw_deadlock_roll_day()
+        cap = self._uw_deadlock_day_loss_cap_eur
+        if cap <= 0:
+            return Decimal("1e9")
+        return max(_ZERO, cap - self._uw_deadlock_day_loss_eur)
+
+    def _uw_deadlock_note_loss(self, loss_eur: Decimal) -> None:
+        if loss_eur <= 0:
+            return
+        self._uw_deadlock_roll_day()
+        self._uw_deadlock_day_loss_eur += loss_eur
+
+    def _uw_deadlock_sleeve_target_eur(self) -> Decimal:
+        """One sleeve clip of free cash is enough to break the deadlock."""
+        for cand in (
+            self._uw_deadlock_target_free_eur,
+            self._alphai_priority_clip_eur,
+            self._alphai_strong_clip_eur,
+        ):
+            try:
+                v = Decimal(str(cand or 0))
+            except Exception:  # noqa: BLE001
+                v = _ZERO
+            if v > 0:
+                return v
+        return Decimal("220")
+
+    def _uw_deadlock_free_quote_eur(self) -> Decimal:
+        total = _ZERO
+        for venue in getattr(self, "_execute_venues", ()) or ():
+            try:
+                total += self._venue_budget_remaining(str(venue))
+            except Exception:  # noqa: BLE001
+                continue
+        return max(_ZERO, total)
+
+    def _uw_deadlock_needed_free_eur(self) -> Decimal:
+        return max(_ZERO, self._uw_deadlock_sleeve_target_eur() - self._uw_deadlock_free_quote_eur())
+
+    def _uw_bag_supported(self, base: str) -> bool:
+        """A bag has support when AlphaI still buys it or the tape still leads it."""
+        bu = str(base or "").strip().upper()
+        for probe in (
+            lambda: self._alphai_sleeve_priority_buy(bu),
+            lambda: self._alphai_bullish_buy(bu),
+            lambda: bu in self._tape_leader_bases(),
+        ):
+            try:
+                if probe():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _uw_confirmed_replacement(self, venue: str, base: str) -> str | None:
+        """An unheld name we would deploy into right now (sleeve target or tape leader)."""
+        bu = str(base or "").strip().upper()
+        try:
+            held = self._all_held_alt_bases()
+        except Exception:  # noqa: BLE001
+            held = set()
+        candidates: list[str] = []
+        try:
+            candidates.extend(self._sleeve_deploy_targets(top_n=2))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            candidates.extend(sorted(self._tape_leader_bases()))
+        except Exception:  # noqa: BLE001
+            pass
+        for cand in candidates:
+            cu = str(cand or "").upper()
+            if not cu or cu == bu or cu in held:
+                continue
+            try:
+                if self._alphai_is_avoid_base(cu) or self._alphai_blocks_base(cu):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+            return cu
+        return None
+
+    def _uw_recycle_plan_simple(
+        self,
+        *,
+        venue: str,
+        base: str,
+        symbol: str,
+        be: Decimal,
+        depth: Decimal,
+        age: float,
+    ) -> tuple[str, str, Decimal] | None:
+        """Three-rule underwater policy (replaces the tiered recycle stack).
+
+        1. Hard stops live outside this plan (early-cut -1% / cut-loss -2.5%).
+        2. Aged bag without support (AlphaI not buying, tape not leading) at a
+           mild depth: patient maker exit at the ask. Avoid-list bags age faster.
+        3. Rotate only against a *confirmed* replacement while capital is
+           deadlocked, within the daily voluntary-loss budget.
+        Deeper bags are nursed to recovery-arm or the hard cut — never dumped
+        at -1..-3% for "capital rotation" (37 such exits netted -38 EUR in 3 days).
+        """
+        max_depth = self._uw_simple_max_depth_pct
+        if max_depth <= 0 or depth > max_depth:
+            return None
+        floor = be * (Decimal("1") - max_depth)
+        grace = float(getattr(self, "_uw_fresh_entry_grace_sec", 0.0) or 0.0)
+        if grace > 0 and age < grace:
+            return None
+        if self._uw_bag_supported(base):
+            return None
+        avoid = False
+        try:
+            avoid = bool(self._alphai_is_avoid_base(base))
+        except Exception:  # noqa: BLE001
+            avoid = False
+        aged_after = self._uw_simple_avoid_age_sec if avoid else self._uw_simple_unsupported_age_sec
+        if aged_after > 0 and age >= aged_after:
+            return ("aged_avoid" if avoid else "aged_unsupported", "band", floor)
+        if (
+            age >= self._uw_simple_rotate_min_age_sec
+            and not self._uw_would_buy_today(base, symbol)
+            and self._capital_deadlocked(venue)
+            and self._uw_deadlock_day_loss_remaining() > 0
+            and self._uw_confirmed_replacement(venue, base) is not None
+        ):
+            return ("rotate_replacement", "band", floor)
+        return None
+
+    def _uw_would_buy_today(self, base: str, symbol: str) -> bool:
+        """Forward-looking: would we deploy fresh cash into this name now?
+
+        Avoid names never qualify. Rising sleeve / bullish names do — those we
+        nurse instead of unlocking during deadlock.
+        """
+        bu = str(base or "").strip().upper()
+        if not bu:
+            return False
+        try:
+            if self._alphai_is_avoid_base(bu):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        flat_or_down = True
+        try:
+            flat_or_down = bool(self._momentum_flat_or_down(symbol))
+        except Exception:  # noqa: BLE001
+            flat_or_down = True
+        try:
+            if self._alphai_sleeve_priority_buy(bu) and not flat_or_down:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._alphai_bullish_buy(bu) and not flat_or_down:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _uw_deadlock_partial_sell_qty(
+        self,
+        *,
+        free_qty: Decimal,
+        mark: Decimal,
+        be: Decimal,
+        session_cap: Decimal,
+        rotate_inventory: bool = False,
+    ) -> Decimal:
+        """Size unlock to remaining sleeve-cash need and day-loss budget.
+
+        ``rotate_inventory`` (mid-flat / lag-time / deadlock-with-sleeve-targets):
+        when free cash already covers the sleeve clip, still allow one clip of
+        weak UW inventory so capital can rotate into fresher deploy targets.
+        """
+        if free_qty <= 0 or mark <= 0 or be <= 0 or mark >= be:
+            return _ZERO
+        cap_qty = min(free_qty, session_cap) if session_cap > 0 else free_qty
+        if not self._uw_deadlock_partial_enabled:
+            return cap_qty
+        needed = self._uw_deadlock_unlock_remaining_eur
+        clip = self._uw_deadlock_partial_clip_eur
+        if clip <= 0:
+            clip = self._uw_deadlock_target_free_eur or Decimal("220")
+        if needed <= 0 and rotate_inventory:
+            needed = clip
+        if needed <= 0:
+            return _ZERO
+        target_eur = min(needed, clip)
+        depth = (be - mark) / be
+        rem_loss = self._uw_deadlock_day_loss_remaining()
+        if rem_loss <= 0:
+            return _ZERO
+        if depth > 0:
+            max_by_loss = rem_loss / depth
+            target_eur = min(target_eur, max_by_loss)
+        min_eur = self._uw_deadlock_partial_min_eur
+        bag_eur = cap_qty * mark
+        if target_eur < min_eur:
+            # Take the whole bag only when it is itself a small unlock clip.
+            loss_ok = True if depth <= 0 else bag_eur <= (rem_loss / depth)
+            if bag_eur <= max(min_eur, needed) and loss_ok:
+                return cap_qty
+            return _ZERO
+        qty = (target_eur / mark).quantize(Decimal("0.00000001"))
+        qty = min(qty, cap_qty)
+        if qty * mark < min_eur and bag_eur >= min_eur:
+            qty = min(cap_qty, (min_eur / mark).quantize(Decimal("0.00000001")))
+        return qty if qty > 0 else _ZERO
+
+    def _uw_recycle_plan(
+        self,
+        *,
+        venue: str,
+        base: str,
+        symbol: str,
+        mark: Decimal,
+        be: Decimal | None,
+        notional: Decimal,
+    ) -> tuple[str, str, Decimal] | None:
+        """Tiered underwater recycle plan.
+
+        Returns ``(tier, mode, floor)`` where mode is ``band`` (floor ≤ mark < BE)
+        or ``stop`` (mark ≤ floor). ``None`` when recycle must not fire.
+        """
+        if not self._uw_recycle_enabled:
+            return None
+        if self._sleeve_paused or self._daily_kill_active or self._is_long_hold(base):
+            return None
+        if be is None or be <= 0 or mark <= 0 or mark >= be:
+            return None
+        # Cost basis required (trusted preferred; provisional unit cost allowed).
+        if self._unit_cost(venue, base) is None:
+            return None
+        depth = (be - mark) / be
+        age = self._position_age_sec(venue, base)
+        is_alphai = self._alphai_bullish_buy(base)
+        flat_or_down = self._momentum_flat_or_down(symbol)
+
+        # Layer 1: dust — always free tiny bags (sleeve-capped); allow up to 5% BE.
+        if (
+            self._uw_dust_max_notional > 0
+            and notional > 0
+            and notional < self._uw_dust_max_notional
+        ):
+            dust_pct = max(self._uw_dust_below_be_pct, Decimal("0.05"))
+            floor = be * (Decimal("1") - dust_pct)
+            if mark >= floor:
+                return ("dust", "band", floor)
+            return ("dust", "stop", floor)
+
+        if str(getattr(self, "_uw_policy", "legacy") or "legacy").lower() == "simple":
+            return self._uw_recycle_plan_simple(
+                venue=venue,
+                base=base,
+                symbol=symbol,
+                be=be,
+                depth=depth,
+                age=age,
+            )
+
+        strong_hold = self._alphai_protects_from_cuts(base)
+        rotate_exit = False
+        try:
+            rotate_exit = bool(self._alphai_daytrader_rotate_exit(base))
+        except Exception:  # noqa: BLE001
+            rotate_exit = False
+        # Daytrader: never nurse avoid/non-pick bags behind strong_hold.
+        if rotate_exit and self._alphai_is_avoid_base(base):
+            strong_hold = False
+
+        # Avoid / bearish bags: free capital for the AlphaI sleeve quickly.
+        if self._alphai_is_avoid_base(base) and not strong_hold:
+            below = max(self._uw_non_alphai_below_be_pct, Decimal("0.006"))
+            min_age = min(float(self._uw_non_alphai_min_age_sec), float(self._uw_avoid_max_age_sec))
+            # When rank-1/2 sleeve still needs a slot, recycle avoid bags faster
+            # (ETH/XRP stuck while BNB/ADA were the picks).
+            if self._sleeve_has_unheld_priority():
+                below = min(below, Decimal("0.004"))
+                min_age = min(min_age, 180.0)
+            # Daytrader AlphaI-first: shallow depth + short age beat never-loss wait.
+            if bool(getattr(self, "_alphai_daytrader_enabled", False)) and bool(
+                getattr(self, "_daytrader_rotate_exits_enabled", True)
+            ):
+                below = min(
+                    below,
+                    Decimal(
+                        str(
+                            getattr(
+                                self, "_daytrader_avoid_below_be_pct", Decimal("0.0025")
+                            )
+                        )
+                    ),
+                    Decimal(
+                        str(
+                            getattr(
+                                self,
+                                "_daytrader_non_alphai_below_be_pct",
+                                Decimal("0.005"),
+                            )
+                        )
+                    ),
+                )
+                min_age = min(
+                    float(min_age),
+                    float(getattr(self, "_daytrader_avoid_min_age_sec", 60.0) or 60.0),
+                    float(
+                        getattr(self, "_daytrader_non_alphai_min_age_sec", 120.0) or 120.0
+                    ),
+                )
+            # Desk lesson feedback: recycle avoid bags faster after avoid-vs-sleeve misses.
+            min_age = max(30.0, float(min_age) * float(self._desk_lesson_avoid_age_scale()))
+            floor = be * (Decimal("1") - below)
+            if depth >= below:
+                return ("avoid_deep", "stop", floor)
+            if age >= min_age and (flat_or_down or rotate_exit):
+                if mark >= floor:
+                    return ("avoid_aged", "band", floor)
+                return ("avoid_aged", "stop", floor)
+            # Idle cash + avoid: recycle even sooner when free capital is abundant.
+            if (
+                self._uw_idle_pressure_enabled
+                and age >= min(min_age, 300.0)
+                and self._venue_budget_remaining(venue) >= self._uw_idle_min_free_eur
+            ):
+                if mark >= floor:
+                    return ("avoid_idle", "band", floor)
+                return ("avoid_idle", "stop", floor)
+
+        # Daytrader non-pick / weak-confirm rotate (before deadlock nurse).
+        if (
+            rotate_exit
+            and not self._alphai_is_avoid_base(base)
+            and not strong_hold
+            and not is_alphai
+        ):
+            below = min(
+                self._uw_non_alphai_below_be_pct,
+                Decimal(
+                    str(
+                        getattr(
+                            self, "_daytrader_avoid_below_be_pct", Decimal("0.0025")
+                        )
+                    )
+                ),
+                Decimal(
+                    str(
+                        getattr(
+                            self, "_daytrader_non_alphai_below_be_pct", Decimal("0.005")
+                        )
+                    )
+                ),
+            )
+            min_age = min(
+                float(self._uw_non_alphai_min_age_sec),
+                float(getattr(self, "_daytrader_avoid_min_age_sec", 60.0) or 60.0),
+                float(getattr(self, "_daytrader_non_alphai_min_age_sec", 120.0) or 120.0),
+            )
+            floor = be * (Decimal("1") - below)
+            if depth >= below:
+                return ("rotate_non_pick_deep", "stop", floor)
+            if age >= min_age and flat_or_down:
+                if mark >= floor:
+                    return ("rotate_non_pick_aged", "band", floor)
+                return ("rotate_non_pick_aged", "stop", floor)
+
+
+        # Fresh session entry grace: idle-pressure / deadlock / mid-flat tiers are
+        # bag-recycling tools, not stops. On a 5-minute-old AVAX clip they fired at
+        # -0.5% and the entry gate re-bought 10s later (7 round trips, pure fee
+        # bleed). Only early-cut (-1%) / cut-loss (-2.5%) may exit a fresh entry.
+        grace = float(getattr(self, "_uw_fresh_entry_grace_sec", 0.0) or 0.0)
+        if grace > 0 and age < grace:
+            try:
+                fresh_session_entry = self._session_qty(venue, base) > 0
+            except Exception:  # noqa: BLE001
+                fresh_session_entry = False
+            if fresh_session_entry:
+                return None
+
+        # Deadlock unlock: free bags at mild depth/age so capital rotates.
+        # Overrides strong_hold except for rising sleeve-priority names we still nurse.
+        # Does not require same-venue free cash (capital is often locked IN the bag).
+        if (
+            self._uw_deadlock_unlock_enabled
+            and age >= self._uw_deadlock_min_age_sec
+            and depth >= self._uw_deadlock_below_be_pct
+            and self._capital_deadlocked(venue)
+        ):
+            sleeve_rising = (
+                is_alphai
+                and self._alphai_sleeve_priority_buy(base)
+                and not flat_or_down
+            )
+            # Would-buy-today gate: nurse names we would still deploy into —
+            # except mild-UW slot blockers while fresher sleeve targets wait.
+            if (
+                self._uw_deadlock_would_buy_gate
+                and not self._alphai_is_avoid_base(base)
+                and self._uw_would_buy_today(base, symbol)
+            ):
+                nurse = True
+                try:
+                    targets = self._sleeve_deploy_targets(top_n=2)
+                    if targets and not self._sleeve_held_fills_slot(base):
+                        nurse = False
+                except Exception:  # noqa: BLE001
+                    nurse = True
+                if nurse:
+                    sleeve_rising = True
+            if self._uw_deadlock_day_loss_remaining() <= 0:
+                pass  # day unlock budget spent — fall through to milder paths
+            elif not sleeve_rising:
+                floor = be * (Decimal("1") - self._uw_deadlock_below_be_pct)
+                if depth >= self._uw_deadlock_below_be_pct * Decimal("1.5"):
+                    return ("deadlock_deep", "stop", floor)
+                if flat_or_down and mark >= floor:
+                    return ("deadlock_aged", "band", floor)
+                if flat_or_down:
+                    return ("deadlock_aged", "stop", floor)
+                return ("deadlock_unlock", "stop", floor)
+
+        # Layer 1b: idle-pressure — free bags when venue cash is idle OR when UW
+        # vault has locked the ring. Deadlock also overrides strong_hold here.
+        deadlocked = self._capital_deadlocked(venue)
+        if (
+            self._uw_idle_pressure_enabled
+            and (not strong_hold or deadlocked)
+            and age >= self._uw_idle_min_age_sec
+            and depth >= self._uw_idle_below_be_pct
+        ):
+            free_est = self._venue_budget_remaining(venue)
+            uw_book = self._underwater_book_notional(venue)
+            soft = self._ring_soft_block_underwater_eur
+            if soft <= 0:
+                soft = Decimal("25")
+            locked_starved = (
+                uw_book >= soft
+                and self._active_book_notional(venue)
+                < self._active_ring_eur * Decimal("0.40")
+            )
+            # Free-cash probe can read 0 on multi-venue ledger glitches; also
+            # treat fat UW vault + starved ring as idle pressure by itself.
+            if (
+                free_est >= self._uw_idle_min_free_eur
+                or locked_starved
+                or uw_book >= soft
+            ):
+                floor = be * (Decimal("1") - self._uw_idle_below_be_pct)
+                if depth >= self._uw_idle_below_be_pct * Decimal("1.5") or not flat_or_down:
+                    # Clearly underwater or momentum unknown → hit bid.
+                    return ("idle_pressure", "stop", floor)
+                if flat_or_down and mark >= floor:
+                    return ("idle_pressure", "band", floor)
+                if flat_or_down:
+                    return ("idle_pressure", "stop", floor)
+
+        # Mid-depth flat recycle: bags past near_be but before alphai deep-hold,
+        # that we would NOT buy today — free capital for the sleeve (partial-sized
+        # by caller when deadlock_partial tooling is active).
+        mid_flat_min_age = self._uw_mid_flat_min_age_sec
+        mid_flat_min_depth = self._uw_near_below_be_pct
+        mid_flat_max_depth = self._uw_mid_flat_max_depth_pct
+        slot_blocker = False
+        try:
+            # Weak / mild-UW held priority bags must not keep capital idle while
+            # fresher unheld sleeve targets wait (UNI @ -0.4% was missing the
+            # near_be floor of 0.5% and never entered mid_flat).
+            targets = self._sleeve_deploy_targets(top_n=2)
+            weak_hold = False
+            try:
+                weak_hold = bool(self._alphai_weak_bullish_hold(base))
+            except Exception:  # noqa: BLE001
+                weak_hold = False
+            if targets:
+                if (not self._sleeve_held_fills_slot(base)) or weak_hold:
+                    slot_blocker = True
+                elif depth >= Decimal("0.001") and (
+                    self._alphai_sleeve_priority_buy(base)
+                    or self._alphai_bullish_buy(base)
+                ):
+                    slot_blocker = True
+            if slot_blocker:
+                # Faster / shallower than generic mid-flat — free mild UW capital
+                # for open sleeve targets without waiting for a deep hard cut.
+                mid_flat_min_age = min(mid_flat_min_age, 90.0)
+                mid_flat_min_depth = min(
+                    mid_flat_min_depth,
+                    self._uw_deadlock_below_be_pct,
+                    Decimal("0.001"),
+                )
+                mid_flat_max_depth = max(mid_flat_max_depth, Decimal("0.015"))
+        except Exception:  # noqa: BLE001
+            pass
+        if (
+            self._uw_mid_flat_recycle_enabled
+            and not strong_hold
+            and age >= mid_flat_min_age
+            and depth > mid_flat_min_depth
+            and depth <= mid_flat_max_depth
+            and (
+                # Opportunity-cost: slot blockers rotate even on a mild bounce
+                # (would-buy / rising tape must not park capital over ADA/LINK).
+                slot_blocker
+                or (
+                    flat_or_down
+                    and not self._uw_would_buy_today(base, symbol)
+                )
+            )
+        ):
+            floor = be * (Decimal("1") - mid_flat_max_depth)
+            if mark >= floor:
+                return ("mid_flat", "band", floor)
+            return ("mid_flat", "stop", floor)
+
+        # Lag-time partial: aged flat mild-UW while sleeve targets wait.
+        # Opportunity-cost rotate (day-loss capped) — NOT a blind 4% hard stop.
+        # Hard cut (~2.5%) remains the deep safety net above this band.
+        try:
+            lag_targets = self._sleeve_deploy_targets(top_n=2)
+        except Exception:  # noqa: BLE001
+            lag_targets = []
+        lag_weak = False
+        try:
+            lag_weak = bool(self._alphai_weak_bullish_hold(base))
+        except Exception:  # noqa: BLE001
+            lag_weak = False
+        lag_fills = True
+        try:
+            lag_fills = bool(self._sleeve_held_fills_slot(base))
+        except Exception:  # noqa: BLE001
+            lag_fills = True
+        lag_max = self._uw_lag_time_partial_max_depth_pct
+        if lag_max <= 0:
+            lag_max = Decimal("0.020")
+        # Never reach into hard-cut territory via this path.
+        try:
+            hard_cut = Decimal(str(self._cut_loss_below_be_pct or 0))
+            if hard_cut > 0:
+                lag_max = min(lag_max, hard_cut * Decimal("0.80"))
+        except Exception:  # noqa: BLE001
+            pass
+        if (
+            self._uw_lag_time_partial_enabled
+            and flat_or_down
+            and not strong_hold
+            and not self._uw_would_buy_today(base, symbol)
+            and bool(lag_targets)
+            and age
+            >= float(
+                min(
+                    float(self._uw_lag_time_partial_min_age_sec or 1800.0),
+                    float(
+                        getattr(self, "_daytrader_lag_time_min_age_sec", 600.0) or 600.0
+                    )
+                    if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                    else float(self._uw_lag_time_partial_min_age_sec or 1800.0),
+                )
+            )
+            and depth > Decimal("0.001")
+            and depth <= lag_max
+            and (lag_weak or (not lag_fills) or depth >= Decimal("0.001"))
+        ):
+            floor = be * (Decimal("1") - lag_max)
+            if mark >= floor:
+                return ("lag_time_partial", "band", floor)
+            return ("lag_time_partial", "stop", floor)
+
+        # Layer 3: AlphaI picks — hold longer; weak/mixed conviction recycles sooner.
+        if is_alphai:
+            weak = self._alphai_weak_bullish_hold(base)
+            conv = self._alphai_hold_conviction(base)
+            if weak or conv < 0.45:
+                # Blend toward non-AlphaI thresholds for weak picks (BNB/DOGE-class).
+                below = (
+                    self._uw_non_alphai_below_be_pct
+                    + (self._uw_alphai_below_be_pct - self._uw_non_alphai_below_be_pct)
+                    * Decimal(str(max(0.0, min(1.0, conv))))
+                )
+                min_age = self._uw_non_alphai_min_age_sec + (
+                    self._uw_alphai_min_age_sec - self._uw_non_alphai_min_age_sec
+                ) * max(0.0, min(1.0, conv))
+                # Daytrader: failed/weak picks free capital for confirmed satellite entries.
+                if bool(getattr(self, "_alphai_daytrader_enabled", False)):
+                    min_age = min(
+                        float(min_age),
+                        float(
+                            getattr(self, "_daytrader_weak_alphai_min_age_sec", 480.0)
+                            or 480.0
+                        ),
+                    )
+                tier_prefix = "alphai_weak"
+            else:
+                below = self._uw_alphai_below_be_pct
+                min_age = self._uw_alphai_min_age_sec
+                tier_prefix = "alphai"
+            floor = be * (Decimal("1") - below)
+            if depth >= below:
+                return (f"{tier_prefix}_deep", "stop", floor)
+            if age >= min_age and flat_or_down:
+                if mark >= floor:
+                    return (f"{tier_prefix}_aged", "band", floor)
+                return (f"{tier_prefix}_aged", "stop", floor)
+            return None
+
+        # Layer 2a: non-AlphaI aged recycle (faster under daytrade rotate pressure).
+        non_alphai_age = float(self._uw_non_alphai_min_age_sec)
+        non_alphai_below = self._uw_non_alphai_below_be_pct
+        if self._daytrade_rotate_non_picks():
+            non_alphai_age = min(
+                non_alphai_age,
+                float(getattr(self, "_daytrader_non_alphai_min_age_sec", 120.0) or 120.0)
+                if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                else 180.0,
+            )
+            non_alphai_below = min(
+                non_alphai_below,
+                Decimal(
+                    str(
+                        getattr(self, "_daytrader_non_alphai_below_be_pct", Decimal("0.005"))
+                    )
+                )
+                if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                else Decimal("0.006"),
+            )
+        if age >= non_alphai_age:
+            floor = be * (Decimal("1") - non_alphai_below)
+            if depth >= non_alphai_below:
+                return ("non_alphai", "stop", floor)
+            if flat_or_down:
+                if mark >= floor:
+                    return ("non_alphai", "band", floor)
+
+        # Layer 2b: near-BE band after shorter wait.
+        near_age = float(self._uw_near_min_age_sec)
+        if self._daytrade_rotate_non_picks():
+            near_age = min(
+                near_age,
+                float(getattr(self, "_daytrader_near_min_age_sec", 90.0) or 90.0)
+                if bool(getattr(self, "_alphai_daytrader_enabled", False))
+                else 120.0,
+            )
+        if (
+            depth <= self._uw_near_max_depth_pct
+            and age >= near_age
+            and flat_or_down
+        ):
+            floor = be * (Decimal("1") - self._uw_near_below_be_pct)
+            if mark >= floor:
+                return ("near_be", "band", floor)
+        return None
+
+    def _uw_recycle_sleeve_allows(
+        self, *, notional: Decimal, mark: Decimal, be: Decimal
+    ) -> bool:
+        """Refuse recycle when estimated loss would breach the sleeve daily cap."""
+        if self._sleeve_daily_loss_cap <= 0:
+            return True
+        if be <= 0 or mark >= be:
+            return True
+        est_loss = notional * (be - mark) / be
+        projected = self._sleeve_realized_eur - est_loss
+        return projected >= -self._sleeve_daily_loss_cap
+
+    async def _uw_recycle_exit_quote(
+        self,
+        venue: str,
+        base: str,
+        mark: Decimal,
+        *,
+        floor: Decimal,
+        mode: str,
+    ) -> tuple[Decimal | None, bool, str]:
+        """Hit bid for uw recycle; band mode requires bid ≥ floor.
+
+        Stop mode: once the plan fires a stop, hit the bid whenever still
+        underwater vs BE — do not stall because mark bounced above the shallow
+        floor while remaining below break-even (AlphaI rotate leak).
+        """
+        best_bid = _ZERO
+        best_ask = _ZERO
+        client = self._trading_client(venue)
+        symbol = f"{base.upper()}{self._quote}"
+        if client is not None:
+            try:
+                ticker = await client.fetch_ticker(symbol)
+                best_bid = Decimal(str(getattr(ticker, "bid", None) or 0))
+                best_ask = Decimal(str(getattr(ticker, "ask", None) or 0))
+            except Exception:  # noqa: BLE001
+                pass
+        if best_bid <= 0:
+            best_bid = mark
+        if mode == "band" and best_bid < floor:
+            return None, False, "uw_bid_below_floor"
+        if mode == "band" and self._exit_patient_enabled and best_ask > best_bid:
+            # Band = aged bag inside [floor, BE): not a stop. Rest post-only just
+            # inside the ask first (maker fee, no spread paid); escalate to the
+            # bid only after repeated stale quotes.
+            if not self._should_force_taker_exit(venue, base, "trail_uw_recycle_band"):
+                tick = best_ask * Decimal("0.00005")
+                ask_px = best_ask - tick
+                if ask_px <= best_bid:
+                    ask_px = best_bid + tick
+                return ask_px, True, "rest_ask_uw_band"
+        if mode == "stop":
+            # Prefer live BE when available; fall back to floor comparison.
+            be = None
+            try:
+                be = self._break_even_sell_price(
+                    venue, base, allow_provisional=True
+                )
+            except Exception:  # noqa: BLE001
+                be = None
+            if be is not None and be > 0:
+                if mark >= be:
+                    return None, False, "uw_above_be"
+            elif mark > floor:
+                return None, False, "uw_above_stop_floor"
+        return best_bid, False, f"hit_bid_uw_{mode}"
 
     async def _cut_loss_exit_quote(
         self,
@@ -4132,11 +7430,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return self._active_book_notional(venue) < self._active_ring_eur
 
     def _ring_soft_momentum_eligible(self, venue: str) -> bool:
-        """Softer momentum only while active book is still thinly deployed."""
+        """Softer momentum only while active book is still thinly deployed.
+
+        Capital Velocity Desk unlock: when ``live_micro_ring_util_b_ignore_underwater``
+        is True, underwater vault bags do **not** disable Util-B. Same-base underwater
+        adds remain blocked via ``UNDERWATER_BASE_BLOCK`` / buy-quality gates.
+        """
         if not self._ring_needs_deploy(venue):
-            return False
+            # Desk lesson urgency: still deploy sleeve into idle cash after missed deploys.
+            bias = float(self._desk_lesson_deploy_bias())
+            if (
+                bias <= 1.01
+                or not self._sleeve_has_unheld_priority()
+                or float(self._venue_budget_remaining(venue))
+                < float(getattr(self, "_desk_lessons_min_free_eur", 150.0) or 150.0)
+            ):
+                return False
         if (
-            self._ring_soft_block_underwater_eur > 0
+            not self._ring_util_b_ignore_underwater
+            and self._ring_soft_block_underwater_eur > 0
             and self._underwater_book_notional(venue)
             >= self._ring_soft_block_underwater_eur
         ):
@@ -4145,11 +7457,27 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return True
         return self._active_book_notional(venue) < self._ring_soft_max_active_eur
 
-    def _momentum_floor_for_buy(self, venue: str) -> Decimal:
+    def _momentum_floor_for_buy(self, venue: str, base: str | None = None) -> Decimal:
         """Softer momentum floor only while active book is thinly deployed."""
-        if self._ring_soft_momentum_eligible(venue):
-            return self._ring_momentum_min
-        return self._momentum_min
+        floor = (
+            self._ring_momentum_min
+            if self._ring_soft_momentum_eligible(venue)
+            else self._momentum_min
+        )
+        if base:
+            floor *= self._alphai_momentum_floor_scale(base)
+            # Sleeve deploy urgency: empty ring → ease entry even without desk bias.
+            try:
+                if (
+                    self._alphai_sleeve_priority_buy(base)
+                    and self._ring_needs_deploy(venue)
+                ):
+                    bias = float(self._desk_lesson_deploy_bias())
+                    scale = max(bias, 1.20)  # at least 20% softer for sleeve deploy
+                    floor = floor / Decimal(str(min(scale, 1.35)))
+            except Exception:  # noqa: BLE001
+                pass
+        return floor
 
     def _momentum_ok(
         self,
@@ -4192,11 +7520,13 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         *,
         min_return: Decimal,
         low_util: bool,
+        require_history: bool = True,
+        allow_unknown_short: bool = False,
     ) -> bool:
         """Stricter new-base entry: full + short-window momentum and rising tape."""
         if not self._momentum_ok(
             symbol,
-            require_history=True,
+            require_history=require_history,
             min_return=min_return,
             low_util=low_util,
         ):
@@ -4206,7 +7536,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         series = self._series_for(symbol)
         short = series.momentum_return_last(self._entry_short_momentum_samples)
         if short is None:
-            return False
+            # For strong AlphaI top picks we can tolerate "unknown short momentum"
+            # when history is not yet materialized. We still keep never-loss/risk-gates.
+            return bool(allow_unknown_short)
         return short >= self._entry_short_momentum_min
 
     def _corr_group_momentum_down_count(self) -> int:
@@ -4339,6 +7671,99 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 return True
         return False
 
+    def _underwater_depth_on_venue(self, venue: str, base: str) -> Decimal | None:
+        """Positive fraction below BE on venue, or None if unknown/not held."""
+        b = str(base or "").upper()
+        venue_l = venue.strip().lower()
+        qty = self._balance_qty(venue_l, b)
+        if qty <= 0:
+            return None
+        be = self._break_even_sell_price(venue_l, b)
+        if be is None or be <= 0:
+            return None
+        symbol = f"{b}{self._quote}"
+        mark = self._portfolio.state.mark_prices.get(symbol.upper())
+        if mark is None or mark <= 0:
+            st = self._trail.get(self._lots_key(venue_l, b)) or {}
+            try:
+                mark = Decimal(str(st.get("last_mark") or st.get("mark") or 0))
+            except Exception:  # noqa: BLE001
+                mark = _ZERO
+        if mark <= 0:
+            return None
+        if mark >= be:
+            return Decimal("0")
+        return (be - mark) / be
+
+    def _alphai_idle_deploy_allowed(self, venue: str, base: str) -> bool:
+        """Allow AlphaI buys to deploy idle ring cash despite holding-base policy.
+
+        Cross-venue: base not on this venue, other-venue depth shallow enough.
+        Same-venue ring-fill add: held here but within near-BE depth band.
+        """
+        if bool(getattr(self, "_alphai_idle_deploy_blocked", False)):
+            return False
+        if not self._alphai_bullish_buy(base):
+            return False
+        if self._sleeve_paused or self._daily_kill_active:
+            return False
+        if self._buys_blocked:
+            # Playbook ADVERSE / macro new-bases-only: keep AlphaI rank-1/2 live.
+            if not self._buys_blocked_new_bases_only:
+                return False
+            if not self._alphai_sleeve_priority_buy(base):
+                return False
+        # Concentrate idle cash on the sleeve first.
+        if not self._alphai_sleeve_priority_buy(base):
+            # Non-sleeve only when sleeve picks are already held / unavailable.
+            held: set[str] = set()
+            for v in self._execute_venues:
+                held |= self._held_alt_bases(v, min_notional_eur=Decimal("1"))
+            sig = self._alphai_signals
+            unheld = None
+            if sig is not None and hasattr(sig, "unheld_priority_buys"):
+                try:
+                    unheld = sig.unheld_priority_buys(held, top_n=2)
+                except Exception:  # noqa: BLE001
+                    unheld = None
+            if unheld:
+                return False
+        if not self._ring_needs_deploy(venue):
+            return False
+        # Lagging / weak RS names must not soak idle cash on red tape —
+        # except AlphaI rank-1/2 sleeve (those are the deploy target).
+        sig = self._alphai_signals
+        if sig is not None and not self._alphai_sleeve_priority_buy(base):
+            try:
+                if hasattr(sig, "is_price_lagging") and bool(sig.is_price_lagging(base)):
+                    return False
+                if hasattr(sig, "price_confirm_scale") and float(
+                    sig.price_confirm_scale(base)
+                ) < 0.55:
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+        venue_l = venue.strip().lower()
+        held_here = not self._is_new_base_buy(venue_l, base)
+        if not held_here:
+            if not self._alphai_cross_venue_deploy:
+                return False
+            for other in self._execute_venues:
+                if other == venue_l:
+                    continue
+                depth = self._underwater_depth_on_venue(other, base)
+                if depth is None:
+                    continue
+                if depth > self._alphai_cross_venue_max_other_depth:
+                    return False
+            return True
+        if self._alphai_ring_fill_add_max_depth <= 0:
+            return False
+        depth = self._underwater_depth_on_venue(venue_l, base)
+        if depth is None:
+            return False
+        return depth <= self._alphai_ring_fill_add_max_depth
+
     def _momentum_down(self, symbol: str) -> bool:
         """True when rolling mark return is at/below the negative momentum floor."""
         if not self._momentum_enabled:
@@ -4385,6 +7810,15 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if st.get("triggered"):
             return False
         if be is None or mark < be:
+            return False
+        # Avoid / exit-urgent bags recycle at BE+; all other rising bags (NEAR lesson)
+        # keep riding until peak-fade — even when not an AlphaI pick.
+        base = infer_base_asset(symbol, self._quote)
+        if base and (
+            self._alphai_exit_urgency(base)
+            or self._alphai_is_avoid_base(base)
+            or self._alphai_weak_bullish_hold(base)
+        ):
             return False
         if self._momentum_still_rising(symbol):
             return True
@@ -4548,7 +7982,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         )
 
     def _buy_clip_cap_eur(self, venue: str, base: str) -> Decimal | None:
-        """Entry clip; winner-adds use the dedicated winner clip size."""
+        """Entry clip; AlphaI priority/strong picks get larger deploy size."""
         if (
             self._winner_add_enabled
             and not self._is_new_base_buy(venue, base)
@@ -4556,6 +7990,44 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             return self._winner_add_clip_eur if self._winner_add_clip_eur > 0 else None
         first = self._first_clip_eur
+        daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
+        confirm = None
+        if daytrader:
+            sig = self._alphai_signals
+            if sig is not None and hasattr(sig, "price_confirm_scale"):
+                try:
+                    confirm = Decimal(str(sig.price_confirm_scale(base)))
+                except Exception:  # noqa: BLE001
+                    confirm = None
+        # Concentrate working capital on AlphaI: strong > priority > default first clip.
+        # Daytrader: only enlarge when tape confirm clears ranked thresholds.
+        if self._alphai_strong_bullish_buy(base) and self._alphai_strong_clip_eur > 0:
+            min_strong = Decimal(
+                str(
+                    getattr(
+                        self, "_daytrader_strong_clip_min_confirm", Decimal("0.75")
+                    )
+                )
+            )
+            if (not daytrader) or confirm is None or confirm >= min_strong:
+                return self._alphai_strong_clip_eur
+        if self._alphai_bullish_buy(base) and self._alphai_priority_clip_eur > 0:
+            min_pri = Decimal(
+                str(
+                    getattr(
+                        self, "_daytrader_priority_clip_min_confirm", Decimal("0.60")
+                    )
+                )
+            )
+            allow_priority = (not daytrader) or confirm is None or confirm >= min_pri
+            if allow_priority:
+                sig = self._alphai_signals
+                if sig is not None and hasattr(sig, "is_slot_priority_buy"):
+                    # Structural sleeve: concentrate capital on AlphaI rank-1/2.
+                    if sig.is_slot_priority_buy(base, top_n=2):
+                        return self._alphai_priority_clip_eur
+                elif self._alphai_priority_clip_eur > first:
+                    return self._alphai_priority_clip_eur
         if first <= 0:
             add = self._add_clip_eur
             return add if add > 0 else None
@@ -4576,6 +8048,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         if self._buys_blocked or self._sleeve_paused or self._daily_kill_active:
             return False
         if self._is_long_hold(base) or self._base_underwater_blocked(venue, base):
+            return False
+        # Max-deploy path: only add into AlphaI-approved bags (still ≥ BE).
+        if self._alphai_winner_add_only and not self._alphai_bullish_buy(base):
+            return False
+        # Stale / weak AlphaI: do not scale in — recycle capital toward fresh conviction.
+        if not self._alphai_signal_fresh_enough(base):
+            return False
+        if self._alphai_weak_bullish_hold(base):
             return False
         trail_key = self._lots_key(venue, base)
         st = self._trail.get(trail_key) or {}
@@ -4772,6 +8252,30 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 peak,
             )
         return peak
+
+    def _gain_scaled_trail_dd(
+        self, dd: Decimal, *, peak: Decimal, cost: Decimal, hard_arm: Decimal
+    ) -> Decimal:
+        """Widen hard-trail drawdown with peak gain (room to run, capped).
+
+        peak gain < 2×arm → dd unchanged; 2×arm → ×1.5; ≥3×arm → ×2.0
+        (linear in between), never above ``live_micro_trail_dd_max_pct``.
+        """
+        if not self._trail_dd_gain_scale_enabled or dd <= 0 or cost <= 0 or peak <= 0:
+            return dd
+        if hard_arm <= 0:
+            return dd
+        peak_gain = (peak - cost) / cost
+        ratio = peak_gain / hard_arm
+        two = Decimal("2")
+        three = Decimal("3")
+        if ratio < two:
+            return dd
+        if ratio >= three:
+            mult = Decimal("2.0")
+        else:
+            mult = Decimal("1.5") + (ratio - two) * Decimal("0.5")
+        return min(dd * mult, self._trail_dd_max)
 
     def _sanitize_persisted_trails(self) -> None:
         """Clamp polluted peaks loaded from disk before the first live cycle."""
@@ -4985,6 +8489,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             peak=peak,
         )
         active_dd = hard_dd if st.get("hard_armed") else soft_dd
+        if st.get("hard_armed"):
+            active_dd = self._gain_scaled_trail_dd(
+                active_dd, peak=peak, cost=cost, hard_arm=hard_arm
+            )
         peak = self._sanitize_trail_peak(
             st,
             base=base,
@@ -5133,9 +8641,85 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 "exit_reason": reason,
             },
         )
-        return await self.execute(
+        result = await self.execute(
             req, strategy=reason, order_type=OrderType.LIMIT
         )
+        if reason in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
+            try:
+                submitted = bool(getattr(result, "status", None)) and str(
+                    getattr(result, "status", "")
+                ).lower() not in {"rejected", "failed", "orderstatus.rejected", "orderstatus.failed"}
+            except Exception:  # noqa: BLE001
+                submitted = True
+            if submitted:
+                self._record_loss_exit(venue, infer_base_asset(symbol), px)
+        return result
+
+    # ----------------------------------------------------------- loss re-entry
+    def _record_loss_exit(self, venue: str, base: str, price: Decimal) -> None:
+        if self._loss_exit_cooldown_sec <= 0:
+            return
+        key = f"{str(venue).lower()}:{str(base).upper()}"
+        self._loss_exits[key] = (time.monotonic(), Decimal(str(price)))
+
+    def _fee_route_block(self, venue: str, base: str, notional: Decimal) -> str | None:
+        """Route a new-base entry to the cheaper venue when it can take the clip.
+
+        Bitvavo bills 0.15/0.25, OKX (Lv1, every spot pair incl. USDT) 0.20/0.35:
+        a maker round trip costs 0.30% vs 0.40%. While the preferred venue is live,
+        not holding the base, not blocked on it and has the free ring for this
+        clip, the more expensive venue must not open the position.
+        """
+        pref = str(
+            getattr(self._settings, "live_micro_preferred_entry_venue", "") or ""
+        ).strip().lower()
+        v = str(venue or "").strip().lower()
+        if not pref or v == pref:
+            return None
+        if pref not in (getattr(self, "_execute_venues", ()) or ()):
+            return None
+        bu = str(base or "").upper()
+        try:
+            if bu in self._held_alt_bases(pref):
+                return None
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            if bu in (self._underwater_blocked_bases.get(pref) or set()):
+                return None
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            free = self._venue_budget_remaining(pref)
+        except Exception:  # noqa: BLE001
+            return None
+        need = max(notional, _MIN_LIVE_NOTIONAL) if notional > 0 else _MIN_LIVE_NOTIONAL
+        if free < need:
+            return None
+        return (
+            f"routed to {pref} (fees {float(self._effective_fee_rate(pref, taker=False)) * 100:.2f}% vs "
+            f"{float(self._effective_fee_rate(v, taker=False)) * 100:.2f}% maker; free={free:.0f})"
+        )
+
+    def _loss_exit_block(self, venue: str, base: str, mark: Decimal | None) -> str | None:
+        """Reason string when a fresh re-entry after a loss exit must wait."""
+        if self._loss_exit_cooldown_sec <= 0:
+            return None
+        key = f"{str(venue).lower()}:{str(base).upper()}"
+        hit = self._loss_exits.get(key)
+        if hit is None:
+            return None
+        ts, exit_px = hit
+        age = time.monotonic() - ts
+        if age >= self._loss_exit_cooldown_sec:
+            self._loss_exits.pop(key, None)
+            return None
+        if mark is not None and mark > 0 and exit_px > 0:
+            reclaim = exit_px * (_ONE + self._loss_exit_reclaim_bps / Decimal("10000"))
+            if mark >= reclaim:
+                return None
+        remaining = int(self._loss_exit_cooldown_sec - age)
+        return f"loss exit {int(age)}s ago at {exit_px}; wait {remaining}s or reclaim +{self._loss_exit_reclaim_bps}bps"
 
     async def _refresh_free(
         self, venue: str, symbol: str, asset: str, locked: Decimal
@@ -5149,12 +8733,43 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self, venue: str = "bitvavo"
     ) -> dict[str, Any]:
         """Soft/hard trail + recovery-arm at BE (no flat BE dump after time-stop)."""
+        try:
+            self.refresh_capital_playbook()
+        except Exception:  # noqa: BLE001
+            logger.exception("CAPITAL_PLAYBOOK_REFRESH_FAILED")
         if not self._trail_enabled and not self._time_stop_enabled:
             return {"ok": True, "enabled": False, "triggered": []}
         venue = venue.strip().lower()
         bals = await self._fetch_balances_cached(venue)
         triggered: list[dict[str, Any]] = []
         armed_now: list[str] = []
+        # When capital is deadlocked, recycle avoid/non-sleeve bags before sleeve names.
+        # Only free enough cash for one sleeve clip (partial unlock budget).
+        try:
+            self._uw_deadlock_roll_day()
+            if self._capital_deadlocked(venue):
+                bals = sorted(
+                    list(bals),
+                    key=lambda bal: self._uw_recycle_priority(
+                        str(getattr(bal, "asset", "") or "")
+                    ),
+                )
+                needed = self._uw_deadlock_needed_free_eur()
+                # Free cash can already exceed the sleeve clip while weak UW bags
+                # still block opportunity-cost rotation — keep one clip of budget.
+                if needed <= 0 and self._sleeve_has_unheld_priority():
+                    needed = self._uw_deadlock_partial_clip_eur or Decimal("220")
+                self._uw_deadlock_unlock_remaining_eur = needed
+            elif self._sleeve_has_unheld_priority() and self._ring_needs_deploy(venue):
+                # Not cash-deadlocked, but ring empty + sleeve open: allow mid-flat
+                # inventory rotation up to one sleeve clip.
+                self._uw_deadlock_unlock_remaining_eur = (
+                    self._uw_deadlock_partial_clip_eur or Decimal("220")
+                )
+            else:
+                self._uw_deadlock_unlock_remaining_eur = _ZERO
+        except Exception:  # noqa: BLE001
+            self._uw_deadlock_unlock_remaining_eur = _ZERO
         for bal in bals:
             asset = str(getattr(bal, "asset", "") or "").upper()
             if not asset or asset == self._quote:
@@ -5192,14 +8807,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 else (free + locked)
             )
             if cost is None or cost <= 0 or session_qty <= 0:
-                # Aged bags with trusted cost: allow recovery-arm / trail exits even
-                # when session lots are empty (never dump flat at BE).
+                # Aged bags: allow recovery-arm / trail exits even when session lots
+                # are empty. Trusted preferred; provisional unit cost enables sleeve
+                # loss exits when hydration lagged.
                 blend = self._unit_cost(venue, asset)
                 if not (
                     self._time_stop_enabled
                     and blend is not None
                     and blend > 0
-                    and self._has_trusted_cost(venue, asset)
                     and (free + locked) > 0
                 ):
                     continue
@@ -5212,10 +8827,21 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 cost = blend
                 session_qty = free + locked
 
-            # Untrusted / mark-seeded cost must never arm or exit a trail.
+            # Untrusted / mark-seeded cost must never arm BE+ trails or profitable exits.
+            # Sleeve loss exits (uw/cut) may use provisional unit cost so bags are not
+            # frozen forever when hydration lags (Sep-4: trail_no_trusted_cost ×700).
+            provisional_cost = False
+            soft_trust_be = False
             if not self._has_trusted_cost(venue, asset):
                 self._bump_skip("trail_no_trusted_cost")
-                continue
+                if self._unit_cost(venue, asset) is None:
+                    continue
+                provisional_cost = True
+                # Aged / avoid: allow BE+ harvests on provisional cost without
+                # permanently trusting mark-seeded lots (never-loss intact).
+                if self._provisional_be_exit_allowed(venue, asset):
+                    soft_trust_be = True
+                    self._bump_skip("provisional_be_exit_enabled")
 
             symbol = f"{asset}{self._quote}"
             mark = await self._mark_price(venue, symbol)
@@ -5223,7 +8849,17 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 continue
             self._note_position_opened(venue, asset)
             st = self._trail_update_state(venue, asset, cost=cost, mark=mark)
-            be = self._break_even_sell_price(venue, asset)
+            be = self._break_even_sell_price(
+                venue, asset, allow_provisional=(provisional_cost or soft_trust_be)
+            )
+            if provisional_cost and not soft_trust_be:
+                st["provisional_cost"] = True
+                # Only sleeve loss paths below; skip BE+ harvest/arm logic.
+                if be is None or mark >= be:
+                    self._bump_skip("uw_recycle_no_trusted_cost")
+                    continue
+            elif soft_trust_be:
+                st["provisional_soft_trust"] = True
 
             # Loss → BE (rising through): arm recovery trail, do not sell yet.
             self._maybe_recovery_arm_from_loss(
@@ -5242,14 +8878,9 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 continue
             if st.get("time_stop_due") and (be is None or mark < be):
-                cut_floor_early = self._cut_loss_floor_price(venue, asset)
-                if not (
-                    cut_floor_early is not None
-                    and self._cut_loss_eligible(st, venue=venue, base=asset)
-                    and mark <= cut_floor_early
-                ):
-                    self._bump_skip("time_stop_below_be")
-                    continue
+                # Aged + underwater: do NOT bail — fall through to uw_recycle /
+                # early-cut / soft cut so capital can free within the sleeve.
+                self._bump_skip("time_stop_below_be")
 
             if st.get("soft_armed") and not st.get("triggered"):
                 armed_now.append(f"{venue}:{asset}")
@@ -5261,6 +8892,33 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             soft_arm_now = Decimal(str(st.get("soft_arm") or self._soft_arm_floor))
             gain_now = Decimal(str(st.get("gain") or 0))
+            harvest_gain_floor = max(
+                self._be_harvest_min_gain * self._alphai_be_harvest_gain_scale(asset),
+                self._harvest_fee_floor(venue),
+            )
+            exit_urgency = self._alphai_exit_urgency(asset)
+            # AlphaI hold: when momentum goes flat/down after a peak, harvest BE+
+            # sooner (policy: hold with momentum, exit when peak is past).
+            alphai_peak_past = False
+            peak_px = Decimal(str(st.get("peak") or 0) or 0)
+            sleeve_hold = self._alphai_sleeve_priority_buy(asset)
+            # Sleeve winners need a clearer peak fade (≥0.5%) before early harvest;
+            # mild 0.3% dips were clipping BNB/ADA under macro.
+            peak_fade_mult = Decimal("0.995") if sleeve_hold else Decimal("0.997")
+            if (
+                not exit_urgency
+                and be is not None
+                and mark >= be
+                and gain_now > 0
+                and peak_px > 0
+                and mark <= peak_px * peak_fade_mult
+                and self._momentum_enabled
+                and self._momentum_flat_or_down(symbol)
+            ):
+                # Peak-fade harvest for any BE+ bag (winners we already hold).
+                alphai_peak_past = True
+                if not sleeve_hold:
+                    harvest_gain_floor = harvest_gain_floor * Decimal("0.70")
             early_floor = self._early_cut_loss_floor_price(venue, asset)
             if (
                 early_floor is not None
@@ -5272,37 +8930,274 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 and mark <= early_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
+                notional_early = free * mark
+                if self._uw_recycle_sleeve_allows(
+                    notional=notional_early, mark=mark, be=be
+                ):
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_early_cut_loss"
+                    st["sleeve"] = True
+                else:
+                    self._bump_skip("early_cut_sleeve_cap")
+            if not reason and be is not None and mark < be:
+                free_uw = await self._refresh_free(venue, symbol, asset, locked)
+                notional_uw = free_uw * mark
+                plan = self._uw_recycle_plan(
+                    venue=venue,
+                    base=asset,
+                    symbol=symbol,
+                    mark=mark,
+                    be=be,
+                    notional=notional_uw,
                 )
-                reason = "trail_early_cut_loss"
+                if plan is None:
+                    st.pop("uw_recycle_tier", None)
+                    st.pop("uw_recycle_mode", None)
+                if plan is not None:
+                    tier, mode, floor = plan
+                    session_cap = (
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free_uw
+                    )
+                    # AlphaI rotate / avoid: always free the full bag (no partial clip).
+                    full_rotate = str(tier).startswith("avoid_") or str(tier).startswith(
+                        "rotate_"
+                    )
+                    try:
+                        if self._alphai_daytrader_rotate_exit(asset):
+                            full_rotate = True
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if (
+                        (
+                            str(tier).startswith("deadlock_")
+                            or str(tier) in {"mid_flat", "lag_time_partial"}
+                        )
+                        and self._uw_deadlock_partial_enabled
+                        and not full_rotate
+                    ):
+                        # Opportunity-cost: when free cash already covers the
+                        # sleeve clip, still rotate mild-UW / deadlock bags if
+                        # unheld sleeve targets are waiting (else unlock_remaining
+                        # stays 0 and UNI-class bags never clip).
+                        rotate = str(tier) in {"mid_flat", "lag_time_partial"}
+                        if not rotate and str(tier).startswith("deadlock_"):
+                            try:
+                                rotate = bool(self._sleeve_has_unheld_priority())
+                            except Exception:  # noqa: BLE001
+                                rotate = False
+                        sell_qty = self._uw_deadlock_partial_sell_qty(
+                            free_qty=free_uw,
+                            mark=mark,
+                            be=be,
+                            session_cap=session_cap,
+                            rotate_inventory=rotate,
+                        )
+                        if sell_qty <= 0:
+                            self._bump_skip("uw_deadlock_partial_budget")
+                            sell_qty = _ZERO
+                            plan = None
+                            st.pop("uw_recycle_tier", None)
+                            st.pop("uw_recycle_mode", None)
+                        notional_uw = sell_qty * mark
+                    else:
+                        sell_qty = min(free_uw, session_cap)
+                        if sell_qty <= 0 and locked > 0:
+                            # Ghost locks (NEAR-class): cancel then retry free.
+                            free_uw = await self._refresh_free(
+                                venue, symbol, asset, locked
+                            )
+                            sell_qty = min(
+                                free_uw, session_cap if session_cap > 0 else free_uw
+                            )
+                    if sell_qty > 0:
+                        notional_uw = sell_qty * mark
+                    if plan is not None and sell_qty <= 0:
+                        self._bump_skip("uw_recycle_zero_qty")
+                        st.pop("uw_recycle_tier", None)
+                        st.pop("uw_recycle_mode", None)
+                        plan = None
+                    if plan is not None and self._uw_recycle_sleeve_allows(
+                        notional=notional_uw, mark=mark, be=be
+                    ):
+                        reason = "trail_uw_recycle"
+                        self._uw_recycle_floors[trail_key] = floor
+                        st["uw_recycle_tier"] = tier
+                        st["uw_recycle_mode"] = mode
+                        st["sleeve"] = True  # attribute realized PnL to sleeve loss cap
+                        if (
+                            not full_rotate
+                            and (
+                                str(tier).startswith("deadlock_")
+                                or str(tier) in {
+                                    "mid_flat",
+                                    "lag_time_partial",
+                                }
+                            )
+                        ):
+                            # Reserve budget so later bags this pass do not over-unlock.
+                            self._uw_deadlock_unlock_remaining_eur = max(
+                                _ZERO,
+                                self._uw_deadlock_unlock_remaining_eur - notional_uw,
+                            )
+                    elif plan is not None:
+                        self._bump_skip("uw_recycle_sleeve_cap")
+                        sell_qty = _ZERO
+                        st.pop("uw_recycle_tier", None)
+                        st.pop("uw_recycle_mode", None)
             cut_floor = self._cut_loss_floor_price(venue, asset)
             if (
                 not reason
                 and cut_floor is not None
                 and self._cut_loss_eligible(st, venue=venue, base=asset)
+                and be is not None
                 and mark <= cut_floor
             ):
                 free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_cut_loss"
-            elif (
-                not reason
-                and be is not None
-                and self._momentum_enabled
-                and self._momentum_down(symbol)
-                and not st.get("momentum_be_exit_done")
+                notional_cut = free * mark
+                if self._uw_recycle_sleeve_allows(
+                    notional=notional_cut, mark=mark, be=be
+                ):
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_cut_loss"
+                    st["sleeve"] = True
+                else:
+                    self._bump_skip("cut_loss_sleeve_cap")
+            # Provisional cost: never BE+ harvest — only sleeve loss exits.
+            if (
+                provisional_cost
+                and not soft_trust_be
+                and reason
+                not in {
+                    "trail_early_cut_loss",
+                    "trail_uw_recycle",
+                    "trail_cut_loss",
+                }
             ):
-                mom_target = self._momentum_exit_target_price(venue, asset)
-                if mom_target is not None and mark >= be:
+                if be is not None and mark < be:
+                    self._bump_skip("uw_recycle_provisional_pending")
+                continue
+            # BE+ harvest chain must not run (or fall through to continue)
+            # after sleeve-loss exits already set reason — that discarded
+            # trail_uw_recycle / cut-loss sells for underwater AlphaI rotates.
+            if not reason:
+                if (
+                    be is not None
+                    and self._momentum_enabled
+                    and self._momentum_down(symbol)
+                    and not st.get("momentum_be_exit_done")
+                ):
+                    mom_target = self._momentum_exit_target_price(venue, asset)
+                    if mom_target is not None and mark >= be:
+                        free = await self._refresh_free(venue, symbol, asset, locked)
+                        sell_qty = min(
+                            free,
+                            self._session_qty(venue, asset)
+                            if self._trail_session_only
+                            else free,
+                        )
+                        reason = "trail_momentum_be_exit"
+                        limit_px = mom_target if mark >= mom_target else None
+                elif (
+                    st.get("soft_armed")
+                    and not st.get("recovery_armed")
+                    and self._trail_partial_enabled
+                    and self._soft_partial > 0
+                    and not st.get("soft_partial_done")
+                    and gain_now >= soft_arm_now
+                ):
+                    # Retry every cycle until a soft partial lands (not only the
+                    # arming tick — large bags used to fail max-notional once and
+                    # never retry because newly_soft is one-shot).
+                    # soft_partial=0 → skip; full bag waits for soft/hard drawdown exit.
+                    # Recovery-from-loss bags never soft-partial at BE; they ride for
+                    # profit and only floor-exit on pullback to BE / trail drawdown.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
+                        )
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
+                    sell_qty = self._trail_partial_qty(
+                        cap=cap,
+                        partial_pct=self._soft_partial,
+                        mark=mark,
+                        notional_floor=partial_min,
+                    )
+                    reason = "trail_soft_partial"
+                elif (
+                    st.get("hard_armed")
+                    and self._trail_partial_enabled
+                    and not st.get("hard_partial_done")
+                ):
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
+                        )
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
+                    sell_qty = self._trail_partial_qty(
+                        cap=cap,
+                        partial_pct=self._hard_partial,
+                        mark=mark,
+                        notional_floor=partial_min,
+                    )
+                    reason = "trail_hard_partial"
+                elif (
+                    self._consolidate_duplicates
+                    and self._is_consolidation_secondary(venue, asset)
+                    and be is not None
+                    and mark >= be
+                    and not st.get("consolidation_wind_down_done")
+                ):
+                    # Wind down OKX duplicate at BE+; Bitvavo remains primary bag.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    sell_qty = cap
+                    reason = "trail_consolidation_wind_down"
+                elif st.get("triggered"):
                     free = await self._refresh_free(venue, symbol, asset, locked)
                     sell_qty = min(
                         free,
@@ -5310,214 +9205,161 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         if self._trail_session_only
                         else free,
                     )
-                    reason = "trail_momentum_be_exit"
-                    limit_px = mom_target if mark >= mom_target else None
-            elif (
-                st.get("soft_armed")
-                and not st.get("recovery_armed")
-                and self._trail_partial_enabled
-                and self._soft_partial > 0
-                and not st.get("soft_partial_done")
-                and gain_now >= soft_arm_now
-            ):
-                # Retry every cycle until a soft partial lands (not only the
-                # arming tick — large bags used to fail max-notional once and
-                # never retry because newly_soft is one-shot).
-                # soft_partial=0 → skip; full bag waits for soft/hard drawdown exit.
-                # Recovery-from-loss bags never soft-partial at BE; they ride for
-                # profit and only floor-exit on pullback to BE / trail drawdown.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                sell_qty = self._trail_partial_qty(
-                    cap=cap,
-                    partial_pct=self._soft_partial,
-                    mark=mark,
-                    notional_floor=partial_min,
-                )
-                reason = "trail_soft_partial"
-            elif (
-                st.get("hard_armed")
-                and self._trail_partial_enabled
-                and not st.get("hard_partial_done")
-            ):
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                sell_qty = self._trail_partial_qty(
-                    cap=cap,
-                    partial_pct=self._hard_partial,
-                    mark=mark,
-                    notional_floor=partial_min,
-                )
-                reason = "trail_hard_partial"
-            elif (
-                self._consolidate_duplicates
-                and self._is_consolidation_secondary(venue, asset)
-                and be is not None
-                and mark >= be
-                and not st.get("consolidation_wind_down_done")
-            ):
-                # Wind down OKX duplicate at BE+; Bitvavo remains primary bag.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                sell_qty = cap
-                reason = "trail_consolidation_wind_down"
-            elif st.get("triggered"):
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_drawdown"
-            elif (
-                be is not None
-                and mark >= be
-                and self._be_harvest_partial > 0
-                and not self._be_harvest_already_done(st)
-                and gain_now
-                >= (
-                    min(self._be_harvest_min_gain, Decimal("0.00015"))
-                    if st.get("recovery_armed")
-                    else self._be_harvest_min_gain
-                )
-                and not self._soft_partial_would_fire(
-                    st, gain_now=gain_now, soft_arm_now=soft_arm_now
-                )
-            ):
-                # Fee-positive harvest at BE+ (recovery bags, small MTM wins).
-                # Recovery bags use a slightly lower min-gain so underwater→BE+
-                # recycles capital before the next dip.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                sell_qty = self._trail_partial_qty(
-                    cap=cap,
-                    partial_pct=self._be_harvest_partial,
-                    mark=mark,
-                    notional_floor=partial_min,
-                )
-                reason = "trail_be_harvest"
-            elif (
-                self._exit_engine_enabled
-                and self._exit_soft_armed_work
-                and st.get("soft_armed")
-                and be is not None
-                and mark >= be
-                and gain_now >= self._be_harvest_min_gain
-                # B3: let soft partial / runner window run first; then work remainder.
-                and (
-                    self._soft_partial <= 0
-                    or st.get("soft_partial_done")
-                )
-            ):
-                # D: keep working BE+ inventory at touch while soft-armed
-                # (do not wait for drawdown — spikes die in seconds).
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                cap = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                maker_min = Decimal(
-                    str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
-                )
-                partial_min = max(
-                    _MIN_LIVE_NOTIONAL,
-                    maker_min * self._trail_partial_min_frac,
-                )
-                if self._exit_soft_armed_partial >= Decimal("1"):
-                    sell_qty = cap
-                else:
+                    reason = "trail_drawdown"
+                elif (
+                    be is not None
+                    and mark >= be
+                    and self._be_harvest_partial > 0
+                    and not self._be_harvest_already_done(st)
+                    and gain_now
+                    >= (
+                        min(harvest_gain_floor, Decimal("0.00015"))
+                        if st.get("recovery_armed")
+                        else harvest_gain_floor
+                    )
+                    and not self._soft_partial_would_fire(
+                        st, gain_now=gain_now, soft_arm_now=soft_arm_now
+                    )
+                ):
+                    # Fee-positive harvest at BE+ (recovery bags, small MTM wins).
+                    # Recovery bags use a slightly lower min-gain so underwater→BE+
+                    # recycles capital before the next dip.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
+                        )
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
                     sell_qty = self._trail_partial_qty(
                         cap=cap,
-                        partial_pct=self._exit_soft_armed_partial,
+                        partial_pct=self._be_harvest_partial,
                         mark=mark,
                         notional_floor=partial_min,
                     )
-                reason = "trail_exit_work"
-            elif (
-                st.get("recovery_armed")
-                and be is not None
-                and Decimal(str(st.get("peak") or 0)) > be
-                and mark <= be
-            ):
-                # Grew above BE after recovery-arm, then fell back to BE → exit.
-                free = await self._refresh_free(venue, symbol, asset, locked)
-                sell_qty = min(
-                    free,
-                    self._session_qty(venue, asset)
-                    if self._trail_session_only
-                    else free,
-                )
-                reason = "trail_recovery_be"
-                limit_px = max(be, mark * Decimal("0.999"))
-                post_only = True
-            else:
-                # B3: no exit this tick → maybe scale into soft-armed BE+ winner.
-                if not st.get("triggered"):
-                    add = await self._maybe_submit_winner_add(
+                    reason = "trail_be_harvest"
+                    self._record_desk_early_harvest(
                         venue=venue,
                         base=asset,
-                        symbol=symbol,
                         mark=mark,
+                        gain_now=gain_now,
+                        peak_px=peak_px,
                         be=be,
-                        st=st,
+                        soft_arm=soft_arm_now,
+                        sell_qty=sell_qty,
+                        reason=reason,
                     )
-                    if add is not None:
-                        triggered.append(
-                            {
-                                "venue": venue,
-                                "base": asset,
-                                "reason": "winner_add",
-                                "detail": add,
-                            }
+                elif (
+                    self._exit_engine_enabled
+                    and self._exit_soft_armed_work
+                    and st.get("soft_armed")
+                    and be is not None
+                    and mark >= be
+                    and gain_now
+                    >= (
+                        harvest_gain_floor * Decimal("0.85")
+                        if (exit_urgency or alphai_peak_past)
+                        else harvest_gain_floor
+                    )
+                    # B3: let soft partial / runner window run first; then work remainder.
+                    and (
+                        self._soft_partial <= 0
+                        or st.get("soft_partial_done")
+                        or exit_urgency
+                        or alphai_peak_past
+                    )
+                ):
+                    # D: keep working BE+ inventory at touch while soft-armed
+                    # (do not wait for drawdown — spikes die in seconds).
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    cap = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    maker_min = Decimal(
+                        str(
+                            getattr(
+                                self._settings, "paper_maker_min_notional_eur", 10
+                            )
+                            or 10
                         )
-                continue
+                    )
+                    partial_min = max(
+                        _MIN_LIVE_NOTIONAL,
+                        maker_min * self._trail_partial_min_frac,
+                    )
+                    if self._exit_soft_armed_partial >= Decimal("1"):
+                        sell_qty = cap
+                    else:
+                        sell_qty = self._trail_partial_qty(
+                            cap=cap,
+                            partial_pct=self._exit_soft_armed_partial,
+                            mark=mark,
+                            notional_floor=partial_min,
+                        )
+                    reason = "trail_exit_work"
+                elif (
+                    st.get("recovery_armed")
+                    and be is not None
+                    and Decimal(str(st.get("peak") or 0)) > be
+                    and mark <= be
+                ):
+                    # Grew above BE after recovery-arm, then fell back to BE → exit.
+                    free = await self._refresh_free(venue, symbol, asset, locked)
+                    sell_qty = min(
+                        free,
+                        self._session_qty(venue, asset)
+                        if self._trail_session_only
+                        else free,
+                    )
+                    reason = "trail_recovery_be"
+                    limit_px = max(be, mark * Decimal("0.999"))
+                    post_only = True
+                else:
+                    # B3: no exit this tick → maybe scale into soft-armed BE+ winner.
+                    if not st.get("triggered"):
+                        add = await self._maybe_submit_winner_add(
+                            venue=venue,
+                            base=asset,
+                            symbol=symbol,
+                            mark=mark,
+                            be=be,
+                            st=st,
+                        )
+                        if add is not None:
+                            triggered.append(
+                                {
+                                    "venue": venue,
+                                    "base": asset,
+                                    "reason": "winner_add",
+                                    "detail": add,
+                                }
+                            )
+                    continue
 
-            if self._defer_harvest_while_rising(
-                symbol, mark=mark, be=be, st=st, reason=reason
+            # Sleeve priority: keep deferring while rising even after mild peak-fade
+            # so macro BE harvest does not clip rank-1/2 winners mid-move.
+            peak_blocks_defer = alphai_peak_past and not sleeve_hold
+            if (
+                not exit_urgency
+                and not peak_blocks_defer
+                and self._defer_harvest_while_rising(
+                    symbol, mark=mark, be=be, st=st, reason=reason
+                )
             ):
                 self._bump_skip("trail_hold_rising")
                 continue
@@ -5552,15 +9394,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 exit_px, exit_post_only, quote_reason = await self._cut_loss_exit_quote(
                     venue, asset, mark, floor=cut_floor
                 )
+            elif reason == "trail_uw_recycle":
+                floor = self._uw_recycle_floors.get(trail_key)
+                mode = str(st.get("uw_recycle_mode") or "band")
+                if floor is None:
+                    self._bump_skip("uw_recycle_no_floor")
+                    continue
+                exit_px, exit_post_only, quote_reason = await self._uw_recycle_exit_quote(
+                    venue, asset, mark, floor=floor, mode=mode
+                )
             else:
-                # D: aggressive touch quotes for all profitable trail exits.
-                force_taker = self._should_force_taker_exit(venue, asset)
+                # D: aggressive touch quotes for urgent trail exits; patient
+                # profit-taking rests at the ask as maker (fee-aware).
+                force_taker = self._should_force_taker_exit(venue, asset, reason)
                 exit_px, exit_post_only, quote_reason = await self._profitable_exit_quote(
                     venue,
                     asset,
                     mark,
                     aggressive=self._exit_engine_enabled,
                     force_taker=force_taker,
+                    patient=self._is_patient_exit(reason),
                 )
             if exit_px is None:
                 self._bump_skip(f"exit_quote_{quote_reason}")
@@ -5572,7 +9425,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     exit_px = max(exit_px, mom_target)
                     limit_px = max(limit_px or _ZERO, mom_target)
 
-            if reason not in {"trail_cut_loss", "trail_early_cut_loss"}:
+            if reason not in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
                 ok_sell, gate_reason, be = self._sell_allowed_at(venue, asset, exit_px)
                 if not ok_sell:
                     self._bump_skip(gate_reason)
@@ -5586,7 +9439,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
 
             if limit_px is None or limit_px < exit_px:
                 limit_px = exit_px
-            if reason in {"trail_cut_loss", "trail_early_cut_loss"}:
+            if reason in {"trail_cut_loss", "trail_early_cut_loss", "trail_uw_recycle"}:
                 limit_px = exit_px
                 post_only = exit_post_only
             elif reason != "trail_recovery_be":
@@ -5639,18 +9492,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 self._bump_exit_stat(self._exit_reject_counts, f"reason:{reason}")
                 if quote_reason in {"rest_touch_maker", "rest_maker_be"}:
                     self._bump_exit_maker_fail(venue, asset)
-                if reason != "trail_be_harvest":
-                    self._clear_partial_done(st, reason)
+                # Always clear — including BE harvest — so stale/reject can retry.
+                self._clear_partial_done(st, reason)
                 self._bump_skip(f"{reason}_reject")
             elif reason == "trail_be_harvest":
-                # Lock after submit — resting fills must not re-trigger 35% spam.
-                self._set_partial_done(st, reason)
                 status_l = str(result.status.value).lower()
                 if status_l in {"filled", "partially_filled"}:
+                    # Lock only on real fill (pending/resting must remain retryable).
+                    self._set_partial_done(st, reason)
                     self._clear_exit_maker_fail(venue, asset)
                     self._bump_exit_stat(self._exit_fill_counts, quote_reason)
                     self._bump_exit_stat(self._exit_fill_counts, f"reason:{reason}")
                 else:
+                    # Resting/pending: do not lock harvest; maker-fail path can force taker.
                     self._bump_exit_stat(self._exit_pending_counts, quote_reason)
                     self._bump_exit_stat(self._exit_pending_counts, f"reason:{reason}")
                 logger.info(
@@ -5689,6 +9543,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     "trail_consolidation_wind_down",
                     "trail_cut_loss",
                     "trail_early_cut_loss",
+                    "trail_uw_recycle",
                     "trail_momentum_be_exit",
                     "time_stop_breakeven",
                 }:
@@ -5697,6 +9552,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     if rem_free * mark < notional_floor:
                         self._trail.pop(trail_key, None)
                         self._position_opened_mono.pop(trail_key, None)
+                        self._uw_recycle_floors.pop(trail_key, None)
                     else:
                         st["triggered"] = False
             else:
@@ -5864,6 +9720,10 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         strategy: str = "",
         order_type: OrderType = OrderType.LIMIT,
     ) -> ExecutionResult:
+        try:
+            self.refresh_capital_playbook()
+        except Exception:  # noqa: BLE001
+            logger.exception("CAPITAL_PLAYBOOK_REFRESH_FAILED")
         meta = dict(order_request.metadata or {})
         post_only = bool(meta.get("post_only"))
         if post_only and not self._live_maker:
@@ -5926,21 +9786,106 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             )
         if (
             side_is_buy
+            and self._velocity_sleeve_eur > 0
+            and not meta.get("dust_top_up")
+            and not self._is_long_hold(base)
+        ):
+            try:
+                locked = Decimal(
+                    str(self._mtm_summary().get("micro_locked_notional_eur") or 0)
+                )
+            except Exception:  # noqa: BLE001
+                locked = _ZERO
+            try:
+                px = Decimal(str(order_request.price or 0))
+                qty = Decimal(str(order_request.quantity or 0))
+                order_notional = px * qty if px > 0 and qty > 0 else _ZERO
+            except Exception:  # noqa: BLE001
+                order_notional = _ZERO
+            headroom = self._velocity_sleeve_eur - locked
+            if headroom <= 0 or (
+                order_notional > 0 and order_notional > headroom + Decimal("1")
+            ):
+                self._bump_skip("sleeve_size_full")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="SLEEVE_SIZE_FULL",
+                    message=(
+                        f"satellite sleeve full: micro locked €{locked} "
+                        f"/ sleeve €{self._velocity_sleeve_eur} "
+                        f"(core vault €{self._core_eur} untouched)"
+                    ),
+                )
+        if (
+            side_is_buy
+            and self._alphai_macro_active
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+        ):
+            allow_bullish = bool(
+                getattr(self, "_alphai_macro_allow_bullish", True)
+                and getattr(self._settings, "alphai_macro_allow_bullish_buys", True)
+            )
+            if allow_bullish:
+                if not self._alphai_bullish_buy(base):
+                    self._bump_skip("alphai_macro_block")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ALPHAI_MACRO_BLOCK",
+                        message=(
+                            "AlphaI macro caution — only bullish/watch "
+                            f"(or ring-fallback focus) bases allowed (not {base})"
+                        ),
+                    )
+                meta["alphai_macro_bullish_override"] = True
+                if self._alphai_ring_fallback_active():
+                    meta["alphai_ring_fallback"] = True
+            else:
+                self._bump_skip("alphai_macro_block")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_MACRO_BLOCK",
+                    message="AlphaI macro reduce-only blocks all new buys",
+                )
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and self._sleeve_has_unheld_priority()
+            and self._any_capital_deadlocked()
+        ):
+            new_base = self._is_new_base_buy(venue, base)
+            if new_base and not self._alphai_sleeve_priority_buy(base):
+                self._bump_skip("capital_deadlock_sleeve_only")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="CAPITAL_DEADLOCK_SLEEVE_ONLY",
+                    message=(
+                        "capital deadlocked in UW vault — only AlphaI rank-1/2 "
+                        f"sleeve new bases allowed (not {base})"
+                    ),
+                )
+        if (
+            side_is_buy
             and self._regime_block_buys
             and self._buys_blocked
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not (
+                self._alphai_bullish_buy(base)
+                and bool(getattr(self._settings, "alphai_macro_allow_bullish_buys", True))
+            )
         ):
             new_base = self._is_new_base_buy(venue, base)
             if self._buys_blocked_new_bases_only:
-                if new_base:
+                if new_base and not self._alphai_sleeve_priority_buy(base):
                     self._bump_skip("regime_block_buys")
                     return await self._reject_before_live(
                         order_request,
                         reason="REGIME_BLOCK_BUYS_NEW",
                         message=(
                             "new-base buys blocked while underwater bags pile up "
-                            "(adds to existing still allowed)"
+                            "(AlphaI rank-1/2 sleeve and adds still allowed)"
                         ),
                     )
             else:
@@ -6033,6 +9978,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
             and not meta.get("trail_take_profit")
+            and not self._alphai_idle_deploy_allowed(venue, base)
         ):
             self._bump_skip("underwater_cross_venue_block")
             return await self._reject_before_live(
@@ -6051,7 +9997,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("trail_take_profit")
         ):
             self._refresh_buy_quality_circuit_breaker()
-            if self._buy_quality_paused():
+            if self._buy_quality_paused() and not self._alphai_bullish_buy(base):
                 self._bump_skip("buy_quality_pause")
                 return await self._reject_before_live(
                     order_request,
@@ -6082,6 +10028,123 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
         if (
             side_is_buy
+            and self._alphai_blocks_base(base)
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+        ):
+            self._bump_skip("alphai_news_block")
+            detail = self._alphai_blocked_detail.get(base.upper(), "")
+            self._alphai_attribution.record(
+                AlphaIAttributionEvent(
+                    kind="blocked_buy",
+                    base=base,
+                    venue=venue,
+                    estimated_net_delta_eur=_ZERO,
+                    baseline_net_eur=_ZERO,
+                    alphai_net_eur=_ZERO,
+                    reasons=("alphai_news_block", detail) if detail else ("alphai_news_block",),
+                )
+            )
+            return await self._reject_before_live(
+                order_request,
+                reason="ALPHAI_NEWS_BLOCK",
+                message=f"AlphaI bearish headline blocks new {base} buys{': ' + detail if detail else ''}",
+            )
+        sig = self._alphai_signals
+        if (
+            side_is_buy
+            and sig is not None
+            and hasattr(sig, "avoid_bases")
+            and base.upper() in sig.avoid_bases
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+            and self._is_new_base_buy(venue, base)
+        ):
+            self._bump_skip("alphai_avoid_base")
+            return await self._reject_before_live(
+                order_request,
+                reason="ALPHAI_AVOID_BASE",
+                message=f"AlphaI daily avoid list blocks new {base} buys",
+            )
+        if (
+            side_is_buy
+            and bool(getattr(self._settings, "alphai_require_bullish_new_buys", False))
+            and not meta.get("dust_top_up")
+            and not meta.get("trail_take_profit")
+            and self._is_new_base_buy(venue, base)
+        ):
+            sig_now = self._alphai_signals
+            allowed = self._alphai_bullish_buy(base)
+            if sig_now is None:
+                allowed = False
+            tape_only = False
+            if allowed and sig_now is not None and hasattr(sig_now, "is_tape_confirmed"):
+                try:
+                    tape_only = bool(sig_now.is_tape_confirmed(base))
+                except Exception:  # noqa: BLE001
+                    tape_only = False
+            if tape_only:
+                # Tape leaders: per-venue slot cap + no macro/avoid — else reject.
+                if self._tape_confirmed_buy(venue, base):
+                    meta["tape_confirmed_buy"] = True
+                    self._tape_entry_bases.add(str(base).upper())
+                    self._bump_skip("tape_confirmed_entry")
+                else:
+                    self._bump_skip("tape_slot_blocked")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="TAPE_SLOT_BLOCKED",
+                        message=(
+                            f"tape leader {base}: per-venue tape slots full "
+                            f"(max {self._tape_max_bases_per_venue}) or tape stale"
+                        ),
+                    )
+            if not allowed:
+                self._bump_skip("alphai_bullish_required")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_BULLISH_REQUIRED",
+                    message=(
+                        f"new {base} buys require AlphaI bullish pick/headline "
+                        "(bearish/neutral names recycle at BE+ only)"
+                    ),
+                )
+        if (
+            side_is_buy
+            and not meta.get("dust_top_up")
+            and not meta.get("ladder_leg")
+            and not meta.get("trail_take_profit")
+            and not meta.get("winner_add")
+            and self._is_new_base_buy(venue, base)
+        ):
+            try:
+                mark_now = self._portfolio.state.mark_prices.get(symbol)
+            except Exception:  # noqa: BLE001
+                mark_now = None
+            block = self._loss_exit_block(venue, base, mark_now)
+            if block:
+                self._bump_skip("loss_exit_cooldown")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="LOSS_EXIT_COOLDOWN",
+                    message=f"{base} on {venue}: {block}",
+                )
+            try:
+                route_notional = Decimal(str(order_request.price or 0)) * Decimal(
+                    str(order_request.quantity or 0)
+                )
+            except Exception:  # noqa: BLE001
+                route_notional = _ZERO
+            route = self._fee_route_block(venue, base, route_notional)
+            if route:
+                self._bump_skip("fee_route_preferred_venue")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="FEE_ROUTE_PREFERRED_VENUE",
+                    message=f"{base} on {venue}: {route}",
+                )
+        if (
+            side_is_buy
             and self._new_buy_focus_only
             and self._focus_bases
             and self._is_new_base_buy(venue, base)
@@ -6094,7 +10157,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             relax = self._low_util_relax_focus and self._ring_soft_momentum_eligible(
                 venue
             )
-            if base.upper() not in self._focus_bases and not relax:
+            bullish_buy = self._alphai_bullish_buy(base)
+            if (
+                base.upper() not in self._focus_bases
+                and not relax
+                and not bullish_buy
+            ):
                 self._bump_skip("focus_base_required")
                 return await self._reject_before_live(
                     order_request,
@@ -6114,9 +10182,19 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         ):
             # New crypto only: require mark momentum + history (no cold/flat slip-ins).
             # Ring underfill uses a softer floor but still blocks flat/falling marks.
-            mom_floor = self._momentum_floor_for_buy(venue)
+            mom_floor = self._momentum_floor_for_buy(venue, base)
             ring_relaxed = self._ring_soft_momentum_eligible(venue)
-            if self._corr_sector_blocks_new_buy(base):
+            tape_buy = bool(meta.get("tape_confirmed_buy"))
+            bullish_buy = self._alphai_bullish_buy(base) or tape_buy
+            strong_bullish = self._alphai_strong_bullish_buy(base)
+            # Velocity scale-up: for AlphaI strong bullish picks we allow missing
+            # momentum-short history (require_history relax) to avoid "momentum_block"
+            # dead-zones while marks warm up. All risk/never-loss gates remain unchanged.
+            # Also allow when ring is relaxed (active book thin): this is the
+            # safest time to tolerate unknown momentum.
+            momentum_require_history = not (strong_bullish or ring_relaxed)
+            momentum_allow_unknown_short = bool(strong_bullish or ring_relaxed)
+            if self._corr_sector_blocks_new_buy(base) and not bullish_buy:
                 self._bump_skip("corr_sector_momentum_block")
                 return await self._reject_before_live(
                     order_request,
@@ -6126,11 +10204,54 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"bases flat/down ≥ {self._corr_sector_momentum_block})"
                     ),
                 )
-            if not self._entry_momentum_ok(
+            momentum_ok = self._entry_momentum_ok(
                 symbol,
                 min_return=mom_floor,
-                low_util=ring_relaxed,
+                low_util=ring_relaxed or bullish_buy,
+                require_history=momentum_require_history,
+                allow_unknown_short=momentum_allow_unknown_short,
+            )
+            if not momentum_ok and bullish_buy:
+                momentum_ok = self._entry_momentum_ok(
+                    symbol,
+                    min_return=mom_floor * Decimal("0.5"),
+                    low_util=True,
+                    require_history=momentum_require_history,
+                    allow_unknown_short=momentum_allow_unknown_short,
+                )
+            if not momentum_ok and strong_bullish and not self._momentum_down(symbol):
+                momentum_ok = True
+            # Rank-1/2 sleeve: same soft pass as strong bullish when tape is not
+            # actively falling — ADVERSE rising-N was blocking all sleeve fills.
+            if (
+                not momentum_ok
+                and self._alphai_sleeve_priority_buy(base)
+                and not self._momentum_down(symbol)
             ):
+                momentum_ok = True
+            # Deploy-target sleeve under empty ring: tolerate flat tape (not falling).
+            if (
+                not momentum_ok
+                and self._ring_needs_deploy(venue)
+                and self._alphai_sleeve_priority_buy(base)
+                and not self._momentum_down(symbol)
+            ):
+                short = self._series_for(symbol).momentum_return_last(
+                    max(2, self._entry_short_momentum_samples // 2)
+                )
+                if short is None or short >= (self._entry_short_momentum_min * Decimal("0.25")):
+                    momentum_ok = True
+                    meta["sleeve_momentum_soft"] = True
+            # Tape leader (24h RS confirmed): same soft pass — block only when the
+            # intraday tape is actively falling or short momentum is negative.
+            if not momentum_ok and tape_buy and not self._momentum_down(symbol):
+                short = self._series_for(symbol).momentum_return_last(
+                    max(2, self._entry_short_momentum_samples // 2)
+                )
+                if short is None or short >= 0:
+                    momentum_ok = True
+                    meta["tape_momentum_soft"] = True
+            if not momentum_ok:
                 self._bump_skip("momentum_block")
                 return await self._reject_before_live(
                     order_request,
@@ -6139,9 +10260,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"new base {base} needs entry momentum "
                         f"(floor={float(mom_floor * 100):.2f}%"
                         f", short≥{float(self._entry_short_momentum_min * 100):.2f}%"
-                        f"{'; low-util boost' if ring_relaxed else ''})"
+                        f"{'; low-util boost' if ring_relaxed else ''}"
+                        f"{'; alphai bullish' if bullish_buy else ''})"
                     ),
                 )
+            if bullish_buy:
+                meta["alphai_bullish_buy"] = True
+            if strong_bullish:
+                meta["alphai_strong_bullish_buy"] = True
 
         if (
             side_is_buy
@@ -6153,13 +10279,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not meta.get("winner_add")
         ):
             pre_rec = str(meta.get("entry_quality_recommendation") or "")
+            bullish_buy = self._alphai_bullish_buy(base)
             if pre_rec == EntryQualityRecommendation.REJECT.value:
-                self._bump_skip("entry_quality_reject")
-                return await self._reject_before_live(
-                    order_request,
-                    reason="ENTRY_QUALITY_REJECT",
-                    message=str(meta.get("entry_quality_reject_reason") or "entry_quality"),
+                reason_key = str(meta.get("entry_quality_reject_reason") or "")
+                strong = self._alphai_strong_bullish_buy(base)
+                # Extension_extreme stays a hard reject only when we don't
+                # have strong AlphaI bullish backing.
+                hard_reject = reason_key == "extension_extreme" and not strong
+                soft_ok = (bullish_buy and not hard_reject) or (
+                    strong and reason_key == "continuity_spike"
                 )
+                if not soft_ok:
+                    self._bump_skip("entry_quality_reject")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message=reason_key or "entry_quality",
+                    )
+                meta["entry_quality_multiplier"] = "0.50"
+                order_request = order_request.model_copy(update={"metadata": meta})
+                self._bump_skip("entry_quality_reduced")
             if not pre_rec:
                 assessment = self._assess_entry_quality_buy(
                     symbol=symbol,
@@ -6169,28 +10308,44 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 )
                 self._entry_quality_diagnostics.record(assessment)
                 if assessment.recommendation == EntryQualityRecommendation.REJECT:
-                    self._bump_skip("entry_quality_reject")
                     reason_key = assessment.reject_reason or "entry_quality"
-                    if "headroom" in reason_key:
-                        self._bump_skip("headroom_reject")
-                    if "extension" in reason_key:
-                        self._bump_skip("extension_reject")
-                    if "continuity" in reason_key:
-                        self._bump_skip("continuity_reject")
-                    if assessment.headroom_pct is None:
-                        self._bump_skip("headroom_unknown")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="ENTRY_QUALITY_REJECT",
-                        message=(
-                            f"entry quality {assessment.score} "
-                            f"headroom={assessment.headroom_pct} "
-                            f"ext={assessment.extension_pct} "
-                            f"req={assessment.required_move_pct} "
-                            f"({reason_key})"
-                        ),
-                    )
-                if assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
+                    strong = self._alphai_strong_bullish_buy(base)
+                    # Only extension_extreme stays hard; continuity_spike soft for strong AlphaI.
+                    hard_reject = reason_key == "extension_extreme" and not strong
+                    soft_continuity = reason_key == "continuity_spike" and strong
+                    if (bullish_buy and not hard_reject) or soft_continuity:
+                        meta["entry_quality_multiplier"] = str(
+                            min(
+                                assessment.recommended_size_multiplier or Decimal("0.5"),
+                                Decimal("0.50"),
+                            )
+                        )
+                        order_request = order_request.model_copy(
+                            update={"metadata": meta}
+                        )
+                        self._bump_skip("entry_quality_reduced")
+                    else:
+                        self._bump_skip("entry_quality_reject")
+                        if "headroom" in reason_key:
+                            self._bump_skip("headroom_reject")
+                        if "extension" in reason_key:
+                            self._bump_skip("extension_reject")
+                        if "continuity" in reason_key:
+                            self._bump_skip("continuity_reject")
+                        if assessment.headroom_pct is None:
+                            self._bump_skip("headroom_unknown")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="ENTRY_QUALITY_REJECT",
+                            message=(
+                                f"entry quality {assessment.score} "
+                                f"headroom={assessment.headroom_pct} "
+                                f"ext={assessment.extension_pct} "
+                                f"req={assessment.required_move_pct} "
+                                f"({reason_key})"
+                            ),
+                        )
+                elif assessment.recommendation == EntryQualityRecommendation.REDUCED_SIZE:
                     self._bump_skip("entry_quality_reduced")
                 else:
                     self._bump_skip("entry_quality_normal")
@@ -6207,23 +10362,172 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 order_request, reason="BAD_SIZE", message="quantity/price required"
             )
         if side_is_buy:
+            feat_timing = str(meta.get("alphai_entry_timing") or "")
+            if not feat_timing:
+                try:
+                    feat_timing = self._alphai_feature_for(base).entry_timing
+                except Exception:  # noqa: BLE001
+                    feat_timing = ""
+            # Unified intraday AND-gate (AlphaI × fresh × adverse × momentum).
+            if (
+                self._alphai_intraday_gate_enabled
+                and not meta.get("dust_top_up")
+                and not meta.get("ladder_leg")
+                and not meta.get("trail_take_profit")
+            ):
+                adv_raw = meta.get("adverse_selection_score")
+                adv_sc: Decimal | None = None
+                if adv_raw is not None:
+                    try:
+                        adv_sc = Decimal(str(adv_raw))
+                    except Exception:  # noqa: BLE001
+                        adv_sc = None
+                action, gate_mult, gate_reasons = self._alphai_intraday_entry_gate(
+                    base, symbol, adverse_score=adv_sc, meta=meta
+                )
+                meta["alphai_intraday_gate"] = action
+                meta["alphai_intraday_reasons"] = ",".join(gate_reasons)
+                order_request = order_request.model_copy(update={"metadata": meta})
+                if action == "WAIT":
+                    # Sleeve urgency: empty ring + free cash → REDUCE instead of hard WAIT.
+                    # Daytrader: off by default — cash beats unconfirmed pick entries.
+                    sleeve_urgency = False
+                    daytrader = bool(getattr(self, "_alphai_daytrader_enabled", False))
+                    urgency_allowed = (not daytrader) or bool(
+                        getattr(self, "_daytrader_sleeve_urgency_enabled", False)
+                    )
+                    hard_wait_reasons = {
+                        "price_lagging",
+                        "price_confirm_weak",
+                        "pick_conviction_weak",
+                        "momentum_down",
+                        "momentum_not_rising_strict",
+                        "alphai_not_bullish",
+                    }
+                    if urgency_allowed and not hard_wait_reasons.intersection(
+                        gate_reasons
+                    ):
+                        try:
+                            ring_hungry = bool(
+                                self._ring_needs_deploy(venue)
+                                and float(self._venue_budget_remaining(venue)) >= 50.0
+                            )
+                            sleeve_urgency = bool(
+                                ring_hungry and self._alphai_sleeve_priority_buy(base)
+                            )
+                            # High-confirm AlphaI bullish under empty ring: same urgency
+                            # even if structural top-N is occupied by weak held bags.
+                            if (
+                                not sleeve_urgency
+                                and ring_hungry
+                                and self._alphai_bullish_buy(base)
+                            ):
+                                confirm = None
+                                sig = self._alphai_signals
+                                if sig is not None and hasattr(sig, "price_confirm_scale"):
+                                    try:
+                                        confirm = float(sig.price_confirm_scale(base))
+                                    except Exception:  # noqa: BLE001
+                                        confirm = None
+                                min_u = 0.55
+                                if daytrader:
+                                    min_u = float(
+                                        getattr(
+                                            self,
+                                            "_daytrader_sleeve_min_confirm",
+                                            Decimal("0.55"),
+                                        )
+                                        or 0.55
+                                    )
+                                if confirm is None or confirm >= min_u:
+                                    sleeve_urgency = True
+                        except Exception:  # noqa: BLE001
+                            sleeve_urgency = False
+                    if sleeve_urgency:
+                        action = "REDUCE"
+                        gate_mult = min(gate_mult if gate_mult > 0 else _ONE, Decimal("0.55"))
+                        meta["alphai_intraday_gate"] = action
+                        meta["alphai_intraday_sleeve_urgency"] = True
+                        meta["alphai_intraday_size_mult"] = str(gate_mult)
+                        order_request = order_request.model_copy(update={"metadata": meta})
+                        self._bump_skip("alphai_intraday_sleeve_urgency")
+                    else:
+                        self._bump_skip("alphai_intraday_wait")
+                        for reason in gate_reasons:
+                            self._bump_skip(f"intraday_{reason}")
+                        if daytrader and hard_wait_reasons.intersection(gate_reasons):
+                            self._bump_skip("daytrader_entry_wait")
+                        if not self._alphai_intraday_gate_shadow_only:
+                            return await self._reject_before_live(
+                                order_request,
+                                reason="ALPHAI_INTRADAY_WAIT",
+                                message=(
+                                    f"intraday gate WAIT for {base}: "
+                                    + ",".join(gate_reasons)
+                                ),
+                            )
+                elif action == "REDUCE" and gate_mult < _ONE:
+                    meta["alphai_intraday_size_mult"] = str(gate_mult)
+                    order_request = order_request.model_copy(update={"metadata": meta})
+                    if not self._alphai_intraday_gate_shadow_only:
+                        # Applied below together with other size multipliers.
+                        pass
+            if (
+                feat_timing == "WAIT"
+                and not self._alphai_feature_config.shadow_only
+                and self._alphai_feature_config.enabled
+                and not self._alphai_intraday_gate_enabled
+            ):
+                self._bump_skip("alphai_adverse_wait")
+                return await self._reject_before_live(
+                    order_request,
+                    reason="ALPHAI_ADVERSE_WAIT",
+                    message=f"alphai bullish+adverse wait for {base}",
+                )
             mult_raw = meta.get("entry_quality_multiplier")
+            mult = _ONE
             if mult_raw is not None:
                 try:
                     mult = Decimal(str(mult_raw))
                 except Exception:  # noqa: BLE001
                     mult = _ONE
-                if mult < _ONE:
-                    scaled = apply_size_multiplier(qty, mult)
-                    if scaled <= 0:
-                        self._bump_skip("entry_quality_reject")
-                        return await self._reject_before_live(
-                            order_request,
-                            reason="ENTRY_QUALITY_REJECT",
-                            message="entry quality size multiplier zero",
+            gate_mult_raw = meta.get("alphai_intraday_size_mult")
+            if (
+                gate_mult_raw is not None
+                and self._alphai_intraday_gate_enabled
+                and not self._alphai_intraday_gate_shadow_only
+            ):
+                try:
+                    mult = min(mult * Decimal(str(gate_mult_raw)), Decimal("1.50"))
+                    self._bump_skip("alphai_intraday_reduce")
+                except Exception:  # noqa: BLE001
+                    pass
+            alphai_mult = self._alphai_entry_multiplier(base)
+            if alphai_mult != _ONE:
+                mult = min(mult * alphai_mult, Decimal("1.50"))
+                if alphai_mult > _ONE:
+                    self._alphai_attribution.record(
+                        AlphaIAttributionEvent(
+                            kind="size_boost",
+                            base=base,
+                            venue=venue,
+                            estimated_net_delta_eur=_ZERO,
+                            baseline_net_eur=_ZERO,
+                            alphai_net_eur=_ZERO,
+                            reasons=("size_boost",),
                         )
-                    qty = scaled
-                    order_request = order_request.model_copy(update={"quantity": qty})
+                    )
+            if mult != _ONE:
+                scaled = apply_size_multiplier(qty, mult)
+                if scaled <= 0:
+                    self._bump_skip("entry_quality_reject")
+                    return await self._reject_before_live(
+                        order_request,
+                        reason="ENTRY_QUALITY_REJECT",
+                        message="entry quality size multiplier zero",
+                    )
+                qty = scaled
+                order_request = order_request.model_copy(update={"quantity": qty})
         if side_is_buy and post_only:
             px = self._aggressive_buy_price(venue, px, order_book)
             order_request = order_request.model_copy(update={"limit_price": px})
@@ -6234,6 +10538,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             and not self._is_new_base_buy(venue, base)
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
+            and not self._alphai_idle_deploy_allowed(venue, base)
         ):
             be = self._break_even_sell_price(venue, base)
             mark_ref = self._portfolio.state.mark_prices.get(symbol.upper())
@@ -6249,21 +10554,26 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                         f"below break-even {be}"
                     ),
                 )
+        held_anywhere = base.upper() in self._held_alt_bases()
         if (
             side_is_buy
             and self._block_buys_when_holding_base
-            and not self._is_new_base_buy(venue, base)
+            and not meta.get("winner_add")
+            and (
+                not self._is_new_base_buy(venue, base)
+                or held_anywhere
+            )
             and not meta.get("dust_top_up")
             and not meta.get("ladder_leg")
-            and not meta.get("winner_add")
+            and not self._alphai_idle_deploy_allowed(venue, base)
         ):
             self._bump_skip("holding_base_buy_block")
             return await self._reject_before_live(
                 order_request,
                 reason="HOLDING_BASE_BUY_BLOCK",
                 message=(
-                    f"buy blocked: already holding {venue}:{base}; "
-                    "scan other bases with momentum"
+                    f"buy blocked: already holding {base} in portfolio; "
+                    "AlphaI daily policy: no bijkoop"
                 ),
             )
         if (
@@ -6408,10 +10718,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 qty = live_base.quantize(Decimal("0.00000001"))
                 order_request = order_request.model_copy(update={"quantity": qty})
             # Hard floor: NEVER sell below fee-adjusted cost + profit buffer.
-            # Cut-loss exits (new-base stop) may sell below BE when floor is breached.
+            # Cut-loss / uw-recycle exits may sell below BE within a configured floor.
             exit_reason = str(meta.get("exit_reason") or strategy or "")
-            cut_loss_exit = exit_reason in {"trail_cut_loss", "trail_early_cut_loss"}
-            be = self._break_even_sell_price(venue, base)
+            cut_loss_exit = exit_reason in {
+                "trail_cut_loss",
+                "trail_early_cut_loss",
+                "trail_uw_recycle",
+            }
+            # Daytrader / hydration lag: allow provisional unit-cost BE for
+            # aged BE+ harvests and sleeve UW/cut exits (never invent cost).
+            allow_provisional = False
+            if cut_loss_exit and self._unit_cost(venue, base) is not None:
+                allow_provisional = True
+            elif self._provisional_be_exit_allowed(venue, base):
+                allow_provisional = True
+            be = self._break_even_sell_price(
+                venue, base, allow_provisional=allow_provisional
+            )
             if be is None:
                 self._bump_skip("sell_no_trusted_cost")
                 return await self._reject_before_live(
@@ -6423,27 +10746,57 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     ),
                 )
             if cut_loss_exit:
-                floor = self._cut_loss_floor_for_reason(venue, base, exit_reason)
-                if floor is None:
-                    self._bump_skip("cut_loss_not_configured")
-                    return await self._reject_before_live(
-                        order_request,
-                        reason="CUT_LOSS_DISABLED",
-                        message=f"cut-loss not enabled for {venue}:{base}",
-                    )
+                if exit_reason == "trail_uw_recycle":
+                    floor = self._uw_recycle_floors.get(self._lots_key(venue, base))
+                    mode = "band"
+                    trail_st = self._trail.get(self._lots_key(venue, base)) or {}
+                    mode = str(trail_st.get("uw_recycle_mode") or mode)
+                    if floor is None:
+                        self._bump_skip("uw_recycle_no_floor")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="UW_RECYCLE_NO_FLOOR",
+                            message=f"uw recycle floor missing for {venue}:{base}",
+                        )
+                else:
+                    floor = self._cut_loss_floor_for_reason(venue, base, exit_reason)
+                    mode = "stop"
+                    if floor is None:
+                        self._bump_skip("cut_loss_not_configured")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="CUT_LOSS_DISABLED",
+                            message=f"cut-loss not enabled for {venue}:{base}",
+                        )
                 mark_ref = px
                 if order_book is not None and order_book.bids:
                     try:
                         mark_ref = Decimal(str(order_book.bids[0].price))
                     except Exception:  # noqa: BLE001
                         pass
-                if mark_ref > floor:
+                if exit_reason == "trail_uw_recycle" and mode == "band":
+                    if mark_ref < floor:
+                        self._bump_skip("uw_recycle_bid_below_floor")
+                        return await self._reject_before_live(
+                            order_request,
+                            reason="UW_RECYCLE_BELOW_FLOOR",
+                            message=f"bid {mark_ref} below uw recycle floor {floor}",
+                        )
+                elif mark_ref > floor and exit_reason != "trail_uw_recycle":
                     self._bump_skip("cut_loss_above_floor")
                     return await self._reject_before_live(
                         order_request,
                         reason="CUT_LOSS_ABOVE_FLOOR",
                         message=f"mark {mark_ref} above cut-loss floor {floor}",
                     )
+                elif (
+                    exit_reason == "trail_uw_recycle"
+                    and mode == "stop"
+                    and mark_ref > floor
+                    and px > floor
+                ):
+                    # Stop mode: allow when mark breached floor; prefer bid.
+                    pass
             elif be > px:
                 px = be
                 order_request = order_request.model_copy(update={"limit_price": px})
@@ -6458,6 +10811,25 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                     best_bid = _ZERO
                 if cut_loss_exit:
                     if best_bid > 0:
+                        if exit_reason == "trail_uw_recycle":
+                            floor = self._uw_recycle_floors.get(
+                                self._lots_key(venue, base)
+                            ) or _ZERO
+                            mode = str(
+                                (
+                                    self._trail.get(self._lots_key(venue, base)) or {}
+                                ).get("uw_recycle_mode")
+                                or "band"
+                            )
+                            if mode == "band" and best_bid < floor:
+                                self._bump_skip("uw_recycle_bid_below_floor")
+                                return await self._reject_before_live(
+                                    order_request,
+                                    reason="UW_RECYCLE_BELOW_FLOOR",
+                                    message=(
+                                        f"best bid {best_bid} below uw floor {floor}"
+                                    ),
+                                )
                         px = best_bid
                         order_request = order_request.model_copy(update={"limit_price": px})
                         meta = dict(order_request.metadata or {})

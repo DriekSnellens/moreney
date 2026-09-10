@@ -103,7 +103,7 @@ class IntelligenceSession:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(p.suffix + ".tmp")
         try:
-            tmp.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+            tmp.write_text(json.dumps(self.to_dict(), indent=2, default=str), encoding="utf-8")
             tmp.replace(p)
         except Exception as exc:  # noqa: BLE001
             logger.warning("intelligence state save failed: %s", exc)

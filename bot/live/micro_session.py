@@ -23,6 +23,7 @@ from bot.engine.orchestrator import TradingEngine
 from bot.live.micro_bridge_executor import MicroBudgetLiveExecutor
 from bot.live.micro_engine import LiveMicroEngine, reset_micro_engine
 from bot.market_data.service import MarketDataService
+from bot.core.venue_fees import LIVE_VENUE_FEE_OVERRIDES
 from bot.paper.runner import PaperRunner
 from bot.paper.store import PaperTradingStore
 from bot.funding.multi_venue import parse_venue_list
@@ -142,6 +143,8 @@ def _session_settings(
     persist_path: Path,
 ) -> Settings:
     """Paper mode + micro unlocks already in env; € pocket capital, live arb path."""
+    from bot.live.capital_split import resolve_capital_split, split_session_overrides
+
     mode = getattr(base, "market_data_mode", "local") or "local"
     # Direct WebSockets for live — do not depend on shared Redis publisher.
     mode = "local"
@@ -155,8 +158,24 @@ def _session_settings(
         "ETH,SOL,XRP,ADA,LINK,DOT,AVAX,NEAR,ATOM,DOGE,LTC,"
         "ARB,OP,SUI,APT,UNI,AAVE,BNB,BCH,TRX"
     )
-    return base.model_copy(
-        update={
+    n_venues = max(len(execute_venues) if execute_venues else (2 if cross_venue else 1), 1)
+    split_plan = resolve_capital_split(
+        budget_f,
+        n_venues=n_venues,
+        enabled=bool(getattr(base, "live_micro_capital_split_enabled", True)),
+        core_fraction=float(getattr(base, "live_micro_core_fraction", 0.65) or 0.65),
+        satellite_fraction=float(
+            getattr(base, "live_micro_satellite_fraction", 0.35) or 0.35
+        ),
+        core_mode=str(getattr(base, "live_micro_core_mode", "cash") or "cash"),
+        cut_loss_below_be_pct=0.025,
+        early_cut_loss_below_be_pct=0.01,
+        core_long_hold_bases=str(
+            getattr(base, "live_micro_core_long_hold_bases", "BTC,ETH") or "BTC,ETH"
+        ),
+    )
+    split_over = split_session_overrides(split_plan)
+    updates: dict = {
             # Internal engine host only — env keeps PAPER_TRADING_ENABLED=false so
             # the API never exposes paper lab UI or auto-start on :8020.
             "execution_mode": ExecutionMode.PAPER,
@@ -177,46 +196,54 @@ def _session_settings(
             "paper_maker_same_venue": True,
             # One quote per venue per cycle — avoids stacked duplicate resting bids.
             # C12: more parallel quotes while ring is filling.
-            "paper_maker_max_open_quotes": 6 if cross_venue else 4,
+            "paper_maker_max_open_quotes": 8 if cross_venue else 6,
             # More concurrent NET-passing quotes across venues (still never-loss gated).
             "arbitrage_max_emits_per_cycle": 12 if cross_venue else 5,
             "paper_cycle_interval_ms": 800.0,
-            # Smaller clips → more parallel active-book slots; soft-partials still fee-OK.
-            "paper_maker_min_notional_eur": 55.0,
-            "live_micro_first_clip_eur": 55.0,
-            "live_micro_add_clip_eur": 100.0,
+            # AlphaI max-deploy: larger clips on priority/strong picks; base clips mid-size.
+            "paper_maker_min_notional_eur": 80.0,
+            "live_micro_first_clip_eur": 140.0,
+            "live_micro_add_clip_eur": 200.0,
+            "live_micro_alphai_priority_clip_eur": 220.0,
+            "live_micro_alphai_strong_clip_eur": 280.0,
             # Util-B light: slightly easier NET so empty-ring emits are not starved.
             # C12: align maker + profitability gate (was 5bps gate killing 4bps maker).
-            "paper_maker_min_profit_eur": 0.03,
-            "paper_maker_min_net_return": 0.0004,
-            "paper_maker_small_clip_max_eur": 90.0,
-            "paper_maker_small_clip_min_profit_eur": 0.03,
-            "paper_maker_small_clip_min_net_return": 0.0003,
+            # Near-miss fix (live funnel): most rejects fail NET return 0.0004 by ~0.5bps
+            # or absolute €0.03 by ~€0.002 — still strictly positive after fees.
+            "paper_maker_min_profit_eur": 0.025,
+            "paper_maker_min_net_return": 0.0003,
+            "paper_maker_small_clip_max_eur": 220.0,
+            "paper_maker_small_clip_min_profit_eur": 0.02,
+            "paper_maker_small_clip_min_net_return": 0.00026,
             "paper_maker_min_spread_bps": 5.0,
             "paper_maker_adverse_bps": 2.0,
             "paper_maker_spread_fee_buffer_bps": 1.0,
             "paper_maker_allow_buy_only": True,
             # Still fee-aware never-loss; thinner buffer = asks clear sooner.
-            "paper_maker_sell_profit_buffer_bps": 10.0,
-            # Soft harvest earlier / larger partials → more €/day recycles.
-            # Next step (ruim): recycle winners faster — still never below BE.
+            "paper_maker_sell_profit_buffer_bps": 15.0,
+            # OKX EUR pairs bill 0.20%/0.35% (observed), not the 0.08%/0.10% table.
+            "live_venue_fee_overrides": LIVE_VENUE_FEE_OVERRIDES,
+            # Phase A velocity: arm earlier, harvest larger partials, recycle winners.
+            # Still never below BE (never-loss unchanged).
             "paper_trail_take_profit_enabled": True,
-            # Trail all synced inventory (incl. pre-session ATOM/NEAR bags).
+            # Trail all synced inventory (incl. pre-session bags → BE harvest).
             "paper_trail_session_buys_only": False,
-            # B3 runner-window: arm later so winnable can build, then light partial.
-            "paper_trail_soft_arm_pct": 0.012,
-            "paper_trail_soft_drawdown_pct": 0.0025,
-            "paper_trail_soft_partial_pct": 0.15,
-            # Lock more of BE+ bags into cash so slots free sooner.
-            "paper_trail_recovery_be_partial_pct": 0.50,
-            "paper_trail_be_harvest_partial_pct": 0.50,
-            "paper_trail_be_harvest_min_gain_pct": 0.0003,
-            "live_micro_be_harvest_cooldown_sec": 5.0,
-            "paper_trail_hard_arm_pct": 0.03,
-            "paper_trail_hard_drawdown_pct": 0.015,
-            "paper_trail_hard_partial_pct": 0.35,
-            "paper_trail_arm_gain_pct": 0.03,
-            "paper_trail_drawdown_pct": 0.015,
+            "paper_trail_soft_arm_pct": 0.015,
+            # 0.2% clipped +1.5% winners on noise; 0.5% gives room to run
+            # (hard trail widens further with gain via live_micro_trail_dd_gain_scale).
+            "paper_trail_soft_drawdown_pct": 0.005,
+            "paper_trail_soft_partial_pct": 0.35,
+            "paper_trail_recovery_be_partial_pct": 0.60,
+            "paper_trail_be_harvest_partial_pct": 0.40,
+            # 222/534 round trips exited at 0..+0.5% gross: gross +20.75, fees 35.59,
+            # net -14.84. Below ~+1% gross a "BE+ harvest" is a fee donation.
+            "paper_trail_be_harvest_min_gain_pct": 0.015,  # = soft-arm: one ladder, not two partials 0.3% apart
+            "live_micro_be_harvest_cooldown_sec": 2.0,
+            "paper_trail_hard_arm_pct": 0.025,
+            "paper_trail_hard_drawdown_pct": 0.012,
+            "paper_trail_hard_partial_pct": 0.40,
+            "paper_trail_arm_gain_pct": 0.025,
+            "paper_trail_drawdown_pct": 0.012,
             "paper_trail_partial_enabled": True,
             "paper_trail_partial_pct": 0.50,
             "paper_trail_atr_enabled": False,  # keep fixed harvest levels
@@ -227,7 +254,8 @@ def _session_settings(
             "paper_ladder_buy_enabled": False,
             "paper_ladder_buy_pcts": "0,0.0015,0.004",
             "paper_time_stop_enabled": True,
-            "paper_time_stop_sec": 3600.0,  # after 1h, recovery-arm at BE (no flat dump)
+            # AlphaI daytrader: earlier BE recovery-arm so capital rotates same-day.
+            "paper_time_stop_sec": 1800.0,
             "paper_time_stop_min_profit_bps": 25.0,  # diagnostics / floor helper only
             "paper_dust_policy": "top_up_or_exit",
             "paper_dust_exit_slack_bps": 0.0,  # never sell below fee-aware break-even
@@ -239,8 +267,13 @@ def _session_settings(
             "live_micro_momentum_require_last_n_rising": 4,
             "live_micro_trail_hold_while_rising": True,
             "live_micro_trail_hold_rising_n": 2,
-            "live_micro_ring_soft_max_active_eur": 650.0,
+            # Max capital deploy: soft momentum until near full pocket is working.
+            "live_micro_ring_soft_max_active_eur": 1850.0,
             "live_micro_ring_soft_block_underwater_eur": 25.0,
+            # Capital Velocity Desk: unlock Util-B despite vault underwater bags.
+            "live_micro_ring_util_b_ignore_underwater": True,
+            # Soft floor while ring NEED; full paper floor stays 0.0015 when ring OK.
+            "live_micro_ring_momentum_min_return": 0.0005,
             "live_micro_low_util_rising_n": 3,
             "live_micro_entry_min_low_util_rising_n": 3,
             "live_micro_entry_short_momentum_samples": 6,
@@ -249,27 +282,29 @@ def _session_settings(
             "live_micro_low_util_buy_resting_max_age_sec": 30.0,
             "live_micro_buy_resting_max_age_sec": 30.0,
             "live_micro_cancel_buy_on_flat_momentum": True,
-            # Util-B: when active book < ring_soft max, allow non-focus new buys.
-            "live_micro_low_util_relax_focus": True,
-            # B3: scale into soft-armed BE+ winners (bridge-submitted adds).
+            # Util-B: do not fill thin-ring slots with non-AlphaI coins.
+            "live_micro_low_util_relax_focus": False,
+            # Scale into AlphaI winners above BE only (never-loss; no underwater adds).
             "live_micro_winner_add_enabled": True,
             "live_micro_winner_add_max": 2,
-            "live_micro_winner_add_clip_eur": 55.0,
+            "live_micro_winner_add_clip_eur": 200.0,
             "live_micro_winner_add_cooldown_sec": 45.0,
-            "live_micro_buy_quality_underwater_count": 2,
-            "live_micro_buy_quality_pause_sec": 1800.0,
+            "live_micro_alphai_winner_add_only": True,
+            "live_micro_buy_quality_underwater_count": 8,
+            "live_micro_buy_quality_pause_sec": 600.0,
             "live_micro_entry_headroom_enabled": True,
-            "live_micro_entry_headroom_min_pct": 0.0025,
+            # Phase A: slightly softer entry gates — still reject extremes.
+            "live_micro_entry_headroom_min_pct": 0.002,
             "live_micro_entry_extension_moderate_pct": 0.012,
             "live_micro_entry_extension_max_pct": 0.025,
             "live_micro_entry_extension_extreme_pct": 0.045,
-            "live_micro_entry_quality_min_score": 60.0,
+            "live_micro_entry_quality_min_score": 55.0,
             "live_micro_entry_reduced_size_score": 70.0,
             "live_micro_entry_normal_size_score": 80.0,
-            "live_micro_entry_reduced_size_multiplier": 0.75,
-            "live_micro_entry_small_size_multiplier": 0.50,
-            "live_micro_entry_min_continuity_score": 0.35,
-            "live_micro_entry_target_harvest_pct": 0.012,
+            "live_micro_entry_reduced_size_multiplier": 0.85,
+            "live_micro_entry_small_size_multiplier": 0.65,
+            "live_micro_entry_min_continuity_score": 0.30,
+            "live_micro_entry_target_harvest_pct": 0.008,
             "live_micro_block_underwater_cross_venue": True,
             # Capital velocity + venue economics (downward-only modifiers).
             "live_micro_capital_efficiency_enabled": True,
@@ -297,37 +332,33 @@ def _session_settings(
             # Prefer dual-liquid day-trade bases; block non-focus new buys (no TAO tunnel).
             "live_micro_focus_bases": focus_bases,
             "live_micro_new_buy_focus_only": True,
-            # Always-on deploy: keep ~€1k/venue working in focus (not stuck) bags.
-            "live_micro_active_ring_eur": float(
-                getattr(base, "live_micro_active_ring_eur", 1000.0) or 1000.0
-            ),
-            # A: velocity sleeve ≈ ring size; vault = rest of pocket (never-loss).
-            "live_micro_velocity_sleeve_eur": float(
-                getattr(base, "live_micro_velocity_sleeve_eur", None)
-                or getattr(base, "live_micro_active_ring_eur", 1000.0)
-                or 1000.0
-            ),
+            # Unlock ETH for AlphaI (top daily pick) — no vault lockout while testing max deploy.
+            "live_micro_long_hold_bases": "",
+            # Always-on deploy: target nearly full €2k/venue working (leave fee/exit buffer).
+            "live_micro_active_ring_eur": 1850.0,
+            # A: velocity sleeve ≈ ring size; vault = small cash buffer (never-loss exits).
+            "live_micro_velocity_sleeve_eur": 1850.0,
             "live_micro_velocity_sleeve_daily_loss_cap_eur": 50.0,
             # D: exit engine — fill soft-armed BE+ spikes (touch/improve, fast reprice).
             "live_micro_exit_engine_enabled": True,
-            "live_micro_exit_resting_max_age_sec": 1.0,
-            "live_micro_exit_cooldown_sec": 1.0,
+            # Reduce exit-engine churn so we don't hit MAX_TRADES_PER_MINUTE.
+            "live_micro_exit_resting_max_age_sec": 1.5,
+            "live_micro_exit_cooldown_sec": 1.5,
             "live_micro_exit_touch_improve_bps": 2.0,
             "live_micro_exit_soft_armed_work": True,
-            "live_micro_exit_soft_armed_partial_pct": 0.75,
+            "live_micro_exit_soft_armed_partial_pct": 0.40,
             "live_micro_exit_taker_cushion_bps": 5.0,
             # Winnable-A: escalate to taker after 1 stale maker (still only ≥ BE).
             "live_micro_exit_taker_after_maker_fails": 1,
             "live_micro_mark_ttl_sec": 2.0,
             "live_micro_winnable_gap_alert_eur": 3.0,
             "live_micro_daily_baseline_reset_utc": True,
-            "live_micro_okx_ring_clip_eur": 55.0,
-            # Low-util boost: same floor as full mode (no weak 0.05% entries).
-            "live_micro_ring_momentum_min_return": 0.0015,
+            "live_micro_okx_ring_clip_eur": 140.0,
+            # Soft floor while ring NEED is set earlier (0.0005); do not re-pin to full.
             # Concentrate: correlated spray dilutes €/trail on €2k pockets.
             # Stuck underwater bags do not consume corr slots (see bridge).
             "live_micro_corr_group": "BTC,ETH,SOL,XRP,ADA,LINK,AVAX,ARB,OP,DOT,NEAR",
-            "live_micro_max_per_corr_group": 3,
+            "live_micro_max_per_corr_group": 4,
             "paper_daily_kill_eur": 50.0,
             "paper_alert_pct_to_arm": 0.006,
             "paper_hmm_enabled": False,  # unfitted HMM was noise on live
@@ -337,15 +368,15 @@ def _session_settings(
             "paper_maker_sibling_grace_ms": 20_000.0,
             "paper_max_holding_sec": 0.0,
             # Prefer cash when bags pile up (skew → sell-only sooner).
-            # Ruim: allow up to ~half pocket in alts so 8×€100 clips fit.
-            "paper_max_alt_inventory_pct": 55.0,
+            # Max deploy: allow most of the pocket in alts (cash buffer for exits/fees).
+            "paper_max_alt_inventory_pct": 78.0,
             "paper_min_alt_inventory_pct": 15.0,
             "paper_inventory_ask_improve_bps": 2.0,
             # Underweight venues buy sooner (OKX cash deployment).
             # Prefer cash / rising entries — do not force underweight dip buys.
             "paper_inventory_buy_dip_bps": 0.0,
             # Among NET-passing candidates, allow more than only the top rank.
-            "paper_maker_keep_vs_best_frac": 0.30,
+            "paper_maker_keep_vs_best_frac": 0.35,
             "live_micro_underwater_buy_block": 1,
             "live_micro_underwater_block_new_bases_only": True,
             "live_micro_block_underwater_adds": True,
@@ -354,14 +385,64 @@ def _session_settings(
             "live_micro_primary_execute_venue": "bitvavo",
             "live_micro_okx_buy_improve_bps": 1.0,
             "live_micro_underwater_min_notional_eur": 25.0,
-            # Hard cut-loss off until legacy underwater bags are cleared.
-            "live_micro_cut_loss_below_be_pct": 0.0,
+            # Capital velocity: small sleeve losses OK — free stuck bags, redeploy to AlphaI.
+            # Soft cut 2.5% hard stop; early 1% on new-session fails; uw_recycle does the rest.
+            "live_micro_cut_loss_below_be_pct": 0.025,
             "live_micro_cut_loss_new_bases_only": False,
-            # Early cut: new-session bags at −1.5% BE + flat/down momentum → free capital.
-            # Early cut off: never realize intentional losses (target ~€30/day, no red exits).
-            "live_micro_early_cut_loss_below_be_pct": 0.0,
+            "live_micro_early_cut_loss_below_be_pct": 0.01,
             "live_micro_early_cut_new_bases_only": True,
             "live_micro_early_cut_momentum_max_return": 0.0,
+            # Underwater policy: 3 rules (hard stops / aged unsupported bag at mild
+            # depth / rotate only against a confirmed replacement, day-capped).
+            "live_micro_uw_policy": "simple",
+            "live_micro_uw_simple_max_depth_pct": 0.012,
+            "live_micro_uw_simple_unsupported_age_sec": 86400.0,
+            "live_micro_uw_simple_avoid_age_sec": 7200.0,
+            "live_micro_uw_simple_rotate_min_age_sec": 900.0,
+            # Fee routing: Bitvavo bills 0.15/0.25, OKX (Lv1, all spot pairs) 0.20/0.35.
+            "live_micro_preferred_entry_venue": "bitvavo",
+            "live_micro_uw_recycle_enabled": True,
+            "live_micro_provisional_be_exit_min_age_sec": 600.0,
+            "live_micro_uw_avoid_max_age_sec": 600.0,
+            "live_micro_uw_dust_max_notional_eur": 25.0,
+            "live_micro_uw_dust_below_be_pct": 0.003,
+            "live_micro_uw_near_below_be_pct": 0.005,
+            "live_micro_uw_near_max_depth_pct": 0.012,
+            "live_micro_uw_near_min_age_sec": 900.0,
+            "live_micro_uw_non_alphai_below_be_pct": 0.006,
+            "live_micro_uw_non_alphai_min_age_sec": 900.0,
+            "live_micro_uw_alphai_below_be_pct": 0.012,
+            "live_micro_uw_alphai_min_age_sec": 1800.0,
+            # 14d fill forensics: idle-pressure / mid-flat / lag-time recycles produced
+            # 54 round trips at -0.5..0% with a 2-minute median hold (net -20 EUR,
+            # pure fees). Off: an aged mild-UW bag is nursed to recovery-arm; only
+            # dust, avoid-list, deadlock (would-buy gated, day-capped) and the hard
+            # cuts may realise a loss.
+            "live_micro_uw_idle_pressure_enabled": False,
+            "live_micro_uw_idle_min_free_eur": 100.0,
+            "live_micro_uw_idle_min_age_sec": 300.0,
+            "live_micro_uw_idle_below_be_pct": 0.003,
+            # Deadlock unlock: UW vault must not freeze the desk (mild recycle + redeploy).
+            "live_micro_uw_deadlock_unlock_enabled": True,
+            "live_micro_uw_deadlock_below_be_pct": 0.0025,
+            "live_micro_uw_deadlock_min_age_sec": 900.0,
+            "live_micro_uw_deadlock_partial_enabled": True,
+            "live_micro_uw_deadlock_target_free_eur": 220.0,
+            "live_micro_uw_deadlock_partial_clip_eur": 220.0,
+            "live_micro_uw_deadlock_partial_min_eur": 40.0,
+            "live_micro_uw_deadlock_day_loss_cap_eur": 8.0,
+            "live_micro_uw_deadlock_would_buy_gate": True,
+            "live_micro_uw_mid_flat_recycle_enabled": False,
+            "live_micro_uw_mid_flat_max_depth_pct": 0.015,
+            "live_micro_uw_mid_flat_min_age_sec": 120.0,
+            # Keep hard cut 2.5%; accelerate mild UW via lag-time partial (≤2%).
+            "live_micro_uw_lag_time_partial_enabled": False,
+            "live_micro_uw_lag_time_partial_min_age_sec": 600.0,
+            "live_micro_uw_lag_time_partial_max_depth_pct": 0.020,
+            # Idle-cash fix: deploy AlphaI on the empty venue / near-BE ring fill.
+            "live_micro_alphai_cross_venue_deploy": True,
+            "live_micro_alphai_cross_venue_max_other_depth_pct": 0.025,
+            "live_micro_alphai_ring_fill_add_max_depth_pct": 0.012,
             "live_micro_momentum_exit_min_return": 0.002,
             "live_micro_momentum_exit_above_be_pct": 0.005,
             "global_max_strategy_exposure_pct": 100.0,
@@ -382,6 +463,69 @@ def _session_settings(
             "paper_maker_fair_value": True,
             # Live-only: no research CVD/shadow/lead-lag on hot path.
             "live_disable_research_hooks": True,
+            # Product retirement: CVD TOB shadow expectancy failed.
+            "live_cvd_abandoned": True,
+            # AlphaI news intelligence (requires ALPHAI_API_KEY in env).
+            "alphai_enabled": bool(getattr(base, "alphai_enabled", True)),
+            "alphai_min_relevance": int(getattr(base, "alphai_min_relevance", 7) or 7),
+            "alphai_poll_interval_sec": float(
+                getattr(base, "alphai_poll_interval_sec", 120.0) or 120.0
+            ),
+            "alphai_block_bearish_bases": bool(
+                getattr(base, "alphai_block_bearish_bases", True)
+            ),
+            "alphai_macro_reduce_only": bool(
+                getattr(base, "alphai_macro_reduce_only", True)
+            ),
+            "alphai_poll_macro": bool(getattr(base, "alphai_poll_macro", True)),
+            "alphai_macro_allow_bullish_buys": True,
+            "alphai_poll_actionable": bool(
+                getattr(base, "alphai_poll_actionable", True)
+            ),
+            "alphai_observation_mode": bool(
+                getattr(base, "alphai_observation_mode", False)
+            ),
+            # Buys/sells follow AlphaI: new buys only on bullish picks/headlines;
+            # bearish/neutral bags recycle at fee-aware BE+ (never-loss unchanged).
+            "alphai_require_bullish_new_buys": True,
+            "alphai_bullish_buy_enabled": True,
+            "alphai_daily_recommendations_top_n": 5,
+            # AlphaI scored features — live WAIT on bullish×adverse (never-loss intact).
+            "alphai_feature_scoring_enabled": True,
+            "alphai_feature_shadow_only": False,
+            "alphai_feature_auto_apply": False,
+            "alphai_opp_weight": 0.06,
+            # Intraday timing gate: AlphaI × fresh × adverse × momentum (enforce).
+            "alphai_intraday_gate_enabled": True,
+            "alphai_intraday_gate_shadow_only": False,
+            "alphai_intraday_min_freshness": 0.40,
+            # Learn: dynamic RS + outcomes reliability (no per-coin hardcoding).
+            "alphai_price_confirm_enabled": True,
+            "alphai_price_lag_vs_btc_pp": 1.5,
+            "alphai_adaptive_lag_enabled": True,
+            "alphai_pick_outcomes_enabled": True,
+            "alphai_pick_outcomes_path": "./data/alphai/pick_outcomes.json",
+            # Desk learn-loop: observe → settle → shadow feedback (opt-in apply).
+            "alphai_desk_lessons_enabled": True,
+            "alphai_desk_lessons_path": "./data/alphai/desk_lessons.json",
+            "alphai_desk_lessons_auto_apply": False,
+            "alphai_desk_lessons_auto_apply_modes": "deploy_urgency,avoid",
+            "alphai_desk_lessons_min_free_eur": 150.0,
+            "alphai_desk_lessons_observe_sec": 60.0,
+            # Capital playbook router (TREND/FLAT/ADVERSE) — live enforce.
+            "live_micro_capital_playbook_enabled": True,
+            "live_micro_capital_playbook_min_hold_sec": 900.0,
+            "live_micro_capital_playbook_refresh_sec": 60.0,
+            # Auto CERTAINTY ↔ VELOCITY when AlphaI confirms + tape allows.
+            "live_micro_desk_mode_auto_enabled": True,
+            "live_micro_desk_mode_min_hold_sec": 900.0,
+            "live_micro_desk_mode_min_confirm": 0.55,
+            "live_micro_desk_mode_min_conviction": 0.25,
+            "live_micro_desk_mode_min_confirmed_picks": 1,
+            "live_micro_desk_mode_max_underwater_eur": 120.0,
+            "live_micro_desk_mode_velocity_ring_fraction_of_satellite": 0.90,
+            "live_micro_desk_mode_velocity_ring_mult_of_certainty": 2.0,
+            "live_micro_desk_mode_velocity_sleeve_loss_cap_eur": 35.0,
             "live_allow_without_research_unlock": True,
             "research_marketdata_recording_enabled": False,
             "market_data_recording_enabled": False,
@@ -394,20 +538,20 @@ def _session_settings(
             "live_micro_cross_venue_enabled": cross_venue,
             "arbitrage_min_profit_eur": 0.05,
             "arbitrage_min_profit_pct": 0.0008,
-            "profitability_min_net_profit_usd": 0.03,
-            "profitability_min_net_return": 0.0004,
+            "profitability_min_net_profit_usd": 0.025,
+            "profitability_min_net_return": 0.0003,
             "profitability_execution_buffer_bps": 2.0,
-            "risk_min_net_profit_usd": 0.03,
-            # Hard per-trade ceiling: allow ~€180 add clips on ~€2k pocket.
-            "risk_max_position_usd": min(150.0, max(80.0, budget_f * 0.08)),
+            "risk_min_net_profit_usd": 0.025,
+            # Hard per-trade ceiling: AlphaI strong clips (€280) need a little headroom.
+            "risk_max_position_usd": min(300.0, max(120.0, budget_f * 0.15)),
             # Size vs aggregate multi-venue equity so clips stay near the ceiling
             # (2×€2k pockets must not inflate too far and fail NET return).
             "arbitrage_position_pct": min(
-                6.5,
+                7.5,
                 max(
                     3.0,
                     (
-                        min(150.0, max(80.0, budget_f * 0.08))
+                        min(300.0, max(120.0, budget_f * 0.15))
                         / max(budget_f * max(len(execute_venues), 1), 1.0)
                     )
                     * 100.0,
@@ -421,16 +565,19 @@ def _session_settings(
             # Ruim: enough open-position headroom for 8 bases/venue (defensive exits unchanged).
             "risk_max_open_positions": 16 if cross_venue else 8,
             "max_simultaneous_positions": 16 if cross_venue else 8,
-            "opportunity_max_executions_per_cycle": 10,
-            "opportunity_max_candidates_per_cycle": 20,
+            # Velocity scale: allow a small increase in trade throughput.
+            # Keep drawdown/daily-loss/correlation caps unchanged.
+            "max_trades_per_minute": 200,
+            "opportunity_max_executions_per_cycle": 12,
+            "opportunity_max_candidates_per_cycle": 24,
             "live_micro_venues": ",".join(sorted(execute_venues)) or "bitvavo",
             "live_micro_symbols": ",".join(symbols)
             if symbols
             else ",".join(_LIQUID_EUR_SYMBOLS),
-            "live_micro_max_alt_bases": 8,
+            "live_micro_max_alt_bases": 10,
             # Cap live order size to add-clip ceiling.
             # Per-venue: each exchange gets its own open-order budget (OKX ≠ Bitvavo).
-            "live_micro_max_notional_eur": min(150.0, max(80.0, budget_f * 0.08)),
+            "live_micro_max_notional_eur": min(300.0, max(120.0, budget_f * 0.15)),
             "live_micro_max_daily_loss_eur": max(50.0, budget_f * 0.10),
             # Alt-beta book: wider drawdown band than default 5–8% global kill.
             "max_drawdown_percent": float(
@@ -440,17 +587,134 @@ def _session_settings(
                 getattr(base, "live_micro_reset_drawdown_on_start", True)
             ),
             # C12: more concurrent resting buys while deploying the ring.
-            "live_micro_max_open_orders": 6 if cross_venue else 4,
-            "live_micro_max_open_orders_per_venue": 4,
-            "live_micro_max_resting_buys_per_symbol": 2,
+            "live_micro_max_open_orders": 8 if cross_venue else 8,
+            "live_micro_max_open_orders_per_venue": 8,
+            "live_micro_max_resting_buys_per_symbol": 3,
             "live_micro_resting_max_age_sec": 480.0,
             "market_data_mode": mode,
             "market_data_symbols": ",".join(md_symbols) if md_symbols else base.market_data_symbols,
             "market_data_exchanges": "binance,kraken,coinbase,bitvavo,okx,bybit"
             if cross_venue
             else base.market_data_exchanges,
-        }
-    )
+    }
+    # Core/satellite allocation overrides legacy full-pocket ring defaults.
+    if split_over:
+        updates.update(split_over)
+    # Sharp AlphaI daytrader: on by default with capital split (coin-agnostic).
+    daytrader = bool(
+        getattr(base, "live_micro_alphai_daytrader_enabled", True)
+    ) and bool(updates.get("live_micro_capital_split_enabled", False) or split_over)
+    if daytrader:
+        updates.update(
+            {
+                "live_micro_alphai_daytrader_enabled": True,
+                "live_micro_daytrader_min_confirm_scale": max(
+                    float(
+                        getattr(base, "live_micro_daytrader_min_confirm_scale", 0.55)
+                        or 0.55
+                    ),
+                    0.55,
+                ),
+                "live_micro_daytrader_sleeve_min_confirm_scale": max(
+                    float(
+                        getattr(
+                            base, "live_micro_daytrader_sleeve_min_confirm_scale", 0.55
+                        )
+                        or 0.55
+                    ),
+                    0.55,
+                ),
+                "live_micro_daytrader_require_rising": bool(
+                    getattr(base, "live_micro_daytrader_require_rising", True)
+                ),
+                "live_micro_daytrader_sleeve_require_rising": bool(
+                    getattr(base, "live_micro_daytrader_sleeve_require_rising", True)
+                ),
+                "live_micro_daytrader_min_conviction": float(
+                    getattr(base, "live_micro_daytrader_min_conviction", 0.25) or 0.25
+                ),
+                "live_micro_daytrader_sleeve_urgency_enabled": bool(
+                    getattr(base, "live_micro_daytrader_sleeve_urgency_enabled", False)
+                ),
+                "live_micro_daytrader_priority_clip_min_confirm": float(
+                    getattr(
+                        base, "live_micro_daytrader_priority_clip_min_confirm", 0.60
+                    )
+                    or 0.60
+                ),
+                "live_micro_daytrader_strong_clip_min_confirm": float(
+                    getattr(base, "live_micro_daytrader_strong_clip_min_confirm", 0.75)
+                    or 0.75
+                ),
+                "live_micro_daytrader_non_alphai_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_non_alphai_min_age_sec", 120.0)
+                    or 120.0
+                ),
+                "live_micro_daytrader_non_alphai_below_be_pct": float(
+                    getattr(base, "live_micro_daytrader_non_alphai_below_be_pct", 0.005)
+                    or 0.005
+                ),
+                "live_micro_daytrader_near_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_near_min_age_sec", 90.0) or 90.0
+                ),
+                "live_micro_daytrader_weak_alphai_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_weak_alphai_min_age_sec", 480.0)
+                    or 480.0
+                ),
+                "live_micro_daytrader_lag_time_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_lag_time_min_age_sec", 600.0)
+                    or 600.0
+                ),
+                "live_micro_daytrader_provisional_be_exit_min_age_sec": float(
+                    getattr(
+                        base,
+                        "live_micro_daytrader_provisional_be_exit_min_age_sec",
+                        300.0,
+                    )
+                    or 300.0
+                ),
+                "live_micro_daytrader_rotate_exits_enabled": bool(
+                    getattr(base, "live_micro_daytrader_rotate_exits_enabled", True)
+                ),
+                "live_micro_daytrader_avoid_below_be_pct": float(
+                    getattr(base, "live_micro_daytrader_avoid_below_be_pct", 0.0025)
+                    or 0.0025
+                ),
+                "live_micro_daytrader_avoid_min_age_sec": float(
+                    getattr(base, "live_micro_daytrader_avoid_min_age_sec", 60.0) or 60.0
+                ),
+                # Entries: only confirmed AlphaI (already require_bullish); rising tape.
+                "alphai_require_bullish_new_buys": True,
+                "alphai_bullish_buy_enabled": True,
+                "alphai_price_confirm_enabled": True,
+                "alphai_intraday_gate_enabled": True,
+                # Stricter entry-quality: reject more mediocre tape (less REDUCE spam).
+                "live_micro_entry_quality_min_score": max(
+                    float(getattr(base, "live_micro_entry_quality_min_score", 55) or 55),
+                    65.0,
+                ),
+                "live_micro_entry_reduced_size_score": max(
+                    float(
+                        getattr(base, "live_micro_entry_reduced_size_score", 70) or 70
+                    ),
+                    72.0,
+                ),
+                "live_micro_entry_normal_size_score": max(
+                    float(
+                        getattr(base, "live_micro_entry_normal_size_score", 80) or 80
+                    ),
+                    82.0,
+                ),
+                # 24/7 accuracy: apply settled desk lessons (deploy + avoid recycle).
+                "alphai_desk_lessons_enabled": True,
+                "alphai_desk_lessons_auto_apply_modes": "deploy_urgency,avoid",
+                "alphai_adaptive_lag_enabled": True,
+                "alphai_pick_outcomes_enabled": True,
+            }
+        )
+    else:
+        updates.setdefault("live_micro_alphai_daytrader_enabled", False)
+    return base.model_copy(update=updates)
 
 
 def attach_micro_bridge(
@@ -729,6 +993,26 @@ async def run_session(
                 "strategy": st.get("strategy"),
                 "approved_opportunities": st.get("approved_opportunities"),
                 "executed_opportunities": st.get("executed_opportunities"),
+                "maker_reject_counts": st.get("reject_counts") or {},
+                "maker_last_reject_by_symbol": (
+                    ((st.get("last_cycle") or {}).get("scan") or {}).get(
+                        "last_reject_by_symbol"
+                    )
+                    or {}
+                ),
+                "maker_scan": {
+                    k: ((st.get("last_cycle") or {}).get("scan") or {}).get(k)
+                    for k in (
+                        "reduce_only",
+                        "hmm_regime_id",
+                        "dump_symbols",
+                        "news_blocked_bases",
+                        "inventory_mode",
+                        "venue_inventory_modes",
+                        "alt_inventory_pct",
+                        "opportunities_emitted",
+                    )
+                },
                 "netto_winst_eur": str(bridge.realized_trade_pnl_eur),
                 "realized_trade_pnl_eur": str(bridge.realized_trade_pnl_eur),
                 "portfolio_value_eur": (
@@ -759,6 +1043,7 @@ async def run_session(
                 "last_cycle": st.get("last_cycle"),
                 "why_not_trade": st.get("why_not_trade"),
                 "pipeline_funnel": st.get("pipeline_funnel"),
+                "alphai": st.get("alphai") or {},
             }
         )
 
@@ -791,6 +1076,21 @@ async def run_session(
                 reduce_only = bool(st_now.get("reduce_only"))
                 hmm = st_now.get("hmm_regime") or {}
                 toxic = bool(hmm.get("is_toxic_flow"))
+                alphai_box = st_now.get("alphai") or {}
+                allow_bullish_macro = bool(
+                    getattr(cfg, "alphai_macro_allow_bullish_buys", True)
+                )
+                alphai_macro_ro = bool(
+                    alphai_box.get("macro_reduce_only")
+                    or alphai_box.get("global_reduce_only")
+                )
+                # Macro caution is sleeve-aware reduce-only: never a full desk freeze.
+                # Spray (non-sleeve new bases) pauses; AlphaI rank-1/2 stay deployable
+                # via bridge new-bases-only + sleeve exemption.
+                macro_new_bases_only = bool(alphai_macro_ro)
+                if alphai_macro_ro and allow_bullish_macro:
+                    # Bullish macro path: still constrain spray, but do not full-block.
+                    alphai_macro_ro = False
                 uw_block = int(
                     getattr(cfg, "live_micro_underwater_buy_block", 3) or 0
                 )
@@ -809,10 +1109,16 @@ async def run_session(
                             uw_blocked_bases.setdefault(v.strip().lower(), set()).add(
                                 base
                             )
+                # Toxic/reduce-only still full-freeze; macro alone does NOT.
                 block_buys_full = reduce_only or toxic
                 new_base_only = bool(
                     getattr(cfg, "live_micro_underwater_block_new_bases_only", True)
                 )
+                # Capital playbook ADVERSE/pre-crash owns a new-bases buy block;
+                # do not clear it every cycle (was racing overlays off).
+                playbook_block = bool(
+                    getattr(bridge, "_playbook_block_new_buys", False)
+                ) or macro_new_bases_only
                 prev_uw = {
                     v: set(bases)
                     for v, bases in (
@@ -823,12 +1129,18 @@ async def run_session(
                     bridge.set_buys_blocked(True, new_bases_only=False)
                     bridge.set_underwater_base_blocks({})
                 elif uw_blocked_bases:
-                    bridge.set_buys_blocked(False)
+                    if playbook_block:
+                        bridge.set_buys_blocked(True, new_bases_only=True)
+                    else:
+                        bridge.set_buys_blocked(False)
                     bridge.set_underwater_base_blocks(
                         uw_blocked_bases, new_bases_only=new_base_only
                     )
                 else:
-                    bridge.set_buys_blocked(False)
+                    if playbook_block:
+                        bridge.set_buys_blocked(True, new_bases_only=True)
+                    else:
+                        bridge.set_buys_blocked(False)
                     bridge.set_underwater_base_blocks({})
                 # Stuck book → strategy: underwater bases do not fill the active ring.
                 try:

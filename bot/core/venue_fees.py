@@ -24,6 +24,53 @@ VENUE_MAKER_FEE: dict[str, Decimal] = {
     "bybit": Decimal("0.001"),
 }
 
+# Live-observed schedule that differs from the public USDT-pair table. OKX EUR
+# spot pairs (regular tier) bill 0.20% maker / 0.35% taker (300+ fills, p10=p90).
+# Applied process-wide by the live runner via set_venue_fee_overrides(); research
+# fixtures keep the static table above.
+LIVE_VENUE_FEE_OVERRIDES = "okx:0.0020:0.0035"
+
+# venue -> (maker, taker); None keeps the table value.
+_OVERRIDES: dict[str, tuple[Decimal | None, Decimal | None]] = {}
+
+
+def set_venue_fee_overrides(spec: str | None) -> dict[str, tuple[Decimal | None, Decimal | None]]:
+    """Parse ``"venue:maker:taker,venue2:maker:taker"`` into process-wide overrides.
+
+    Empty / None clears all overrides. Empty fields keep the table value
+    (``"okx::0.0035"`` overrides only taker).
+    """
+    global _OVERRIDES
+    parsed: dict[str, tuple[Decimal | None, Decimal | None]] = {}
+    for chunk in str(spec or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split(":")
+        venue = parts[0].strip().lower()
+        if not venue:
+            continue
+
+        def _dec(raw: str) -> Decimal | None:
+            raw = raw.strip()
+            if not raw:
+                return None
+            try:
+                val = Decimal(raw)
+            except Exception:  # noqa: BLE001
+                return None
+            return val if 0 <= val <= Decimal("0.02") else None
+
+        maker = _dec(parts[1]) if len(parts) > 1 else None
+        taker = _dec(parts[2]) if len(parts) > 2 else None
+        parsed[venue] = (maker, taker)
+    _OVERRIDES = parsed
+    return dict(parsed)
+
+
+def get_venue_fee_overrides() -> dict[str, tuple[Decimal | None, Decimal | None]]:
+    return dict(_OVERRIDES)
+
 # Multipliers vs retail. vip3 ≈ high-volume; rebate = negative maker (rare retail).
 FEE_TIER_MULTIPLIER: dict[str, Decimal] = {
     "retail": Decimal("1.0"),
@@ -61,6 +108,9 @@ def venue_taker_fee(
 ) -> Decimal:
     """Return the taker rate for ``exchange`` after fee-tier multiplier."""
     key = str(exchange or "").strip().lower()
+    override = _OVERRIDES.get(key)
+    if override is not None and override[1] is not None:
+        return override[1] * _tier_mult(tier)
     base = VENUE_TAKER_FEE.get(key, fallback if fallback is not None else _DEFAULT)
     return base * _tier_mult(tier)
 
@@ -73,5 +123,8 @@ def venue_maker_fee(
 ) -> Decimal:
     """Return the maker rate for ``exchange`` after fee-tier multiplier."""
     key = str(exchange or "").strip().lower()
+    override = _OVERRIDES.get(key)
+    if override is not None and override[0] is not None:
+        return override[0] * _tier_mult(tier)
     base = VENUE_MAKER_FEE.get(key, fallback if fallback is not None else _DEFAULT)
     return base * _tier_mult(tier)

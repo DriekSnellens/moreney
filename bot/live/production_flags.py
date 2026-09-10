@@ -12,3 +12,7 @@ PRODUCTION_EXECUTION_ENABLED = True
 # When True, PaperRunner skips CVD inject / shadow observer / research panels
 # (used by live micro so research code is not on the hot path).
 LIVE_DISABLE_RESEARCH_HOOKS = True
+
+# Product retirement: CVD abandoned after TOB shadow expectancy failed.
+# See docs/POST_CVD_VELOCITY_DESK.md.
+CVD_ABANDONED = True
