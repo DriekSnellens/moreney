@@ -8,6 +8,7 @@ names are hard vetoes. Blind volatility chasing is intentionally blocked.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -77,7 +78,7 @@ _VOLATILE_CLUSTERS: dict[str, str] = {
     "BCH": "PAY",
 }
 
-_DEFAULT_ALPHAI_PATH = Path("data/alphai/daily_recommendations.json")
+_DEFAULT_ALPHAI_PATH = Path("data/alphai/volatile_recommendations.json")
 _MIN_CLIP_EUR = 25.0
 
 
@@ -580,6 +581,70 @@ def _candle_cache_dir() -> Path:
         return fallback
 
 
+
+def refresh_volatile_alphai(
+    path: str | Path | None = None,
+    *,
+    force: bool = False,
+    client: Any | None = None,
+) -> dict[str, Any] | None:
+    """Refresh AlphaI picks scoped to the volatile pool (per-symbol news).
+
+    Writes a separate JSON from the core-16 daily recommendations so the live
+    Momentum Desk majors feed stays untouched.
+    """
+    import os
+
+    from bot.core.config import get_settings
+    from bot.integrations.alphai.client import AlphaIClient
+    from bot.integrations.alphai.daily_recommendations import (
+        load_daily_recommendations,
+        maybe_refresh_daily,
+    )
+
+    settings = get_settings()
+    out_path = Path(path) if path else Path(
+        str(
+            getattr(settings, "alphai_volatile_recommendations_path", None)
+            or _DEFAULT_ALPHAI_PATH
+        )
+    )
+    if client is None:
+        key = getattr(settings, "alphai_api_key", None)
+        secret = (
+            key.get_secret_value()
+            if key is not None and hasattr(key, "get_secret_value")
+            else (str(key) if key else os.environ.get("ALPHAI_API_KEY", ""))
+        )
+        if not secret:
+            return load_daily_recommendations(out_path)
+        client = AlphaIClient(str(secret))
+
+    focus = set(volatile_universe())
+    return maybe_refresh_daily(
+        client,
+        out_path,
+        focus_bases=focus,
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        ),
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8),
+        update_hour_local=int(
+            getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
+        ),
+        interval_minutes=int(
+            getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15
+        ),
+        interval_hours=int(
+            getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
+        ),
+        macro_caution=False,
+        per_symbol_news=True,
+        force=force,
+    )
+
+
 def build_volatile_shadow(
     *,
     days: int = 14,
@@ -587,9 +652,17 @@ def build_volatile_shadow(
     end_ms: int | None = None,
     refresh: bool = False,
     alphai_path: str | Path | None = None,
+    refresh_alphai: bool | None = None,
 ) -> dict[str, Any]:
     """Day-by-day AlphaI-first volatile paper report (no live orders)."""
-    alphai, alphai_meta = load_shadow_alphai(alphai_path)
+    # Default: refresh AlphaI when candle refresh is requested; always soft-refresh
+    # if the volatile feed is missing.
+    do_alphai = refresh if refresh_alphai is None else bool(refresh_alphai)
+    resolved_alphai = Path(alphai_path) if alphai_path else _DEFAULT_ALPHAI_PATH
+    if do_alphai or not resolved_alphai.exists():
+        with contextlib.suppress(Exception):
+            refresh_volatile_alphai(resolved_alphai, force=bool(do_alphai))
+    alphai, alphai_meta = load_shadow_alphai(resolved_alphai)
     cfg = shadow_config(live_cfg, alphai=alphai, scores=alphai_meta.get("scores") or {})
     uni = cfg.universe
     if not uni:
@@ -991,6 +1064,7 @@ __all__ = [
     "VolatileShadowConfig",
     "build_volatile_shadow",
     "load_shadow_alphai",
+    "refresh_volatile_alphai",
     "render_volatile_shadow_html",
     "render_volatile_shadow_page",
     "shadow_config",

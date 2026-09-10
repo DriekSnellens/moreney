@@ -150,3 +150,41 @@ def test_soft_buy_bar_includes_score_one() -> None:
     # score 0.5 stays watch unless needed to fill — with 2 buys already under top_n=5
     # DOT score>0 can be promoted from watch fill.
     assert "DOT" in {p.base for p in buy} or "DOT" in {p.base for p in watch}
+
+
+def test_generate_daily_recommendations_per_symbol_news_fetches_focus_tickers(monkeypatch):
+    from bot.integrations.alphai import daily_recommendations as mod
+
+    calls: list[dict] = []
+
+    class _Client:
+        last_rate_limit = type("RL", (), {"remaining": 99})()
+
+        def list_news(self, **kwargs):
+            calls.append(kwargs)
+            return {"results": []}
+
+    monkeypatch.setattr(mod, "parse_news_page", lambda page: [])
+    monkeypatch.setattr(
+        mod,
+        "score_focus_bases",
+        lambda headlines, universe, min_relevance=6: {
+            b: {"score": 0.0, "bullish": [], "bearish": [], "mentions": 0} for b in universe
+        },
+    )
+    monkeypatch.setattr(
+        mod,
+        "build_picks_from_scores",
+        lambda scores, top_n=8, macro_caution=False: ([], [], []),
+    )
+
+    report = mod.generate_daily_recommendations(
+        _Client(),
+        focus_bases={"RAY", "INJ"},
+        per_symbol_news=True,
+        top_n=2,
+    )
+    symbols = {c.get("symbol") for c in calls if c.get("symbol")}
+    assert report["per_symbol_news"] is True
+    assert "RAY-USD" in symbols
+    assert "INJ-USD" in symbols

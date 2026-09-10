@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from bot.integrations.alphai.client import AlphaIClient
 from bot.integrations.alphai.parse import AlphaIHeadline, parse_news_page
-from bot.integrations.alphai.symbols import LIQUID_EUR_BASES
+from bot.integrations.alphai.symbols import LIQUID_EUR_BASES, alphai_crypto_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -265,13 +265,20 @@ def generate_daily_recommendations(
     interval_minutes: int | None = None,
     interval_hours: int | None = None,
     macro_caution: bool = False,
+    per_symbol_news: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Fetch AlphaI news and rank focus bases for the current refresh window."""
+    """Fetch AlphaI news and rank focus bases for the current refresh window.
+
+    When ``per_symbol_news`` is True (volatile shadow path), also pull
+    symbol-scoped headlines so midcaps outside the global crypto feed can
+    still receive AlphaI scores.
+    """
     instant = now or datetime.now(UTC)
     universe = focus_bases or set(LIQUID_EUR_BASES)
     headlines: list[AlphaIHeadline] = []
     seen_uids: set[str] = set()
+    symbol_news_errors: list[str] = []
 
     def _merge(page: dict[str, Any]) -> None:
         for h in parse_news_page(page):
@@ -298,6 +305,28 @@ def generate_daily_recommendations(
         )
     except RuntimeError:
         logger.debug("ALPHAI_ACTIONABLE_NEWS_SKIPPED", exc_info=True)
+
+    if per_symbol_news:
+        for base in sorted(universe):
+            ticker = alphai_crypto_ticker(base)
+            try:
+                _merge(
+                    client.list_news(
+                        symbol=ticker,
+                        category="crypto",
+                        min_relevance=min_relevance,
+                        page_size=10,
+                        sort="ingested",
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                symbol_news_errors.append(f"{base}:{exc}")
+                logger.debug(
+                    "ALPHAI_SYMBOL_NEWS_SKIPPED base=%s ticker=%s",
+                    base,
+                    ticker,
+                    exc_info=True,
+                )
 
     scores = score_focus_bases(headlines, universe, min_relevance=min_relevance)
     buy, avoid, watch = build_picks_from_scores(
@@ -336,7 +365,9 @@ def generate_daily_recommendations(
         "interval_hours": max(1, (minutes + 59) // 60),
         "refresh_mode": refresh_mode,
         "macro_caution": macro_caution,
+        "per_symbol_news": bool(per_symbol_news),
         "headline_count": len(headlines),
+        "symbol_news_errors": symbol_news_errors[:8],
         "rate_limit_remaining": client.last_rate_limit.remaining,
         "picks": [p.to_dict() for p in buy],
         "avoid": [p.to_dict() for p in avoid],
@@ -357,6 +388,7 @@ def maybe_refresh_daily(
     interval_minutes: int | None = None,
     interval_hours: int | None = None,
     macro_caution: bool = False,
+    per_symbol_news: bool = False,
     force: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
@@ -395,6 +427,7 @@ def maybe_refresh_daily(
             update_hour_local=update_hour_local,
             interval_minutes=minutes,
             macro_caution=macro_caution,
+            per_symbol_news=per_symbol_news,
             now=instant,
         )
         save_daily_recommendations(path, report)
