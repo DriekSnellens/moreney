@@ -322,6 +322,10 @@ def _toolbar(*, running: bool, has_positions: bool, hold: bool) -> str:
             '<input type="hidden" name="sell_all" value="1">'
             '<button type="submit" class="btn danger">Verkoop alles</button></form>'
         )
+    bits.append(
+        '<form method="get" action="/live/momentum/volatile">'
+        '<button type="submit" class="btn">Volatile shadow</button></form>'
+    )
     if hold:
         bits.append(
             '<form method="get" action="/live/momentum">'

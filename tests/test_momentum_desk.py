@@ -1194,6 +1194,7 @@ def test_dashboard_sell_all_and_report_render():
     }
     html = render_momentum_dashboard(status, []).body.decode()
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
+    assert "Volatile shadow" in html
     assert "pos-cards" in html and 'name="sell" value="h1"' in html
     confirm = render_momentum_dashboard(status, [], sell_all=True).body.decode()
     assert "Alles verkopen?" in confirm and "/live/momentum/sell-all" in confirm
