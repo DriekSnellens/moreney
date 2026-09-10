@@ -26,6 +26,8 @@ BARS_PER_DAY = 96
 # (ts_ms, open, high, low, close, volume_base)
 Candle = Sequence[float]
 
+# Core 16 + liquid midcap expansion (Bitvavo EUR, typically ≥ €1M/24h so the
+# existing volume gate can actually admit them). Rules unchanged.
 DEFAULT_UNIVERSE: tuple[str, ...] = (
     "ETH",
     "SOL",
@@ -43,6 +45,17 @@ DEFAULT_UNIVERSE: tuple[str, ...] = (
     "SUI",
     "FET",
     "UNI",
+    # Liquid midcap expansion (A/B).
+    "HYPE",
+    "TAO",
+    "WLD",
+    "RAY",
+    "ONDO",
+    "XLM",
+    "INJ",
+    "HBAR",
+    "JUP",
+    "PEPE",
 )
 
 DEFAULT_CLUSTERS: dict[str, str] = {
@@ -53,15 +66,25 @@ DEFAULT_CLUSTERS: dict[str, str] = {
     "DOT": "L1",
     "ATOM": "L1",
     "ADA": "L1",
+    "INJ": "L1",
+    "HBAR": "L1",
+    "XLM": "L1",
     "ETH": "ETH",
     "ARB": "L2",
     "OP": "L2",
     "LINK": "DEFI",
     "UNI": "DEFI",
+    "ONDO": "DEFI",
+    "RAY": "DEFI",
+    "JUP": "DEFI",
     "FET": "AI",
+    "TAO": "AI",
+    "WLD": "AI",
+    "HYPE": "PERP",
     "LTC": "PAY",
     "XRP": "PAY",
     "DOGE": "MEME",
+    "PEPE": "MEME",
 }
 
 
