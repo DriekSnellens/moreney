@@ -213,14 +213,13 @@ def test_restrict_by_volume_keeps_top_k():
     assert set(restrict_by_volume(stats, DeskConfig(universe_top_by_volume=2))) == {"A", "C"}
 
 
-def test_default_universe_includes_liquid_midcap_expansion():
+def test_default_universe_is_the_core_sixteen():
     from bot.live.momentum_desk import DEFAULT_CLUSTERS, DEFAULT_UNIVERSE
 
-    assert len(DEFAULT_UNIVERSE) == 26
-    for base in ("HYPE", "TAO", "WLD", "RAY", "ONDO", "XLM", "INJ", "HBAR", "JUP", "PEPE"):
-        assert base in DEFAULT_UNIVERSE
-        assert base in DEFAULT_CLUSTERS
+    assert len(DEFAULT_UNIVERSE) == 16
     assert set(DEFAULT_UNIVERSE) <= set(DEFAULT_CLUSTERS)
+    for base in ("HYPE", "TAO", "WLD", "PEPE", "ONDO"):
+        assert base not in DEFAULT_UNIVERSE
 
 
 def test_risk_ledger_day_week_limits_and_pause():
