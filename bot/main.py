@@ -937,16 +937,24 @@ async def live_momentum_volatile_shadow(
     manager = get_momentum_desk_manager()
     live_cfg = None
     runner = getattr(manager, "_runner", None)
+    settings = get_settings()
     if runner is not None and getattr(runner, "cfg", None) is not None:
         live_cfg = runner.cfg
     else:
         try:
-            live_cfg = desk_config_from_settings(get_settings())
+            live_cfg = desk_config_from_settings(settings)
         except Exception:  # noqa: BLE001
             live_cfg = None
     days_n = max(1, min(int(days or 14), 120))
+    alphai_path = str(
+        getattr(settings, "alphai_daily_recommendations_path", None)
+        or "data/alphai/daily_recommendations.json"
+    )
     payload = build_volatile_shadow(
-        days=days_n, live_cfg=live_cfg, refresh=bool(refresh)
+        days=days_n,
+        live_cfg=live_cfg,
+        refresh=bool(refresh),
+        alphai_path=alphai_path,
     )
     if str(format).lower() == "json":
         return JSONResponse(payload)

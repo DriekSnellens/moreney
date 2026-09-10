@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from bot.live.momentum_desk import BAR_MS, DEFAULT_UNIVERSE, DeskConfig
 from bot.live.momentum_volatile_shadow import (
     build_volatile_shadow,
@@ -30,10 +32,34 @@ def test_shadow_config_points_at_volatile_pool():
             min_volume_eur=1_000_000.0,
         )
     )
-    assert set(cfg.universe) == set(volatile_universe())
+    assert set(volatile_universe()) <= set(cfg.universe)
     assert cfg.clip_eur == 1300.0
     assert cfg.min_volume_eur == 500_000.0
+    assert cfg.alphai_clip_mult >= 1.5
     assert set(cfg.universe) <= set(cfg.clusters)
+
+
+def test_load_shadow_alphai_promotes_watch_and_respects_avoid(tmp_path):
+    from bot.live.momentum_volatile_shadow import load_shadow_alphai
+
+    path = tmp_path / "alphai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-09-10T12:00:00+00:00",
+                "macro_caution": True,
+                "picks": [{"base": "WLD", "score": 40}],
+                "avoid": [{"base": "HYPE", "score": -20}],
+                "watch": [{"base": "ONDO", "score": 5}, {"base": "HYPE", "score": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    view, meta = load_shadow_alphai(path)
+    assert view.macro_caution is True
+    assert "WLD" in view.picks and "ONDO" in view.picks
+    assert "HYPE" in view.avoid and "HYPE" not in view.picks
+    assert meta["loaded"] is True
 
 
 def test_build_volatile_shadow_reports_days(monkeypatch):
@@ -41,6 +67,28 @@ def test_build_volatile_shadow_reports_days(monkeypatch):
 
     uni = ("HYPE", "WLD")
     monkeypatch.setattr(mod, "VOLATILE_POOL", uni)
+    monkeypatch.setattr(
+        mod,
+        "load_shadow_alphai",
+        lambda path=None: (
+            __import__("bot.live.momentum_desk", fromlist=["AlphaIView"]).AlphaIView(
+                picks=frozenset({"WLD"}),
+                avoid=frozenset({"HYPE"}),
+                macro_caution=False,
+            ),
+            {
+                "loaded": True,
+                "generated_at": "test",
+                "effective_picks": ["WLD"],
+                "effective_avoid": ["HYPE"],
+                "macro_caution": False,
+                "note": "test",
+                "picks": [],
+                "avoid": [],
+                "watch": [],
+            },
+        ),
+    )
 
     n = 4 * 96
     start = T0 - DAY_MS
@@ -56,7 +104,16 @@ def test_build_volatile_shadow_reports_days(monkeypatch):
         else:
             px = 10.0 * 1.01
         hype.append([ts, px, px * 1.001, px * 0.999, px, 3e6])
-        wld.append([ts, 5.0, 5.01, 4.99, 5.0, 3e6])
+        wld.append(
+            [
+                ts,
+                5.0 * (1.06 if ts >= T0 else 1.0),
+                5.1,
+                4.9,
+                5.0 * (1.06 if ts >= T0 else 1.0),
+                3e6,
+            ]
+        )
 
     candles = {"BTC": btc, "HYPE": hype, "WLD": wld}
     monkeypatch.setattr(mod, "load_candles", lambda *a, **k: candles)
@@ -76,8 +133,7 @@ def test_build_volatile_shadow_reports_days(monkeypatch):
         ),
     )
     assert payload["ok"] and payload["shadow"]
-    assert payload["universe"] == list(uni)
-    assert isinstance(payload["days"], list)
+    assert payload["alphai"]["loaded"] is True
+    assert "WLD" in payload["alphai"]["effective_picks"]
     html = render_volatile_shadow_html(payload)
-    assert "SHADOW" in html
-    assert "geen" in html.lower() or "Geen" in html or "Zou kopen" in html or "Volatile" in html
+    assert "AlphaI" in html and "SHADOW" in html

@@ -7,6 +7,7 @@ touching the live book.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from bot.live.momentum_desk import (
     BAR_MS,
     DEFAULT_CLUSTERS,
     DEFAULT_UNIVERSE,
+    AlphaIView,
     DeskConfig,
 )
 from bot.research.momentum_backtest.engine import load_candles, simulate
@@ -38,6 +40,9 @@ VOLATILE_POOL: tuple[str, ...] = (
     "ENA",
     "RENDER",
     "TIA",
+    "TRX",
+    "AAVE",
+    "BCH",
 )
 
 _VOLATILE_CLUSTERS: dict[str, str] = {
@@ -57,7 +62,12 @@ _VOLATILE_CLUSTERS: dict[str, str] = {
     "ENA": "DEFI",
     "RENDER": "AI",
     "TIA": "L1",
+    "TRX": "PAY",
+    "AAVE": "DEFI",
+    "BCH": "PAY",
 }
+
+_DEFAULT_ALPHAI_PATH = Path("data/alphai/daily_recommendations.json")
 
 
 def volatile_universe() -> tuple[str, ...]:
@@ -66,26 +76,153 @@ def volatile_universe() -> tuple[str, ...]:
     return tuple(b for b in VOLATILE_POOL if b not in core)
 
 
-def shadow_config(live_cfg: DeskConfig | None = None) -> DeskConfig:
-    """Same rules as the live desk, pointed at the volatile pool only."""
-    uni = volatile_universe()
+def _norm_base(raw: Any) -> str | None:
+    if isinstance(raw, Mapping):
+        raw = raw.get("base") or raw.get("symbol") or raw.get("ticker")
+    text = str(raw or "").strip().upper().replace("-EUR", "").replace("EUR", "")
+    return text or None
+
+
+def load_shadow_alphai(
+    path: str | Path | None = None,
+) -> tuple[AlphaIView, dict[str, Any]]:
+    """Load AlphaI picks/avoid/watch for the shadow book.
+
+    Watch names with a non-negative score are treated as soft picks so the
+    volatile sim leans into AlphaI's directional view, not only the top-N buys.
+    """
+    p = Path(path) if path else _DEFAULT_ALPHAI_PATH
+    meta: dict[str, Any] = {
+        "path": str(p),
+        "loaded": False,
+        "generated_at": None,
+        "picks": [],
+        "avoid": [],
+        "watch": [],
+        "macro_caution": False,
+        "note": "",
+    }
+    if not p.exists():
+        meta["note"] = "AlphaI-bestand ontbreekt — shadow draait zonder news-bias"
+        return AlphaIView(), meta
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        meta["note"] = f"AlphaI onleesbaar: {exc}"
+        return AlphaIView(), meta
+
+    base_view = AlphaIView.from_recommendations(raw if isinstance(raw, Mapping) else None)
+    picks: set[str] = set(base_view.picks)
+    avoid: set[str] = set(base_view.avoid)
+    watch: set[str] = set()
+    pick_rows: list[dict[str, Any]] = []
+    avoid_rows: list[dict[str, Any]] = []
+    watch_rows: list[dict[str, Any]] = []
+
+    def _row(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, Mapping):
+            b = _norm_base(item)
+            return {"base": b, "score": None} if b else None
+        b = _norm_base(item)
+        if not b:
+            return None
+        score = item.get("score")
+        try:
+            score_f = float(score) if score is not None else None
+        except (TypeError, ValueError):
+            score_f = None
+        return {
+            "base": b,
+            "score": score_f,
+            "rank": item.get("rank"),
+            "bullish": list(item.get("bullish_headlines") or [])[:2],
+            "bearish": list(item.get("bearish_headlines") or [])[:2],
+        }
+
+    if isinstance(raw, Mapping):
+        for item in raw.get("picks") or []:
+            row = _row(item)
+            if row:
+                picks.add(row["base"])
+                pick_rows.append(row)
+        for item in raw.get("avoid") or []:
+            row = _row(item)
+            if row:
+                avoid.add(row["base"])
+                avoid_rows.append(row)
+        for item in raw.get("watch") or []:
+            row = _row(item)
+            if not row:
+                continue
+            watch.add(row["base"])
+            watch_rows.append(row)
+            # Soft-positive watch → treat as pick for the volatile shadow.
+            if row["score"] is None or row["score"] >= 0:
+                picks.add(row["base"])
+
+    # Never long something AlphaI marks avoid.
+    picks -= avoid
+    view = AlphaIView(
+        picks=frozenset(picks),
+        avoid=frozenset(avoid),
+        macro_caution=bool(base_view.macro_caution),
+    )
+    meta.update(
+        {
+            "loaded": True,
+            "generated_at": (raw.get("generated_at") if isinstance(raw, Mapping) else None),
+            "picks": pick_rows,
+            "avoid": avoid_rows,
+            "watch": watch_rows,
+            "macro_caution": view.macro_caution,
+            "effective_picks": sorted(view.picks),
+            "effective_avoid": sorted(view.avoid),
+            "note": (
+                "AlphaI snapshot over heel venster gezet (geen historische dagfiles). "
+                "Picks/watch → clip-boost & tiebreak; avoid → geen entry + strakkere trail."
+            ),
+        }
+    )
+    return view, meta
+
+
+def shadow_universe(alphai: AlphaIView | None = None) -> tuple[str, ...]:
+    """Volatile midcaps + non-core AlphaI picks (so news leaders can appear)."""
+    core = set(DEFAULT_UNIVERSE)
+    out: list[str] = [b for b in VOLATILE_POOL if b not in core]
+    if alphai is not None:
+        for b in sorted(alphai.picks):
+            if b not in core and b not in out:
+                out.append(b)
+    return tuple(out)
+
+
+def shadow_config(
+    live_cfg: DeskConfig | None = None,
+    *,
+    alphai: AlphaIView | None = None,
+) -> DeskConfig:
+    """Live desk rules on the volatile(+AlphaI) pool; stronger pick sizing."""
+    uni = shadow_universe(alphai)
     clusters = {k: v for k, v in _VOLATILE_CLUSTERS.items() if k in uni}
+    for b in uni:
+        clusters.setdefault(b, "OTHER")
     if live_cfg is None:
         return DeskConfig(
             decision_hours_utc=(7, 13),
             clip_eur=1300.0,
+            alphai_clip_mult=1.5,
             max_positions=4,
             top_n=2,
             top_n_broad=3,
             min_excess=0.015,
             max_from_high=0.02,
-            # Slightly softer volume gate so thinner alts can appear; still
-            # needs real Bitvavo flow (~€0.5M/24h).
             min_volume_eur=500_000.0,
             day_loss_limit_eur=100.0,
             week_loss_limit_eur=250.0,
             book_eur=4000.0,
             skip_weekend_entries=True,
+            alphai_avoid_tightens_trail=True,
             universe=uni,
             clusters=clusters,
         )
@@ -95,6 +232,8 @@ def shadow_config(live_cfg: DeskConfig | None = None) -> DeskConfig:
         clusters=clusters,
         min_volume_eur=min(float(live_cfg.min_volume_eur), 500_000.0),
         book_eur=float(live_cfg.book_eur) or 4000.0,
+        alphai_clip_mult=max(float(live_cfg.alphai_clip_mult), 1.5),
+        alphai_avoid_tightens_trail=True,
     )
 
 
@@ -127,15 +266,18 @@ def build_volatile_shadow(
     live_cfg: DeskConfig | None = None,
     end_ms: int | None = None,
     refresh: bool = False,
+    alphai_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Replay the volatile pool and return a day-by-day would-have report."""
-    cfg = shadow_config(live_cfg)
+    alphai, alphai_meta = load_shadow_alphai(alphai_path)
+    cfg = shadow_config(live_cfg, alphai=alphai)
     uni = cfg.universe
     if not uni:
         return {
             "ok": False,
             "reason": "empty_volatile_universe",
             "universe": [],
+            "alphai": alphai_meta,
         }
     end = end_ms if end_ms is not None else int(datetime.now(UTC).timestamp() * 1000)
     end = end // BAR_MS * BAR_MS
@@ -147,7 +289,7 @@ def build_volatile_shadow(
         refresh=refresh,
         cache_dir=_candle_cache_dir(),
     )
-    res = simulate(candles, cfg, start_ms=start, end_ms=end)
+    res = simulate(candles, cfg, start_ms=start, end_ms=end, alphai=alphai)
 
     # Index decisions / entries / exits by UTC day.
     by_day: dict[str, dict[str, Any]] = {}
@@ -188,6 +330,15 @@ def build_volatile_shadow(
                     "notional_eur": clip,
                     "btc_ret": round(float(d.btc_ret), 4) if d.btc_ret is not None else None,
                     "breadth": round(float(d.breadth), 3),
+                    "alphai_pick": base in alphai.picks,
+                    "alphai_avoid": base in alphai.avoid,
+                    "alphai_bias": (
+                        "up"
+                        if base in alphai.picks
+                        else "down"
+                        if base in alphai.avoid
+                        else "neutral"
+                    ),
                 }
             )
 
@@ -239,11 +390,13 @@ def build_volatile_shadow(
     days_out = [by_day[k] for k in sorted(by_day.keys(), reverse=True)]
     summary = res.summary()
     sleeve_net = round(sum(t.net_eur for t in res.closed), 2)
+    pick_trades = [t for t in res.closed if "alphai_pick" in str(t.entry_reason)]
     return {
         "ok": True,
         "shadow": True,
-        "label": "Volatile shadow (geen echte orders)",
+        "label": "Volatile shadow + AlphaI (geen echte orders)",
         "universe": list(uni),
+        "alphai": alphai_meta,
         "window": {
             "start": _iso(start),
             "end": _iso(end),
@@ -258,11 +411,14 @@ def build_volatile_shadow(
             "max_from_high": cfg.max_from_high,
             "trail_pct": cfg.trail_pct,
             "hard_stop_pct": cfg.hard_stop_pct,
+            "alphai_clip_mult": cfg.alphai_clip_mult,
         },
         "summary": {
             **summary,
             "volatile_net_eur": sleeve_net,
             "open_positions": len(res.open_mtm),
+            "alphai_pick_trades": len(pick_trades),
+            "alphai_pick_net_eur": round(sum(t.net_eur for t in pick_trades), 2),
         },
         "open": res.open_mtm,
         "days": days_out,
@@ -283,6 +439,7 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     summary = payload.get("summary") or {}
     window = payload.get("window") or {}
     cfg = payload.get("config") or {}
+    alphai = payload.get("alphai") or {}
     uni = ", ".join(escape(str(b)) for b in (payload.get("universe") or []))
 
     def eur(v: Any, *, signed: bool = True) -> str:
@@ -298,6 +455,32 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
         except (TypeError, ValueError):
             return ""
         return "good" if x > 0 else "bad" if x < 0 else ""
+
+    def bias_tag(b: Mapping[str, Any]) -> str:
+        bias = str(b.get("alphai_bias") or "neutral")
+        if bias == "up" or b.get("alphai_pick"):
+            return " <span class='good'>AlphaI ↑</span>"
+        if bias == "down" or b.get("alphai_avoid"):
+            return " <span class='bad'>AlphaI ↓</span>"
+        return ""
+
+    alphai_html = (
+        '<div class="card section"><div class="card-head"><h2>AlphaI bias</h2>'
+        f'<span class="muted">{escape(str(alphai.get("generated_at") or "—"))}</span></div>'
+        f"<p>Macro caution: <strong>{'ja' if alphai.get('macro_caution') else 'nee'}</strong>"
+        f" · pick-clip ×{float(cfg.get('alphai_clip_mult') or 1.5):.1f}</p>"
+        f'<p class="muted" style="font-size:.78rem">'
+        f"{escape(str(alphai.get('note') or ''))}</p>"
+        "<div class='rules' style='margin-top:.5rem'>"
+        f"<div><span>Picks (↑)</span>"
+        f"{escape(', '.join(alphai.get('effective_picks') or []) or '—')}</div>"
+        f"<div><span>Avoid (↓)</span>"
+        f"{escape(', '.join(alphai.get('effective_avoid') or []) or '—')}</div>"
+        f"<div><span>Pick-trades</span>{summary.get('alphai_pick_trades') or 0} · "
+        f"<span class='{cls(summary.get('alphai_pick_net_eur'))}'>"
+        f"{eur(summary.get('alphai_pick_net_eur'))}</span></div>"
+        "</div></div>"
+    )
 
     rows: list[str] = []
     for day in payload.get("days") or []:
@@ -317,7 +500,7 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
                 u = b["unrealized_net_eur"]
                 extra = f" → open <span class='{cls(u)}'>{eur(u)}</span>"
             buy_lines.append(
-                f"<li><strong>{escape(str(b.get('base')))}</strong> "
+                f"<li><strong>{escape(str(b.get('base')))}</strong>{bias_tag(b)} "
                 f"@ {escape(str(b.get('at')))} "
                 f"· {eur(b.get('notional_eur'), signed=False)} · {status}{extra}</li>"
             )
@@ -372,8 +555,8 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     vol_m = float(cfg.get("min_volume_eur") or 0) / 1e6
     return (
         '<div class="hint warn">SHADOW — er worden <strong>geen</strong> '
-        "echte orders geplaatst. Zelfde entry/exit-regels als de live desk, "
-        "op een volatile pool buiten de core 16.</div>"
+        "echte orders geplaatst. Desk-regels + AlphaI picks/avoid/macro op een "
+        "volatile pool buiten de core 16.</div>"
         f'<div class="card section"><div class="card-head"><h2>{label}</h2>'
         f'<span class="muted">{w0} → {w1}</span></div>'
         f"<p>Universe ({len(payload.get('universe') or [])}): {uni}</p>"
@@ -391,6 +574,7 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
         '<a class="muted" href="/live/momentum/volatile?format=json">JSON</a> · '
         '<a class="muted" href="/live/momentum/volatile?days=14">14d</a> · '
         '<a class="muted" href="/live/momentum/volatile?days=84">12w</a></p></div>'
+        + alphai_html
         + open_html
         + ("".join(rows) if rows else '<p class="muted">Geen beslissingen in dit venster.</p>')
     )
@@ -423,8 +607,10 @@ def render_volatile_shadow_page(payload: Mapping[str, Any]) -> str:
 __all__ = [
     "VOLATILE_POOL",
     "build_volatile_shadow",
+    "load_shadow_alphai",
     "render_volatile_shadow_html",
     "render_volatile_shadow_page",
     "shadow_config",
+    "shadow_universe",
     "volatile_universe",
 ]

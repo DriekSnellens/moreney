@@ -239,7 +239,7 @@ def simulate(
             bar = idx.get(pos.base, {}).get(closed_ts)
             if bar is None:
                 continue
-            decision = evaluate_exit(pos, bar, cfg)
+            decision = evaluate_exit(pos, bar, cfg, alphai=alphai)
             if decision is None:
                 continue
             exit_price = decision.price if decision.price is not None else float(bar[4])
