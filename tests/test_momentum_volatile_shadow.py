@@ -38,6 +38,9 @@ def test_shadow_config_is_not_core_desk():
     assert set(cfg.universe) == set(volatile_universe())
     assert cfg.require_alphai_green is True
     assert cfg.clip_eur == 650.0
+    assert cfg.alphai_flip_exits is True
+    assert cfg.conviction_sizing is True
+    assert cfg.decision_hours_utc == (7, 13, 16)
     assert cfg.book_eur == 2000.0
     assert cfg.min_volume_eur == 400_000.0
     assert cfg.max_from_high == 0.05  # softer than core 2%
@@ -181,3 +184,77 @@ def test_no_alphai_green_means_no_buys(monkeypatch):
     assert buys == []
     assert payload["summary"]["trades"] == 0
     assert payload["now"]["block"] == "no_alphai_volatile_picks"
+
+
+def test_smart_exit_flips_on_alphai_avoid():
+    from bot.live.momentum_desk import AlphaIView, Position
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, _evaluate_volatile_exit
+
+    cfg = VolatileShadowConfig(alphai_flip_exits=True)
+    pos = Position(
+        base="RAY",
+        entry_price=1.0,
+        quantity=10,
+        notional_eur=10,
+        opened_ms=0,
+        peak=1.05,
+    )
+    bar = [0, 1.0, 1.05, 0.95, 1.02, 1e6]
+    alphai = AlphaIView(picks=frozenset(), avoid=frozenset({"RAY"}), macro_caution=False)
+    decision = _evaluate_volatile_exit(pos, bar, cfg, alphai)
+    assert decision is not None
+    assert decision.reason == "alphai_flip"
+    assert decision.urgent is True
+
+
+def test_rank_rejects_chase_extended():
+    from bot.live.momentum_desk import AlphaIView, BaseStats
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, _rank_volatile
+
+    cfg = VolatileShadowConfig(
+        require_alphai_green=True,
+        min_alphai_score=0.0,
+        weak_score_needs_excess=0.0,
+        max_chase_ret_24h=0.12,
+        prefer_pullback_from_high=0.008,
+        alphai_scores={"RAY": 80.0},
+    )
+    alphai = AlphaIView(picks=frozenset({"RAY"}), avoid=frozenset(), macro_caution=False)
+    stats = {
+        "RAY": BaseStats(
+            base="RAY",
+            price=1.0,
+            ret_24h=0.20,
+            from_high=-0.001,
+            volume_eur=5_000_000.0,
+        )
+    }
+    cands, rejected = _rank_volatile(stats, 0.0, cfg, alphai)
+    assert cands == []
+    assert rejected
+    why = rejected[0]["why"]
+    assert any("chase" in w for w in why)
+
+
+def test_conviction_sizing_scales_clip():
+    from bot.live.momentum_desk import AlphaIView
+    from bot.live.momentum_volatile_shadow import (
+        VolatileShadowConfig,
+        _select_volatile,
+        _VolCandidate,
+    )
+
+    cfg = VolatileShadowConfig(
+        clip_eur=650.0,
+        alphai_clip_mult=1.0,
+        conviction_sizing=True,
+        strong_alphai_score=60.0,
+        max_positions=2,
+        top_n=2,
+    )
+    alphai = AlphaIView(picks=frozenset({"RAY", "ENA"}), avoid=frozenset(), macro_caution=False)
+    strong = _VolCandidate("RAY", 0.02, 0.03, -0.01, 1e6, 80.0, 100.0, ("alphai_green",))
+    weak = _VolCandidate("ENA", 0.02, 0.03, -0.01, 1e6, 20.0, 50.0, ("alphai_green",))
+    planned = _select_volatile([strong, weak], cfg, held=set(), blocked=set(), alphai=alphai)
+    by = {p["base"]: p["clip_eur"] for p in planned}
+    assert by["RAY"] > by["ENA"]
