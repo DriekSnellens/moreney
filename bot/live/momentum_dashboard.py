@@ -790,6 +790,115 @@ def _rules(cfg: Mapping[str, Any]) -> str:
     )
 
 
+def _sleeve_card(
+    *,
+    title: str,
+    role: str,
+    status: Mapping[str, Any] | None,
+    href: str,
+    book_label: str | None = None,
+) -> str:
+    """Compact dual-sleeve tile for the integrated desk view."""
+    st = status or {}
+    running = bool(st.get("running"))
+    dry = bool(st.get("dry_run"))
+    allow_live = st.get("allow_live")
+    if not running:
+        pill = '<span class="pill off"><span class="dot"></span>STOP</span>'
+        mode = "gestopt"
+    elif dry or allow_live is False:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        mode = "paper / dry-run"
+    else:
+        pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
+        mode = "live orders"
+    risk = st.get("risk") or {}
+    cfg = st.get("config") or {}
+    n_pos = len(st.get("positions") or [])
+    max_pos = cfg.get("max_positions") or "—"
+    hours = cfg.get("decision_hours_utc") or []
+    hours_s = ",".join(str(h) for h in hours) if hours else "—"
+    book = st.get("book_eur")
+    if book is None:
+        book = cfg.get("book_eur")
+    book_left = st.get("book_left_eur")
+    book_html = ""
+    if book_label and book is not None:
+        left_s = (
+            f" · vrij {_fmt_eur(book_left, signed=False)}"
+            if book_left is not None
+            else ""
+        )
+        book_html = (
+            f"<p>{escape(book_label)} {_fmt_eur(book, signed=False)}{left_s}</p>"
+        )
+    pos_bits: list[str] = []
+    for p in (st.get("positions") or [])[:4]:
+        base = escape(str(p.get("base") or ""))
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(f"<li><strong>{base}</strong> · <span class='{_cls(net)}'>{_fmt_eur(net)}</span></li>")
+    if not pos_bits:
+        pos_bits.append("<li class='muted'>Geen open posities</li>")
+    return (
+        f'<div class="card"><div class="card-head"><h2>{escape(title)}</h2>{pill}</div>'
+        f'<p class="muted" style="margin:0 0 .5rem">{escape(role)} · {escape(mode)}</p>'
+        f"<p>Gerealiseerd <strong class='{_cls(st.get('realized_total_eur'))}'>"
+        f"{_fmt_eur(st.get('realized_total_eur'))}</strong> · "
+        f"day <span class='{_cls(risk.get('day_realized_eur'))}'>"
+        f"{_fmt_eur(risk.get('day_realized_eur'))}</span> · "
+        f"pos {n_pos}/{max_pos}</p>"
+        f"{book_html}"
+        f"<p>Uren {escape(hours_s)} UTC · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul>"
+        f'<p><a class="btn" href="{escape(href)}">Open sleeve</a></p></div>'
+    )
+
+
+def _sleeves_panel(
+    core: Mapping[str, Any],
+    volatile: Mapping[str, Any] | None,
+) -> str:
+    """One desk, two sleeves: stable core + aggressive volatile."""
+    cash = float(core.get("cash_eur") or 0)
+    core_exp = float(core.get("exposure_eur") or 0)
+    v = volatile or {}
+    book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
+    deployed = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
+    reserved = max(0.0, book - deployed) if book else 0.0
+    free_shared = max(0.0, cash - core_exp - reserved)
+    capital = (
+        '<div class="hint" style="margin-bottom:.7rem">'
+        "<strong>Kapitaalbeeld</strong> — gedeelde venue-cash, gescheiden boeken. "
+        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)} · "
+        f"volatile book {_fmt_eur(book, signed=False)} "
+        f"(waarvan vrij {_fmt_eur(reserved, signed=False)}) · "
+        f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}."
+        "</div>"
+    )
+    return (
+        '<div class="card section"><div class="card-head">'
+        "<h2>Desk sleeves</h2>"
+        '<span class="muted">stabiel core · aggressief volatile</span></div>'
+        f"{capital}"
+        '<div class="stack two">'
+        + _sleeve_card(
+            title="Core",
+            role="Stabiele RS-desk · core-16 · strengere filters",
+            status=core,
+            href="/live/momentum",
+            book_label=None,
+        )
+        + _sleeve_card(
+            title="Volatile",
+            role="Agressievere AlphaI midcaps · soft book · eigen risk",
+            status=volatile,
+            href="/live/momentum/volatile",
+            book_label="Soft book",
+        )
+        + "</div></div>"
+    )
+
+
 def render_momentum_dashboard(
     status: Mapping[str, Any],
     ledger_rows: Sequence[Mapping[str, Any]],
@@ -799,6 +908,7 @@ def render_momentum_dashboard(
     sell: str | None = None,
     sell_all: bool = False,
     report: Mapping[str, Any] | None = None,
+    volatile: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -902,20 +1012,21 @@ def render_momentum_dashboard(
 <body><div class="wrap">
 <div class="topbar">
   <div><h1 style="margin:0;font-family:var(--display);font-weight:500">Momentum Desk</h1>
-  <div class="tagline">Dagelijkse RS-leaders · één exit-regel · {venue}</div></div>
+  <div class="tagline">Core stabiel + volatile aggressief · {venue}</div></div>
   <div>{pill}</div>
 </div>
 {err_html}
 {toolbar}
+{_sleeves_panel(status, volatile)}
 <div class="hero-grid" style="margin-top:1rem">{heroes}</div>
 {preview_html}
 {report_html}
 {sell_html}
 {sell_all_html}
 <div class="stack two section">
-  <div class="card"><div class="card-head"><h2>Open posities</h2></div>
+  <div class="card"><div class="card-head"><h2>Core · open posities</h2></div>
   {_positions_table(status)}</div>
-  <div class="card"><div class="card-head"><h2>Laatste beslissing</h2>
+  <div class="card"><div class="card-head"><h2>Core · laatste beslissing</h2>
   {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
 </div>
 <div class="card section"><h2>Ledger</h2>{_ledger_table(ledger_rows)}</div>
