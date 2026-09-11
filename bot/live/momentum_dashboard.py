@@ -135,11 +135,17 @@ def _hero(label: str, value: str, *, cls: str = "", hint: str = "") -> str:
     )
 
 
-def _positions_table(status: Mapping[str, Any]) -> str:
+def _positions_table(
+    status: Mapping[str, Any],
+    *,
+    sell_all_path: str | None = "/live/momentum",
+    post_sell_action: str | None = None,
+    empty_text: str = "Geen open posities — 100% cash tot de volgende beslissing.",
+) -> str:
     rows = status.get("positions") or []
     cfg = status.get("config") or {}
     if not rows:
-        return '<p class="muted">Geen open posities — 100% cash tot de volgende beslissing.</p>'
+        return f'<p class="muted">{escape(empty_text)}</p>'
     trail = float(cfg.get("trail_pct") or 0.03)
     tight_after = float(cfg.get("trail_tight_after") or 0.0)
     tight = float(cfg.get("trail_tight_pct") or trail)
@@ -161,7 +167,7 @@ def _positions_table(status: Mapping[str, Any]) -> str:
         trail_px = peak_px * (1 - eff_trail)
         stop_px = entry * (1 - stop)
         mark = p.get("mark")
-        sell = _sell_cell(p, disabled=sell_busy)
+        sell = _sell_cell(p, disabled=sell_busy, post_action=post_sell_action)
         out.append(
             "<tr>"
             f"<td><strong>{escape(str(p.get('base')))}</strong>"
@@ -205,13 +211,21 @@ def _positions_table(status: Mapping[str, Any]) -> str:
     cards.append("</div>")
     out.append("".join(cards))
     sell_all = ""
-    if rows and not sell_busy:
-        sell_all = (
-            '<div class="toolbar" style="margin-top:.55rem">'
-            '<form method="get" action="/live/momentum">'
-            '<input type="hidden" name="sell_all" value="1">'
-            '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
-        )
+    if rows and not sell_busy and sell_all_path:
+        if post_sell_action:
+            sell_all = (
+                '<div class="toolbar" style="margin-top:.55rem">'
+                f'<form method="post" action="{escape(post_sell_action.replace("/sell", "/sell-all"))}">'
+                '<input type="hidden" name="redirect" value="1">'
+                '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
+            )
+        else:
+            sell_all = (
+                '<div class="toolbar" style="margin-top:.55rem">'
+                f'<form method="get" action="{escape(sell_all_path)}">'
+                '<input type="hidden" name="sell_all" value="1">'
+                '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
+            )
     out.append(sell_all)
     out.append(
         "<p class='muted' style='font-size:.72rem;margin-top:.4rem'>Verkoop = maker-order op de "
@@ -220,16 +234,31 @@ def _positions_table(status: Mapping[str, Any]) -> str:
     return "".join(out)
 
 
-def _sell_cell(p: Mapping[str, Any], *, disabled: bool) -> str:
+def _sell_cell(
+    p: Mapping[str, Any],
+    *,
+    disabled: bool,
+    confirm_path: str = "/live/momentum",
+    sell_param: str = "sell",
+    post_action: str | None = None,
+) -> str:
     hid = str(p.get("holding_id") or "")
     if not hid:
         return ""
     if p.get("exiting"):
         return "<span class='muted' style='font-size:.75rem'>verkoop bezig…</span>"
     dis = " disabled" if disabled else ""
+    if post_action:
+        return (
+            f'<form method="post" action="{escape(post_action)}" style="display:inline">'
+            f'<input type="hidden" name="holding_id" value="{escape(hid)}">'
+            '<input type="hidden" name="redirect" value="1">'
+            f'<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;'
+            f'min-height:40px"{dis}>Verkoop</button></form>'
+        )
     return (
-        f'<form method="get" action="/live/momentum" style="display:inline">'
-        f'<input type="hidden" name="sell" value="{escape(hid)}">'
+        f'<form method="get" action="{escape(confirm_path)}" style="display:inline">'
+        f'<input type="hidden" name="{escape(sell_param)}" value="{escape(hid)}">'
         f'<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;'
         f'min-height:40px"{dis}>Verkoop</button></form>'
     )
@@ -790,6 +819,136 @@ def _rules(cfg: Mapping[str, Any]) -> str:
     )
 
 
+def _sleeve_card(
+    *,
+    title: str,
+    role: str,
+    status: Mapping[str, Any] | None,
+    href: str,
+    book_label: str | None = None,
+) -> str:
+    """Compact dual-sleeve tile for the integrated desk view."""
+    st = status or {}
+    running = bool(st.get("running"))
+    dry = bool(st.get("dry_run"))
+    allow_live = st.get("allow_live")
+    if not running:
+        pill = '<span class="pill off"><span class="dot"></span>STOP</span>'
+        mode = "gestopt"
+    elif dry or allow_live is False:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        mode = "paper / dry-run"
+    else:
+        pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
+        mode = "live orders"
+    risk = st.get("risk") or {}
+    cfg = st.get("config") or {}
+    n_pos = len(st.get("positions") or [])
+    max_pos = cfg.get("max_positions") or "—"
+    hours = cfg.get("decision_hours_utc") or []
+    hours_s = ",".join(str(h) for h in hours) if hours else "—"
+    book = st.get("book_eur")
+    if book is None:
+        book = cfg.get("book_eur")
+    book_left = st.get("book_left_eur")
+    book_html = ""
+    if book_label and book is not None:
+        left_s = (
+            f" · vrij {_fmt_eur(book_left, signed=False)}"
+            if book_left is not None
+            else ""
+        )
+        book_html = (
+            f"<p>{escape(book_label)} {_fmt_eur(book, signed=False)}{left_s}</p>"
+        )
+    pos_bits: list[str] = []
+    for p in (st.get("positions") or [])[:4]:
+        base = escape(str(p.get("base") or ""))
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(f"<li><strong>{base}</strong> · <span class='{_cls(net)}'>{_fmt_eur(net)}</span></li>")
+    if not pos_bits:
+        pos_bits.append("<li class='muted'>Geen open posities</li>")
+    return (
+        f'<div class="card"><div class="card-head"><h2>{escape(title)}</h2>{pill}</div>'
+        f'<p class="muted" style="margin:0 0 .5rem">{escape(role)} · {escape(mode)}</p>'
+        f"<p>Gerealiseerd <strong class='{_cls(st.get('realized_total_eur'))}'>"
+        f"{_fmt_eur(st.get('realized_total_eur'))}</strong> · "
+        f"day <span class='{_cls(risk.get('day_realized_eur'))}'>"
+        f"{_fmt_eur(risk.get('day_realized_eur'))}</span> · "
+        f"pos {n_pos}/{max_pos}</p>"
+        f"{book_html}"
+        f"<p>Uren {escape(hours_s)} UTC · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul></div>"
+    )
+
+
+def _sleeves_panel(
+    core: Mapping[str, Any],
+    volatile: Mapping[str, Any] | None,
+) -> str:
+    """One desk, two sleeves: stable core + aggressive volatile."""
+    cash = float(core.get("cash_eur") or 0)
+    core_exp = float(core.get("exposure_eur") or 0)
+    v = volatile or {}
+    book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
+    deployed = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
+    reserved = max(0.0, book - deployed) if book else 0.0
+    free_shared = max(0.0, cash - core_exp - reserved)
+    capital = (
+        '<div class="hint" style="margin-bottom:.7rem">'
+        "<strong>Kapitaalbeeld</strong> — gedeelde venue-cash, gescheiden boeken. "
+        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)} · "
+        f"volatile book {_fmt_eur(book, signed=False)} "
+        f"(waarvan vrij {_fmt_eur(reserved, signed=False)}) · "
+        f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}."
+        "</div>"
+    )
+    return (
+        '<div class="card section"><div class="card-head">'
+        "<h2>Desk sleeves</h2>"
+        '<span class="muted">stabiel core · aggressief volatile</span></div>'
+        f"{capital}"
+        '<div class="stack two">'
+        + _sleeve_card(
+            title="Core",
+            role="Stabiele RS-desk · core-16 · strengere filters",
+            status=core,
+            href="/live/momentum",
+            book_label=None,
+        )
+        + _sleeve_card(
+            title="Volatile",
+            role="Agressievere AlphaI midcaps · soft book · eigen risk",
+            status=volatile,
+            href="/live/momentum/volatile",
+            book_label="Soft book",
+        )
+        + "</div></div>"
+    )
+
+
+def _volatile_actions(volatile: Mapping[str, Any] | None) -> str:
+    """Inline paper/live controls for the volatile sleeve on the main desk."""
+    st = volatile or {}
+    if not st.get("running"):
+        return (
+            '<form method="post" action="/live/momentum/volatile/start" style="display:inline">'
+            '<input type="hidden" name="dry_run" value="false">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn primary">Start volatile LIVE</button></form>'
+        )
+    return (
+        '<form method="post" action="/live/momentum/volatile/decide" style="display:inline;margin-right:.35rem">'
+        '<input type="hidden" name="execute" value="0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Preview</button></form>'
+        '<form method="post" action="/live/momentum/volatile/decide" style="display:inline">'
+        '<input type="hidden" name="execute" value="1">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn primary">Decide</button></form>'
+    )
+
+
 def render_momentum_dashboard(
     status: Mapping[str, Any],
     ledger_rows: Sequence[Mapping[str, Any]],
@@ -799,6 +958,7 @@ def render_momentum_dashboard(
     sell: str | None = None,
     sell_all: bool = False,
     report: Mapping[str, Any] | None = None,
+    volatile: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -902,28 +1062,40 @@ def render_momentum_dashboard(
 <body><div class="wrap">
 <div class="topbar">
   <div><h1 style="margin:0;font-family:var(--display);font-weight:500">Momentum Desk</h1>
-  <div class="tagline">Dagelijkse RS-leaders · één exit-regel · {venue}</div></div>
+  <div class="tagline">Core stabiel + volatile aggressief · {venue}</div></div>
   <div>{pill}</div>
 </div>
 {err_html}
 {toolbar}
+{_sleeves_panel(status, volatile)}
 <div class="hero-grid" style="margin-top:1rem">{heroes}</div>
 {preview_html}
 {report_html}
 {sell_html}
 {sell_all_html}
 <div class="stack two section">
-  <div class="card"><div class="card-head"><h2>Open posities</h2></div>
+  <div class="card"><div class="card-head"><h2>Core · open posities</h2></div>
   {_positions_table(status)}</div>
-  <div class="card"><div class="card-head"><h2>Laatste beslissing</h2>
-  {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
+  <div class="card"><div class="card-head"><h2>Volatile · open posities</h2></div>
+  {_positions_table(
+      volatile or {},
+      sell_all_path=None,
+      post_sell_action="/live/momentum/volatile/sell",
+      empty_text="Geen open volatile-posities — soft book staat klaar.",
+  )}</div>
 </div>
-<div class="card section"><h2>Ledger</h2>{_ledger_table(ledger_rows)}</div>
-<div class="card section"><h2>Regels</h2>{_rules(cfg)}</div>
+<div class="stack two section">
+  <div class="card"><div class="card-head"><h2>Core · laatste beslissing</h2>
+  {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
+  <div class="card"><div class="card-head"><h2>Volatile · laatste beslissing</h2>
+  {_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>
+</div>
+<div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
+<div class="card section"><h2>Regels (core)</h2>{_rules(cfg)}</div>
 <p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
-<a href="/live/momentum/status" style="color:var(--blue)">status JSON</a> ·
-<a href="/live/momentum/ledger" style="color:var(--blue)">ledger JSON</a> ·
-<a href="/live/dashboard/legacy" style="color:var(--muted)">oude desk</a></p>
+<a href="/live/momentum/status" style="color:var(--blue)">core JSON</a> ·
+<a href="/live/momentum/volatile/status" style="color:var(--blue)">volatile JSON</a> ·
+<a href="/live/momentum/ledger" style="color:var(--blue)">ledger</a></p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
 </body></html>"""

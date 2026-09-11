@@ -863,6 +863,11 @@ async def live_momentum_dashboard(
             notice = f"Report niet mogelijk: {res.get('reason')}"
     status = manager.status()
     ledger = await live_momentum_ledger(limit=400)
+    volatile_status: dict[str, Any] | None
+    try:
+        volatile_status = get_volatile_desk_manager().status()
+    except Exception:  # noqa: BLE001
+        volatile_status = None
     return render_momentum_dashboard(
         status,
         ledger["rows"],
@@ -871,6 +876,7 @@ async def live_momentum_dashboard(
         sell=(sell or None),
         sell_all=bool(sell_all),
         report=report_payload,
+        volatile=volatile_status,
     )
 
 
@@ -938,7 +944,7 @@ def _volatile_wants_redirect(body: Mapping[str, Any], request: Request) -> bool:
 def _volatile_redirect(notice: str | None = None) -> RedirectResponse:
     from urllib.parse import quote
 
-    url = "/live/momentum/volatile"
+    url = "/live/momentum"
     if notice:
         url = f"{url}?notice={quote(notice)}"
     return RedirectResponse(url=url, status_code=303)
