@@ -324,7 +324,7 @@ def _toolbar(*, running: bool, has_positions: bool, hold: bool) -> str:
         )
     bits.append(
         '<form method="get" action="/live/momentum/volatile">'
-        '<button type="submit" class="btn">Volatile shadow</button></form>'
+        '<button type="submit" class="btn">Volatile</button></form>'
     )
     if hold:
         bits.append(

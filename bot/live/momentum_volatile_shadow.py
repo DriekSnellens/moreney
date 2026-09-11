@@ -2,12 +2,14 @@
 
 This is NOT the Momentum Desk logic. The live book keeps its RS/regime rules on
 the core 16. Here we only consider a volatile pool *outside* that universe and
-refuse to buy unless AlphaI gives a directional green light (pick/watch). Avoid
-names are hard vetoes. Blind volatility chasing is intentionally blocked.
+refuse to buy unless AlphaI is green, then time/size entries by conviction and
+anti-chase filters. Exits adapt: AlphaI flip cuts, strong greens get room,
+weak/neutral names trail tighter. Blind volatility chasing stays blocked.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -77,37 +79,60 @@ _VOLATILE_CLUSTERS: dict[str, str] = {
     "BCH": "PAY",
 }
 
-_DEFAULT_ALPHAI_PATH = Path("data/alphai/daily_recommendations.json")
+_DEFAULT_ALPHAI_PATH = Path("data/alphai/volatile_recommendations.json")
 _MIN_CLIP_EUR = 25.0
 
 
 @dataclass(frozen=True)
 class VolatileShadowConfig:
-    """Entry/exit knobs for the AlphaI-first volatile paper book."""
+    """Entry/exit knobs for the AlphaI-first volatile paper book.
 
-    decision_hours_utc: tuple[int, ...] = (7, 13)
+    Smart mode (default): AlphaI conviction drives size, entry quality filters
+    avoid chase entries, and exits adapt to AlphaI flip / still-green winners.
+    """
+
+    decision_hours_utc: tuple[int, ...] = (7, 13, 16)
     clip_eur: float = 650.0
     alphai_clip_mult: float = 1.4
     macro_caution_clip_mult: float = 0.6
-    max_positions: int = 2
+    # Concentration beats diversification on this sleeve (12w sweep).
+    max_positions: int = 1
     top_n: int = 2
     # Softer than the core desk: AlphaI already did the "which name" work.
     min_volume_eur: float = 400_000.0
     min_ret_24h: float = 0.0  # need some upside print
     max_from_high: float = 0.05
+    # Prefer a shallow pullback vs buying the exact high.
+    prefer_pullback_from_high: float = 0.008
+    # Skip exhaustion chase: big 24h pop already sitting on the high.
+    max_chase_ret_24h: float = 0.10
+    min_alphai_score: float = 30.0
+    # With min_alphai_score=30, excess gate is optional (0 disables).
+    weak_score_needs_excess: float = 0.0
     trail_pct: float = 0.04
-    trail_tight_after: float = 0.05
+    trail_tight_after: float = 0.06
     trail_tight_pct: float = 0.025
-    hard_stop_pct: float = 0.04
-    time_exit_hours: float = 18.0
+    # Strong AlphaI winners get more room.
+    trail_wide_pct: float = 0.06
+    trail_wide_after: float = 0.04
+    strong_alphai_score: float = 60.0
+    hard_stop_pct: float = 0.05
+    time_exit_hours: float = 24.0
+    # Still-green winners may hold longer before fee-aware time exit.
+    time_exit_hours_green: float = 48.0
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 80.0
     week_loss_limit_eur: float = 200.0
     pause_hours_after_week_limit: float = 48.0
     max_entries_per_base_per_day: int = 1
-    skip_weekend_entries: bool = True
+    # Volatile sleeve decides every day (incl. weekends) — core desk stays weekday-only.
+    skip_weekend_entries: bool = False
     # Hard rule: no AlphaI pick/watch ⇒ no buy (never blind).
     require_alphai_green: bool = True
+    # Exit immediately when AlphaI flips a held name to avoid.
+    alphai_flip_exits: bool = True
+    # Scale clip by AlphaI score conviction.
+    conviction_sizing: bool = True
     book_eur: float = 2000.0
     universe: tuple[str, ...] = field(default_factory=tuple)
     clusters: Mapping[str, str] = field(default_factory=dict)
@@ -249,10 +274,10 @@ def shadow_config(
     for b in uni:
         clusters.setdefault(b, "OTHER")
     clip = 650.0
-    hours = (7, 13)
+    # Own schedule (more entry windows than core 7/13) — do not inherit core hours.
+    hours = (7, 13, 16)
     if live_cfg is not None:
-        # Borrow schedule only; do not inherit RS thresholds / core clip.
-        hours = tuple(live_cfg.decision_hours_utc) or hours
+        # Borrow clip scale only; keep volatile smart decision hours.
         clip = min(650.0, float(live_cfg.clip_eur) * 0.5)
     return VolatileShadowConfig(
         decision_hours_utc=hours,
@@ -301,17 +326,29 @@ class _VolCandidate:
     reasons: tuple[str, ...]
 
 
+def _conviction_mult(score: float, cfg: VolatileShadowConfig) -> float:
+    """Map AlphaI score → clip multiplier (weak / base / strong)."""
+    if not cfg.conviction_sizing:
+        return 1.0
+    if score >= cfg.strong_alphai_score:
+        return 1.25
+    if score < cfg.min_alphai_score + 10:
+        return 0.75
+    return 1.0
+
+
 def _rank_volatile(
     stats: Mapping[str, BaseStats],
     btc_ret: float,
     cfg: VolatileShadowConfig,
     alphai: AlphaIView,
 ) -> tuple[list[_VolCandidate], list[dict[str, Any]]]:
-    """AlphaI-first ranking. Rejected rows are returned for the UI."""
+    """AlphaI-first ranking with anti-chase / quality filters."""
     rejected: list[dict[str, Any]] = []
     out: list[_VolCandidate] = []
     for base, st in stats.items():
         excess = st.ret_24h - btc_ret
+        a_score = float(cfg.alphai_scores.get(base, 10.0 if base in alphai.picks else 0.0))
         why: list[str] = []
         if base in alphai.avoid:
             why.append("alphai_avoid")
@@ -323,6 +360,20 @@ def _rank_volatile(
             why.append("ret_flat_or_down")
         if st.from_high < -cfg.max_from_high:
             why.append("far_from_high")
+        # Sitting on the high after a large pop → chase.
+        if (
+            st.ret_24h >= cfg.max_chase_ret_24h
+            and st.from_high > -cfg.prefer_pullback_from_high
+        ):
+            why.append("chase_extended")
+        if a_score < cfg.min_alphai_score and base in alphai.picks:
+            why.append("alphai_score_weak")
+        if (
+            a_score < cfg.weak_score_needs_excess
+            and excess <= 0
+            and base in alphai.picks
+        ):
+            why.append("weak_score_no_excess")
         if why:
             rejected.append(
                 {
@@ -342,10 +393,24 @@ def _rank_volatile(
                 }
             )
             continue
-        a_score = float(cfg.alphai_scores.get(base, 10.0))
-        # AlphaI score dominates; mild excess tiebreak.
-        score = a_score + 100.0 * excess
-        reasons = ["alphai_green", f"alphai_score={a_score:.1f}", f"excess={excess:+.4f}"]
+        # Prefer slight pullback: reward being off the high a little.
+        pullback_bonus = 0.0
+        if -cfg.max_from_high <= st.from_high <= -cfg.prefer_pullback_from_high:
+            pullback_bonus = 8.0
+            pullback_tag = "pullback_entry"
+        elif st.from_high > -cfg.prefer_pullback_from_high:
+            pullback_bonus = -4.0
+            pullback_tag = "near_high"
+        else:
+            pullback_tag = "deeper_pullback"
+        # AlphaI score dominates; excess + pullback quality as secondary.
+        score = a_score + 80.0 * excess + pullback_bonus
+        reasons = [
+            "alphai_green",
+            f"alphai_score={a_score:.1f}",
+            f"excess={excess:+.4f}",
+            pullback_tag,
+        ]
         out.append(
             _VolCandidate(
                 base=base,
@@ -383,10 +448,13 @@ def _select_volatile(
         cluster = cfg.clusters.get(c.base)
         if cluster is not None and cluster in clusters_held:
             continue
-        clip = cfg.clip_eur * cfg.alphai_clip_mult * macro
+        conv = _conviction_mult(c.alphai_score, cfg)
+        clip = cfg.clip_eur * cfg.alphai_clip_mult * macro * conv
         reasons = list(c.reasons)
         if macro != 1.0:
             reasons.append("macro_reduce")
+        if conv != 1.0:
+            reasons.append(f"conviction_x{conv:.2f}")
         planned.append(
             {
                 "base": c.base,
@@ -399,6 +467,59 @@ def _select_volatile(
         if cluster is not None:
             clusters_held.add(cluster)
     return planned
+
+
+def _evaluate_volatile_exit(
+    pos: Position,
+    bar: Candle,
+    cfg: VolatileShadowConfig,
+    alphai: AlphaIView,
+) -> Any:
+    """AlphaI-aware exit: flip-out, wider trail for strong greens, adaptive time exit."""
+    from bot.live.momentum_desk import ExitDecision
+
+    # 1) AlphaI flip → cut immediately on close (protect net PnL).
+    if cfg.alphai_flip_exits and pos.base in alphai.avoid:
+        close = float(bar[4])
+        return ExitDecision(
+            "alphai_flip",
+            pos.gross_return(close),
+            urgent=True,
+            price=close,
+        )
+
+    a_score = float(cfg.alphai_scores.get(pos.base, 0.0))
+    still_green = pos.base in alphai.picks
+    strong = still_green and a_score >= cfg.strong_alphai_score
+
+    # Per-position adaptive desk cfg.
+    trail = cfg.trail_wide_pct if strong else cfg.trail_pct
+    tight_after = cfg.trail_wide_after if strong else cfg.trail_tight_after
+    time_hrs = cfg.time_exit_hours_green if still_green else cfg.time_exit_hours
+    # Weak / no longer green → tighten stop & trail sooner.
+    hard = cfg.hard_stop_pct
+    tight_pct = cfg.trail_tight_pct
+    if not still_green:
+        trail = min(trail, cfg.trail_tight_pct)
+        tight_after = min(tight_after, 0.03)
+        hard = min(hard, 0.025)
+        time_hrs = min(time_hrs, 12.0)
+
+    exit_cfg = DeskConfig(
+        decision_hours_utc=cfg.decision_hours_utc,
+        clip_eur=cfg.clip_eur,
+        trail_pct=trail,
+        trail_tight_after=tight_after,
+        trail_tight_pct=tight_pct,
+        hard_stop_pct=hard,
+        time_exit_hours=time_hrs,
+        fee_rt=cfg.fee_rt,
+        alphai_avoid_tightens_trail=True,
+        universe=cfg.universe,
+        clusters=dict(cfg.clusters),
+        skip_weekend_entries=cfg.skip_weekend_entries,
+    )
+    return evaluate_exit(pos, bar, exit_cfg, alphai=alphai)
 
 
 def simulate_volatile_alphai(
@@ -428,7 +549,7 @@ def simulate_volatile_alphai(
             bar = idx.get(pos.base, {}).get(closed_ts)
             if bar is None:
                 continue
-            decision = evaluate_exit(pos, bar, exit_cfg, alphai=alphai)
+            decision = _evaluate_volatile_exit(pos, bar, cfg, alphai)
             if decision is None:
                 continue
             exit_price = decision.price if decision.price is not None else float(bar[4])
@@ -580,6 +701,70 @@ def _candle_cache_dir() -> Path:
         return fallback
 
 
+
+def refresh_volatile_alphai(
+    path: str | Path | None = None,
+    *,
+    force: bool = False,
+    client: Any | None = None,
+) -> dict[str, Any] | None:
+    """Refresh AlphaI picks scoped to the volatile pool (per-symbol news).
+
+    Writes a separate JSON from the core-16 daily recommendations so the live
+    Momentum Desk majors feed stays untouched.
+    """
+    import os
+
+    from bot.core.config import get_settings
+    from bot.integrations.alphai.client import AlphaIClient
+    from bot.integrations.alphai.daily_recommendations import (
+        load_daily_recommendations,
+        maybe_refresh_daily,
+    )
+
+    settings = get_settings()
+    out_path = Path(path) if path else Path(
+        str(
+            getattr(settings, "alphai_volatile_recommendations_path", None)
+            or _DEFAULT_ALPHAI_PATH
+        )
+    )
+    if client is None:
+        key = getattr(settings, "alphai_api_key", None)
+        secret = (
+            key.get_secret_value()
+            if key is not None and hasattr(key, "get_secret_value")
+            else (str(key) if key else os.environ.get("ALPHAI_API_KEY", ""))
+        )
+        if not secret:
+            return load_daily_recommendations(out_path)
+        client = AlphaIClient(str(secret))
+
+    focus = set(volatile_universe())
+    return maybe_refresh_daily(
+        client,
+        out_path,
+        focus_bases=focus,
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        ),
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8),
+        update_hour_local=int(
+            getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
+        ),
+        interval_minutes=int(
+            getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15
+        ),
+        interval_hours=int(
+            getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
+        ),
+        macro_caution=False,
+        per_symbol_news=True,
+        force=force,
+    )
+
+
 def build_volatile_shadow(
     *,
     days: int = 14,
@@ -587,9 +772,17 @@ def build_volatile_shadow(
     end_ms: int | None = None,
     refresh: bool = False,
     alphai_path: str | Path | None = None,
+    refresh_alphai: bool | None = None,
 ) -> dict[str, Any]:
     """Day-by-day AlphaI-first volatile paper report (no live orders)."""
-    alphai, alphai_meta = load_shadow_alphai(alphai_path)
+    # Default: refresh AlphaI when candle refresh is requested; always soft-refresh
+    # if the volatile feed is missing.
+    do_alphai = refresh if refresh_alphai is None else bool(refresh_alphai)
+    resolved_alphai = Path(alphai_path) if alphai_path else _DEFAULT_ALPHAI_PATH
+    if do_alphai or not resolved_alphai.exists():
+        with contextlib.suppress(Exception):
+            refresh_volatile_alphai(resolved_alphai, force=bool(do_alphai))
+    alphai, alphai_meta = load_shadow_alphai(resolved_alphai)
     cfg = shadow_config(live_cfg, alphai=alphai, scores=alphai_meta.get("scores") or {})
     uni = cfg.universe
     if not uni:
@@ -711,12 +904,12 @@ def build_volatile_shadow(
         "ok": True,
         "shadow": True,
         "mode": "alphai_first_volatile",
-        "label": "Volatile shadow · AlphaI-first (los van core 16)",
+        "label": "Volatile shadow · AlphaI-smart (los van core 16)",
         "universe": list(uni),
         "alphai": alphai_meta,
         "window": {"start": _iso(start), "end": _iso(end), "days": int(days)},
         "config": {
-            "logic": "AlphaI green required · no core-16 RS regime",
+            "logic": "AlphaI-smart · conviction size · anti-chase · adaptive exits",
             "decision_hours_utc": list(cfg.decision_hours_utc),
             "clip_eur": cfg.clip_eur,
             "book_eur": cfg.book_eur,
@@ -727,6 +920,11 @@ def build_volatile_shadow(
             "hard_stop_pct": cfg.hard_stop_pct,
             "alphai_clip_mult": cfg.alphai_clip_mult,
             "require_alphai_green": cfg.require_alphai_green,
+            "alphai_flip_exits": cfg.alphai_flip_exits,
+            "conviction_sizing": cfg.conviction_sizing,
+            "min_alphai_score": cfg.min_alphai_score,
+            "max_chase_ret_24h": cfg.max_chase_ret_24h,
+            "time_exit_hours_green": cfg.time_exit_hours_green,
         },
         "summary": {
             **summary,
@@ -932,10 +1130,10 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     hours = escape(",".join(str(h) for h in (cfg.get("decision_hours_utc") or [])))
     vol_m = float(cfg.get("min_volume_eur") or 0) / 1e6
     return (
-        '<div class="hint warn">SHADOW · <strong>los van de core 16</strong>. '
+        '<div class="hint warn">PAPER SHADOW · <strong>los van de core 16 én van live</strong>. '
         "Alleen volatile namen met AlphaI ↑; geen RS-regime van de live desk. "
-        "Geen echte orders.</div>"
-        f'<div class="card section"><div class="card-head"><h2>{label}</h2>'
+        "Geen echte orders — research replay.</div>"
+        f'<div class="card section"><div class="card-head"><h2>Paper · {label}</h2>'
         f'<span class="muted">{w0} → {w1}</span></div>'
         f"<p>Universe ({len(payload.get('universe') or [])}): {uni}</p>"
         f"<p>Logica: {escape(str(cfg.get('logic') or 'AlphaI-first'))}</p>"
@@ -963,27 +1161,218 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     )
 
 
-def render_volatile_shadow_page(payload: Mapping[str, Any]) -> str:
+def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
+    """LIVE volatile sleeve panel (operator dashboard body)."""
+    from html import escape
+
+    if not live:
+        return (
+            '<div class="hint warn">LIVE sleeve status niet beschikbaar. '
+            'Check <code>/live/momentum/volatile/status</code>.</div>'
+        )
+
+    def eur(v: Any, *, signed: bool = True) -> str:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return "—"
+        return f"{x:+,.2f} €" if signed else f"{x:,.2f} €"
+
+    def cls(v: Any) -> str:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return ""
+        return "good" if x > 0 else "bad" if x < 0 else ""
+
+    running = bool(live.get("running"))
+    dry = bool(live.get("dry_run"))
+    enabled = bool(live.get("enabled_setting"))
+    allow_live = bool(live.get("allow_live", False))
+    if running and not dry:
+        pill = '<span class="pill live"><span class="dot"></span>LIVE</span>'
+        mode = "armed · echte orders"
+    elif running and dry:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        mode = "paper/dry-run · geen echte orders"
+    elif enabled:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER / STOP</span>'
+        mode = "enabled · start paper om data te verzamelen"
+    else:
+        pill = '<span class="pill obs"><span class="dot"></span>OFF</span>'
+        mode = "MOMENTUM_VOLATILE_ENABLED=false"
+
+    positions = live.get("positions") or []
+    pos_html: list[str] = []
+    for p in positions:
+        hid = escape(str(p.get("holding_id") or ""))
+        base = escape(str(p.get("base") or ""))
+        net = p.get("unrealized_net_eur")
+        gross = p.get("gross_return")
+        try:
+            gross_s = f"{float(gross)*100:+.2f}%"
+        except (TypeError, ValueError):
+            gross_s = "—"
+        pos_html.append(
+            "<li style='margin-bottom:.45rem'>"
+            f"<strong>{base}</strong> · {escape(str(p.get('venue') or ''))} · "
+            f"{eur(p.get('notional_eur'), signed=False)} · "
+            f"<span class='{cls(net)}'>{eur(net)}</span> ({gross_s})"
+            f'<form method="post" action="/live/momentum/volatile/sell" '
+            'style="display:inline;margin-left:.4rem">'
+            f'<input type="hidden" name="holding_id" value="{hid}">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn danger" style="padding:.15rem .45rem;'
+            'font-size:.72rem">Verkoop</button></form></li>'
+        )
+    if not pos_html:
+        pos_html.append("<li class='muted'>Geen open paper posities</li>")
+
+    venues = ", ".join(escape(str(v)) for v in (live.get("venues") or [])) or "—"
+    nxt = escape(str(live.get("next_decision") or "—"))
+    err = live.get("last_error")
+    err_html = (
+        f'<p class="bad" style="font-size:.8rem">Error: {escape(str(err))}</p>'
+        if err
+        else ""
+    )
+    actions = (
+        '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem">'
+        '<form method="post" action="/live/momentum/volatile/decide">'
+        '<input type="hidden" name="execute" value="0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Decide (preview)</button></form>'
+        '<form method="post" action="/live/momentum/volatile/decide">'
+        '<input type="hidden" name="execute" value="1">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Decide + paper execute</button></form>'
+        + (
+            '<form method="post" action="/live/momentum/volatile/sell-all">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn danger">Verkoop alles</button></form>'
+            if positions
+            else ""
+        )
+        + '<form method="post" action="/live/momentum/volatile/stop">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Stop sleeve</button></form>'
+        "</div>"
+    )
+    if not running and enabled:
+        start_bits = [
+            '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem">',
+            '<form method="post" action="/live/momentum/volatile/start">'
+            '<input type="hidden" name="dry_run" value="true">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn">Start PAPER</button></form>',
+        ]
+        if allow_live:
+            start_bits.append(
+                '<form method="post" action="/live/momentum/volatile/start">'
+                '<input type="hidden" name="dry_run" value="false">'
+                '<input type="hidden" name="redirect" value="1">'
+                '<button type="submit" class="btn">Start LIVE</button></form>'
+            )
+        else:
+            start_bits.append(
+                '<span class="muted" style="font-size:.75rem;align-self:center">'
+                "Live orders uit (ALLOW_LIVE=false)</span>"
+            )
+        start_bits.append("</div>")
+        actions = "".join(start_bits)
+
+    risk = live.get("risk") or {}
+    risk_html = (
+        f"<p>Day P&amp;L {eur(risk.get('day_realized_eur'))} · "
+        f"week {eur(risk.get('week_realized_eur'))} · "
+        f"entries {escape(str(risk.get('block_reason') or 'ok'))}</p>"
+    )
+    title = "PAPER volatile sleeve" if dry or not allow_live else "LIVE volatile sleeve"
+    return (
+        f'<div class="hint {"warn" if dry or not allow_live else "good"}">'
+        f"<strong>{title}</strong> — apart van de core 16. "
+        f"{escape(mode)}.</div>"
+        '<div class="card section"><div class="card-head">'
+        f"<h2>{'Paper' if dry or not allow_live else 'Live'} volatile</h2>{pill}</div>"
+        f"<p>Book {eur(live.get('book_eur'), signed=False)} · "
+        f"left {eur(live.get('book_left_eur'), signed=False)} · "
+        f"deployed {eur(live.get('deployed_eur') or live.get('exposure_eur'), signed=False)}</p>"
+        f"<p>Venues {venues} · next decision <strong>{nxt}</strong></p>"
+        f"<p>Realized <strong class='{cls(live.get('realized_total_eur'))}'>"
+        f"{eur(live.get('realized_total_eur'))}</strong> · "
+        f"unrealized <strong class='{cls(live.get('unrealized_net_eur'))}'>"
+        f"{eur(live.get('unrealized_net_eur'))}</strong> · "
+        f"trades {int(live.get('trade_count') or 0)}</p>"
+        f"{risk_html}"
+        f"{err_html}"
+        "<h3 style='font-size:.85rem;margin:.6rem 0 .3rem'>Open posities</h3>"
+        f"<ul style='margin:0;padding-left:1.1rem'>{''.join(pos_html)}</ul>"
+        f"{actions}"
+        '<p class="muted" style="margin-top:.6rem;font-size:.75rem">'
+        '<a href="/live/momentum/volatile/status">status JSON</a> · '
+        '<a href="/live/momentum">core desk</a></p></div>'
+    )
+
+
+def render_volatile_live_page(
+    live: Mapping[str, Any] | None,
+    *,
+    notice: str | None = None,
+    shadow_html: str | None = None,
+) -> str:
+    """Operator page: paper/live sleeve + optional paper-shadow research."""
+    from html import escape
+
     from bot.live.dashboard_v2 import dashboard_css
     from bot.live.momentum_dashboard import _CSS
 
-    body = render_volatile_shadow_html(payload)
+    live_html = render_volatile_live_html(live)
+    notice_html = f'<div class="hint">{escape(notice)}</div>' if notice else ""
+    running = bool((live or {}).get("running"))
+    dry = bool((live or {}).get("dry_run", True))
+    allow_live = bool((live or {}).get("allow_live", False))
+    if running and not dry and allow_live:
+        top_pill = '<span class="pill live"><span class="dot"></span>LIVE</span>'
+        sub = "Echte orders · los van core 16"
+    elif running:
+        top_pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        sub = "Paper sleeve · data verzamelen · los van core 16"
+    else:
+        top_pill = '<span class="pill obs"><span class="dot"></span>STOP</span>'
+        sub = "Paper mode · sleeve gestopt · los van core 16"
+    shadow_block = shadow_html or ""
     return f"""<!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Volatile AlphaI shadow · Moreney</title>
+<title>Volatile · Moreney</title>
 <style>{dashboard_css()}{_CSS}
   ul {{ font-size: .85rem; line-height: 1.45; }}
 </style></head>
 <body><div class="wrap">
   <div class="topbar"><div>
-    <div class="brand">Volatile shadow</div>
-    <div class="sub">AlphaI-first · los van core 16 · paper only</div>
+    <div class="brand">Volatile</div>
+    <div class="sub">{sub}</div>
   </div>
-  <span class="pill obs"><span class="dot"></span>SHADOW</span>
+  {top_pill}
   </div>
-  {body}
+  {notice_html}
+  {live_html}
+  {shadow_block}
 </div></body></html>"""
+
+
+def render_volatile_shadow_page(
+    payload: Mapping[str, Any],
+    *,
+    live: Mapping[str, Any] | None = None,
+    notice: str | None = None,
+) -> str:
+    """Paper sleeve + research shadow replay on one page."""
+    return render_volatile_live_page(
+        live,
+        notice=notice,
+        shadow_html=render_volatile_shadow_html(payload),
+    )
 
 
 __all__ = [
@@ -991,6 +1380,9 @@ __all__ = [
     "VolatileShadowConfig",
     "build_volatile_shadow",
     "load_shadow_alphai",
+    "refresh_volatile_alphai",
+    "render_volatile_live_html",
+    "render_volatile_live_page",
     "render_volatile_shadow_html",
     "render_volatile_shadow_page",
     "shadow_config",

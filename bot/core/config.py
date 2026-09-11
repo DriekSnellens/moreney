@@ -454,6 +454,8 @@ class Settings(BaseSettings):
     alphai_recommendations_interval_hours: int = Field(default=1, ge=1, le=24)
     alphai_daily_recommendations_top_n: int = Field(default=8, ge=1, le=20)
     alphai_daily_recommendations_min_relevance: int = Field(default=6, ge=1, le=10)
+    # Separate AlphaI feed for the volatile shadow (midcaps), not the core desk.
+    alphai_volatile_recommendations_path: str = "data/alphai/volatile_recommendations.json"
     # AlphaI scored features (opportunity/capital/adverse timing) — shadow default.
     alphai_feature_scoring_enabled: bool = True
     alphai_feature_shadow_only: bool = True
@@ -587,6 +589,21 @@ class Settings(BaseSettings):
     momentum_desk_macro_caution_mode: str = "reduce"
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
+
+    # Volatile AlphaI sleeve (separate from core-16 momentum desk). Default off.
+    momentum_volatile_enabled: bool = False
+    # When false, start/resume may only run dry_run (paper) — no real orders.
+    momentum_volatile_allow_live: bool = False
+    momentum_volatile_venues: str = "bitvavo"
+    momentum_volatile_book_eur: float = Field(default=650.0, gt=0)
+    momentum_volatile_clip_eur: float = Field(default=650.0, gt=0)
+    momentum_volatile_max_positions: int = Field(default=1, ge=1, le=3)
+    momentum_volatile_day_loss_limit_eur: float = Field(default=80.0, gt=0)
+    momentum_volatile_week_loss_limit_eur: float = Field(default=200.0, gt=0)
+    # Volatile decides every calendar day by default (incl. weekends).
+    momentum_volatile_skip_weekend_entries: bool = False
+    momentum_volatile_state_path: str = "./data/momentum_volatile_state.json"
+    momentum_volatile_ledger_path: str = "./data/momentum_volatile_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

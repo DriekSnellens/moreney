@@ -11,7 +11,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import uvicorn
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Security
@@ -58,6 +58,10 @@ from bot.live.micro_session_manager import (
 )
 from bot.live.momentum_dashboard import render_momentum_dashboard
 from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
+from bot.live.momentum_volatile_runner import (
+    get_volatile_desk_manager,
+    volatile_desk_flagged_running,
+)
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -239,6 +243,14 @@ async def lifespan(_app: FastAPI):
                 logger.warning("momentum desk auto-resume did not start: %s", resumed)
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume momentum desk")
+        try:
+            v_resumed = await get_volatile_desk_manager().resume_if_flagged()
+            if v_resumed and v_resumed.get("started"):
+                logger.info("auto-resumed volatile sleeve after process start")
+            elif v_resumed:
+                logger.warning("volatile sleeve auto-resume did not start: %s", v_resumed)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume volatile sleeve")
     yield
     if paper_runner is not None:
         try:
@@ -916,28 +928,83 @@ async def live_momentum_sell_all(
     return RedirectResponse(url="/live/momentum", status_code=303)
 
 
+def _volatile_wants_redirect(body: Mapping[str, Any], request: Request) -> bool:
+    raw = body.get("redirect", request.query_params.get("redirect", "0"))
+    if isinstance(raw, str):
+        return raw.strip().lower() not in {"0", "false", "no", ""}
+    return bool(raw)
+
+
+def _volatile_redirect(notice: str | None = None) -> RedirectResponse:
+    from urllib.parse import quote
+
+    url = "/live/momentum/volatile"
+    if notice:
+        url = f"{url}?notice={quote(notice)}"
+    return RedirectResponse(url=url, status_code=303)
+
+
+async def _volatile_request_body(request: Request) -> dict[str, Any]:
+    """Accept JSON API bodies or HTML form / query params."""
+    body: dict[str, Any] = {}
+    ctype = (request.headers.get("content-type") or "").lower()
+    if "application/json" in ctype:
+        try:
+            raw = await request.json()
+            if isinstance(raw, dict):
+                body.update(raw)
+        except Exception:  # noqa: BLE001
+            pass
+    elif (
+        "application/x-www-form-urlencoded" in ctype
+        or "multipart/form-data" in ctype
+    ):
+        try:
+            form = await request.form()
+            body.update({str(k): form.get(k) for k in form.keys()})
+        except Exception:  # noqa: BLE001
+            pass
+    for key, value in request.query_params.multi_items():
+        body.setdefault(key, value)
+    return body
+
+
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", ""}
+    return bool(value)
+
+
 @app.get("/live/momentum/volatile", response_model=None)
-async def live_momentum_volatile_shadow(
+async def live_momentum_volatile_page(
     days: int = 14,
     format: str = "html",
     refresh: int = 0,
+    notice: str = "",
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse | JSONResponse:
-    """Paper replay of a volatile midcap book — no live orders.
-
-    Shows day-by-day would-have buys, exits and net P&L using the same desk
-    rules on a pool outside the core 16.
-    """
+    """Paper volatile sleeve dashboard (+ research shadow). Live orders gated off."""
     from bot.live.momentum_runner import desk_config_from_settings
     from bot.live.momentum_volatile_shadow import (
         build_volatile_shadow,
-        render_volatile_shadow_page,
+        render_volatile_live_page,
+        render_volatile_shadow_html,
     )
 
+    live_status: dict[str, Any]
+    try:
+        live_status = get_volatile_desk_manager().status()
+    except Exception as exc:  # noqa: BLE001
+        live_status = {"running": False, "last_error": str(exc)}
+    if str(format).lower() == "json":
+        return JSONResponse(live_status)
+
+    settings = get_settings()
     manager = get_momentum_desk_manager()
     live_cfg = None
     runner = getattr(manager, "_runner", None)
-    settings = get_settings()
     if runner is not None and getattr(runner, "cfg", None) is not None:
         live_cfg = runner.cfg
     else:
@@ -947,18 +1014,137 @@ async def live_momentum_volatile_shadow(
             live_cfg = None
     days_n = max(1, min(int(days or 14), 120))
     alphai_path = str(
-        getattr(settings, "alphai_daily_recommendations_path", None)
-        or "data/alphai/daily_recommendations.json"
+        getattr(settings, "alphai_volatile_recommendations_path", None)
+        or "data/alphai/volatile_recommendations.json"
     )
-    payload = build_volatile_shadow(
-        days=days_n,
-        live_cfg=live_cfg,
-        refresh=bool(refresh),
-        alphai_path=alphai_path,
+    shadow_html = ""
+    try:
+        payload = build_volatile_shadow(
+            days=days_n,
+            live_cfg=live_cfg,
+            refresh=bool(refresh),
+            alphai_path=alphai_path,
+            refresh_alphai=True,
+        )
+        shadow_html = render_volatile_shadow_html(payload)
+    except Exception as exc:  # noqa: BLE001
+        shadow_html = (
+            f'<div class="hint warn">Paper shadow research niet beschikbaar: {exc}</div>'
+        )
+    return HTMLResponse(
+        render_volatile_live_page(
+            live_status,
+            notice=(notice.strip() or None),
+            shadow_html=shadow_html,
+        )
     )
-    if str(format).lower() == "json":
-        return JSONResponse(payload)
-    return HTMLResponse(render_volatile_shadow_page(payload))
+
+
+@app.get("/live/momentum/volatile/status")
+async def live_momentum_volatile_status() -> dict[str, Any]:
+    """Volatile sleeve status (paper by default; live gated by ALLOW_LIVE)."""
+    return get_volatile_desk_manager().status()
+
+
+@app.post("/live/momentum/volatile/start", response_model=None)
+async def live_momentum_volatile_start(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Start the volatile sleeve. Paper/dry_run unless ALLOW_LIVE is armed."""
+    body = await _volatile_request_body(request)
+    settings = get_settings()
+    allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
+    dry = _as_bool(body.get("dry_run"), default=True)
+    if not allow_live:
+        dry = True
+    venues = body.get("venues") or body.get("venue") or settings.momentum_volatile_venues
+    result = await get_volatile_desk_manager().start(
+        settings=settings, dry_run=bool(dry), venue=venues
+    )
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Start geweigerd: {result.get('reason') or result}")
+        mode = "paper" if dry else "LIVE"
+        return _volatile_redirect(f"Volatile sleeve gestart ({mode})")
+    return result
+
+
+@app.post("/live/momentum/volatile/decide", response_model=None)
+async def live_momentum_volatile_decide(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Preview (default) or execute a volatile-sleeve decision now."""
+    body = await _volatile_request_body(request)
+    execute = _as_bool(body.get("execute"), default=False)
+    result = await get_volatile_desk_manager().decide(execute=bool(execute))
+    if _volatile_wants_redirect(body, request):
+        label = "Decide+execute" if execute else "Decide preview"
+        if result.get("ok") is False:
+            return _volatile_redirect(f"{label} geweigerd: {result.get('reason') or result}")
+        return _volatile_redirect(f"{label} klaar")
+    return result
+
+
+@app.post("/live/momentum/volatile/stop", response_model=None)
+async def live_momentum_volatile_stop(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Stop the volatile sleeve loop (open positions stay on the exchange)."""
+    body = await _volatile_request_body(request)
+    result = await get_volatile_desk_manager().stop()
+    if _volatile_wants_redirect(body, request):
+        return _volatile_redirect("Volatile sleeve gestopt")
+    return result
+
+
+@app.post("/live/momentum/volatile/commit")
+async def live_momentum_volatile_commit(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Commit a previewed volatile entry set (background)."""
+    body = payload or {}
+    bases = body.get("bases") or body.get("entries") or []
+    if isinstance(bases, str):
+        bases = [b.strip() for b in bases.split(",") if b.strip()]
+    return get_volatile_desk_manager().commit(list(bases))
+
+
+@app.post("/live/momentum/volatile/sell", response_model=None)
+async def live_momentum_volatile_sell(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Sell one volatile holding by holding_id."""
+    body = await _volatile_request_body(request)
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    urgent = _as_bool(body.get("urgent"), default=False)
+    if not holding_id:
+        if _volatile_wants_redirect(body, request):
+            return _volatile_redirect("Geen positie opgegeven")
+        return {"ok": False, "reason": "holding_id_required"}
+    result = get_volatile_desk_manager().sell(holding_id, urgent=bool(urgent))
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Verkoop geweigerd: {result.get('reason') or result}")
+        return _volatile_redirect("Verkoop gestart")
+    return result
+
+
+@app.post("/live/momentum/volatile/sell-all", response_model=None)
+async def live_momentum_volatile_sell_all(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Sell every open volatile-sleeve holding."""
+    body = await _volatile_request_body(request)
+    urgent = _as_bool(body.get("urgent"), default=False)
+    result = get_volatile_desk_manager().sell_all(urgent=bool(urgent))
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Verkoop alles geweigerd: {result.get('reason') or result}")
+        return _volatile_redirect("Verkoop alles gestart")
+    return result
 
 
 @app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
@@ -1102,7 +1288,7 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     await get_kill_switch().emergency_stop(reason)
     status = get_kill_switch().status()
     assert status.state == KillSwitchState.EMERGENCY_STOP
-    # Also request micro-session stop so resting work winds down.
+    # Also request micro-session + desks stop so resting work winds down.
     session_stop: dict[str, Any] | None = None
     try:
         from bot.live.micro_session_manager import get_micro_session_manager
@@ -1111,9 +1297,21 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
         session_stop = await mgr.stop()
     except Exception as exc:  # noqa: BLE001
         session_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    momentum_stop: dict[str, Any] | None = None
+    try:
+        momentum_stop = await get_momentum_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        momentum_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    volatile_stop: dict[str, Any] | None = None
+    try:
+        volatile_stop = await get_volatile_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        volatile_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     return {
         "status": status.model_dump(mode="json"),
         "micro_session_stop": session_stop,
+        "momentum_desk_stop": momentum_stop,
+        "volatile_sleeve_stop": volatile_stop,
     }
 
 
