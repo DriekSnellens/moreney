@@ -135,11 +135,17 @@ def _hero(label: str, value: str, *, cls: str = "", hint: str = "") -> str:
     )
 
 
-def _positions_table(status: Mapping[str, Any]) -> str:
+def _positions_table(
+    status: Mapping[str, Any],
+    *,
+    sell_all_path: str | None = "/live/momentum",
+    post_sell_action: str | None = None,
+    empty_text: str = "Geen open posities — 100% cash tot de volgende beslissing.",
+) -> str:
     rows = status.get("positions") or []
     cfg = status.get("config") or {}
     if not rows:
-        return '<p class="muted">Geen open posities — 100% cash tot de volgende beslissing.</p>'
+        return f'<p class="muted">{escape(empty_text)}</p>'
     trail = float(cfg.get("trail_pct") or 0.03)
     tight_after = float(cfg.get("trail_tight_after") or 0.0)
     tight = float(cfg.get("trail_tight_pct") or trail)
@@ -161,7 +167,7 @@ def _positions_table(status: Mapping[str, Any]) -> str:
         trail_px = peak_px * (1 - eff_trail)
         stop_px = entry * (1 - stop)
         mark = p.get("mark")
-        sell = _sell_cell(p, disabled=sell_busy)
+        sell = _sell_cell(p, disabled=sell_busy, post_action=post_sell_action)
         out.append(
             "<tr>"
             f"<td><strong>{escape(str(p.get('base')))}</strong>"
@@ -205,13 +211,21 @@ def _positions_table(status: Mapping[str, Any]) -> str:
     cards.append("</div>")
     out.append("".join(cards))
     sell_all = ""
-    if rows and not sell_busy:
-        sell_all = (
-            '<div class="toolbar" style="margin-top:.55rem">'
-            '<form method="get" action="/live/momentum">'
-            '<input type="hidden" name="sell_all" value="1">'
-            '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
-        )
+    if rows and not sell_busy and sell_all_path:
+        if post_sell_action:
+            sell_all = (
+                '<div class="toolbar" style="margin-top:.55rem">'
+                f'<form method="post" action="{escape(post_sell_action.replace("/sell", "/sell-all"))}">'
+                '<input type="hidden" name="redirect" value="1">'
+                '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
+            )
+        else:
+            sell_all = (
+                '<div class="toolbar" style="margin-top:.55rem">'
+                f'<form method="get" action="{escape(sell_all_path)}">'
+                '<input type="hidden" name="sell_all" value="1">'
+                '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
+            )
     out.append(sell_all)
     out.append(
         "<p class='muted' style='font-size:.72rem;margin-top:.4rem'>Verkoop = maker-order op de "
@@ -220,16 +234,31 @@ def _positions_table(status: Mapping[str, Any]) -> str:
     return "".join(out)
 
 
-def _sell_cell(p: Mapping[str, Any], *, disabled: bool) -> str:
+def _sell_cell(
+    p: Mapping[str, Any],
+    *,
+    disabled: bool,
+    confirm_path: str = "/live/momentum",
+    sell_param: str = "sell",
+    post_action: str | None = None,
+) -> str:
     hid = str(p.get("holding_id") or "")
     if not hid:
         return ""
     if p.get("exiting"):
         return "<span class='muted' style='font-size:.75rem'>verkoop bezig…</span>"
     dis = " disabled" if disabled else ""
+    if post_action:
+        return (
+            f'<form method="post" action="{escape(post_action)}" style="display:inline">'
+            f'<input type="hidden" name="holding_id" value="{escape(hid)}">'
+            '<input type="hidden" name="redirect" value="1">'
+            f'<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;'
+            f'min-height:40px"{dis}>Verkoop</button></form>'
+        )
     return (
-        f'<form method="get" action="/live/momentum" style="display:inline">'
-        f'<input type="hidden" name="sell" value="{escape(hid)}">'
+        f'<form method="get" action="{escape(confirm_path)}" style="display:inline">'
+        f'<input type="hidden" name="{escape(sell_param)}" value="{escape(hid)}">'
         f'<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;'
         f'min-height:40px"{dis}>Verkoop</button></form>'
     )
@@ -849,8 +878,7 @@ def _sleeve_card(
         f"pos {n_pos}/{max_pos}</p>"
         f"{book_html}"
         f"<p>Uren {escape(hours_s)} UTC · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
-        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul>"
-        f'<p><a class="btn" href="{escape(href)}">Open sleeve</a></p></div>'
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul></div>"
     )
 
 
@@ -896,6 +924,28 @@ def _sleeves_panel(
             book_label="Soft book",
         )
         + "</div></div>"
+    )
+
+
+def _volatile_actions(volatile: Mapping[str, Any] | None) -> str:
+    """Inline paper/live controls for the volatile sleeve on the main desk."""
+    st = volatile or {}
+    if not st.get("running"):
+        return (
+            '<form method="post" action="/live/momentum/volatile/start" style="display:inline">'
+            '<input type="hidden" name="dry_run" value="false">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn primary">Start volatile LIVE</button></form>'
+        )
+    return (
+        '<form method="post" action="/live/momentum/volatile/decide" style="display:inline;margin-right:.35rem">'
+        '<input type="hidden" name="execute" value="0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Preview</button></form>'
+        '<form method="post" action="/live/momentum/volatile/decide" style="display:inline">'
+        '<input type="hidden" name="execute" value="1">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn primary">Decide</button></form>'
     )
 
 
@@ -1026,15 +1076,26 @@ def render_momentum_dashboard(
 <div class="stack two section">
   <div class="card"><div class="card-head"><h2>Core · open posities</h2></div>
   {_positions_table(status)}</div>
+  <div class="card"><div class="card-head"><h2>Volatile · open posities</h2></div>
+  {_positions_table(
+      volatile or {},
+      sell_all_path=None,
+      post_sell_action="/live/momentum/volatile/sell",
+      empty_text="Geen open volatile-posities — soft book staat klaar.",
+  )}</div>
+</div>
+<div class="stack two section">
   <div class="card"><div class="card-head"><h2>Core · laatste beslissing</h2>
   {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
+  <div class="card"><div class="card-head"><h2>Volatile · laatste beslissing</h2>
+  {_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>
 </div>
-<div class="card section"><h2>Ledger</h2>{_ledger_table(ledger_rows)}</div>
-<div class="card section"><h2>Regels</h2>{_rules(cfg)}</div>
+<div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
+<div class="card section"><h2>Regels (core)</h2>{_rules(cfg)}</div>
 <p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
-<a href="/live/momentum/status" style="color:var(--blue)">status JSON</a> ·
-<a href="/live/momentum/ledger" style="color:var(--blue)">ledger JSON</a> ·
-<a href="/live/dashboard/legacy" style="color:var(--muted)">oude desk</a></p>
+<a href="/live/momentum/status" style="color:var(--blue)">core JSON</a> ·
+<a href="/live/momentum/volatile/status" style="color:var(--blue)">volatile JSON</a> ·
+<a href="/live/momentum/ledger" style="color:var(--blue)">ledger</a></p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
 </body></html>"""

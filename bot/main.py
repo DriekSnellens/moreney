@@ -944,7 +944,7 @@ def _volatile_wants_redirect(body: Mapping[str, Any], request: Request) -> bool:
 def _volatile_redirect(notice: str | None = None) -> RedirectResponse:
     from urllib.parse import quote
 
-    url = "/live/momentum/volatile"
+    url = "/live/momentum"
     if notice:
         url = f"{url}?notice={quote(notice)}"
     return RedirectResponse(url=url, status_code=303)
