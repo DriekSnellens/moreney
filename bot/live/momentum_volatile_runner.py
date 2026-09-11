@@ -189,7 +189,7 @@ class VolatileDeskRunner(MomentumDeskRunner):
         if book <= 0:
             return venue, clip
         free_book = max(0.0, book - self._deployed_eur())
-        min_ok = max(_MIN_ORDER_EUR, float(clip_eur) * float(self.opt.min_clip_fraction))
+        min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
         if free_book < min_ok:
             return None
         return venue, round(min(clip, free_book), 2)

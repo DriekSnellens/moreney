@@ -281,8 +281,12 @@ class Fill:
 class RunnerOptions:
     # Preference order for entries; the first venue is the primary (cheapest).
     venues: tuple[str, ...] = ("bitvavo",)
-    # Below this fraction of the clip a venue's cash is not worth a clip.
+    # Legacy fraction gate (kept for callers); residual fills use
+    # ``min_residual_clip_eur`` so leftover cash still deploys.
     min_clip_fraction: float = 0.5
+    # Absolute floor for a reduced leftover fill on the richest venue.
+    # Example: clip €1690 with €816 left → still buy ~€816, do not skip.
+    min_residual_clip_eur: float = 100.0
     tick_sec: float = 20.0
     buy_rest_sec: float = 90.0
     sell_rest_sec: float = 60.0
@@ -501,8 +505,11 @@ class MomentumDeskRunner:
     def _route_entry(self, clip_eur: float) -> tuple[str, float] | None:
         """Pick the venue for a clip: first in preference order with enough
         EUR. Without any gateway (dry-run) or balance data the primary is used.
-        Falls back to the richest venue with a reduced clip if none can take
-        the full clip, and skips the entry when even that is too small."""
+
+        If no venue can fund the full clip, deploy the leftover on the richest
+        venue (most cash available) as long as that residual is still a
+        meaningful order — do not require a large fraction of the planned clip.
+        """
         venues = self.opt.venues
         if not self._gws or not self.cash_by_venue:
             return venues[0], clip_eur
@@ -511,6 +518,7 @@ class MomentumDeskRunner:
             cash = self.cash_by_venue.get(venue)
             if cash is not None and cash >= need and venue in self._gws:
                 return venue, clip_eur
+        # Full clip unavailable: use the venue with the most leftover cash.
         best = max(
             ((v, self.cash_by_venue.get(v, 0.0)) for v in venues if v in self._gws),
             key=lambda item: item[1],
@@ -520,9 +528,10 @@ class MomentumDeskRunner:
             return None
         venue, cash = best
         reduced = cash / 1.005
-        if reduced < max(_MIN_ORDER_EUR, clip_eur * self.opt.min_clip_fraction):
+        min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
+        if reduced < min_ok:
             return None
-        return venue, round(reduced, 2)
+        return venue, round(min(reduced, clip_eur), 2)
 
     # ----------------------------------------------------------------- exits
 
