@@ -1161,7 +1161,7 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
 
 
 def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
-    """Separate LIVE sleeve panel — not the paper shadow replay."""
+    """LIVE volatile sleeve panel (operator dashboard body)."""
     from html import escape
 
     if not live:
@@ -1270,10 +1270,16 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
             "</div>"
         )
 
+    risk = live.get("risk") or {}
+    risk_html = (
+        f"<p>Day P&amp;L {eur(risk.get('day_realized_eur'))} · "
+        f"week {eur(risk.get('week_realized_eur'))} · "
+        f"entries {escape(str(risk.get('block_reason') or 'ok'))}</p>"
+    )
     return (
         f'<div class="hint {"good" if running and not dry else "warn"}">'
-        f"<strong>LIVE volatile sleeve</strong> — apart van core desk én van de "
-        f"paper shadow hieronder. {escape(mode)}.</div>"
+        f"<strong>LIVE volatile sleeve</strong> — apart van de core 16. "
+        f"{escape(mode)}.</div>"
         '<div class="card section"><div class="card-head">'
         f"<h2>Live volatile</h2>{pill}</div>"
         f"<p>Book {eur(live.get('book_eur'), signed=False)} · "
@@ -1285,6 +1291,7 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         f"unrealized <strong class='{cls(live.get('unrealized_net_eur'))}'>"
         f"{eur(live.get('unrealized_net_eur'))}</strong> · "
         f"trades {int(live.get('trade_count') or 0)}</p>"
+        f"{risk_html}"
         f"{err_html}"
         "<h3 style='font-size:.85rem;margin:.6rem 0 .3rem'>Open posities</h3>"
         f"<ul style='margin:0;padding-left:1.1rem'>{''.join(pos_html)}</ul>"
@@ -1295,33 +1302,30 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
     )
 
 
-def render_volatile_shadow_page(
-    payload: Mapping[str, Any],
+def render_volatile_live_page(
+    live: Mapping[str, Any] | None,
     *,
-    live: Mapping[str, Any] | None = None,
     notice: str | None = None,
 ) -> str:
+    """Operator page for the live volatile sleeve only (no paper shadow)."""
+    from html import escape
+
     from bot.live.dashboard_v2 import dashboard_css
     from bot.live.momentum_dashboard import _CSS
 
     live_html = render_volatile_live_html(live)
-    body = render_volatile_shadow_html(payload)
-    notice_html = ""
-    if notice:
-        from html import escape
-
-        notice_html = f'<div class="hint">{escape(notice)}</div>'
+    notice_html = f'<div class="hint">{escape(notice)}</div>' if notice else ""
     running = bool((live or {}).get("running"))
     dry = bool((live or {}).get("dry_run"))
     if running and not dry:
-        top_pill = '<span class="pill live"><span class="dot"></span>LIVE + SHADOW</span>'
-        sub = "Live sleeve boven · paper shadow onder · los van core 16"
+        top_pill = '<span class="pill live"><span class="dot"></span>LIVE</span>'
+        sub = "Echte orders · los van core 16"
     elif running:
-        top_pill = '<span class="pill obs"><span class="dot"></span>DRY + SHADOW</span>'
-        sub = "Dry-run sleeve boven · paper shadow onder · los van core 16"
+        top_pill = '<span class="pill obs"><span class="dot"></span>DRY-RUN</span>'
+        sub = "Dry-run sleeve · los van core 16"
     else:
-        top_pill = '<span class="pill obs"><span class="dot"></span>SHADOW</span>'
-        sub = "Paper research + live sleeve status · los van core 16"
+        top_pill = '<span class="pill obs"><span class="dot"></span>STOP</span>'
+        sub = "Sleeve gestopt · los van core 16"
     return f"""<!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1338,8 +1342,18 @@ def render_volatile_shadow_page(
   </div>
   {notice_html}
   {live_html}
-  {body}
 </div></body></html>"""
+
+
+def render_volatile_shadow_page(
+    payload: Mapping[str, Any],
+    *,
+    live: Mapping[str, Any] | None = None,
+    notice: str | None = None,
+) -> str:
+    """Backward-compatible alias: live dashboard only (paper UI removed)."""
+    _ = payload
+    return render_volatile_live_page(live, notice=notice)
 
 
 __all__ = [
@@ -1349,6 +1363,7 @@ __all__ = [
     "load_shadow_alphai",
     "refresh_volatile_alphai",
     "render_volatile_live_html",
+    "render_volatile_live_page",
     "render_volatile_shadow_html",
     "render_volatile_shadow_page",
     "shadow_config",

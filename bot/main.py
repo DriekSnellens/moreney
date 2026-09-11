@@ -978,63 +978,24 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
 
 
 @app.get("/live/momentum/volatile", response_model=None)
-async def live_momentum_volatile_shadow(
-    days: int = 14,
+async def live_momentum_volatile_page(
     format: str = "html",
-    refresh: int = 0,
     notice: str = "",
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse | JSONResponse:
-    """Volatile page: LIVE sleeve panel on top + paper shadow research below.
+    """Live volatile sleeve dashboard (separate from the core 16 desk)."""
+    from bot.live.momentum_volatile_shadow import render_volatile_live_page
 
-    The paper replay never places orders. Live sleeve status/actions are separate
-    from the core 16 desk.
-    """
-    from bot.live.momentum_runner import desk_config_from_settings
-    from bot.live.momentum_volatile_shadow import (
-        build_volatile_shadow,
-        render_volatile_shadow_page,
-    )
-
-    manager = get_momentum_desk_manager()
-    live_cfg = None
-    runner = getattr(manager, "_runner", None)
-    settings = get_settings()
-    if runner is not None and getattr(runner, "cfg", None) is not None:
-        live_cfg = runner.cfg
-    else:
-        try:
-            live_cfg = desk_config_from_settings(settings)
-        except Exception:  # noqa: BLE001
-            live_cfg = None
-    days_n = max(1, min(int(days or 14), 120))
-    alphai_path = str(
-        getattr(settings, "alphai_volatile_recommendations_path", None)
-        or "data/alphai/volatile_recommendations.json"
-    )
-    payload = build_volatile_shadow(
-        days=days_n,
-        live_cfg=live_cfg,
-        refresh=bool(refresh),
-        alphai_path=alphai_path,
-        refresh_alphai=True,
-    )
-    if str(format).lower() == "json":
-        return JSONResponse(
-            {
-                "paper_shadow": payload,
-                "live": get_volatile_desk_manager().status(),
-            }
-        )
     live_status: dict[str, Any]
     try:
         live_status = get_volatile_desk_manager().status()
     except Exception as exc:  # noqa: BLE001
         live_status = {"running": False, "last_error": str(exc)}
+    if str(format).lower() == "json":
+        return JSONResponse(live_status)
     return HTMLResponse(
-        render_volatile_shadow_page(
-            payload,
-            live=live_status,
+        render_volatile_live_page(
+            live_status,
             notice=(notice.strip() or None),
         )
     )
