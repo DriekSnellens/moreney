@@ -979,12 +979,19 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
 
 @app.get("/live/momentum/volatile", response_model=None)
 async def live_momentum_volatile_page(
+    days: int = 14,
     format: str = "html",
+    refresh: int = 0,
     notice: str = "",
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse | JSONResponse:
-    """Live volatile sleeve dashboard (separate from the core 16 desk)."""
-    from bot.live.momentum_volatile_shadow import render_volatile_live_page
+    """Paper volatile sleeve dashboard (+ research shadow). Live orders gated off."""
+    from bot.live.momentum_runner import desk_config_from_settings
+    from bot.live.momentum_volatile_shadow import (
+        build_volatile_shadow,
+        render_volatile_live_page,
+        render_volatile_shadow_html,
+    )
 
     live_status: dict[str, Any]
     try:
@@ -993,17 +1000,49 @@ async def live_momentum_volatile_page(
         live_status = {"running": False, "last_error": str(exc)}
     if str(format).lower() == "json":
         return JSONResponse(live_status)
+
+    settings = get_settings()
+    manager = get_momentum_desk_manager()
+    live_cfg = None
+    runner = getattr(manager, "_runner", None)
+    if runner is not None and getattr(runner, "cfg", None) is not None:
+        live_cfg = runner.cfg
+    else:
+        try:
+            live_cfg = desk_config_from_settings(settings)
+        except Exception:  # noqa: BLE001
+            live_cfg = None
+    days_n = max(1, min(int(days or 14), 120))
+    alphai_path = str(
+        getattr(settings, "alphai_volatile_recommendations_path", None)
+        or "data/alphai/volatile_recommendations.json"
+    )
+    shadow_html = ""
+    try:
+        payload = build_volatile_shadow(
+            days=days_n,
+            live_cfg=live_cfg,
+            refresh=bool(refresh),
+            alphai_path=alphai_path,
+            refresh_alphai=True,
+        )
+        shadow_html = render_volatile_shadow_html(payload)
+    except Exception as exc:  # noqa: BLE001
+        shadow_html = (
+            f'<div class="hint warn">Paper shadow research niet beschikbaar: {exc}</div>'
+        )
     return HTMLResponse(
         render_volatile_live_page(
             live_status,
             notice=(notice.strip() or None),
+            shadow_html=shadow_html,
         )
     )
 
 
 @app.get("/live/momentum/volatile/status")
 async def live_momentum_volatile_status() -> dict[str, Any]:
-    """Live volatile sleeve status (separate from paper shadow + core desk)."""
+    """Volatile sleeve status (paper by default; live gated by ALLOW_LIVE)."""
     return get_volatile_desk_manager().status()
 
 
@@ -1012,10 +1051,13 @@ async def live_momentum_volatile_start(
     request: Request,
     _: None = Depends(require_dashboard_access),
 ) -> dict[str, Any] | RedirectResponse:
-    """Start the volatile sleeve. Defaults to dry_run; requires MOMENTUM_VOLATILE_ENABLED."""
+    """Start the volatile sleeve. Paper/dry_run unless ALLOW_LIVE is armed."""
     body = await _volatile_request_body(request)
-    dry = _as_bool(body.get("dry_run"), default=True)
     settings = get_settings()
+    allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
+    dry = _as_bool(body.get("dry_run"), default=True)
+    if not allow_live:
+        dry = True
     venues = body.get("venues") or body.get("venue") or settings.momentum_volatile_venues
     result = await get_volatile_desk_manager().start(
         settings=settings, dry_run=bool(dry), venue=venues
@@ -1023,7 +1065,7 @@ async def live_momentum_volatile_start(
     if _volatile_wants_redirect(body, request):
         if result.get("ok") is False:
             return _volatile_redirect(f"Start geweigerd: {result.get('reason') or result}")
-        mode = "dry-run" if dry else "LIVE"
+        mode = "paper" if dry else "LIVE"
         return _volatile_redirect(f"Volatile sleeve gestart ({mode})")
     return result
 

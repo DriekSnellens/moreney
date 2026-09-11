@@ -352,14 +352,20 @@ class VolatileDeskManager:
 
     def status(self) -> dict[str, Any]:
         settings = get_settings()
+        allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
+        dry = bool(getattr(self._runner.opt, "dry_run", True)) if self._runner is not None else True
         base: dict[str, Any] = {
             "running": self.running(),
             "enabled_setting": bool(getattr(settings, "momentum_volatile_enabled", False)),
+            "allow_live": allow_live,
             "desk": "momentum_volatile",
-            "mode": "volatile_live",
+            "mode": "volatile_paper" if dry or not allow_live else "volatile_live",
         }
         if self._runner is not None:
             base.update(self._runner.status())
+            dry = bool(getattr(self._runner.opt, "dry_run", True))
+            base["dry_run"] = dry
+            base["mode"] = "volatile_paper" if dry else "volatile_live"
         if self._commit:
             base["commit"] = dict(self._commit)
         if self._manual_exit:
@@ -376,13 +382,31 @@ class VolatileDeskManager:
         venue: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         if self.running():
-            return {"started": False, "reason": "already_running", "status": self.status()}
+            return {
+                "ok": False,
+                "started": False,
+                "reason": "already_running",
+                "status": self.status(),
+            }
         settings = settings or get_settings()
         if not bool(getattr(settings, "momentum_volatile_enabled", False)):
             return {
+                "ok": False,
                 "started": False,
                 "reason": "momentum_volatile_enabled_false",
                 "hint": "Set MOMENTUM_VOLATILE_ENABLED=true to arm the sleeve",
+            }
+        allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
+        if not dry_run and not allow_live:
+            return {
+                "ok": False,
+                "started": False,
+                "reason": "live_orders_disabled",
+                "hint": (
+                    "MOMENTUM_VOLATILE_ALLOW_LIVE=false — only paper/dry_run is allowed. "
+                    "Set ALLOW_LIVE=true to re-arm real orders."
+                ),
+                "status": self.status(),
             }
         shadow = volatile_shadow_from_settings(settings)
         cfg = volatile_desk_config(shadow)
@@ -455,7 +479,7 @@ class VolatileDeskManager:
             shadow.book_eur,
             shadow.clip_eur,
         )
-        return {"started": True, "status": self.status()}
+        return {"ok": True, "started": True, "status": self.status()}
 
     async def decide(self, *, execute: bool) -> dict[str, Any]:
         if self._runner is None or not self.running():
@@ -589,12 +613,17 @@ class VolatileDeskManager:
         flag = _read_volatile_flag(state_path)
         if not flag or not flag.get("running"):
             return None
-        logger.warning(
-            "volatile desk: resuming after restart (dry_run=%s)", flag.get("dry_run")
-        )
+        allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
+        dry = True if not allow_live else bool(flag.get("dry_run", True))
+        if not allow_live and not bool(flag.get("dry_run", True)):
+            logger.warning(
+                "volatile desk: flag had live orders; forcing paper/dry_run "
+                "(MOMENTUM_VOLATILE_ALLOW_LIVE=false)"
+            )
+        logger.warning("volatile desk: resuming after restart (dry_run=%s)", dry)
         return await self.start(
             settings=settings,
-            dry_run=bool(flag.get("dry_run", True)),
+            dry_run=dry,
             venue=flag.get("venues") or str(flag.get("venue") or "bitvavo"),
         )
 

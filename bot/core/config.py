@@ -592,6 +592,8 @@ class Settings(BaseSettings):
 
     # Volatile AlphaI sleeve (separate from core-16 momentum desk). Default off.
     momentum_volatile_enabled: bool = False
+    # When false, start/resume may only run dry_run (paper) — no real orders.
+    momentum_volatile_allow_live: bool = False
     momentum_volatile_venues: str = "bitvavo"
     momentum_volatile_book_eur: float = Field(default=650.0, gt=0)
     momentum_volatile_clip_eur: float = Field(default=650.0, gt=0)

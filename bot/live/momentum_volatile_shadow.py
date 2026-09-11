@@ -1187,15 +1187,16 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
     running = bool(live.get("running"))
     dry = bool(live.get("dry_run"))
     enabled = bool(live.get("enabled_setting"))
+    allow_live = bool(live.get("allow_live", False))
     if running and not dry:
         pill = '<span class="pill live"><span class="dot"></span>LIVE</span>'
         mode = "armed · echte orders"
     elif running and dry:
-        pill = '<span class="pill obs"><span class="dot"></span>DRY-RUN</span>'
-        mode = "draait · geen echte orders"
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        mode = "paper/dry-run · geen echte orders"
     elif enabled:
-        pill = '<span class="pill obs"><span class="dot"></span>ARMED / STOP</span>'
-        mode = "enabled maar niet gestart"
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER / STOP</span>'
+        mode = "enabled · start paper om data te verzamelen"
     else:
         pill = '<span class="pill obs"><span class="dot"></span>OFF</span>'
         mode = "MOMENTUM_VOLATILE_ENABLED=false"
@@ -1224,7 +1225,7 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
             'font-size:.72rem">Verkoop</button></form></li>'
         )
     if not pos_html:
-        pos_html.append("<li class='muted'>Geen open live posities</li>")
+        pos_html.append("<li class='muted'>Geen open paper posities</li>")
 
     venues = ", ".join(escape(str(v)) for v in (live.get("venues") or [])) or "—"
     nxt = escape(str(live.get("next_decision") or "—"))
@@ -1243,7 +1244,7 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         '<form method="post" action="/live/momentum/volatile/decide">'
         '<input type="hidden" name="execute" value="1">'
         '<input type="hidden" name="redirect" value="1">'
-        '<button type="submit" class="btn">Decide + execute</button></form>'
+        '<button type="submit" class="btn">Decide + paper execute</button></form>'
         + (
             '<form method="post" action="/live/momentum/volatile/sell-all">'
             '<input type="hidden" name="redirect" value="1">'
@@ -1257,18 +1258,27 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         "</div>"
     )
     if not running and enabled:
-        actions = (
-            '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem">'
-            '<form method="post" action="/live/momentum/volatile/start">'
-            '<input type="hidden" name="dry_run" value="false">'
-            '<input type="hidden" name="redirect" value="1">'
-            '<button type="submit" class="btn">Start LIVE</button></form>'
+        start_bits = [
+            '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem">',
             '<form method="post" action="/live/momentum/volatile/start">'
             '<input type="hidden" name="dry_run" value="true">'
             '<input type="hidden" name="redirect" value="1">'
-            '<button type="submit" class="btn">Start dry-run</button></form>'
-            "</div>"
-        )
+            '<button type="submit" class="btn">Start PAPER</button></form>',
+        ]
+        if allow_live:
+            start_bits.append(
+                '<form method="post" action="/live/momentum/volatile/start">'
+                '<input type="hidden" name="dry_run" value="false">'
+                '<input type="hidden" name="redirect" value="1">'
+                '<button type="submit" class="btn">Start LIVE</button></form>'
+            )
+        else:
+            start_bits.append(
+                '<span class="muted" style="font-size:.75rem;align-self:center">'
+                "Live orders uit (ALLOW_LIVE=false)</span>"
+            )
+        start_bits.append("</div>")
+        actions = "".join(start_bits)
 
     risk = live.get("risk") or {}
     risk_html = (
@@ -1276,12 +1286,13 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         f"week {eur(risk.get('week_realized_eur'))} · "
         f"entries {escape(str(risk.get('block_reason') or 'ok'))}</p>"
     )
+    title = "PAPER volatile sleeve" if dry or not allow_live else "LIVE volatile sleeve"
     return (
-        f'<div class="hint {"good" if running and not dry else "warn"}">'
-        f"<strong>LIVE volatile sleeve</strong> — apart van de core 16. "
+        f'<div class="hint {"warn" if dry or not allow_live else "good"}">'
+        f"<strong>{title}</strong> — apart van de core 16. "
         f"{escape(mode)}.</div>"
         '<div class="card section"><div class="card-head">'
-        f"<h2>Live volatile</h2>{pill}</div>"
+        f"<h2>{'Paper' if dry or not allow_live else 'Live'} volatile</h2>{pill}</div>"
         f"<p>Book {eur(live.get('book_eur'), signed=False)} · "
         f"left {eur(live.get('book_left_eur'), signed=False)} · "
         f"deployed {eur(live.get('deployed_eur') or live.get('exposure_eur'), signed=False)}</p>"
@@ -1306,8 +1317,9 @@ def render_volatile_live_page(
     live: Mapping[str, Any] | None,
     *,
     notice: str | None = None,
+    shadow_html: str | None = None,
 ) -> str:
-    """Operator page for the live volatile sleeve only (no paper shadow)."""
+    """Operator page: paper/live sleeve + optional paper-shadow research."""
     from html import escape
 
     from bot.live.dashboard_v2 import dashboard_css
@@ -1316,16 +1328,18 @@ def render_volatile_live_page(
     live_html = render_volatile_live_html(live)
     notice_html = f'<div class="hint">{escape(notice)}</div>' if notice else ""
     running = bool((live or {}).get("running"))
-    dry = bool((live or {}).get("dry_run"))
-    if running and not dry:
+    dry = bool((live or {}).get("dry_run", True))
+    allow_live = bool((live or {}).get("allow_live", False))
+    if running and not dry and allow_live:
         top_pill = '<span class="pill live"><span class="dot"></span>LIVE</span>'
         sub = "Echte orders · los van core 16"
     elif running:
-        top_pill = '<span class="pill obs"><span class="dot"></span>DRY-RUN</span>'
-        sub = "Dry-run sleeve · los van core 16"
+        top_pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        sub = "Paper sleeve · data verzamelen · los van core 16"
     else:
         top_pill = '<span class="pill obs"><span class="dot"></span>STOP</span>'
-        sub = "Sleeve gestopt · los van core 16"
+        sub = "Paper mode · sleeve gestopt · los van core 16"
+    shadow_block = shadow_html or ""
     return f"""<!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1342,6 +1356,7 @@ def render_volatile_live_page(
   </div>
   {notice_html}
   {live_html}
+  {shadow_block}
 </div></body></html>"""
 
 
@@ -1351,9 +1366,12 @@ def render_volatile_shadow_page(
     live: Mapping[str, Any] | None = None,
     notice: str | None = None,
 ) -> str:
-    """Backward-compatible alias: live dashboard only (paper UI removed)."""
-    _ = payload
-    return render_volatile_live_page(live, notice=notice)
+    """Paper sleeve + research shadow replay on one page."""
+    return render_volatile_live_page(
+        live,
+        notice=notice,
+        shadow_html=render_volatile_shadow_html(payload),
+    )
 
 
 __all__ = [
