@@ -1129,10 +1129,10 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     hours = escape(",".join(str(h) for h in (cfg.get("decision_hours_utc") or [])))
     vol_m = float(cfg.get("min_volume_eur") or 0) / 1e6
     return (
-        '<div class="hint warn">SHADOW · <strong>los van de core 16</strong>. '
+        '<div class="hint warn">PAPER SHADOW · <strong>los van de core 16 én van live</strong>. '
         "Alleen volatile namen met AlphaI ↑; geen RS-regime van de live desk. "
-        "Geen echte orders.</div>"
-        f'<div class="card section"><div class="card-head"><h2>{label}</h2>'
+        "Geen echte orders — research replay.</div>"
+        f'<div class="card section"><div class="card-head"><h2>Paper · {label}</h2>'
         f'<span class="muted">{w0} → {w1}</span></div>'
         f"<p>Universe ({len(payload.get('universe') or [])}): {uni}</p>"
         f"<p>Logica: {escape(str(cfg.get('logic') or 'AlphaI-first'))}</p>"
@@ -1160,25 +1160,184 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     )
 
 
-def render_volatile_shadow_page(payload: Mapping[str, Any]) -> str:
+def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
+    """Separate LIVE sleeve panel — not the paper shadow replay."""
+    from html import escape
+
+    if not live:
+        return (
+            '<div class="hint warn">LIVE sleeve status niet beschikbaar. '
+            'Check <code>/live/momentum/volatile/status</code>.</div>'
+        )
+
+    def eur(v: Any, *, signed: bool = True) -> str:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return "—"
+        return f"{x:+,.2f} €" if signed else f"{x:,.2f} €"
+
+    def cls(v: Any) -> str:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return ""
+        return "good" if x > 0 else "bad" if x < 0 else ""
+
+    running = bool(live.get("running"))
+    dry = bool(live.get("dry_run"))
+    enabled = bool(live.get("enabled_setting"))
+    if running and not dry:
+        pill = '<span class="pill live"><span class="dot"></span>LIVE</span>'
+        mode = "armed · echte orders"
+    elif running and dry:
+        pill = '<span class="pill obs"><span class="dot"></span>DRY-RUN</span>'
+        mode = "draait · geen echte orders"
+    elif enabled:
+        pill = '<span class="pill obs"><span class="dot"></span>ARMED / STOP</span>'
+        mode = "enabled maar niet gestart"
+    else:
+        pill = '<span class="pill obs"><span class="dot"></span>OFF</span>'
+        mode = "MOMENTUM_VOLATILE_ENABLED=false"
+
+    positions = live.get("positions") or []
+    pos_html: list[str] = []
+    for p in positions:
+        hid = escape(str(p.get("holding_id") or ""))
+        base = escape(str(p.get("base") or ""))
+        net = p.get("unrealized_net_eur")
+        gross = p.get("gross_return")
+        try:
+            gross_s = f"{float(gross)*100:+.2f}%"
+        except (TypeError, ValueError):
+            gross_s = "—"
+        pos_html.append(
+            "<li style='margin-bottom:.45rem'>"
+            f"<strong>{base}</strong> · {escape(str(p.get('venue') or ''))} · "
+            f"{eur(p.get('notional_eur'), signed=False)} · "
+            f"<span class='{cls(net)}'>{eur(net)}</span> ({gross_s})"
+            f'<form method="post" action="/live/momentum/volatile/sell" '
+            'style="display:inline;margin-left:.4rem">'
+            f'<input type="hidden" name="holding_id" value="{hid}">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn danger" style="padding:.15rem .45rem;'
+            'font-size:.72rem">Verkoop</button></form></li>'
+        )
+    if not pos_html:
+        pos_html.append("<li class='muted'>Geen open live posities</li>")
+
+    venues = ", ".join(escape(str(v)) for v in (live.get("venues") or [])) or "—"
+    nxt = escape(str(live.get("next_decision") or "—"))
+    err = live.get("last_error")
+    err_html = (
+        f'<p class="bad" style="font-size:.8rem">Error: {escape(str(err))}</p>'
+        if err
+        else ""
+    )
+    actions = (
+        '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem">'
+        '<form method="post" action="/live/momentum/volatile/decide">'
+        '<input type="hidden" name="execute" value="0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Decide (preview)</button></form>'
+        '<form method="post" action="/live/momentum/volatile/decide">'
+        '<input type="hidden" name="execute" value="1">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Decide + execute</button></form>'
+        + (
+            '<form method="post" action="/live/momentum/volatile/sell-all">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn danger">Verkoop alles</button></form>'
+            if positions
+            else ""
+        )
+        + '<form method="post" action="/live/momentum/volatile/stop">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Stop sleeve</button></form>'
+        "</div>"
+    )
+    if not running and enabled:
+        actions = (
+            '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem">'
+            '<form method="post" action="/live/momentum/volatile/start">'
+            '<input type="hidden" name="dry_run" value="false">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn">Start LIVE</button></form>'
+            '<form method="post" action="/live/momentum/volatile/start">'
+            '<input type="hidden" name="dry_run" value="true">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn">Start dry-run</button></form>'
+            "</div>"
+        )
+
+    return (
+        f'<div class="hint {"good" if running and not dry else "warn"}">'
+        f"<strong>LIVE volatile sleeve</strong> — apart van core desk én van de "
+        f"paper shadow hieronder. {escape(mode)}.</div>"
+        '<div class="card section"><div class="card-head">'
+        f"<h2>Live volatile</h2>{pill}</div>"
+        f"<p>Book {eur(live.get('book_eur'), signed=False)} · "
+        f"left {eur(live.get('book_left_eur'), signed=False)} · "
+        f"deployed {eur(live.get('deployed_eur') or live.get('exposure_eur'), signed=False)}</p>"
+        f"<p>Venues {venues} · next decision <strong>{nxt}</strong></p>"
+        f"<p>Realized <strong class='{cls(live.get('realized_total_eur'))}'>"
+        f"{eur(live.get('realized_total_eur'))}</strong> · "
+        f"unrealized <strong class='{cls(live.get('unrealized_net_eur'))}'>"
+        f"{eur(live.get('unrealized_net_eur'))}</strong> · "
+        f"trades {int(live.get('trade_count') or 0)}</p>"
+        f"{err_html}"
+        "<h3 style='font-size:.85rem;margin:.6rem 0 .3rem'>Open posities</h3>"
+        f"<ul style='margin:0;padding-left:1.1rem'>{''.join(pos_html)}</ul>"
+        f"{actions}"
+        '<p class="muted" style="margin-top:.6rem;font-size:.75rem">'
+        '<a href="/live/momentum/volatile/status">status JSON</a> · '
+        '<a href="/live/momentum">core desk</a></p></div>'
+    )
+
+
+def render_volatile_shadow_page(
+    payload: Mapping[str, Any],
+    *,
+    live: Mapping[str, Any] | None = None,
+    notice: str | None = None,
+) -> str:
     from bot.live.dashboard_v2 import dashboard_css
     from bot.live.momentum_dashboard import _CSS
 
+    live_html = render_volatile_live_html(live)
     body = render_volatile_shadow_html(payload)
+    notice_html = ""
+    if notice:
+        from html import escape
+
+        notice_html = f'<div class="hint">{escape(notice)}</div>'
+    running = bool((live or {}).get("running"))
+    dry = bool((live or {}).get("dry_run"))
+    if running and not dry:
+        top_pill = '<span class="pill live"><span class="dot"></span>LIVE + SHADOW</span>'
+        sub = "Live sleeve boven · paper shadow onder · los van core 16"
+    elif running:
+        top_pill = '<span class="pill obs"><span class="dot"></span>DRY + SHADOW</span>'
+        sub = "Dry-run sleeve boven · paper shadow onder · los van core 16"
+    else:
+        top_pill = '<span class="pill obs"><span class="dot"></span>SHADOW</span>'
+        sub = "Paper research + live sleeve status · los van core 16"
     return f"""<!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Volatile AlphaI shadow · Moreney</title>
+<title>Volatile · Moreney</title>
 <style>{dashboard_css()}{_CSS}
   ul {{ font-size: .85rem; line-height: 1.45; }}
 </style></head>
 <body><div class="wrap">
   <div class="topbar"><div>
-    <div class="brand">Volatile shadow</div>
-    <div class="sub">AlphaI-first · los van core 16 · paper only</div>
+    <div class="brand">Volatile</div>
+    <div class="sub">{sub}</div>
   </div>
-  <span class="pill obs"><span class="dot"></span>SHADOW</span>
+  {top_pill}
   </div>
+  {notice_html}
+  {live_html}
   {body}
 </div></body></html>"""
 
@@ -1189,6 +1348,7 @@ __all__ = [
     "build_volatile_shadow",
     "load_shadow_alphai",
     "refresh_volatile_alphai",
+    "render_volatile_live_html",
     "render_volatile_shadow_html",
     "render_volatile_shadow_page",
     "shadow_config",
