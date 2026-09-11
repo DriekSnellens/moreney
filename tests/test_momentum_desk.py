@@ -908,13 +908,19 @@ def test_route_prefers_primary_and_overflows_to_second_venue(tmp_path):
     r.cash_by_venue["bitvavo"] = 300.0
     # Primary short -> second venue takes the full clip.
     assert r._route_entry(600.0) == ("okx", 600.0)
-    # Nobody can fund the clip -> richest venue with a reduced clip (>= 50%).
+    # Nobody can fund the clip -> richest venue with leftover cash.
     r.cash_by_venue["okx"] = 400.0
     venue, clip = r._route_entry(600.0)
     assert venue == "okx" and 395.0 < clip < 400.0
+    # Residual still meaningful (above absolute floor) even if << planned clip.
+    r.cash_by_venue["bitvavo"] = 816.0
+    r.cash_by_venue["okx"] = 620.0
+    venue, clip = r._route_entry(1690.0)
+    assert venue == "bitvavo" and 810.0 < clip <= 816.0
     # Too little everywhere -> skip.
-    r.cash_by_venue["okx"] = 250.0
-    assert r._route_entry(600.0) is None
+    r.cash_by_venue["bitvavo"] = 40.0
+    r.cash_by_venue["okx"] = 50.0
+    assert r._route_entry(1690.0) is None
 
 
 def test_multi_venue_entry_and_exit_use_position_venue(tmp_path):
@@ -952,8 +958,8 @@ def test_entry_skipped_when_no_venue_can_fund(tmp_path):
     r, gws = _multi_runner(
         tmp_path,
         clock,
-        bitvavo_cash=100.0,
-        okx_cash=120.0,
+        bitvavo_cash=40.0,
+        okx_cash=50.0,
         feed=FakeFeed(candles),
         universe=("SOL", "LINK"),
         min_volume_eur=0.0,
@@ -963,6 +969,31 @@ def test_entry_skipped_when_no_venue_can_fund(tmp_path):
     assert r.holdings == [] and not gws["bitvavo"].placed and not gws["okx"].placed
     ledger = (tmp_path / "ledger.jsonl").read_text().splitlines()
     assert '"event": "entry_skipped"' in ledger[-1] and "insufficient_cash" in ledger[-1]
+
+
+def test_entry_uses_residual_cash_on_richest_venue(tmp_path):
+    """After preferred venues can't fund the full clip, still buy with leftover."""
+    cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
+    clock = FakeClock((T0 + 60_000) / 1000)
+    r, gws = _multi_runner(
+        tmp_path,
+        clock,
+        bitvavo_cash=816.0,
+        okx_cash=620.0,
+        feed=FakeFeed(candles),
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=1690.0,
+    )
+    asyncio.run(r.tick())
+    assert len(r.holdings) == 1
+    h = r.holdings[0]
+    assert h.pos.base == "SOL"
+    assert h.pos.venue == "bitvavo"
+    assert 800.0 <= h.pos.notional_eur <= 816.0
+    assert "clip_reduced" in (h.pos.entry_reason or "")
+    assert gws["okx"].placed == []
+    assert gws["bitvavo"].placed
 
 
 def test_resume_flag_round_trips_venues(tmp_path):
