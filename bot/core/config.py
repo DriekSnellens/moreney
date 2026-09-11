@@ -589,6 +589,17 @@ class Settings(BaseSettings):
     momentum_desk_macro_caution_mode: str = "reduce"
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
+
+    # Volatile AlphaI sleeve (separate from core-16 momentum desk). Default off.
+    momentum_volatile_enabled: bool = False
+    momentum_volatile_venues: str = "bitvavo"
+    momentum_volatile_book_eur: float = Field(default=650.0, gt=0)
+    momentum_volatile_clip_eur: float = Field(default=650.0, gt=0)
+    momentum_volatile_max_positions: int = Field(default=1, ge=1, le=3)
+    momentum_volatile_day_loss_limit_eur: float = Field(default=80.0, gt=0)
+    momentum_volatile_week_loss_limit_eur: float = Field(default=200.0, gt=0)
+    momentum_volatile_state_path: str = "./data/momentum_volatile_state.json"
+    momentum_volatile_ledger_path: str = "./data/momentum_volatile_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

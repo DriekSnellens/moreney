@@ -58,6 +58,10 @@ from bot.live.micro_session_manager import (
 )
 from bot.live.momentum_dashboard import render_momentum_dashboard
 from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
+from bot.live.momentum_volatile_runner import (
+    get_volatile_desk_manager,
+    volatile_desk_flagged_running,
+)
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -239,6 +243,14 @@ async def lifespan(_app: FastAPI):
                 logger.warning("momentum desk auto-resume did not start: %s", resumed)
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume momentum desk")
+        try:
+            v_resumed = await get_volatile_desk_manager().resume_if_flagged()
+            if v_resumed and v_resumed.get("started"):
+                logger.info("auto-resumed volatile sleeve after process start")
+            elif v_resumed:
+                logger.warning("volatile sleeve auto-resume did not start: %s", v_resumed)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume volatile sleeve")
     yield
     if paper_runner is not None:
         try:
@@ -962,6 +974,75 @@ async def live_momentum_volatile_shadow(
     return HTMLResponse(render_volatile_shadow_page(payload))
 
 
+@app.get("/live/momentum/volatile/status")
+async def live_momentum_volatile_status() -> dict[str, Any]:
+    """Live volatile sleeve status (separate from paper shadow + core desk)."""
+    return get_volatile_desk_manager().status()
+
+
+@app.post("/live/momentum/volatile/start")
+async def live_momentum_volatile_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start the volatile sleeve. Defaults to dry_run; requires MOMENTUM_VOLATILE_ENABLED."""
+    body = payload or {}
+    dry = body.get("dry_run", True)
+    if isinstance(dry, str):
+        dry = dry.strip().lower() not in {"0", "false", "no"}
+    settings = get_settings()
+    venues = body.get("venues") or body.get("venue") or settings.momentum_volatile_venues
+    return await get_volatile_desk_manager().start(
+        settings=settings, dry_run=bool(dry), venue=venues
+    )
+
+
+@app.post("/live/momentum/volatile/decide")
+async def live_momentum_volatile_decide(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Preview (default) or execute a volatile-sleeve decision now."""
+    body = payload or {}
+    execute = body.get("execute", False)
+    if isinstance(execute, str):
+        execute = execute.strip().lower() not in {"0", "false", "no"}
+    return await get_volatile_desk_manager().decide(execute=bool(execute))
+
+
+@app.post("/live/momentum/volatile/stop")
+async def live_momentum_volatile_stop() -> dict[str, Any]:
+    """Stop the volatile sleeve loop (open positions stay on the exchange)."""
+    return await get_volatile_desk_manager().stop()
+
+
+@app.post("/live/momentum/volatile/commit")
+async def live_momentum_volatile_commit(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Commit a previewed volatile entry set (background)."""
+    body = payload or {}
+    bases = body.get("bases") or body.get("entries") or []
+    if isinstance(bases, str):
+        bases = [b.strip() for b in bases.split(",") if b.strip()]
+    return get_volatile_desk_manager().commit(list(bases))
+
+
+@app.post("/live/momentum/volatile/sell")
+async def live_momentum_volatile_sell(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Sell one volatile holding by holding_id."""
+    body = payload or {}
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    urgent = body.get("urgent", False)
+    if isinstance(urgent, str):
+        urgent = urgent.strip().lower() not in {"0", "false", "no"}
+    if not holding_id:
+        return {"ok": False, "reason": "holding_id_required"}
+    return get_volatile_desk_manager().sell(holding_id, urgent=bool(urgent))
+
+
+@app.post("/live/momentum/volatile/sell-all")
+async def live_momentum_volatile_sell_all(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Sell every open volatile-sleeve holding."""
+    body = payload or {}
+    urgent = body.get("urgent", False)
+    if isinstance(urgent, str):
+        urgent = urgent.strip().lower() not in {"0", "false", "no"}
+    return get_volatile_desk_manager().sell_all(urgent=bool(urgent))
+
+
 @app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
 async def live_micro_dashboard_redirect() -> RedirectResponse:
     """Legacy URL — single operator dashboard lives at /live/dashboard."""
@@ -1103,7 +1184,7 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     await get_kill_switch().emergency_stop(reason)
     status = get_kill_switch().status()
     assert status.state == KillSwitchState.EMERGENCY_STOP
-    # Also request micro-session stop so resting work winds down.
+    # Also request micro-session + desks stop so resting work winds down.
     session_stop: dict[str, Any] | None = None
     try:
         from bot.live.micro_session_manager import get_micro_session_manager
@@ -1112,9 +1193,21 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
         session_stop = await mgr.stop()
     except Exception as exc:  # noqa: BLE001
         session_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    momentum_stop: dict[str, Any] | None = None
+    try:
+        momentum_stop = await get_momentum_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        momentum_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    volatile_stop: dict[str, Any] | None = None
+    try:
+        volatile_stop = await get_volatile_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        volatile_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     return {
         "status": status.model_dump(mode="json"),
         "micro_session_stop": session_stop,
+        "momentum_desk_stop": momentum_stop,
+        "volatile_sleeve_stop": volatile_stop,
     }
 
 
