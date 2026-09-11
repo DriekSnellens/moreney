@@ -125,7 +125,8 @@ class VolatileShadowConfig:
     week_loss_limit_eur: float = 200.0
     pause_hours_after_week_limit: float = 48.0
     max_entries_per_base_per_day: int = 1
-    skip_weekend_entries: bool = True
+    # Volatile sleeve decides every day (incl. weekends) — core desk stays weekday-only.
+    skip_weekend_entries: bool = False
     # Hard rule: no AlphaI pick/watch ⇒ no buy (never blind).
     require_alphai_green: bool = True
     # Exit immediately when AlphaI flips a held name to avoid.

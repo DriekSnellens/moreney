@@ -600,6 +600,8 @@ class Settings(BaseSettings):
     momentum_volatile_max_positions: int = Field(default=1, ge=1, le=3)
     momentum_volatile_day_loss_limit_eur: float = Field(default=80.0, gt=0)
     momentum_volatile_week_loss_limit_eur: float = Field(default=200.0, gt=0)
+    # Volatile decides every calendar day by default (incl. weekends).
+    momentum_volatile_skip_weekend_entries: bool = False
     momentum_volatile_state_path: str = "./data/momentum_volatile_state.json"
     momentum_volatile_ledger_path: str = "./data/momentum_volatile_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

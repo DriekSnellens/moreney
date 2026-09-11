@@ -100,6 +100,13 @@ def volatile_shadow_from_settings(settings: Settings | None = None) -> VolatileS
             getattr(settings, "momentum_volatile_week_loss_limit_eur", base.week_loss_limit_eur)
             or base.week_loss_limit_eur
         ),
+        skip_weekend_entries=bool(
+            getattr(
+                settings,
+                "momentum_volatile_skip_weekend_entries",
+                base.skip_weekend_entries,
+            )
+        ),
     )
 
 
