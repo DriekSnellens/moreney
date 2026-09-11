@@ -95,7 +95,8 @@ class VolatileShadowConfig:
     clip_eur: float = 650.0
     alphai_clip_mult: float = 1.4
     macro_caution_clip_mult: float = 0.6
-    max_positions: int = 2
+    # Concentration beats diversification on this sleeve (12w sweep).
+    max_positions: int = 1
     top_n: int = 2
     # Softer than the core desk: AlphaI already did the "which name" work.
     min_volume_eur: float = 400_000.0
@@ -104,21 +105,21 @@ class VolatileShadowConfig:
     # Prefer a shallow pullback vs buying the exact high.
     prefer_pullback_from_high: float = 0.008
     # Skip exhaustion chase: big 24h pop already sitting on the high.
-    max_chase_ret_24h: float = 0.12
-    min_alphai_score: float = 15.0
-    # Weak picks need positive excess vs BTC; strong AlphaI can override.
-    weak_score_needs_excess: float = 40.0
+    max_chase_ret_24h: float = 0.10
+    min_alphai_score: float = 30.0
+    # With min_alphai_score=30, excess gate is optional (0 disables).
+    weak_score_needs_excess: float = 0.0
     trail_pct: float = 0.04
     trail_tight_after: float = 0.06
     trail_tight_pct: float = 0.025
     # Strong AlphaI winners get more room.
-    trail_wide_pct: float = 0.055
+    trail_wide_pct: float = 0.06
     trail_wide_after: float = 0.04
     strong_alphai_score: float = 60.0
-    hard_stop_pct: float = 0.04
-    time_exit_hours: float = 18.0
+    hard_stop_pct: float = 0.05
+    time_exit_hours: float = 24.0
     # Still-green winners may hold longer before fee-aware time exit.
-    time_exit_hours_green: float = 36.0
+    time_exit_hours_green: float = 48.0
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 80.0
     week_loss_limit_eur: float = 200.0

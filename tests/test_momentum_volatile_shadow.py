@@ -39,6 +39,10 @@ def test_shadow_config_is_not_core_desk():
     assert cfg.require_alphai_green is True
     assert cfg.clip_eur == 650.0
     assert cfg.alphai_flip_exits is True
+    assert cfg.max_positions == 1
+    assert cfg.min_alphai_score == 30.0
+    assert cfg.hard_stop_pct == 0.05
+    assert cfg.time_exit_hours_green == 48.0
     assert cfg.conviction_sizing is True
     assert cfg.decision_hours_utc == (7, 13, 16)
     assert cfg.book_eur == 2000.0
