@@ -139,11 +139,21 @@ def test_from_high_and_macro_caution_rules():
     cfg = cfg.with_overrides(min_volume_eur=0.0)
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    view = AlphaIView(macro_caution=True)
-    entries = select_entries(
-        rank_candidates(alts, 0.0, cfg), regime, cfg, held_bases=[], alphai=view
+    # Under macro caution, only AlphaI picks may enter (default).
+    view = AlphaIView(macro_caution=True, picks=frozenset({"SOL"}))
+    cands = rank_candidates(alts, 0.0, cfg, alphai=view)
+    entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
+    assert entries[0].clip_eur == pytest.approx(455.0)  # 500 * alphai_clip 1.3 * macro 0.7
+    assert "macro_reduce" in entries[0].reasons and "alphai_pick" in entries[0].reasons
+    # Non-picks are skipped while macro caution + reduce is active.
+    skipped = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=AlphaIView(macro_caution=True)),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=AlphaIView(macro_caution=True, picks=frozenset()),
     )
-    assert entries[0].clip_eur == pytest.approx(350.0)
+    assert skipped == []
     blocked = classify_regime(
         bar_stats("BTC", candles["BTC"], T0),
         alts,
@@ -151,6 +161,23 @@ def test_from_high_and_macro_caution_rules():
         alphai=view,
     )
     assert not blocked.ok and "alphai_macro_block" in blocked.reasons
+
+
+def test_macro_caution_can_allow_non_picks_when_flag_off():
+    cfg, candles = _universe({"SOL": 0.05}, 0.0)
+    cfg = cfg.with_overrides(min_volume_eur=0.0, macro_caution_requires_alphai_pick=False)
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    view = AlphaIView(macro_caution=True, picks=frozenset())
+    entries = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=view),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=view,
+    )
+    assert len(entries) == 1
+    assert "macro_reduce" in entries[0].reasons
 
 
 def test_exit_rules_hard_stop_trail_ratchet_and_time():

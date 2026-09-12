@@ -41,6 +41,7 @@ from bot.live.momentum_volatile_shadow import (
     _rank_volatile,
     _select_volatile,
     load_shadow_alphai,
+    refresh_volatile_alphai,
     shadow_config,
     volatile_universe,
 )
@@ -164,6 +165,32 @@ class VolatileDeskRunner(MomentumDeskRunner):
             kwargs["sleep"] = sleep
         super().__init__(cfg, gateway, **kwargs)
         self.shadow = shadow
+        self._alphai_refresh_ts = 0.0
+        self._alphai_refresh_interval_sec = 900.0
+
+    async def tick(self) -> None:
+        """Refresh volatile AlphaI (separate file) before the shared desk tick."""
+        await self._maybe_refresh_alphai()
+        await super().tick()
+
+    async def _maybe_refresh_alphai(self) -> None:
+        """Soft-refresh the volatile AlphaI board on a 15m cadence.
+
+        Core desk refreshes ``daily_recommendations.json`` via its regime
+        monitor; this sleeve writes a separate midcap file and previously
+        never refreshed it live — boards went stale overnight.
+        """
+        now = float(self._clock())
+        if now - self._alphai_refresh_ts < self._alphai_refresh_interval_sec:
+            return
+        self._alphai_refresh_ts = now
+        path = self.opt.alphai_recommendations_path
+        if not path:
+            return
+        try:
+            await asyncio.to_thread(refresh_volatile_alphai, path, force=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("volatile AlphaI refresh failed: %s", exc)
 
     def status(self) -> dict[str, Any]:
         out = super().status()
@@ -278,7 +305,10 @@ class VolatileDeskRunner(MomentumDeskRunner):
                     clip = float(row["clip_eur"])
                     free_book = max(0.0, float(self.shadow.book_eur) - self._deployed_eur())
                     clip = min(clip, free_book)
-                    if clip < max(_MIN_ORDER_EUR, float(self.shadow.clip_eur) * 0.5):
+                    # Align with residual-cash floor (not half-clip), so leftover
+                    # soft-book cash between €100 and 50% of clip still deploys.
+                    min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
+                    if clip < min_ok:
                         continue
                     entries.append(
                         Entry(

@@ -109,6 +109,9 @@ class VolatileShadowConfig:
     min_alphai_score: float = 30.0
     # With min_alphai_score=30, excess gate is optional (0 disables).
     weak_score_needs_excess: float = 0.0
+    # Fee-aware relative-strength floor vs BTC (coin-agnostic). Default covers
+    # ~2.5× round-trip fees so marginal +0.3–0.5% excess names do not eat the book.
+    min_excess: float = 0.008
     trail_pct: float = 0.04
     trail_tight_after: float = 0.06
     trail_tight_pct: float = 0.025
@@ -374,6 +377,8 @@ def _rank_volatile(
             and base in alphai.picks
         ):
             why.append("weak_score_no_excess")
+        if cfg.min_excess > 0 and excess < cfg.min_excess:
+            why.append("excess_low")
         if why:
             rejected.append(
                 {

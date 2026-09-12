@@ -105,6 +105,9 @@ class DeskConfig:
     # desk 100% cash through an alt rally, so reduce is the default.
     macro_caution_mode: str = "reduce"
     macro_caution_clip_mult: float = 0.7
+    # Under macro caution + reduce: only AlphaI-confirmed names (skip weak
+    # tape-only entries that historically trailed into small losses).
+    macro_caution_requires_alphai_pick: bool = True
     # Tape-strength sizing. 12-week attribution at 7/13 UTC: entries taken
     # with >= 85% of the universe up on the day averaged +13.9 EUR per 1000
     # EUR clip (n=31) against +3.1 EUR for the rest (n=28); broad rallies
@@ -377,6 +380,13 @@ def select_entries(
         if len(out) >= min(slots, top_n):
             break
         if c.base in held or c.base in blocked:
+            continue
+        if (
+            view.macro_caution
+            and cfg.macro_caution_mode == "reduce"
+            and cfg.macro_caution_requires_alphai_pick
+            and not c.alphai_pick
+        ):
             continue
         cluster = cfg.clusters.get(c.base)
         if cluster is not None and cluster in clusters_held:
