@@ -57,6 +57,7 @@ from bot.live.micro_session_manager import (
     reset_micro_session_manager,
 )
 from bot.live.momentum_dashboard import read_ledger_tail, render_momentum_dashboard
+from bot.live.momentum_period_pnl import compute_desk_earnings, earnings_as_dict
 from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
 from bot.live.momentum_volatile_runner import (
     get_volatile_desk_manager,
@@ -853,9 +854,11 @@ async def live_momentum_dashboard(
             report_payload = res.get("report")
         else:
             notice = f"Report niet mogelijk: {res.get('reason')}"
+    settings = get_settings()
     status = manager.status()
     ledger = await live_momentum_ledger(limit=400)
     volatile_status: dict[str, Any] | None
+    volatile_rows: list[dict[str, Any]] = []
     try:
         volatile_status = get_volatile_desk_manager().status()
     except Exception:  # noqa: BLE001
@@ -864,6 +867,12 @@ async def live_momentum_dashboard(
     volatile_ledger = read_ledger_tail(
         getattr(settings, "momentum_volatile_ledger_path", "./data/momentum_volatile_ledger.jsonl"),
         limit=400,
+    )
+    earnings = compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=settings.momentum_volatile_ledger_path,
+        core_status=status,
+        volatile_status=volatile_status,
     )
     return render_momentum_dashboard(
         status,
@@ -874,8 +883,27 @@ async def live_momentum_dashboard(
         sell_all=bool(sell_all),
         report=report_payload,
         volatile=volatile_status,
+        earnings=earnings,
         volatile_ledger_rows=volatile_ledger,
     )
+
+
+@app.get("/live/momentum/earnings")
+async def live_momentum_earnings() -> dict[str, Any]:
+    """Week / month / all-time net PnL for core + volatile (Amsterdam calendar)."""
+    settings = get_settings()
+    core = get_momentum_desk_manager().status()
+    try:
+        volatile = get_volatile_desk_manager().status()
+    except Exception:  # noqa: BLE001
+        volatile = None
+    earnings = compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=settings.momentum_volatile_ledger_path,
+        core_status=core,
+        volatile_status=volatile,
+    )
+    return earnings_as_dict(earnings)
 
 
 @app.post("/live/momentum/commit", response_model=None)
