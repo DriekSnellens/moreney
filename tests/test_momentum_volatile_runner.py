@@ -86,3 +86,64 @@ async def test_volatile_manager_dry_run_start_stop_writes_own_flag(tmp_path: Pat
     assert mgr.running() is False
     flag_after = _read_volatile_flag(settings.momentum_volatile_state_path)
     assert flag_after and flag_after.get("running") is False
+
+
+@pytest.mark.asyncio
+async def test_volatile_tick_refreshes_alphai(monkeypatch, tmp_path: Path):
+    """Live volatile sleeve soft-refreshes its own AlphaI board on tick."""
+    calls: list[tuple] = []
+
+    def _fake_refresh(path, *, force: bool = False, client=None):
+        calls.append((str(path), force))
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "bot.live.momentum_volatile_runner.refresh_volatile_alphai",
+        _fake_refresh,
+    )
+
+    from bot.live.momentum_desk import DeskConfig
+    from bot.live.momentum_runner import RunnerOptions
+    from bot.live.momentum_volatile_runner import VolatileDeskRunner
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.t = 1_000_000.0
+
+        def __call__(self) -> float:
+            return self.t
+
+    clock = _Clock()
+    shadow = VolatileShadowConfig(book_eur=650.0, clip_eur=650.0, universe=("RAY",))
+    opt = RunnerOptions(
+        alphai_recommendations_path=str(tmp_path / "volatile_alphai.json"),
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        dry_run=True,
+    )
+    runner = VolatileDeskRunner(
+        DeskConfig(universe=("RAY",), decision_hours_utc=(0,)),
+        gateway=None,
+        shadow=shadow,
+        options=opt,
+        clock=clock,
+        sleep=lambda _s: None,
+    )
+
+    # Bypass the heavy parent tick body.
+    async def _noop_tick(self):
+        return None
+
+    monkeypatch.setattr(
+        "bot.live.momentum_runner.MomentumDeskRunner.tick",
+        _noop_tick,
+    )
+    await runner.tick()
+    assert calls and calls[0][1] is False
+    n = len(calls)
+    await runner.tick()  # within 15m cadence → no second refresh
+    assert len(calls) == n
+    clock.t += 901.0
+    await runner.tick()
+    assert len(calls) == n + 1
