@@ -9,85 +9,185 @@ from typing import Any
 
 from fastapi.responses import HTMLResponse
 
-from bot.live.dashboard_v2 import dashboard_css
+from bot.live.momentum_period_pnl import DeskEarnings, earnings_as_dict
 
 _CSS = """
-    .mono { font-family: var(--mono); }
-    table.desk { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    table.desk th, table.desk td { padding: .45rem .55rem; text-align: right;
-      border-bottom: 1px solid var(--line); white-space: nowrap; }
-    table.desk th { color: var(--muted); font-weight: 500; font-size: .72rem;
-      letter-spacing: .04em; text-transform: uppercase; }
-    table.desk td:first-child, table.desk th:first-child { text-align: left; }
-    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -.25rem;
-      padding: 0 .25rem; }
-    .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
-    .muted { color: var(--muted); }
-    .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: .5rem .9rem; font-size: .8rem; }
-    .rules div span { display: block; color: var(--muted); font-size: .68rem; }
-    .chips span { display: inline-block; margin: .15rem .25rem 0 0; padding: .15rem .5rem;
-      border: 1px solid var(--line); border-radius: 999px; font-size: .74rem; }
-    .section { margin-top: 1.1rem; }
-    .section h2 { font-family: var(--display); font-weight: 500; font-size: 1.05rem;
-      margin: 0 0 .6rem; }
-    .stack { display: grid; gap: 1rem; }
-    @media (min-width: 980px) { .stack.two { grid-template-columns: 1.15fr .85fr; } }
-    .btn { cursor: pointer; font: inherit; font-size: .85rem; padding: .55rem .9rem;
-      min-height: 44px; border-radius: .6rem; border: 1px solid var(--line);
-      background: transparent; color: var(--blue); touch-action: manipulation; }
-    .btn:hover { border-color: var(--blue); }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
-    .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 60%, var(--line));
-      font-weight: 600; }
-    .btn.primary { background: color-mix(in srgb, var(--blue) 14%, transparent);
-      border-color: color-mix(in srgb, var(--blue) 55%, var(--line)); font-weight: 600; }
-    .btn.block { width: 100%; display: block; text-align: center; }
-    .hint { margin: .6rem 0; padding: .5rem .75rem; border-radius: .5rem; font-size: .82rem;
-      border: 1px solid var(--line); }
-    .hint.bad { color: var(--bad);
-      border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
-    .hint.good { color: var(--good);
-      border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
-    .hint.warn { color: var(--warn);
-      border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
-    .card-head { display: flex; justify-content: space-between; align-items: center;
-      gap: .6rem; flex-wrap: wrap; }
-    .card-head h2 { margin: 0; }
-    .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: .85rem 0 0; }
-    .toolbar form { display: inline; flex: 1 1 auto; min-width: 9rem; }
-    .toolbar .btn { width: 100%; }
-    .pos-cards { display: none; gap: .65rem; }
-    .pos-card { border: 1px solid var(--line); border-radius: .7rem; padding: .7rem .8rem;
-      background: color-mix(in srgb, var(--panel) 92%, transparent); }
-    .pos-card .row1 { display: flex; justify-content: space-between; align-items: baseline;
-      gap: .5rem; margin-bottom: .35rem; }
-    .pos-card .meta { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem .6rem;
-      font-size: .78rem; }
-    .pos-card .meta span { color: var(--muted); display: block; font-size: .65rem; }
-    .pos-card .actions { margin-top: .55rem; }
-    .sticky-actions { position: sticky; bottom: 0; z-index: 20; margin: 1rem -.25rem 0;
-      padding: .65rem .75rem calc(.65rem + env(safe-area-inset-bottom));
-      background: color-mix(in srgb, var(--bg) 92%, transparent);
-      border-top: 1px solid var(--line); backdrop-filter: blur(8px); }
-    .sticky-actions .toolbar { margin: 0; }
-    body { padding-bottom: 5.5rem; }
-    @media (max-width: 720px) {
-      .wrap { padding: .75rem .7rem 0; }
-      .topbar { flex-direction: column; align-items: flex-start; gap: .45rem; }
-      .hero-grid { grid-template-columns: 1fr 1fr !important; gap: .55rem !important; }
-      .hero-card .value { font-size: 1.15rem; }
-      .desk-wide { display: none; }
-      .pos-cards { display: grid; }
-      table.desk { font-size: .78rem; }
-      table.desk th, table.desk td { padding: .4rem .4rem; }
-      .btn { font-size: .82rem; }
-    }
-    @media (min-width: 721px) {
-      .sticky-actions { display: none; }
-      body { padding-bottom: 0; }
-    }
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@500;600&display=swap');
+:root {
+  --ink: #14201c;
+  --muted: #5c6b64;
+  --line: #d5ddd7;
+  --panel: rgba(255,255,255,.78);
+  --panel-solid: #f7faf7;
+  --good: #0b7a45;
+  --bad: #b42318;
+  --warn: #9a6700;
+  --accent: #0f5c4c;
+  --accent-2: #1f7a64;
+  --blue: #0f5c4c;
+  --bg0: #e8eee9;
+  --bg1: #f4f7f4;
+  --display: "Syne", "Avenir Next", sans-serif;
+  --sans: "DM Sans", "Avenir Next", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 14px;
+  --shadow: 0 1px 0 rgba(20,32,28,.04);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  color: var(--ink);
+  font-family: var(--sans);
+  background:
+    radial-gradient(900px 420px at 12% -10%, rgba(31,122,100,.16), transparent 55%),
+    radial-gradient(800px 380px at 92% 8%, rgba(20,32,28,.08), transparent 50%),
+    linear-gradient(180deg, #eef3ef 0%, var(--bg1) 42%, #e5ebe6 100%);
+  padding-bottom: 5.5rem;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 1.1rem 1rem 2rem; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+.good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+
+/* Brand masthead — first viewport composition */
+.masthead {
+  display: grid; gap: 1.1rem; margin-bottom: 1.25rem;
+  padding: 1.15rem 1.2rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 4px);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.92), rgba(247,250,247,.72)),
+    linear-gradient(180deg, rgba(15,92,76,.05), transparent 60%);
+  box-shadow: var(--shadow);
+}
+.masthead-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.brand {
+  margin: 0; font-family: var(--display); font-weight: 800;
+  font-size: clamp(2.1rem, 6vw, 3.4rem); letter-spacing: -0.045em; line-height: .95;
+  color: var(--accent);
+}
+.brand-sub { margin: .45rem 0 0; color: var(--muted); font-size: .95rem; max-width: 34rem; line-height: 1.4; }
+.earn-label {
+  margin: 0 0 .55rem; font-size: .72rem; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted);
+}
+.earn-grid {
+  display: grid; gap: .75rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 760px) {
+  .earn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+}
+.earn-tile {
+  padding: .85rem .95rem .9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.66);
+  min-height: 6.2rem;
+}
+.earn-tile .period { margin: 0; font-size: .78rem; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+.earn-tile .amount {
+  margin: .35rem 0 0; font-family: var(--mono); font-weight: 600;
+  font-size: clamp(1.55rem, 4.5vw, 2.15rem); letter-spacing: -0.03em; line-height: 1.05;
+}
+.earn-tile .meta { margin: .4rem 0 0; font-size: .74rem; color: var(--muted); }
+.earn-foot {
+  display: flex; flex-wrap: wrap; gap: .55rem 1.1rem; margin-top: .85rem;
+  font-size: .8rem; color: var(--muted);
+}
+.earn-foot strong { color: var(--ink); font-weight: 600; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .35rem .7rem; border-radius: 8px; border: 1px solid var(--line);
+  background: rgba(255,255,255,.7); font-size: .68rem; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.pill .dot { width: .42rem; height: .42rem; border-radius: 2px; background: currentColor; }
+.pill.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+.pill.off { color: var(--bad); }
+.pill.obs { color: var(--warn); }
+
+.card, .hero-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .9rem 1rem; box-shadow: var(--shadow);
+}
+.card.section { margin-top: 1rem; }
+.card-head, .card-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.card-head h2, .section h2 {
+  margin: 0; font-family: var(--display); font-weight: 700; font-size: 1.05rem; letter-spacing: -0.02em;
+}
+.section { margin-top: 1.1rem; }
+.section h2 { margin: 0 0 .6rem; }
+.hero-grid { display: grid; gap: .65rem; grid-template-columns: repeat(2, minmax(0,1fr)); margin-top: 1rem; }
+@media (min-width: 760px) { .hero-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+.hero-card .label { margin: 0; color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.hero-card .value { margin: .35rem 0 0; font-family: var(--mono); font-size: clamp(1.15rem, 3.5vw, 1.55rem); font-weight: 600; letter-spacing: -0.02em; }
+.hero-card .hint { margin: .35rem 0 0; color: var(--muted); font-size: .74rem; border: 0; padding: 0; background: none; }
+
+.stack { display: grid; gap: 1rem; }
+@media (min-width: 980px) { .stack.two { grid-template-columns: 1.15fr .85fr; } }
+.hint { margin: .6rem 0; padding: .55rem .75rem; border-radius: 10px; font-size: .82rem; border: 1px solid var(--line); background: rgba(255,255,255,.55); }
+.hint.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.hint.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.hint.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+
+.btn { cursor: pointer; font: inherit; font-size: .85rem; padding: .55rem .9rem; min-height: 44px;
+  border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.75);
+  color: var(--accent); touch-action: manipulation; font-weight: 600; }
+.btn:hover { border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.btn.primary { background: var(--accent); color: #f4faf7; border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn.block { width: 100%; display: block; text-align: center; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: .85rem 0 0; }
+.toolbar form { display: inline; flex: 1 1 auto; min-width: 9rem; }
+.toolbar .btn { width: 100%; }
+
+table.desk { width: 100%; border-collapse: collapse; font-size: .85rem; }
+table.desk th, table.desk td { padding: .45rem .55rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.desk th { color: var(--muted); font-weight: 600; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
+table.desk td:first-child, table.desk th:first-child { text-align: left; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .5rem .9rem; font-size: .8rem; }
+.rules div span { display: block; color: var(--muted); font-size: .68rem; }
+.chips span { display: inline-block; margin: .15rem .25rem 0 0; padding: .15rem .5rem; border: 1px solid var(--line); border-radius: 8px; font-size: .74rem; }
+
+.pos-cards { display: none; gap: .65rem; }
+.pos-card { border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .8rem; background: rgba(255,255,255,.7); }
+.pos-card .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; margin-bottom: .35rem; }
+.pos-card .meta { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem .6rem; font-size: .78rem; }
+.pos-card .meta span { color: var(--muted); display: block; font-size: .65rem; }
+.pos-card .actions { margin-top: .55rem; }
+
+.sticky-actions { position: sticky; bottom: 0; z-index: 20; margin: 1rem -.25rem 0;
+  padding: .65rem .75rem calc(.65rem + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--bg1) 88%, transparent);
+  border-top: 1px solid var(--line); backdrop-filter: blur(8px); }
+.sticky-actions .toolbar { margin: 0; }
+
+.sleeve-split { display: grid; gap: .75rem; }
+@media (min-width: 820px) { .sleeve-split { grid-template-columns: 1fr 1fr; } }
+.sleeve-earn { font-size: .78rem; color: var(--muted); margin: .35rem 0 .15rem; }
+.sleeve-earn b { font-family: var(--mono); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .wrap { padding: .85rem .7rem 0; }
+  .masthead { padding: 1rem .9rem 1.05rem; }
+  .desk-wide { display: none; }
+  .pos-cards { display: grid; }
+  table.desk { font-size: .78rem; }
+  table.desk th, table.desk td { padding: .4rem .4rem; }
+}
+@media (min-width: 721px) {
+  .sticky-actions { display: none; }
+  body { padding-bottom: 0; }
+}
 """
+
 
 
 def _fmt_eur(v: Any, *, signed: bool = True) -> str:
@@ -128,10 +228,76 @@ def _ts(iso: Any) -> str:
 
 
 def _hero(label: str, value: str, *, cls: str = "", hint: str = "") -> str:
-    hint_html = f'<div class="hint">{escape(hint)}</div>' if hint else ""
+    hint_html = f'<div class="hint muted">{escape(hint)}</div>' if hint else ""
     return (
         f'<div class="hero-card {cls}"><div class="label">{escape(label)}</div>'
         f'<div class="value {cls}">{value}</div>{hint_html}</div>'
+    )
+
+
+
+
+def _earnings_masthead(
+    earnings: DeskEarnings | None,
+    *,
+    pill: str,
+    venue: str,
+) -> str:
+    """First-viewport composition: brand + week/month/all-time net."""
+    if earnings is None:
+        c_week = c_month = c_all = 0.0
+        open_mtm = 0.0
+        tw = tm = ta = 0
+        core_w = vol_w = 0.0
+        as_of = "—"
+    else:
+        c = earnings.combined
+        c_week, c_month, c_all = c.week_eur, c.month_eur, c.all_time_eur
+        open_mtm = earnings.open_mtm_eur
+        tw, tm, ta = c.trades_week, c.trades_month, c.trades_all_time
+        core_w, vol_w = earnings.core.week_eur, earnings.volatile.week_eur
+        as_of = earnings.as_of
+    tiles = [
+        ("Deze week", c_week, f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"),
+        ("Deze maand", c_month, f"{tm} trades deze maand"),
+        ("Vanaf begin", c_all, f"{ta} trades all-time · netto gesloten"),
+    ]
+    tiles_html = "".join(
+        '<div class="earn-tile">'
+        f'<p class="period">{escape(label)}</p>'
+        f'<p class="amount {_cls(val)}">{_fmt_eur(val)}</p>'
+        f'<p class="meta">{escape(meta)}</p>'
+        "</div>"
+        for label, val, meta in tiles
+    )
+    return (
+        '<section class="masthead">'
+        '<div class="masthead-top">'
+        "<div>"
+        '<h1 class="brand">Moreney</h1>'
+        f'<p class="brand-sub">Momentum desk · core + volatile · {venue}. '
+        "Netto = gesloten trades na fees (Europe/Amsterdam).</p>"
+        "</div>"
+        f"<div>{pill}</div>"
+        "</div>"
+        '<p class="earn-label">Netto verdiend</p>'
+        f'<div class="earn-grid">{tiles_html}</div>'
+        '<div class="earn-foot">'
+        f"<span>Vandaag <strong class='{_cls(earnings.combined.day_eur if earnings else 0)}'>"
+        f"{_fmt_eur(earnings.combined.day_eur if earnings else 0)}</strong></span>"
+        f"<span>Open MTM <strong class='{_cls(open_mtm)}'>{_fmt_eur(open_mtm)}</strong></span>"
+        f'<span class="muted">peil {escape(str(as_of)[:19].replace("T", " "))} NL</span>'
+        "</div></section>"
+    )
+
+
+def _sleeve_earnings_line(period: Any) -> str:
+    if period is None:
+        return ""
+    return (
+        f'<p class="sleeve-earn">week <b class="{_cls(period.week_eur)}">{_fmt_eur(period.week_eur)}</b>'
+        f" · maand <b class='{_cls(period.month_eur)}'>{_fmt_eur(period.month_eur)}</b>"
+        f" · begin <b class='{_cls(period.all_time_eur)}'>{_fmt_eur(period.all_time_eur)}</b></p>"
     )
 
 
@@ -959,6 +1125,8 @@ def render_momentum_dashboard(
     sell_all: bool = False,
     report: Mapping[str, Any] | None = None,
     volatile: Mapping[str, Any] | None = None,
+    earnings: DeskEarnings | None = None,
+    volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -1008,6 +1176,8 @@ def render_momentum_dashboard(
         else ""
     )
 
+    earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue)
+
     heroes = "".join(
         [
             _hero(
@@ -1016,29 +1186,16 @@ def render_momentum_dashboard(
                 hint=f"{cash_hint} · ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}",
             ),
             _hero(
-                "Gerealiseerd totaal",
-                _fmt_eur(status.get("realized_total_eur")),
-                cls=_cls(status.get("realized_total_eur")),
-                hint=f"{status.get('trade_count') or 0} trades · win {win_rate} · "
-                f"fees {fees:,.2f} €",
-            ),
-            _hero(
-                "Vandaag",
+                "Core vandaag",
                 _fmt_eur(risk.get("day_realized_eur")),
                 cls=_cls(risk.get("day_realized_eur")),
-                hint=f"limiet −{float(cfg.get('day_loss_limit_eur') or 0):.0f} €",
+                hint=f"limiet −{float(cfg.get('day_loss_limit_eur') or 0):.0f} € · win {win_rate}",
             ),
             _hero(
-                "Deze week",
-                _fmt_eur(risk.get("week_realized_eur")),
-                cls=_cls(risk.get("week_realized_eur")),
-                hint=f"limiet −{float(cfg.get('week_loss_limit_eur') or 0):.0f} €",
-            ),
-            _hero(
-                "Open resultaat",
-                _fmt_eur(status.get("unrealized_net_eur")),
-                cls=_cls(status.get("unrealized_net_eur")),
-                hint=f"{n_pos}/{cfg.get('max_positions')} posities",
+                "Open resultaat (beide)",
+                _fmt_eur(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
+                cls=_cls(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
+                hint=f"core {n_pos}/{cfg.get('max_positions')} · fees {fees:,.2f} €",
             ),
             _hero(
                 "Volgende beslissing",
@@ -1052,23 +1209,29 @@ def render_momentum_dashboard(
             ),
         ]
     )
+    core_earn = _sleeve_earnings_line(earnings.core if earnings else None)
+    vol_earn = _sleeve_earnings_line(earnings.volatile if earnings else None)
+    vol_ledger_html = (
+        f'<div class="card section"><h2>Volatile ledger</h2>'
+        f"{_ledger_table(volatile_ledger_rows or [])}</div>"
+        if volatile_ledger_rows is not None
+        else ""
+    )
     html = f"""<!doctype html>
 <html lang="nl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f1419">
+<meta name="theme-color" content="#0f5c4c">
 {refresh_meta}
-<title>Momentum Desk</title>
-<style>{dashboard_css()}{_CSS}</style></head>
+<title>Moreney · Momentum Desk</title>
+<style>{_CSS}</style></head>
 <body><div class="wrap">
-<div class="topbar">
-  <div><h1 style="margin:0;font-family:var(--display);font-weight:500">Momentum Desk</h1>
-  <div class="tagline">Core stabiel + volatile aggressief · {venue}</div></div>
-  <div>{pill}</div>
-</div>
+{earnings_html}
 {err_html}
 {toolbar}
 {_sleeves_panel(status, volatile)}
-<div class="hero-grid" style="margin-top:1rem">{heroes}</div>
+{core_earn and f'<div class="muted" style="font-size:.8rem;margin:.35rem 0 0">Core netto · </div>{core_earn}' or ''}
+{vol_earn and f'<div class="muted" style="font-size:.8rem">Volatile netto · </div>{vol_earn}' or ''}
+<div class="hero-grid">{heroes}</div>
 {preview_html}
 {report_html}
 {sell_html}
@@ -1091,11 +1254,13 @@ def render_momentum_dashboard(
   {_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>
 </div>
 <div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
+{vol_ledger_html}
 <div class="card section"><h2>Regels (core)</h2>{_rules(cfg)}</div>
 <p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
-<a href="/live/momentum/status" style="color:var(--blue)">core JSON</a> ·
-<a href="/live/momentum/volatile/status" style="color:var(--blue)">volatile JSON</a> ·
-<a href="/live/momentum/ledger" style="color:var(--blue)">ledger</a></p>
+<a href="/live/momentum/status" style="color:var(--accent)">core JSON</a> ·
+<a href="/live/momentum/volatile/status" style="color:var(--accent)">volatile JSON</a> ·
+<a href="/live/momentum/ledger" style="color:var(--accent)">ledger</a> ·
+<a href="/live/momentum/earnings" style="color:var(--accent)">earnings JSON</a></p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
 </body></html>"""
