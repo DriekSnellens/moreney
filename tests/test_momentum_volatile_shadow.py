@@ -262,3 +262,64 @@ def test_conviction_sizing_scales_clip():
     planned = _select_volatile([strong, weak], cfg, held=set(), blocked=set(), alphai=alphai)
     by = {p["base"]: p["clip_eur"] for p in planned}
     assert by["RAY"] > by["ENA"]
+
+
+def test_rank_rejects_fee_thin_excess():
+    """Marginal RS vs BTC below min_excess is rejected (fee-drag guard)."""
+    from bot.live.momentum_desk import AlphaIView, BaseStats
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, _rank_volatile
+
+    cfg = VolatileShadowConfig(
+        require_alphai_green=True,
+        min_alphai_score=0.0,
+        weak_score_needs_excess=0.0,
+        min_excess=0.008,
+        max_chase_ret_24h=0.50,
+        prefer_pullback_from_high=0.0,
+        alphai_scores={"RAY": 80.0},
+        min_volume_eur=0.0,
+        min_ret_24h=-1.0,
+        max_from_high=1.0,
+    )
+    alphai = AlphaIView(picks=frozenset({"RAY"}), avoid=frozenset(), macro_caution=False)
+    stats = {
+        "RAY": BaseStats(
+            base="RAY",
+            price=1.0,
+            ret_24h=0.004,
+            from_high=-0.01,
+            volume_eur=5_000_000.0,
+        )
+    }
+    cands, rejected = _rank_volatile(stats, 0.0, cfg, alphai)
+    assert cands == []
+    assert any("excess_low" in w for w in rejected[0]["why"])
+
+
+def test_rank_accepts_excess_above_fee_floor():
+    from bot.live.momentum_desk import AlphaIView, BaseStats
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, _rank_volatile
+
+    cfg = VolatileShadowConfig(
+        require_alphai_green=True,
+        min_alphai_score=0.0,
+        min_excess=0.008,
+        max_chase_ret_24h=0.50,
+        prefer_pullback_from_high=0.0,
+        alphai_scores={"RAY": 80.0},
+        min_volume_eur=0.0,
+        min_ret_24h=-1.0,
+        max_from_high=1.0,
+    )
+    alphai = AlphaIView(picks=frozenset({"RAY"}), avoid=frozenset(), macro_caution=False)
+    stats = {
+        "RAY": BaseStats(
+            base="RAY",
+            price=1.0,
+            ret_24h=0.02,
+            from_high=-0.01,
+            volume_eur=5_000_000.0,
+        )
+    }
+    cands, _rejected = _rank_volatile(stats, 0.0, cfg, alphai)
+    assert len(cands) == 1 and cands[0].base == "RAY"
