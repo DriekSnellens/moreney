@@ -147,3 +147,34 @@ async def test_volatile_tick_refreshes_alphai(monkeypatch, tmp_path: Path):
     clock.t += 901.0
     await runner.tick()
     assert len(calls) == n + 1
+
+
+@pytest.mark.asyncio
+async def test_volatile_decide_blocks_entries_when_alphai_stale(monkeypatch, tmp_path: Path):
+    from bot.live.momentum_desk import DeskConfig
+    from bot.live.momentum_runner import RunnerOptions
+    from bot.live.momentum_volatile_runner import VolatileDeskRunner
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig
+
+    shadow = VolatileShadowConfig(
+        book_eur=650.0,
+        clip_eur=650.0,
+        universe=("RAY",),
+        alphai_max_age_hours=6.0,
+    )
+    opt = RunnerOptions(
+        alphai_recommendations_path=str(tmp_path / "volatile_alphai.json"),
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        dry_run=True,
+    )
+    runner = VolatileDeskRunner(
+        DeskConfig(universe=("RAY",), decision_hours_utc=(0,)),
+        gateway=None,
+        shadow=shadow,
+        options=opt,
+        clock=lambda: 1_000_000.0,
+        sleep=lambda _s: None,
+    )
+    runner._alphai_meta = {"age_hours": 9.0, "generated_at": "2026-09-11T00:00:00+00:00"}
+    assert runner._alphai_is_stale() is True

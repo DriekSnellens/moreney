@@ -108,6 +108,18 @@ class DeskConfig:
     # Under macro caution + reduce: only AlphaI-confirmed names (skip weak
     # tape-only entries that historically trailed into small losses).
     macro_caution_requires_alphai_pick: bool = True
+    # Soft regime: weak BTC/breadth no longer hard-blocks. Instead the
+    # desk stays open for AlphaI picks at a reduced clip so early legs
+    # of a bounce are not missed while tape is still thin.
+    soft_regime_on_weak_tape: bool = True
+    soft_regime_clip_mult: float = 0.5
+    # Under macro caution, demand excess that clears fee_rt × buffer
+    # before a weak/tape-only name can enter (coin-agnostic fee guard).
+    macro_caution_fee_buffer_mult: float = 4.0
+    # Ranking: AlphaI pick boost + mild absolute-momentum complement
+    # (volume already gated). Keeps RS primary, rewards confirmed names.
+    alphai_rank_boost: float = 0.01
+    momentum_rank_weight: float = 0.05
     # Tape-strength sizing. 12-week attribution at 7/13 UTC: entries taken
     # with >= 85% of the universe up on the day averaged +13.9 EUR per 1000
     # EUR clip (n=31) against +3.1 EUR for the rest (n=28); broad rallies
@@ -158,6 +170,7 @@ class RegimeDecision:
     btc_ret: float | None
     breadth: float
     reasons: tuple[str, ...]
+    soft: bool = False
 
 
 @dataclass(frozen=True)
@@ -312,7 +325,21 @@ def classify_regime(
         reasons.append("breadth_weak")
     if alphai is not None and alphai.macro_caution and cfg.macro_caution_mode == "block":
         reasons.append("alphai_macro_block")
-    return RegimeDecision(ok=not reasons, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons))
+    soft_reasons = {"btc_weak", "breadth_weak"}
+    hard = [r for r in reasons if r not in soft_reasons]
+    if (
+        cfg.soft_regime_on_weak_tape
+        and reasons
+        and not hard
+        and all(r in soft_reasons for r in reasons)
+    ):
+        # Weak tape only: stay open, mark soft so select_entries AlphaI-sizes down.
+        return RegimeDecision(
+            ok=True, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons), soft=True
+        )
+    return RegimeDecision(
+        ok=not reasons, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons), soft=False
+    )
 
 
 def rank_candidates(
@@ -335,8 +362,15 @@ def rank_candidates(
         if s.volume_eur < cfg.min_volume_eur:
             continue
         pick = base in view.picks
-        # Excess return is the score; an AlphaI pick only breaks ties.
-        score = excess + (0.0025 if pick else 0.0)
+        need = cfg.min_excess
+        if view.macro_caution and cfg.macro_caution_mode == "reduce":
+            need = max(need, cfg.fee_rt * cfg.macro_caution_fee_buffer_mult)
+        if excess < need:
+            continue
+        # RS primary; AlphaI pick gets a real boost; mild abs-momentum complement
+        # (volume already passed). Coin-agnostic — no per-base special cases.
+        score = excess + (cfg.alphai_rank_boost if pick else 0.0)
+        score += cfg.momentum_rank_weight * max(0.0, s.ret_24h)
         out.append(
             Candidate(
                 base=base,
@@ -391,15 +425,21 @@ def select_entries(
         cluster = cfg.clusters.get(c.base)
         if cluster is not None and cluster in clusters_held:
             continue
+        if getattr(regime, "soft", False) and not c.alphai_pick:
+            continue
         clip = (
             cfg.clip_eur
             * (cfg.alphai_clip_mult if c.alphai_pick else 1.0)
             * macro_mult
             * breadth_mult
         )
+        if getattr(regime, "soft", False):
+            clip *= cfg.soft_regime_clip_mult
         reasons = [f"excess={c.excess:+.4f}", f"from_high={c.from_high:+.4f}"]
         if c.alphai_pick:
             reasons.append("alphai_pick")
+        if getattr(regime, "soft", False):
+            reasons.append("soft_regime")
         if macro_mult != 1.0:
             reasons.append("macro_reduce")
         if breadth_tag:

@@ -41,6 +41,7 @@ from bot.live.momentum_volatile_shadow import (
     _rank_volatile,
     _select_volatile,
     load_shadow_alphai,
+    is_alphai_stale,
     refresh_volatile_alphai,
     shadow_config,
     volatile_universe,
@@ -226,7 +227,12 @@ class VolatileDeskRunner(MomentumDeskRunner):
         view, meta = load_shadow_alphai(path)
         scores = dict(meta.get("scores") or {})
         self.shadow = replace(self.shadow, alphai_scores=scores)
+        self._alphai_meta = meta
         return view
+
+    def _alphai_is_stale(self) -> bool:
+        meta = getattr(self, "_alphai_meta", {}) or {}
+        return is_alphai_stale(meta, self.shadow)
 
     async def _manage_exits(self, now_ms: int) -> None:
         if not self.holdings:
@@ -253,7 +259,13 @@ class VolatileDeskRunner(MomentumDeskRunner):
             if bar is None:
                 continue
             h.last_bar_ms = last_closed
-            decision = _evaluate_volatile_exit(h.pos, bar, self.shadow, alphai)
+            exit_alphai = alphai
+            if self._alphai_is_stale():
+                # Stale board: keep trail/stop/midflat, ignore AlphaI-flip cuts.
+                from dataclasses import replace as _dc_replace
+
+                exit_alphai = _dc_replace(alphai, avoid=frozenset())
+            decision = _evaluate_volatile_exit(h.pos, bar, self.shadow, exit_alphai)
             if decision is not None:
                 await self._exit(h, decision)
 
@@ -287,7 +299,9 @@ class VolatileDeskRunner(MomentumDeskRunner):
         allowed, why = self.ledger.entries_allowed(now_ms)
         entries: list[Entry] = []
         if allowed:
-            if alphai.macro_caution and not alphai.picks:
+            if self._alphai_is_stale():
+                allowed, why = False, "alphai_stale"
+            elif alphai.macro_caution and not alphai.picks:
                 allowed, why = False, "macro_caution_no_picks"
             elif self.shadow.require_alphai_green and not alphai.picks:
                 allowed, why = False, "no_alphai_volatile_picks"

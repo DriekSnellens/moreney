@@ -323,3 +323,74 @@ def test_rank_accepts_excess_above_fee_floor():
     }
     cands, _rejected = _rank_volatile(stats, 0.0, cfg, alphai)
     assert len(cands) == 1 and cands[0].base == "RAY"
+
+def test_rank_strong_score_lowers_volume_floor():
+    """Strong AlphaI scores may clear a lower EUR-volume floor (still non-zero)."""
+    from bot.live.momentum_desk import AlphaIView, BaseStats
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, _rank_volatile
+
+    cfg = VolatileShadowConfig(
+        require_alphai_green=True,
+        min_alphai_score=0.0,
+        min_excess=0.0,
+        max_chase_ret_24h=0.50,
+        prefer_pullback_from_high=0.0,
+        alphai_scores={"AAVE": 120.0, "RAY": 40.0},
+        min_volume_eur=400_000.0,
+        strong_alphai_score=60.0,
+        strong_score_volume_mult=0.5,
+        mid_score_volume_mult=0.75,
+        mid_score_volume_at=50.0,
+        min_ret_24h=-1.0,
+        max_from_high=1.0,
+    )
+    alphai = AlphaIView(picks=frozenset({"AAVE", "RAY"}), avoid=frozenset(), macro_caution=False)
+    stats = {
+        "AAVE": BaseStats("AAVE", 100.0, 0.03, -0.01, 250_000.0),
+        "RAY": BaseStats("RAY", 1.0, 0.03, -0.01, 250_000.0),
+    }
+    cands, rejected = _rank_volatile(stats, 0.0, cfg, alphai)
+    assert [c.base for c in cands] == ["AAVE"]
+    ray_rej = next(r for r in rejected if r["base"] == "RAY")
+    assert "volume_low" in ray_rej["why"]
+
+
+def test_midflat_tightens_green_time_exit():
+    """Fee-flat after midflat_hours exits even while AlphaI is still green."""
+    from bot.live.momentum_desk import BAR_MS, AlphaIView, Position
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, _evaluate_volatile_exit
+
+    cfg = VolatileShadowConfig(
+        alphai_scores={"TRX": 100.0},
+        midflat_hours=18.0,
+        time_exit_hours=24.0,
+        time_exit_hours_green=48.0,
+        fee_rt=0.003,
+        trail_pct=0.50,
+        hard_stop_pct=0.50,
+    )
+    alphai = AlphaIView(picks=frozenset({"TRX"}), avoid=frozenset(), macro_caution=False)
+    opened = 0
+    age_ms = int(20 * 3_600_000)
+    bar_ts = opened + age_ms - BAR_MS
+    pos = Position(
+        base="TRX",
+        entry_price=0.29327,
+        quantity=2216.0,
+        notional_eur=650.0,
+        opened_ms=opened,
+        peak=0.2940,
+    )
+    bar = (bar_ts, 0.2933, 0.2934, 0.2932, 0.29335, 0.0)
+    decision = _evaluate_volatile_exit(pos, bar, cfg, alphai)
+    assert decision is not None
+    assert decision.reason == "time_exit"
+
+
+def test_alphai_stale_helper_fail_closed():
+    from bot.live.momentum_volatile_shadow import VolatileShadowConfig, is_alphai_stale
+
+    cfg = VolatileShadowConfig(alphai_max_age_hours=6.0)
+    assert is_alphai_stale({"age_hours": 7.0}, cfg) is True
+    assert is_alphai_stale({"age_hours": 1.0}, cfg) is False
+    assert is_alphai_stale({}, cfg) is True  # unknown age → stale
