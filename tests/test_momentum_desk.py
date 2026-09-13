@@ -92,17 +92,47 @@ def _universe(returns: dict[str, float], btc_ret: float = 0.0, *, from_high: flo
     return cfg, candles
 
 
-def test_regime_blocks_on_weak_btc_or_breadth():
+def test_regime_blocks_on_weak_btc_or_breadth_when_soft_disabled():
     cfg, candles = _universe({"A": 0.03, "B": -0.02, "C": -0.01}, btc_ret=0.01)
+    cfg = cfg.with_overrides(soft_regime_on_weak_tape=False)
     alts = universe_stats(candles, T0, cfg)
     btc = bar_stats("BTC", candles["BTC"], T0)
     regime = classify_regime(btc, alts, cfg)
-    assert not regime.ok and "breadth_weak" in regime.reasons
+    assert not regime.ok and not regime.soft and "breadth_weak" in regime.reasons
 
     cfg, candles = _universe({"A": 0.03, "B": 0.02}, btc_ret=-0.02)
+    cfg = cfg.with_overrides(soft_regime_on_weak_tape=False)
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    assert not regime.ok and "btc_weak" in regime.reasons
+    assert not regime.ok and not regime.soft and "btc_weak" in regime.reasons
+
+
+def test_soft_regime_allows_alphai_picks_on_weak_tape():
+    """Weak BTC/breadth stays open for AlphaI picks at a reduced clip."""
+    cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=-0.02)
+    cfg = cfg.with_overrides(
+        soft_regime_on_weak_tape=True,
+        soft_regime_clip_mult=0.5,
+        min_volume_eur=0.0,
+        clip_eur=1000.0,
+        alphai_clip_mult=1.0,
+        strong_clip_mult=1.0,
+        weak_clip_mult=1.0,
+    )
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    assert regime.ok and regime.soft
+    assert "btc_weak" in regime.reasons and "breadth_weak" in regime.reasons
+    view = AlphaIView(picks=frozenset({"A"}), avoid=frozenset())
+    cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
+    entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
+    assert [e.base for e in entries] == ["A"]
+    assert entries[0].clip_eur == pytest.approx(500.0)
+    assert "soft_regime" in entries[0].reasons
+    # Non-picks stay blocked under soft regime.
+    view2 = AlphaIView(picks=frozenset(), avoid=frozenset())
+    cands2 = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view2)
+    assert select_entries(cands2, regime, cfg, held_bases=[], alphai=view2) == []
 
 
 def test_rank_and_select_apply_excess_cluster_and_alphai_rules():
@@ -139,11 +169,21 @@ def test_from_high_and_macro_caution_rules():
     cfg = cfg.with_overrides(min_volume_eur=0.0)
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    view = AlphaIView(macro_caution=True)
-    entries = select_entries(
-        rank_candidates(alts, 0.0, cfg), regime, cfg, held_bases=[], alphai=view
+    # Under macro caution, only AlphaI picks may enter (default).
+    view = AlphaIView(macro_caution=True, picks=frozenset({"SOL"}))
+    cands = rank_candidates(alts, 0.0, cfg, alphai=view)
+    entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
+    assert entries[0].clip_eur == pytest.approx(455.0)  # 500 * alphai_clip 1.3 * macro 0.7
+    assert "macro_reduce" in entries[0].reasons and "alphai_pick" in entries[0].reasons
+    # Non-picks are skipped while macro caution + reduce is active.
+    skipped = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=AlphaIView(macro_caution=True)),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=AlphaIView(macro_caution=True, picks=frozenset()),
     )
-    assert entries[0].clip_eur == pytest.approx(350.0)
+    assert skipped == []
     blocked = classify_regime(
         bar_stats("BTC", candles["BTC"], T0),
         alts,
@@ -151,6 +191,23 @@ def test_from_high_and_macro_caution_rules():
         alphai=view,
     )
     assert not blocked.ok and "alphai_macro_block" in blocked.reasons
+
+
+def test_macro_caution_can_allow_non_picks_when_flag_off():
+    cfg, candles = _universe({"SOL": 0.05}, 0.0)
+    cfg = cfg.with_overrides(min_volume_eur=0.0, macro_caution_requires_alphai_pick=False)
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    view = AlphaIView(macro_caution=True, picks=frozenset())
+    entries = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=view),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=view,
+    )
+    assert len(entries) == 1
+    assert "macro_reduce" in entries[0].reasons
 
 
 def test_exit_rules_hard_stop_trail_ratchet_and_time():
@@ -1225,7 +1282,10 @@ def test_dashboard_sell_all_and_report_render():
     }
     html = render_momentum_dashboard(status, []).body.decode()
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
-    assert "Volatile shadow" in html
+    assert "Moreney" in html and ("Netto verdiend" in html or "Deze week" in html)
+    assert "volatile" in html.lower()
+    assert "Volatile ledger" in html or "Volatile" in html
+    assert "/live/momentum/volatile/ledger" in html or "/live/momentum/earnings" in html
     assert "pos-cards" in html and 'name="sell" value="h1"' in html
     confirm = render_momentum_dashboard(status, [], sell_all=True).body.decode()
     assert "Alles verkopen?" in confirm and "/live/momentum/sell-all" in confirm
@@ -1253,3 +1313,35 @@ def test_dashboard_sell_all_and_report_render():
     }
     rep = render_momentum_dashboard(status, [], report=report).body.decode()
     assert "Gemiste instappen" in rep and "DOT" in rep and 'http-equiv="refresh"' not in rep
+
+
+def test_decide_resizes_clip_to_venue_cash_before_plan(tmp_path):
+    """Decide path rewrites entry clips to what venues can actually fund."""
+    clock = FakeClock(T0 / 1000)
+    r, _ = _multi_runner(tmp_path, clock, bitvavo_cash=816.0, okx_cash=620.0)
+    asyncio.run(r._refresh_cash())
+    from bot.live.momentum_desk import Entry
+
+    # Simulate select_entries output, then apply the same resize block as _decide.
+    entries = [
+        Entry(base="ETH", clip_eur=1690.0, score=0.05, reasons=("alphai_pick",)),
+        Entry(base="LINK", clip_eur=500.0, score=0.04, reasons=("excess=+0.0400",)),
+    ]
+    sized = []
+    for entry in entries:
+        route = r._route_entry(entry.clip_eur)
+        if route is None:
+            continue
+        _venue, clip = route
+        reasons = entry.reasons
+        if clip + 1e-9 < entry.clip_eur:
+            reasons = tuple(reasons) + ("clip_reduced",)
+        sized.append(
+            Entry(base=entry.base, clip_eur=round(clip, 2), score=entry.score, reasons=reasons)
+        )
+    assert sized[0].base == "ETH"
+    assert "clip_reduced" in sized[0].reasons
+    assert 810.0 < sized[0].clip_eur <= 816.0
+    # LINK fits on primary → unchanged clip, no resize tag.
+    assert sized[1].clip_eur == 500.0
+    assert "clip_reduced" not in sized[1].reasons
