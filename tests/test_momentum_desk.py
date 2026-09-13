@@ -928,7 +928,7 @@ def test_dashboard_renders_positions_decision_and_ledger():
                 "quantity": 156.25,
                 "notional_eur": 500,
                 "age_h": 2.5,
-                "peak_return": 0.045,
+                "peak_return": 0.055,
                 "mark": 3.3,
                 "gross_return": 0.03125,
                 "unrealized_net_eur": 14.1,
@@ -980,8 +980,8 @@ def test_dashboard_renders_positions_decision_and_ledger():
     html = render_momentum_dashboard(status, rows).body.decode()
     assert "LIVE" in html and "REGIME ON" in html
     assert "DOT" in html and "trail" in html and "2,015.60" in html
-    # Ratchet active (peak 4.5% >= 4%) -> tight trail shown at 2%.
-    assert "(2.0%)" in html
+    # Ratchet active (peak 5.5% >= 5%) -> tight trail shown at 2.5%.
+    assert "(2.5%)" in html
     assert "<script" not in html  # server-rendered, no JS surface
     # Sell button is a GET to the confirmation step, never a direct POST.
     assert 'name="sell" value="h-dot"' in html and "/live/momentum/sell" not in html
@@ -1334,6 +1334,9 @@ def test_daily_report_flags_missed_hour_and_early_manual():
         strong_clip_mult=1.0,
         weak_clip_mult=1.0,
         max_from_high=0.02,
+        # Pin the trail the afternoon dump was written against (~3% from peak).
+        trail_pct=0.03,
+        trail_tight_after=0.0,
     )
     # Build candles: BTC flat, SOL strong on hour 10 only path.
     n = 3 * BARS_PER_DAY

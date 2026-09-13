@@ -74,35 +74,37 @@ class DeskConfig:
     top_n: int = 2
     top_n_broad: int = 3
     broad_breadth: float = 0.7
-    # Fee-aware floor: 2.0% clears ~6× round-trip fees so marginal RS
-    # names cannot eat the book. Raised from 1.5% after 90d @40k attribution
-    # showed jun/jul bleed concentrated in low-excess hard_stops.
-    min_excess: float = 0.020
+    # Fee-aware floor. 130d @€40k config search (May–Sep 2026): 2.5% with a
+    # wider trail dominated both the prior 2.0% pack and the old hard-regime
+    # style on calmar (PnL / |DD|); Jun/Jul bleed was concentrated in thinner
+    # excess names that 2.5% simply skips.
+    min_excess: float = 0.025
     # Always-on excess floor = fee_rt × this (binds even if min_excess is lowered).
     entry_fee_buffer_mult: float = 6.0
-    # Reject extended breakouts glued to the 24h high (chase entries).
-    max_chase_ret_24h: float = 0.09
+    # Chase reject (0 disables). Same search: the 9% glue-to-high gate did not
+    # improve calmar vs off; keep disabled so extended leaders can still enter.
+    max_chase_ret_24h: float = 0.0
     chase_near_high: float = 0.008  # must be at least this far under the high
     max_from_high: float = 0.02
     min_volume_eur: float = 1_000_000.0
     btc_min_ret: float = -0.01
     min_breadth: float = 0.5
-    trail_pct: float = 0.03
+    trail_pct: float = 0.04
     # Ratchet: once the peak gain reaches ``trail_tight_after`` the trail
-    # narrows to ``trail_tight_pct`` (0 disables). 12-week walk-forward
-    # (7/13 UTC, 600 EUR clip): 3%->1.5% netted +164 EUR; 4%->2% +308 EUR
-    # and positive in both halves. The tighter ratchet was shaking winners
-    # out on ordinary 2% intraday noise before they reached +5..+9%.
-    trail_tight_after: float = 0.04
-    trail_tight_pct: float = 0.02
+    # narrows to ``trail_tight_pct`` (0 disables). Search winner used 5%→2.5%
+    # with the 4% base trail — lets August-style runners breathe past ordinary
+    # 2–3% noise before locking gains.
+    trail_tight_after: float = 0.05
+    trail_tight_pct: float = 0.025
     hard_stop_pct: float = 0.03
     # Positions that have done nothing in a day almost always close red
     # (48h time-exits: -43 EUR over 5 trades). 24h keeps the same total and
     # trims the worst week from -76 to -54 EUR and max drawdown -118 -> -87.
     time_exit_hours: float = 24.0
-    # Earlier fee-flat cut: if still ≤ fee_rt after midflat_hours, exit
-    # (0 disables). Cuts fee-churn time_exits without touching trail winners.
-    midflat_hours: float = 16.0
+    # Midflat (0 disables). Search winner was indifferent to 0 vs 24h at the
+    # 2.5% excess / 4% trail setting (no midflat fills on that path), so keep
+    # off and rely on the 24h fee-flat time exit.
+    midflat_hours: float = 0.0
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 40.0
     week_loss_limit_eur: float = 100.0
