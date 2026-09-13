@@ -1315,9 +1315,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         decision_hours_utc=hours or (0,),
         clip_eur=float(getattr(settings, "momentum_desk_clip_eur", 500.0)),
         max_positions=int(getattr(settings, "momentum_desk_max_positions", 3)),
-        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.03)),
-        trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.04)),
-        trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.02)),
+        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.04)),
+        trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.05)),
+        trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.025)),
         hard_stop_pct=float(getattr(settings, "momentum_desk_hard_stop_pct", 0.03)),
         time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 24.0)),
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 40.0)),
@@ -1326,6 +1326,10 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
         weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),
         skip_weekend_entries=bool(getattr(settings, "momentum_desk_skip_weekend_entries", True)),
+        min_excess=float(getattr(settings, "momentum_desk_min_excess", 0.025)),
+        entry_fee_buffer_mult=float(getattr(settings, "momentum_desk_entry_fee_buffer_mult", 6.0)),
+        max_chase_ret_24h=float(getattr(settings, "momentum_desk_max_chase_ret_24h", 0.0)),
+        midflat_hours=float(getattr(settings, "momentum_desk_midflat_hours", 0.0)),
     )
 
 
