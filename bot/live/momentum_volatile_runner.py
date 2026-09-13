@@ -41,6 +41,8 @@ from bot.live.momentum_volatile_shadow import (
     _rank_volatile,
     _select_volatile,
     load_shadow_alphai,
+    is_alphai_stale,
+    refresh_volatile_alphai,
     shadow_config,
     volatile_universe,
 )
@@ -164,6 +166,32 @@ class VolatileDeskRunner(MomentumDeskRunner):
             kwargs["sleep"] = sleep
         super().__init__(cfg, gateway, **kwargs)
         self.shadow = shadow
+        self._alphai_refresh_ts = 0.0
+        self._alphai_refresh_interval_sec = 900.0
+
+    async def tick(self) -> None:
+        """Refresh volatile AlphaI (separate file) before the shared desk tick."""
+        await self._maybe_refresh_alphai()
+        await super().tick()
+
+    async def _maybe_refresh_alphai(self) -> None:
+        """Soft-refresh the volatile AlphaI board on a 15m cadence.
+
+        Core desk refreshes ``daily_recommendations.json`` via its regime
+        monitor; this sleeve writes a separate midcap file and previously
+        never refreshed it live — boards went stale overnight.
+        """
+        now = float(self._clock())
+        if now - self._alphai_refresh_ts < self._alphai_refresh_interval_sec:
+            return
+        self._alphai_refresh_ts = now
+        path = self.opt.alphai_recommendations_path
+        if not path:
+            return
+        try:
+            await asyncio.to_thread(refresh_volatile_alphai, path, force=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("volatile AlphaI refresh failed: %s", exc)
 
     def status(self) -> dict[str, Any]:
         out = super().status()
@@ -199,7 +227,12 @@ class VolatileDeskRunner(MomentumDeskRunner):
         view, meta = load_shadow_alphai(path)
         scores = dict(meta.get("scores") or {})
         self.shadow = replace(self.shadow, alphai_scores=scores)
+        self._alphai_meta = meta
         return view
+
+    def _alphai_is_stale(self) -> bool:
+        meta = getattr(self, "_alphai_meta", {}) or {}
+        return is_alphai_stale(meta, self.shadow)
 
     async def _manage_exits(self, now_ms: int) -> None:
         if not self.holdings:
@@ -226,7 +259,13 @@ class VolatileDeskRunner(MomentumDeskRunner):
             if bar is None:
                 continue
             h.last_bar_ms = last_closed
-            decision = _evaluate_volatile_exit(h.pos, bar, self.shadow, alphai)
+            exit_alphai = alphai
+            if self._alphai_is_stale():
+                # Stale board: keep trail/stop/midflat, ignore AlphaI-flip cuts.
+                from dataclasses import replace as _dc_replace
+
+                exit_alphai = _dc_replace(alphai, avoid=frozenset())
+            decision = _evaluate_volatile_exit(h.pos, bar, self.shadow, exit_alphai)
             if decision is not None:
                 await self._exit(h, decision)
 
@@ -260,7 +299,9 @@ class VolatileDeskRunner(MomentumDeskRunner):
         allowed, why = self.ledger.entries_allowed(now_ms)
         entries: list[Entry] = []
         if allowed:
-            if alphai.macro_caution and not alphai.picks:
+            if self._alphai_is_stale():
+                allowed, why = False, "alphai_stale"
+            elif alphai.macro_caution and not alphai.picks:
                 allowed, why = False, "macro_caution_no_picks"
             elif self.shadow.require_alphai_green and not alphai.picks:
                 allowed, why = False, "no_alphai_volatile_picks"
@@ -278,7 +319,10 @@ class VolatileDeskRunner(MomentumDeskRunner):
                     clip = float(row["clip_eur"])
                     free_book = max(0.0, float(self.shadow.book_eur) - self._deployed_eur())
                     clip = min(clip, free_book)
-                    if clip < max(_MIN_ORDER_EUR, float(self.shadow.clip_eur) * 0.5):
+                    # Align with residual-cash floor (not half-clip), so leftover
+                    # soft-book cash between €100 and 50% of clip still deploys.
+                    min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
+                    if clip < min_ok:
                         continue
                     entries.append(
                         Entry(

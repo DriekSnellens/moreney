@@ -800,6 +800,32 @@ class MomentumDeskRunner:
                 ),
                 alphai=alphai,
             )
+
+        # Size clips to venue cash *before* planning so operators see the
+        # executable clip and we do not "plan full / skip for cash" later.
+        # Pre-size clips to venue cash so plans match what can fill. Unfundable
+        # names stay in the list so ``_enter`` still emits ``entry_skipped``.
+        sized: list[Entry] = []
+        for entry in entries:
+            route = self._route_entry(entry.clip_eur)
+            if route is None:
+                sized.append(entry)
+                continue
+            _venue, clip = route
+            reasons = entry.reasons
+            if clip + 1e-9 < entry.clip_eur:
+                reasons = tuple(reasons) + ("clip_reduced",)
+                sized.append(
+                    Entry(
+                        base=entry.base,
+                        clip_eur=round(clip, 2),
+                        score=entry.score,
+                        reasons=reasons,
+                    )
+                )
+            else:
+                sized.append(entry)
+        entries = sized
         # Why the leaders that did not qualify were dropped, for the operator.
         rejected = []
         if regime.ok:
