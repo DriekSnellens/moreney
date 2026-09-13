@@ -412,6 +412,11 @@ class FakeGateway:
     ask: float = 100.2
     fill_maker_after_polls: int | None = None  # None = never fills as maker
     partial_on_cancel: bool = False
+    # Fraction of each taker order that fills immediately (rest canceled empty).
+    taker_fill_frac: float = 1.0
+    # After this many partial taker fills, subsequent takers fill fully (models
+    # an escalating chase that finally clears the book).
+    taker_partial_count: int = 10**9
     free_by_base: dict[str, float] | None = None  # None = do not report (no clamp)
     placed: list[dict] = field(default_factory=list)
     _orders: dict[str, dict] = field(default_factory=dict)
@@ -429,13 +434,23 @@ class FakeGateway:
         oid = f"o{len(self.placed) + 1}"
         self.placed.append({"side": side, "qty": qty, "price": price, "post_only": post_only})
         if not post_only:
+            n_taker = sum(1 for p in self.placed if not p["post_only"])
+            frac = (
+                float(self.taker_fill_frac)
+                if n_taker <= int(self.taker_partial_count)
+                else 1.0
+            )
+            filled = max(0.0, min(qty, qty * frac))
             self._orders[oid] = {
-                "status": "closed",
-                "filled": qty,
-                "avg": price,
-                "fee": qty * price * 0.0025,
+                "status": "closed" if filled + 1e-12 >= qty else "open",
+                "filled": filled,
+                "avg": price if filled > 0 else None,
+                "fee": filled * price * 0.0025,
+                "qty": qty,
+                "price": price,
             }
-            return OrderState(oid, "closed", qty, price, qty * price * 0.0025)
+            o = self._orders[oid]
+            return OrderState(oid, o["status"], o["filled"], o["avg"], o["fee"])
         self._orders[oid] = {
             "status": "open",
             "filled": 0.0,
@@ -462,14 +477,14 @@ class FakeGateway:
     async def cancel_order(self, order_id, symbol):
         o = self._orders[order_id]
         if o["status"] == "open":
-            if self.partial_on_cancel:
+            if self.partial_on_cancel and o["filled"] <= 0:
                 # Venue filled part of it just before the cancel landed; the
                 # cancel reply itself (like Bitvavo's) says nothing about it.
                 o.update(
                     filled=o["qty"] * 0.4, avg=o["price"], fee=o["qty"] * 0.4 * o["price"] * 0.0015
                 )
             o["status"] = "canceled"
-        return OrderState(order_id, "open", 0.0, None, 0.0)
+        return OrderState(order_id, "open", o["filled"], o["avg"], o["fee"])
 
 
 class FakeClock:
@@ -491,7 +506,7 @@ class FakeFeed:
         return self.rows[base][-limit:]
 
 
-def _runner(tmp_path: Path, gw, clock, feed=None, **cfg_kwargs) -> MomentumDeskRunner:
+def _runner(tmp_path: Path, gw, clock, feed=None, opt_kwargs=None, **cfg_kwargs) -> MomentumDeskRunner:
     cfg = DeskConfig(**{**FLAT_SIZING, **cfg_kwargs})
     opts = RunnerOptions(
         state_path=str(tmp_path / "state.json"),
@@ -500,6 +515,7 @@ def _runner(tmp_path: Path, gw, clock, feed=None, **cfg_kwargs) -> MomentumDeskR
         buy_rest_sec=60.0,
         repeg_sec=20.0,
         poll_sec=5.0,
+        **(opt_kwargs or {}),
     )
     return MomentumDeskRunner(
         cfg, gw, options=opts, feed=feed or FakeFeed({}), clock=clock, sleep=clock.sleep
@@ -560,6 +576,61 @@ def test_urgent_sell_goes_straight_to_taker(tmp_path):
     fill = asyncio.run(r._sell("SOL", 5.0, urgent=True))
     assert fill is not None and fill.taker and len(gw.placed) == 1
     assert gw.placed[0]["price"] == pytest.approx(100.0 * 0.998)
+
+
+def test_large_urgent_sell_is_sliced(tmp_path):
+    # €10k notional / €2.5k slices → 4 child taker orders when the book fills each.
+    gw = FakeGateway()
+    clock = FakeClock(T0 / 1000)
+    r = _runner(tmp_path, gw, clock, opt_kwargs={"sell_slice_eur": 2500.0})
+    fill = asyncio.run(r._sell("SOL", 100.0, urgent=True))
+    assert fill is not None and fill.qty == pytest.approx(100.0)
+    takers = [p for p in gw.placed if not p["post_only"]]
+    assert len(takers) == 4
+    assert all(p["qty"] == pytest.approx(25.0) for p in takers)
+
+
+def test_sell_chase_escalates_cross_until_flat(tmp_path):
+    # Each taker only fills 40%; chase rounds must deepen the cross and finish.
+    gw = FakeGateway(taker_fill_frac=0.4, taker_partial_count=1)
+    clock = FakeClock(T0 / 1000)
+    r = _runner(
+        tmp_path,
+        gw,
+        clock,
+        opt_kwargs={
+            "sell_slice_eur": 0.0,  # single child per round
+            "sell_chase_rounds": 4,
+            "sell_chase_step_bps": 15.0,
+            "taker_cross_bps": 20.0,
+        },
+    )
+    fill = asyncio.run(r._sell("SOL", 10.0, urgent=True))
+    assert fill is not None and fill.qty == pytest.approx(10.0, abs=1e-6)
+    takers = [p for p in gw.placed if not p["post_only"]]
+    assert len(takers) >= 2
+    # Cross deepens after the thin first fill: 20 → 35 bps …
+    prices = [p["price"] for p in takers]
+    assert prices[0] == pytest.approx(100.0 * (1 - 0.0020))
+    assert prices[1] == pytest.approx(100.0 * (1 - 0.0035))
+    assert takers[0]["qty"] == pytest.approx(10.0)
+    assert takers[1]["qty"] == pytest.approx(6.0)
+
+
+def test_patient_trail_sell_rests_then_chases_partials(tmp_path):
+    # Trail exits stay patient (maker first) but still chase leftovers to flat.
+    gw = FakeGateway(taker_fill_frac=0.5, taker_partial_count=1)
+    clock = FakeClock(T0 / 1000)
+    r = _runner(
+        tmp_path,
+        gw,
+        clock,
+        opt_kwargs={"sell_slice_eur": 0.0, "sell_chase_rounds": 3, "sell_rest_sec": 20.0},
+    )
+    fill = asyncio.run(r._sell("ETH", 8.0, urgent=False))
+    assert fill is not None and fill.qty == pytest.approx(8.0, abs=1e-6)
+    assert any(p["post_only"] for p in gw.placed)
+    assert any(not p["post_only"] for p in gw.placed)
 
 
 def test_tick_exits_on_closed_bar_and_persists_ledger(tmp_path):

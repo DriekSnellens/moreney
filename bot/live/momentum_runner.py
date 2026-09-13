@@ -12,7 +12,9 @@ Design:
   overflow capital rather than a duplicate book.
 * Buys: post-only maker at the bid, re-pegged for up to ``buy_rest_sec``,
   then one taker fallback. Trail / time exits: maker at the ask for
-  ``sell_rest_sec`` then taker. Hard stops: taker immediately.
+  ``sell_rest_sec``, then sliced taker chase until flat (escalating cross).
+  Hard stops: skip maker, same sliced chase immediately. Peak trailing only
+  works if the sell actually completes — chase-to-flat is that guarantee.
 * Every fill is appended to a JSONL ledger with entry/exit reason codes;
   state (positions, risk ledger) is persisted so restarts are safe.
 """
@@ -293,6 +295,12 @@ class RunnerOptions:
     repeg_sec: float = 20.0
     poll_sec: float = 3.0
     taker_cross_bps: float = 20.0
+    # Exit hardening: large sells are split and chased to flat so trail/stop
+    # exits cannot leave inventory after a single thin taker attempt.
+    sell_slice_eur: float = 2500.0  # 0 = single shot
+    sell_chase_rounds: int = 4  # extra taker rounds after the first
+    sell_chase_step_bps: float = 15.0  # deepen the cross each chase round
+    sell_taker_poll_sec: float = 30.0
     decision_grace_sec: float = 30.0
     bar_close_grace_sec: float = 15.0
     state_path: str = "./data/momentum_desk_state.json"
@@ -1000,11 +1008,116 @@ class MomentumDeskRunner:
             base, "buy", notional_eur=notional_eur, rest_sec=self.opt.buy_rest_sec, venue=venue
         )
 
+    def _sell_slices(self, qty: float, px: float) -> list[float]:
+        """Split a sell into book-friendly child sizes (last slice gets the remainder)."""
+        if qty <= 0 or px <= 0:
+            return []
+        slice_eur = float(self.opt.sell_slice_eur or 0.0)
+        if slice_eur <= 0 or qty * px <= slice_eur + _MIN_ORDER_EUR:
+            return [qty]
+        slice_qty = slice_eur / px
+        out: list[float] = []
+        left = qty
+        while left * px >= _MIN_ORDER_EUR:
+            if left <= slice_qty * 1.25:  # avoid a dust leftover child
+                out.append(left)
+                break
+            chunk = min(left, slice_qty)
+            out.append(chunk)
+            left -= chunk
+        return out
+
     async def _sell(
         self, base: str, qty: float, *, urgent: bool, venue: str | None = None
     ) -> Fill | None:
-        return await self._work_order(
-            base, "sell", qty=qty, rest_sec=0.0 if urgent else self.opt.sell_rest_sec, venue=venue
+        """Sell ``qty``, slicing and chasing until flat (or chase budget exhausted).
+
+        Peak trailing / hard stops only protect PnL if the exit actually fills.
+        Patient exits rest as maker once, then every exit path — trail included —
+        slices the remainder and escalates the taker cross across chase rounds.
+        """
+        venue = venue or self.opt.venues[0]
+        gw = self._gateway(venue)
+        mark = 0.0
+        if gw is not None:
+            try:
+                bid, ask = await gw.best_bid_ask(f"{base}EUR")
+                mark = float(bid or ask or 0.0)
+            except Exception:  # noqa: BLE001
+                mark = 0.0
+        if mark <= 0:
+            mark = float(self.marks.get(base) or 0.0)
+        if mark <= 0:
+            mark = 1.0
+
+        filled_qty = 0.0
+        filled_cost = 0.0
+        fee_eur = 0.0
+        taker_used = False
+        remaining = float(qty)
+        total_rounds = 1 + max(0, int(self.opt.sell_chase_rounds))
+
+        for round_i in range(total_rounds):
+            if remaining * mark < _MIN_ORDER_EUR:
+                break
+            before = remaining
+            cross_bps = float(self.opt.taker_cross_bps) + round_i * float(
+                self.opt.sell_chase_step_bps
+            )
+            # Maker rest only on the first child of round 0 for patient exits.
+            rest_budget = 0.0 if urgent or round_i > 0 else float(self.opt.sell_rest_sec)
+            slices = self._sell_slices(remaining, mark)
+            for idx, chunk in enumerate(slices):
+                if chunk * mark < _MIN_ORDER_EUR:
+                    continue
+                child_rest = rest_budget if idx == 0 else 0.0
+                fill = await self._work_order(
+                    base,
+                    "sell",
+                    qty=chunk,
+                    rest_sec=child_rest,
+                    venue=venue,
+                    cross_bps=cross_bps,
+                    taker_poll_sec=float(self.opt.sell_taker_poll_sec),
+                )
+                if fill is None or fill.qty <= 0:
+                    continue
+                filled_qty += fill.qty
+                filled_cost += fill.qty * fill.avg_price
+                fee_eur += fill.fee_eur
+                taker_used = taker_used or fill.taker
+                remaining = max(0.0, remaining - fill.qty)
+                mark = fill.avg_price or mark
+            if remaining * mark < _MIN_ORDER_EUR:
+                break
+            if remaining >= before - 1e-12:
+                # No progress this round — further escalation still tried once more,
+                # but if the book returns nothing we stop after the budget.
+                logger.warning(
+                    "momentum desk: sell chase round %s made no progress on %s "
+                    "(left %.8f @ ~%.4f EUR)",
+                    round_i,
+                    base,
+                    remaining,
+                    mark,
+                )
+
+        if filled_qty <= 0:
+            return None
+        if remaining * mark >= _MIN_ORDER_EUR:
+            logger.warning(
+                "momentum desk: sell chase exhausted for %s — filled %.8f / %.8f "
+                "(~%.0f EUR left)",
+                base,
+                filled_qty,
+                qty,
+                remaining * mark,
+            )
+        return Fill(
+            qty=filled_qty,
+            avg_price=filled_cost / filled_qty,
+            fee_eur=fee_eur,
+            taker=taker_used,
         )
 
     async def _work_order(
@@ -1016,6 +1129,8 @@ class MomentumDeskRunner:
         notional_eur: float | None = None,
         rest_sec: float,
         venue: str | None = None,
+        cross_bps: float | None = None,
+        taker_poll_sec: float | None = None,
     ) -> Fill | None:
         symbol = f"{base}EUR"
         venue = venue or self.opt.venues[0]
@@ -1088,16 +1203,23 @@ class MomentumDeskRunner:
             if state.status == "rejected":
                 await self._sleep(self.opt.poll_sec)
 
-        # Taker phase: cross the spread once for the remainder.
+        # Taker phase: cross the spread once for the remainder (bps may be
+        # escalated by ``_sell`` chase rounds).
         if not _done():
             bid, ask = await gw.best_bid_ask(symbol)
-            cross = self.opt.taker_cross_bps / 10_000
+            bps = float(self.opt.taker_cross_bps if cross_bps is None else cross_bps)
+            cross = bps / 10_000
             price = ask * (1 + cross) if side == "buy" else bid * (1 - cross)
             q = remaining_qty if remaining_qty is not None else (remaining_notional or 0.0) / price
+            poll_for = (
+                float(taker_poll_sec)
+                if taker_poll_sec is not None
+                else (float(self.opt.sell_taker_poll_sec) if side == "sell" else 30.0)
+            )
             try:
                 state = await gw.place_limit(symbol, side, q, price, post_only=False)
                 taker_used = True
-                state = await self._poll(gw, state, symbol, 30.0)
+                state = await self._poll(gw, state, symbol, poll_for)
                 if state.status == "open":
                     state = await self._cancel_and_refetch(gw, state, symbol)
                 elif state.status == "closed":
