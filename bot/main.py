@@ -56,7 +56,7 @@ from bot.live.micro_session_manager import (
     get_micro_session_manager,
     reset_micro_session_manager,
 )
-from bot.live.momentum_dashboard import render_momentum_dashboard
+from bot.live.momentum_dashboard import read_ledger_tail, render_momentum_dashboard
 from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
 from bot.live.momentum_volatile_runner import (
     get_volatile_desk_manager,
@@ -639,15 +639,7 @@ async def live_momentum_stop() -> dict[str, Any]:
 @app.get("/live/momentum/ledger")
 async def live_momentum_ledger(limit: int = 200) -> dict[str, Any]:
     """Tail of the momentum desk trade ledger (entries, exits, decisions)."""
-    path = Path(get_settings().momentum_desk_ledger_path)
-    rows: list[dict[str, Any]] = []
-    if path.exists():
-        lines = path.read_text(encoding="utf-8").splitlines()
-        for line in lines[-max(1, min(int(limit), 2000)) :]:
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    rows = read_ledger_tail(get_settings().momentum_desk_ledger_path, limit=limit)
     exits = [r for r in rows if r.get("event") == "exit"]
     return {
         "rows": rows,
@@ -868,6 +860,11 @@ async def live_momentum_dashboard(
         volatile_status = get_volatile_desk_manager().status()
     except Exception:  # noqa: BLE001
         volatile_status = None
+    settings = get_settings()
+    volatile_ledger = read_ledger_tail(
+        getattr(settings, "momentum_volatile_ledger_path", "./data/momentum_volatile_ledger.jsonl"),
+        limit=400,
+    )
     return render_momentum_dashboard(
         status,
         ledger["rows"],
@@ -877,6 +874,7 @@ async def live_momentum_dashboard(
         sell_all=bool(sell_all),
         report=report_payload,
         volatile=volatile_status,
+        volatile_ledger_rows=volatile_ledger,
     )
 
 
@@ -1042,6 +1040,14 @@ async def live_momentum_volatile_page(
             live_status,
             notice=(notice.strip() or None),
             shadow_html=shadow_html,
+            ledger_rows=read_ledger_tail(
+                getattr(
+                    settings,
+                    "momentum_volatile_ledger_path",
+                    "./data/momentum_volatile_ledger.jsonl",
+                ),
+                limit=400,
+            ),
         )
     )
 
@@ -1050,6 +1056,20 @@ async def live_momentum_volatile_page(
 async def live_momentum_volatile_status() -> dict[str, Any]:
     """Volatile sleeve status (paper by default; live gated by ALLOW_LIVE)."""
     return get_volatile_desk_manager().status()
+
+
+@app.get("/live/momentum/volatile/ledger")
+async def live_momentum_volatile_ledger(limit: int = 200) -> dict[str, Any]:
+    """Tail of the volatile sleeve trade ledger (entries, exits, decisions)."""
+    path = get_settings().momentum_volatile_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+        "path": str(path),
+    }
 
 
 @app.post("/live/momentum/volatile/start", response_model=None)

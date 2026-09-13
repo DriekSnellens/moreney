@@ -1215,7 +1215,11 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     )
 
 
-def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
+def render_volatile_live_html(
+    live: Mapping[str, Any] | None,
+    *,
+    ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+) -> str:
     """LIVE volatile sleeve panel (operator dashboard body)."""
     from html import escape
 
@@ -1342,6 +1346,12 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         f"entries {escape(str(risk.get('block_reason') or 'ok'))}</p>"
     )
     title = "PAPER volatile sleeve" if dry or not allow_live else "LIVE volatile sleeve"
+    from bot.live.momentum_dashboard import _ledger_table
+
+    ledger_html = (
+        '<h3 style="font-size:.85rem;margin:.9rem 0 .3rem">Ledger</h3>'
+        f"{_ledger_table(ledger_rows or [])}"
+    )
     return (
         f'<div class="hint {"warn" if dry or not allow_live else "good"}">'
         f"<strong>{title}</strong> — apart van de core 16. "
@@ -1362,8 +1372,10 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         "<h3 style='font-size:.85rem;margin:.6rem 0 .3rem'>Open posities</h3>"
         f"<ul style='margin:0;padding-left:1.1rem'>{''.join(pos_html)}</ul>"
         f"{actions}"
+        f"{ledger_html}"
         '<p class="muted" style="margin-top:.6rem;font-size:.75rem">'
         '<a href="/live/momentum/volatile/status">status JSON</a> · '
+        '<a href="/live/momentum/volatile/ledger">ledger JSON</a> · '
         '<a href="/live/momentum">core desk</a></p></div>'
     )
 
@@ -1373,6 +1385,7 @@ def render_volatile_live_page(
     *,
     notice: str | None = None,
     shadow_html: str | None = None,
+    ledger_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     """Operator page: paper/live sleeve + optional paper-shadow research."""
     from html import escape
@@ -1380,7 +1393,7 @@ def render_volatile_live_page(
     from bot.live.dashboard_v2 import dashboard_css
     from bot.live.momentum_dashboard import _CSS
 
-    live_html = render_volatile_live_html(live)
+    live_html = render_volatile_live_html(live, ledger_rows=ledger_rows)
     notice_html = f'<div class="hint">{escape(notice)}</div>' if notice else ""
     running = bool((live or {}).get("running"))
     dry = bool((live or {}).get("dry_run", True))

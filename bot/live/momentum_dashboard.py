@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from html import escape
+from pathlib import Path
 from typing import Any
 
 from fastapi.responses import HTMLResponse
@@ -740,6 +742,26 @@ def _commit_notice(commit: Mapping[str, Any]) -> str:
     )
 
 
+def read_ledger_tail(path: str | Path, *, limit: int = 400) -> list[dict[str, Any]]:
+    """Read the last ``limit`` JSONL ledger rows (best-effort)."""
+    p = Path(path)
+    rows: list[dict[str, Any]] = []
+    if not p.exists():
+        return rows
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows
+    for line in lines[-max(1, min(int(limit), 2000)) :]:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
 def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
     fills = [r for r in rows if r.get("event") in {"entry", "exit", "entry_failed", "exit_failed"}]
     if not fills:
@@ -959,6 +981,7 @@ def render_momentum_dashboard(
     sell_all: bool = False,
     report: Mapping[str, Any] | None = None,
     volatile: Mapping[str, Any] | None = None,
+    volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -1091,11 +1114,13 @@ def render_momentum_dashboard(
   {_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>
 </div>
 <div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
+<div class="card section"><h2>Volatile ledger</h2>{_ledger_table(volatile_ledger_rows or [])}</div>
 <div class="card section"><h2>Regels (core)</h2>{_rules(cfg)}</div>
 <p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
 <a href="/live/momentum/status" style="color:var(--blue)">core JSON</a> ·
 <a href="/live/momentum/volatile/status" style="color:var(--blue)">volatile JSON</a> ·
-<a href="/live/momentum/ledger" style="color:var(--blue)">ledger</a></p>
+<a href="/live/momentum/ledger" style="color:var(--blue)">core ledger</a> ·
+<a href="/live/momentum/volatile/ledger" style="color:var(--blue)">volatile ledger</a></p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
 </body></html>"""
