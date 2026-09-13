@@ -300,6 +300,9 @@ class RunnerOptions:
     sell_slice_eur: float = 2500.0  # 0 = single shot
     sell_chase_rounds: int = 4  # extra taker rounds after the first
     sell_chase_step_bps: float = 15.0  # deepen the cross each chase round
+    # Final wide cross after chase budget is exhausted (0 disables). Keeps
+    # leftover inventory from sitting after thin books refuse normal crosses.
+    sell_disaster_extra_bps: float = 80.0
     sell_taker_poll_sec: float = 30.0
     decision_grace_sec: float = 30.0
     bar_close_grace_sec: float = 15.0
@@ -1101,6 +1104,39 @@ class MomentumDeskRunner:
                     remaining,
                     mark,
                 )
+
+        # Disaster mop-up: one last wide cross if chase left economic size.
+        disaster_extra = float(self.opt.sell_disaster_extra_bps)
+        if remaining * mark >= _MIN_ORDER_EUR and disaster_extra > 0.0:
+            cross_bps = float(self.opt.taker_cross_bps) + max(
+                0, int(self.opt.sell_chase_rounds)
+            ) * float(self.opt.sell_chase_step_bps) + disaster_extra
+            logger.warning(
+                "momentum desk: sell disaster mop-up on %s left %.8f @ cross %.0f bps",
+                base,
+                remaining,
+                cross_bps,
+            )
+            for chunk in self._sell_slices(remaining, mark):
+                if chunk * mark < _MIN_ORDER_EUR:
+                    continue
+                fill = await self._work_order(
+                    base,
+                    "sell",
+                    qty=chunk,
+                    rest_sec=0.0,
+                    venue=venue,
+                    cross_bps=cross_bps,
+                    taker_poll_sec=float(self.opt.sell_taker_poll_sec),
+                )
+                if fill is None or fill.qty <= 0:
+                    continue
+                filled_qty += fill.qty
+                filled_cost += fill.qty * fill.avg_price
+                fee_eur += fill.fee_eur
+                taker_used = True
+                remaining = max(0.0, remaining - fill.qty)
+                mark = fill.avg_price or mark
 
         if filled_qty <= 0:
             return None

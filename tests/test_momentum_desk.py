@@ -150,13 +150,14 @@ def test_rank_and_select_apply_excess_cluster_and_alphai_rules():
     assert "XRP" not in names  # excess 0.2pp < 1.5pp
     assert names[0] == "SOL"
     entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
-    # breadth 1.0 -> top_n_broad=3 -> SOL, LINK (pick, 1.3x clip), OP; AVAX vetoed.
-    assert [e.base for e in entries] == ["SOL", "LINK", "OP"]
+    # breadth 1.0 -> top_n_broad=3, but OP excess ~2.0pp sits on the new
+    # min_excess/fee floor and is dropped; AVAX vetoed. SOL + LINK remain.
+    assert [e.base for e in entries] == ["SOL", "LINK"]
     link = next(e for e in entries if e.base == "LINK")
     assert link.clip_eur == pytest.approx(650.0)
     # Holding SOL blocks the whole L1 cluster.
     entries = select_entries(cands, regime, cfg, held_bases=["SOL"], alphai=view)
-    assert [e.base for e in entries] == ["LINK", "OP"]
+    assert [e.base for e in entries] == ["LINK"]
 
 
 def test_from_high_and_macro_caution_rules():
@@ -212,7 +213,11 @@ def test_macro_caution_can_allow_non_picks_when_flag_off():
 
 def test_exit_rules_hard_stop_trail_ratchet_and_time():
     cfg = DeskConfig(
-        trail_pct=0.03, trail_tight_after=0.03, trail_tight_pct=0.015, hard_stop_pct=0.03
+        trail_pct=0.03,
+        trail_tight_after=0.03,
+        trail_tight_pct=0.015,
+        hard_stop_pct=0.03,
+        midflat_hours=0.0,  # isolate the full time_exit path
     )
     pos = Position("X", 100.0, 5.0, 500.0, T0, 100.0)
     assert evaluate_exit(pos, [T0, 100, 101, 99, 100.5, 1], cfg) is None
@@ -232,6 +237,84 @@ def test_exit_rules_hard_stop_trail_ratchet_and_time():
     assert d is not None and d.reason == "time_exit"
     pos4 = Position("W", 100.0, 5.0, 500.0, T0, 100.0)
     assert evaluate_exit(pos4, [late, 100, 101, 100, 100.8, 1], cfg) is None  # above BE -> keep
+
+
+def test_midflat_exits_fee_flat_before_full_time_exit():
+    cfg = DeskConfig(midflat_hours=16.0, time_exit_hours=24.0, fee_rt=0.003)
+    pos = Position("Z", 100.0, 5.0, 500.0, T0, 100.0)
+    mid = T0 + int(16 * 3_600_000) - BAR_MS
+    assert evaluate_exit(pos, [mid - BAR_MS, 100, 100.2, 99.9, 100.2, 1], cfg) is None
+    d = evaluate_exit(pos, [mid, 100, 100.2, 99.9, 100.1, 1], cfg)
+    assert d is not None and d.reason == "midflat"
+    # Above fee_rt after midflat: hold until the full time exit (or trail).
+    pos2 = Position("W", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [mid, 100, 101, 100, 100.5, 1], cfg) is None
+
+
+def test_entry_fee_buffer_and_chase_reject():
+    cfg = DeskConfig(
+        min_excess=0.010,
+        entry_fee_buffer_mult=6.0,
+        fee_rt=0.003,
+        max_chase_ret_24h=0.09,
+        chase_near_high=0.008,
+        min_volume_eur=0.0,
+    )
+    # Excess 1.5% clears min_excess but not fee×6 (1.8%) — rejected.
+    thin = {"A": _stats("A", 0.015)}
+    assert rank_candidates(thin, 0.0, cfg) == []
+    # Excess 2.0% clears fee floor.
+    ok = rank_candidates({"B": _stats("B", 0.020)}, 0.0, cfg)
+    assert [c.base for c in ok] == ["B"]
+    # Extended + glued to high → chase reject.
+    from bot.live.momentum_desk import BaseStats
+
+    chase = {
+        "C": BaseStats(
+            base="C", price=100.0, ret_24h=0.10, from_high=-0.002, volume_eur=5e6
+        )
+    }
+    assert rank_candidates(chase, 0.0, cfg) == []
+    # Same extension but pulled back under the high → allowed.
+    pulled = {
+        "C": BaseStats(
+            base="C", price=100.0, ret_24h=0.10, from_high=-0.015, volume_eur=5e6
+        )
+    }
+    assert [c.base for c in rank_candidates(pulled, 0.0, cfg)] == ["C"]
+
+
+def test_strong_clip_requires_quality_or_alphai():
+    from bot.live.momentum_desk import RegimeDecision
+
+    cfg = DeskConfig(
+        clip_eur=1000.0,
+        strong_clip_mult=1.3,
+        weak_clip_mult=1.0,
+        strong_clip_requires_quality=True,
+        strong_clip_min_excess=0.04,
+        min_volume_eur=0.0,
+        min_excess=0.015,
+        entry_fee_buffer_mult=0.0,
+    )
+    strong = RegimeDecision(True, 0.01, 0.9, ())
+    mediocre = rank_candidates({"SOL": _stats("SOL", 0.025)}, 0.0, cfg)
+    e = select_entries(mediocre, strong, cfg, held_bases=[])[0]
+    assert e.clip_eur == pytest.approx(1000.0)
+    assert "breadth_strong_gated" in e.reasons
+    quality = rank_candidates({"SOL": _stats("SOL", 0.05)}, 0.0, cfg)
+    e2 = select_entries(quality, strong, cfg, held_bases=[])[0]
+    assert e2.clip_eur == pytest.approx(1300.0) and "breadth_strong" in e2.reasons
+    view = AlphaIView(picks=frozenset({"SOL"}))
+    picked = select_entries(
+        rank_candidates({"SOL": _stats("SOL", 0.025)}, 0.0, cfg, alphai=view),
+        strong,
+        cfg,
+        held_bases=[],
+        alphai=view,
+    )[0]
+    # alphai_pick still sizes up even below strong_clip_min_excess
+    assert picked.clip_eur == pytest.approx(1000 * 1.3 * 1.3)
 
 
 def test_exit_on_touch_uses_low_and_prior_peak():
