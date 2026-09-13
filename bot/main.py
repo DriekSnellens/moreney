@@ -56,7 +56,8 @@ from bot.live.micro_session_manager import (
     get_micro_session_manager,
     reset_micro_session_manager,
 )
-from bot.live.momentum_dashboard import render_momentum_dashboard
+from bot.live.momentum_dashboard import read_ledger_tail, render_momentum_dashboard
+from bot.live.momentum_period_pnl import compute_desk_earnings, earnings_as_dict
 from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
 from bot.live.momentum_volatile_runner import (
     get_volatile_desk_manager,
@@ -244,11 +245,14 @@ async def lifespan(_app: FastAPI):
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume momentum desk")
         try:
-            v_resumed = await get_volatile_desk_manager().resume_if_flagged()
-            if v_resumed and v_resumed.get("started"):
-                logger.info("auto-resumed volatile sleeve after process start")
-            elif v_resumed:
-                logger.warning("volatile sleeve auto-resume did not start: %s", v_resumed)
+            if bool(getattr(get_settings(), "momentum_volatile_enabled", False)):
+                v_resumed = await get_volatile_desk_manager().resume_if_flagged()
+                if v_resumed and v_resumed.get("started"):
+                    logger.info("auto-resumed volatile sleeve after process start")
+                elif v_resumed:
+                    logger.warning("volatile sleeve auto-resume did not start: %s", v_resumed)
+            else:
+                logger.info("volatile sleeve disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume volatile sleeve")
     yield
@@ -639,15 +643,7 @@ async def live_momentum_stop() -> dict[str, Any]:
 @app.get("/live/momentum/ledger")
 async def live_momentum_ledger(limit: int = 200) -> dict[str, Any]:
     """Tail of the momentum desk trade ledger (entries, exits, decisions)."""
-    path = Path(get_settings().momentum_desk_ledger_path)
-    rows: list[dict[str, Any]] = []
-    if path.exists():
-        lines = path.read_text(encoding="utf-8").splitlines()
-        for line in lines[-max(1, min(int(limit), 2000)) :]:
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    rows = read_ledger_tail(get_settings().momentum_desk_ledger_path, limit=limit)
     exits = [r for r in rows if r.get("event") == "exit"]
     return {
         "rows": rows,
@@ -861,13 +857,30 @@ async def live_momentum_dashboard(
             report_payload = res.get("report")
         else:
             notice = f"Report niet mogelijk: {res.get('reason')}"
+    settings = get_settings()
     status = manager.status()
     ledger = await live_momentum_ledger(limit=400)
-    volatile_status: dict[str, Any] | None
-    try:
-        volatile_status = get_volatile_desk_manager().status()
-    except Exception:  # noqa: BLE001
-        volatile_status = None
+    settings = get_settings()
+    show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    volatile_status: dict[str, Any] | None = None
+    volatile_ledger: list[dict[str, Any]] | None = None
+    if show_volatile:
+        try:
+            volatile_status = get_volatile_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            volatile_status = None
+        volatile_ledger = read_ledger_tail(
+            getattr(settings, "momentum_volatile_ledger_path", "./data/momentum_volatile_ledger.jsonl"),
+            limit=400,
+        )
+    earnings = compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=(
+            settings.momentum_volatile_ledger_path if show_volatile else None
+        ),
+        core_status=status,
+        volatile_status=volatile_status if show_volatile else None,
+    )
     return render_momentum_dashboard(
         status,
         ledger["rows"],
@@ -876,8 +889,34 @@ async def live_momentum_dashboard(
         sell=(sell or None),
         sell_all=bool(sell_all),
         report=report_payload,
-        volatile=volatile_status,
+        volatile=volatile_status if show_volatile else None,
+        earnings=earnings,
+        volatile_ledger_rows=volatile_ledger if show_volatile else None,
+        show_volatile=show_volatile,
     )
+
+
+@app.get("/live/momentum/earnings")
+async def live_momentum_earnings() -> dict[str, Any]:
+    """Week / month / all-time net PnL (Amsterdam calendar). Volatile optional."""
+    settings = get_settings()
+    show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    core = get_momentum_desk_manager().status()
+    volatile = None
+    if show_volatile:
+        try:
+            volatile = get_volatile_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            volatile = None
+    earnings = compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=(
+            settings.momentum_volatile_ledger_path if show_volatile else None
+        ),
+        core_status=core,
+        volatile_status=volatile,
+    )
+    return earnings_as_dict(earnings)
 
 
 @app.post("/live/momentum/commit", response_model=None)
@@ -992,6 +1031,27 @@ async def live_momentum_volatile_page(
     _: None = Depends(require_dashboard_access),
 ) -> HTMLResponse | JSONResponse:
     """Paper volatile sleeve dashboard (+ research shadow). Live orders gated off."""
+    settings = get_settings()
+    if not bool(getattr(settings, "momentum_volatile_enabled", False)):
+        if str(format).lower() == "json":
+            return JSONResponse(
+                {
+                    "running": False,
+                    "enabled_setting": False,
+                    "disabled": True,
+                    "reason": "momentum_volatile_enabled_false",
+                }
+            )
+        return HTMLResponse(
+            "<!doctype html><html lang='nl'><head><meta charset='utf-8'>"
+            "<title>Volatile uit</title></head><body style='font-family:sans-serif;"
+            "max-width:40rem;margin:3rem auto;padding:0 1rem'>"
+            "<h1>Volatile sleeve uitgeschakeld</h1>"
+            "<p>De volatile engine staat uit — alleen de core desk draait.</p>"
+            "<p><a href='/live/momentum'>Terug naar Momentum Desk</a></p>"
+            "</body></html>"
+        )
+
     from bot.live.momentum_runner import desk_config_from_settings
     from bot.live.momentum_volatile_shadow import (
         build_volatile_shadow,
@@ -1042,6 +1102,14 @@ async def live_momentum_volatile_page(
             live_status,
             notice=(notice.strip() or None),
             shadow_html=shadow_html,
+            ledger_rows=read_ledger_tail(
+                getattr(
+                    settings,
+                    "momentum_volatile_ledger_path",
+                    "./data/momentum_volatile_ledger.jsonl",
+                ),
+                limit=400,
+            ),
         )
     )
 
@@ -1052,6 +1120,20 @@ async def live_momentum_volatile_status() -> dict[str, Any]:
     return get_volatile_desk_manager().status()
 
 
+@app.get("/live/momentum/volatile/ledger")
+async def live_momentum_volatile_ledger(limit: int = 200) -> dict[str, Any]:
+    """Tail of the volatile sleeve trade ledger (entries, exits, decisions)."""
+    path = get_settings().momentum_volatile_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+        "path": str(path),
+    }
+
+
 @app.post("/live/momentum/volatile/start", response_model=None)
 async def live_momentum_volatile_start(
     request: Request,
@@ -1060,6 +1142,11 @@ async def live_momentum_volatile_start(
     """Start the volatile sleeve. Paper/dry_run unless ALLOW_LIVE is armed."""
     body = await _volatile_request_body(request)
     settings = get_settings()
+    if not bool(getattr(settings, "momentum_volatile_enabled", False)):
+        refused = {"ok": False, "reason": "momentum_volatile_enabled_false"}
+        if _volatile_wants_redirect(body, request):
+            return _volatile_redirect("Start geweigerd: volatile sleeve is uitgeschakeld")
+        return refused
     allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
     dry = _as_bool(body.get("dry_run"), default=True)
     if not allow_live:

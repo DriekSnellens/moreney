@@ -74,27 +74,37 @@ class DeskConfig:
     top_n: int = 2
     top_n_broad: int = 3
     broad_breadth: float = 0.7
-    min_excess: float = 0.015
-    # 12-week walk-forward (1300 EUR clip, 4000 EUR book): 1.5% -> +749 EUR,
-    # 2.0% -> +821 EUR at the same drawdown, 2.5% -> +468 EUR. 2.0% is the
-    # operator's choice; do not widen further.
+    # Fee-aware floor. 130d @€40k config search (May–Sep 2026): 2.5% with a
+    # wider trail dominated both the prior 2.0% pack and the old hard-regime
+    # style on calmar (PnL / |DD|); Jun/Jul bleed was concentrated in thinner
+    # excess names that 2.5% simply skips.
+    min_excess: float = 0.025
+    # Always-on excess floor = fee_rt × this (binds even if min_excess is lowered).
+    entry_fee_buffer_mult: float = 6.0
+    # Chase reject (0 disables). Same search: the 9% glue-to-high gate did not
+    # improve calmar vs off; keep disabled so extended leaders can still enter.
+    max_chase_ret_24h: float = 0.0
+    chase_near_high: float = 0.008  # must be at least this far under the high
     max_from_high: float = 0.02
     min_volume_eur: float = 1_000_000.0
     btc_min_ret: float = -0.01
     min_breadth: float = 0.5
-    trail_pct: float = 0.03
+    trail_pct: float = 0.04
     # Ratchet: once the peak gain reaches ``trail_tight_after`` the trail
-    # narrows to ``trail_tight_pct`` (0 disables). 12-week walk-forward
-    # (7/13 UTC, 600 EUR clip): 3%->1.5% netted +164 EUR; 4%->2% +308 EUR
-    # and positive in both halves. The tighter ratchet was shaking winners
-    # out on ordinary 2% intraday noise before they reached +5..+9%.
-    trail_tight_after: float = 0.04
-    trail_tight_pct: float = 0.02
+    # narrows to ``trail_tight_pct`` (0 disables). Search winner used 5%→2.5%
+    # with the 4% base trail — lets August-style runners breathe past ordinary
+    # 2–3% noise before locking gains.
+    trail_tight_after: float = 0.05
+    trail_tight_pct: float = 0.025
     hard_stop_pct: float = 0.03
     # Positions that have done nothing in a day almost always close red
     # (48h time-exits: -43 EUR over 5 trades). 24h keeps the same total and
     # trims the worst week from -76 to -54 EUR and max drawdown -118 -> -87.
     time_exit_hours: float = 24.0
+    # Midflat (0 disables). Search winner was indifferent to 0 vs 24h at the
+    # 2.5% excess / 4% trail setting (no midflat fills on that path), so keep
+    # off and rely on the 24h fee-flat time exit.
+    midflat_hours: float = 0.0
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 40.0
     week_loss_limit_eur: float = 100.0
@@ -105,12 +115,34 @@ class DeskConfig:
     # desk 100% cash through an alt rally, so reduce is the default.
     macro_caution_mode: str = "reduce"
     macro_caution_clip_mult: float = 0.7
+    # Under macro caution + reduce: only AlphaI-confirmed names (skip weak
+    # tape-only entries that historically trailed into small losses).
+    macro_caution_requires_alphai_pick: bool = True
+    # Soft regime: weak BTC/breadth no longer hard-blocks. Instead the
+    # desk stays open for AlphaI picks at a reduced clip so early legs
+    # of a bounce are not missed while tape is still thin.
+    soft_regime_on_weak_tape: bool = True
+    soft_regime_clip_mult: float = 0.5
+    # Under macro caution, demand excess that clears fee_rt × buffer
+    # before a weak/tape-only name can enter (coin-agnostic fee guard).
+    # Must be ≥ entry_fee_buffer_mult so caution is never looser than base.
+    macro_caution_fee_buffer_mult: float = 7.0
+    # Soft regime (weak BTC/breadth): AlphaI-only AND fee×this excess floor.
+    soft_regime_fee_buffer_mult: float = 6.0
+    # Ranking: AlphaI pick boost + mild absolute-momentum complement
+    # (volume already gated). Keeps RS primary, rewards confirmed names.
+    alphai_rank_boost: float = 0.01
+    momentum_rank_weight: float = 0.05
     # Tape-strength sizing. 12-week attribution at 7/13 UTC: entries taken
     # with >= 85% of the universe up on the day averaged +13.9 EUR per 1000
     # EUR clip (n=31) against +3.1 EUR for the rest (n=28); broad rallies
     # persist, narrow ones fade. Strong tape sizes up, thin tape sizes down.
     strong_breadth: float = 0.85
     strong_clip_mult: float = 1.3
+    # Only apply strong_clip_mult when the name clears quality (AlphaI pick or
+    # excess ≥ strong_clip_min_excess). Broad-but-fake tape sized up into jun/jul losses.
+    strong_clip_requires_quality: bool = True
+    strong_clip_min_excess: float = 0.04
     weak_clip_mult: float = 0.7
     # Weekend decisions (Sat/Sun UTC) read 24h returns printed on thin
     # liquidity; they were 18 of 59 trades and netted about zero while
@@ -155,6 +187,7 @@ class RegimeDecision:
     btc_ret: float | None
     breadth: float
     reasons: tuple[str, ...]
+    soft: bool = False
 
 
 @dataclass(frozen=True)
@@ -309,7 +342,21 @@ def classify_regime(
         reasons.append("breadth_weak")
     if alphai is not None and alphai.macro_caution and cfg.macro_caution_mode == "block":
         reasons.append("alphai_macro_block")
-    return RegimeDecision(ok=not reasons, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons))
+    soft_reasons = {"btc_weak", "breadth_weak"}
+    hard = [r for r in reasons if r not in soft_reasons]
+    if (
+        cfg.soft_regime_on_weak_tape
+        and reasons
+        and not hard
+        and all(r in soft_reasons for r in reasons)
+    ):
+        # Weak tape only: stay open, mark soft so select_entries AlphaI-sizes down.
+        return RegimeDecision(
+            ok=True, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons), soft=True
+        )
+    return RegimeDecision(
+        ok=not reasons, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons), soft=False
+    )
 
 
 def rank_candidates(
@@ -321,19 +368,31 @@ def rank_candidates(
 ) -> list[Candidate]:
     view = alphai or AlphaIView()
     out: list[Candidate] = []
+    fee_floor = cfg.fee_rt * max(0.0, float(cfg.entry_fee_buffer_mult))
+    base_need = max(float(cfg.min_excess), fee_floor)
     for base, s in alts.items():
         if base in view.avoid:
             continue
         excess = s.ret_24h - btc_ret
-        if excess < cfg.min_excess:
-            continue
         if s.from_high < -cfg.max_from_high:
             continue
         if s.volume_eur < cfg.min_volume_eur:
             continue
+        # Reject late chase: already up hard and still glued near the 24h high.
+        max_chase = float(cfg.max_chase_ret_24h)
+        if max_chase > 0.0 and s.ret_24h >= max_chase:
+            if s.from_high > -max(0.0, float(cfg.chase_near_high)):
+                continue
         pick = base in view.picks
-        # Excess return is the score; an AlphaI pick only breaks ties.
-        score = excess + (0.0025 if pick else 0.0)
+        need = base_need
+        if view.macro_caution and cfg.macro_caution_mode == "reduce":
+            need = max(need, cfg.fee_rt * float(cfg.macro_caution_fee_buffer_mult))
+        if excess < need:
+            continue
+        # RS primary; AlphaI pick gets a real boost; mild abs-momentum complement
+        # (volume already passed). Coin-agnostic — no per-base special cases.
+        score = excess + (cfg.alphai_rank_boost if pick else 0.0)
+        score += cfg.momentum_rank_weight * max(0.0, s.ret_24h)
         out.append(
             Candidate(
                 base=base,
@@ -371,25 +430,51 @@ def select_entries(
         if (view.macro_caution and cfg.macro_caution_mode == "reduce")
         else 1.0
     )
-    breadth_mult, breadth_tag = breadth_clip_mult(regime.breadth, cfg)
+    soft_need = cfg.fee_rt * max(0.0, float(cfg.soft_regime_fee_buffer_mult))
     out: list[Entry] = []
     for c in cands:
         if len(out) >= min(slots, top_n):
             break
         if c.base in held or c.base in blocked:
             continue
+        if (
+            view.macro_caution
+            and cfg.macro_caution_mode == "reduce"
+            and cfg.macro_caution_requires_alphai_pick
+            and not c.alphai_pick
+        ):
+            continue
         cluster = cfg.clusters.get(c.base)
         if cluster is not None and cluster in clusters_held:
             continue
+        soft = bool(getattr(regime, "soft", False))
+        if soft and not c.alphai_pick:
+            continue
+        if soft and c.excess < soft_need:
+            continue
+        breadth_mult, breadth_tag = breadth_clip_mult(regime.breadth, cfg)
+        # Gate oversized strong-tape clips behind quality so broad-but-fake
+        # rallies do not auto-size up mediocre RS names.
+        if (
+            breadth_tag == "breadth_strong"
+            and bool(cfg.strong_clip_requires_quality)
+            and not c.alphai_pick
+            and float(c.excess) < float(cfg.strong_clip_min_excess)
+        ):
+            breadth_mult, breadth_tag = 1.0, "breadth_strong_gated"
         clip = (
             cfg.clip_eur
             * (cfg.alphai_clip_mult if c.alphai_pick else 1.0)
             * macro_mult
             * breadth_mult
         )
+        if soft:
+            clip *= cfg.soft_regime_clip_mult
         reasons = [f"excess={c.excess:+.4f}", f"from_high={c.from_high:+.4f}"]
         if c.alphai_pick:
             reasons.append("alphai_pick")
+        if soft:
+            reasons.append("soft_regime")
         if macro_mult != 1.0:
             reasons.append("macro_reduce")
         if breadth_tag:
@@ -494,6 +579,9 @@ def evaluate_exit(
             reason = "trail" if close <= pos.peak * (1.0 - base_trail) else "trail_alphai"
             return ExitDecision(reason, gross, urgent=False)
     age_ms = bar_end - pos.opened_ms
+    midflat_h = float(cfg.midflat_hours)
+    if midflat_h > 0.0 and age_ms >= midflat_h * 3600_000 and gross <= cfg.fee_rt:
+        return ExitDecision("midflat", gross, urgent=False)
     if age_ms >= cfg.time_exit_hours * 3600_000 and gross <= cfg.fee_rt:
         return ExitDecision("time_exit", gross, urgent=False)
     return None
