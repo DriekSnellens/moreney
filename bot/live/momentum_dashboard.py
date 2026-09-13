@@ -244,6 +244,7 @@ def _earnings_masthead(
     *,
     pill: str,
     venue: str,
+    show_volatile: bool = False,
 ) -> str:
     """First-viewport composition: brand + week/month/all-time net."""
     if earnings is None:
@@ -253,14 +254,21 @@ def _earnings_masthead(
         core_w = vol_w = 0.0
         as_of = "—"
     else:
-        c = earnings.combined
-        c_week, c_month, c_all = c.week_eur, c.month_eur, c.all_time_eur
+        # Core-only masthead uses core sleeve totals when volatile is disabled.
+        sleeve = earnings.combined if show_volatile else earnings.core
+        c_week, c_month, c_all = sleeve.week_eur, sleeve.month_eur, sleeve.all_time_eur
         open_mtm = earnings.open_mtm_eur
-        tw, tm, ta = c.trades_week, c.trades_month, c.trades_all_time
+        tw, tm, ta = sleeve.trades_week, sleeve.trades_month, sleeve.trades_all_time
         core_w, vol_w = earnings.core.week_eur, earnings.volatile.week_eur
         as_of = earnings.as_of
+    if show_volatile:
+        week_meta = f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"
+        brand_sub = f"Momentum desk · core + volatile · {venue}. "
+    else:
+        week_meta = f"{tw} trades deze week"
+        brand_sub = f"Momentum desk · core · {venue}. "
     tiles = [
-        ("Deze week", c_week, f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"),
+        ("Deze week", c_week, week_meta),
         ("Deze maand", c_month, f"{tm} trades deze maand"),
         ("Vanaf begin", c_all, f"{ta} trades all-time · netto gesloten"),
     ]
@@ -272,12 +280,17 @@ def _earnings_masthead(
         "</div>"
         for label, val, meta in tiles
     )
+    day_eur = 0.0
+    if earnings is not None:
+        day_eur = (
+            earnings.combined.day_eur if show_volatile else earnings.core.day_eur
+        )
     return (
         '<section class="masthead">'
         '<div class="masthead-top">'
         "<div>"
         '<h1 class="brand">Moreney</h1>'
-        f'<p class="brand-sub">Momentum desk · core + volatile · {venue}. '
+        f'<p class="brand-sub">{brand_sub}'
         "Netto = gesloten trades na fees (Europe/Amsterdam).</p>"
         "</div>"
         f"<div>{pill}</div>"
@@ -285,8 +298,8 @@ def _earnings_masthead(
         '<p class="earn-label">Netto verdiend</p>'
         f'<div class="earn-grid">{tiles_html}</div>'
         '<div class="earn-foot">'
-        f"<span>Vandaag <strong class='{_cls(earnings.combined.day_eur if earnings else 0)}'>"
-        f"{_fmt_eur(earnings.combined.day_eur if earnings else 0)}</strong></span>"
+        f"<span>Vandaag <strong class='{_cls(day_eur)}'>"
+        f"{_fmt_eur(day_eur)}</strong></span>"
         f"<span>Open MTM <strong class='{_cls(open_mtm)}'>{_fmt_eur(open_mtm)}</strong></span>"
         f'<span class="muted">peil {escape(str(as_of)[:19].replace("T", " "))} NL</span>'
         "</div></section>"
@@ -501,7 +514,9 @@ def _sell_all_confirm_panel(status: Mapping[str, Any]) -> str:
     )
 
 
-def _toolbar(*, running: bool, has_positions: bool, hold: bool) -> str:
+def _toolbar(
+    *, running: bool, has_positions: bool, hold: bool, show_volatile: bool = False
+) -> str:
     if not running:
         return ""
     bits = [
@@ -519,10 +534,11 @@ def _toolbar(*, running: bool, has_positions: bool, hold: bool) -> str:
             '<input type="hidden" name="sell_all" value="1">'
             '<button type="submit" class="btn danger">Verkoop alles</button></form>'
         )
-    bits.append(
-        '<form method="get" action="/live/momentum/volatile">'
-        '<button type="submit" class="btn">Volatile</button></form>'
-    )
+    if show_volatile:
+        bits.append(
+            '<form method="get" action="/live/momentum/volatile">'
+            '<button type="submit" class="btn">Volatile</button></form>'
+        )
     if hold:
         bits.append(
             '<form method="get" action="/live/momentum">'
@@ -1149,6 +1165,7 @@ def render_momentum_dashboard(
     volatile: Mapping[str, Any] | None = None,
     earnings: DeskEarnings | None = None,
     volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    show_volatile: bool = False,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -1187,7 +1204,10 @@ def render_momentum_dashboard(
     hold_page = bool(preview) or bool(sell) or bool(sell_all) or bool(report)
     refresh_meta = "" if hold_page else '<meta http-equiv="refresh" content="20">'
     refresh_note = "Geen auto-refresh tijdens bevestiging" if hold_page else "Ververst elke 20s"
-    toolbar = _toolbar(running=running, has_positions=n_pos > 0, hold=hold_page)
+    show_vol = bool(show_volatile)
+    toolbar = _toolbar(
+        running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=show_vol
+    )
     sell_html = _sell_confirm_panel(status, sell) if sell else ""
     sell_all_html = _sell_all_confirm_panel(status) if sell_all else ""
     report_html = _report_panel(report) if report else ""
@@ -1198,7 +1218,7 @@ def render_momentum_dashboard(
         else ""
     )
 
-    earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue)
+    earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue, show_volatile=show_vol)
 
     heroes = "".join(
         [
@@ -1214,7 +1234,7 @@ def render_momentum_dashboard(
                 hint=f"limiet −{float(cfg.get('day_loss_limit_eur') or 0):.0f} € · win {win_rate}",
             ),
             _hero(
-                "Open resultaat (beide)",
+                "Open resultaat",
                 _fmt_eur(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
                 cls=_cls(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
                 hint=f"core {n_pos}/{cfg.get('max_positions')} · fees {fees:,.2f} €",
@@ -1232,13 +1252,60 @@ def render_momentum_dashboard(
         ]
     )
     core_earn = _sleeve_earnings_line(earnings.core if earnings else None)
-    vol_earn = _sleeve_earnings_line(earnings.volatile if earnings else None)
-    vol_ledger_html = (
-        f'<div class="card section"><h2>Volatile ledger</h2>'
-        f"{_ledger_table(volatile_ledger_rows or [])}</div>"
-        if volatile_ledger_rows is not None
-        else ""
+    vol_earn = (
+        _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
     )
+    sleeves_html = _sleeves_panel(status, volatile) if show_vol else ""
+    if show_vol:
+        positions_html = (
+            '<div class="stack two section">'
+            '<div class="card"><div class="card-head"><h2>Core · open posities</h2></div>'
+            f"{_positions_table(status)}</div>"
+            '<div class="card"><div class="card-head"><h2>Volatile · open posities</h2></div>'
+            f"""{_positions_table(
+                volatile or {},
+                sell_all_path=None,
+                post_sell_action="/live/momentum/volatile/sell",
+                empty_text="Geen open volatile-posities — soft book staat klaar.",
+            )}</div></div>"""
+        )
+        decisions_html = (
+            '<div class="stack two section">'
+            '<div class="card"><div class="card-head"><h2>Core · laatste beslissing</h2>'
+            f"{_simulate_button() if running and not preview else ''}</div>"
+            f"{_decision_panel(status)}</div>"
+            '<div class="card"><div class="card-head"><h2>Volatile · laatste beslissing</h2>'
+            f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div></div>"
+        )
+        vol_ledger_html = (
+            f'<div class="card section"><h2>Volatile ledger</h2>'
+            f"{_ledger_table(volatile_ledger_rows or [])}</div>"
+            if volatile_ledger_rows is not None
+            else ""
+        )
+        footer_links = (
+            '<a href="/live/momentum/status" style="color:var(--accent)">core JSON</a> · '
+            '<a href="/live/momentum/volatile/status" style="color:var(--accent)">volatile JSON</a> · '
+            '<a href="/live/momentum/ledger" style="color:var(--accent)">core ledger</a> · '
+            '<a href="/live/momentum/volatile/ledger" style="color:var(--accent)">volatile ledger</a> · '
+            '<a href="/live/momentum/earnings" style="color:var(--accent)">earnings JSON</a>'
+        )
+    else:
+        positions_html = (
+            '<div class="card section"><div class="card-head"><h2>Open posities</h2></div>'
+            f"{_positions_table(status)}</div>"
+        )
+        decisions_html = (
+            '<div class="card section"><div class="card-head"><h2>Laatste beslissing</h2>'
+            f"{_simulate_button() if running and not preview else ''}</div>"
+            f"{_decision_panel(status)}</div>"
+        )
+        vol_ledger_html = ""
+        footer_links = (
+            '<a href="/live/momentum/status" style="color:var(--accent)">status JSON</a> · '
+            '<a href="/live/momentum/ledger" style="color:var(--accent)">ledger</a> · '
+            '<a href="/live/momentum/earnings" style="color:var(--accent)">earnings JSON</a>'
+        )
     html = f"""<!doctype html>
 <html lang="nl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -1250,7 +1317,7 @@ def render_momentum_dashboard(
 {earnings_html}
 {err_html}
 {toolbar}
-{_sleeves_panel(status, volatile)}
+{sleeves_html}
 {core_earn and f'<div class="muted" style="font-size:.8rem;margin:.35rem 0 0">Core netto · </div>{core_earn}' or ''}
 {vol_earn and f'<div class="muted" style="font-size:.8rem">Volatile netto · </div>{vol_earn}' or ''}
 <div class="hero-grid">{heroes}</div>
@@ -1258,32 +1325,13 @@ def render_momentum_dashboard(
 {report_html}
 {sell_html}
 {sell_all_html}
-<div class="stack two section">
-  <div class="card"><div class="card-head"><h2>Core · open posities</h2></div>
-  {_positions_table(status)}</div>
-  <div class="card"><div class="card-head"><h2>Volatile · open posities</h2></div>
-  {_positions_table(
-      volatile or {},
-      sell_all_path=None,
-      post_sell_action="/live/momentum/volatile/sell",
-      empty_text="Geen open volatile-posities — soft book staat klaar.",
-  )}</div>
-</div>
-<div class="stack two section">
-  <div class="card"><div class="card-head"><h2>Core · laatste beslissing</h2>
-  {_simulate_button() if running and not preview else ""}</div>{_decision_panel(status)}</div>
-  <div class="card"><div class="card-head"><h2>Volatile · laatste beslissing</h2>
-  {_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>
-</div>
+{positions_html}
+{decisions_html}
 <div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
 {vol_ledger_html}
 <div class="card section"><h2>Regels (core)</h2>{_rules(cfg)}</div>
 <p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
-<a href="/live/momentum/status" style="color:var(--accent)">core JSON</a> ·
-<a href="/live/momentum/volatile/status" style="color:var(--accent)">volatile JSON</a> ·
-<a href="/live/momentum/ledger" style="color:var(--accent)">core ledger</a> ·
-<a href="/live/momentum/volatile/ledger" style="color:var(--accent)">volatile ledger</a> ·
-<a href="/live/momentum/earnings" style="color:var(--accent)">earnings JSON</a></p>
+{footer_links}</p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
 </body></html>"""

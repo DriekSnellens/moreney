@@ -1283,10 +1283,16 @@ def test_dashboard_sell_all_and_report_render():
     html = render_momentum_dashboard(status, []).body.decode()
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
     assert "Moreney" in html and ("Netto verdiend" in html or "Deze week" in html)
-    assert "volatile" in html.lower()
-    assert "Volatile ledger" in html or "Volatile" in html
-    assert "/live/momentum/volatile/ledger" in html or "/live/momentum/earnings" in html
+    # Volatile sleeve is off by default (core-only desk).
+    assert "Volatile ledger" not in html
+    assert "Start volatile" not in html
+    assert "Desk sleeves" not in html
+    assert "/live/momentum/earnings" in html
     assert "pos-cards" in html and 'name="sell" value="h1"' in html
+    with_vol = render_momentum_dashboard(
+        status, [], show_volatile=True, volatile={"running": False}, volatile_ledger_rows=[]
+    ).body.decode()
+    assert "Volatile ledger" in with_vol and "Desk sleeves" in with_vol
     confirm = render_momentum_dashboard(status, [], sell_all=True).body.decode()
     assert "Alles verkopen?" in confirm and "/live/momentum/sell-all" in confirm
     report = {
