@@ -218,6 +218,7 @@ def test_exit_rules_hard_stop_trail_ratchet_and_time():
         trail_tight_pct=0.015,
         hard_stop_pct=0.03,
         midflat_hours=0.0,  # isolate the full time_exit path
+        green_deadline_hours=0.0,  # isolate from time-to-green
     )
     pos = Position("X", 100.0, 5.0, 500.0, T0, 100.0)
     assert evaluate_exit(pos, [T0, 100, 101, 99, 100.5, 1], cfg) is None
@@ -240,7 +241,9 @@ def test_exit_rules_hard_stop_trail_ratchet_and_time():
 
 
 def test_midflat_exits_fee_flat_before_full_time_exit():
-    cfg = DeskConfig(midflat_hours=16.0, time_exit_hours=24.0, fee_rt=0.003)
+    cfg = DeskConfig(
+        midflat_hours=16.0, time_exit_hours=24.0, fee_rt=0.003, green_deadline_hours=0.0
+    )
     pos = Position("Z", 100.0, 5.0, 500.0, T0, 100.0)
     mid = T0 + int(16 * 3_600_000) - BAR_MS
     assert evaluate_exit(pos, [mid - BAR_MS, 100, 100.2, 99.9, 100.2, 1], cfg) is None
@@ -632,9 +635,15 @@ class FakeClock:
 class FakeFeed:
     def __init__(self, rows_by_base):
         self.rows = rows_by_base
+        self.last_price_calls: list[str] = []
 
     async def candles(self, base, limit):
         return self.rows[base][-limit:]
+
+    async def last_price(self, base):
+        self.last_price_calls.append(base)
+        rows = self.rows.get(base) or []
+        return float(rows[-1][4]) if rows else None
 
 
 def _runner(tmp_path: Path, gw, clock, feed=None, opt_kwargs=None, **cfg_kwargs) -> MomentumDeskRunner:
@@ -1558,3 +1567,48 @@ def test_decide_resizes_clip_to_venue_cash_before_plan(tmp_path):
     # LINK fits on primary → unchanged clip, no resize tag.
     assert sized[1].clip_eur == 500.0
     assert "clip_reduced" not in sized[1].reasons
+
+
+def test_refresh_marks_uses_holding_venue_bbo_not_bitvavo_ticker(tmp_path):
+    """OKX inventory must be marked from the OKX book, not Bitvavo tape."""
+    from bot.live.momentum_runner import Holding
+
+    class TrapFeed:
+        async def last_price(self, base):
+            return 999.0
+
+        async def candles(self, base, limit):
+            return [[T0, 999.0, 999.0, 999.0, 999.0, 1.0]]
+
+    clock = FakeClock(T0 / 1000)
+    okx = FakeGateway(bid=50.0, ask=50.2)
+    bitvavo = FakeGateway(bid=1.0, ask=1.1)
+    cfg = DeskConfig(**FLAT_SIZING)
+    opts = RunnerOptions(
+        venues=("bitvavo", "okx"),
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        alphai_recommendations_path=None,
+    )
+    r = MomentumDeskRunner(
+        cfg,
+        bitvavo,
+        options=opts,
+        feed=TrapFeed(),
+        clock=clock,
+        sleep=clock.sleep,
+        gateways={"okx": okx},
+    )
+    r.holdings = [
+        Holding(
+            Position("SOL", 48.0, 10.0, 480.0, T0, 48.0, venue="okx"),
+            "h-okx",
+            T0,
+        )
+    ]
+    asyncio.run(r.refresh_marks())
+    assert r.marks["SOL"] == pytest.approx(50.1)
+    assert r.mark_sources["SOL"] == "okx_bbo"
+    st = r.status()
+    assert st["positions"][0]["mark"] == pytest.approx(50.1)
+    assert st["positions"][0]["mark_source"] == "okx_bbo"

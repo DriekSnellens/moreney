@@ -371,6 +371,7 @@ class MomentumDeskRunner:
         self.last_regime: dict[str, Any] = {}
         self.last_error: str | None = None
         self.marks: dict[str, float] = {}
+        self.mark_sources: dict[str, str] = {}
         self.marks_updated_at: float | None = None
         self.cash_by_venue: dict[str, float] = {}
         self._cash_ts: float = 0.0
@@ -454,6 +455,7 @@ class MomentumDeskRunner:
                     "age_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
                     "peak_return": round(h.pos.peak / h.pos.entry_price - 1, 4),
                     "mark": mark,
+                    "mark_source": self.mark_sources.get(h.pos.base),
                     "mark_age_sec": (
                         round(self._clock() - self.marks_updated_at, 1)
                         if self.marks_updated_at is not None and mark is not None
@@ -535,10 +537,12 @@ class MomentumDeskRunner:
             await self._maybe_decide(now_ms)
 
     async def refresh_marks(self) -> None:
-        """Pull last-trade marks for open holdings (dashboard + disaster stop).
+        """Refresh open-position marks from the **holding's venue** book.
 
-        Safe to call outside the tick lock: only mutates ``marks``. Prefer this
-        over waiting for the next 15m candle poll when the UI asks for status.
+        Uses mid of ``best_bid_ask`` on the venue where the coins sit (Bitvavo
+        or OKX). Falls back to the Bitvavo public ticker / forming candle only
+        when no gateway is available (dry-run) or the venue book call fails —
+        so OKX inventory is not marked off Bitvavo tape.
         """
         if not self.holdings:
             return
@@ -546,18 +550,37 @@ class MomentumDeskRunner:
         for h in list(self.holdings):
             if h.exiting:
                 continue
-            px = await self._feed.last_price(h.pos.base)
-            if px is None:
-                # Fallback: forming 15m close from the candle feed.
-                rows = await self._feed.candles(h.pos.base, 1)
-                if rows:
-                    px = float(rows[-1][4])
+            px, source = await self._mark_for_holding(h)
             if px is None or px <= 0:
                 continue
             self.marks[h.pos.base] = float(px)
+            self.mark_sources[h.pos.base] = source
             updated = True
         if updated:
             self.marks_updated_at = self._clock()
+
+    async def _mark_for_holding(self, h: Holding) -> tuple[float | None, str]:
+        venue = str(h.pos.venue or self.opt.venues[0]).lower()
+        base = h.pos.base
+        gw = self._gateway(venue)
+        if gw is not None:
+            try:
+                bid, ask = await gw.best_bid_ask(f"{base}EUR")
+                bid_f, ask_f = float(bid), float(ask)
+                if bid_f > 0 and ask_f > 0:
+                    return (bid_f + ask_f) / 2.0, f"{venue}_bbo"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "momentum desk: %s BBO mark failed for %s: %s", venue, base, exc
+                )
+        # Dry-run / missing gateway / book error: Bitvavo public tape.
+        px = await self._feed.last_price(base)
+        if px is not None and px > 0:
+            return float(px), "bitvavo_ticker"
+        rows = await self._feed.candles(base, 1)
+        if rows:
+            return float(rows[-1][4]), "bitvavo_candle"
+        return None, "none"
 
     async def _refresh_cash(self) -> None:
         if self._clock() - self._cash_ts < 60.0:
@@ -623,10 +646,11 @@ class MomentumDeskRunner:
             rows = await self._feed.candles(h.pos.base, 4)
             if not rows:
                 continue
-            # Prefer ticker mark when fresh; candle close is the fallback.
+            # Prefer venue mark from refresh_marks; candle close is fallback only.
             live_px = float(self.marks.get(h.pos.base) or rows[-1][4])
             if h.pos.base not in self.marks:
                 self.marks[h.pos.base] = live_px
+                self.mark_sources[h.pos.base] = "bitvavo_candle"
                 self.marks_updated_at = self._clock()
             # Disaster stop on the live price — a 15m close is too slow for a crash.
             if live_px <= h.pos.entry_price * (1 - _DISASTER_STOP_MULT * self.cfg.hard_stop_pct):
@@ -1052,6 +1076,7 @@ class MomentumDeskRunner:
         self.holdings.append(holding)
         self.ledger.note_entry(base, now_ms)
         self.marks[base] = fill.avg_price
+        self.mark_sources[base] = f"{venue}_fill"
         if venue in self.cash_by_venue:
             self.cash_by_venue[venue] -= fill.notional + fill.fee_eur
         self._ledger_append(
