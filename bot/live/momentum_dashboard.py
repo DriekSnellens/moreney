@@ -1035,6 +1035,17 @@ def _rules(cfg: Mapping[str, Any]) -> str:
                 else "uit"
             ),
         ),
+        (
+            "Fade ETA→0",
+            (
+                f"≤{float(cfg.get('fade_eta_sec') or 0):.0f}s "
+                f"(bevestig {float(cfg.get('fade_confirm_sec') or 0):.0f}s, "
+                f"piek ≥{float(cfg.get('fade_min_peak_eur') or 0):.0f}€/"
+                f"{100 * float(cfg.get('fade_min_peak_pct') or 0):.1f}%)"
+                if float(cfg.get("fade_eta_sec") or 0) > 0
+                else "uit"
+            ),
+        ),
         ("Time-exit", f"{float(cfg.get('time_exit_hours') or 0):.0f}u onder break-even"),
         ("Daglimiet", f"−{float(cfg.get('day_loss_limit_eur') or 0):.0f} €"),
         (

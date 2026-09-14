@@ -593,6 +593,14 @@ class Settings(BaseSettings):
     # Time-to-green early invalidation (A/B winner: 4h / +1% peak).
     momentum_desk_green_deadline_hours: float = Field(default=4.0, ge=0.0, le=168.0)
     momentum_desk_green_min_peak: float = Field(default=0.01, ge=0.0, le=0.2)
+    # Fade-velocity / ETA-to-zero (0 fade_eta_sec disables). Dense marks while open.
+    momentum_desk_fade_eta_sec: float = Field(default=180.0, ge=0.0, le=3600.0)
+    momentum_desk_fade_confirm_sec: float = Field(default=20.0, ge=0.0, le=600.0)
+    momentum_desk_fade_smooth_sec: float = Field(default=40.0, ge=1.0, le=600.0)
+    momentum_desk_fade_min_peak_eur: float = Field(default=15.0, ge=0.0, le=10_000.0)
+    momentum_desk_fade_min_peak_pct: float = Field(default=0.012, ge=0.0, le=0.5)
+    momentum_desk_fade_min_giveback_eur: float = Field(default=5.0, ge=0.0, le=10_000.0)
+    momentum_desk_mark_tick_sec: float = Field(default=4.0, ge=0.0, le=60.0)
     momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"

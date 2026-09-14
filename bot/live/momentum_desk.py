@@ -117,6 +117,17 @@ class DeskConfig:
     # 2.5% excess / 4% trail setting (no midflat fills on that path), so keep
     # off and rely on the 24h fee-flat time exit.
     midflat_hours: float = 0.0
+    # Fade-velocity / ETA-to-zero (0 ``fade_eta_sec`` disables). Live path with
+    # dense venue marks: once peak unrealized net is meaningful, if smoothed
+    # net is falling toward zero fast enough that ETA < fade_eta_sec for
+    # ``fade_confirm_sec``, exit as ``fade_fast``. Preserves slow runners
+    # (normal trail) while cutting cascades from green toward red.
+    fade_eta_sec: float = 180.0
+    fade_confirm_sec: float = 20.0
+    fade_smooth_sec: float = 40.0
+    fade_min_peak_eur: float = 15.0
+    fade_min_peak_pct: float = 0.012
+    fade_min_giveback_eur: float = 5.0
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 40.0
     week_loss_limit_eur: float = 100.0
@@ -272,6 +283,94 @@ class ExitDecision:
     urgent: bool
     # Fill assumption for the backtest when the exit triggered intrabar.
     price: float | None = None
+
+
+@dataclass
+class FadeState:
+    """Live fade-velocity tracker (not persisted; re-arms after restart)."""
+
+    peak_net_eur: float = 0.0
+    peak_gross_return: float = 0.0
+    net_ema: float | None = None
+    last_ts: float = 0.0
+    breach_since: float | None = None
+
+
+def unrealized_net_eur(pos: Position, mark: float, cfg: DeskConfig) -> float:
+    """Mark-to-market net EUR incl. entry fee + expected exit half-fee."""
+    return (
+        pos.quantity * (mark - pos.entry_price)
+        - float(pos.entry_fee_eur)
+        - (pos.quantity * mark * cfg.fee_rt / 2.0)
+    )
+
+
+def update_fade_state(
+    state: FadeState,
+    *,
+    net_eur: float,
+    gross_return: float,
+    now: float,
+    cfg: DeskConfig,
+) -> tuple[FadeState, ExitDecision | None]:
+    """Update EMA/peak and optionally fire ``fade_fast``.
+
+    Coin-agnostic: arm after peak unrealized net clears ``fade_min_peak_eur``
+    **or** peak return clears ``fade_min_peak_pct``. Exit when smoothed net is
+    still green, has given back enough from peak, and ETA to zero
+    (net / -velocity) stays below ``fade_eta_sec`` for ``fade_confirm_sec``.
+    """
+    eta_lim = float(cfg.fade_eta_sec)
+    if eta_lim <= 0.0:
+        return state, None
+
+    peak_net = max(float(state.peak_net_eur), float(net_eur))
+    peak_gross = max(float(state.peak_gross_return), float(gross_return))
+    smooth = max(1.0, float(cfg.fade_smooth_sec))
+    prev_ema = state.net_ema
+    prev_ts = float(state.last_ts or 0.0)
+    if prev_ema is None or prev_ts <= 0.0 or now <= prev_ts:
+        ema = float(net_eur)
+        vel = 0.0
+    else:
+        dt = max(1e-3, now - prev_ts)
+        alpha = 1.0 - pow(0.5, dt / smooth)  # half-life ≈ smooth_sec
+        ema = float(prev_ema) + alpha * (float(net_eur) - float(prev_ema))
+        vel = (ema - float(prev_ema)) / dt  # EUR / sec
+
+    armed = peak_net >= float(cfg.fade_min_peak_eur) or peak_gross >= float(
+        cfg.fade_min_peak_pct
+    )
+    giveback = peak_net - float(net_eur)
+    eta: float | None = None
+    if armed and float(net_eur) > 0.0 and vel < 0.0:
+        eta = float(net_eur) / (-vel)
+
+    breach = (
+        armed
+        and float(net_eur) > 0.0
+        and giveback >= float(cfg.fade_min_giveback_eur)
+        and eta is not None
+        and eta <= eta_lim
+    )
+    breach_since = state.breach_since
+    decision: ExitDecision | None = None
+    if breach:
+        if breach_since is None:
+            breach_since = now
+        elif now - breach_since >= float(cfg.fade_confirm_sec):
+            decision = ExitDecision("fade_fast", float(gross_return), urgent=True)
+    else:
+        breach_since = None
+
+    new_state = FadeState(
+        peak_net_eur=peak_net,
+        peak_gross_return=peak_gross,
+        net_ema=ema,
+        last_ts=now,
+        breach_since=breach_since,
+    )
+    return new_state, decision
 
 
 def _closed_bars(candles: Sequence[Candle], t_ms: int) -> list[Candle]:

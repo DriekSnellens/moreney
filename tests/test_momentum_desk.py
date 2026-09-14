@@ -302,6 +302,74 @@ def test_no_green_exits_when_peak_never_confirms():
     assert evaluate_exit(pos2, [deadline, 100.8, 100.9, 100.0, 100.2, 1], cfg) is None
 
 
+def test_fade_state_fires_on_fast_eta_to_zero():
+    from bot.live.momentum_desk import FadeState, update_fade_state, unrealized_net_eur
+
+    cfg = DeskConfig(
+        fade_eta_sec=180.0,
+        fade_confirm_sec=20.0,
+        fade_smooth_sec=40.0,
+        fade_min_peak_eur=15.0,
+        fade_min_peak_pct=0.012,
+        fade_min_giveback_eur=5.0,
+        fee_rt=0.003,
+        hard_stop_pct=0.10,
+        trail_pct=0.10,
+        green_deadline_hours=0.0,
+    )
+    # ~€1300 clip: qty 13 @ 100.
+    pos = Position("X", 100.0, 13.0, 1300.0, T0, 100.0, entry_fee_eur=1.95)
+    st = FadeState()
+    # Peak ~+€26 net at 102.5.
+    peak_mark = 102.5
+    st, d = update_fade_state(
+        st,
+        net_eur=unrealized_net_eur(pos, peak_mark, cfg),
+        gross_return=pos.gross_return(peak_mark),
+        now=1000.0,
+        cfg=cfg,
+    )
+    assert d is None and st.peak_net_eur >= 15.0
+    # Fast cascade toward zero: still green but ETA ≪ 180s.
+    fade_mark = 101.2
+    net = unrealized_net_eur(pos, fade_mark, cfg)
+    assert net > 0.0
+    st, d = update_fade_state(
+        st, net_eur=net, gross_return=pos.gross_return(fade_mark), now=1004.0, cfg=cfg
+    )
+    assert d is None and st.breach_since is not None  # breach armed
+    st, d = update_fade_state(
+        st, net_eur=net * 0.55, gross_return=0.006, now=1025.0, cfg=cfg
+    )
+    assert d is not None and d.reason == "fade_fast" and d.urgent
+    # Disabled when fade_eta_sec=0.
+    off = cfg.with_overrides(fade_eta_sec=0.0)
+    st2, d2 = update_fade_state(
+        FadeState(), net_eur=30.0, gross_return=0.03, now=1.0, cfg=off
+    )
+    assert d2 is None and st2.peak_net_eur == 0.0
+
+
+def test_fade_state_keeps_slow_runners():
+    from bot.live.momentum_desk import FadeState, update_fade_state
+
+    cfg = DeskConfig(
+        fade_eta_sec=180.0,
+        fade_confirm_sec=20.0,
+        fade_smooth_sec=40.0,
+        fade_min_peak_eur=15.0,
+        fade_min_giveback_eur=5.0,
+        fee_rt=0.003,
+    )
+    st = FadeState()
+    st, _ = update_fade_state(st, net_eur=40.0, gross_return=0.03, now=0.0, cfg=cfg)
+    # Gentle drift: ~€2 over 60s → ETA ≫ 180s.
+    st, d = update_fade_state(st, net_eur=38.0, gross_return=0.028, now=60.0, cfg=cfg)
+    assert d is None and st.breach_since is None
+    st, d = update_fade_state(st, net_eur=36.0, gross_return=0.026, now=120.0, cfg=cfg)
+    assert d is None and st.breach_since is None
+
+
 def test_entry_fee_buffer_and_chase_reject():
     cfg = DeskConfig(
         min_excess=0.010,
@@ -1612,3 +1680,72 @@ def test_refresh_marks_uses_holding_venue_bbo_not_bitvavo_ticker(tmp_path):
     st = r.status()
     assert st["positions"][0]["mark"] == pytest.approx(50.1)
     assert st["positions"][0]["mark_source"] == "okx_bbo"
+
+
+def test_manage_exits_fires_fade_fast_urgent_sell(tmp_path):
+    """Dense venue marks → fade_fast urgent exit without waiting for a 15m bar."""
+    from bot.live.momentum_runner import Holding
+
+    class QuietFeed:
+        async def last_price(self, base):
+            return None
+
+        async def candles(self, base, limit):
+            # Mid-bar: not bar_ready for trail; fade must still fire.
+            return [[T0, 100.0, 103.0, 99.0, 101.0, 1.0]]
+
+    clock = FakeClock(T0 / 1000 + 60.0)  # 60s into the forming bar
+    gw = FakeGateway(bid=102.4, ask=102.6)
+    cfg = DeskConfig(
+        fade_eta_sec=120.0,
+        fade_confirm_sec=8.0,
+        fade_smooth_sec=20.0,
+        fade_min_peak_eur=10.0,
+        fade_min_giveback_eur=3.0,
+        hard_stop_pct=0.20,
+        trail_pct=0.20,
+        green_deadline_hours=0.0,
+        fee_rt=0.003,
+        **FLAT_SIZING,
+    )
+    opts = RunnerOptions(
+        venues=("bitvavo",),
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        alphai_recommendations_path=None,
+        sell_rest_sec=1.0,
+        sell_slice_eur=0.0,
+    )
+    r = MomentumDeskRunner(
+        cfg, gw, options=opts, feed=QuietFeed(), clock=clock, sleep=clock.sleep
+    )
+    r.holdings = [
+        Holding(
+            Position("X", 100.0, 13.0, 1300.0, T0, 100.0, entry_fee_eur=1.95, venue="bitvavo"),
+            "h-fade",
+            last_bar_ms=T0 - BAR_MS,
+        )
+    ]
+
+    async def scenario():
+        await r.refresh_marks()
+        await r._manage_exits(int(clock() * 1000))
+        assert r.holdings and r.holdings[0].fade.peak_net_eur >= 10.0
+        # Crash the book toward flat while still green.
+        gw.bid, gw.ask = 100.9, 101.1
+        clock.t += 4.0
+        await r.refresh_marks()
+        await r._manage_exits(int(clock() * 1000))
+        assert r.holdings[0].fade.breach_since is not None
+        gw.bid, gw.ask = 100.7, 100.9
+        clock.t += 9.0
+        await r.refresh_marks()
+        await r._manage_exits(int(clock() * 1000))
+
+    asyncio.run(scenario())
+    assert r.holdings == []
+    ledger = [json.loads(line) for line in Path(r.opt.ledger_path).read_text().splitlines()]
+    exits = [row for row in ledger if row.get("event") == "exit"]
+    assert len(exits) == 1 and exits[0]["reason"] == "fade_fast"
+    assert any(not o["post_only"] for o in gw.placed)  # urgent taker
+

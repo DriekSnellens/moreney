@@ -4,8 +4,9 @@ Executes ``bot.live.momentum_desk`` decisions against one or more venues
 through the existing fail-closed ``LiveMicroEngine`` (policy gates + audit).
 Design:
 
-* 20s tick. Exits are evaluated once per closed 15m bar; entries once per
-  configured decision hour (UTC).
+* 20s tick when flat; denser ``mark_tick_sec`` while holdings are open so
+  venue marks + fade-velocity exits stay timely. Bar trail/stop/time exits
+  still evaluate once per closed 15m bar; entries once per decision hour (UTC).
 * Venue routing: signals come from Bitvavo candles for every position; each
   entry is executed on the first venue in ``RunnerOptions.venues`` (cheapest
   fees first) that has enough EUR for the clip, so the second venue acts as
@@ -27,7 +28,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -43,6 +44,7 @@ from bot.live.momentum_desk import (
     DeskConfig,
     Entry,
     ExitDecision,
+    FadeState,
     Position,
     RiskLedger,
     bar_stats,
@@ -53,6 +55,8 @@ from bot.live.momentum_desk import (
     rank_candidates,
     select_entries,
     universe_stats,
+    unrealized_net_eur,
+    update_fade_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -278,6 +282,8 @@ class Holding:
     holding_id: str
     last_bar_ms: int = 0
     exiting: bool = False
+    # Live-only; not persisted (re-arms after restart).
+    fade: FadeState = field(default_factory=FadeState)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -318,6 +324,9 @@ class RunnerOptions:
     # Example: clip €1690 with €816 left → still buy ~€816, do not skip.
     min_residual_clip_eur: float = 100.0
     tick_sec: float = 20.0
+    # While holdings are open, sleep this long between ticks so venue BBO marks
+    # and fade-velocity exits stay dense. Flat desk keeps ``tick_sec``.
+    mark_tick_sec: float = 4.0
     buy_rest_sec: float = 90.0
     sell_rest_sec: float = 60.0
     repeg_sec: float = 20.0
@@ -525,7 +534,10 @@ class MomentumDeskRunner:
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 logger.exception("momentum desk tick failed")
             self._save_state()
-            await self._sleep(self.opt.tick_sec)
+            sleep_for = self.opt.tick_sec
+            if self.holdings and float(self.opt.mark_tick_sec) > 0:
+                sleep_for = min(sleep_for, float(self.opt.mark_tick_sec))
+            await self._sleep(sleep_for)
 
     async def tick(self) -> None:
         async with self._lock:
@@ -640,25 +652,46 @@ class MomentumDeskRunner:
         last_closed = (now_ms // BAR_MS) * BAR_MS - BAR_MS
         bar_ready = now_ms >= last_closed + BAR_MS + int(self.opt.bar_close_grace_sec * 1000)
         alphai = self._alphai_view() if bar_ready else None
+        now_s = self._clock()
         for h in list(self.holdings):
             if h.exiting:
                 continue
-            rows = await self._feed.candles(h.pos.base, 4)
-            if not rows:
-                continue
-            # Prefer venue mark from refresh_marks; candle close is fallback only.
-            live_px = float(self.marks.get(h.pos.base) or rows[-1][4])
-            if h.pos.base not in self.marks:
+            live_px = self.marks.get(h.pos.base)
+            rows: list[Candle] | None = None
+            if live_px is None:
+                rows = await self._feed.candles(h.pos.base, 4)
+                if not rows:
+                    continue
+                live_px = float(rows[-1][4])
                 self.marks[h.pos.base] = live_px
                 self.mark_sources[h.pos.base] = "bitvavo_candle"
-                self.marks_updated_at = self._clock()
+                self.marks_updated_at = now_s
+            else:
+                live_px = float(live_px)
             # Disaster stop on the live price — a 15m close is too slow for a crash.
             if live_px <= h.pos.entry_price * (1 - _DISASTER_STOP_MULT * self.cfg.hard_stop_pct):
                 await self._exit(
                     h, ExitDecision("disaster_stop", h.pos.gross_return(live_px), True)
                 )
                 continue
+            # Fade-velocity / ETA-to-zero on dense venue marks (independent of 15m bars).
+            if float(self.cfg.fade_eta_sec) > 0.0:
+                net = unrealized_net_eur(h.pos, live_px, self.cfg)
+                h.fade, fade_dec = update_fade_state(
+                    h.fade,
+                    net_eur=net,
+                    gross_return=h.pos.gross_return(live_px),
+                    now=now_s,
+                    cfg=self.cfg,
+                )
+                if fade_dec is not None:
+                    await self._exit(h, fade_dec)
+                    continue
             if not bar_ready or h.last_bar_ms >= last_closed:
+                continue
+            if rows is None:
+                rows = await self._feed.candles(h.pos.base, 4)
+            if not rows:
                 continue
             bar = next((r for r in rows if int(r[0]) == last_closed), None)
             if bar is None:
@@ -1427,6 +1460,14 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
             getattr(settings, "momentum_desk_green_deadline_hours", 4.0)
         ),
         green_min_peak=float(getattr(settings, "momentum_desk_green_min_peak", 0.01)),
+        fade_eta_sec=float(getattr(settings, "momentum_desk_fade_eta_sec", 180.0)),
+        fade_confirm_sec=float(getattr(settings, "momentum_desk_fade_confirm_sec", 20.0)),
+        fade_smooth_sec=float(getattr(settings, "momentum_desk_fade_smooth_sec", 40.0)),
+        fade_min_peak_eur=float(getattr(settings, "momentum_desk_fade_min_peak_eur", 15.0)),
+        fade_min_peak_pct=float(getattr(settings, "momentum_desk_fade_min_peak_pct", 0.012)),
+        fade_min_giveback_eur=float(
+            getattr(settings, "momentum_desk_fade_min_giveback_eur", 5.0)
+        ),
     )
 
 
@@ -1525,6 +1566,9 @@ class MomentumDeskManager:
         options = RunnerOptions(
             venues=venues,
             dry_run=dry_run,
+            mark_tick_sec=float(
+                getattr(settings, "momentum_desk_mark_tick_sec", RunnerOptions.mark_tick_sec)
+            ),
             state_path=str(getattr(settings, "momentum_desk_state_path", RunnerOptions.state_path)),
             ledger_path=str(
                 getattr(settings, "momentum_desk_ledger_path", RunnerOptions.ledger_path)
