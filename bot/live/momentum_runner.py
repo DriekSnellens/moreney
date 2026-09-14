@@ -1330,6 +1330,10 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         entry_fee_buffer_mult=float(getattr(settings, "momentum_desk_entry_fee_buffer_mult", 6.0)),
         max_chase_ret_24h=float(getattr(settings, "momentum_desk_max_chase_ret_24h", 0.0)),
         midflat_hours=float(getattr(settings, "momentum_desk_midflat_hours", 0.0)),
+        green_deadline_hours=float(
+            getattr(settings, "momentum_desk_green_deadline_hours", 4.0)
+        ),
+        green_min_peak=float(getattr(settings, "momentum_desk_green_min_peak", 0.01)),
     )
 
 

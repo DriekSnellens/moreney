@@ -1007,6 +1007,15 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             f"≥ {100 * float(cfg.get('trail_tight_after') or 0):.0f}%",
         ),
         ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
+        (
+            "Time-to-green",
+            (
+                f"{float(cfg.get('green_deadline_hours') or 0):.0f}u zonder piek "
+                f"≥ {100 * float(cfg.get('green_min_peak') or 0):.1f}%"
+                if float(cfg.get("green_deadline_hours") or 0) > 0
+                else "uit"
+            ),
+        ),
         ("Time-exit", f"{float(cfg.get('time_exit_hours') or 0):.0f}u onder break-even"),
         ("Daglimiet", f"−{float(cfg.get('day_loss_limit_eur') or 0):.0f} €"),
         (

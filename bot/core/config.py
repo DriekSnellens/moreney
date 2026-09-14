@@ -590,6 +590,9 @@ class Settings(BaseSettings):
     momentum_desk_entry_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
     momentum_desk_max_chase_ret_24h: float = Field(default=0.0, ge=0.0, le=1.0)
     momentum_desk_midflat_hours: float = Field(default=0.0, ge=0.0, le=168.0)
+    # Time-to-green early invalidation (A/B winner: 4h / +1% peak).
+    momentum_desk_green_deadline_hours: float = Field(default=4.0, ge=0.0, le=168.0)
+    momentum_desk_green_min_peak: float = Field(default=0.01, ge=0.0, le=0.2)
     momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"

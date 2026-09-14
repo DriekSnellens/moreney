@@ -108,11 +108,11 @@ class DeskConfig:
     # trims the worst week from -76 to -54 EUR and max drawdown -118 -> -87.
     time_exit_hours: float = 24.0
     # Time-to-green (0 disables): if age ≥ ``green_deadline_hours`` and peak
-    # gain is still below ``green_min_peak``, exit as ``no_green``. Coin-agnostic
-    # early invalidation for stalls that the 24h fee-flat exit would otherwise
-    # hold through.
-    green_deadline_hours: float = 0.0
-    green_min_peak: float = 0.0
+    # gain is still below ``green_min_peak``, exit as ``no_green``. A/B vs winner
+    # @€40k (May–Sep 2026): 4h / +1% lifted net +16.3%→+18.9% and DD −6.0%→−5.0%
+    # at the same WR by cutting hard-stop bleed on stalls.
+    green_deadline_hours: float = 4.0
+    green_min_peak: float = 0.01
     # Midflat (0 disables). Search winner was indifferent to 0 vs 24h at the
     # 2.5% excess / 4% trail setting (no midflat fills on that path), so keep
     # off and rely on the 24h fee-flat time exit.
