@@ -229,11 +229,19 @@ def _ts(iso: Any) -> str:
         return escape(str(iso))
 
 
-def _hero(label: str, value: str, *, cls: str = "", hint: str = "") -> str:
+def _hero(
+    label: str,
+    value: str,
+    *,
+    cls: str = "",
+    hint: str = "",
+    value_attr: str = "",
+) -> str:
     hint_html = f'<div class="hint muted">{escape(hint)}</div>' if hint else ""
+    attrs = f" {value_attr}" if value_attr else ""
     return (
         f'<div class="hero-card {cls}"><div class="label">{escape(label)}</div>'
-        f'<div class="value {cls}">{value}</div>{hint_html}</div>'
+        f'<div class="value {cls}"{attrs}>{value}</div>{hint_html}</div>'
     )
 
 
@@ -326,7 +334,7 @@ def _positions_table(
     rows = status.get("positions") or []
     cfg = status.get("config") or {}
     if not rows:
-        return f'<p class="muted">{escape(empty_text)}</p>'
+        return f'<p class="muted" data-live="positions-empty">{escape(empty_text)}</p>'
     trail = float(cfg.get("trail_pct") or 0.03)
     tight_after = float(cfg.get("trail_tight_after") or 0.0)
     tight = float(cfg.get("trail_tight_pct") or trail)
@@ -334,57 +342,66 @@ def _positions_table(
     busy = status.get("manual_exit") or {}
     sell_busy = bool(busy) and not busy.get("done")
     out = [
-        '<div class="table-scroll desk-wide"><table class="desk"><thead><tr>',
+        '<div class="table-scroll desk-wide" data-live="positions">'
+        f'<table class="desk" data-trail="{trail}" data-tight-after="{tight_after}" '
+        f'data-tight="{tight}" data-stop="{stop}"><thead><tr>',
         "<th>Base</th><th>Entry</th><th>Mark</th><th>Gross</th>"
         "<th>Peak</th><th>Trail-stop</th><th>Hard-stop</th><th>Net</th><th>Age</th>"
         "<th>Actie</th></tr></thead><tbody>",
     ]
-    cards = ['<div class="pos-cards">']
+    cards = ['<div class="pos-cards" data-live="position-cards">']
     for p in rows:
         entry = float(p.get("entry_price") or 0)
         peak_ret = float(p.get("peak_return") or 0)
-        peak_px = entry * (1 + peak_ret)
-        eff_trail = tight if (tight_after > 0 and peak_ret >= tight_after) else trail
+        mark = p.get("mark")
+        gross = p.get("gross_return")
+        live_peak_ret = peak_ret
+        if mark and entry > 0:
+            live_peak_ret = max(peak_ret, float(mark) / entry - 1.0)
+        peak_px = entry * (1 + live_peak_ret)
+        eff_trail = tight if (tight_after > 0 and live_peak_ret >= tight_after) else trail
         trail_px = peak_px * (1 - eff_trail)
         stop_px = entry * (1 - stop)
-        mark = p.get("mark")
+        hid = escape(str(p.get("holding_id") or p.get("base") or ""))
         sell = _sell_cell(p, disabled=sell_busy, post_action=post_sell_action)
         out.append(
-            "<tr>"
+            f'<tr data-holding="{hid}" data-entry="{entry}">'
             f"<td><strong>{escape(str(p.get('base')))}</strong>"
             f" <span class='muted' style='font-size:.7rem'>{escape(str(p.get('venue') or ''))}"
             f"</span><div class='muted' style='font-size:.7rem'>"
             f"{escape(str(p.get('entry_reason') or ''))}</div></td>"
             f"<td class='mono'>{entry:,.4f}</td>"
-            f"<td class='mono'>{(f'{float(mark):,.4f}' if mark else '—')}</td>"
-            f"<td class='{_cls(p.get('gross_return'))}'>{_fmt_pct(p.get('gross_return'))}</td>"
-            f"<td>{_fmt_pct(peak_ret)}</td>"
-            f"<td class='mono'>{trail_px:,.4f} "
+            f"<td class='mono' data-k='mark'>{(f'{float(mark):,.4f}' if mark else '—')}</td>"
+            f"<td class='{_cls(gross)}' data-k='gross'>{_fmt_pct(gross)}</td>"
+            f"<td data-k='peak'>{_fmt_pct(live_peak_ret)}</td>"
+            f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
             f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
             f"<td class='mono'>{stop_px:,.4f}</td>"
-            f"<td class='{_cls(p.get('unrealized_net_eur'))}'>"
+            f"<td class='{_cls(p.get('unrealized_net_eur'))}' data-k='net'>"
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
-            f"<td>{float(p.get('age_h') or 0):.1f}h</td>"
+            f"<td data-k='age'>{float(p.get('age_h') or 0):.1f}h</td>"
             f"<td>{sell}</td>"
             "</tr>"
         )
         cards.append(
-            '<div class="pos-card">'
+            f'<div class="pos-card" data-holding="{hid}" data-entry="{entry}">'
             f'<div class="row1"><div><strong>{escape(str(p.get("base")))}</strong> '
             f'<span class="muted">{escape(str(p.get("venue") or ""))}</span></div>'
-            f'<div class="{_cls(p.get("unrealized_net_eur"))}" style="font-weight:600">'
+            f'<div class="{_cls(p.get("unrealized_net_eur"))}" style="font-weight:600" data-k="net">'
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</div></div>"
             f'<div class="muted" style="font-size:.7rem;margin-bottom:.35rem">'
             f"{escape(str(p.get('entry_reason') or ''))}</div>"
             '<div class="meta">'
             f"<div><span>Entry</span>{entry:,.4f}</div>"
-            f"<div><span>Mark</span>{(f'{float(mark):,.4f}' if mark else '—')}</div>"
-            f'<div><span>Gross</span><span class="{_cls(p.get("gross_return"))}">'
-            f"{_fmt_pct(p.get('gross_return'))}</span></div>"
-            f"<div><span>Peak</span>{_fmt_pct(peak_ret)}</div>"
-            f"<div><span>Trail</span>{trail_px:,.4f} ({100 * eff_trail:.1f}%)</div>"
+            f"<div><span>Mark</span><span data-k='mark'>"
+            f"{(f'{float(mark):,.4f}' if mark else '—')}</span></div>"
+            f'<div><span>Gross</span><span class="{_cls(gross)}" data-k="gross">'
+            f"{_fmt_pct(gross)}</span></div>"
+            f"<div><span>Peak</span><span data-k='peak'>{_fmt_pct(live_peak_ret)}</span></div>"
+            f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
+            f"({100 * eff_trail:.1f}%)</span></div>"
             f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
-            f"<div><span>Age</span>{float(p.get('age_h') or 0):.1f}h</div>"
+            f"<div><span>Age</span><span data-k='age'>{float(p.get('age_h') or 0):.1f}h</span></div>"
             "</div>"
             f'<div class="actions">{sell}</div></div>'
         )
@@ -410,9 +427,11 @@ def _positions_table(
     out.append(sell_all)
     out.append(
         "<p class='muted' style='font-size:.72rem;margin-top:.4rem'>Verkoop = maker-order op de "
-        "bied, valt na 60 s terug op taker. Wordt in de ledger geboekt als <em>manual</em>.</p>"
+        "bied, valt na 60 s terug op taker. Wordt in de ledger geboekt als <em>manual</em>. "
+        "Marks vernieuwen elke 3s via ticker.</p>"
     )
     return "".join(out)
+
 
 
 def _sell_cell(
@@ -1162,6 +1181,105 @@ def _volatile_actions(volatile: Mapping[str, Any] | None) -> str:
     )
 
 
+
+_LIVE_MARKS_JS = r"""
+<script>
+(function () {
+  if (window.__moreneyMarksPoll) return;
+  window.__moreneyMarksPoll = true;
+  const STATUS_URL = "/live/momentum/status";
+  const INTERVAL_MS = 3000;
+
+  function fmtPct(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+    const n = Number(v) * 100;
+    return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+  }
+  function fmtEur(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+    const n = Number(v);
+    const sign = n > 0 ? "+" : "";
+    return sign + n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  }
+  function fmtPx(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+    return Number(v).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  }
+  function cls(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === 0) return "";
+    return n > 0 ? "good" : "bad";
+  }
+  function setText(root, key, text, className) {
+    root.querySelectorAll(`[data-k="${key}"]`).forEach((el) => {
+      el.textContent = text;
+      if (className !== undefined) {
+        el.classList.remove("good", "bad");
+        if (className) el.classList.add(className);
+      }
+    });
+  }
+  function patchHolding(pos, trail, tightAfter, tight) {
+    const id = String(pos.holding_id || pos.base || "");
+    const nodes = document.querySelectorAll(`[data-holding="${CSS.escape(id)}"]`);
+    if (!nodes.length) return;
+    const entry = Number(pos.entry_price || 0);
+    const mark = pos.mark == null ? null : Number(pos.mark);
+    const peakBar = Number(pos.peak_return || 0);
+    const gross = pos.gross_return;
+    let livePeak = peakBar;
+    if (mark && entry > 0) livePeak = Math.max(peakBar, mark / entry - 1);
+    const effTrail = (tightAfter > 0 && livePeak >= tightAfter) ? tight : trail;
+    const trailPx = entry * (1 + livePeak) * (1 - effTrail);
+    nodes.forEach((root) => {
+      setText(root, "mark", fmtPx(mark));
+      setText(root, "gross", fmtPct(gross), cls(gross));
+      setText(root, "peak", fmtPct(livePeak));
+      setText(root, "trail", `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`);
+      setText(root, "net", fmtEur(pos.unrealized_net_eur), cls(pos.unrealized_net_eur));
+      if (pos.age_h != null) setText(root, "age", `${Number(pos.age_h).toFixed(1)}h`);
+    });
+  }
+  function patchHeroes(status) {
+    const open = status.unrealized_net_eur;
+    const el = document.querySelector('[data-live="open-pnl"]');
+    if (el) {
+      el.textContent = fmtEur(open);
+      el.classList.remove("good", "bad");
+      const c = cls(open);
+      if (c) el.classList.add(c);
+    }
+    const eq = document.querySelector('[data-live="equity"]');
+    if (eq && status.equity_eur != null) eq.textContent = fmtEur(status.equity_eur).replace(/^\+/, "");
+    const stamp = document.querySelector('[data-live="marks-age"]');
+    if (stamp) {
+      const age = (status.positions || []).map(p => p.mark_age_sec).filter(v => v != null);
+      if (age.length) stamp.textContent = `marks ${Math.max(...age).toFixed(0)}s geleden`;
+      else if (status.marks_updated_at) stamp.textContent = "marks live";
+    }
+  }
+  async function tick() {
+    try {
+      const res = await fetch(STATUS_URL, { cache: "no-store" });
+      if (!res.ok) return;
+      const status = await res.json();
+      const table = document.querySelector("table.desk[data-trail]");
+      const trail = table ? Number(table.dataset.trail || 0.04) : 0.04;
+      const tightAfter = table ? Number(table.dataset.tightAfter || 0) : 0;
+      const tight = table ? Number(table.dataset.tight || trail) : trail;
+      (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
+      patchHeroes(status);
+    } catch (err) {
+      /* ignore transient network blips */
+    }
+  }
+  tick();
+  setInterval(tick, INTERVAL_MS);
+})();
+</script>
+"""
+
+
 def render_momentum_dashboard(
     status: Mapping[str, Any],
     ledger_rows: Sequence[Mapping[str, Any]],
@@ -1211,8 +1329,13 @@ def render_momentum_dashboard(
     err_html += _commit_notice(commit)
     err_html += _manual_exit_notice(status.get("manual_exit") or {})
     hold_page = bool(preview) or bool(sell) or bool(sell_all) or bool(report)
-    refresh_meta = "" if hold_page else '<meta http-equiv="refresh" content="20">'
-    refresh_note = "Geen auto-refresh tijdens bevestiging" if hold_page else "Ververst elke 20s"
+    refresh_meta = ""  # marks poll via JS; full reload only on demand
+    refresh_note = (
+        "Geen live-update tijdens bevestiging"
+        if hold_page
+        else 'Marks live elke 3s · <span data-live="marks-age">—</span>'
+    )
+    live_js = "" if hold_page else _LIVE_MARKS_JS
     show_vol = bool(show_volatile)
     toolbar = _toolbar(
         running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=show_vol
@@ -1235,6 +1358,7 @@ def render_momentum_dashboard(
                 "Equity (cash + posities)",
                 _fmt_eur(status.get("equity_eur"), signed=False),
                 hint=f"{cash_hint} · ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}",
+                value_attr='data-live="equity"',
             ),
             _hero(
                 "Core vandaag",
@@ -1247,6 +1371,7 @@ def render_momentum_dashboard(
                 _fmt_eur(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
                 cls=_cls(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
                 hint=f"core {n_pos}/{cfg.get('max_positions')} · fees {fees:,.2f} €",
+                value_attr='data-live="open-pnl"',
             ),
             _hero(
                 "Volgende beslissing",
@@ -1343,5 +1468,6 @@ def render_momentum_dashboard(
 {footer_links}</p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
+{live_js}
 </body></html>"""
     return HTMLResponse(html)

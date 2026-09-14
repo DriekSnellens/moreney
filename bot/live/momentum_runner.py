@@ -210,12 +210,20 @@ def _from_exchange_order(order: Any, symbol: str | None = None) -> OrderState:
 
 
 class CandleFeed:
-    """Bitvavo public 15m candles with a tiny per-call TTL cache."""
+    """Bitvavo public 15m candles + last-trade ticker with small TTL caches."""
 
-    def __init__(self, base_url: str = BITVAVO_PUBLIC, ttl_sec: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: str = BITVAVO_PUBLIC,
+        ttl_sec: float = 10.0,
+        *,
+        ticker_ttl_sec: float = 2.0,
+    ) -> None:
         self._base_url = base_url
         self._ttl = ttl_sec
+        self._ticker_ttl = ticker_ttl_sec
         self._cache: dict[tuple[str, int], tuple[float, list[list[float]]]] = {}
+        self._ticker_cache: dict[str, tuple[float, float]] = {}
 
     async def candles(self, base: str, limit: int) -> list[list[float]]:
         key = (base, limit)
@@ -237,6 +245,26 @@ class CandleFeed:
         )
         self._cache[key] = (now, out)
         return out
+
+    async def last_price(self, base: str) -> float | None:
+        """Last trade price for dashboard / live marks (Bitvavo public ticker)."""
+        now = time.time()
+        hit = self._ticker_cache.get(base)
+        if hit and now - hit[0] < self._ticker_ttl:
+            return hit[1]
+        url = f"{self._base_url}/ticker/price"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get(url, params={"market": f"{base}-EUR"})
+                resp.raise_for_status()
+                payload = resp.json()
+            price = float(payload["price"] if isinstance(payload, dict) else payload[0]["price"])
+        except Exception:  # noqa: BLE001
+            return None
+        if price <= 0:
+            return None
+        self._ticker_cache[base] = (now, price)
+        return price
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +371,7 @@ class MomentumDeskRunner:
         self.last_regime: dict[str, Any] = {}
         self.last_error: str | None = None
         self.marks: dict[str, float] = {}
+        self.marks_updated_at: float | None = None
         self.cash_by_venue: dict[str, float] = {}
         self._cash_ts: float = 0.0
         self._lock = asyncio.Lock()
@@ -425,6 +454,11 @@ class MomentumDeskRunner:
                     "age_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
                     "peak_return": round(h.pos.peak / h.pos.entry_price - 1, 4),
                     "mark": mark,
+                    "mark_age_sec": (
+                        round(self._clock() - self.marks_updated_at, 1)
+                        if self.marks_updated_at is not None and mark is not None
+                        else None
+                    ),
                     "gross_return": round(gross, 4) if gross is not None else None,
                     "unrealized_net_eur": round(net, 2) if net is not None else None,
                     "entry_reason": h.pos.entry_reason,
@@ -460,6 +494,11 @@ class MomentumDeskRunner:
             "last_regime": self.last_regime,
             "next_decision": self._next_decision_iso(now_ms),
             "last_error": self.last_error,
+            "marks_updated_at": (
+                datetime.fromtimestamp(self.marks_updated_at, UTC).isoformat()
+                if self.marks_updated_at
+                else None
+            ),
         }
 
     def _next_decision_iso(self, now_ms: int) -> str:
@@ -489,10 +528,36 @@ class MomentumDeskRunner:
     async def tick(self) -> None:
         async with self._lock:
             now_ms = int(self._clock() * 1000)
+            await self.refresh_marks()
             await self._manage_exits(now_ms)
             # Cash first: the venue router needs fresh balances at the decision hour.
             await self._refresh_cash()
             await self._maybe_decide(now_ms)
+
+    async def refresh_marks(self) -> None:
+        """Pull last-trade marks for open holdings (dashboard + disaster stop).
+
+        Safe to call outside the tick lock: only mutates ``marks``. Prefer this
+        over waiting for the next 15m candle poll when the UI asks for status.
+        """
+        if not self.holdings:
+            return
+        updated = False
+        for h in list(self.holdings):
+            if h.exiting:
+                continue
+            px = await self._feed.last_price(h.pos.base)
+            if px is None:
+                # Fallback: forming 15m close from the candle feed.
+                rows = await self._feed.candles(h.pos.base, 1)
+                if rows:
+                    px = float(rows[-1][4])
+            if px is None or px <= 0:
+                continue
+            self.marks[h.pos.base] = float(px)
+            updated = True
+        if updated:
+            self.marks_updated_at = self._clock()
 
     async def _refresh_cash(self) -> None:
         if self._clock() - self._cash_ts < 60.0:
@@ -558,8 +623,11 @@ class MomentumDeskRunner:
             rows = await self._feed.candles(h.pos.base, 4)
             if not rows:
                 continue
-            live_px = float(rows[-1][4])
-            self.marks[h.pos.base] = live_px
+            # Prefer ticker mark when fresh; candle close is the fallback.
+            live_px = float(self.marks.get(h.pos.base) or rows[-1][4])
+            if h.pos.base not in self.marks:
+                self.marks[h.pos.base] = live_px
+                self.marks_updated_at = self._clock()
             # Disaster stop on the live price — a 15m close is too slow for a crash.
             if live_px <= h.pos.entry_price * (1 - _DISASTER_STOP_MULT * self.cfg.hard_stop_pct):
                 await self._exit(
@@ -1390,6 +1458,15 @@ class MomentumDeskManager:
         if self._task is not None and self._task.done() and self._task.exception():
             base["task_error"] = repr(self._task.exception())
         return base
+
+    async def status_fresh(self) -> dict[str, Any]:
+        """Status after refreshing open-position marks from the public ticker."""
+        if self._runner is not None:
+            try:
+                await self._runner.refresh_marks()
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: mark refresh for status failed")
+        return self.status()
 
     async def start(
         self,

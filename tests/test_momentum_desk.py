@@ -1030,11 +1030,13 @@ def test_dashboard_renders_positions_decision_and_ledger():
     assert "DOT" in html and "trail" in html and "2,015.60" in html
     # Ratchet active (peak 5.5% >= 5%) -> tight trail shown at 2.5%.
     assert "(2.5%)" in html
-    assert "<script" not in html  # server-rendered, no JS surface
+    assert "/live/momentum/status" in html and "Marks live elke 3s" in html
+    assert 'data-live="open-pnl"' in html
     # Sell button is a GET to the confirmation step, never a direct POST.
     assert 'name="sell" value="h-dot"' in html and "/live/momentum/sell" not in html
     confirm = render_momentum_dashboard(status, rows, sell="h-dot").body.decode()
     assert "Verkoop bevestigen" in confirm
+    assert "<script" not in confirm  # hold still while confirming — no marks poll
     assert 'action="/live/momentum/sell?holding_id=h-dot"' in confirm
     assert "holding_id=h-dot&amp;urgent=1" in confirm
     assert 'http-equiv="refresh"' not in confirm  # page holds still while confirming

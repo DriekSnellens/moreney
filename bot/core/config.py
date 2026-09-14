@@ -566,7 +566,7 @@ class Settings(BaseSettings):
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
     # 90d sweep: entries 06-14 UTC all positive, 15-23 UTC all negative.
-    momentum_desk_decision_hours_utc: str = "7,13"
+    momentum_desk_decision_hours_utc: str = "7,13,16"
     # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
     # positions, so the base clip can exceed book/4; the router shrinks or
     # skips clips the venue cash cannot fund. Strong tape (>= 85% of the

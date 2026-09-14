@@ -605,8 +605,12 @@ async def live_micro_session_stop() -> dict[str, Any]:
 
 @app.get("/live/momentum/status")
 async def live_momentum_status() -> dict[str, Any]:
-    """Daily Momentum Desk: positions, risk ledger, last decision, next decision."""
-    return get_momentum_desk_manager().status()
+    """Daily Momentum Desk: positions, risk ledger, last decision, next decision.
+
+    Marks are refreshed from the public ticker before the snapshot so the
+    dashboard poll stays near real-time even between 20s exit ticks.
+    """
+    return await get_momentum_desk_manager().status_fresh()
 
 
 @app.post("/live/momentum/start")
