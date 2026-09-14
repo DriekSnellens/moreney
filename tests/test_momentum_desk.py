@@ -251,6 +251,54 @@ def test_midflat_exits_fee_flat_before_full_time_exit():
     assert evaluate_exit(pos2, [mid, 100, 101, 100, 100.5, 1], cfg) is None
 
 
+def test_early_stop_stages_until_peak_then_hard_stop():
+    cfg = DeskConfig(
+        hard_stop_pct=0.03,
+        early_stop_pct=0.015,
+        early_stop_until_peak=0.005,
+        trail_pct=0.10,
+        trail_tight_after=0.0,
+        midflat_hours=0.0,
+        green_deadline_hours=0.0,
+        exit_on_touch=True,
+    )
+    # Never confirmed: −1.5% early stop fires before −3% hard stop.
+    pos = Position("E", 100.0, 5.0, 500.0, T0, 100.0)
+    d = evaluate_exit(pos, [T0, 100, 100.2, 98.4, 98.5, 1], cfg)
+    assert d is not None and d.reason == "early_stop" and d.urgent
+    assert d.price == pytest.approx(98.5)
+    # After peak ≥ +0.5%, early stop unlocks → −3% hard stop only.
+    pos2 = Position("E", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [T0, 100, 100.6, 100.0, 100.5, 1], cfg) is None
+    assert pos2.peak == pytest.approx(100.6)
+    d = evaluate_exit(pos2, [T0 + BAR_MS, 100.5, 100.5, 98.4, 98.5, 1], cfg)
+    assert d is None  # −1.6% still above −3% hard stop
+    d = evaluate_exit(pos2, [T0 + 2 * BAR_MS, 98.5, 98.5, 96.8, 97.0, 1], cfg)
+    assert d is not None and d.reason == "hard_stop" and d.price == pytest.approx(97.0)
+
+
+def test_no_green_exits_when_peak_never_confirms():
+    cfg = DeskConfig(
+        green_deadline_hours=4.0,
+        green_min_peak=0.01,
+        hard_stop_pct=0.05,
+        trail_pct=0.10,
+        midflat_hours=0.0,
+        time_exit_hours=24.0,
+        fee_rt=0.003,
+    )
+    deadline = T0 + int(4 * 3_600_000) - BAR_MS
+    pos = Position("G", 100.0, 5.0, 500.0, T0, 100.0)
+    # Peak only +0.4% by deadline → no_green.
+    assert evaluate_exit(pos, [deadline - BAR_MS, 100, 100.4, 99.8, 100.2, 1], cfg) is None
+    d = evaluate_exit(pos, [deadline, 100.2, 100.3, 99.9, 100.1, 1], cfg)
+    assert d is not None and d.reason == "no_green" and not d.urgent
+    # Peak ≥ +1% by deadline → hold (even if close is fee-flat).
+    pos2 = Position("G", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [deadline - BAR_MS, 100, 101.2, 100.5, 100.8, 1], cfg) is None
+    assert evaluate_exit(pos2, [deadline, 100.8, 100.9, 100.0, 100.2, 1], cfg) is None
+
+
 def test_entry_fee_buffer_and_chase_reject():
     cfg = DeskConfig(
         min_excess=0.010,

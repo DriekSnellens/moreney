@@ -97,10 +97,22 @@ class DeskConfig:
     trail_tight_after: float = 0.05
     trail_tight_pct: float = 0.025
     hard_stop_pct: float = 0.03
+    # Staged early stop (0 disables): until peak gain reaches
+    # ``early_stop_until_peak``, use the tighter ``early_stop_pct`` instead of
+    # ``hard_stop_pct``. Cuts losers that never print a meaningful green print
+    # without clipping trails once the trade has confirmed.
+    early_stop_pct: float = 0.0
+    early_stop_until_peak: float = 0.0
     # Positions that have done nothing in a day almost always close red
     # (48h time-exits: -43 EUR over 5 trades). 24h keeps the same total and
     # trims the worst week from -76 to -54 EUR and max drawdown -118 -> -87.
     time_exit_hours: float = 24.0
+    # Time-to-green (0 disables): if age ≥ ``green_deadline_hours`` and peak
+    # gain is still below ``green_min_peak``, exit as ``no_green``. Coin-agnostic
+    # early invalidation for stalls that the 24h fee-flat exit would otherwise
+    # hold through.
+    green_deadline_hours: float = 0.0
+    green_min_peak: float = 0.0
     # Midflat (0 disables). Search winner was indifferent to 0 vs 24h at the
     # 2.5% excess / 4% trail setting (no midflat fills on that path), so keep
     # off and rely on the 24h fee-flat time exit.
@@ -550,14 +562,26 @@ def evaluate_exit(
             trail = min(trail, cfg.trail_tight_pct)
         return base_trail, trail
 
+    def _stop_pct_for(peak: float) -> tuple[float, str]:
+        """Effective stop distance and reason tag (hard_stop vs early_stop)."""
+        stop = cfg.hard_stop_pct
+        reason = "hard_stop"
+        if cfg.early_stop_pct > 0.0 and cfg.early_stop_until_peak > 0.0 and pos.entry_price > 0:
+            peak_gain = peak / pos.entry_price - 1.0
+            if peak_gain < cfg.early_stop_until_peak:
+                stop = cfg.early_stop_pct
+                reason = "early_stop"
+        return stop, reason
+
     if cfg.exit_on_touch:
         # Intrabar semantics: stops are tested against the low with the peak
         # known *before* this bar (the order of high and low inside a bar is
         # unknown). A gap through the level fills at the open.
-        stop_px = pos.entry_price * (1.0 - cfg.hard_stop_pct)
+        stop_pct, stop_reason = _stop_pct_for(pos.peak)
+        stop_px = pos.entry_price * (1.0 - stop_pct)
         if low <= stop_px:
             px = min(stop_px, open_)
-            return ExitDecision("hard_stop", pos.gross_return(px), urgent=True, price=px)
+            return ExitDecision(stop_reason, pos.gross_return(px), urgent=True, price=px)
         if pos.peak > 0:
             base_trail, trail = _trail_for(pos.peak)
             trail_px = pos.peak * (1.0 - trail)
@@ -569,16 +593,23 @@ def evaluate_exit(
             pos.peak = high
         gross = pos.gross_return(close)
     else:
+        # Peak for stop staging uses the pre-bar peak (same as exit_on_touch).
+        stop_pct, stop_reason = _stop_pct_for(pos.peak)
         if pos.peak < high:
             pos.peak = high
         gross = pos.gross_return(close)
-        if close <= pos.entry_price * (1.0 - cfg.hard_stop_pct):
-            return ExitDecision("hard_stop", gross, urgent=True)
+        if close <= pos.entry_price * (1.0 - stop_pct):
+            return ExitDecision(stop_reason, gross, urgent=True)
         base_trail, trail = _trail_for(pos.peak)
         if pos.peak > 0 and close <= pos.peak * (1.0 - trail):
             reason = "trail" if close <= pos.peak * (1.0 - base_trail) else "trail_alphai"
             return ExitDecision(reason, gross, urgent=False)
     age_ms = bar_end - pos.opened_ms
+    green_h = float(cfg.green_deadline_hours)
+    if green_h > 0.0 and age_ms >= green_h * 3600_000:
+        peak_gain = pos.peak / pos.entry_price - 1.0 if pos.entry_price > 0 else 0.0
+        if peak_gain < float(cfg.green_min_peak):
+            return ExitDecision("no_green", gross, urgent=False)
     midflat_h = float(cfg.midflat_hours)
     if midflat_h > 0.0 and age_ms >= midflat_h * 3600_000 and gross <= cfg.fee_rt:
         return ExitDecision("midflat", gross, urgent=False)
