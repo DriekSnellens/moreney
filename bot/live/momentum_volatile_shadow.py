@@ -13,7 +13,7 @@ import contextlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +109,9 @@ class VolatileShadowConfig:
     min_alphai_score: float = 30.0
     # With min_alphai_score=30, excess gate is optional (0 disables).
     weak_score_needs_excess: float = 0.0
+    # Fee-aware relative-strength floor vs BTC (coin-agnostic). Default covers
+    # ~2.5× round-trip fees so marginal +0.3–0.5% excess names do not eat the book.
+    min_excess: float = 0.008
     trail_pct: float = 0.04
     trail_tight_after: float = 0.06
     trail_tight_pct: float = 0.025
@@ -131,6 +134,19 @@ class VolatileShadowConfig:
     require_alphai_green: bool = True
     # Exit immediately when AlphaI flips a held name to avoid.
     alphai_flip_exits: bool = True
+    # Refuse new entries / AlphaI-flip exits when the board is older than this.
+    # Soft-refresh runs on a 15m tick; this gate covers refresh failures.
+    alphai_max_age_hours: float = 6.0
+    # Strong AlphaI scores may clear a lower EUR-volume floor (liquidity
+    # still required — never zero). Mid scores get a milder relief.
+    strong_score_volume_mult: float = 0.5
+    mid_score_volume_mult: float = 0.75
+    mid_score_volume_at: float = 50.0
+    # Midflat / dead-name: still fee-flat after N hours → tighten time exit
+    # even if AlphaI is still green (no blind rank-rotate).
+    midflat_hours: float = 18.0
+    # Under macro caution, demand excess >= fee_rt × buffer.
+    macro_caution_fee_buffer_mult: float = 4.0
     # Scale clip by AlphaI score conviction.
     conviction_sizing: bool = True
     book_eur: float = 2000.0
@@ -152,6 +168,22 @@ def _norm_base(raw: Any) -> str | None:
     return text or None
 
 
+
+def _alphai_age_hours(generated_at: Any, *, now: datetime | None = None) -> float | None:
+    """Hours since AlphaI board ``generated_at`` (ISO); None if unknown."""
+    if not generated_at:
+        return None
+    try:
+        text = str(generated_at).replace("Z", "+00:00")
+        ts = datetime.fromisoformat(text)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        now = now or datetime.now(timezone.utc)
+        return max(0.0, (now - ts.astimezone(timezone.utc)).total_seconds() / 3600.0)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def load_shadow_alphai(
     path: str | Path | None = None,
 ) -> tuple[AlphaIView, dict[str, Any]]:
@@ -161,6 +193,7 @@ def load_shadow_alphai(
         "path": str(p),
         "loaded": False,
         "generated_at": None,
+        "age_hours": None,
         "picks": [],
         "avoid": [],
         "watch": [],
@@ -235,10 +268,12 @@ def load_shadow_alphai(
         avoid=avoid_vol,
         macro_caution=bool(base_view.macro_caution),
     )
+    generated_at = raw.get("generated_at") if isinstance(raw, Mapping) else None
     meta.update(
         {
             "loaded": True,
-            "generated_at": raw.get("generated_at") if isinstance(raw, Mapping) else None,
+            "generated_at": generated_at,
+            "age_hours": _alphai_age_hours(generated_at),
             "picks": [r for r in pick_rows if r["base"] in vol],
             "avoid": [r for r in avoid_rows if r["base"] in vol],
             "watch": [r for r in watch_rows if r["base"] in vol],
@@ -354,7 +389,12 @@ def _rank_volatile(
             why.append("alphai_avoid")
         if cfg.require_alphai_green and base not in alphai.picks:
             why.append("no_alphai_green")
-        if st.volume_eur < cfg.min_volume_eur:
+        vol_floor = cfg.min_volume_eur
+        if a_score >= cfg.strong_alphai_score:
+            vol_floor *= cfg.strong_score_volume_mult
+        elif a_score >= cfg.mid_score_volume_at:
+            vol_floor *= cfg.mid_score_volume_mult
+        if st.volume_eur < vol_floor:
             why.append("volume_low")
         if st.ret_24h < cfg.min_ret_24h:
             why.append("ret_flat_or_down")
@@ -374,6 +414,11 @@ def _rank_volatile(
             and base in alphai.picks
         ):
             why.append("weak_score_no_excess")
+        need_excess = cfg.min_excess
+        if alphai.macro_caution:
+            need_excess = max(need_excess, cfg.fee_rt * cfg.macro_caution_fee_buffer_mult)
+        if need_excess > 0 and excess < need_excess:
+            why.append("excess_low")
         if why:
             rejected.append(
                 {
@@ -504,6 +549,15 @@ def _evaluate_volatile_exit(
         tight_after = min(tight_after, 0.03)
         hard = min(hard, 0.025)
         time_hrs = min(time_hrs, 12.0)
+
+    # Midflat / dead-name: fee-flat after N hours → pull time exit forward
+    # even while AlphaI is still green. Not a rank-rotate.
+    if cfg.midflat_hours > 0:
+        close_px = float(bar[4])
+        gross = pos.gross_return(close_px)
+        age_h = (int(bar[0]) + BAR_MS - pos.opened_ms) / 3_600_000.0
+        if age_h >= cfg.midflat_hours and gross <= cfg.fee_rt:
+            time_hrs = min(time_hrs, cfg.midflat_hours)
 
     exit_cfg = DeskConfig(
         decision_hours_utc=cfg.decision_hours_utc,
@@ -1161,7 +1215,11 @@ def render_volatile_shadow_html(payload: Mapping[str, Any]) -> str:
     )
 
 
-def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
+def render_volatile_live_html(
+    live: Mapping[str, Any] | None,
+    *,
+    ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+) -> str:
     """LIVE volatile sleeve panel (operator dashboard body)."""
     from html import escape
 
@@ -1288,6 +1346,12 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         f"entries {escape(str(risk.get('block_reason') or 'ok'))}</p>"
     )
     title = "PAPER volatile sleeve" if dry or not allow_live else "LIVE volatile sleeve"
+    from bot.live.momentum_dashboard import _ledger_table
+
+    ledger_html = (
+        '<h3 style="font-size:.85rem;margin:.9rem 0 .3rem">Ledger</h3>'
+        f"{_ledger_table(ledger_rows or [])}"
+    )
     return (
         f'<div class="hint {"warn" if dry or not allow_live else "good"}">'
         f"<strong>{title}</strong> — apart van de core 16. "
@@ -1308,8 +1372,10 @@ def render_volatile_live_html(live: Mapping[str, Any] | None) -> str:
         "<h3 style='font-size:.85rem;margin:.6rem 0 .3rem'>Open posities</h3>"
         f"<ul style='margin:0;padding-left:1.1rem'>{''.join(pos_html)}</ul>"
         f"{actions}"
+        f"{ledger_html}"
         '<p class="muted" style="margin-top:.6rem;font-size:.75rem">'
         '<a href="/live/momentum/volatile/status">status JSON</a> · '
+        '<a href="/live/momentum/volatile/ledger">ledger JSON</a> · '
         '<a href="/live/momentum">core desk</a></p></div>'
     )
 
@@ -1319,6 +1385,7 @@ def render_volatile_live_page(
     *,
     notice: str | None = None,
     shadow_html: str | None = None,
+    ledger_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     """Operator page: paper/live sleeve + optional paper-shadow research."""
     from html import escape
@@ -1326,7 +1393,7 @@ def render_volatile_live_page(
     from bot.live.dashboard_v2 import dashboard_css
     from bot.live.momentum_dashboard import _CSS
 
-    live_html = render_volatile_live_html(live)
+    live_html = render_volatile_live_html(live, ledger_rows=ledger_rows)
     notice_html = f'<div class="hint">{escape(notice)}</div>' if notice else ""
     running = bool((live or {}).get("running"))
     dry = bool((live or {}).get("dry_run", True))
@@ -1390,3 +1457,16 @@ __all__ = [
     "simulate_volatile_alphai",
     "volatile_universe",
 ]
+
+
+def is_alphai_stale(meta: Mapping[str, Any], cfg: VolatileShadowConfig) -> bool:
+    """True when the volatile AlphaI board exceeds ``alphai_max_age_hours``."""
+    max_age = float(getattr(cfg, "alphai_max_age_hours", 0.0) or 0.0)
+    if max_age <= 0:
+        return False
+    age = meta.get("age_hours")
+    if age is None:
+        age = _alphai_age_hours(meta.get("generated_at"))
+    if age is None:
+        return True  # unknown age → treat as stale (fail closed for entries)
+    return float(age) > max_age

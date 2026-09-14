@@ -92,17 +92,47 @@ def _universe(returns: dict[str, float], btc_ret: float = 0.0, *, from_high: flo
     return cfg, candles
 
 
-def test_regime_blocks_on_weak_btc_or_breadth():
+def test_regime_blocks_on_weak_btc_or_breadth_when_soft_disabled():
     cfg, candles = _universe({"A": 0.03, "B": -0.02, "C": -0.01}, btc_ret=0.01)
+    cfg = cfg.with_overrides(soft_regime_on_weak_tape=False)
     alts = universe_stats(candles, T0, cfg)
     btc = bar_stats("BTC", candles["BTC"], T0)
     regime = classify_regime(btc, alts, cfg)
-    assert not regime.ok and "breadth_weak" in regime.reasons
+    assert not regime.ok and not regime.soft and "breadth_weak" in regime.reasons
 
     cfg, candles = _universe({"A": 0.03, "B": 0.02}, btc_ret=-0.02)
+    cfg = cfg.with_overrides(soft_regime_on_weak_tape=False)
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    assert not regime.ok and "btc_weak" in regime.reasons
+    assert not regime.ok and not regime.soft and "btc_weak" in regime.reasons
+
+
+def test_soft_regime_allows_alphai_picks_on_weak_tape():
+    """Weak BTC/breadth stays open for AlphaI picks at a reduced clip."""
+    cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=-0.02)
+    cfg = cfg.with_overrides(
+        soft_regime_on_weak_tape=True,
+        soft_regime_clip_mult=0.5,
+        min_volume_eur=0.0,
+        clip_eur=1000.0,
+        alphai_clip_mult=1.0,
+        strong_clip_mult=1.0,
+        weak_clip_mult=1.0,
+    )
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    assert regime.ok and regime.soft
+    assert "btc_weak" in regime.reasons and "breadth_weak" in regime.reasons
+    view = AlphaIView(picks=frozenset({"A"}), avoid=frozenset())
+    cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
+    entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
+    assert [e.base for e in entries] == ["A"]
+    assert entries[0].clip_eur == pytest.approx(500.0)
+    assert "soft_regime" in entries[0].reasons
+    # Non-picks stay blocked under soft regime.
+    view2 = AlphaIView(picks=frozenset(), avoid=frozenset())
+    cands2 = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view2)
+    assert select_entries(cands2, regime, cfg, held_bases=[], alphai=view2) == []
 
 
 def test_rank_and_select_apply_excess_cluster_and_alphai_rules():
@@ -120,13 +150,14 @@ def test_rank_and_select_apply_excess_cluster_and_alphai_rules():
     assert "XRP" not in names  # excess 0.2pp < 1.5pp
     assert names[0] == "SOL"
     entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
-    # breadth 1.0 -> top_n_broad=3 -> SOL, LINK (pick, 1.3x clip), OP; AVAX vetoed.
-    assert [e.base for e in entries] == ["SOL", "LINK", "OP"]
+    # breadth 1.0 -> top_n_broad=3, but OP excess ~2.0pp sits on the new
+    # min_excess/fee floor and is dropped; AVAX vetoed. SOL + LINK remain.
+    assert [e.base for e in entries] == ["SOL", "LINK"]
     link = next(e for e in entries if e.base == "LINK")
     assert link.clip_eur == pytest.approx(650.0)
     # Holding SOL blocks the whole L1 cluster.
     entries = select_entries(cands, regime, cfg, held_bases=["SOL"], alphai=view)
-    assert [e.base for e in entries] == ["LINK", "OP"]
+    assert [e.base for e in entries] == ["LINK"]
 
 
 def test_from_high_and_macro_caution_rules():
@@ -139,11 +170,21 @@ def test_from_high_and_macro_caution_rules():
     cfg = cfg.with_overrides(min_volume_eur=0.0)
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    view = AlphaIView(macro_caution=True)
-    entries = select_entries(
-        rank_candidates(alts, 0.0, cfg), regime, cfg, held_bases=[], alphai=view
+    # Under macro caution, only AlphaI picks may enter (default).
+    view = AlphaIView(macro_caution=True, picks=frozenset({"SOL"}))
+    cands = rank_candidates(alts, 0.0, cfg, alphai=view)
+    entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
+    assert entries[0].clip_eur == pytest.approx(455.0)  # 500 * alphai_clip 1.3 * macro 0.7
+    assert "macro_reduce" in entries[0].reasons and "alphai_pick" in entries[0].reasons
+    # Non-picks are skipped while macro caution + reduce is active.
+    skipped = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=AlphaIView(macro_caution=True)),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=AlphaIView(macro_caution=True, picks=frozenset()),
     )
-    assert entries[0].clip_eur == pytest.approx(350.0)
+    assert skipped == []
     blocked = classify_regime(
         bar_stats("BTC", candles["BTC"], T0),
         alts,
@@ -153,9 +194,30 @@ def test_from_high_and_macro_caution_rules():
     assert not blocked.ok and "alphai_macro_block" in blocked.reasons
 
 
+def test_macro_caution_can_allow_non_picks_when_flag_off():
+    cfg, candles = _universe({"SOL": 0.05}, 0.0)
+    cfg = cfg.with_overrides(min_volume_eur=0.0, macro_caution_requires_alphai_pick=False)
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    view = AlphaIView(macro_caution=True, picks=frozenset())
+    entries = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=view),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=view,
+    )
+    assert len(entries) == 1
+    assert "macro_reduce" in entries[0].reasons
+
+
 def test_exit_rules_hard_stop_trail_ratchet_and_time():
     cfg = DeskConfig(
-        trail_pct=0.03, trail_tight_after=0.03, trail_tight_pct=0.015, hard_stop_pct=0.03
+        trail_pct=0.03,
+        trail_tight_after=0.03,
+        trail_tight_pct=0.015,
+        hard_stop_pct=0.03,
+        midflat_hours=0.0,  # isolate the full time_exit path
     )
     pos = Position("X", 100.0, 5.0, 500.0, T0, 100.0)
     assert evaluate_exit(pos, [T0, 100, 101, 99, 100.5, 1], cfg) is None
@@ -175,6 +237,132 @@ def test_exit_rules_hard_stop_trail_ratchet_and_time():
     assert d is not None and d.reason == "time_exit"
     pos4 = Position("W", 100.0, 5.0, 500.0, T0, 100.0)
     assert evaluate_exit(pos4, [late, 100, 101, 100, 100.8, 1], cfg) is None  # above BE -> keep
+
+
+def test_midflat_exits_fee_flat_before_full_time_exit():
+    cfg = DeskConfig(midflat_hours=16.0, time_exit_hours=24.0, fee_rt=0.003)
+    pos = Position("Z", 100.0, 5.0, 500.0, T0, 100.0)
+    mid = T0 + int(16 * 3_600_000) - BAR_MS
+    assert evaluate_exit(pos, [mid - BAR_MS, 100, 100.2, 99.9, 100.2, 1], cfg) is None
+    d = evaluate_exit(pos, [mid, 100, 100.2, 99.9, 100.1, 1], cfg)
+    assert d is not None and d.reason == "midflat"
+    # Above fee_rt after midflat: hold until the full time exit (or trail).
+    pos2 = Position("W", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [mid, 100, 101, 100, 100.5, 1], cfg) is None
+
+
+def test_early_stop_stages_until_peak_then_hard_stop():
+    cfg = DeskConfig(
+        hard_stop_pct=0.03,
+        early_stop_pct=0.015,
+        early_stop_until_peak=0.005,
+        trail_pct=0.10,
+        trail_tight_after=0.0,
+        midflat_hours=0.0,
+        green_deadline_hours=0.0,
+        exit_on_touch=True,
+    )
+    # Never confirmed: −1.5% early stop fires before −3% hard stop.
+    pos = Position("E", 100.0, 5.0, 500.0, T0, 100.0)
+    d = evaluate_exit(pos, [T0, 100, 100.2, 98.4, 98.5, 1], cfg)
+    assert d is not None and d.reason == "early_stop" and d.urgent
+    assert d.price == pytest.approx(98.5)
+    # After peak ≥ +0.5%, early stop unlocks → −3% hard stop only.
+    pos2 = Position("E", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [T0, 100, 100.6, 100.0, 100.5, 1], cfg) is None
+    assert pos2.peak == pytest.approx(100.6)
+    d = evaluate_exit(pos2, [T0 + BAR_MS, 100.5, 100.5, 98.4, 98.5, 1], cfg)
+    assert d is None  # −1.6% still above −3% hard stop
+    d = evaluate_exit(pos2, [T0 + 2 * BAR_MS, 98.5, 98.5, 96.8, 97.0, 1], cfg)
+    assert d is not None and d.reason == "hard_stop" and d.price == pytest.approx(97.0)
+
+
+def test_no_green_exits_when_peak_never_confirms():
+    cfg = DeskConfig(
+        green_deadline_hours=4.0,
+        green_min_peak=0.01,
+        hard_stop_pct=0.05,
+        trail_pct=0.10,
+        midflat_hours=0.0,
+        time_exit_hours=24.0,
+        fee_rt=0.003,
+    )
+    deadline = T0 + int(4 * 3_600_000) - BAR_MS
+    pos = Position("G", 100.0, 5.0, 500.0, T0, 100.0)
+    # Peak only +0.4% by deadline → no_green.
+    assert evaluate_exit(pos, [deadline - BAR_MS, 100, 100.4, 99.8, 100.2, 1], cfg) is None
+    d = evaluate_exit(pos, [deadline, 100.2, 100.3, 99.9, 100.1, 1], cfg)
+    assert d is not None and d.reason == "no_green" and not d.urgent
+    # Peak ≥ +1% by deadline → hold (even if close is fee-flat).
+    pos2 = Position("G", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [deadline - BAR_MS, 100, 101.2, 100.5, 100.8, 1], cfg) is None
+    assert evaluate_exit(pos2, [deadline, 100.8, 100.9, 100.0, 100.2, 1], cfg) is None
+
+
+def test_entry_fee_buffer_and_chase_reject():
+    cfg = DeskConfig(
+        min_excess=0.010,
+        entry_fee_buffer_mult=6.0,
+        fee_rt=0.003,
+        max_chase_ret_24h=0.09,
+        chase_near_high=0.008,
+        min_volume_eur=0.0,
+    )
+    # Excess 1.5% clears min_excess but not fee×6 (1.8%) — rejected.
+    thin = {"A": _stats("A", 0.015)}
+    assert rank_candidates(thin, 0.0, cfg) == []
+    # Excess 2.0% clears fee floor.
+    ok = rank_candidates({"B": _stats("B", 0.020)}, 0.0, cfg)
+    assert [c.base for c in ok] == ["B"]
+    # Extended + glued to high → chase reject.
+    from bot.live.momentum_desk import BaseStats
+
+    chase = {
+        "C": BaseStats(
+            base="C", price=100.0, ret_24h=0.10, from_high=-0.002, volume_eur=5e6
+        )
+    }
+    assert rank_candidates(chase, 0.0, cfg) == []
+    # Same extension but pulled back under the high → allowed.
+    pulled = {
+        "C": BaseStats(
+            base="C", price=100.0, ret_24h=0.10, from_high=-0.015, volume_eur=5e6
+        )
+    }
+    assert [c.base for c in rank_candidates(pulled, 0.0, cfg)] == ["C"]
+
+
+def test_strong_clip_requires_quality_or_alphai():
+    from bot.live.momentum_desk import RegimeDecision
+
+    cfg = DeskConfig(
+        clip_eur=1000.0,
+        strong_clip_mult=1.3,
+        weak_clip_mult=1.0,
+        strong_clip_requires_quality=True,
+        strong_clip_min_excess=0.04,
+        min_volume_eur=0.0,
+        min_excess=0.015,
+        entry_fee_buffer_mult=0.0,
+    )
+    strong = RegimeDecision(True, 0.01, 0.9, ())
+    mediocre = rank_candidates({"SOL": _stats("SOL", 0.025)}, 0.0, cfg)
+    e = select_entries(mediocre, strong, cfg, held_bases=[])[0]
+    assert e.clip_eur == pytest.approx(1000.0)
+    assert "breadth_strong_gated" in e.reasons
+    quality = rank_candidates({"SOL": _stats("SOL", 0.05)}, 0.0, cfg)
+    e2 = select_entries(quality, strong, cfg, held_bases=[])[0]
+    assert e2.clip_eur == pytest.approx(1300.0) and "breadth_strong" in e2.reasons
+    view = AlphaIView(picks=frozenset({"SOL"}))
+    picked = select_entries(
+        rank_candidates({"SOL": _stats("SOL", 0.025)}, 0.0, cfg, alphai=view),
+        strong,
+        cfg,
+        held_bases=[],
+        alphai=view,
+    )[0]
+    # alphai_pick still sizes up even below strong_clip_min_excess
+    assert picked.clip_eur == pytest.approx(1000 * 1.3 * 1.3)
 
 
 def test_exit_on_touch_uses_low_and_prior_peak():
@@ -355,6 +543,11 @@ class FakeGateway:
     ask: float = 100.2
     fill_maker_after_polls: int | None = None  # None = never fills as maker
     partial_on_cancel: bool = False
+    # Fraction of each taker order that fills immediately (rest canceled empty).
+    taker_fill_frac: float = 1.0
+    # After this many partial taker fills, subsequent takers fill fully (models
+    # an escalating chase that finally clears the book).
+    taker_partial_count: int = 10**9
     free_by_base: dict[str, float] | None = None  # None = do not report (no clamp)
     placed: list[dict] = field(default_factory=list)
     _orders: dict[str, dict] = field(default_factory=dict)
@@ -372,13 +565,23 @@ class FakeGateway:
         oid = f"o{len(self.placed) + 1}"
         self.placed.append({"side": side, "qty": qty, "price": price, "post_only": post_only})
         if not post_only:
+            n_taker = sum(1 for p in self.placed if not p["post_only"])
+            frac = (
+                float(self.taker_fill_frac)
+                if n_taker <= int(self.taker_partial_count)
+                else 1.0
+            )
+            filled = max(0.0, min(qty, qty * frac))
             self._orders[oid] = {
-                "status": "closed",
-                "filled": qty,
-                "avg": price,
-                "fee": qty * price * 0.0025,
+                "status": "closed" if filled + 1e-12 >= qty else "open",
+                "filled": filled,
+                "avg": price if filled > 0 else None,
+                "fee": filled * price * 0.0025,
+                "qty": qty,
+                "price": price,
             }
-            return OrderState(oid, "closed", qty, price, qty * price * 0.0025)
+            o = self._orders[oid]
+            return OrderState(oid, o["status"], o["filled"], o["avg"], o["fee"])
         self._orders[oid] = {
             "status": "open",
             "filled": 0.0,
@@ -405,14 +608,14 @@ class FakeGateway:
     async def cancel_order(self, order_id, symbol):
         o = self._orders[order_id]
         if o["status"] == "open":
-            if self.partial_on_cancel:
+            if self.partial_on_cancel and o["filled"] <= 0:
                 # Venue filled part of it just before the cancel landed; the
                 # cancel reply itself (like Bitvavo's) says nothing about it.
                 o.update(
                     filled=o["qty"] * 0.4, avg=o["price"], fee=o["qty"] * 0.4 * o["price"] * 0.0015
                 )
             o["status"] = "canceled"
-        return OrderState(order_id, "open", 0.0, None, 0.0)
+        return OrderState(order_id, "open", o["filled"], o["avg"], o["fee"])
 
 
 class FakeClock:
@@ -434,7 +637,7 @@ class FakeFeed:
         return self.rows[base][-limit:]
 
 
-def _runner(tmp_path: Path, gw, clock, feed=None, **cfg_kwargs) -> MomentumDeskRunner:
+def _runner(tmp_path: Path, gw, clock, feed=None, opt_kwargs=None, **cfg_kwargs) -> MomentumDeskRunner:
     cfg = DeskConfig(**{**FLAT_SIZING, **cfg_kwargs})
     opts = RunnerOptions(
         state_path=str(tmp_path / "state.json"),
@@ -443,6 +646,7 @@ def _runner(tmp_path: Path, gw, clock, feed=None, **cfg_kwargs) -> MomentumDeskR
         buy_rest_sec=60.0,
         repeg_sec=20.0,
         poll_sec=5.0,
+        **(opt_kwargs or {}),
     )
     return MomentumDeskRunner(
         cfg, gw, options=opts, feed=feed or FakeFeed({}), clock=clock, sleep=clock.sleep
@@ -503,6 +707,61 @@ def test_urgent_sell_goes_straight_to_taker(tmp_path):
     fill = asyncio.run(r._sell("SOL", 5.0, urgent=True))
     assert fill is not None and fill.taker and len(gw.placed) == 1
     assert gw.placed[0]["price"] == pytest.approx(100.0 * 0.998)
+
+
+def test_large_urgent_sell_is_sliced(tmp_path):
+    # €10k notional / €2.5k slices → 4 child taker orders when the book fills each.
+    gw = FakeGateway()
+    clock = FakeClock(T0 / 1000)
+    r = _runner(tmp_path, gw, clock, opt_kwargs={"sell_slice_eur": 2500.0})
+    fill = asyncio.run(r._sell("SOL", 100.0, urgent=True))
+    assert fill is not None and fill.qty == pytest.approx(100.0)
+    takers = [p for p in gw.placed if not p["post_only"]]
+    assert len(takers) == 4
+    assert all(p["qty"] == pytest.approx(25.0) for p in takers)
+
+
+def test_sell_chase_escalates_cross_until_flat(tmp_path):
+    # Each taker only fills 40%; chase rounds must deepen the cross and finish.
+    gw = FakeGateway(taker_fill_frac=0.4, taker_partial_count=1)
+    clock = FakeClock(T0 / 1000)
+    r = _runner(
+        tmp_path,
+        gw,
+        clock,
+        opt_kwargs={
+            "sell_slice_eur": 0.0,  # single child per round
+            "sell_chase_rounds": 4,
+            "sell_chase_step_bps": 15.0,
+            "taker_cross_bps": 20.0,
+        },
+    )
+    fill = asyncio.run(r._sell("SOL", 10.0, urgent=True))
+    assert fill is not None and fill.qty == pytest.approx(10.0, abs=1e-6)
+    takers = [p for p in gw.placed if not p["post_only"]]
+    assert len(takers) >= 2
+    # Cross deepens after the thin first fill: 20 → 35 bps …
+    prices = [p["price"] for p in takers]
+    assert prices[0] == pytest.approx(100.0 * (1 - 0.0020))
+    assert prices[1] == pytest.approx(100.0 * (1 - 0.0035))
+    assert takers[0]["qty"] == pytest.approx(10.0)
+    assert takers[1]["qty"] == pytest.approx(6.0)
+
+
+def test_patient_trail_sell_rests_then_chases_partials(tmp_path):
+    # Trail exits stay patient (maker first) but still chase leftovers to flat.
+    gw = FakeGateway(taker_fill_frac=0.5, taker_partial_count=1)
+    clock = FakeClock(T0 / 1000)
+    r = _runner(
+        tmp_path,
+        gw,
+        clock,
+        opt_kwargs={"sell_slice_eur": 0.0, "sell_chase_rounds": 3, "sell_rest_sec": 20.0},
+    )
+    fill = asyncio.run(r._sell("ETH", 8.0, urgent=False))
+    assert fill is not None and fill.qty == pytest.approx(8.0, abs=1e-6)
+    assert any(p["post_only"] for p in gw.placed)
+    assert any(not p["post_only"] for p in gw.placed)
 
 
 def test_tick_exits_on_closed_bar_and_persists_ledger(tmp_path):
@@ -717,7 +976,7 @@ def test_dashboard_renders_positions_decision_and_ledger():
                 "quantity": 156.25,
                 "notional_eur": 500,
                 "age_h": 2.5,
-                "peak_return": 0.045,
+                "peak_return": 0.055,
                 "mark": 3.3,
                 "gross_return": 0.03125,
                 "unrealized_net_eur": 14.1,
@@ -769,8 +1028,8 @@ def test_dashboard_renders_positions_decision_and_ledger():
     html = render_momentum_dashboard(status, rows).body.decode()
     assert "LIVE" in html and "REGIME ON" in html
     assert "DOT" in html and "trail" in html and "2,015.60" in html
-    # Ratchet active (peak 4.5% >= 4%) -> tight trail shown at 2%.
-    assert "(2.0%)" in html
+    # Ratchet active (peak 5.5% >= 5%) -> tight trail shown at 2.5%.
+    assert "(2.5%)" in html
     assert "<script" not in html  # server-rendered, no JS surface
     # Sell button is a GET to the confirmation step, never a direct POST.
     assert 'name="sell" value="h-dot"' in html and "/live/momentum/sell" not in html
@@ -1123,6 +1382,9 @@ def test_daily_report_flags_missed_hour_and_early_manual():
         strong_clip_mult=1.0,
         weak_clip_mult=1.0,
         max_from_high=0.02,
+        # Pin the trail the afternoon dump was written against (~3% from peak).
+        trail_pct=0.03,
+        trail_tight_after=0.0,
     )
     # Build candles: BTC flat, SOL strong on hour 10 only path.
     n = 3 * BARS_PER_DAY
@@ -1225,8 +1487,17 @@ def test_dashboard_sell_all_and_report_render():
     }
     html = render_momentum_dashboard(status, []).body.decode()
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
-    assert "Volatile shadow" in html
+    assert "Moreney" in html and ("Netto verdiend" in html or "Deze week" in html)
+    # Volatile sleeve is off by default (core-only desk).
+    assert "Volatile ledger" not in html
+    assert "Start volatile" not in html
+    assert "Desk sleeves" not in html
+    assert "/live/momentum/earnings" in html
     assert "pos-cards" in html and 'name="sell" value="h1"' in html
+    with_vol = render_momentum_dashboard(
+        status, [], show_volatile=True, volatile={"running": False}, volatile_ledger_rows=[]
+    ).body.decode()
+    assert "Volatile ledger" in with_vol and "Desk sleeves" in with_vol
     confirm = render_momentum_dashboard(status, [], sell_all=True).body.decode()
     assert "Alles verkopen?" in confirm and "/live/momentum/sell-all" in confirm
     report = {
@@ -1253,3 +1524,35 @@ def test_dashboard_sell_all_and_report_render():
     }
     rep = render_momentum_dashboard(status, [], report=report).body.decode()
     assert "Gemiste instappen" in rep and "DOT" in rep and 'http-equiv="refresh"' not in rep
+
+
+def test_decide_resizes_clip_to_venue_cash_before_plan(tmp_path):
+    """Decide path rewrites entry clips to what venues can actually fund."""
+    clock = FakeClock(T0 / 1000)
+    r, _ = _multi_runner(tmp_path, clock, bitvavo_cash=816.0, okx_cash=620.0)
+    asyncio.run(r._refresh_cash())
+    from bot.live.momentum_desk import Entry
+
+    # Simulate select_entries output, then apply the same resize block as _decide.
+    entries = [
+        Entry(base="ETH", clip_eur=1690.0, score=0.05, reasons=("alphai_pick",)),
+        Entry(base="LINK", clip_eur=500.0, score=0.04, reasons=("excess=+0.0400",)),
+    ]
+    sized = []
+    for entry in entries:
+        route = r._route_entry(entry.clip_eur)
+        if route is None:
+            continue
+        _venue, clip = route
+        reasons = entry.reasons
+        if clip + 1e-9 < entry.clip_eur:
+            reasons = tuple(reasons) + ("clip_reduced",)
+        sized.append(
+            Entry(base=entry.base, clip_eur=round(clip, 2), score=entry.score, reasons=reasons)
+        )
+    assert sized[0].base == "ETH"
+    assert "clip_reduced" in sized[0].reasons
+    assert 810.0 < sized[0].clip_eur <= 816.0
+    # LINK fits on primary → unchanged clip, no resize tag.
+    assert sized[1].clip_eur == 500.0
+    assert "clip_reduced" not in sized[1].reasons

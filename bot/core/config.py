@@ -579,11 +579,20 @@ class Settings(BaseSettings):
     # while adding a third of the drawdown; exits keep running on weekends.
     momentum_desk_skip_weekend_entries: bool = True
     momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
-    momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
-    momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
-    momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
+    # 130d @€40k search winner: 4% trail with 5%→2.5% ratchet.
+    momentum_desk_trail_pct: float = Field(default=0.04, gt=0, le=0.2)
+    momentum_desk_trail_tight_after: float = Field(default=0.05, ge=0, le=0.5)
+    momentum_desk_trail_tight_pct: float = Field(default=0.025, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_time_exit_hours: float = Field(default=24.0, gt=0)
+    # Entry/exit quality knobs (DeskConfig defaults; overridable via env).
+    momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)
+    momentum_desk_entry_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
+    momentum_desk_max_chase_ret_24h: float = Field(default=0.0, ge=0.0, le=1.0)
+    momentum_desk_midflat_hours: float = Field(default=0.0, ge=0.0, le=168.0)
+    # Time-to-green early invalidation (A/B winner: 4h / +1% peak).
+    momentum_desk_green_deadline_hours: float = Field(default=4.0, ge=0.0, le=168.0)
+    momentum_desk_green_min_peak: float = Field(default=0.01, ge=0.0, le=0.2)
     momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
