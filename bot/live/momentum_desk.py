@@ -172,10 +172,13 @@ class DeskConfig:
     # decision hours, and trigger stops on the bar's low (proxy for minute-level
     # monitoring) instead of on the close.
     decision_every_bar: bool = False
-    # Live cadence (0 = use ``decision_hours_utc``). Entry filters are strict
-    # enough that scanning every minute on weekdays catches new 15m closes and
-    # freed slots without waiting for sparse hour slots.
+    # Live cadence (0 = use ``decision_hours_utc``). Continuous minute/every-bar
+    # scanning destroys WR on the 135d live-scale window (~54%→~36%); keep 0
+    # and rely on quality hours + ``refill_on_exit`` for freed slots.
     decision_interval_sec: float = 0.0
+    # After a successful exit frees a slot, run one immediate entry decision
+    # (same filters) so a weekday runner is not waited on until the next hour.
+    refill_on_exit: bool = True
     exit_on_touch: bool = False
     # Dynamic universe: at each decision keep only the K bases with the highest
     # trailing 24h EUR volume (0 = use the whole universe). Lets a wide pool

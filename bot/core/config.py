@@ -565,12 +565,14 @@ class Settings(BaseSettings):
     # Entry venues in preference order (cheapest fees first); later venues are
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
-    # Fallback schedule when decision_interval_sec=0 (WR search used 7+16).
-    momentum_desk_decision_hours_utc: str = "7,16"
-    # Live entry scan cadence in seconds (0 = only decision_hours_utc).
-    # 60s weekday scan: signal still uses closed 15m bars; catches new closes
-    # and freed slots after exits. Strict filters stay the WR gate.
-    momentum_desk_decision_interval_sec: float = Field(default=60.0, ge=0.0, le=3600.0)
+    # Quality hours (135d live-scale): 7+13+16 ≈ WR 52.5% / +€888 vs peak
+    # 7+16 WR 54% / +€951. Midday 13 catches EU session without every-bar bleed.
+    momentum_desk_decision_hours_utc: str = "7,13,16"
+    # 0 = only decision_hours_utc. Continuous minute scan ≈ every-bar and cuts
+    # WR ~54%→~36% on the same window; use refill_on_exit for freed slots.
+    momentum_desk_decision_interval_sec: float = Field(default=0.0, ge=0.0, le=3600.0)
+    # After an exit frees a slot, run one immediate entry decision (same filters).
+    momentum_desk_refill_on_exit: bool = True
     # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
     # positions, so the base clip can exceed book/4; the router shrinks or
     # skips clips the venue cash cannot fund. Strong tape (>= 85% of the

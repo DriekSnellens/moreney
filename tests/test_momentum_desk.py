@@ -1780,3 +1780,65 @@ def test_manage_exits_fires_fade_fast_urgent_sell(tmp_path):
     assert len(exits) == 1 and exits[0]["reason"] == "fade_fast"
     assert any(not o["post_only"] for o in gw.placed)  # urgent taker
 
+
+
+def test_refill_on_exit_triggers_decide_outside_hours(tmp_path):
+    """After an exit frees a slot, refill decides immediately even off-hour."""
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock(T0 / 1000 + 10 * 3600 + 30 * 60)  # Thu 10:30 UTC — not 7/13/16
+    gw = FakeGateway(bid=110.0, ask=110.2, fill_maker_after_polls=1)
+    cfg = DeskConfig(
+        decision_hours_utc=(7, 13, 16),
+        decision_interval_sec=0.0,
+        refill_on_exit=True,
+        max_positions=2,
+        hard_stop_pct=0.20,
+        trail_pct=0.20,
+        **FLAT_SIZING,
+    )
+    opts = RunnerOptions(
+        venues=("bitvavo",),
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        alphai_recommendations_path=None,
+        sell_rest_sec=1.0,
+        sell_slice_eur=0.0,
+    )
+    r = MomentumDeskRunner(cfg, gw, options=opts, clock=clock, sleep=clock.sleep)
+    r.holdings = [
+        Holding(
+            Position(
+                "SOL",
+                100.0,
+                10.0,
+                1000.0,
+                T0,
+                112.0,
+                entry_fee_eur=1.5,
+                venue="bitvavo",
+            ),
+            "h-refill",
+            last_bar_ms=T0,
+        )
+    ]
+    calls: list[str] = []
+
+    async def fake_decide(t_ms, now_ms, *, execute, trigger, expect_bases=None):
+        calls.append(trigger)
+        return {"ok": True, "trigger": trigger}
+
+    r._decide = fake_decide  # type: ignore[method-assign]
+
+    async def scenario():
+        fill = await r._exit(r.holdings[0], ExitDecision("trail", 0.10, False))
+        assert fill is not None
+        assert r.holdings == []
+        assert r._refill_pending is True
+        # Off-hour: scheduled decide must not fire; refill must.
+        assert r._decision_slot_due(int(clock() * 1000)) is None
+        await r._maybe_refill(int(clock() * 1000))
+        assert calls == ["refill"]
+        assert r._refill_pending is False
+
+    asyncio.run(scenario())

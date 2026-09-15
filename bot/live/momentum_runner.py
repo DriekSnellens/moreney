@@ -385,6 +385,8 @@ class MomentumDeskRunner:
         self.marks_updated_at: float | None = None
         self.cash_by_venue: dict[str, float] = {}
         self._cash_ts: float = 0.0
+        # Set when an exit frees a slot; consumed by ``_maybe_refill``.
+        self._refill_pending: bool = False
         self._lock = asyncio.Lock()
         self.started_at = datetime.now(UTC).isoformat()
         self._load_state()
@@ -557,6 +559,8 @@ class MomentumDeskRunner:
             await self._manage_exits(now_ms)
             # Cash first: the venue router needs fresh balances at the decision hour.
             await self._refresh_cash()
+            # Refill freed slots immediately (WR hours stay sparse; don't wait).
+            await self._maybe_refill(now_ms)
             await self._maybe_decide(now_ms)
 
     async def refresh_marks(self) -> None:
@@ -798,6 +802,10 @@ class MomentumDeskRunner:
         remaining = h.pos.quantity - fill.qty
         if remaining * fill.avg_price < _MIN_ORDER_EUR:
             self.holdings.remove(h)
+            if bool(getattr(self.cfg, "refill_on_exit", True)) and len(
+                self.holdings
+            ) < int(self.cfg.max_positions):
+                self._refill_pending = True
         else:
             h.pos.quantity = remaining
             h.pos.notional_eur = remaining * h.pos.entry_price
@@ -892,6 +900,25 @@ class MomentumDeskRunner:
         except Exception:  # noqa: BLE001
             logger.warning("momentum desk: AlphaI recommendations unreadable; ignoring")
             return AlphaIView()
+
+    async def _maybe_refill(self, now_ms: int) -> None:
+        """One immediate entry pass after an exit frees a slot.
+
+        Keeps sparse high-WR decision hours, but does not leave cash idle until
+        the next scheduled slot when a runner is already printing. Does not
+        advance ``last_decision_hour_ms`` so the hour schedule stays intact.
+        """
+        if not self._refill_pending:
+            return
+        self._refill_pending = False
+        if not bool(getattr(self.cfg, "refill_on_exit", True)):
+            return
+        if len(self.holdings) >= int(self.cfg.max_positions):
+            return
+        if not is_entry_weekday(now_ms, self.cfg):
+            return
+        t_ms = (now_ms // BAR_MS) * BAR_MS
+        await self._decide(t_ms, now_ms, execute=True, trigger="refill")
 
     async def _maybe_decide(self, now_ms: int) -> None:
         slot_ms = self._decision_slot_due(now_ms)
@@ -1472,6 +1499,7 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         decision_interval_sec=float(
             getattr(settings, "momentum_desk_decision_interval_sec", 0.0)
         ),
+        refill_on_exit=bool(getattr(settings, "momentum_desk_refill_on_exit", True)),
         clip_eur=float(getattr(settings, "momentum_desk_clip_eur", 500.0)),
         max_positions=int(getattr(settings, "momentum_desk_max_positions", 3)),
         trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.04)),
