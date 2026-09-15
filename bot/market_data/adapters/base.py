@@ -120,8 +120,29 @@ class PublicMarketDataAdapter(ABC):
         sequence: int | None = None,
         prev_sequence: int | None = None,
         timestamp: datetime | None = None,
+        exchange_ts_available: bool | None = None,
+        timestamp_quality: str | None = None,
     ) -> MarketDataEvent:
-        ts = timestamp or datetime.now(UTC)
+        received_at = datetime.now(UTC)
+        # Never invent an exchange timestamp. If the venue did not provide one,
+        # keep operational timestamp = received_at but mark exchange_ts unavailable.
+        if exchange_ts_available is None:
+            exchange_ts_available = timestamp is not None
+        if timestamp is None:
+            ts = received_at
+            exchange_ts_available = False
+            timestamp_quality = timestamp_quality or "UNSUPPORTED"
+        else:
+            ts = timestamp
+            timestamp_quality = timestamp_quality or (
+                "MEDIUM" if exchange_ts_available else "UNSUPPORTED"
+            )
+        meta = {
+            "exchange_ts_available": exchange_ts_available,
+            "timestamp_quality": timestamp_quality,
+            "exchange_ts": ts.isoformat() if exchange_ts_available else None,
+            "received_at": received_at.isoformat(),
+        }
         update = OrderBookUpdate(
             exchange=self.name,
             symbol=symbol,
@@ -129,16 +150,18 @@ class PublicMarketDataAdapter(ABC):
             asks=asks,
             is_snapshot=is_snapshot,
             timestamp=ts,
-            received_at=datetime.now(UTC),
+            received_at=received_at,
             sequence=sequence,
             prev_sequence=prev_sequence,
+            metadata=dict(meta),
         )
         return MarketDataEvent(
             exchange=self.name,
             symbol=symbol,
             event_type="book_snapshot" if is_snapshot else "book_update",
             timestamp=ts,
-            received_at=update.received_at,
+            received_at=received_at,
             sequence=sequence,
             book_update=update,
+            metadata=dict(meta),
         )

@@ -1,0 +1,349 @@
+{
+  "asof": "2026-09-15T15:00:00+00:00",
+  "window": {
+    "start": "2026-06-23T15:00:00+00:00",
+    "end": "2026-09-15T15:00:00+00:00",
+    "weeks": 12
+  },
+  "book_eur": 20000.0,
+  "clip_eur": 10000.0,
+  "caveat": "Tape-only bar replay; soft+macro idle cannot fire without AlphaI history. Survival lever tested = weak_tape_idle_on_double (+ soft_macro flag, inert here).",
+  "survival_on": {
+    "label": "survival_on",
+    "survival": true,
+    "summary": {
+      "window": "2026-06-23 15:00 -> 2026-09-15 15:00",
+      "trades": 62,
+      "open": 0,
+      "win_rate": 0.484,
+      "realized_eur": 3754.58,
+      "open_mtm_eur": 0,
+      "total_eur": 3754.58,
+      "fees_eur": 1785.0,
+      "avg_net_per_trade_eur": 60.56,
+      "max_drawdown_eur": -1627.01,
+      "decision_points": 180,
+      "regime_on_points": 129,
+      "by_reason": {
+        "trail": {
+          "n": 57,
+          "net_eur": 5681.18
+        },
+        "hard_stop": {
+          "n": 5,
+          "net_eur": -1926.6
+        }
+      }
+    },
+    "return_pct": 18.773,
+    "soft_decision_points": 0,
+    "soft_entries": 0,
+    "weak_tape_idle_decisions": 51,
+    "weeks": [
+      {
+        "week_start": "2026-06-22",
+        "trades": 4,
+        "wins": 1,
+        "win_rate": 0.25,
+        "pnl_eur": -305.69
+      },
+      {
+        "week_start": "2026-06-29",
+        "trades": 7,
+        "wins": 5,
+        "win_rate": 0.714,
+        "pnl_eur": 1479.68
+      },
+      {
+        "week_start": "2026-07-06",
+        "trades": 4,
+        "wins": 0,
+        "win_rate": 0.0,
+        "pnl_eur": -876.13
+      },
+      {
+        "week_start": "2026-07-13",
+        "trades": 2,
+        "wins": 2,
+        "win_rate": 1.0,
+        "pnl_eur": 411.3
+      },
+      {
+        "week_start": "2026-07-20",
+        "trades": 1,
+        "wins": 0,
+        "win_rate": 0.0,
+        "pnl_eur": -384.5
+      },
+      {
+        "week_start": "2026-07-27",
+        "trades": 4,
+        "wins": 2,
+        "win_rate": 0.5,
+        "pnl_eur": 162.97
+      },
+      {
+        "week_start": "2026-08-10",
+        "trades": 2,
+        "wins": 1,
+        "win_rate": 0.5,
+        "pnl_eur": -75.96
+      },
+      {
+        "week_start": "2026-08-17",
+        "trades": 13,
+        "wins": 6,
+        "win_rate": 0.462,
+        "pnl_eur": 2002.51
+      },
+      {
+        "week_start": "2026-08-24",
+        "trades": 3,
+        "wins": 1,
+        "win_rate": 0.333,
+        "pnl_eur": -32.84
+      },
+      {
+        "week_start": "2026-08-31",
+        "trades": 9,
+        "wins": 5,
+        "win_rate": 0.556,
+        "pnl_eur": 387.85
+      },
+      {
+        "week_start": "2026-09-07",
+        "trades": 10,
+        "wins": 5,
+        "win_rate": 0.5,
+        "pnl_eur": 482.38
+      },
+      {
+        "week_start": "2026-09-14",
+        "trades": 3,
+        "wins": 2,
+        "win_rate": 0.667,
+        "pnl_eur": 503.0
+      }
+    ]
+  },
+  "survival_off": {
+    "label": "survival_off",
+    "survival": false,
+    "summary": {
+      "window": "2026-06-23 15:00 -> 2026-09-15 15:00",
+      "trades": 62,
+      "open": 0,
+      "win_rate": 0.484,
+      "realized_eur": 3754.58,
+      "open_mtm_eur": 0,
+      "total_eur": 3754.58,
+      "fees_eur": 1785.0,
+      "avg_net_per_trade_eur": 60.56,
+      "max_drawdown_eur": -1627.01,
+      "decision_points": 180,
+      "regime_on_points": 180,
+      "by_reason": {
+        "trail": {
+          "n": 57,
+          "net_eur": 5681.18
+        },
+        "hard_stop": {
+          "n": 5,
+          "net_eur": -1926.6
+        }
+      }
+    },
+    "return_pct": 18.773,
+    "soft_decision_points": 0,
+    "soft_entries": 0,
+    "weak_tape_idle_decisions": 0,
+    "weeks": [
+      {
+        "week_start": "2026-06-22",
+        "trades": 4,
+        "wins": 1,
+        "win_rate": 0.25,
+        "pnl_eur": -305.69
+      },
+      {
+        "week_start": "2026-06-29",
+        "trades": 7,
+        "wins": 5,
+        "win_rate": 0.714,
+        "pnl_eur": 1479.68
+      },
+      {
+        "week_start": "2026-07-06",
+        "trades": 4,
+        "wins": 0,
+        "win_rate": 0.0,
+        "pnl_eur": -876.13
+      },
+      {
+        "week_start": "2026-07-13",
+        "trades": 2,
+        "wins": 2,
+        "win_rate": 1.0,
+        "pnl_eur": 411.3
+      },
+      {
+        "week_start": "2026-07-20",
+        "trades": 1,
+        "wins": 0,
+        "win_rate": 0.0,
+        "pnl_eur": -384.5
+      },
+      {
+        "week_start": "2026-07-27",
+        "trades": 4,
+        "wins": 2,
+        "win_rate": 0.5,
+        "pnl_eur": 162.97
+      },
+      {
+        "week_start": "2026-08-10",
+        "trades": 2,
+        "wins": 1,
+        "win_rate": 0.5,
+        "pnl_eur": -75.96
+      },
+      {
+        "week_start": "2026-08-17",
+        "trades": 13,
+        "wins": 6,
+        "win_rate": 0.462,
+        "pnl_eur": 2002.51
+      },
+      {
+        "week_start": "2026-08-24",
+        "trades": 3,
+        "wins": 1,
+        "win_rate": 0.333,
+        "pnl_eur": -32.84
+      },
+      {
+        "week_start": "2026-08-31",
+        "trades": 9,
+        "wins": 5,
+        "win_rate": 0.556,
+        "pnl_eur": 387.85
+      },
+      {
+        "week_start": "2026-09-07",
+        "trades": 10,
+        "wins": 5,
+        "win_rate": 0.5,
+        "pnl_eur": 482.38
+      },
+      {
+        "week_start": "2026-09-14",
+        "trades": 3,
+        "wins": 2,
+        "win_rate": 0.667,
+        "pnl_eur": 503.0
+      }
+    ]
+  },
+  "week_deltas": [
+    {
+      "week_start": "2026-06-22",
+      "survival_on_pnl": -305.69,
+      "survival_off_pnl": -305.69,
+      "delta_eur": 0.0,
+      "survival_on_trades": 4,
+      "survival_off_trades": 4
+    },
+    {
+      "week_start": "2026-06-29",
+      "survival_on_pnl": 1479.68,
+      "survival_off_pnl": 1479.68,
+      "delta_eur": 0.0,
+      "survival_on_trades": 7,
+      "survival_off_trades": 7
+    },
+    {
+      "week_start": "2026-07-06",
+      "survival_on_pnl": -876.13,
+      "survival_off_pnl": -876.13,
+      "delta_eur": 0.0,
+      "survival_on_trades": 4,
+      "survival_off_trades": 4
+    },
+    {
+      "week_start": "2026-07-13",
+      "survival_on_pnl": 411.3,
+      "survival_off_pnl": 411.3,
+      "delta_eur": 0.0,
+      "survival_on_trades": 2,
+      "survival_off_trades": 2
+    },
+    {
+      "week_start": "2026-07-20",
+      "survival_on_pnl": -384.5,
+      "survival_off_pnl": -384.5,
+      "delta_eur": 0.0,
+      "survival_on_trades": 1,
+      "survival_off_trades": 1
+    },
+    {
+      "week_start": "2026-07-27",
+      "survival_on_pnl": 162.97,
+      "survival_off_pnl": 162.97,
+      "delta_eur": 0.0,
+      "survival_on_trades": 4,
+      "survival_off_trades": 4
+    },
+    {
+      "week_start": "2026-08-10",
+      "survival_on_pnl": -75.96,
+      "survival_off_pnl": -75.96,
+      "delta_eur": 0.0,
+      "survival_on_trades": 2,
+      "survival_off_trades": 2
+    },
+    {
+      "week_start": "2026-08-17",
+      "survival_on_pnl": 2002.51,
+      "survival_off_pnl": 2002.51,
+      "delta_eur": 0.0,
+      "survival_on_trades": 13,
+      "survival_off_trades": 13
+    },
+    {
+      "week_start": "2026-08-24",
+      "survival_on_pnl": -32.84,
+      "survival_off_pnl": -32.84,
+      "delta_eur": 0.0,
+      "survival_on_trades": 3,
+      "survival_off_trades": 3
+    },
+    {
+      "week_start": "2026-08-31",
+      "survival_on_pnl": 387.85,
+      "survival_off_pnl": 387.85,
+      "delta_eur": 0.0,
+      "survival_on_trades": 9,
+      "survival_off_trades": 9
+    },
+    {
+      "week_start": "2026-09-07",
+      "survival_on_pnl": 482.38,
+      "survival_off_pnl": 482.38,
+      "delta_eur": 0.0,
+      "survival_on_trades": 10,
+      "survival_off_trades": 10
+    },
+    {
+      "week_start": "2026-09-14",
+      "survival_on_pnl": 503.0,
+      "survival_off_pnl": 503.0,
+      "delta_eur": 0.0,
+      "survival_on_trades": 3,
+      "survival_off_trades": 3
+    }
+  ],
+  "only_in_survival_off": [],
+  "only_in_survival_on": [],
+  "net_delta_eur": 0.0,
+  "verdict": "flat"
+}

@@ -12,6 +12,10 @@ EnvironmentFile=-/opt/moreney/.env
 Environment=PYTHONPATH=/opt/moreney
 Environment=MARKET_DATA_MODE=publisher
 Environment=MARKET_DATA_CACHE_INTERVAL_MS=100
+Environment=RESEARCH_MARKETDATA_RECORDING_ENABLED=false
+Environment=MARKETDATA_RETENTION_DAYS=3
+Environment=DISK_GUARD_WARN_PCT=85
+Environment=DISK_GUARD_BLOCK_PCT=92
 ExecStart=/opt/moreney/.venv/bin/python -m bot.market_data.publisher
 Restart=always
 RestartSec=3

@@ -101,6 +101,7 @@ def wants_html(request: Request) -> bool:
     accept = request.headers.get("accept", "")
     return "text/html" in accept or request.url.path in {
         "/fleet",
+        "/dashboard",
         "/paper/dashboard",
         "/paper/dashboard-lite",
         "/login",

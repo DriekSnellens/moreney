@@ -18,6 +18,7 @@ from bot.portfolio.models import (
     PortfolioStats,
     PositionState,
 )
+from bot.portfolio.venue_ledger import VenueLedger, infer_base_asset
 
 _ZERO = Decimal("0")
 
@@ -56,6 +57,7 @@ class PaperPortfolio:
             mark_prices={},
         )
         self._update_drawdown()
+        self.venue_ledger: VenueLedger | None = None
 
     @property
     def accounting(self) -> AccountingEngine:
@@ -72,6 +74,7 @@ class PaperPortfolio:
         self._state = state.model_copy(deep=True)
         if processed_fill_ids:
             self._accounting.load_processed_ids(processed_fill_ids)
+        self._update_unrealized()
         self._update_drawdown()
 
     async def get_snapshot(self) -> PortfolioSnapshot:
@@ -83,6 +86,11 @@ class PaperPortfolio:
             for b in self._state.balances.values()
         ]
         positions: list[Position] = []
+        min_notional = Decimal(
+            str(getattr(self._settings, "paper_maker_min_notional_eur", 10) or 10)
+        )
+        tradeable_floor = min_notional * Decimal("0.5")
+        tradeable_open = 0
         for pos in self._state.positions.values():
             if pos.quantity == 0:
                 continue
@@ -97,6 +105,9 @@ class PaperPortfolio:
                     side=OpportunitySide.BUY,
                 )
             )
+            ref_px = mark if mark > 0 else pos.average_entry_price
+            if ref_px > 0 and abs(pos.quantity * ref_px) >= tradeable_floor:
+                tradeable_open += 1
         equity = self._state.total_equity
         return PortfolioSnapshot(
             balances=balances,
@@ -104,9 +115,98 @@ class PaperPortfolio:
             equity_usd=equity,
             peak_equity_usd=self._state.stats.peak_equity,
             daily_realized_pnl_usd=self._state.stats.realized_pnl,
-            open_position_count=len(positions),
+            open_position_count=tradeable_open,
             as_of=datetime.now(UTC),
         )
+
+    def init_venue_ledger(self, venues: list[str], *, starting_quote: Decimal | None = None) -> None:
+        start = starting_quote if starting_quote is not None else Decimal(str(self._settings.paper_starting_eur))
+        self.venue_ledger = VenueLedger(venues, quote=self._quote, starting_quote=start)
+
+    def load_venue_ledger(self, data: dict | None) -> None:
+        if not data:
+            self.venue_ledger = None
+            return
+        self.venue_ledger = VenueLedger.from_export(
+            data,
+            fallback_quote=self._quote,
+            fallback_start=Decimal(str(self._settings.paper_starting_eur)),
+        )
+
+    def maybe_seed_inventory(self, symbol: str, price: Decimal) -> None:
+        """Pre-fund base asset on maker venues from a shared inventory budget.
+
+        ``paper_seed_inventory_pct`` is the *total* share of starting capital used for
+        all seeded coins combined (not per-coin). Only ``paper_seed_max_assets`` coins
+        are funded so sizes stay tradeable; other symbols are still scanned.
+        """
+        ledger = self.venue_ledger
+        if ledger is None or price <= 0:
+            return
+        pct = Decimal(str(getattr(self._settings, "paper_seed_inventory_pct", 0) or 0))
+        if pct <= 0:
+            return
+        base = infer_base_asset(symbol, self._quote)
+        quote = symbol.upper()
+        if not quote.endswith(self._quote):
+            return
+        allow = {
+            part.strip().upper().replace("-", "").replace("/", "")
+            for part in str(getattr(self._settings, "paper_seed_symbols", "") or "").split(",")
+            if part.strip()
+        }
+        if allow and quote not in allow:
+            return
+        max_assets = int(getattr(self._settings, "paper_seed_max_assets", 0) or 0)
+        if max_assets > 0 and base not in ledger.seeded_assets:
+            if len(ledger.seeded_assets) >= max_assets:
+                return
+        asset_slots = max_assets if max_assets > 0 else self._seed_asset_slot_count()
+        asset_slots = max(1, asset_slots)
+        start_each = ledger.start_quote_each
+        if start_each <= 0:
+            start_each = Decimal(str(self._settings.paper_starting_eur)) / Decimal(
+                max(1, len(ledger.venues))
+            )
+        quote_budget = start_each * (pct / Decimal("100")) / Decimal(asset_slots)
+        moved = ledger.seed_asset(base, price=price, quote_budget=quote_budget)
+        if not moved:
+            return
+        total_qty = sum((qty for _, qty, _ in moved), _ZERO)
+        total_cost = sum((cost for _, _, cost in moved), _ZERO)
+        eur = self._state.balances.setdefault(
+            self._quote, AssetBalance(asset=self._quote, available=_ZERO, reserved=_ZERO)
+        )
+        take = min(total_cost, eur.available)
+        eur.available -= take
+        crypto = self._state.balances.setdefault(
+            base, AssetBalance(asset=base, available=_ZERO, reserved=_ZERO)
+        )
+        crypto.available += total_qty
+        pos = self._state.positions.setdefault(
+            symbol.upper(),
+            PositionState(symbol=symbol.upper(), quantity=_ZERO, average_entry_price=price),
+        )
+        pos.quantity += total_qty
+        pos.average_entry_price = price
+        self._state.mark_prices[symbol.upper()] = price
+        self._update_unrealized()
+        self._update_drawdown()
+
+    def _seed_asset_slot_count(self) -> int:
+        allow = [
+            part.strip()
+            for part in str(getattr(self._settings, "paper_seed_symbols", "") or "").split(",")
+            if part.strip()
+        ]
+        if allow:
+            return len(allow)
+        symbols = [
+            part.strip()
+            for part in str(getattr(self._settings, "market_data_symbols", "") or "").split(",")
+            if part.strip() and part.strip().upper().endswith(self._quote)
+        ]
+        return max(1, len(symbols))
 
     def set_mark_price(self, symbol: str, price: Decimal) -> None:
         self._state.mark_prices[symbol.upper()] = price
@@ -120,6 +220,219 @@ class PaperPortfolio:
     def reserved(self, asset: str) -> Decimal:
         bal = self._state.balances.get(asset.upper())
         return bal.reserved if bal else _ZERO
+
+    def sync_live_balances(
+        self,
+        balances: list[Balance],
+        *,
+        quote_available_cap: Decimal | None = None,
+        allowed_bases: set[str] | None = None,
+        exclude_bases: set[str] | None = None,
+    ) -> dict[str, str]:
+        """Replace paper cash/inventory with live venue balances (EUR pocket capped).
+
+        ``quote_available_cap`` limits free quote used as the trading pocket so a
+        larger exchange balance cannot inflate paper risk beyond the session budget.
+        Locked quote stays reserved so open orders are visible to the pocket.
+
+        Optional ``allowed_bases`` / ``exclude_bases`` keep dust and non-tradeable
+        coins out of the paper position book (so sells are not blocked by caps).
+        """
+        quote = self._quote
+        allow = (
+            {a.strip().upper() for a in allowed_bases if a and str(a).strip()}
+            if allowed_bases is not None
+            else None
+        )
+        exclude = {
+            a.strip().upper() for a in (exclude_bases or set()) if a and str(a).strip()
+        }
+        next_balances: dict[str, AssetBalance] = {}
+        for bal in balances:
+            asset = str(bal.asset or "").upper()
+            if not asset:
+                continue
+            if asset != quote:
+                if asset in exclude:
+                    continue
+                if allow is not None and asset not in allow:
+                    continue
+            free = Decimal(str(bal.free or 0))
+            locked = Decimal(str(bal.locked or 0))
+            if free < 0:
+                free = _ZERO
+            if locked < 0:
+                locked = _ZERO
+            if asset == quote and quote_available_cap is not None:
+                cap = Decimal(str(quote_available_cap))
+                if cap < 0:
+                    cap = _ZERO
+                free = min(free, cap)
+            if free == 0 and locked == 0:
+                continue
+            next_balances[asset] = AssetBalance(
+                asset=asset, available=free, reserved=locked
+            )
+        if quote not in next_balances:
+            next_balances[quote] = AssetBalance(
+                asset=quote, available=_ZERO, reserved=_ZERO
+            )
+        self._state.balances = next_balances
+
+        # Rebuild EUR-quoted positions from non-quote balances so sells see inventory.
+        keep_symbols: set[str] = set()
+        for asset, bal in next_balances.items():
+            if asset == quote:
+                continue
+            symbol = f"{asset}{quote}"
+            qty = bal.total
+            if qty <= 0:
+                continue
+            keep_symbols.add(symbol)
+            mark = self._state.mark_prices.get(symbol) or _ZERO
+            prev = self._state.positions.get(symbol)
+            entry = (
+                prev.average_entry_price
+                if prev is not None and prev.average_entry_price > 0
+                else mark
+            )
+            if entry <= 0:
+                # Never invent €1 cost — that creates huge phantom losses on sell.
+                entry = mark if mark > 0 else _ZERO
+            self._state.positions[symbol] = PositionState(
+                symbol=symbol,
+                quantity=qty,
+                average_entry_price=entry,
+                realized_pnl=prev.realized_pnl if prev is not None else _ZERO,
+                fees_paid=prev.fees_paid if prev is not None else _ZERO,
+            )
+            if mark > 0:
+                self._state.mark_prices[symbol] = mark
+        for symbol in list(self._state.positions.keys()):
+            if symbol not in keep_symbols:
+                del self._state.positions[symbol]
+
+        self._update_unrealized()
+        self._update_drawdown()
+        self._state.as_of = datetime.now(UTC)
+        return {
+            asset: f"{bal.available}/{bal.reserved}"
+            for asset, bal in sorted(next_balances.items())
+        }
+
+    def sync_live_balances_from_venues(
+        self,
+        venue_balances: dict[str, list[Balance]],
+        *,
+        quote_available_cap: Decimal | None = None,
+        allowed_bases: set[str] | None = None,
+        exclude_bases: set[str] | None = None,
+    ) -> dict[str, str]:
+        """Merge live balances from multiple venues into one paper pocket.
+
+        Each venue's free quote is capped independently so €2k on Bitvavo and
+        €2k on OKX both remain deployable without one sync wiping the other.
+        """
+        quote = self._quote
+        allow = (
+            {a.strip().upper() for a in allowed_bases if a and str(a).strip()}
+            if allowed_bases is not None
+            else None
+        )
+        exclude = {
+            a.strip().upper() for a in (exclude_bases or set()) if a and str(a).strip()
+        }
+        cap = (
+            Decimal(str(quote_available_cap))
+            if quote_available_cap is not None
+            else None
+        )
+        if cap is not None and cap < 0:
+            cap = _ZERO
+
+        merged: dict[str, AssetBalance] = {}
+
+        def _merge_asset(asset: str, free: Decimal, locked: Decimal) -> None:
+            if free < 0:
+                free = _ZERO
+            if locked < 0:
+                locked = _ZERO
+            if free == 0 and locked == 0:
+                return
+            prev = merged.get(asset)
+            if prev is None:
+                merged[asset] = AssetBalance(
+                    asset=asset, available=free, reserved=locked
+                )
+            else:
+                merged[asset] = AssetBalance(
+                    asset=asset,
+                    available=prev.available + free,
+                    reserved=prev.reserved + locked,
+                )
+
+        for _venue, balances in venue_balances.items():
+            for bal in balances:
+                asset = str(bal.asset or "").upper()
+                if not asset:
+                    continue
+                if asset != quote:
+                    if asset in exclude:
+                        continue
+                    if allow is not None and asset not in allow:
+                        continue
+                free = Decimal(str(bal.free or 0))
+                locked = Decimal(str(bal.locked or 0))
+                if asset == quote and cap is not None:
+                    free = min(free, cap)
+                _merge_asset(asset, free, locked)
+
+        if quote not in merged:
+            merged[quote] = AssetBalance(
+                asset=quote, available=_ZERO, reserved=_ZERO
+            )
+
+        self._state.balances = merged
+
+        keep_symbols: set[str] = set()
+        for asset, bal in merged.items():
+            if asset == quote:
+                continue
+            symbol = f"{asset}{quote}"
+            qty = bal.total
+            if qty <= 0:
+                continue
+            keep_symbols.add(symbol)
+            mark = self._state.mark_prices.get(symbol) or _ZERO
+            prev = self._state.positions.get(symbol)
+            entry = (
+                prev.average_entry_price
+                if prev is not None and prev.average_entry_price > 0
+                else mark
+            )
+            if entry <= 0:
+                # Never invent €1 cost — that creates huge phantom losses on sell.
+                entry = mark if mark > 0 else _ZERO
+            self._state.positions[symbol] = PositionState(
+                symbol=symbol,
+                quantity=qty,
+                average_entry_price=entry,
+                realized_pnl=prev.realized_pnl if prev is not None else _ZERO,
+                fees_paid=prev.fees_paid if prev is not None else _ZERO,
+            )
+            if mark > 0:
+                self._state.mark_prices[symbol] = mark
+        for symbol in list(self._state.positions.keys()):
+            if symbol not in keep_symbols:
+                del self._state.positions[symbol]
+
+        self._update_unrealized()
+        self._update_drawdown()
+        self._state.as_of = datetime.now(UTC)
+        return {
+            asset: f"{bal.available}/{bal.reserved}"
+            for asset, bal in sorted(merged.items())
+        }
 
     def reserve(self, asset: str, amount: Decimal) -> bool:
         """Move available → reserved for a pending order. Returns False if short."""
@@ -156,13 +469,13 @@ class PaperPortfolio:
         return result
 
     def base_asset_for(self, symbol: str) -> str:
-        sym = symbol.upper().replace("/", "").replace("-", "")
-        q = self._quote
-        if sym.endswith(q) and len(sym) > len(q):
-            return sym[: -len(q)]
-        return sym
+        from bot.portfolio.venue_ledger import infer_base_asset, infer_quote_asset
+
+        quote = infer_quote_asset(symbol, self._quote)
+        return infer_base_asset(symbol, quote)
 
     def _update_unrealized(self) -> None:
+        self._state.cap_positions_to_balances()
         unrealized = _ZERO
         for symbol, pos in self._state.positions.items():
             if pos.quantity == 0:
@@ -174,13 +487,49 @@ class PaperPortfolio:
     def _update_drawdown(self) -> None:
         equity = self._state.total_equity
         stats = self._state.stats
-        if equity > stats.peak_equity:
-            stats.peak_equity = equity
+        # Live micro: paper marks can ghost-spike far above real venue MTM and
+        # false-trip the kill switch (e.g. peak €6887 vs live ~€4200 → "40% DD").
+        cap = getattr(self, "_live_mtm_cap", None)
+        trackable = equity
+        if isinstance(cap, Decimal) and cap > 0:
+            soft = cap * Decimal("1.02")
+            if trackable > soft:
+                trackable = soft
+            if stats.peak_equity > soft:
+                stats.peak_equity = cap
+        if trackable > stats.peak_equity:
+            stats.peak_equity = trackable
         peak = stats.peak_equity
         if peak > 0:
             dd = (peak - equity) / peak
+            # If equity ghost-spiked above a capped peak, treat DD as flat.
             stats.current_drawdown = max(dd, _ZERO)
             if stats.current_drawdown > stats.maximum_drawdown:
                 stats.maximum_drawdown = stats.current_drawdown
         else:
             stats.current_drawdown = _ZERO
+
+    def set_live_mtm_cap(self, live_eur: Decimal | None) -> None:
+        """Bound drawdown peak to real multi-venue portfolio MTM (live micro)."""
+        if live_eur is None or live_eur <= 0:
+            self._live_mtm_cap = None
+            return
+        self._live_mtm_cap = Decimal(str(live_eur))
+        soft = self._live_mtm_cap * Decimal("1.02")
+        if self._state.stats.peak_equity > soft:
+            self._state.stats.peak_equity = self._live_mtm_cap
+        self._update_drawdown()
+
+    def reset_drawdown_baseline(self) -> Decimal:
+        """Set peak equity to current MTM so session drawdown starts fresh."""
+        equity = self._state.total_equity
+        cap = getattr(self, "_live_mtm_cap", None)
+        if isinstance(cap, Decimal) and cap > 0:
+            equity = min(equity, cap) if equity > 0 else cap
+            if equity <= 0:
+                equity = cap
+        stats = self._state.stats
+        stats.peak_equity = equity
+        stats.current_drawdown = _ZERO
+        stats.maximum_drawdown = _ZERO
+        return equity

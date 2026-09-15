@@ -61,6 +61,14 @@ class FeeRole(StrEnum):
     TAKER = "taker"
 
 
+class EntryQualityRecommendation(StrEnum):
+    """Entry quality sizing recommendation (downward-only modifier)."""
+
+    REJECT = "reject"
+    REDUCED_SIZE = "reduced_size"
+    NORMAL_SIZE = "normal_size"
+
+
 class KillSwitchState(StrEnum):
     """Kill-switch lifecycle. PAUSED / EMERGENCY_STOP block new orders."""
 
@@ -102,3 +110,90 @@ class RiskRejectReason(StrEnum):
     NOT_PROFITABLE = "NOT_PROFITABLE"
     LEVERAGE_FORBIDDEN = "LEVERAGE_FORBIDDEN"
     UNPROFITABLE_MODIFICATION_FORBIDDEN = "UNPROFITABLE_MODIFICATION_FORBIDDEN"
+    CORRELATION_LIMIT = "CORRELATION_LIMIT"
+    STRATEGY_EXPOSURE_LIMIT = "STRATEGY_EXPOSURE_LIMIT"
+    VENUE_EXPOSURE_LIMIT = "VENUE_EXPOSURE_LIMIT"
+    MARKET_CLOSED = "MARKET_CLOSED"
+    REGIME_MISMATCH = "REGIME_MISMATCH"
+    PORTFOLIO_OPPORTUNITY_COST = "PORTFOLIO_OPPORTUNITY_COST"
+    EVENT_RISK = "EVENT_RISK"
+
+
+class AssetClass(StrEnum):
+    """Normalized asset class for multi-market opportunity engine."""
+
+    CRYPTO_SPOT = "crypto_spot"
+    CRYPTO_PERP = "crypto_perp"
+    FX = "fx"
+    EQUITY = "equity"
+    INDEX = "index"
+    COMMODITY = "commodity"
+    BOND = "bond"
+    FUTURE = "future"
+
+
+class MarketSessionPhase(StrEnum):
+    """Trading session phase for calendar-aware scanning."""
+
+    CLOSED = "closed"
+    PRE_MARKET = "pre_market"
+    REGULAR = "regular"
+    AFTER_HOURS = "after_hours"
+    ALWAYS_OPEN = "always_open"
+
+
+class MarketRegime(StrEnum):
+    """Coarse market regime labels for strategy weighting."""
+
+    TRENDING = "trending"
+    MEAN_REVERTING = "mean_reverting"
+    HIGH_VOLATILITY = "high_volatility"
+    LOW_VOLATILITY = "low_volatility"
+    RISK_ON = "risk_on"
+    RISK_OFF = "risk_off"
+    LIQUIDITY_STRESSED = "liquidity_stressed"
+    NORMAL = "normal"
+    MOMENTUM = "momentum"
+    RANGE_BOUND = "range_bound"
+    EVENT_DRIVEN = "event_driven"
+
+
+class OpportunityDecisionAction(StrEnum):
+    """Final gate decision for observability."""
+
+    TAKE = "take"
+    REJECT = "reject"
+    DEFER = "defer"
+
+
+class FillType(StrEnum):
+    """How a paper maker fill was produced. Not all fills are economically equal."""
+
+    QUEUE = "queue"
+    TRADE_THROUGH = "trade_through"
+    UNKNOWN = "unknown"
+
+
+class RouteState(StrEnum):
+    """Lifecycle of a venue→venue (or key) trading route under calibration."""
+
+    WARMUP = "warmup"
+    ACTIVE = "active"
+    WATCH = "watch"
+    EARLY_STOPPED = "early_stopped"
+    HARD_STOPPED = "hard_stopped"
+
+
+class RouteDecisionReason(StrEnum):
+    """Machine-readable why a route is in its current state / was gated."""
+
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    NEGATIVE_RAW_CAPTURE = "negative_raw_capture"
+    CUMULATIVE_LOSS = "cumulative_loss"
+    CALIBRATED_EV_NEGATIVE = "calibrated_ev_negative"
+    TOXIC_MARKOUT = "toxic_markout"
+    STALE_MARKET_DATA = "stale_market_data"
+    RISK_VIOLATION = "risk_violation"
+    POSITIVE_EVIDENCE = "positive_evidence"
+    EARLY_RAW_LOSS_OVERRIDES_SHRINKAGE = "early_raw_loss_overrides_shrinkage"
+

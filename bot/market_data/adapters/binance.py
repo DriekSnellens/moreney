@@ -78,7 +78,9 @@ class BinancePublicAdapter(PublicMarketDataAdapter):
             prev_sequence=int(payload["U"]) - 1 if payload.get("U") is not None else None,
             timestamp=datetime.fromtimestamp(int(payload.get("E", 0)) / 1000, tz=UTC)
             if payload.get("E")
-            else datetime.now(UTC),
+            else None,
+            exchange_ts_available=bool(payload.get("E")),
+            timestamp_quality="MEDIUM" if payload.get("E") else "UNSUPPORTED",
         )
 
     def _parse_book_ticker(self, payload: dict[str, Any]) -> MarketDataEvent:

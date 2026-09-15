@@ -80,7 +80,10 @@ class BitvavoPublicAdapter(PublicMarketDataAdapter):
             asks=self.levels_from_pairs(data.get("asks") or []),
             is_snapshot=is_snapshot,
             sequence=nonce,
-            timestamp=datetime.now(UTC),
+            # Bitvavo does not provide a usable exchange event timestamp.
+            timestamp=None,
+            exchange_ts_available=False,
+            timestamp_quality="UNSUPPORTED",
         )
 
     def _parse_ticker(self, data: dict[str, Any]) -> MarketDataEvent:

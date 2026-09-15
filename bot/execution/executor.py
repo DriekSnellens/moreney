@@ -85,6 +85,9 @@ class ExecutionService(BaseExecutor):
             raise ExecutionError("Safety violation: real exchange order flag set in paper path")
         return result
 
+    def match_resting(self, books: dict[str, dict[str, OrderBook]]) -> list[ExecutionResult]:
+        return self._paper.match_resting(books)
+
 
 def create_paper_execution(settings: Settings) -> ExecutionService:
     """Factory that always returns an isolated paper execution stack."""

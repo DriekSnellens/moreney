@@ -38,6 +38,14 @@ class TrackedOpportunity(BaseModel):
     execution_buffer: Decimal = _ZERO
     expected_net_profit: Decimal = _ZERO
     expected_net_return: Decimal = _ZERO
+    expected_gross: Decimal = _ZERO
+    expected_adverse: Decimal = _ZERO
+    expected_inventory: Decimal = _ZERO
+    calibrated_expected_value: Decimal | None = None
+    realized_fees: Decimal | None = None
+    realized_slippage: Decimal | None = None
+    realized_adverse: Decimal | None = None
+    realized_inventory: Decimal | None = None
     risk_decision: str = ""
     rejection_reason: str | None = None
     execution_result: str | None = None
@@ -163,6 +171,7 @@ class PerformanceSnapshot(BaseModel):
     current_equity: Decimal = _ZERO
     realized_pnl: Decimal = _ZERO
     unrealized_pnl: Decimal = _ZERO
+    paper_equity_pnl: Decimal = _ZERO
     gross_pnl: Decimal = _ZERO
     fees: Decimal = _ZERO
     slippage: Decimal = _ZERO
@@ -189,3 +198,10 @@ class PerformanceSnapshot(BaseModel):
     pairs_evaluated: int = 0
     depth_edges_found: int = 0
     scan_rejections: int = 0
+    net_eur_per_fill: Decimal = _ZERO
+    net_bps_per_fill: Decimal = _ZERO
+    ev_capture: Decimal | None = None
+    fees_per_fill: Decimal = _ZERO
+    slippage_per_fill: Decimal = _ZERO
+    capital_velocity: Decimal = _ZERO
+    rejection_opportunity_cost: Decimal = _ZERO

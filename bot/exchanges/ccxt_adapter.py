@@ -45,6 +45,37 @@ from bot.exchanges.symbols import to_ccxt_symbol, to_internal_symbol
 
 logger = logging.getLogger(__name__)
 
+
+def sanitize_okx_client_order_id(raw: str | None) -> str:
+    """OKX clOrdId: alphanumeric only, ≤32 chars, must start with a letter."""
+    cleaned = "".join(ch for ch in str(raw or "") if ch.isalnum())
+    if not cleaned:
+        cleaned = uuid4().hex
+    if cleaned[0].isdigit():
+        cleaned = f"m{cleaned}"
+    return cleaned[:32]
+
+
+def sanitize_bitvavo_client_order_id(raw: str | None) -> str:
+    """Bitvavo clientOrderId: hyphenated UUID (8-4-4-4-12), unique among open orders."""
+    text = str(raw or "").strip().lower()
+    parts = text.split("-")
+    if (
+        len(parts) == 5
+        and len(parts[0]) == 8
+        and len(parts[1]) == 4
+        and len(parts[2]) == 4
+        and len(parts[3]) == 4
+        and len(parts[4]) == 12
+        and all(all(ch in "0123456789abcdef" for ch in part) for part in parts)
+    ):
+        return text
+    cleaned = "".join(ch for ch in text if ch.isalnum())
+    if len(cleaned) >= 32:
+        h = cleaned[:32]
+        return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
+    return str(uuid4())
+
 try:
     import ccxt.async_support as ccxt
     from ccxt.base.errors import (
@@ -129,6 +160,15 @@ class CcxtExchangeAdapter(BaseExchangeClient):
             config["password"] = self._passphrase
         if self._base_url:
             config["urls"] = {"api": self._base_url}
+        # Bitvavo MiCA: operatorId required on order endpoints.
+        if self.ccxt_id == "bitvavo":
+            op_id = int(getattr(self._settings, "bitvavo_operator_id", 1001) or 1001)
+            config.setdefault("options", {})
+            config["options"]["operatorId"] = op_id
+        if self.ccxt_id == "okx":
+            hostname = str(getattr(self._settings, "okx_hostname", "") or "").strip()
+            if hostname:
+                config["hostname"] = hostname
 
         logger.info(
             "Initializing CCXT exchange %s with %s",
@@ -139,6 +179,7 @@ class CcxtExchangeAdapter(BaseExchangeClient):
                     "secret": bool(self._api_secret),
                     "password": bool(self._passphrase),
                     "enableRateLimit": True,
+                    "operatorId": bool(self.ccxt_id == "bitvavo"),
                 }
             ),
         )
@@ -269,14 +310,39 @@ class CcxtExchangeAdapter(BaseExchangeClient):
         ccxt_symbol = to_ccxt_symbol(order.symbol)
         side = _to_ccxt_side(order.side)
         order_type = "limit" if order.limit_price is not None else "market"
-        amount = float(order.quantity)
-        price = float(order.limit_price) if order.limit_price is not None else None
         params: dict[str, Any] = {}
         if order.client_order_id:
-            params["clientOrderId"] = order.client_order_id
+            cl_id = order.client_order_id
+            if self.ccxt_id == "okx":
+                cl_id = sanitize_okx_client_order_id(cl_id)
+            elif self.ccxt_id == "bitvavo":
+                cl_id = sanitize_bitvavo_client_order_id(cl_id)
+            params["clientOrderId"] = cl_id
+        if self.ccxt_id == "bitvavo":
+            params["operatorId"] = int(
+                getattr(self._settings, "bitvavo_operator_id", 1001) or 1001
+            )
+        meta = order.metadata or {}
+        if meta.get("post_only") or meta.get("postOnly"):
+            params["postOnly"] = True
 
         async def _op() -> Any:
             exchange = await self._get_exchange()
+            if not getattr(exchange, "markets", None):
+                await self._call(exchange.load_markets)
+            # Venue precision — Bitvavo rejects oversized decimal strings.
+            amount = float(order.quantity)
+            price = float(order.limit_price) if order.limit_price is not None else None
+            try:
+                amount = float(exchange.amount_to_precision(ccxt_symbol, amount))
+                if price is not None:
+                    price = float(exchange.price_to_precision(ccxt_symbol, price))
+            except Exception as exc:  # noqa: BLE001
+                raise ExchangeError(
+                    f"{self.name} precision failed for {ccxt_symbol}: {safe_exc_message(exc)}"
+                ) from exc
+            if amount <= 0:
+                raise ExchangeError(f"{self.name} amount rounds to zero for {ccxt_symbol}")
             if order_type == "limit":
                 return await self._call(
                     exchange.create_order, ccxt_symbol, order_type, side, amount, price, params
@@ -323,9 +389,16 @@ class CcxtExchangeAdapter(BaseExchangeClient):
                 f"{self.name} cancel_order blocked: enable_trading is False"
             )
         ccxt_symbol = to_ccxt_symbol(symbol)
+        params: dict[str, Any] = {}
+        if self.ccxt_id == "bitvavo":
+            params["operatorId"] = int(
+                getattr(self._settings, "bitvavo_operator_id", 1001) or 1001
+            )
 
         async def _op() -> Any:
             exchange = await self._get_exchange()
+            if params:
+                return await self._call(exchange.cancel_order, order_id, ccxt_symbol, params)
             return await self._call(exchange.cancel_order, order_id, ccxt_symbol)
 
         raw = await with_retries(

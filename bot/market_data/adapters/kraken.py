@@ -18,6 +18,20 @@ class KrakenPublicAdapter(PublicMarketDataAdapter):
     _SYMBOL_MAP = {
         "BTCEUR": "BTC/EUR",
         "BTCUSDT": "BTC/USDT",
+        "ETHEUR": "ETH/EUR",
+        "ETHUSDT": "ETH/USDT",
+        "XRPEUR": "XRP/EUR",
+        "ADAEUR": "ADA/EUR",
+        "SOLEUR": "SOL/EUR",
+        "LTCEUR": "LTC/EUR",
+        "DOGEUR": "DOGE/EUR",
+        "AVAXEUR": "AVAX/EUR",
+        "LINKEUR": "LINK/EUR",
+        "DOTEUR": "DOT/EUR",
+        "UNIEUR": "UNI/EUR",
+        "ATOMEUR": "ATOM/EUR",
+        "NEAREUR": "NEAR/EUR",
+        "BNBEUR": "BNB/EUR",
         "XBTEUR": "BTC/EUR",
     }
 
@@ -27,6 +41,8 @@ class KrakenPublicAdapter(PublicMarketDataAdapter):
             return "BTCEUR"
         if raw in {"XBTUSDT", "XXBTUSDT"}:
             return "BTCUSDT"
+        if raw in {"XETHZEUR"}:
+            return "ETHEUR"
         return raw
 
     def to_exchange_symbol(self, symbol: str) -> str:

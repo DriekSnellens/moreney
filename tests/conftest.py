@@ -24,6 +24,13 @@ def _isolate_paper_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("PAPER_PERSIST_PATH", str(path))
     monkeypatch.setenv("PAPER_AUTO_START", "false")
     get_settings.cache_clear()
+    # Live micro sessions install process-wide venue fee overrides; keep research
+    # / maker fixtures on the static table regardless of test order.
+    from bot.core.venue_fees import set_venue_fee_overrides
+
+    set_venue_fee_overrides(None)
+    yield
+    set_venue_fee_overrides(None)
 
 
 @pytest.fixture
@@ -38,6 +45,8 @@ def settings() -> Settings:
         risk_max_position_usd=1000.0,
         risk_max_daily_loss_usd=200.0,
         risk_max_open_positions=5,
+        max_simultaneous_positions=5,
+        risk_allow_partial_sizing=False,
         risk_min_net_profit_usd=1.0,
         max_position_percent=10.0,
         max_total_exposure_percent=50.0,
