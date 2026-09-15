@@ -1,0 +1,862 @@
+{
+  "asof": "2026-09-15T14:00:00+00:00",
+  "window": {
+    "start": "2026-09-08T14:00:00+00:00",
+    "end": "2026-09-15T14:00:00+00:00",
+    "days": 7
+  },
+  "caveats": [
+    "15m bar replay; fills at bar close (no live maker/taker path).",
+    "No historical AlphaI timeline \u2014 soft+macro idle cannot fire; tape-only.",
+    "Fade-ETA exits need dense marks; bar sim mostly trail/stop/time."
+  ],
+  "variants": {
+    "current_20k": {
+      "label": "current_20k",
+      "config": {
+        "book_eur": 20000.0,
+        "clip_eur": 10000.0,
+        "max_positions": 3,
+        "decision_hours_utc": [
+          7,
+          13,
+          16
+        ],
+        "trail": [
+          0.03,
+          0.04,
+          0.02
+        ],
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "min_excess": 0.025,
+        "soft_regime_on_weak_tape": true,
+        "weak_tape_idle_on_double": true,
+        "soft_regime_idle_on_macro_caution": true,
+        "day_loss_limit_eur": 750.0,
+        "week_loss_limit_eur": 2000.0
+      },
+      "summary": {
+        "window": "2026-09-08 14:00 -> 2026-09-15 14:00",
+        "trades": 10,
+        "open": 0,
+        "win_rate": 0.6,
+        "realized_eur": 1312.68,
+        "open_mtm_eur": 0,
+        "total_eur": 1312.68,
+        "fees_eur": 282.0,
+        "avg_net_per_trade_eur": 131.27,
+        "max_drawdown_eur": -330.42,
+        "decision_points": 15,
+        "regime_on_points": 11,
+        "by_reason": {
+          "trail": {
+            "n": 9,
+            "net_eur": 1643.1
+          },
+          "hard_stop": {
+            "n": 1,
+            "net_eur": -330.42
+          }
+        }
+      },
+      "return_on_book_pct": 6.563,
+      "regime_pnl": {
+        "firm": {
+          "n": 7,
+          "wins": 5,
+          "win_rate": 0.714,
+          "net_eur": 1540.82,
+          "avg_net_eur": 220.12
+        },
+        "strong": {
+          "n": 3,
+          "wins": 1,
+          "win_rate": 0.333,
+          "net_eur": -228.13,
+          "avg_net_eur": -76.04
+        }
+      },
+      "decision_stats": {
+        "n": 15,
+        "regime_ok": 11,
+        "soft_ok": 0,
+        "reason_counts": {
+          "breadth_weak": 7,
+          "btc_weak": 4,
+          "weak_tape_idle": 4
+        }
+      },
+      "closed_trades": [
+        {
+          "base": "DOT",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-08T20:30:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 5.03,
+          "peak_pct": 7.24,
+          "net_eur": 473.44,
+          "reason": "trail",
+          "entry_reason": "excess=+0.1132,from_high=-0.0001,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-09T03:15:00+00:00",
+          "hold_h": 11.25,
+          "notional_eur": 10000.0,
+          "gross_pct": -1.58,
+          "peak_pct": 1.53,
+          "net_eur": -187.7,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0358,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T13:45:00+00:00",
+          "hold_h": 6.75,
+          "notional_eur": 7000.0,
+          "gross_pct": 7.32,
+          "peak_pct": 9.81,
+          "net_eur": 491.2,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T20:30:00+00:00",
+          "hold_h": 13.5,
+          "notional_eur": 7000.0,
+          "gross_pct": -2.41,
+          "peak_pct": 0.81,
+          "net_eur": -189.97,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0261,from_high=-0.0166,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:30:00+00:00",
+          "hold_h": 1.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 2.9,
+          "peak_pct": 5.47,
+          "net_eur": 259.96,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0371,from_high=-0.0052,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:45:00+00:00",
+          "hold_h": 1.75,
+          "notional_eur": 10000.0,
+          "gross_pct": 3.23,
+          "peak_pct": 5.48,
+          "net_eur": 293.17,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "ETH",
+          "opened": "2026-09-11T14:30:00+00:00",
+          "closed": "2026-09-11T19:00:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 10000.0,
+          "gross_pct": -3.0,
+          "peak_pct": 0.05,
+          "net_eur": -330.42,
+          "reason": "hard_stop",
+          "entry_reason": "excess=+0.0511,from_high=-0.0177,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-14T07:00:00+00:00",
+          "closed": "2026-09-14T19:30:00+00:00",
+          "hold_h": 12.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 4.31,
+          "peak_pct": 6.66,
+          "net_eur": 400.72,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-14T13:00:00+00:00",
+          "closed": "2026-09-14T21:15:00+00:00",
+          "hold_h": 8.25,
+          "notional_eur": 10000.0,
+          "gross_pct": 3.86,
+          "peak_pct": 6.86,
+          "net_eur": 356.04,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0286,from_high=-0.0097,regime=strong,breadth_strong_gated",
+          "regime_label": "strong"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-14T19:30:00+00:00",
+          "closed": "2026-09-14T21:45:00+00:00",
+          "hold_h": 2.25,
+          "notional_eur": 10000.0,
+          "gross_pct": -2.24,
+          "peak_pct": 1.11,
+          "net_eur": -253.75,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0491,from_high=-0.0038,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        }
+      ],
+      "open_mtm": []
+    },
+    "legacy_soft_no_idle": {
+      "label": "legacy_soft_no_idle",
+      "config": {
+        "book_eur": 20000.0,
+        "clip_eur": 10000.0,
+        "max_positions": 3,
+        "decision_hours_utc": [
+          7,
+          13,
+          16
+        ],
+        "trail": [
+          0.03,
+          0.04,
+          0.02
+        ],
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "min_excess": 0.025,
+        "soft_regime_on_weak_tape": true,
+        "weak_tape_idle_on_double": false,
+        "soft_regime_idle_on_macro_caution": false,
+        "day_loss_limit_eur": 750.0,
+        "week_loss_limit_eur": 2000.0
+      },
+      "summary": {
+        "window": "2026-09-08 14:00 -> 2026-09-15 14:00",
+        "trades": 10,
+        "open": 0,
+        "win_rate": 0.6,
+        "realized_eur": 1312.68,
+        "open_mtm_eur": 0,
+        "total_eur": 1312.68,
+        "fees_eur": 282.0,
+        "avg_net_per_trade_eur": 131.27,
+        "max_drawdown_eur": -330.42,
+        "decision_points": 15,
+        "regime_on_points": 15,
+        "by_reason": {
+          "trail": {
+            "n": 9,
+            "net_eur": 1643.1
+          },
+          "hard_stop": {
+            "n": 1,
+            "net_eur": -330.42
+          }
+        }
+      },
+      "return_on_book_pct": 6.563,
+      "regime_pnl": {
+        "firm": {
+          "n": 7,
+          "wins": 5,
+          "win_rate": 0.714,
+          "net_eur": 1540.82,
+          "avg_net_eur": 220.12
+        },
+        "strong": {
+          "n": 3,
+          "wins": 1,
+          "win_rate": 0.333,
+          "net_eur": -228.13,
+          "avg_net_eur": -76.04
+        }
+      },
+      "decision_stats": {
+        "n": 15,
+        "regime_ok": 15,
+        "soft_ok": 0,
+        "reason_counts": {
+          "breadth_weak": 7,
+          "btc_weak": 4
+        }
+      },
+      "closed_trades": [
+        {
+          "base": "DOT",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-08T20:30:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 5.03,
+          "peak_pct": 7.24,
+          "net_eur": 473.44,
+          "reason": "trail",
+          "entry_reason": "excess=+0.1132,from_high=-0.0001,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-09T03:15:00+00:00",
+          "hold_h": 11.25,
+          "notional_eur": 10000.0,
+          "gross_pct": -1.58,
+          "peak_pct": 1.53,
+          "net_eur": -187.7,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0358,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T13:45:00+00:00",
+          "hold_h": 6.75,
+          "notional_eur": 7000.0,
+          "gross_pct": 7.32,
+          "peak_pct": 9.81,
+          "net_eur": 491.2,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T20:30:00+00:00",
+          "hold_h": 13.5,
+          "notional_eur": 7000.0,
+          "gross_pct": -2.41,
+          "peak_pct": 0.81,
+          "net_eur": -189.97,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0261,from_high=-0.0166,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:30:00+00:00",
+          "hold_h": 1.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 2.9,
+          "peak_pct": 5.47,
+          "net_eur": 259.96,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0371,from_high=-0.0052,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:45:00+00:00",
+          "hold_h": 1.75,
+          "notional_eur": 10000.0,
+          "gross_pct": 3.23,
+          "peak_pct": 5.48,
+          "net_eur": 293.17,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "ETH",
+          "opened": "2026-09-11T14:30:00+00:00",
+          "closed": "2026-09-11T19:00:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 10000.0,
+          "gross_pct": -3.0,
+          "peak_pct": 0.05,
+          "net_eur": -330.42,
+          "reason": "hard_stop",
+          "entry_reason": "excess=+0.0511,from_high=-0.0177,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-14T07:00:00+00:00",
+          "closed": "2026-09-14T19:30:00+00:00",
+          "hold_h": 12.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 4.31,
+          "peak_pct": 6.66,
+          "net_eur": 400.72,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-14T13:00:00+00:00",
+          "closed": "2026-09-14T21:15:00+00:00",
+          "hold_h": 8.25,
+          "notional_eur": 10000.0,
+          "gross_pct": 3.86,
+          "peak_pct": 6.86,
+          "net_eur": 356.04,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0286,from_high=-0.0097,regime=strong,breadth_strong_gated",
+          "regime_label": "strong"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-14T19:30:00+00:00",
+          "closed": "2026-09-14T21:45:00+00:00",
+          "hold_h": 2.25,
+          "notional_eur": 10000.0,
+          "gross_pct": -2.24,
+          "peak_pct": 1.11,
+          "net_eur": -253.75,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0491,from_high=-0.0038,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        }
+      ],
+      "open_mtm": []
+    },
+    "hard_block_no_soft": {
+      "label": "hard_block_no_soft",
+      "config": {
+        "book_eur": 20000.0,
+        "clip_eur": 10000.0,
+        "max_positions": 3,
+        "decision_hours_utc": [
+          7,
+          13,
+          16
+        ],
+        "trail": [
+          0.03,
+          0.04,
+          0.02
+        ],
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "min_excess": 0.025,
+        "soft_regime_on_weak_tape": false,
+        "weak_tape_idle_on_double": true,
+        "soft_regime_idle_on_macro_caution": true,
+        "day_loss_limit_eur": 750.0,
+        "week_loss_limit_eur": 2000.0
+      },
+      "summary": {
+        "window": "2026-09-08 14:00 -> 2026-09-15 14:00",
+        "trades": 10,
+        "open": 0,
+        "win_rate": 0.6,
+        "realized_eur": 1312.68,
+        "open_mtm_eur": 0,
+        "total_eur": 1312.68,
+        "fees_eur": 282.0,
+        "avg_net_per_trade_eur": 131.27,
+        "max_drawdown_eur": -330.42,
+        "decision_points": 15,
+        "regime_on_points": 8,
+        "by_reason": {
+          "trail": {
+            "n": 9,
+            "net_eur": 1643.1
+          },
+          "hard_stop": {
+            "n": 1,
+            "net_eur": -330.42
+          }
+        }
+      },
+      "return_on_book_pct": 6.563,
+      "regime_pnl": {
+        "firm": {
+          "n": 7,
+          "wins": 5,
+          "win_rate": 0.714,
+          "net_eur": 1540.82,
+          "avg_net_eur": 220.12
+        },
+        "strong": {
+          "n": 3,
+          "wins": 1,
+          "win_rate": 0.333,
+          "net_eur": -228.13,
+          "avg_net_eur": -76.04
+        }
+      },
+      "decision_stats": {
+        "n": 15,
+        "regime_ok": 8,
+        "soft_ok": 0,
+        "reason_counts": {
+          "breadth_weak": 7,
+          "btc_weak": 4
+        }
+      },
+      "closed_trades": [
+        {
+          "base": "DOT",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-08T20:30:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 5.03,
+          "peak_pct": 7.24,
+          "net_eur": 473.44,
+          "reason": "trail",
+          "entry_reason": "excess=+0.1132,from_high=-0.0001,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-09T03:15:00+00:00",
+          "hold_h": 11.25,
+          "notional_eur": 10000.0,
+          "gross_pct": -1.58,
+          "peak_pct": 1.53,
+          "net_eur": -187.7,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0358,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T13:45:00+00:00",
+          "hold_h": 6.75,
+          "notional_eur": 7000.0,
+          "gross_pct": 7.32,
+          "peak_pct": 9.81,
+          "net_eur": 491.2,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T20:30:00+00:00",
+          "hold_h": 13.5,
+          "notional_eur": 7000.0,
+          "gross_pct": -2.41,
+          "peak_pct": 0.81,
+          "net_eur": -189.97,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0261,from_high=-0.0166,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:30:00+00:00",
+          "hold_h": 1.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 2.9,
+          "peak_pct": 5.47,
+          "net_eur": 259.96,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0371,from_high=-0.0052,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:45:00+00:00",
+          "hold_h": 1.75,
+          "notional_eur": 10000.0,
+          "gross_pct": 3.23,
+          "peak_pct": 5.48,
+          "net_eur": 293.17,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "ETH",
+          "opened": "2026-09-11T14:30:00+00:00",
+          "closed": "2026-09-11T19:00:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 10000.0,
+          "gross_pct": -3.0,
+          "peak_pct": 0.05,
+          "net_eur": -330.42,
+          "reason": "hard_stop",
+          "entry_reason": "excess=+0.0511,from_high=-0.0177,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-14T07:00:00+00:00",
+          "closed": "2026-09-14T19:30:00+00:00",
+          "hold_h": 12.5,
+          "notional_eur": 10000.0,
+          "gross_pct": 4.31,
+          "peak_pct": 6.66,
+          "net_eur": 400.72,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-14T13:00:00+00:00",
+          "closed": "2026-09-14T21:15:00+00:00",
+          "hold_h": 8.25,
+          "notional_eur": 10000.0,
+          "gross_pct": 3.86,
+          "peak_pct": 6.86,
+          "net_eur": 356.04,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0286,from_high=-0.0097,regime=strong,breadth_strong_gated",
+          "regime_label": "strong"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-14T19:30:00+00:00",
+          "closed": "2026-09-14T21:45:00+00:00",
+          "hold_h": 2.25,
+          "notional_eur": 10000.0,
+          "gross_pct": -2.24,
+          "peak_pct": 1.11,
+          "net_eur": -253.75,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0491,from_high=-0.0038,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        }
+      ],
+      "open_mtm": []
+    },
+    "micro_live_defaults": {
+      "label": "micro_live_defaults",
+      "config": {
+        "book_eur": 4036.0,
+        "clip_eur": 1300.0,
+        "max_positions": 3,
+        "decision_hours_utc": [
+          7,
+          13,
+          16
+        ],
+        "trail": [
+          0.03,
+          0.04,
+          0.02
+        ],
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "min_excess": 0.025,
+        "soft_regime_on_weak_tape": true,
+        "weak_tape_idle_on_double": true,
+        "soft_regime_idle_on_macro_caution": true,
+        "day_loss_limit_eur": 100.0,
+        "week_loss_limit_eur": 250.0
+      },
+      "summary": {
+        "window": "2026-09-08 14:00 -> 2026-09-15 14:00",
+        "trades": 11,
+        "open": 0,
+        "win_rate": 0.636,
+        "realized_eur": 213.97,
+        "open_mtm_eur": 0,
+        "total_eur": 213.97,
+        "fees_eur": 41.73,
+        "avg_net_per_trade_eur": 19.45,
+        "max_drawdown_eur": -42.88,
+        "decision_points": 15,
+        "regime_on_points": 11,
+        "by_reason": {
+          "trail": {
+            "n": 11,
+            "net_eur": 213.97
+          }
+        }
+      },
+      "return_on_book_pct": 5.302,
+      "regime_pnl": {
+        "firm": {
+          "n": 8,
+          "wins": 6,
+          "win_rate": 0.75,
+          "net_eur": 247.13,
+          "avg_net_eur": 30.89
+        },
+        "strong": {
+          "n": 3,
+          "wins": 1,
+          "win_rate": 0.333,
+          "net_eur": -33.16,
+          "avg_net_eur": -11.05
+        }
+      },
+      "decision_stats": {
+        "n": 15,
+        "regime_ok": 11,
+        "soft_ok": 0,
+        "reason_counts": {
+          "breadth_weak": 7,
+          "btc_weak": 4,
+          "weak_tape_idle": 4
+        }
+      },
+      "closed_trades": [
+        {
+          "base": "DOT",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-08T20:30:00+00:00",
+          "hold_h": 4.5,
+          "notional_eur": 1300.0,
+          "gross_pct": 5.03,
+          "peak_pct": 7.24,
+          "net_eur": 61.55,
+          "reason": "trail",
+          "entry_reason": "excess=+0.1132,from_high=-0.0001,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-08T16:00:00+00:00",
+          "closed": "2026-09-09T03:15:00+00:00",
+          "hold_h": 11.25,
+          "notional_eur": 1300.0,
+          "gross_pct": -1.58,
+          "peak_pct": 1.53,
+          "net_eur": -24.4,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0358,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T13:45:00+00:00",
+          "hold_h": 6.75,
+          "notional_eur": 910.0,
+          "gross_pct": 7.32,
+          "peak_pct": 9.81,
+          "net_eur": 63.86,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-09T07:00:00+00:00",
+          "closed": "2026-09-09T20:30:00+00:00",
+          "hold_h": 13.5,
+          "notional_eur": 910.0,
+          "gross_pct": -2.41,
+          "peak_pct": 0.81,
+          "net_eur": -24.7,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0261,from_high=-0.0166,regime=firm,breadth_weak",
+          "regime_label": "firm"
+        },
+        {
+          "base": "ETH",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:15:00+00:00",
+          "hold_h": 1.25,
+          "notional_eur": 1300.0,
+          "gross_pct": 3.9,
+          "peak_pct": 6.11,
+          "net_eur": 46.83,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0254,from_high=-0.0020,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:30:00+00:00",
+          "hold_h": 1.5,
+          "notional_eur": 1300.0,
+          "gross_pct": 2.9,
+          "peak_pct": 5.47,
+          "net_eur": 33.79,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0371,from_high=-0.0052,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-11T13:00:00+00:00",
+          "closed": "2026-09-11T14:45:00+00:00",
+          "hold_h": 1.75,
+          "notional_eur": 1300.0,
+          "gross_pct": 3.23,
+          "peak_pct": 5.48,
+          "net_eur": 38.11,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "FET",
+          "opened": "2026-09-11T14:30:00+00:00",
+          "closed": "2026-09-11T16:00:00+00:00",
+          "hold_h": 1.5,
+          "notional_eur": 1300.0,
+          "gross_pct": -2.51,
+          "peak_pct": 0.81,
+          "net_eur": -36.57,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0331,from_high=-0.0077,regime=strong,breadth_strong_gated",
+          "regime_label": "strong"
+        },
+        {
+          "base": "NEAR",
+          "opened": "2026-09-14T07:00:00+00:00",
+          "closed": "2026-09-14T19:30:00+00:00",
+          "hold_h": 12.5,
+          "notional_eur": 1300.0,
+          "gross_pct": 4.31,
+          "peak_pct": 6.66,
+          "net_eur": 52.09,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+          "regime_label": "firm"
+        },
+        {
+          "base": "XRP",
+          "opened": "2026-09-14T13:00:00+00:00",
+          "closed": "2026-09-14T21:15:00+00:00",
+          "hold_h": 8.25,
+          "notional_eur": 1300.0,
+          "gross_pct": 3.86,
+          "peak_pct": 6.86,
+          "net_eur": 46.29,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0286,from_high=-0.0097,regime=strong,breadth_strong_gated",
+          "regime_label": "strong"
+        },
+        {
+          "base": "UNI",
+          "opened": "2026-09-14T19:30:00+00:00",
+          "closed": "2026-09-14T21:45:00+00:00",
+          "hold_h": 2.25,
+          "notional_eur": 1690.0,
+          "gross_pct": -2.24,
+          "peak_pct": 1.11,
+          "net_eur": -42.88,
+          "reason": "trail",
+          "entry_reason": "excess=+0.0491,from_high=-0.0038,regime=strong,breadth_strong",
+          "regime_label": "strong"
+        }
+      ],
+      "open_mtm": []
+    }
+  }
+}
