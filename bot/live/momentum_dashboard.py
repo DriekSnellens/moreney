@@ -996,10 +996,19 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _rules(cfg: Mapping[str, Any]) -> str:
-    hours = ", ".join(f"{int(h):02d}:00" for h in (cfg.get("decision_hours_utc") or [0]))
     weekdays = " (ma–vr)" if cfg.get("skip_weekend_entries") else ""
+    interval = float(cfg.get("decision_interval_sec") or 0.0)
+    if interval > 0:
+        if interval >= 60 and abs(interval / 60 - round(interval / 60)) < 1e-9:
+            cadence = f"elke {interval / 60:.0f} min"
+        else:
+            cadence = f"elke {interval:.0f}s"
+        decision_label = cadence + weekdays
+    else:
+        hours = ", ".join(f"{int(h):02d}:00" for h in (cfg.get("decision_hours_utc") or [0]))
+        decision_label = hours + weekdays
     items = [
-        ("Beslismoment (UTC)", hours + weekdays),
+        ("Beslismoment (UTC)", decision_label),
         (
             "Clip",
             f"{float(cfg.get('clip_eur') or 0):,.0f} € "
@@ -1090,6 +1099,14 @@ def _sleeve_card(
     max_pos = cfg.get("max_positions") or "—"
     hours = cfg.get("decision_hours_utc") or []
     hours_s = ",".join(str(h) for h in hours) if hours else "—"
+    interval = float(cfg.get("decision_interval_sec") or 0.0)
+    if interval > 0:
+        if interval >= 60 and abs(interval / 60 - round(interval / 60)) < 1e-9:
+            schedule_s = f"elke {interval / 60:.0f} min"
+        else:
+            schedule_s = f"elke {interval:.0f}s"
+    else:
+        schedule_s = f"Uren {hours_s} UTC"
     book = st.get("book_eur")
     if book is None:
         book = cfg.get("book_eur")
@@ -1120,7 +1137,7 @@ def _sleeve_card(
         f"{_fmt_eur(risk.get('day_realized_eur'))}</span> · "
         f"pos {n_pos}/{max_pos}</p>"
         f"{book_html}"
-        f"<p>Uren {escape(hours_s)} UTC · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
+        f"<p>{escape(schedule_s)} · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
         f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul></div>"
     )
 

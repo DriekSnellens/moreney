@@ -50,6 +50,7 @@ from bot.live.momentum_desk import (
     bar_stats,
     classify_regime,
     evaluate_exit,
+    is_entry_weekday,
     is_scheduled_hour,
     max_clip_mult,
     rank_candidates,
@@ -513,6 +514,16 @@ class MomentumDeskRunner:
         }
 
     def _next_decision_iso(self, now_ms: int) -> str:
+        interval = float(getattr(self.cfg, "decision_interval_sec", 0.0) or 0.0)
+        if interval > 0.0:
+            slot_ms = max(1, int(interval * 1000))
+            # Start at the next slot boundary; skip weekend when configured.
+            cand = (now_ms // slot_ms + 1) * slot_ms
+            for _ in range(0, int(3 * 86_400_000 / slot_ms) + 2):
+                if cand > self.last_decision_hour_ms and is_entry_weekday(cand, self.cfg):
+                    return datetime.fromtimestamp(cand / 1000, UTC).isoformat()
+                cand += slot_ms
+            return ""
         hour_ms = 3_600_000
         cur = now_ms // hour_ms * hour_ms
         # Up to 3 days ahead so a Friday-evening dashboard still shows Monday.
@@ -839,7 +850,22 @@ class MomentumDeskRunner:
 
     # --------------------------------------------------------------- entries
 
-    def _decision_hour_due(self, now_ms: int) -> int | None:
+    def _decision_slot_due(self, now_ms: int) -> int | None:
+        """Return the decision slot timestamp due now, or None.
+
+        When ``decision_interval_sec`` > 0, fire once per interval on weekdays
+        (filters stay strict — this only raises cadence). Otherwise keep the
+        sparse ``decision_hours_utc`` hour slots with grace / staleness guards.
+        """
+        interval = float(getattr(self.cfg, "decision_interval_sec", 0.0) or 0.0)
+        if interval > 0.0:
+            if not is_entry_weekday(now_ms, self.cfg):
+                return None
+            slot_ms = max(1, int(interval * 1000))
+            cur = now_ms // slot_ms * slot_ms
+            if cur <= self.last_decision_hour_ms:
+                return None
+            return cur
         hour_ms = 3_600_000
         cur = now_ms // hour_ms * hour_ms
         if not is_scheduled_hour(cur, self.cfg):
@@ -868,11 +894,15 @@ class MomentumDeskRunner:
             return AlphaIView()
 
     async def _maybe_decide(self, now_ms: int) -> None:
-        hour_ms = self._decision_hour_due(now_ms)
-        if hour_ms is None:
+        slot_ms = self._decision_slot_due(now_ms)
+        if slot_ms is None:
             return
-        self.last_decision_hour_ms = hour_ms
-        await self._decide(hour_ms, now_ms, execute=True, trigger="schedule")
+        self.last_decision_hour_ms = slot_ms
+        # Interval mode: score the latest closed 15m bar. Hour mode: align to
+        # the scheduled hour start (historical live behaviour).
+        interval = float(getattr(self.cfg, "decision_interval_sec", 0.0) or 0.0)
+        t_ms = (now_ms // BAR_MS) * BAR_MS if interval > 0.0 else slot_ms
+        await self._decide(t_ms, now_ms, execute=True, trigger="schedule")
 
     async def decide_now(
         self, *, execute: bool, expect_bases: Iterable[str] | None = None
@@ -1439,6 +1469,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
     )
     return DeskConfig(
         decision_hours_utc=hours or (0,),
+        decision_interval_sec=float(
+            getattr(settings, "momentum_desk_decision_interval_sec", 0.0)
+        ),
         clip_eur=float(getattr(settings, "momentum_desk_clip_eur", 500.0)),
         max_positions=int(getattr(settings, "momentum_desk_max_positions", 3)),
         trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.04)),

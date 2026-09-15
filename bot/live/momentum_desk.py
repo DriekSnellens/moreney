@@ -179,6 +179,10 @@ class DeskConfig:
     # decision hours, and trigger stops on the bar's low (proxy for minute-level
     # monitoring) instead of on the close.
     decision_every_bar: bool = False
+    # Live cadence (0 = use ``decision_hours_utc``). Entry filters are strict
+    # enough that scanning every minute on weekdays catches new 15m closes and
+    # freed slots without waiting for sparse hour slots.
+    decision_interval_sec: float = 0.0
     exit_on_touch: bool = False
     # Dynamic universe: at each decision keep only the K bases with the highest
     # trailing 24h EUR volume (0 = use the whole universe). Lets a wide pool
@@ -629,6 +633,10 @@ def is_scheduled_hour(hour_start_ms: int, cfg: DeskConfig) -> bool:
 def is_decision_time(t_ms: int, cfg: DeskConfig) -> bool:
     if cfg.decision_every_bar:
         return t_ms % BAR_MS == 0
+    interval = float(cfg.decision_interval_sec or 0.0)
+    if interval > 0.0:
+        slot_ms = max(1, int(interval * 1000))
+        return t_ms % slot_ms == 0 and is_entry_weekday(t_ms, cfg)
     return t_ms % 3_600_000 == 0 and is_scheduled_hour(t_ms, cfg)
 
 

@@ -508,6 +508,37 @@ def test_is_decision_time():
     assert not is_decision_time(T0 + BAR_MS, cfg)
 
 
+def test_decision_interval_fires_each_minute_on_weekdays():
+    cfg = DeskConfig(decision_hours_utc=(7,), decision_interval_sec=60.0)
+    # Thursday 00:01 UTC is a decision slot under interval mode (hours ignored).
+    assert is_decision_time(T0 + 60_000, cfg)
+    assert not is_decision_time(T0 + 30_000, cfg)
+    # Saturday still blocked when weekend entries are skipped.
+    sat = T0 + 2 * DAY_MS
+    assert not is_decision_time(sat + 60_000, cfg)
+    assert is_decision_time(sat + 60_000, cfg.with_overrides(skip_weekend_entries=False))
+
+
+def test_decision_slot_due_interval_and_next_iso(tmp_path):
+    """Live runner fires once per minute and advances next_decision."""
+    from bot.live.momentum_runner import Holding, MomentumDeskRunner, RunnerOptions
+
+    clock = FakeClock(T0 / 1000 + 90.0)  # mid-minute past a Thursday midnight
+    cfg = DeskConfig(decision_interval_sec=60.0, decision_hours_utc=(7,), **FLAT_SIZING)
+    opts = RunnerOptions(
+        state_path=str(tmp_path / "state.json"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
+        alphai_recommendations_path=None,
+    )
+    r = MomentumDeskRunner(cfg, FakeGateway(), options=opts, clock=clock, sleep=clock.sleep)
+    slot = r._decision_slot_due(int(clock() * 1000))
+    assert slot == (T0 + 60_000)
+    r.last_decision_hour_ms = slot
+    assert r._decision_slot_due(int(clock() * 1000)) is None
+    nxt = r._next_decision_iso(int(clock() * 1000))
+    assert nxt.startswith(datetime.fromtimestamp((T0 + 120_000) / 1000, UTC).isoformat()[:16])
+
+
 def test_weekend_entries_skipped_but_exits_unaffected():
     from bot.live.momentum_desk import is_entry_weekday, is_scheduled_hour
 
