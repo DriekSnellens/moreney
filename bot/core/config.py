@@ -565,12 +565,12 @@ class Settings(BaseSettings):
     # Entry venues in preference order (cheapest fees first); later venues are
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
-    # WR winner (135d live-scale): 07 + 16 UTC only. Kept as the schedule when
-    # decision_interval_sec=0.
+    # Fallback schedule when decision_interval_sec=0 (WR search used 7+16).
     momentum_desk_decision_hours_utc: str = "7,16"
     # Live entry scan cadence in seconds (0 = only decision_hours_utc).
-    # WR search preferred hours-only; minute scan lowered WR on the same window.
-    momentum_desk_decision_interval_sec: float = Field(default=0.0, ge=0.0, le=3600.0)
+    # 60s weekday scan: signal still uses closed 15m bars; catches new closes
+    # and freed slots after exits. Strict filters stay the WR gate.
+    momentum_desk_decision_interval_sec: float = Field(default=60.0, ge=0.0, le=3600.0)
     # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
     # positions, so the base clip can exceed book/4; the router shrinks or
     # skips clips the venue cash cannot fund. Strong tape (>= 85% of the
