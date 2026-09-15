@@ -619,6 +619,15 @@ class Settings(BaseSettings):
     momentum_desk_alphai_stale_minutes: float = Field(default=45.0, ge=0.0, le=1440.0)
     momentum_desk_alphai_price_confirm_sizing: bool = True
     momentum_desk_alphai_reliability_sizing: bool = True
+    # Outcome learning: log every closed desk trade with generic entry context;
+    # soft clip overlay only (caps ~0.75–1.15). Never auto-rewrites WR filters.
+    momentum_desk_outcome_learning_enabled: bool = True
+    momentum_desk_outcome_learning_auto_size: bool = True
+    momentum_desk_outcome_learning_path: str = "./data/momentum_trade_outcomes.json"
+    momentum_desk_outcome_min_samples: int = Field(default=8, ge=3, le=100)
+    momentum_desk_outcome_full_samples: int = Field(default=25, ge=5, le=200)
+    momentum_desk_outcome_mult_min: float = Field(default=0.75, ge=0.5, le=1.0)
+    momentum_desk_outcome_mult_max: float = Field(default=1.15, ge=1.0, le=1.5)
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
 

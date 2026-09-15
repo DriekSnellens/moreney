@@ -20,6 +20,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from bot.live.momentum_trade_outcomes import build_entry_ctx
+
 BAR_MS = 15 * 60 * 1000
 BARS_PER_DAY = 96
 
@@ -80,6 +82,9 @@ class DeskConfig:
     alphai_stale_minutes: float = 45.0
     alphai_price_confirm_sizing: bool = True
     alphai_reliability_sizing: bool = True
+    # Trade-outcome size overlay (generic context buckets). Soft clip only —
+    # never rewrites WR membership filters. See momentum_trade_outcomes.py.
+    outcome_size_enabled: bool = True
     max_positions: int = 3
     top_n: int = 2
     top_n_broad: int = 3
@@ -474,6 +479,8 @@ class Entry:
     clip_eur: float
     score: float
     reasons: tuple[str, ...]
+    # Generic entry-context snapshot for outcome learning (no coin identity).
+    entry_ctx: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -487,6 +494,8 @@ class Position:
     entry_fee_eur: float = 0.0
     entry_reason: str = ""
     venue: str = "bitvavo"
+    # Generic attributes at entry (persisted for outcome learning on close).
+    entry_ctx: dict[str, Any] = field(default_factory=dict)
 
     def gross_return(self, price: float) -> float:
         return price / self.entry_price - 1.0 if self.entry_price > 0 else 0.0
@@ -744,6 +753,7 @@ def select_entries(
     blocked_bases: Iterable[str] = (),
     alphai: AlphaIView | None = None,
     now_ms: int | None = None,
+    outcome_store: Any | None = None,
 ) -> list[Entry]:
     if not regime.ok:
         return []
@@ -759,6 +769,7 @@ def select_entries(
         else 1.0
     )
     soft_need = cfg.fee_rt * max(0.0, float(cfg.soft_regime_fee_buffer_mult))
+    n_cands = len(cands)
     out: list[Entry] = []
     for c in cands:
         if len(out) >= min(slots, top_n):
@@ -793,13 +804,31 @@ def select_entries(
         alphai_mult, alphai_tags = alphai_entry_clip_mult(
             c.base, view, cfg, now_ms=now_ms
         )
-        clip = cfg.clip_eur * alphai_mult * macro_mult * breadth_mult
+        entry_ctx = build_entry_ctx(
+            excess=float(c.excess),
+            ret_24h=float(c.ret_24h),
+            from_high=float(c.from_high),
+            n_cands=n_cands,
+            breadth=float(regime.breadth),
+            btc_ret=regime.btc_ret,
+            soft=soft,
+            alphai_pick=bool(c.alphai_pick),
+        )
+        outcome_mult, outcome_tags = 1.0, ()
+        if (
+            bool(getattr(cfg, "outcome_size_enabled", True))
+            and outcome_store is not None
+            and hasattr(outcome_store, "size_mult")
+        ):
+            outcome_mult, outcome_tags = outcome_store.size_mult(entry_ctx)
+        clip = cfg.clip_eur * alphai_mult * macro_mult * breadth_mult * float(outcome_mult)
         if soft:
             clip *= cfg.soft_regime_clip_mult
         reasons = [f"excess={c.excess:+.4f}", f"from_high={c.from_high:+.4f}"]
         if c.alphai_pick:
             reasons.append("alphai_pick")
         reasons.extend(alphai_tags)
+        reasons.extend(outcome_tags)
         if soft:
             reasons.append("soft_regime")
         if macro_mult != 1.0:
@@ -807,7 +836,13 @@ def select_entries(
         if breadth_tag:
             reasons.append(breadth_tag)
         out.append(
-            Entry(base=c.base, clip_eur=round(clip, 2), score=c.score, reasons=tuple(reasons))
+            Entry(
+                base=c.base,
+                clip_eur=round(clip, 2),
+                score=c.score,
+                reasons=tuple(reasons),
+                entry_ctx=dict(entry_ctx),
+            )
         )
         if cluster is not None:
             clusters_held.add(cluster)
@@ -825,7 +860,8 @@ def breadth_clip_mult(breadth: float, cfg: DeskConfig) -> tuple[float, str]:
 
 def max_clip_mult(cfg: DeskConfig) -> float:
     """Largest multiplier ``select_entries`` can apply to ``clip_eur``."""
-    return max(1.0, cfg.alphai_clip_mult) * max(1.0, cfg.strong_clip_mult)
+    outcome_hi = 1.15 if bool(getattr(cfg, "outcome_size_enabled", True)) else 1.0
+    return max(1.0, cfg.alphai_clip_mult) * max(1.0, cfg.strong_clip_mult) * outcome_hi
 
 
 def is_entry_weekday(t_ms: int, cfg: DeskConfig) -> bool:

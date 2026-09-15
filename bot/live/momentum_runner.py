@@ -59,6 +59,7 @@ from bot.live.momentum_desk import (
     unrealized_net_eur,
     update_fade_state,
 )
+from bot.live.momentum_trade_outcomes import MomentumTradeOutcomeStore
 
 logger = logging.getLogger(__name__)
 
@@ -295,8 +296,15 @@ class Holding:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Holding:
+        from dataclasses import fields as dc_fields
+
+        raw = dict(data.get("pos") or {})
+        allowed = {f.name for f in dc_fields(Position)}
+        pos_kwargs = {k: v for k, v in raw.items() if k in allowed}
+        if "entry_ctx" in pos_kwargs and not isinstance(pos_kwargs["entry_ctx"], dict):
+            pos_kwargs["entry_ctx"] = {}
         return cls(
-            pos=Position(**data["pos"]),
+            pos=Position(**pos_kwargs),
             holding_id=str(data.get("holding_id") or uuid.uuid4().hex[:10]),
             last_bar_ms=int(data.get("last_bar_ms") or 0),
         )
@@ -348,6 +356,13 @@ class RunnerOptions:
     ledger_path: str = "./data/momentum_desk_ledger.jsonl"
     alphai_recommendations_path: str | None = "./data/alphai/daily_recommendations.json"
     alphai_pick_outcomes_path: str | None = "./data/alphai/pick_outcomes.json"
+    outcome_learning_path: str = "./data/momentum_trade_outcomes.json"
+    outcome_learning_enabled: bool = True
+    outcome_learning_auto_size: bool = True
+    outcome_min_samples: int = 8
+    outcome_full_samples: int = 25
+    outcome_mult_min: float = 0.75
+    outcome_mult_max: float = 1.15
     dry_run: bool = False
 
 
@@ -390,6 +405,15 @@ class MomentumDeskRunner:
         self._refill_pending: bool = False
         self._lock = asyncio.Lock()
         self.started_at = datetime.now(UTC).isoformat()
+        self.outcomes = MomentumTradeOutcomeStore.load(
+            self.opt.outcome_learning_path,
+            enabled=bool(self.opt.outcome_learning_enabled),
+            auto_size=bool(self.opt.outcome_learning_auto_size),
+            min_samples=int(self.opt.outcome_min_samples),
+            full_samples=int(self.opt.outcome_full_samples),
+            mult_min=float(self.opt.outcome_mult_min),
+            mult_max=float(self.opt.outcome_mult_max),
+        )
         self._load_state()
 
     @property
@@ -509,6 +533,7 @@ class MomentumDeskRunner:
             "last_regime": self.last_regime,
             "next_decision": self._next_decision_iso(now_ms),
             "last_error": self.last_error,
+            "outcome_learning": self.outcomes.summary(),
             "marks_updated_at": (
                 datetime.fromtimestamp(self.marks_updated_at, UTC).isoformat()
                 if self.marks_updated_at
@@ -798,10 +823,12 @@ class MomentumDeskRunner:
                 "hold_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
                 "net_eur": round(net, 4),
                 "entry_reason": h.pos.entry_reason,
+                "entry_ctx": dict(getattr(h.pos, "entry_ctx", None) or {}),
             }
         )
         remaining = h.pos.quantity - fill.qty
         if remaining * fill.avg_price < _MIN_ORDER_EUR:
+            self._record_outcome(h, net=net, decision=decision, now_ms=now_ms)
             self.holdings.remove(h)
             if bool(getattr(self.cfg, "refill_on_exit", True)) and len(
                 self.holdings
@@ -812,6 +839,38 @@ class MomentumDeskRunner:
             h.pos.notional_eur = remaining * h.pos.entry_price
         self._save_state()
         return fill
+
+    def _record_outcome(
+        self, h: Holding, *, net: float, decision: ExitDecision, now_ms: int
+    ) -> None:
+        if not self.opt.outcome_learning_enabled:
+            return
+        try:
+            from bot.live.momentum_trade_outcomes import parse_entry_ctx_from_reason
+
+            ctx = dict(getattr(h.pos, "entry_ctx", None) or {})
+            if not ctx:
+                ctx = parse_entry_ctx_from_reason(h.pos.entry_reason)
+            clip = float(h.pos.notional_eur or 0.0)
+            if clip <= 0:
+                clip = float(self.cfg.clip_eur)
+            self.outcomes.record_close(
+                holding_id=h.holding_id,
+                base=h.pos.base,
+                net_eur=float(net),
+                clip_eur=clip,
+                peak_return=float(h.pos.peak / h.pos.entry_price - 1.0)
+                if h.pos.entry_price > 0
+                else 0.0,
+                hold_h=(now_ms - h.pos.opened_ms) / 3_600_000.0,
+                exit_reason=str(decision.reason or ""),
+                entry_ctx=ctx,
+                opened_ms=int(h.pos.opened_ms),
+                closed_ms=int(now_ms),
+            )
+            self.outcomes.save()
+        except Exception:  # noqa: BLE001
+            logger.warning("momentum desk: outcome learning record failed", exc_info=True)
 
     async def sell_all_now(self, *, urgent: bool = False) -> dict[str, Any]:
         """Sell every open holding sequentially (dashboard sell-all)."""
@@ -1036,6 +1095,7 @@ class MomentumDeskRunner:
                 ),
                 alphai=alphai,
                 now_ms=now_ms,
+                outcome_store=self.outcomes if self.opt.outcome_learning_enabled else None,
             )
 
         # Size clips to venue cash *before* planning so operators see the
@@ -1058,6 +1118,7 @@ class MomentumDeskRunner:
                         clip_eur=round(clip, 2),
                         score=entry.score,
                         reasons=reasons,
+                        entry_ctx=dict(entry.entry_ctx or {}),
                     )
                 )
             else:
@@ -1135,7 +1196,13 @@ class MomentumDeskRunner:
         self.last_regime = summary
         self._ledger_append({"event": "decision", **summary})
         for entry in entries:
-            await self._enter(entry.base, entry.clip_eur, ",".join(entry.reasons), now_ms)
+            await self._enter(
+                entry.base,
+                entry.clip_eur,
+                ",".join(entry.reasons),
+                now_ms,
+                entry_ctx=dict(entry.entry_ctx or {}),
+            )
         self._save_state()
         return summary
 
@@ -1171,7 +1238,15 @@ class MomentumDeskRunner:
             row["blocked"] = "insufficient_cash"
         return row
 
-    async def _enter(self, base: str, clip_eur: float, reason: str, now_ms: int) -> None:
+    async def _enter(
+        self,
+        base: str,
+        clip_eur: float,
+        reason: str,
+        now_ms: int,
+        *,
+        entry_ctx: Mapping[str, Any] | None = None,
+    ) -> None:
         route = self._route_entry(clip_eur)
         if route is None:
             self._ledger_append(
@@ -1203,6 +1278,7 @@ class MomentumDeskRunner:
             entry_fee_eur=fill.fee_eur,
             entry_reason=reason,
             venue=venue,
+            entry_ctx=dict(entry_ctx or {}),
         )
         holding = Holding(
             pos=pos, holding_id=uuid.uuid4().hex[:10], last_bar_ms=now_ms // BAR_MS * BAR_MS
@@ -1225,6 +1301,7 @@ class MomentumDeskRunner:
                 "fee_eur": round(fill.fee_eur, 4),
                 "taker": fill.taker,
                 "reason": reason,
+                "entry_ctx": dict(pos.entry_ctx),
             }
         )
         self._save_state()
@@ -1590,6 +1667,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         alphai_reliability_sizing=bool(
             getattr(settings, "momentum_desk_alphai_reliability_sizing", True)
         ),
+        outcome_size_enabled=bool(
+            getattr(settings, "momentum_desk_outcome_learning_enabled", True)
+        ),
     )
 
 
@@ -1709,6 +1789,31 @@ class MomentumDeskManager:
             alphai_pick_outcomes_path=str(
                 getattr(settings, "alphai_pick_outcomes_path", None)
                 or RunnerOptions.alphai_pick_outcomes_path
+            ),
+            outcome_learning_path=str(
+                getattr(
+                    settings,
+                    "momentum_desk_outcome_learning_path",
+                    RunnerOptions.outcome_learning_path,
+                )
+            ),
+            outcome_learning_enabled=bool(
+                getattr(settings, "momentum_desk_outcome_learning_enabled", True)
+            ),
+            outcome_learning_auto_size=bool(
+                getattr(settings, "momentum_desk_outcome_learning_auto_size", True)
+            ),
+            outcome_min_samples=int(
+                getattr(settings, "momentum_desk_outcome_min_samples", 8)
+            ),
+            outcome_full_samples=int(
+                getattr(settings, "momentum_desk_outcome_full_samples", 25)
+            ),
+            outcome_mult_min=float(
+                getattr(settings, "momentum_desk_outcome_mult_min", 0.75)
+            ),
+            outcome_mult_max=float(
+                getattr(settings, "momentum_desk_outcome_mult_max", 1.15)
             ),
         )
         self._runner = MomentumDeskRunner(cfg, None, options=options, gateways=gateways)

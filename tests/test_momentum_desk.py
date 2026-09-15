@@ -564,7 +564,10 @@ def test_breadth_scales_clip_up_on_strong_tape_and_down_on_thin_tape():
     assert breadth_clip_mult(0.9, cfg) == (1.3, "breadth_strong")
     assert breadth_clip_mult(0.75, cfg) == (1.0, "")
     assert breadth_clip_mult(0.6, cfg) == (0.7, "breadth_weak")
-    assert max_clip_mult(cfg) == pytest.approx(1.3 * 1.3)
+    assert max_clip_mult(cfg) == pytest.approx(1.3 * 1.3 * 1.15)
+    assert max_clip_mult(cfg.with_overrides(outcome_size_enabled=False)) == pytest.approx(
+        1.3 * 1.3
+    )
     cands = rank_candidates(
         {"SOL": _stats("SOL", 0.05)}, 0.0, cfg.with_overrides(min_volume_eur=0.0)
     )
@@ -1221,10 +1224,10 @@ def test_engine_settings_cap_notional_to_clip():
     s = Settings(exchange_name="stub", execution_mode="paper")
     cfg = DeskConfig(clip_eur=500.0, alphai_clip_mult=1.3, max_positions=3, strong_clip_mult=1.0)
     out = engine_settings_for_desk(s, cfg, "bitvavo")
-    assert out.live_micro_max_notional_eur == pytest.approx(651.0)
+    assert out.live_micro_max_notional_eur == pytest.approx(500 * 1.3 * 1.15 + 1)
     # Strong-tape multiplier stacks on the AlphaI multiplier in the cap.
     strong = engine_settings_for_desk(s, cfg.with_overrides(strong_clip_mult=1.3), "bitvavo")
-    assert strong.live_micro_max_notional_eur == pytest.approx(500 * 1.3 * 1.3 + 1)
+    assert strong.live_micro_max_notional_eur == pytest.approx(500 * 1.3 * 1.3 * 1.15 + 1)
     assert out.live_micro_symbols == "*" and out.live_micro_venues == "bitvavo"
     assert out.live_micro_max_open_orders_per_venue == 4
     multi = engine_settings_for_desk(s, cfg, "Bitvavo, okx,bitvavo")
