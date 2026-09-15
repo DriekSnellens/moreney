@@ -565,11 +565,11 @@ class Settings(BaseSettings):
     # Entry venues in preference order (cheapest fees first); later venues are
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
-    # 90d sweep: entries 06-14 UTC all positive, 15-23 UTC all negative.
-    # Kept as fallback when decision_interval_sec=0.
-    momentum_desk_decision_hours_utc: str = "7,13,16"
+    # WR winner (135d live-scale): 07 + 16 UTC only. Kept as the schedule when
+    # decision_interval_sec=0.
+    momentum_desk_decision_hours_utc: str = "7,16"
     # Live entry scan cadence in seconds (0 = only decision_hours_utc).
-    # Filters are strict enough that a 60s weekday scan is safe.
+    # WR search preferred hours-only; minute scan lowered WR on the same window.
     momentum_desk_decision_interval_sec: float = Field(default=0.0, ge=0.0, le=3600.0)
     # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
     # positions, so the base clip can exceed book/4; the router shrinks or
@@ -583,19 +583,19 @@ class Settings(BaseSettings):
     # while adding a third of the drawdown; exits keep running on weekends.
     momentum_desk_skip_weekend_entries: bool = True
     momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
-    # 130d @€40k search winner: 4% trail with 5%→2.5% ratchet.
-    momentum_desk_trail_pct: float = Field(default=0.04, gt=0, le=0.2)
-    momentum_desk_trail_tight_after: float = Field(default=0.05, ge=0, le=0.5)
-    momentum_desk_trail_tight_pct: float = Field(default=0.025, gt=0, le=0.2)
+    # WR winner (135d @~€4k): 3% trail with 4%→2% ratchet.
+    momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
+    momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
+    momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
-    momentum_desk_time_exit_hours: float = Field(default=24.0, gt=0)
+    momentum_desk_time_exit_hours: float = Field(default=36.0, gt=0)
     # Entry/exit quality knobs (DeskConfig defaults; overridable via env).
     momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)
     momentum_desk_entry_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
     momentum_desk_max_chase_ret_24h: float = Field(default=0.0, ge=0.0, le=1.0)
     momentum_desk_midflat_hours: float = Field(default=0.0, ge=0.0, le=168.0)
-    # Time-to-green early invalidation (A/B winner: 4h / +1% peak).
-    momentum_desk_green_deadline_hours: float = Field(default=4.0, ge=0.0, le=168.0)
+    # Green deadline off on WR winner (0 disables).
+    momentum_desk_green_deadline_hours: float = Field(default=0.0, ge=0.0, le=168.0)
     momentum_desk_green_min_peak: float = Field(default=0.01, ge=0.0, le=0.2)
     # Fade-velocity / ETA-to-zero (0 fade_eta_sec disables). Dense marks while open.
     momentum_desk_fade_eta_sec: float = Field(default=180.0, ge=0.0, le=3600.0)

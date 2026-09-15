@@ -74,10 +74,8 @@ class DeskConfig:
     top_n: int = 2
     top_n_broad: int = 3
     broad_breadth: float = 0.7
-    # Fee-aware floor. 130d @€40k config search (May–Sep 2026): 2.5% with a
-    # wider trail dominated both the prior 2.0% pack and the old hard-regime
-    # style on calmar (PnL / |DD|); Jun/Jul bleed was concentrated in thinner
-    # excess names that 2.5% simply skips.
+    # Fee-aware floor. WR winner (135d live-scale) and prior €40k calmar search
+    # both kept 2.5%; thinner excess names are the main Jun/Jul bleed source.
     min_excess: float = 0.025
     # Always-on excess floor = fee_rt × this (binds even if min_excess is lowered).
     entry_fee_buffer_mult: float = 6.0
@@ -89,13 +87,13 @@ class DeskConfig:
     min_volume_eur: float = 1_000_000.0
     btc_min_ret: float = -0.01
     min_breadth: float = 0.5
-    trail_pct: float = 0.04
+    trail_pct: float = 0.03
     # Ratchet: once the peak gain reaches ``trail_tight_after`` the trail
-    # narrows to ``trail_tight_pct`` (0 disables). Search winner used 5%→2.5%
-    # with the 4% base trail — lets August-style runners breathe past ordinary
-    # 2–3% noise before locking gains.
-    trail_tight_after: float = 0.05
-    trail_tight_pct: float = 0.025
+    # narrows to ``trail_tight_pct`` (0 disables). WR winner (135d live-scale)
+    # used 4%→2% with a 3% base trail — locks gains earlier than the prior
+    # 4% / 5%→2.5% pack and lifted WR 40%→54% on the same window.
+    trail_tight_after: float = 0.04
+    trail_tight_pct: float = 0.02
     hard_stop_pct: float = 0.03
     # Staged early stop (0 disables): until peak gain reaches
     # ``early_stop_until_peak``, use the tighter ``early_stop_pct`` instead of
@@ -103,19 +101,14 @@ class DeskConfig:
     # without clipping trails once the trade has confirmed.
     early_stop_pct: float = 0.0
     early_stop_until_peak: float = 0.0
-    # Positions that have done nothing in a day almost always close red
-    # (48h time-exits: -43 EUR over 5 trades). 24h keeps the same total and
-    # trims the worst week from -76 to -54 EUR and max drawdown -118 -> -87.
-    time_exit_hours: float = 24.0
+    # WR winner: 36h time exit (vs prior 24h) with the tighter trail pack.
+    time_exit_hours: float = 36.0
     # Time-to-green (0 disables): if age ≥ ``green_deadline_hours`` and peak
-    # gain is still below ``green_min_peak``, exit as ``no_green``. A/B vs winner
-    # @€40k (May–Sep 2026): 4h / +1% lifted net +16.3%→+18.9% and DD −6.0%→−5.0%
-    # at the same WR by cutting hard-stop bleed on stalls.
-    green_deadline_hours: float = 4.0
+    # gain is still below ``green_min_peak``, exit as ``no_green``. Off on the
+    # WR winner — the 4h gate cut WR ~54%→45% in the same live-scale search.
+    green_deadline_hours: float = 0.0
     green_min_peak: float = 0.01
-    # Midflat (0 disables). Search winner was indifferent to 0 vs 24h at the
-    # 2.5% excess / 4% trail setting (no midflat fills on that path), so keep
-    # off and rely on the 24h fee-flat time exit.
+    # Midflat (0 disables). Keep off; WR winner relies on trail + 36h time exit.
     midflat_hours: float = 0.0
     # Fade-velocity / ETA-to-zero (0 ``fade_eta_sec`` disables). Live path with
     # dense venue marks: once peak unrealized net is meaningful, if smoothed
