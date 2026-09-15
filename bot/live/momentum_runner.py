@@ -347,6 +347,7 @@ class RunnerOptions:
     state_path: str = "./data/momentum_desk_state.json"
     ledger_path: str = "./data/momentum_desk_ledger.jsonl"
     alphai_recommendations_path: str | None = "./data/alphai/daily_recommendations.json"
+    alphai_pick_outcomes_path: str | None = "./data/alphai/pick_outcomes.json"
     dry_run: bool = False
 
 
@@ -888,7 +889,7 @@ class MomentumDeskRunner:
             return None
         return cur
 
-    def _alphai_view(self) -> AlphaIView:
+    def _alphai_view(self, stats: Mapping[str, BaseStats] | None = None) -> AlphaIView:
         path = self.opt.alphai_recommendations_path
         if not path:
             return AlphaIView()
@@ -896,10 +897,52 @@ class MomentumDeskRunner:
         if not p.exists():
             return AlphaIView()
         try:
-            return AlphaIView.from_recommendations(json.loads(p.read_text(encoding="utf-8")))
+            payload = json.loads(p.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             logger.warning("momentum desk: AlphaI recommendations unreadable; ignoring")
             return AlphaIView()
+        if not isinstance(payload, dict):
+            return AlphaIView()
+
+        # Optional live overlays used only for clip sizing (not membership).
+        try:
+            from bot.integrations.alphai.price_confirm import enrich_daily_with_price_check
+            from bot.integrations.alphai.pick_outcomes import PickOutcomeStore
+
+            day_rets: dict[str, float] = {}
+            if stats:
+                for base, st in stats.items():
+                    ret = getattr(st, "ret_24h", None)
+                    if ret is None:
+                        continue
+                    try:
+                        day_rets[str(base).upper()] = float(ret) * 100.0
+                    except (TypeError, ValueError):
+                        continue
+            reliability = None
+            try:
+                outcomes_path = (
+                    getattr(self.opt, "alphai_pick_outcomes_path", None)
+                    or "./data/alphai/pick_outcomes.json"
+                )
+                store = PickOutcomeStore.load(outcomes_path)
+                reliability = store.summary().get("base_reliability") or None
+            except Exception:  # noqa: BLE001
+                reliability = None
+            if day_rets:
+                payload = enrich_daily_with_price_check(
+                    payload,
+                    day_rets,
+                    base_reliability=reliability,
+                ) or payload
+            elif reliability:
+                payload = dict(payload)
+                payload["base_reliability"] = {
+                    str(k).upper(): float(v) for k, v in dict(reliability).items()
+                }
+        except Exception:  # noqa: BLE001
+            logger.debug("momentum desk: AlphaI size overlays skipped", exc_info=True)
+        return AlphaIView.from_recommendations(payload)
 
     async def _maybe_refill(self, now_ms: int) -> None:
         """One immediate entry pass after an exit frees a slot.
@@ -971,8 +1014,8 @@ class MomentumDeskRunner:
                 candles[base] = await self._feed.candles(base, 110)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("momentum desk: candles failed for %s: %s", base, exc)
-        alphai = self._alphai_view()
         stats = universe_stats(candles, t_ms, self.cfg)
+        alphai = self._alphai_view(stats)
         btc = bar_stats("BTC", candles["BTC"], t_ms) if candles.get("BTC") else None
         regime = classify_regime(btc, stats, self.cfg, alphai=alphai)
         cands = (
@@ -992,6 +1035,7 @@ class MomentumDeskRunner:
                     now_ms, self.cfg.max_entries_per_base_per_day
                 ),
                 alphai=alphai,
+                now_ms=now_ms,
             )
 
         # Size clips to venue cash *before* planning so operators see the
@@ -1530,6 +1574,22 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         fade_min_giveback_eur=float(
             getattr(settings, "momentum_desk_fade_min_giveback_eur", 5.0)
         ),
+        alphai_clip_mult=float(getattr(settings, "momentum_desk_alphai_clip_mult", 1.3)),
+        alphai_size_mode=str(
+            getattr(settings, "momentum_desk_alphai_size_mode", "conviction")
+        ),
+        alphai_clip_mult_min=float(
+            getattr(settings, "momentum_desk_alphai_clip_mult_min", 1.0)
+        ),
+        alphai_stale_minutes=float(
+            getattr(settings, "momentum_desk_alphai_stale_minutes", 45.0)
+        ),
+        alphai_price_confirm_sizing=bool(
+            getattr(settings, "momentum_desk_alphai_price_confirm_sizing", True)
+        ),
+        alphai_reliability_sizing=bool(
+            getattr(settings, "momentum_desk_alphai_reliability_sizing", True)
+        ),
     )
 
 
@@ -1645,6 +1705,10 @@ class MomentumDeskManager:
             alphai_recommendations_path=str(
                 getattr(settings, "alphai_daily_recommendations_path", None)
                 or RunnerOptions.alphai_recommendations_path
+            ),
+            alphai_pick_outcomes_path=str(
+                getattr(settings, "alphai_pick_outcomes_path", None)
+                or RunnerOptions.alphai_pick_outcomes_path
             ),
         )
         self._runner = MomentumDeskRunner(cfg, None, options=options, gateways=gateways)

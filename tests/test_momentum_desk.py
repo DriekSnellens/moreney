@@ -23,6 +23,7 @@ from bot.live.momentum_desk import (
     evaluate_exit,
     is_decision_time,
     rank_candidates,
+    alphai_entry_clip_mult,
     select_entries,
     universe_stats,
 )
@@ -1845,3 +1846,81 @@ def test_refill_on_exit_triggers_decide_outside_hours(tmp_path):
         assert r._refill_pending is False
 
     asyncio.run(scenario())
+
+
+def test_alphai_conviction_size_overlay_scales_clip_without_changing_membership():
+    """Conviction sizing shrinks weak/mixed picks but keeps the same entry set."""
+    from datetime import UTC, datetime
+
+    cfg, candles = _universe({"ETH": 0.05, "SOL": 0.045, "LINK": 0.04}, btc_ret=0.01)
+    cfg = cfg.with_overrides(
+        min_volume_eur=0.0,
+        clip_eur=1000.0,
+        alphai_clip_mult=1.3,
+        alphai_clip_mult_min=1.0,
+        alphai_size_mode="conviction",
+        strong_clip_mult=1.0,
+        weak_clip_mult=1.0,
+        max_positions=3,
+        top_n=3,
+        top_n_broad=3,
+    )
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    assert regime.ok
+    payload = {
+        "generated_at": datetime.fromtimestamp(T0 / 1000, UTC).isoformat(),
+        "macro_caution": False,
+        "picks": [
+            {
+                "base": "ETH",
+                "score": 40,
+                "rank": 1,
+                "bullish_headlines": ["a", "b", "c"],
+                "bearish_headlines": [],
+            },
+            {
+                "base": "SOL",
+                "score": 10,
+                "rank": 2,
+                "bullish_headlines": ["a"],
+                "bearish_headlines": ["b", "c"],
+            },
+        ],
+        "price_confirm_scales": {"ETH": 1.0, "SOL": 0.4},
+    }
+    view = AlphaIView.from_recommendations(payload)
+    cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
+    entries = select_entries(
+        cands, regime, cfg, held_bases=[], alphai=view, now_ms=T0
+    )
+    by = {e.base: e for e in entries}
+    assert set(by) >= {"ETH", "SOL"}
+    assert by["ETH"].clip_eur > by["SOL"].clip_eur
+    assert by["ETH"].clip_eur <= 1300.0
+    assert by["SOL"].clip_eur >= 1000.0
+    assert any(r.startswith("alphai_conv=") for r in by["SOL"].reasons)
+
+    binary = cfg.with_overrides(alphai_size_mode="binary")
+    entries_b = select_entries(cands, regime, binary, held_bases=[], alphai=view, now_ms=T0)
+    assert {e.base for e in entries_b} == {e.base for e in entries}
+    assert all(e.clip_eur == pytest.approx(1300.0) for e in entries_b if e.base in view.picks)
+
+
+def test_alphai_stale_board_disables_size_boost():
+    cfg = DeskConfig(alphai_size_mode="conviction", alphai_clip_mult=1.3, alphai_stale_minutes=45.0)
+    from datetime import UTC, datetime
+
+    gen = datetime.fromtimestamp(T0 / 1000, UTC).isoformat()
+    view = AlphaIView.from_recommendations(
+        {
+            "generated_at": gen,
+            "picks": [{"base": "ETH", "score": 50, "rank": 1}],
+        }
+    )
+    fresh = alphai_entry_clip_mult("ETH", view, cfg, now_ms=T0 + 5 * 60_000)
+    assert fresh[0] == pytest.approx(1.3)
+    stale_ms = T0 + 2 * 60 * 60 * 1000
+    stale = alphai_entry_clip_mult("ETH", view, cfg, now_ms=stale_ms)
+    assert stale[0] == pytest.approx(1.0)
+    assert "alphai_stale" in stale[1]

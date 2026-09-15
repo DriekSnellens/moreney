@@ -70,6 +70,16 @@ class DeskConfig:
     decision_hours_utc: tuple[int, ...] = (0,)
     clip_eur: float = 500.0
     alphai_clip_mult: float = 1.3
+    # Size overlay: ``binary`` = flat alphai_clip_mult on every pick (legacy).
+    # ``conviction`` = scale between alphai_clip_mult_min and alphai_clip_mult
+    # using score/rank + headline conflict + optional price-confirm/reliability.
+    # Does not change membership gates — only clip size for AlphaI picks.
+    alphai_size_mode: str = "conviction"
+    alphai_clip_mult_min: float = 1.0
+    alphai_conflict_damp: float = 0.55
+    alphai_stale_minutes: float = 45.0
+    alphai_price_confirm_sizing: bool = True
+    alphai_reliability_sizing: bool = True
     max_positions: int = 3
     top_n: int = 2
     top_n_broad: int = 3
@@ -226,11 +236,19 @@ class Candidate:
 
 @dataclass(frozen=True)
 class AlphaIView:
-    """Minimal AlphaI input: veto list, pick set and macro flag."""
+    """AlphaI overlay: membership sets plus optional size-overlay features."""
 
     avoid: frozenset[str] = frozenset()
     picks: frozenset[str] = frozenset()
     macro_caution: bool = False
+    pick_scores: Mapping[str, float] = field(default_factory=dict)
+    pick_ranks: Mapping[str, int] = field(default_factory=dict)
+    bullish_headline_counts: Mapping[str, int] = field(default_factory=dict)
+    bearish_headline_counts: Mapping[str, int] = field(default_factory=dict)
+    price_confirm_scales: Mapping[str, float] = field(default_factory=dict)
+    base_reliability: Mapping[str, float] = field(default_factory=dict)
+    generated_at_ms: int | None = None
+    watch: frozenset[str] = frozenset()
 
     @classmethod
     def from_recommendations(cls, payload: Mapping[str, Any] | None) -> AlphaIView:
@@ -245,11 +263,209 @@ class AlphaIView:
                     out.add(str(base).upper())
             return frozenset(out)
 
+        scores: dict[str, float] = {}
+        ranks: dict[str, int] = {}
+        bull_n: dict[str, int] = {}
+        bear_n: dict[str, int] = {}
+        for row in payload.get("picks") or []:
+            if not isinstance(row, Mapping):
+                continue
+            base = str(row.get("base") or "").upper()
+            if not base:
+                continue
+            if row.get("score") is not None:
+                try:
+                    scores[base] = float(row["score"])
+                except (TypeError, ValueError):
+                    pass
+            if row.get("rank") is not None:
+                try:
+                    ranks[base] = int(row["rank"])
+                except (TypeError, ValueError):
+                    pass
+            bull = row.get("bullish_headlines") or row.get("bullish") or []
+            bear = row.get("bearish_headlines") or row.get("bearish") or []
+            if isinstance(bull, list):
+                bull_n[base] = len(bull)
+            if isinstance(bear, list):
+                bear_n[base] = len(bear)
+
+        confirm: dict[str, float] = {}
+        raw_scales = payload.get("price_confirm_scales") or {}
+        if isinstance(raw_scales, Mapping):
+            for k, v in raw_scales.items():
+                try:
+                    confirm[str(k).upper()] = max(0.0, min(1.0, float(v)))
+                except (TypeError, ValueError):
+                    continue
+        # Older payloads only list lagging bases.
+        for base in payload.get("price_lag_bases") or []:
+            b = str(base).upper()
+            if b and b not in confirm:
+                confirm[b] = 0.35
+
+        reliability: dict[str, float] = {}
+        raw_rel = payload.get("base_reliability") or {}
+        if isinstance(raw_rel, Mapping):
+            for k, v in raw_rel.items():
+                try:
+                    reliability[str(k).upper()] = max(0.40, min(1.10, float(v)))
+                except (TypeError, ValueError):
+                    continue
+
+        generated_at_ms: int | None = None
+        for key in ("generated_at", "updated_at", "asof"):
+            raw = payload.get(key)
+            if not raw:
+                continue
+            try:
+                from datetime import datetime
+
+                ts = str(raw).replace("Z", "+00:00")
+                dt = datetime.fromisoformat(ts)
+                generated_at_ms = int(dt.timestamp() * 1000)
+                break
+            except Exception:  # noqa: BLE001
+                continue
+
         return cls(
             avoid=_bases(payload.get("avoid")),
             picks=_bases(payload.get("picks")),
             macro_caution=bool(payload.get("macro_caution")),
+            pick_scores=scores,
+            pick_ranks=ranks,
+            bullish_headline_counts=bull_n,
+            bearish_headline_counts=bear_n,
+            price_confirm_scales=confirm,
+            base_reliability=reliability,
+            generated_at_ms=generated_at_ms,
+            watch=_bases(payload.get("watch")),
         )
+
+    def headline_conflict_ratio(self, base: str) -> float:
+        b = str(base or "").upper()
+        bull = int(self.bullish_headline_counts.get(b, 0))
+        bear = int(self.bearish_headline_counts.get(b, 0))
+        total = bull + bear
+        if total <= 0:
+            return 0.0
+        return bear / float(total)
+
+    def price_confirm_scale(self, base: str) -> float:
+        b = str(base or "").upper()
+        if b in self.price_confirm_scales:
+            try:
+                return max(0.0, min(1.0, float(self.price_confirm_scales[b])))
+            except (TypeError, ValueError):
+                return 1.0
+        return 1.0
+
+    def pick_conviction(self, base: str, *, cfg: DeskConfig | None = None) -> float:
+        """Relative 0..1 conviction for an AlphaI pick (score/rank + damps)."""
+        b = str(base or "").upper()
+        if b not in self.picks:
+            return 0.0
+        positive = {
+            k: float(v)
+            for k, v in self.pick_scores.items()
+            if k in self.picks and float(v) > 0 and k not in self.avoid
+        }
+        if not positive:
+            # No score payload → treat like legacy full pick boost.
+            conv = 1.0
+        elif b not in positive:
+            conv = 0.75
+        else:
+            ranked = sorted(positive.items(), key=lambda kv: kv[1], reverse=True)
+            n = len(ranked)
+            rank_idx = next(i for i, (k, _) in enumerate(ranked) if k == b)
+            rank_conv = 1.0 - (rank_idx / max(n, 1))
+            vals = [s for _, s in ranked]
+            mx, mn = max(vals), min(vals)
+            score_conv = (positive[b] - mn) / (mx - mn) if mx > mn else 1.0
+            conv = 0.55 * rank_conv + 0.45 * score_conv
+
+        damp = 0.55 if cfg is None else float(cfg.alphai_conflict_damp)
+        conflict = self.headline_conflict_ratio(b)
+        if conflict > 0.0:
+            conv *= max(0.55, 1.0 - damp * conflict)
+
+        use_px = True if cfg is None else bool(cfg.alphai_price_confirm_sizing)
+        if use_px:
+            scale = self.price_confirm_scale(b)
+            if scale < 1.0:
+                conv *= max(0.35, scale)
+
+        use_rel = True if cfg is None else bool(cfg.alphai_reliability_sizing)
+        if use_rel and b in self.base_reliability:
+            try:
+                rel = float(self.base_reliability[b])
+                conv *= max(0.45, min(1.10, rel))
+            except (TypeError, ValueError):
+                pass
+        return max(0.0, min(1.0, conv))
+
+    def with_overlays(
+        self,
+        *,
+        price_confirm_scales: Mapping[str, float] | None = None,
+        base_reliability: Mapping[str, float] | None = None,
+    ) -> AlphaIView:
+        """Return a copy with live tape/reliability overlays merged in."""
+        confirm = dict(self.price_confirm_scales)
+        if price_confirm_scales:
+            for k, v in price_confirm_scales.items():
+                try:
+                    confirm[str(k).upper()] = max(0.0, min(1.0, float(v)))
+                except (TypeError, ValueError):
+                    continue
+        reliability = dict(self.base_reliability)
+        if base_reliability:
+            for k, v in base_reliability.items():
+                try:
+                    reliability[str(k).upper()] = max(0.40, min(1.10, float(v)))
+                except (TypeError, ValueError):
+                    continue
+        return replace(
+            self,
+            price_confirm_scales=confirm,
+            base_reliability=reliability,
+        )
+
+
+def alphai_entry_clip_mult(
+    base: str,
+    view: AlphaIView,
+    cfg: DeskConfig,
+    *,
+    now_ms: int | None = None,
+) -> tuple[float, tuple[str, ...]]:
+    """Clip multiplier for an AlphaI pick; ``1.0`` and no tags for non-picks."""
+    b = str(base or "").upper()
+    if b not in view.picks:
+        return 1.0, ()
+
+    mode = str(cfg.alphai_size_mode or "binary").strip().lower()
+    if mode != "conviction":
+        # Membership tag ``alphai_pick`` is added by select_entries; keep tags size-only.
+        return float(cfg.alphai_clip_mult), ()
+
+    stale_min = float(cfg.alphai_stale_minutes or 0.0)
+    if (
+        stale_min > 0.0
+        and now_ms is not None
+        and view.generated_at_ms is not None
+        and (now_ms - int(view.generated_at_ms)) > stale_min * 60_000
+    ):
+        return 1.0, ("alphai_stale",)
+
+    conv = view.pick_conviction(b, cfg=cfg)
+    lo = float(cfg.alphai_clip_mult_min)
+    hi = float(cfg.alphai_clip_mult)
+    if hi < lo:
+        lo, hi = hi, lo
+    mult = lo + (hi - lo) * conv
+    return mult, (f"alphai_conv={conv:.2f}", f"alphai_clip_x{mult:.2f}")
 
 
 @dataclass(frozen=True)
@@ -527,6 +743,7 @@ def select_entries(
     held_bases: Iterable[str],
     blocked_bases: Iterable[str] = (),
     alphai: AlphaIView | None = None,
+    now_ms: int | None = None,
 ) -> list[Entry]:
     if not regime.ok:
         return []
@@ -573,17 +790,16 @@ def select_entries(
             and float(c.excess) < float(cfg.strong_clip_min_excess)
         ):
             breadth_mult, breadth_tag = 1.0, "breadth_strong_gated"
-        clip = (
-            cfg.clip_eur
-            * (cfg.alphai_clip_mult if c.alphai_pick else 1.0)
-            * macro_mult
-            * breadth_mult
+        alphai_mult, alphai_tags = alphai_entry_clip_mult(
+            c.base, view, cfg, now_ms=now_ms
         )
+        clip = cfg.clip_eur * alphai_mult * macro_mult * breadth_mult
         if soft:
             clip *= cfg.soft_regime_clip_mult
         reasons = [f"excess={c.excess:+.4f}", f"from_high={c.from_high:+.4f}"]
         if c.alphai_pick:
             reasons.append("alphai_pick")
+        reasons.extend(alphai_tags)
         if soft:
             reasons.append("soft_regime")
         if macro_mult != 1.0:

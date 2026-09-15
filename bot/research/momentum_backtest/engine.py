@@ -287,6 +287,7 @@ def simulate(
                     held_bases=[p.base for p in positions],
                     blocked_bases=ledger.blocked_bases(t, cfg.max_entries_per_base_per_day),
                     alphai=view,
+                    now_ms=t,
                 )
             for e in entries:
                 clip = e.clip_eur

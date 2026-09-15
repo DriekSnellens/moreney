@@ -610,6 +610,14 @@ class Settings(BaseSettings):
     momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
+    # AlphaI size overlay: binary = flat alphai_clip_mult; conviction = score/rank
+    # + headline conflict + price-confirm/reliability (no harder entry gates).
+    momentum_desk_alphai_size_mode: str = "conviction"
+    momentum_desk_alphai_clip_mult: float = Field(default=1.3, ge=1.0, le=2.0)
+    momentum_desk_alphai_clip_mult_min: float = Field(default=1.0, ge=1.0, le=2.0)
+    momentum_desk_alphai_stale_minutes: float = Field(default=45.0, ge=0.0, le=1440.0)
+    momentum_desk_alphai_price_confirm_sizing: bool = True
+    momentum_desk_alphai_reliability_sizing: bool = True
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
 
