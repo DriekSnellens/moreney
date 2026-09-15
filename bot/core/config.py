@@ -573,18 +573,19 @@ class Settings(BaseSettings):
     momentum_desk_decision_interval_sec: float = Field(default=0.0, ge=0.0, le=3600.0)
     # After an exit frees a slot, run one immediate entry decision (same filters).
     momentum_desk_refill_on_exit: bool = True
-    # Sized for ~4k EUR across both venues. The desk averages ~2.3 open
-    # positions, so the base clip can exceed book/4; the router shrinks or
-    # skips clips the venue cash cannot fund. Strong tape (>= 85% of the
-    # universe up) sizes x1.3, thin tape x0.7. 12-week walk-forward under a
-    # 4000 EUR book cap, weekdays only: +749 EUR, maxDD -140, worst week -73.
+    # Sized for ~4k EUR across both venues (~€1300 clip). On a scaled €20k
+    # Bitvavo book the weekly-PnL search prefers ~50% book per clip with
+    # max_positions=3 (median week ~€411 / mean ~€692 over 12w) — not denser
+    # hours or looser excess. Router still shrinks clips venue cash cannot fund.
+    # Strong tape (>= 85% of the universe up) sizes x1.3, thin tape x0.7.
     momentum_desk_clip_eur: float = Field(default=1300.0, gt=0)
     momentum_desk_strong_clip_mult: float = Field(default=1.3, ge=1.0, le=2.0)
     momentum_desk_weak_clip_mult: float = Field(default=0.7, gt=0, le=1.0)
     # Weekend 24h signals print on thin liquidity and netted ~0 over 12 weeks
     # while adding a third of the drawdown; exits keep running on weekends.
     momentum_desk_skip_weekend_entries: bool = True
-    momentum_desk_max_positions: int = Field(default=4, ge=1, le=10)
+    # €20k util search: 3 slots + larger clips beat 4× smaller proportional clips.
+    momentum_desk_max_positions: int = Field(default=3, ge=1, le=10)
     # WR winner (135d @~€4k): 3% trail with 4%→2% ratchet.
     momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)

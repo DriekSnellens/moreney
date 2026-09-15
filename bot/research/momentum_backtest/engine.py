@@ -209,6 +209,78 @@ def _max_drawdown(series: Sequence[float]) -> float:
     return worst
 
 
+def _try_entries(
+    res: BacktestResult,
+    ledger: RiskLedger,
+    positions: list[Position],
+    candles_by_base: Mapping[str, Sequence[Candle]],
+    cfg: DeskConfig,
+    view: AlphaIView | None,
+    t: int,
+    *,
+    log_decision: bool,
+) -> None:
+    """Shared entry pass used by schedule slots and refill-on-exit."""
+    if len(positions) >= int(cfg.max_positions):
+        return
+    stats = restrict_by_volume(universe_stats(candles_by_base, t, cfg), cfg)
+    btc_rows = candles_by_base.get("BTC")
+    btc = bar_stats("BTC", btc_rows, t) if btc_rows else None
+    regime = classify_regime(btc, stats, cfg, alphai=view)
+    cands = (
+        rank_candidates(stats, regime.btc_ret or 0.0, cfg, alphai=view)
+        if regime.ok
+        else []
+    )
+    allowed, why = ledger.entries_allowed(t)
+    entries = []
+    if allowed:
+        entries = select_entries(
+            cands,
+            regime,
+            cfg,
+            held_bases=[p.base for p in positions],
+            blocked_bases=ledger.blocked_bases(t, cfg.max_entries_per_base_per_day),
+            alphai=view,
+            now_ms=t,
+        )
+    for e in entries:
+        clip = e.clip_eur
+        if cfg.book_eur > 0:
+            free = cfg.book_eur - sum(p.notional_eur for p in positions)
+            clip = min(clip, free)
+            if clip < max(_MIN_CLIP_EUR, e.clip_eur * _MIN_CLIP_FRACTION):
+                continue
+        price = stats[e.base].price
+        qty = clip / price
+        positions.append(
+            Position(
+                base=e.base,
+                entry_price=price,
+                quantity=qty,
+                notional_eur=clip,
+                opened_ms=t,
+                peak=price,
+                entry_reason=",".join(e.reasons),
+            )
+        )
+        ledger.note_entry(e.base, t)
+    if log_decision:
+        res.decisions.append(
+            DecisionLog(
+                t_ms=t,
+                regime_ok=regime.ok,
+                btc_ret=regime.btc_ret,
+                breadth=round(regime.breadth, 3),
+                reasons=regime.reasons,
+                candidates=[c.base for c in cands[:6]],
+                entries=[f"{e.base}@{e.clip_eur:.0f}" for e in entries],
+                risk_block="" if allowed else why,
+            )
+        )
+
+
+
 def simulate(
     candles_by_base: Mapping[str, Sequence[Candle]],
     cfg: DeskConfig,
@@ -266,61 +338,14 @@ def simulate(
             )
             ledger.note_close(net, t)
             positions.remove(pos)
+            if bool(getattr(cfg, "refill_on_exit", False)):
+                _try_entries(
+                    res, ledger, positions, candles_by_base, cfg, view, t, log_decision=False
+                )
         # 2) Entries at decision hours.
         if is_decision_time(t, cfg):
-            stats = restrict_by_volume(universe_stats(candles_by_base, t, cfg), cfg)
-            btc_rows = candles_by_base.get("BTC")
-            btc = bar_stats("BTC", btc_rows, t) if btc_rows else None
-            regime = classify_regime(btc, stats, cfg, alphai=view)
-            cands = (
-                rank_candidates(stats, regime.btc_ret or 0.0, cfg, alphai=view)
-                if regime.ok
-                else []
-            )
-            allowed, why = ledger.entries_allowed(t)
-            entries = []
-            if allowed:
-                entries = select_entries(
-                    cands,
-                    regime,
-                    cfg,
-                    held_bases=[p.base for p in positions],
-                    blocked_bases=ledger.blocked_bases(t, cfg.max_entries_per_base_per_day),
-                    alphai=view,
-                    now_ms=t,
-                )
-            for e in entries:
-                clip = e.clip_eur
-                if cfg.book_eur > 0:
-                    free = cfg.book_eur - sum(p.notional_eur for p in positions)
-                    clip = min(clip, free)
-                    if clip < max(_MIN_CLIP_EUR, e.clip_eur * _MIN_CLIP_FRACTION):
-                        continue
-                price = stats[e.base].price
-                qty = clip / price
-                positions.append(
-                    Position(
-                        base=e.base,
-                        entry_price=price,
-                        quantity=qty,
-                        notional_eur=clip,
-                        opened_ms=t,
-                        peak=price,
-                        entry_reason=",".join(e.reasons),
-                    )
-                )
-                ledger.note_entry(e.base, t)
-            res.decisions.append(
-                DecisionLog(
-                    t_ms=t,
-                    regime_ok=regime.ok,
-                    btc_ret=regime.btc_ret,
-                    breadth=round(regime.breadth, 3),
-                    reasons=regime.reasons,
-                    candidates=[c.base for c in cands[:6]],
-                    entries=[f"{e.base}@{e.clip_eur:.0f}" for e in entries],
-                    risk_block="" if allowed else why,
-                )
+            _try_entries(
+                res, ledger, positions, candles_by_base, cfg, view, t, log_decision=True
             )
         t += BAR_MS
     # Mark open positions at the last close inside the window.
