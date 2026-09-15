@@ -1136,8 +1136,11 @@ def test_dashboard_renders_positions_decision_and_ledger():
     html = render_momentum_dashboard(status, rows).body.decode()
     assert "LIVE" in html and "REGIME ON" in html
     assert "DOT" in html and "trail" in html and "2,015.60" in html
-    # Ratchet active (peak 5.5% >= 5%) -> tight trail shown at 2.5%.
-    assert "(2.5%)" in html
+    # Ratchet active (peak 5.5% >= tight_after) -> tight trail shown.
+    assert "(2.0%)" in html or "(2.5%)" in html  # WR pack 2.0%; legacy fixtures 2.5%
+    assert "Refill na exit" in html
+    assert "Fade ETA" in html
+    assert "Exit-ladder" in html
     assert "/live/momentum/status" in html and "Marks live elke 3s" in html
     assert 'data-live="open-pnl"' in html
     # Sell button is a GET to the confirmation step, never a direct POST.

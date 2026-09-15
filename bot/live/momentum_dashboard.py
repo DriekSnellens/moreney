@@ -371,7 +371,11 @@ def _positions_table(
             f"</span><div class='muted' style='font-size:.7rem'>"
             f"{escape(str(p.get('entry_reason') or ''))}</div></td>"
             f"<td class='mono'>{entry:,.4f}</td>"
-            f"<td class='mono' data-k='mark'>{(f'{float(mark):,.4f}' if mark else '—')}</td>"
+            f"<td class='mono' data-k='mark'>{(f'{float(mark):,.4f}' if mark else '—')}"
+            f"<div class='muted' style='font-size:.65rem' data-k='mark-meta'>"
+            f"{escape(str(p.get('mark_source') or '—'))}"
+            f"{(' · ' + str(int(p['mark_age_sec'])) + 's') if p.get('mark_age_sec') is not None else ''}"
+            f"</div></td>"
             f"<td class='{_cls(gross)}' data-k='gross'>{_fmt_pct(gross)}</td>"
             f"<td data-k='peak'>{_fmt_pct(live_peak_ret)}</td>"
             f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
@@ -996,6 +1000,7 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _rules(cfg: Mapping[str, Any]) -> str:
+    """Render live desk knobs. Field names must match ``status.config`` (DeskConfig)."""
     weekdays = " (ma–vr)" if cfg.get("skip_weekend_entries") else ""
     interval = float(cfg.get("decision_interval_sec") or 0.0)
     if interval > 0:
@@ -1006,9 +1011,17 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         decision_label = cadence + weekdays
     else:
         hours = ", ".join(f"{int(h):02d}:00" for h in (cfg.get("decision_hours_utc") or [0]))
-        decision_label = hours + weekdays
+        decision_label = f"uren {hours}{weekdays} (geen minutenscan)"
+    refill = bool(cfg.get("refill_on_exit"))
+    fade_eta = float(cfg.get("fade_eta_sec") or 0.0)
+    green_h = float(cfg.get("green_deadline_hours") or 0.0)
+    midflat_h = float(cfg.get("midflat_hours") or 0.0)
     items = [
         ("Beslismoment (UTC)", decision_label),
+        (
+            "Refill na exit",
+            "aan — bij vrij slot meteen opnieuw beslissen" if refill else "uit",
+        ),
         (
             "Clip",
             f"{float(cfg.get('clip_eur') or 0):,.0f} € "
@@ -1029,6 +1042,10 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             f"BTC 24u > {_fmt_pct(cfg.get('btc_min_ret'))}, breadth ≥ {cfg.get('min_breadth')}",
         ),
         (
+            "Exit-ladder",
+            "1) hard stop → 2) fade ETA→0 (live marks) → 3) trail → 4) time-exit",
+        ),
+        (
             "Trail",
             f"{100 * float(cfg.get('trail_pct') or 0):.1f}% → "
             f"{100 * float(cfg.get('trail_tight_pct') or 0):.1f}% na piek "
@@ -1036,24 +1053,30 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
         (
-            "Time-to-green",
+            "Fade ETA→0",
             (
-                f"{float(cfg.get('green_deadline_hours') or 0):.0f}u zonder piek "
-                f"≥ {100 * float(cfg.get('green_min_peak') or 0):.1f}%"
-                if float(cfg.get("green_deadline_hours") or 0) > 0
+                f"≤{fade_eta:.0f}s voor "
+                f"{float(cfg.get('fade_confirm_sec') or 0):.0f}s "
+                f"(smooth {float(cfg.get('fade_smooth_sec') or 0):.0f}s; "
+                f"arm ≥{float(cfg.get('fade_min_peak_eur') or 0):.0f}€/"
+                f"{100 * float(cfg.get('fade_min_peak_pct') or 0):.1f}%; "
+                f"giveback ≥{float(cfg.get('fade_min_giveback_eur') or 0):.0f}€)"
+                if fade_eta > 0
                 else "uit"
             ),
         ),
         (
-            "Fade ETA→0",
+            "Time-to-green",
             (
-                f"≤{float(cfg.get('fade_eta_sec') or 0):.0f}s "
-                f"(bevestig {float(cfg.get('fade_confirm_sec') or 0):.0f}s, "
-                f"piek ≥{float(cfg.get('fade_min_peak_eur') or 0):.0f}€/"
-                f"{100 * float(cfg.get('fade_min_peak_pct') or 0):.1f}%)"
-                if float(cfg.get("fade_eta_sec") or 0) > 0
+                f"{green_h:.0f}u zonder piek "
+                f"≥ {100 * float(cfg.get('green_min_peak') or 0):.1f}%"
+                if green_h > 0
                 else "uit"
             ),
+        ),
+        (
+            "Midflat",
+            f"{midflat_h:.0f}u fee-flat" if midflat_h > 0 else "uit",
         ),
         ("Time-exit", f"{float(cfg.get('time_exit_hours') or 0):.0f}u onder break-even"),
         ("Daglimiet", f"−{float(cfg.get('day_loss_limit_eur') or 0):.0f} €"),
@@ -1065,7 +1088,7 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ("AlphaI macro", str(cfg.get("macro_caution_mode"))),
     ]
     return (
-        '<div class="rules">'
+        '<div class="rules" data-live="rules">'
         + "".join(f"<div><span>{escape(k)}</span>{escape(v)}</div>" for k, v in items)
         + "</div>"
     )
@@ -1261,6 +1284,12 @@ _LIVE_MARKS_JS = r"""
     const trailPx = entry * (1 + livePeak) * (1 - effTrail);
     nodes.forEach((root) => {
       setText(root, "mark", fmtPx(mark));
+      if (pos.mark_source != null || pos.mark_age_sec != null) {
+        const meta = [pos.mark_source || "—"]
+          .concat(pos.mark_age_sec != null ? [`${Number(pos.mark_age_sec).toFixed(0)}s`] : [])
+          .join(" · ");
+        setText(root, "mark-meta", meta);
+      }
       setText(root, "gross", fmtPct(gross), cls(gross));
       setText(root, "peak", fmtPct(livePeak));
       setText(root, "trail", `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`);
@@ -1285,18 +1314,45 @@ _LIVE_MARKS_JS = r"""
       if (age.length) stamp.textContent = `marks ${Math.max(...age).toFixed(0)}s geleden`;
       else if (status.marks_updated_at) stamp.textContent = "marks live";
     }
+    const next = document.querySelector('[data-live="next-decision"]');
+    if (next && status.next_decision) {
+      const d = new Date(status.next_decision);
+      if (!Number.isNaN(d.getTime())) {
+        const dd = String(d.getUTCDate()).padStart(2, "0");
+        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const hh = String(d.getUTCHours()).padStart(2, "0");
+        const mi = String(d.getUTCMinutes()).padStart(2, "0");
+        next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
+      }
+    }
+  }
+  function trailKnobs(status) {
+    const cfg = status.config || {};
+    // Live WR pack defaults (3% / 4%→2%); never fall back to the old 4% pack.
+    const trail = Number(cfg.trail_pct != null ? cfg.trail_pct : 0.03);
+    const tightAfter = Number(cfg.trail_tight_after != null ? cfg.trail_tight_after : 0.04);
+    const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
+    document.querySelectorAll("table.desk[data-trail]").forEach((table) => {
+      table.dataset.trail = String(trail);
+      table.dataset.tightAfter = String(tightAfter);
+      table.dataset.tight = String(tight);
+    });
+    return { trail, tightAfter, tight };
+  }
+  function patchRules(status) {
+    const html = status.ui && status.ui.rules_html;
+    const node = document.querySelector('[data-live="rules"]');
+    if (html && node) node.outerHTML = html;
   }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
       if (!res.ok) return;
       const status = await res.json();
-      const table = document.querySelector("table.desk[data-trail]");
-      const trail = table ? Number(table.dataset.trail || 0.04) : 0.04;
-      const tightAfter = table ? Number(table.dataset.tightAfter || 0) : 0;
-      const tight = table ? Number(table.dataset.tight || trail) : trail;
+      const { trail, tightAfter, tight } = trailKnobs(status);
       (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
       patchHeroes(status);
+      patchRules(status);
     } catch (err) {
       /* ignore transient network blips */
     }
@@ -1403,7 +1459,7 @@ def render_momentum_dashboard(
             ),
             _hero(
                 "Volgende beslissing",
-                f"<span class='mono' style='font-size:1rem'>"
+                f"<span class='mono' style='font-size:1rem' data-live='next-decision'>"
                 f"{_ts(status.get('next_decision'))}</span>",
                 hint=(
                     "entries toegestaan"

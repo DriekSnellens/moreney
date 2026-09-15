@@ -1502,13 +1502,14 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         refill_on_exit=bool(getattr(settings, "momentum_desk_refill_on_exit", True)),
         clip_eur=float(getattr(settings, "momentum_desk_clip_eur", 500.0)),
         max_positions=int(getattr(settings, "momentum_desk_max_positions", 3)),
-        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.04)),
-        trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.05)),
-        trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.025)),
+        # WR-pack getattr defaults (must match Settings / live-micro.env).
+        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.03)),
+        trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.04)),
+        trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.02)),
         hard_stop_pct=float(getattr(settings, "momentum_desk_hard_stop_pct", 0.03)),
-        time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 24.0)),
-        day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 40.0)),
-        week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 100.0)),
+        time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 36.0)),
+        day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 100.0)),
+        week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 250.0)),
         macro_caution_mode=str(getattr(settings, "momentum_desk_macro_caution_mode", "reduce")),
         strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
         weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),
@@ -1518,7 +1519,7 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         max_chase_ret_24h=float(getattr(settings, "momentum_desk_max_chase_ret_24h", 0.0)),
         midflat_hours=float(getattr(settings, "momentum_desk_midflat_hours", 0.0)),
         green_deadline_hours=float(
-            getattr(settings, "momentum_desk_green_deadline_hours", 4.0)
+            getattr(settings, "momentum_desk_green_deadline_hours", 0.0)
         ),
         green_min_peak=float(getattr(settings, "momentum_desk_green_min_peak", 0.01)),
         fade_eta_sec=float(getattr(settings, "momentum_desk_fade_eta_sec", 180.0)),
@@ -1584,6 +1585,13 @@ class MomentumDeskManager:
             base["manual_exit"] = dict(self._manual_exit)
         if self._task is not None and self._task.done() and self._task.exception():
             base["task_error"] = repr(self._task.exception())
+        # Operator UI: keep rules HTML in sync with live config on every poll.
+        try:
+            from bot.live.momentum_dashboard import _rules
+
+            base["ui"] = {"rules_html": _rules(base.get("config") or {})}
+        except Exception:  # noqa: BLE001
+            logger.exception("momentum desk: rules_html render failed")
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
