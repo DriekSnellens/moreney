@@ -7,7 +7,7 @@ import json
 import logging
 import time
 import urllib.request
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -216,12 +216,16 @@ def simulate(
     start_ms: int,
     end_ms: int,
     alphai: AlphaIView | None = None,
+    alphai_at: Callable[[int], AlphaIView | None] | None = None,
 ) -> BacktestResult:
     """Bar-by-bar replay. Fills at the close of the decision bar's predecessor.
 
     Entry price = last closed bar close (the live runner posts a maker bid at
     the book; this is the conservative mid-of-book assumption). Exits fill at
     the bar close that triggered the rule.
+
+    ``alphai`` is a static view for the whole window. Prefer ``alphai_at(t_ms)``
+    when replaying a historical AlphaI timeline (picks / macro / avoid).
     """
     idx = {b: {int(r[0]): r for r in rows} for b, rows in candles_by_base.items()}
     ledger = RiskLedger(
@@ -233,13 +237,14 @@ def simulate(
     positions: list[Position] = []
     t = start_ms // BAR_MS * BAR_MS
     while t <= end_ms:
+        view = alphai_at(t) if alphai_at is not None else alphai
         # 1) Exits on the bar that just closed (ts = t - BAR_MS).
         closed_ts = t - BAR_MS
         for pos in list(positions):
             bar = idx.get(pos.base, {}).get(closed_ts)
             if bar is None:
                 continue
-            decision = evaluate_exit(pos, bar, cfg, alphai=alphai)
+            decision = evaluate_exit(pos, bar, cfg, alphai=view)
             if decision is None:
                 continue
             exit_price = decision.price if decision.price is not None else float(bar[4])
@@ -266,9 +271,9 @@ def simulate(
             stats = restrict_by_volume(universe_stats(candles_by_base, t, cfg), cfg)
             btc_rows = candles_by_base.get("BTC")
             btc = bar_stats("BTC", btc_rows, t) if btc_rows else None
-            regime = classify_regime(btc, stats, cfg, alphai=alphai)
+            regime = classify_regime(btc, stats, cfg, alphai=view)
             cands = (
-                rank_candidates(stats, regime.btc_ret or 0.0, cfg, alphai=alphai)
+                rank_candidates(stats, regime.btc_ret or 0.0, cfg, alphai=view)
                 if regime.ok
                 else []
             )
@@ -281,7 +286,7 @@ def simulate(
                     cfg,
                     held_bases=[p.base for p in positions],
                     blocked_bases=ledger.blocked_bases(t, cfg.max_entries_per_base_per_day),
-                    alphai=alphai,
+                    alphai=view,
                 )
             for e in entries:
                 clip = e.clip_eur
