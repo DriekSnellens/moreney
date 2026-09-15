@@ -611,6 +611,13 @@ class Settings(BaseSettings):
     momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
+    # Soft/weak-tape survival: single soft-fail stays open (AlphaI half-clip);
+    # double soft-fail or soft+macro caution idle (no force-longs).
+    momentum_desk_soft_regime_on_weak_tape: bool = True
+    momentum_desk_soft_regime_clip_mult: float = Field(default=0.5, gt=0.0, le=1.0)
+    momentum_desk_weak_tape_idle_on_double: bool = True
+    momentum_desk_soft_regime_idle_on_macro_caution: bool = True
+    momentum_desk_soft_regime_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
     # AlphaI size overlay: binary = flat alphai_clip_mult; conviction = score/rank
     # + headline conflict + price-confirm/reliability (no harder entry gates).
     momentum_desk_alphai_size_mode: str = "conviction"

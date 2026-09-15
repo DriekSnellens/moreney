@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from bot.live.momentum_desk import (
+    summarize_regime_pnl,
     BAR_MS,
     BARS_PER_DAY,
     AlphaIView,
@@ -108,9 +109,9 @@ def test_regime_blocks_on_weak_btc_or_breadth_when_soft_disabled():
     assert not regime.ok and not regime.soft and "btc_weak" in regime.reasons
 
 
-def test_soft_regime_allows_alphai_picks_on_weak_tape():
-    """Weak BTC/breadth stays open for AlphaI picks at a reduced clip."""
-    cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=-0.02)
+def test_soft_regime_allows_alphai_picks_on_single_weak_factor():
+    """Single soft-fail (breadth only) stays open for AlphaI picks at half clip."""
+    cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=0.01)
     cfg = cfg.with_overrides(
         soft_regime_on_weak_tape=True,
         soft_regime_clip_mult=0.5,
@@ -123,17 +124,55 @@ def test_soft_regime_allows_alphai_picks_on_weak_tape():
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
     assert regime.ok and regime.soft
-    assert "btc_weak" in regime.reasons and "breadth_weak" in regime.reasons
+    assert "breadth_weak" in regime.reasons and "btc_weak" not in regime.reasons
     view = AlphaIView(picks=frozenset({"A"}), avoid=frozenset())
     cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
     entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
     assert [e.base for e in entries] == ["A"]
     assert entries[0].clip_eur == pytest.approx(500.0)
     assert "soft_regime" in entries[0].reasons
+    assert entries[0].entry_ctx.get("regime_label") == "soft"
     # Non-picks stay blocked under soft regime.
     view2 = AlphaIView(picks=frozenset(), avoid=frozenset())
     cands2 = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view2)
     assert select_entries(cands2, regime, cfg, held_bases=[], alphai=view2) == []
+
+
+def test_double_weak_tape_idles_by_default():
+    """BTC + breadth both soft-fail → idle (no force-longs into dead tape)."""
+    cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=-0.02)
+    cfg = cfg.with_overrides(soft_regime_on_weak_tape=True, min_volume_eur=0.0)
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    assert not regime.ok and not regime.soft
+    assert "weak_tape_idle" in regime.reasons
+    view = AlphaIView(picks=frozenset({"A"}))
+    cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
+    assert select_entries(cands, regime, cfg, held_bases=[], alphai=view) == []
+    # Opt-out restores legacy soft double-weak behaviour.
+    soft_cfg = cfg.with_overrides(weak_tape_idle_on_double=False)
+    soft = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, soft_cfg)
+    assert soft.ok and soft.soft
+
+
+def test_soft_regime_idles_under_macro_caution():
+    """Soft tape + AlphaI macro caution → idle (survival; no soft+reduce entries)."""
+    cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=0.01)
+    cfg = cfg.with_overrides(
+        soft_regime_on_weak_tape=True,
+        soft_regime_idle_on_macro_caution=True,
+        min_volume_eur=0.0,
+        clip_eur=1000.0,
+    )
+    alts = universe_stats(candles, T0, cfg)
+    view = AlphaIView(macro_caution=True, picks=frozenset({"A"}))
+    regime = classify_regime(
+        bar_stats("BTC", candles["BTC"], T0), alts, cfg, alphai=view
+    )
+    assert not regime.ok and not regime.soft
+    assert "soft_macro_idle" in regime.reasons
+    cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
+    assert select_entries(cands, regime, cfg, held_bases=[], alphai=view) == []
 
 
 def test_rank_and_select_apply_excess_cluster_and_alphai_rules():
@@ -1927,3 +1966,16 @@ def test_alphai_stale_board_disables_size_boost():
     stale = alphai_entry_clip_mult("ETH", view, cfg, now_ms=stale_ms)
     assert stale[0] == pytest.approx(1.0)
     assert "alphai_stale" in stale[1]
+
+
+def test_summarize_regime_pnl_buckets_by_entry_label():
+    rows = [
+        {"net_eur": 10.0, "hold_h": 2.0, "entry_ctx": {"regime_label": "strong"}},
+        {"net_eur": -5.0, "hold_h": 1.0, "entry_ctx": {"regime_label": "soft"}},
+        {"net_eur": 3.0, "hold_h": 4.0, "entry_ctx": {"regime_label": "soft"}},
+        {"net_eur": -2.0, "hold_h": 1.0, "entry_reason": "soft_regime,alphai_pick"},
+    ]
+    out = summarize_regime_pnl(rows)
+    assert out["strong"]["n"] == 1 and out["strong"]["net_eur"] == 10.0
+    assert out["soft"]["n"] == 3 and out["soft"]["net_eur"] == -4.0
+    assert out["soft"]["wins"] == 1

@@ -704,11 +704,14 @@ def _decision_panel(status: Mapping[str, Any]) -> str:
             f"<strong>{_ts(status.get('next_decision'))}</strong>.</p>"
         )
     ok = bool(reg.get("ok"))
-    pill = (
-        '<span class="pill on"><span class="dot"></span>REGIME ON</span>'
-        if ok
-        else '<span class="pill off"><span class="dot"></span>REGIME OFF</span>'
-    )
+    soft = bool(reg.get("soft"))
+    label = str(reg.get("regime_label") or "")
+    if soft:
+        pill = '<span class="pill on"><span class="dot"></span>REGIME SOFT</span>'
+    elif ok:
+        pill = '<span class="pill on"><span class="dot"></span>REGIME ON</span>'
+    else:
+        pill = '<span class="pill off"><span class="dot"></span>REGIME IDLE</span>'
     reasons = ", ".join(reg.get("reasons") or []) or "—"
     cands = reg.get("candidates") or []
     cand_html = (
@@ -728,13 +731,29 @@ def _decision_panel(status: Mapping[str, Any]) -> str:
     )
     block = reg.get("risk_block") or ""
     block_html = f'<div class="warn">Risk-blok: {escape(str(block))}</div>' if block else ""
+    label_html = f"<div><span>Label</span>{escape(label)}</div>" if label else ""
+    pnl_bits: list[str] = []
+    for key in ("strong", "firm", "soft", "weak"):
+        bucket = (status.get("regime_pnl") or {}).get(key) or {}
+        if not bucket.get("n"):
+            continue
+        wr = bucket.get("win_rate")
+        wr_txt = f"{100 * float(wr):.0f}%" if wr is not None else "—"
+        pnl_bits.append(
+            f"{key}: {int(bucket['n'])}× {_fmt_eur(bucket.get('net_eur'))} (WR {wr_txt})"
+        )
+    pnl_html = (
+        f"<div><span>Regime PnL</span>{escape(' · '.join(pnl_bits))}</div>" if pnl_bits else ""
+    )
     return (
         f"<div>{pill} <span class='muted'>om {_ts(reg.get('at'))}</span></div>"
         f"<div class='rules' style='margin-top:.7rem'>"
+        f"{label_html}"
         f"<div><span>BTC 24u</span>{_fmt_pct(reg.get('btc_ret'))}</div>"
         f"<div><span>Breadth</span>{float(reg.get('breadth') or 0):.2f}</div>"
         f"<div><span>Redenen</span>{escape(reasons)}</div>"
         f"<div><span>Entries</span>{escape(entries)}</div>"
+        f"{pnl_html}"
         f"</div>"
         f"<div class='chips' style='margin-top:.7rem'>{cand_html}</div>"
         f"<div class='muted' style='margin-top:.6rem;font-size:.78rem'>AlphaI — {ai_html}</div>"
@@ -778,8 +797,14 @@ def _preview_panel(
 ) -> str:
     planned = [p for p in preview.get("planned") or []]
     ok = bool(preview.get("ok"))
+    soft = bool(preview.get("soft"))
+    label = str(preview.get("regime_label") or ("soft" if soft else ("firm" if ok else "weak")))
+    regime_state = "AAN" if ok else "IDLE"
+    if soft:
+        regime_state = "SOFT"
     regime = (
-        f"Regime <strong class='{'good' if ok else 'bad'}'>{'AAN' if ok else 'UIT'}</strong> · "
+        f"Regime <strong class='{'good' if ok else 'bad'}'>{regime_state}</strong> "
+        f"<span class='muted'>({escape(label)})</span> · "
         f"BTC 24h {_fmt_pct(preview.get('btc_ret'))} · breadth "
         f"{100 * float(preview.get('breadth') or 0):.0f}% · bar {_ts(preview.get('at'))}"
     )
@@ -1086,6 +1111,17 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             f"{float(cfg.get('pause_hours_after_week_limit') or 0):.0f}u pauze",
         ),
         ("AlphaI macro", str(cfg.get("macro_caution_mode"))),
+        (
+            "Weak-tape survival",
+            (
+                "soft single-fail AlphaI×"
+                f"{cfg.get('soft_regime_clip_mult', 0.5)}; "
+                f"double-weak idle={'aan' if cfg.get('weak_tape_idle_on_double', True) else 'uit'}; "
+                f"soft+macro idle={'aan' if cfg.get('soft_regime_idle_on_macro_caution', True) else 'uit'}"
+                if cfg.get("soft_regime_on_weak_tape", True)
+                else "hard block (soft uit)"
+            ),
+        ),
     ]
     return (
         '<div class="rules" data-live="rules">'

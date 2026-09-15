@@ -54,7 +54,9 @@ from bot.live.momentum_desk import (
     is_scheduled_hour,
     max_clip_mult,
     rank_candidates,
+    regime_label,
     select_entries,
+    summarize_regime_pnl,
     universe_stats,
     unrealized_net_eur,
     update_fade_state,
@@ -531,6 +533,7 @@ class MomentumDeskRunner:
             "trade_count": self.trade_count,
             "risk": {**self.ledger.to_dict(), "entries_allowed": allowed, "block_reason": why},
             "last_regime": self.last_regime,
+            "regime_pnl": self._regime_pnl_summary(),
             "next_decision": self._next_decision_iso(now_ms),
             "last_error": self.last_error,
             "outcome_learning": self.outcomes.summary(),
@@ -540,6 +543,27 @@ class MomentumDeskRunner:
                 else None
             ),
         }
+
+    def _regime_pnl_summary(self) -> dict[str, Any]:
+        """Closed-trade PnL by entry regime_label from the JSONL ledger."""
+        path = Path(self.opt.ledger_path)
+        if not path.exists():
+            return {}
+        exits: list[dict[str, Any]] = []
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict) or row.get("event") != "exit":
+                    continue
+                exits.append(row)
+        except OSError:
+            return {}
+        return summarize_regime_pnl(exits)
 
     def _next_decision_iso(self, now_ms: int) -> str:
         interval = float(getattr(self.cfg, "decision_interval_sec", 0.0) or 0.0)
@@ -806,6 +830,7 @@ class MomentumDeskRunner:
         self.realized_total_eur += net
         self.trade_count += 1
         self.ledger.note_close(net, now_ms)
+        entry_ctx = dict(getattr(h.pos, "entry_ctx", None) or {})
         self._ledger_append(
             {
                 "event": "exit",
@@ -823,7 +848,8 @@ class MomentumDeskRunner:
                 "hold_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
                 "net_eur": round(net, 4),
                 "entry_reason": h.pos.entry_reason,
-                "entry_ctx": dict(getattr(h.pos, "entry_ctx", None) or {}),
+                "entry_ctx": entry_ctx,
+                "regime_label": str(entry_ctx.get("regime_label") or ""),
             }
         )
         remaining = h.pos.quantity - fill.qty
@@ -1158,6 +1184,8 @@ class MomentumDeskRunner:
             "trigger": trigger,
             "executed": execute,
             "ok": regime.ok,
+            "soft": bool(getattr(regime, "soft", False)),
+            "regime_label": regime_label(regime, self.cfg),
             "btc_ret": round(regime.btc_ret, 4) if regime.btc_ret is not None else None,
             "breadth": round(regime.breadth, 3),
             "reasons": list(regime.reasons),
@@ -1669,6 +1697,21 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         ),
         outcome_size_enabled=bool(
             getattr(settings, "momentum_desk_outcome_learning_enabled", True)
+        ),
+        soft_regime_on_weak_tape=bool(
+            getattr(settings, "momentum_desk_soft_regime_on_weak_tape", True)
+        ),
+        soft_regime_clip_mult=float(
+            getattr(settings, "momentum_desk_soft_regime_clip_mult", 0.5)
+        ),
+        weak_tape_idle_on_double=bool(
+            getattr(settings, "momentum_desk_weak_tape_idle_on_double", True)
+        ),
+        soft_regime_idle_on_macro_caution=bool(
+            getattr(settings, "momentum_desk_soft_regime_idle_on_macro_caution", True)
+        ),
+        soft_regime_fee_buffer_mult=float(
+            getattr(settings, "momentum_desk_soft_regime_fee_buffer_mult", 6.0)
         ),
     )
 

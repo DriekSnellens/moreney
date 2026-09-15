@@ -154,6 +154,12 @@ class DeskConfig:
     # of a bounce are not missed while tape is still thin.
     soft_regime_on_weak_tape: bool = True
     soft_regime_clip_mult: float = 0.5
+    # Survival: when BTC and breadth are both soft-fail, idle (preserve
+    # capital) instead of force-longing AlphaI picks into a dead tape.
+    weak_tape_idle_on_double: bool = True
+    # Survival: soft tape + AlphaI macro caution → idle. Soft+reduce was
+    # the path into early hard-stops on thin bounce attempts.
+    soft_regime_idle_on_macro_caution: bool = True
     # Under macro caution, demand excess that clears fee_rt × buffer
     # before a weak/tape-only name can enter (coin-agnostic fee guard).
     # Must be ≥ entry_fee_buffer_mult so caution is never looser than base.
@@ -686,13 +692,91 @@ def classify_regime(
         and not hard
         and all(r in soft_reasons for r in reasons)
     ):
-        # Weak tape only: stay open, mark soft so select_entries AlphaI-sizes down.
+        double_weak = "btc_weak" in reasons and "breadth_weak" in reasons
+        if bool(cfg.weak_tape_idle_on_double) and double_weak:
+            # Both soft factors failed: idle — do not AlphaI-force into dead tape.
+            idle_reasons = tuple([*reasons, "weak_tape_idle"])
+            return RegimeDecision(
+                ok=False,
+                btc_ret=btc_ret,
+                breadth=breadth,
+                reasons=idle_reasons,
+                soft=False,
+            )
+        if (
+            bool(cfg.soft_regime_idle_on_macro_caution)
+            and alphai is not None
+            and alphai.macro_caution
+            and cfg.macro_caution_mode == "reduce"
+        ):
+            idle_reasons = tuple([*reasons, "soft_macro_idle"])
+            return RegimeDecision(
+                ok=False,
+                btc_ret=btc_ret,
+                breadth=breadth,
+                reasons=idle_reasons,
+                soft=False,
+            )
+        # Single soft factor only: stay open, AlphaI-size down in select_entries.
         return RegimeDecision(
             ok=True, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons), soft=True
         )
     return RegimeDecision(
         ok=not reasons, btc_ret=btc_ret, breadth=breadth, reasons=tuple(reasons), soft=False
     )
+
+
+def regime_label(regime: RegimeDecision, cfg: DeskConfig) -> str:
+    """Coin-agnostic tape bucket for PnL attribution: strong|firm|soft|weak."""
+    if not regime.ok:
+        return "weak"
+    if bool(getattr(regime, "soft", False)):
+        return "soft"
+    if float(regime.breadth) >= float(cfg.strong_breadth):
+        return "strong"
+    return "firm"
+
+
+def summarize_regime_pnl(exits: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate closed-trade net PnL by entry regime_label (strong/firm/soft/weak)."""
+    buckets: dict[str, dict[str, float | int]] = {}
+    for row in exits:
+        ctx = row.get("entry_ctx") if isinstance(row.get("entry_ctx"), Mapping) else {}
+        label = str((ctx or {}).get("regime_label") or "").strip().lower()
+        if label not in {"strong", "firm", "soft", "weak"}:
+            reason = str(row.get("entry_reason") or row.get("reason") or "")
+            if "soft_regime" in reason:
+                label = "soft"
+            elif "breadth_strong" in reason:
+                label = "strong"
+            else:
+                label = "firm"
+        bucket = buckets.setdefault(
+            label, {"n": 0, "wins": 0, "net_eur": 0.0, "sum_hold_h": 0.0}
+        )
+        net = float(row.get("net_eur") or 0.0)
+        bucket["n"] = int(bucket["n"]) + 1
+        bucket["net_eur"] = float(bucket["net_eur"]) + net
+        if net > 0:
+            bucket["wins"] = int(bucket["wins"]) + 1
+        hold = row.get("hold_h")
+        if hold is not None:
+            bucket["sum_hold_h"] = float(bucket["sum_hold_h"]) + float(hold)
+    out: dict[str, Any] = {}
+    for label, b in sorted(buckets.items()):
+        n = int(b["n"])
+        net = float(b["net_eur"])
+        wins = int(b["wins"])
+        hold_sum = float(b["sum_hold_h"])
+        out[label] = {
+            "n": n,
+            "wins": wins,
+            "win_rate": round(wins / n, 4) if n else None,
+            "net_eur": round(net, 2),
+            "avg_net_eur": round(net / n, 2) if n else None,
+            "avg_hold_h": round(hold_sum / n, 2) if n and hold_sum else None,
+        }
+    return out
 
 
 def rank_candidates(
@@ -770,6 +854,8 @@ def select_entries(
     )
     soft_need = cfg.fee_rt * max(0.0, float(cfg.soft_regime_fee_buffer_mult))
     n_cands = len(cands)
+    soft = bool(getattr(regime, "soft", False))
+    label = regime_label(regime, cfg)
     out: list[Entry] = []
     for c in cands:
         if len(out) >= min(slots, top_n):
@@ -786,7 +872,6 @@ def select_entries(
         cluster = cfg.clusters.get(c.base)
         if cluster is not None and cluster in clusters_held:
             continue
-        soft = bool(getattr(regime, "soft", False))
         if soft and not c.alphai_pick:
             continue
         if soft and c.excess < soft_need:
@@ -814,6 +899,7 @@ def select_entries(
             soft=soft,
             alphai_pick=bool(c.alphai_pick),
         )
+        entry_ctx["regime_label"] = label
         outcome_mult, outcome_tags = 1.0, ()
         if (
             bool(getattr(cfg, "outcome_size_enabled", True))
@@ -831,6 +917,7 @@ def select_entries(
         reasons.extend(outcome_tags)
         if soft:
             reasons.append("soft_regime")
+        reasons.append(f"regime={label}")
         if macro_mult != 1.0:
             reasons.append("macro_reduce")
         if breadth_tag:
