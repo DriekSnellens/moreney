@@ -1068,7 +1068,7 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         (
             "Exit-ladder",
-            "1) hard stop → 2) fade ETA→0 (live marks) → 3) trail → 4) time-exit",
+            "1) early/hard stop → 2) fade ETA→0 (live marks) → 3) trail → 4) time-exit",
         ),
         (
             "Trail",
@@ -1077,6 +1077,16 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             f"≥ {100 * float(cfg.get('trail_tight_after') or 0):.0f}%",
         ),
         ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
+        (
+            "Early stop",
+            (
+                f"−{100 * float(cfg.get('early_stop_pct') or 0):.1f}% tot piek "
+                f"≥ {100 * float(cfg.get('early_stop_until_peak') or 0):.1f}%"
+                if float(cfg.get("early_stop_pct") or 0) > 0
+                and float(cfg.get("early_stop_until_peak") or 0) > 0
+                else "uit"
+            ),
+        ),
         (
             "Fade ETA→0",
             (

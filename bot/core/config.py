@@ -591,6 +591,10 @@ class Settings(BaseSettings):
     momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
+    # Tighter stop while peak < until_peak (0 disables). €20k×1 12w: early 2%
+    # until +1.5% peak cut losers earlier (+PnL, shallower DD) without trail clamp.
+    momentum_desk_early_stop_pct: float = Field(default=0.02, ge=0.0, le=0.2)
+    momentum_desk_early_stop_until_peak: float = Field(default=0.015, ge=0.0, le=0.5)
     momentum_desk_time_exit_hours: float = Field(default=36.0, gt=0)
     # Entry/exit quality knobs (DeskConfig defaults; overridable via env).
     momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)
