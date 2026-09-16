@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.live.momentum_hold_baseline import baseline_path, mtm_snapshot
 from bot.live.momentum_desk import BAR_MS, DeskConfig, ExitDecision
 from bot.live.momentum_runner import (
     Gateway,
@@ -206,6 +207,8 @@ class HoldDeskRunner(MomentumDeskRunner):
         super().__init__(cfg, gateway, **kwargs)
         self.hold = hold
         self._last_rebalance_ts = 0.0
+        self._btc_mtm: dict[str, Any] = {}
+        self._baseline_path = baseline_path(get_settings())
 
     def status(self) -> dict[str, Any]:
         out = super().status()
@@ -217,6 +220,8 @@ class HoldDeskRunner(MomentumDeskRunner):
         )
         out["hold_bases"] = list(self.hold.bases)
         out["mode"] = "hold_live"
+        if self._btc_mtm:
+            out["btc_hold"] = dict(self._btc_mtm)
         out["config"] = {
             **(out.get("config") or {}),
             "max_positions": len(self.hold.bases),
@@ -228,6 +233,43 @@ class HoldDeskRunner(MomentumDeskRunner):
 
     def _deployed_eur(self) -> float:
         return sum(max(0.0, float(h.pos.notional_eur)) for h in self.holdings)
+
+    async def refresh_btc_inventory(self) -> dict[str, Any]:
+        """Sum free BTC across hold venues and MTM vs today's origin baseline."""
+        by_venue: dict[str, float] = {}
+        for venue in self.opt.venues:
+            free = await self._available_base("BTC", str(venue))
+            if free is None:
+                continue
+            if free > 1e-10:
+                by_venue[str(venue)] = float(free)
+        # Fall back to booked holdings if balance fetch missed a venue.
+        for h in self.holdings:
+            if str(h.pos.base).upper() != "BTC":
+                continue
+            v = str(h.pos.venue or "")
+            booked = float(h.pos.quantity or 0.0)
+            if booked <= 0:
+                continue
+            if v not in by_venue or by_venue[v] + 1e-12 < booked:
+                by_venue[v] = max(by_venue.get(v, 0.0), booked)
+        qty = sum(by_venue.values())
+        mark = self.marks.get("BTC")
+        if mark is None and qty > 0:
+            for h in self.holdings:
+                if str(h.pos.base).upper() == "BTC" and h.pos.entry_price:
+                    mark = float(h.pos.entry_price)
+                    break
+        value = float(qty) * float(mark) if mark and qty > 0 else 0.0
+        snap = mtm_snapshot(
+            value_eur=value,
+            qty_btc=qty,
+            mark_eur=float(mark) if mark else None,
+            by_venue=by_venue,
+            path=self._baseline_path,
+        )
+        self._btc_mtm = snap
+        return snap
 
     def _route_entry(self, clip_eur: float) -> tuple[str, float] | None:
         """Venue pick + own soft book only (do not reserve hold cash against self)."""
@@ -262,6 +304,10 @@ class HoldDeskRunner(MomentumDeskRunner):
         """Mark + optional disaster stop + top-up toward the hold book."""
         await self._refresh_cash()
         await self.refresh_marks()
+        try:
+            await self.refresh_btc_inventory()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hold sleeve: BTC inventory refresh failed: %s", exc)
         now_ms = int(self._clock() * 1000)
         if self.hold.disaster_stop:
             await self._disaster_only_exits(now_ms)
@@ -415,6 +461,19 @@ class HoldDeskManager:
         if self._task is not None and self._task.done() and self._task.exception():
             base["task_error"] = repr(self._task.exception())
         return base
+
+    async def status_fresh(self) -> dict[str, Any]:
+        """Status after refreshing BTC marks + cross-venue inventory."""
+        if self._runner is not None:
+            try:
+                await self._runner.refresh_marks()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hold sleeve: mark refresh failed: %s", exc)
+            try:
+                await self._runner.refresh_btc_inventory()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hold sleeve: inventory refresh failed: %s", exc)
+        return self.status()
 
     async def start(
         self,

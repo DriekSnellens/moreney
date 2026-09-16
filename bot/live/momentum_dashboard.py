@@ -175,6 +175,30 @@ table.desk td:first-child, table.desk th:first-child { text-align: left; }
 @media (min-width: 820px) { .sleeve-split { grid-template-columns: 1fr 1fr; } }
 .sleeve-earn { font-size: .78rem; color: var(--muted); margin: .35rem 0 .15rem; }
 .sleeve-earn b { font-family: var(--mono); font-weight: 600; }
+.btc-hold {
+  margin: 0 0 1rem;
+  padding: 1rem 1.15rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, #fff), var(--panel));
+}
+.btc-hold .btc-label {
+  font-size: .78rem; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 .25rem;
+}
+.btc-hold .btc-value {
+  font-family: var(--mono); font-size: clamp(1.8rem, 4vw, 2.6rem);
+  font-weight: 700; line-height: 1.1; margin: 0;
+}
+.btc-hold .btc-delta {
+  font-family: var(--mono); font-size: 1.05rem; font-weight: 600; margin: .35rem 0 0;
+}
+.btc-hold .btc-meta {
+  margin: .45rem 0 0; font-size: .82rem; color: var(--muted);
+}
+.btc-hold.good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.btc-hold.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
 
 @media (max-width: 720px) {
   .wrap { padding: .85rem .7rem 0; }
@@ -1140,6 +1164,86 @@ def _rules(cfg: Mapping[str, Any]) -> str:
     )
 
 
+def _btc_hold_panel(hold: Mapping[str, Any] | None) -> str:
+    """Prominent BTC hold MTM vs today's fixed origin baseline."""
+    if not hold:
+        return ""
+    snap = hold.get("btc_hold") or {}
+    value = snap.get("value_eur")
+    if value is None:
+        # Fallback: sum marked positions while inventory refresh is pending.
+        value = 0.0
+        for p in hold.get("positions") or []:
+            if str(p.get("base") or "").upper() != "BTC":
+                continue
+            mark = p.get("mark") or p.get("entry_price")
+            qty = p.get("quantity")
+            try:
+                if mark is not None and qty is not None:
+                    value += float(mark) * float(qty)
+            except (TypeError, ValueError):
+                continue
+        if value <= 0:
+            value = hold.get("exposure_eur")
+    try:
+        value_f = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        value_f = None
+    if value_f is None:
+        return ""
+    base = snap.get("baseline_eur")
+    pnl = snap.get("pnl_eur")
+    pnl_pct = snap.get("pnl_pct")
+    try:
+        base_f = float(base) if base is not None else None
+    except (TypeError, ValueError):
+        base_f = None
+    try:
+        pnl_f = float(pnl) if pnl is not None else (
+            (value_f - base_f) if base_f is not None else None
+        )
+    except (TypeError, ValueError):
+        pnl_f = None
+    tone = _cls(pnl_f)
+    day = escape(str(snap.get("baseline_day") or "vandaag"))
+    qty = snap.get("qty_btc")
+    mark = snap.get("mark_eur")
+    venues = snap.get("by_venue_btc") or {}
+    venue_bits = []
+    for v, q in venues.items():
+        try:
+            venue_bits.append(f"{escape(str(v))} {float(q):.5f}")
+        except (TypeError, ValueError):
+            continue
+    if not venue_bits:
+        venue_bits.append("exchange inventory")
+    meta_bits = [
+        f"start {day} {_fmt_eur(base_f, signed=False)}" if base_f is not None else "baseline pending",
+        f"qty {float(qty):.5f} BTC" if qty is not None else None,
+        f"mark {_fmt_eur(mark, signed=False)}" if mark is not None else None,
+        " · ".join(venue_bits),
+    ]
+    meta = " · ".join(x for x in meta_bits if x)
+    if pnl_f is None:
+        delta_html = '<p class="btc-delta muted" data-btc="pnl">vs start —</p>'
+    else:
+        pct_s = _fmt_pct(pnl_pct) if pnl_pct is not None else ""
+        delta_html = (
+            f'<p class="btc-delta {tone}" data-btc="pnl">'
+            f"{_fmt_eur(pnl_f)}"
+            f"{(' · ' + pct_s) if pct_s else ''}"
+            " vs start</p>"
+        )
+    return (
+        f'<section class="btc-hold {tone}" data-btc-hold>'
+        '<p class="btc-label">BTC hold · totale waarde</p>'
+        f'<p class="btc-value {tone}" data-btc="value">{_fmt_eur(value_f, signed=False)}</p>'
+        f"{delta_html}"
+        f'<p class="btc-meta" data-btc="meta">{escape(meta)}</p>'
+        "</section>"
+    )
+
+
 def _sleeve_card(
     *,
     title: str,
@@ -1147,6 +1251,7 @@ def _sleeve_card(
     status: Mapping[str, Any] | None,
     href: str,
     book_label: str | None = None,
+    extra_html: str = "",
 ) -> str:
     """Compact dual-sleeve tile for the integrated desk view."""
     st = status or {}
@@ -1207,7 +1312,8 @@ def _sleeve_card(
         f"pos {n_pos}/{max_pos}</p>"
         f"{book_html}"
         f"<p>{escape(schedule_s)} · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
-        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul></div>"
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul>"
+        f"{extra_html}</div>"
     )
 
 
@@ -1259,6 +1365,16 @@ def _sleeves_panel(
     ]
     if h or h_book > 0:
         bases = ",".join(str(b) for b in (h.get("hold_bases") or ["BTC"])[:4])
+        btc = h.get("btc_hold") or {}
+        hold_extra = ""
+        if btc.get("value_eur") is not None:
+            hold_extra = (
+                f"<p><strong>BTC hold</strong> "
+                f"<span class='{_cls(btc.get('pnl_eur'))}' data-btc-sleeve-value>"
+                f"{_fmt_eur(btc.get('value_eur'), signed=False)}</span>"
+                f" · <span class='{_cls(btc.get('pnl_eur'))}' data-btc-sleeve-pnl>"
+                f"{_fmt_eur(btc.get('pnl_eur'))}</span> vs start</p>"
+            )
         cards.append(
             _sleeve_card(
                 title="Hold · spot buy&hold",
@@ -1266,6 +1382,7 @@ def _sleeves_panel(
                 status=h,
                 href="/live/momentum/hold",
                 book_label="Hold book",
+                extra_html=hold_extra,
             )
         )
     if v or v_book > 0:
@@ -1319,6 +1436,7 @@ _LIVE_MARKS_JS = r"""
   if (window.__moreneyMarksPoll) return;
   window.__moreneyMarksPoll = true;
   const STATUS_URL = "/live/momentum/status";
+  const HOLD_STATUS_URL = "/live/momentum/hold/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -1424,6 +1542,38 @@ _LIVE_MARKS_JS = r"""
     const node = document.querySelector('[data-live="rules"]');
     if (html && node) node.outerHTML = html;
   }
+  function patchBtcHold(snap) {
+    if (!snap) return;
+    const root = document.querySelector("[data-btc-hold]");
+    if (!root) return;
+    const pnl = snap.pnl_eur;
+    const tone = cls(pnl);
+    root.classList.remove("good", "bad");
+    if (tone) root.classList.add(tone);
+    const val = root.querySelector('[data-btc="value"]');
+    if (val && snap.value_eur != null) {
+      val.textContent = fmtEur(snap.value_eur).replace(/^\+/, "");
+      val.classList.remove("good", "bad");
+      if (tone) val.classList.add(tone);
+    }
+    const delta = root.querySelector('[data-btc="pnl"]');
+    if (delta && pnl != null) {
+      const pct = snap.pnl_pct != null ? ` · ${fmtPct(snap.pnl_pct)}` : "";
+      delta.textContent = `${fmtEur(pnl)}${pct} vs start`;
+      delta.classList.remove("good", "bad", "muted");
+      if (tone) delta.classList.add(tone);
+    }
+    document.querySelectorAll("[data-btc-sleeve-value]").forEach((el) => {
+      if (snap.value_eur != null) el.textContent = fmtEur(snap.value_eur).replace(/^\+/, "");
+      el.classList.remove("good", "bad");
+      if (tone) el.classList.add(tone);
+    });
+    document.querySelectorAll("[data-btc-sleeve-pnl]").forEach((el) => {
+      if (pnl != null) el.textContent = fmtEur(pnl);
+      el.classList.remove("good", "bad");
+      if (tone) el.classList.add(tone);
+    });
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
@@ -1435,6 +1585,15 @@ _LIVE_MARKS_JS = r"""
       patchRules(status);
     } catch (err) {
       /* ignore transient network blips */
+    }
+    try {
+      const holdRes = await fetch(HOLD_STATUS_URL, { cache: "no-store" });
+      if (holdRes.ok) {
+        const hold = await holdRes.json();
+        patchBtcHold(hold.btc_hold || null);
+      }
+    } catch (err) {
+      /* ignore */
     }
   }
   tick();
@@ -1517,6 +1676,7 @@ def render_momentum_dashboard(
     )
 
     earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue, show_volatile=show_vol)
+    btc_hold_html = _btc_hold_panel(hold) if show_hold else ""
 
     heroes = "".join(
         [
@@ -1619,6 +1779,7 @@ def render_momentum_dashboard(
 <style>{_CSS}</style></head>
 <body><div class="wrap">
 {earnings_html}
+{btc_hold_html}
 {err_html}
 {toolbar}
 {sleeves_html}

@@ -897,7 +897,7 @@ async def live_momentum_dashboard(
         )
     if show_hold:
         try:
-            hold_status = get_hold_desk_manager().status()
+            hold_status = await get_hold_desk_manager().status_fresh()
         except Exception:  # noqa: BLE001
             hold_status = None
     earnings = compute_desk_earnings(
@@ -1300,19 +1300,26 @@ async def live_momentum_hold_page(
         return JSONResponse(
             {"ok": False, "reason": "momentum_hold_enabled_false"}, status_code=404
         )
-    status = get_hold_desk_manager().status()
+    status = await get_hold_desk_manager().status_fresh()
     if wants_html(request):
         from html import escape
+
+        from bot.live.momentum_dashboard import _btc_hold_panel, _CSS
 
         running = "LIVE" if status.get("running") and not status.get("dry_run") else (
             "PAPER" if status.get("running") else "STOP"
         )
         notice_html = f"<p><em>{escape(notice)}</em></p>" if notice else ""
         bases = ", ".join(escape(str(b)) for b in (status.get("hold_bases") or ["BTC"]))
+        btc_html = _btc_hold_panel(status)
         body = f"""
-        <html><head><title>Hold sleeve</title></head><body>
+        <html><head><title>Hold sleeve</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>{_CSS}</style></head><body>
+        <div class="wrap">
         <h1>Hold · spot buy&hold</h1>
         {notice_html}
+        {btc_html}
         <p>Status: <strong>{running}</strong> · bases {bases} ·
         book {status.get('book_eur')} · deployed {status.get('deployed_eur')}</p>
         <form method="post" action="/live/momentum/hold/start"><input type="hidden" name="redirect" value="1"/>
@@ -1323,7 +1330,7 @@ async def live_momentum_hold_page(
         <button type="submit">Stop</button></form>
         <p><a href="/live/momentum">← desk</a> ·
         <a href="/live/momentum/hold/status">JSON</a></p>
-        </body></html>
+        </div></body></html>
         """
         return HTMLResponse(body)
     return JSONResponse(status)
@@ -1331,7 +1338,7 @@ async def live_momentum_hold_page(
 
 @app.get("/live/momentum/hold/status")
 async def live_momentum_hold_status() -> dict[str, Any]:
-    return get_hold_desk_manager().status()
+    return await get_hold_desk_manager().status_fresh()
 
 
 @app.get("/live/momentum/hold/ledger")
