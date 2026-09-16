@@ -83,10 +83,15 @@ async def with_retries(
             await asyncio.sleep(delay)
 
     assert last_error is not None
+    # Permanent exchange errors (e.g. insufficient funds, invalid amount) must
+    # surface as-is — never wrap them as "failed after N attempts".
+    if not retryable(last_error):
+        raise last_error
     if isinstance(last_error, ExchangeRateLimitError | ExchangeTransientError):
         raise last_error
     raise ExchangeTransientError(
-        f"{operation_name} failed after {policy.max_attempts} attempts: {type(last_error).__name__}"
+        f"{operation_name} failed after {policy.max_attempts} attempts: "
+        f"{type(last_error).__name__}: {last_error}"
     ) from last_error
 
 

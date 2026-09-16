@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bot.core.config import Settings
-from bot.core.enums import ExecutionMode, OrderStatus
+from bot.core.enums import ExecutionMode, OrderSide, OrderStatus
 from bot.engine.orchestrator import TradingEngine
 from bot.execution.paper_executor import PaperExecutor
 from bot.main import app, get_market_data_service, reset_risk_singletons, set_last_paper_cycle
@@ -30,10 +30,11 @@ def _integration_settings() -> Settings:
         market_data_exchanges="binance,kraken",
         market_data_symbols="BTCEUR",
         max_market_data_age_ms=5000.0,
-        arbitrage_min_profit_eur=1.0,
+        arbitrage_min_profit_eur=0.01,
         arbitrage_min_profit_pct=0.0001,
         arbitrage_min_liquidity_base=0.01,
         arbitrage_max_quantity=0.5,
+        arbitrage_position_pct=0.0,
         arbitrage_max_latency_ms=5000.0,
         arbitrage_max_book_age_ms=5000.0,
         profitability_fee_rate=0.0001,
@@ -49,6 +50,9 @@ def _integration_settings() -> Settings:
         paper_fee_rate=0.0001,
         paper_slippage_mode="order_book",
         paper_simulated_latency_ms=0.0,
+        paper_venue_inventory=False,
+        paper_second_leg_adverse_bps=0.0,
+        paper_maker_enabled=False,
         risk_max_position_usd=100_000.0,
         max_position_percent=80.0,
         max_total_exposure_percent=90.0,
@@ -85,8 +89,8 @@ async def test_cross_exchange_paper_pipeline_binance_kraken() -> None:
     service.inject_snapshot(
         "kraken",
         "BTCEUR",
-        bid=Decimal("100150"),
-        ask=Decimal("100250"),
+        bid=Decimal("100500"),
+        ask=Decimal("100600"),
         bid_size=Decimal("2"),
         ask_size=Decimal("2"),
         sequence=1,
@@ -135,15 +139,20 @@ async def test_cross_exchange_paper_pipeline_binance_kraken() -> None:
     assert len(result.risk_decisions) >= 1
     assert result.risk_decisions[0].approved is True
 
-    assert len(result.executions) >= 1
+    assert len(result.executions) >= 2
     assert result.executions[0].status == OrderStatus.FILLED
     assert result.executions[0].metadata.get("real_exchange_order") is False
-    assert len(result.fills) >= 1
-    assert len(result.orders) >= 1
+    assert result.executions[1].status == OrderStatus.FILLED
+    assert len(result.fills) >= 2
+    assert any(f.side == OrderSide.BUY for f in result.fills)
+    assert any(f.side == OrderSide.SELL for f in result.fills)
+    assert len(result.orders) >= 2
 
-    assert portfolio.available("BTC") > starting_btc
-    assert portfolio.available("EUR") < starting_eur
+    # Round-trip arb: BTC inventory returns to start; EUR rises net of fees.
+    assert portfolio.available("BTC") == starting_btc
+    assert portfolio.available("EUR") > starting_eur
     assert result.portfolio_equity is not None
+    assert result.portfolio_equity > Decimal("200000")
 
     # 9: expose through API
     cycle_payload = {
@@ -171,8 +180,8 @@ async def test_cross_exchange_paper_pipeline_binance_kraken() -> None:
     app_service.inject_snapshot(
         "kraken",
         "BTCEUR",
-        bid=Decimal("100150"),
-        ask=Decimal("100250"),
+        bid=Decimal("100500"),
+        ask=Decimal("100600"),
         sequence=1,
     )
     set_last_paper_cycle(cycle_payload)

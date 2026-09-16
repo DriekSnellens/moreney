@@ -1,15 +1,17 @@
 """FastAPI application entrypoint.
 
-Exposes health, status, market-data, risk/kill-switch, and paper-trading endpoints.
-A lightweight HTML dashboard consumes the paper APIs. No withdrawal routes exist.
-Live trading, withdrawals, and leverage remain disabled.
+Exposes health, status, market-data, risk/kill-switch, funding, and live-trading
+endpoints. The HTML UI is live-only (paper dashboards redirect to /live/dashboard).
+Withdrawals remain disabled / non-automatic.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import uvicorn
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Security
@@ -19,15 +21,10 @@ from starlette import status as http_status
 
 from bot import __version__
 from bot.core.config import Settings, get_settings
+from bot.core.disk_guard import disk_guard_status, log_disk_guard
 from bot.core.enums import ExecutionMode, KillSwitchState, OpportunityLifecycleStatus
 from bot.market_data.cache import MarketDataCache
 from bot.market_data.service import MarketDataService
-from bot.paper.dashboard import (
-    render_dashboard,
-    render_dashboard_lite,
-    render_fleet_dashboard,
-)
-from bot.paper.fleet import collect_fleet_overview
 from bot.paper.auth import (
     clear_session_cookie,
     credentials_valid,
@@ -38,7 +35,34 @@ from bot.paper.auth import (
     wants_html,
 )
 from bot.paper.runner import PaperRunner
+from bot.opportunity.parameter_log import PARAMETER_CHANGES
 from bot.paper.store import PaperTradingStore
+from bot.funding.models import FundingEventType
+from bot.funding.service import get_funding_service, reset_funding_service
+from bot.live.dashboard_history import (
+    chart_series_from_history,
+    enrich_session_from_bridge,
+    load_history,
+    metrics_from_payload,
+    record_snapshot,
+)
+from bot.live.dashboard import render_live_dashboard
+from bot.live.pwa_assets import ICON_SVG, MANIFEST_JSON, SERVICE_WORKER_JS
+from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
+from bot.market_data.research.retention import prune_research_marketdata
+from bot.live.service import get_live_service, reset_live_service
+from bot.live.micro_engine import get_micro_engine, reset_micro_engine
+from bot.live.micro_session_manager import (
+    get_micro_session_manager,
+    reset_micro_session_manager,
+)
+from bot.live.momentum_dashboard import read_ledger_tail, render_momentum_dashboard
+from bot.live.momentum_period_pnl import compute_desk_earnings, earnings_as_dict
+from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
+from bot.live.momentum_volatile_runner import (
+    get_volatile_desk_manager,
+    volatile_desk_flagged_running,
+)
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -50,6 +74,7 @@ _market_data_service: MarketDataService | None = None
 _paper_runner: PaperRunner | None = None
 _last_paper_cycle: dict[str, Any] | None = None
 _dashboard_basic = HTTPBasic(auto_error=False)
+logger = logging.getLogger(__name__)
 
 
 def get_kill_switch() -> KillSwitch:
@@ -118,6 +143,10 @@ def reset_risk_singletons() -> None:
     _market_data_service = None
     _paper_runner = None
     _last_paper_cycle = None
+    reset_funding_service()
+    reset_live_service()
+    reset_micro_engine()
+    reset_micro_session_manager()
 
 
 class DashboardLoginRedirect(Exception):
@@ -151,7 +180,7 @@ def require_dashboard_access(
     ):
         return
     if wants_html(request):
-        next_path = request.url.path or "/fleet"
+        next_path = request.url.path or "/live/dashboard"
         if request.url.query:
             next_path = f"{next_path}?{request.url.query}"
         raise DashboardLoginRedirect(next_path)
@@ -166,13 +195,72 @@ async def lifespan(_app: FastAPI):
     settings = get_settings()
     if settings.execution_mode == ExecutionMode.LIVE:
         settings.require_live_credentials()
+    log_disk_guard(
+        "/",
+        warn_pct=float(settings.disk_guard_warn_pct),
+        block_pct=float(settings.disk_guard_block_pct),
+    )
+    prune_research_marketdata(
+        settings.research_marketdata_recording_path,
+        retention_days=int(settings.marketdata_retention_days),
+        execute_delete=True,
+    )
+    get_settings.cache_clear()
     get_kill_switch()
+    get_micro_engine().arm()
     md = get_market_data_service()
-    runner = get_paper_runner()
+    paper_runner = None
+    # Paper lab instances: auto-start PaperRunner only (never live orders).
     if settings.paper_trading_enabled and settings.paper_auto_start:
-        await runner.start()  # connects public WebSockets + starts loop
+        paper_runner = get_paper_runner()
+        await paper_runner.start()
+        logger.info(
+            "paper auto-start enabled persist=%s port=%s",
+            settings.paper_persist_path,
+            settings.api_port,
+        )
+    # Live micro: resume continuous session after uvicorn restart. Skip on
+    # pure paper lab processes so they never touch live micro state.
+    elif bool(settings.live_micro_enabled or settings.live_trading_enabled):
+        # The two desks share the venue cash; only one may own the book. When
+        # the momentum desk is flagged running the legacy maker session never
+        # auto-resumes, even if its status file still claims to be running.
+        if momentum_desk_flagged_running(settings):
+            logger.warning("momentum desk owns the book; legacy micro session not resumed")
+        else:
+            try:
+                resume = await get_micro_session_manager().resume_if_interrupted()
+                if resume and resume.get("started"):
+                    logger.info("auto-resumed continuous micro session after process start")
+                elif resume and not resume.get("started"):
+                    logger.warning("micro session auto-resume did not start: %s", resume)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to auto-resume interrupted micro session")
+        try:
+            resumed = await get_momentum_desk_manager().resume_if_flagged()
+            if resumed and resumed.get("started"):
+                logger.info("auto-resumed momentum desk after process start")
+            elif resumed:
+                logger.warning("momentum desk auto-resume did not start: %s", resumed)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume momentum desk")
+        try:
+            if bool(getattr(get_settings(), "momentum_volatile_enabled", False)):
+                v_resumed = await get_volatile_desk_manager().resume_if_flagged()
+                if v_resumed and v_resumed.get("started"):
+                    logger.info("auto-resumed volatile sleeve after process start")
+                elif v_resumed:
+                    logger.warning("volatile sleeve auto-resume did not start: %s", v_resumed)
+            else:
+                logger.info("volatile sleeve disabled — skip auto-resume")
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume volatile sleeve")
     yield
-    await runner.shutdown()
+    if paper_runner is not None:
+        try:
+            await paper_runner.shutdown()
+        except Exception:  # noqa: BLE001
+            logger.exception("paper runner shutdown failed")
     await md.stop()
 
 
@@ -182,11 +270,15 @@ app = FastAPI(
         "Production-oriented cryptocurrency trading API. "
         "Strategies emit opportunities; profitability and risk gate execution. "
         "No withdrawal functionality is exposed. No leverage in this version. "
-        "Realtime market data uses public feeds only; execution stays paper."
+        "Live micro (:8020) and isolated paper lab instances share this codebase."
     ),
     version=__version__,
     lifespan=lifespan,
 )
+
+from bot.paper.api import router as paper_api_router  # noqa: E402
+
+app.include_router(paper_api_router)
 
 @app.exception_handler(DashboardLoginRedirect)
 async def _dashboard_login_redirect(_request: Request, exc: DashboardLoginRedirect):
@@ -195,28 +287,423 @@ async def _dashboard_login_redirect(_request: Request, exc: DashboardLoginRedire
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
+async def health() -> dict[str, Any]:
+    settings = get_settings()
+    disk = disk_guard_status(
+        "/",
+        warn_pct=float(settings.disk_guard_warn_pct),
+        block_pct=float(settings.disk_guard_block_pct),
+    )
+    return {
+        "status": "ok" if not disk["blocked"] else "degraded",
+        "version": __version__,
+        "disk": disk,
+    }
 
 
 @app.get("/status")
 async def status() -> dict[str, Any]:
     settings: Settings = get_settings()
     ks = get_kill_switch().status()
-    runner = get_paper_runner()
+    funding_flags = get_funding_service().public_status_flags()
+    micro = get_micro_session_manager().status()
+    paper_running = False
+    if settings.paper_trading_enabled:
+        try:
+            paper_running = bool(get_paper_runner().running)
+        except Exception:  # noqa: BLE001
+            paper_running = False
     return {
         "version": __version__,
         "environment": settings.app_env,
         "execution_mode": settings.execution_mode.value,
         "exchange": settings.exchange_name,
         "paper_mode": settings.execution_mode == ExecutionMode.PAPER,
-        "paper_trading_enabled": settings.paper_trading_enabled,
-        "paper_running": runner.running,
+        "paper_trading_enabled": bool(settings.paper_trading_enabled),
+        "paper_running": paper_running,
+        "paper_persist_path": settings.paper_persist_path,
+        "api_port": settings.api_port,
+        "micro_session_running": bool(micro.get("running")),
         "market_data_mode": settings.market_data_mode,
-        "live_trading_enabled": False,
+        "live_trading_enabled": bool(settings.live_trading_enabled or settings.live_micro_enabled),
         "withdrawals_supported": False,
+        "automatic_withdrawals_enabled": False,
         "leverage_supported": False,
+        "funding_main_venue": funding_flags["funding_main_venue"],
+        "funding_venues": funding_flags["funding_venues"],
+        "live_readiness": {
+            "active_phase": get_live_service().active_phase().name.lower(),
+            "can_place_live_orders": False,
+            "observe_enabled": bool(settings.live_observe_enabled),
+            "micro_enabled": bool(settings.live_micro_enabled),
+            "orders_unlocked": bool(settings.live_orders_unlocked),
+        },
         "kill_switch": ks.model_dump(mode="json"),
+    }
+
+
+@app.get("/portfolio")
+async def portfolio_overview() -> dict[str, Any]:
+    """Multi-venue portfolio summary (paper ledger or live balances)."""
+    summary = await get_funding_service().portfolio_summary()
+    return summary.model_dump(mode="json")
+
+
+@app.get("/balances")
+async def balances_all() -> dict[str, Any]:
+    snaps = await get_funding_service().get_venue_balances()
+    return {
+        "withdrawals_supported": False,
+        "venues": [s.model_dump(mode="json") for s in snaps],
+    }
+
+
+@app.get("/balances/{venue}")
+async def balances_venue(venue: str) -> dict[str, Any]:
+    snap = await get_funding_service().get_balances_for_venue(venue)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"Unknown venue: {venue}")
+    return snap.model_dump(mode="json")
+
+
+@app.get("/funding")
+async def funding_overview() -> dict[str, Any]:
+    """Funding overview: deposits, tracked exits, pending — no auto-withdraw."""
+    svc = get_funding_service()
+    summary = await svc.portfolio_summary()
+    deposits = svc.funding_events(event_type=FundingEventType.DEPOSIT, limit=100)
+    exits = svc.funding_events(event_type=FundingEventType.WITHDRAWAL, limit=100)
+    pending = [
+        e.model_dump(mode="json")
+        for e in svc.funding_events(limit=200)
+        if e.status.value == "pending"
+    ]
+    return {
+        "main_funding_venue": svc.main_funding_venue(),
+        "total_deposited": str(summary.total_deposited),
+        "total_withdrawn": str(summary.total_withdrawn),
+        "current_portfolio": str(summary.current_portfolio),
+        "pnl": str(summary.pnl),
+        "withdrawals_supported": False,
+        "automatic_withdrawals_enabled": False,
+        "withdraw_instructions": (
+            f"To withdraw, use the {svc.main_funding_venue()} exchange UI. "
+            "Moreney does not execute withdrawals."
+        ),
+        "deposits": [e.model_dump(mode="json") for e in deposits],
+        "recorded_exits": [e.model_dump(mode="json") for e in exits],
+        "pending": pending,
+        "note": summary.note,
+    }
+
+
+@app.get("/funding/deposits")
+async def funding_deposits(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+    rows = get_funding_service().funding_events(
+        event_type=FundingEventType.DEPOSIT, limit=limit
+    )
+    return {"deposits": [e.model_dump(mode="json") for e in rows]}
+
+
+@app.get("/funding/recorded-exits")
+async def funding_recorded_exits(
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """User-recorded cash-outs via exchange UI (tracking only)."""
+    rows = get_funding_service().funding_events(
+        event_type=FundingEventType.WITHDRAWAL, limit=limit
+    )
+    return {
+        "recorded_exits": [e.model_dump(mode="json") for e in rows],
+        "withdrawals_supported": False,
+        "bot_executed": False,
+    }
+
+
+@app.post("/funding/events")
+async def funding_record_event(payload: dict[str, Any]) -> dict[str, Any]:
+    """Manually record a deposit or tracked exit (never executes exchange transfers)."""
+    svc = get_funding_service()
+    event_type = str(payload.get("type") or "deposit").strip().lower()
+    venue = str(payload.get("venue") or svc.main_funding_venue())
+    amount = payload.get("amount")
+    if amount is None:
+        raise HTTPException(status_code=400, detail="amount is required")
+    asset = str(payload.get("asset") or payload.get("currency") or "EUR")
+    currency = str(payload.get("currency") or asset)
+    ref = payload.get("external_reference")
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if event_type in {"withdrawal", "exit", "cash_out"}:
+        event = svc.record_withdrawal_tracking(
+            venue=venue,
+            amount=amount,
+            asset=asset,
+            currency=currency,
+            external_reference=ref,
+            metadata=meta,
+        )
+    elif event_type == "deposit":
+        event = svc.record_deposit(
+            venue=venue,
+            amount=amount,
+            asset=asset,
+            currency=currency,
+            external_reference=ref,
+            metadata=meta,
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="type must be deposit or withdrawal (tracking only)",
+        )
+    return {"event": event.model_dump(mode="json"), "executed": False}
+
+
+@app.get("/rebalancing/recommendations")
+async def rebalancing_recommendations() -> dict[str, Any]:
+    """Suggest inventory moves — never executed automatically."""
+    recs = get_funding_service().rebalance_recommendations()
+    fee_bps = float(get_settings().global_transfer_fee_bps)
+    return {
+        "auto_execute": False,
+        "transfer_fee_bps": fee_bps,
+        "recommendations": [r.model_dump(mode="json") for r in recs],
+        "instructions": (
+            "Transfer manually via the exchange withdrawal/deposit UI, "
+            "then inventory will update on the next balance refresh."
+        ),
+    }
+
+
+@app.get("/live/readiness")
+async def live_readiness() -> dict[str, Any]:
+    """Full live readiness report across phases 0–5 (fail-closed)."""
+    return await get_live_service().full_status()
+
+
+@app.get("/live/status")
+async def live_status() -> dict[str, Any]:
+    svc = get_live_service()
+    micro = svc.phase3_micro()
+    return {
+        "active_phase": svc.active_phase().name.lower(),
+        "live_trading_enabled": bool(get_settings().live_trading_enabled),
+        "can_place_live_orders": bool(micro.get("can_place_orders")),
+        "block_reason": micro.get("block_reason"),
+        "withdrawals_supported": False,
+        "production_execution_enabled": bool(PRODUCTION_EXECUTION_ENABLED),
+        "go_no_go_ready": svc.phase0().get("ready"),
+    }
+
+
+@app.get("/live/observe")
+async def live_observe(
+    probe: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Phase 1: read-only live balances (no orders)."""
+    return await get_live_service().phase1_observe(probe=probe)
+
+
+@app.get("/live/credentials")
+async def live_credentials(
+    probe: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Per-venue API key presence (+ optional read-only health probe)."""
+    return await get_live_service().credentials(probe=probe)
+
+
+@app.get("/live/micro/unlock-checklist")
+async def live_micro_unlock_checklist() -> dict[str, Any]:
+    """Which env flags still block micro-live (never flips them)."""
+    return get_live_service().micro_unlock_checklist()
+
+
+@app.post("/live/micro/dry-run")
+async def live_micro_dry_run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate a hypothetical order against micro policy — does not place."""
+    return get_live_service().micro_dry_run(payload or {})
+
+
+@app.get("/live/micro/engine")
+async def live_micro_engine_status() -> dict[str, Any]:
+    """Micro-live engine status (separate from PaperRunner)."""
+    return get_micro_engine().status()
+
+
+@app.post("/live/micro/arm")
+async def live_micro_arm() -> dict[str, Any]:
+    """Arm micro engine for this process after env unlocks. Does not place orders."""
+    return get_micro_engine().arm()
+
+
+@app.post("/live/micro/disarm")
+async def live_micro_disarm() -> dict[str, Any]:
+    return get_micro_engine().disarm()
+
+
+@app.post("/live/micro/orders")
+async def live_micro_orders(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Submit a micro live order. Requires env unlocks + arm + confirm=true.
+
+    Body example::
+        {"venue":"bitvavo","symbol":"BTCEUR","side":"buy","notional_eur":25,"confirm":true}
+    """
+    body = payload or {}
+    confirm = bool(body.get("confirm"))
+    return await get_micro_engine().submit(body, confirm=confirm)
+
+
+@app.get("/live/micro/session")
+async def live_micro_session_status() -> dict[str, Any]:
+    """Live status of the full-bot micro session (budget-capped PaperRunner)."""
+    return get_micro_session_manager().status()
+
+
+@app.post("/live/micro/session/start")
+async def live_micro_session_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start a full-bot micro session in the background (continuous by default)."""
+    body = payload or {}
+    raw_minutes = body.get("minutes", None)
+    if raw_minutes in (None, "", "continuous", "forever"):
+        minutes: float | None = None
+    else:
+        minutes = float(raw_minutes)
+        if minutes <= 0:
+            minutes = None
+    budget = float(body.get("budget_eur") or 2000)
+    exclude_btc = body.get("exclude_btc", False)
+    if isinstance(exclude_btc, str):
+        exclude_btc = exclude_btc.strip().lower() not in {"0", "false", "no"}
+    symbols_raw = body.get("symbols")
+    symbols = None
+    if isinstance(symbols_raw, str) and symbols_raw.strip():
+        symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
+    elif isinstance(symbols_raw, list):
+        symbols = [str(s).strip().upper() for s in symbols_raw if str(s).strip()]
+    force = body.get("force", False)
+    if isinstance(force, str):
+        force = force.strip().lower() not in {"0", "false", "no"}
+    if get_momentum_desk_manager().running() and not bool(force):
+        return {
+            "started": False,
+            "reason": "momentum_desk_running",
+            "message": "stop the momentum desk first or pass force=true",
+        }
+    return await get_micro_session_manager().start(
+        minutes=minutes,
+        budget_eur=budget,
+        exclude_btc=bool(exclude_btc),
+        symbols=symbols,
+    )
+
+
+@app.post("/live/micro/session/stop")
+async def live_micro_session_stop() -> dict[str, Any]:
+    """Request stop of the running full-bot micro session."""
+    return await get_micro_session_manager().stop()
+
+
+@app.get("/live/momentum/status")
+async def live_momentum_status() -> dict[str, Any]:
+    """Daily Momentum Desk: positions, risk ledger, last decision, next decision.
+
+    Marks are refreshed from the public ticker before the snapshot so the
+    dashboard poll stays near real-time even between 20s exit ticks.
+    """
+    return await get_momentum_desk_manager().status_fresh()
+
+
+@app.post("/live/momentum/start")
+async def live_momentum_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start the Daily Momentum Desk (``{"dry_run": true}`` for shadow mode)."""
+    body = payload or {}
+    dry = body.get("dry_run", False)
+    if isinstance(dry, str):
+        dry = dry.strip().lower() not in {"0", "false", "no"}
+    settings = get_settings()
+    venues = body.get("venues") or body.get("venue") or settings.momentum_desk_venues
+    return await get_momentum_desk_manager().start(
+        settings=settings, dry_run=bool(dry), venue=venues
+    )
+
+
+@app.post("/live/momentum/decide")
+async def live_momentum_decide(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the desk's entry decision now. Default is a preview (no orders);
+    pass ``{"execute": true}`` to trade under the normal risk rules."""
+    body = payload or {}
+    execute = body.get("execute", False)
+    if isinstance(execute, str):
+        execute = execute.strip().lower() not in {"0", "false", "no"}
+    return await get_momentum_desk_manager().decide(execute=bool(execute))
+
+
+@app.post("/live/momentum/stop")
+async def live_momentum_stop() -> dict[str, Any]:
+    """Stop the Daily Momentum Desk loop (open positions stay on the exchange)."""
+    return await get_momentum_desk_manager().stop()
+
+
+@app.get("/live/momentum/ledger")
+async def live_momentum_ledger(limit: int = 200) -> dict[str, Any]:
+    """Tail of the momentum desk trade ledger (entries, exits, decisions)."""
+    rows = read_ledger_tail(get_settings().momentum_desk_ledger_path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+    }
+
+
+@app.post("/live/micro/session/reset-dashboard")
+async def live_micro_session_reset_dashboard() -> dict[str, Any]:
+    """Zero cumulative realized PnL and clear dashboard chart history."""
+    return await get_micro_session_manager().reset_dashboard()
+
+
+@app.post("/live/dashboard/reconcile")
+async def live_dashboard_reconcile(
+    since: str | None = Query(
+        default=None,
+        description="ISO timestamp; default 12:00 UTC today",
+    ),
+) -> dict[str, Any]:
+    """Rebuild dashboard KPIs and chart history from exchange fills since ``since``."""
+    from datetime import UTC, datetime, timedelta
+
+    mgr = get_micro_session_manager()
+    if since:
+        since = since.strip().replace(" ", "+")
+        try:
+            anchor = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid since: {exc}") from exc
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=UTC)
+    else:
+        now = datetime.now(UTC)
+        anchor = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        if now < anchor:
+            anchor = anchor - timedelta(days=1)
+    return await mgr.reconcile_dashboard(anchor)
+
+
+@app.get("/live/alerts")
+async def live_alerts() -> dict[str, Any]:
+    """Phase 4: venue/rebalance alerts (non-executing)."""
+    observe = await get_live_service().phase1_observe()
+    return get_live_service().phase4_alerts(observe)
+
+
+@app.get("/live/audit")
+async def live_audit(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, Any]:
+    """Phase 5: recent audit events (secrets redacted)."""
+    hardening = get_live_service().phase5_hardening()
+    return {
+        "events": hardening.get("recent_audit") or [],
+        "runbook": hardening.get("runbook"),
+        "withdrawals_supported": False,
     }
 
 
@@ -240,188 +727,55 @@ async def market_data_status() -> dict[str, Any]:
     return compact
 
 
-@app.get("/paper/last-cycle")
-async def paper_last_cycle() -> dict[str, Any]:
-    """Last paper trading cycle result (integration / ops visibility)."""
-    runner = get_paper_runner()
-    cycle = runner.last_cycle if runner.last_cycle is not None else _last_paper_cycle
-    if cycle is None:
-        return {"available": False, "cycle": None}
-    return {"available": True, "cycle": cycle}
-
-
-@app.get("/paper/status")
-async def paper_status() -> dict[str, Any]:
-    return get_paper_runner().status()
-
-
-@app.get("/paper/portfolio")
-async def paper_portfolio() -> dict[str, Any]:
-    portfolio = get_paper_runner().portfolio
-    state = portfolio.state
-    return {
-        "quote_asset": state.quote_asset,
-        "starting_capital": str(get_settings().paper_starting_eur),
-        "equity": str(state.total_equity),
-        "balances": {
-            k: {"available": str(v.available), "reserved": str(v.reserved), "total": str(v.total)}
-            for k, v in state.balances.items()
-        },
-        "positions": {
-            k: {
-                "quantity": str(v.quantity),
-                "average_entry_price": str(v.average_entry_price),
-                "realized_pnl": str(v.realized_pnl),
-                "fees_paid": str(v.fees_paid),
-            }
-            for k, v in state.positions.items()
-            if v.quantity != 0
-        },
-        "stats": state.stats.model_dump(mode="json"),
-        "execution_mode": ExecutionMode.PAPER.value,
-    }
-
-
-@app.get("/paper/performance")
-async def paper_performance() -> dict[str, Any]:
-    snap = get_paper_runner().tracker.snapshot()
-    return snap.model_dump(mode="json")
-
-
-@app.get("/paper/overview")
-async def paper_overview() -> dict[str, Any]:
-    """Current paper-trading state in one payload for operators/UI."""
-    runner = get_paper_runner()
-    portfolio = runner.portfolio.state
-    performance = runner.tracker.snapshot()
-    return {
-        "updated_at": portfolio.as_of.isoformat(),
-        "execution_mode": ExecutionMode.PAPER.value,
-        "status": runner.status(),
-        "market_data": get_market_data_service().status(),
-        "portfolio": {
-            "quote_asset": portfolio.quote_asset,
-            "starting_capital": str(get_settings().paper_starting_eur),
-            "equity": str(portfolio.total_equity),
-            "balances": {
-                k: {
-                    "available": str(v.available),
-                    "reserved": str(v.reserved),
-                    "total": str(v.total),
-                }
-                for k, v in portfolio.balances.items()
-            },
-            "positions": {
-                k: {
-                    "quantity": str(v.quantity),
-                    "average_entry_price": str(v.average_entry_price),
-                    "realized_pnl": str(v.realized_pnl),
-                    "fees_paid": str(v.fees_paid),
-                }
-                for k, v in portfolio.positions.items()
-                if v.quantity != 0
-            },
-        },
-        "performance": performance.model_dump(mode="json"),
-    }
-
-
-@app.get("/paper/statistics/daily")
-async def paper_statistics_daily() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.daily_stats()
-    return {"daily": [r.model_dump(mode="json") for r in rows]}
-
-
-@app.get("/paper/statistics/strategies")
-async def paper_statistics_strategies() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.strategy_stats()
-    payload = []
-    for r in rows:
-        item = r.model_dump(mode="json")
-        item["win_rate"] = str(r.win_rate)
-        item["profit_factor"] = str(r.profit_factor)
-        payload.append(item)
-    return {"strategies": payload}
-
-
-@app.get("/paper/statistics/exchanges")
-async def paper_statistics_exchanges() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.exchange_pair_stats()
-    payload = []
-    for r in rows:
-        item = r.model_dump(mode="json")
-        item["pair"] = r.pair_key
-        item["win_rate"] = str(r.win_rate)
-        payload.append(item)
-    return {"exchanges": payload}
-
-
-@app.get("/paper/statistics/hourly")
-async def paper_statistics_hourly() -> dict[str, Any]:
-    rows = get_paper_runner().tracker.hourly_stats()
-    payload = []
-    for r in rows:
-        item = r.model_dump(mode="json")
-        item["label"] = r.label
-        item["average_net_pnl"] = str(r.average_net_pnl)
-        item["win_rate"] = str(r.win_rate)
-        payload.append(item)
-    return {"hourly": payload}
-
-
-@app.get("/paper/opportunities")
-async def paper_opportunities(
-    limit: int = Query(default=100, ge=1, le=1000),
-    status: str | None = Query(default=None),
+async def _live_dashboard_payload(
+    *,
+    record: bool = True,
+    light: bool = True,
+    include_history: bool = True,
 ) -> dict[str, Any]:
-    status_enum: OpportunityLifecycleStatus | None = None
-    if status:
+    live = get_live_service()
+    mgr = get_micro_session_manager()
+    session = mgr.status()
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        session = enrich_session_from_bridge(session, bridge)
+    elif session.get("bridge") is None:
+        # Stale status file after restart — avoid empty KPI sections.
+        session = dict(session)
+        session.setdefault("bridge", {})
+    if bridge is not None:
         try:
-            status_enum = OpportunityLifecycleStatus(status.lower())
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}") from exc
-    rows = get_paper_runner().tracker.opportunities(limit=limit, status=status_enum)
-    return {"opportunities": [r.model_dump(mode="json") for r in rows]}
+            from bot.live.dashboard_pnl import attach_calendar_pnl, schedule_calendar_pnl_refresh
 
-
-@app.get("/paper/trades")
-async def paper_trades(limit: int = Query(default=100, ge=1, le=1000)) -> dict[str, Any]:
-    return {"trades": get_paper_runner().tracker.trades(limit=limit)}
-
-
-@app.post("/paper/start")
-async def paper_start() -> dict[str, Any]:
-    settings = get_settings()
-    if settings.execution_mode != ExecutionMode.PAPER:
-        raise HTTPException(status_code=403, detail="Paper start refused: EXECUTION_MODE is not paper")
-    if not settings.paper_trading_enabled:
-        raise HTTPException(status_code=403, detail="PAPER_TRADING_ENABLED=false")
-    return await get_paper_runner().start()
-
-
-@app.post("/paper/stop")
-async def paper_stop() -> dict[str, Any]:
-    return await get_paper_runner().stop()
-
-
-@app.post("/paper/reset")
-async def paper_reset(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Reset paper portfolio only. Never affects real exchange accounts."""
-    confirm = bool((payload or {}).get("confirm"))
-    result = await get_paper_runner().reset(confirm=confirm)
-    if not result.get("reset"):
-        raise HTTPException(status_code=400, detail=result)
-    return result
-
-
-
+            schedule_calendar_pnl_refresh(bridge)
+            session = attach_calendar_pnl(session)
+        except Exception:  # noqa: BLE001
+            logger.exception("calendar PnL attach on dashboard payload failed")
+    payload: dict[str, Any] = {
+        "session": session,
+        "engine": get_micro_engine().status(),
+    }
+    if not light:
+        try:
+            readiness = live.compact_status()
+            payload["readiness"] = readiness
+        except Exception:  # noqa: BLE001
+            payload["readiness"] = {}
+        payload["unlock"] = live.micro_unlock_checklist()
+    if record:
+        record_snapshot(payload)
+    if include_history:
+        payload["history"] = load_history(limit=720)
+    return payload
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(next: str = Query(default="/fleet")) -> HTMLResponse:
+async def login_page(next: str = Query(default="/live/dashboard")) -> HTMLResponse:
     settings = get_settings()
     if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(url=next if next.startswith("/") else "/fleet", status_code=303)
+        return RedirectResponse(
+            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+        )
     return render_login_page(next_path=next)
 
 
@@ -429,14 +783,16 @@ async def login_page(next: str = Query(default="/fleet")) -> HTMLResponse:
 async def login_submit(
     username: str = Form(...),
     password: str = Form(...),
-    next: str = Form(default="/fleet"),
+    next: str = Form(default="/live/dashboard"),
 ) -> Response:
     settings = get_settings()
     if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(url=next if next.startswith("/") else "/fleet", status_code=303)
+        return RedirectResponse(
+            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+        )
     if not credentials_valid(settings, username, password):
         return render_login_page(next_path=next, error="Invalid username or password")
-    safe_next = next if next.startswith("/") else "/fleet"
+    safe_next = next if next.startswith("/") else "/live/dashboard"
     response = RedirectResponse(url=safe_next, status_code=303)
     set_session_cookie(response, settings, username)
     return response
@@ -450,55 +806,551 @@ async def logout() -> Response:
     return response
 
 
+@app.get("/", response_class=HTMLResponse, response_model=None)
+@app.get("/live/dashboard", response_class=HTMLResponse, response_model=None)
+@app.get("/dashboard", response_class=HTMLResponse, response_model=None)
+async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse | RedirectResponse:
+    """Live operator dashboard; paper lab instances redirect to the simple lab UI."""
+    settings = get_settings()
+    if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
+        return RedirectResponse(url="/paper/dashboard", status_code=303)
+    # The momentum desk owns the operator view while it runs and the legacy
+    # maker desk is stopped; the old page stays reachable at /live/dashboard/legacy.
+    if get_momentum_desk_manager().running() and not bool(
+        get_micro_session_manager().status().get("running")
+    ):
+        return RedirectResponse(url="/live/momentum", status_code=303)
+    return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/dashboard/legacy", response_class=HTMLResponse, response_model=None)
+async def live_dashboard_legacy(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
+    """Legacy maker-desk dashboard (always renders, even when that desk is stopped)."""
+    return render_live_dashboard(await _live_dashboard_payload())
+
+
+@app.get("/live/momentum", response_class=HTMLResponse, response_model=None)
+async def live_momentum_dashboard(
+    simulate: int = 0,
+    notice: str | None = None,
+    sell: str | None = None,
+    sell_all: int = 0,
+    report: int = 0,
+    day: str | None = None,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse:
+    """Momentum desk operator page: equity, positions, last decision, ledger.
+
+    ``?simulate=1`` runs the entry decision as a preview (no orders) and shows
+    the planned trades with a net P&L scenario table and a commit button.
+    ``?report=1`` builds today's missed-entry / exit-opportunity report.
+    ``?sell_all=1`` opens the sell-everything confirmation.
+    """
+    manager = get_momentum_desk_manager()
+    preview: dict[str, Any] | None = None
+    report_payload: dict[str, Any] | None = None
+    if simulate:
+        res = await manager.decide(execute=False)
+        if res.get("ok"):
+            preview = res.get("decision")
+        else:
+            notice = f"Simulatie niet mogelijk: {res.get('reason')}"
+    if report:
+        res = await manager.daily_report(day)
+        if res.get("ok"):
+            report_payload = res.get("report")
+        else:
+            notice = f"Report niet mogelijk: {res.get('reason')}"
+    settings = get_settings()
+    # Fresh venue marks on first paint (JS poll continues every 3s).
+    status = await manager.status_fresh()
+    ledger = await live_momentum_ledger(limit=400)
+    settings = get_settings()
+    show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    volatile_status: dict[str, Any] | None = None
+    volatile_ledger: list[dict[str, Any]] | None = None
+    if show_volatile:
+        try:
+            volatile_status = get_volatile_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            volatile_status = None
+        volatile_ledger = read_ledger_tail(
+            getattr(settings, "momentum_volatile_ledger_path", "./data/momentum_volatile_ledger.jsonl"),
+            limit=400,
+        )
+    earnings = compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=(
+            settings.momentum_volatile_ledger_path if show_volatile else None
+        ),
+        core_status=status,
+        volatile_status=volatile_status if show_volatile else None,
+    )
+    return render_momentum_dashboard(
+        status,
+        ledger["rows"],
+        preview=preview,
+        notice=(notice or None),
+        sell=(sell or None),
+        sell_all=bool(sell_all),
+        report=report_payload,
+        volatile=volatile_status if show_volatile else None,
+        earnings=earnings,
+        volatile_ledger_rows=volatile_ledger if show_volatile else None,
+        show_volatile=show_volatile,
+    )
+
+
+@app.get("/live/momentum/earnings")
+async def live_momentum_earnings() -> dict[str, Any]:
+    """Week / month / all-time net PnL (Amsterdam calendar). Volatile optional."""
+    settings = get_settings()
+    show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    core = get_momentum_desk_manager().status()
+    volatile = None
+    if show_volatile:
+        try:
+            volatile = get_volatile_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            volatile = None
+    earnings = compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=(
+            settings.momentum_volatile_ledger_path if show_volatile else None
+        ),
+        core_status=core,
+        volatile_status=volatile,
+    )
+    return earnings_as_dict(earnings)
+
+
+@app.post("/live/momentum/commit", response_model=None)
+async def live_momentum_commit(
+    bases: str = "",
+    at: str = "",
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Execute a previewed decision (dashboard commit button). The desk only
+    buys if it would still choose exactly ``bases``; otherwise the commit is
+    rejected and the operator is asked to simulate again."""
+    wanted = [b for b in bases.upper().split(",") if b.strip()]
+    if not wanted:
+        return RedirectResponse(
+            url="/live/momentum?notice=Geen+coins+om+te+committen", status_code=303
+        )
+    res = get_momentum_desk_manager().commit(wanted)
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Commit+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.post("/live/momentum/sell", response_model=None)
+async def live_momentum_sell(
+    holding_id: str = "",
+    urgent: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Sell one open momentum-desk holding now (dashboard sell button).
+    Patient maker exit by default; ``urgent=1`` crosses the spread."""
+    if not holding_id.strip():
+        return RedirectResponse(url="/live/momentum?notice=Geen+positie+opgegeven", status_code=303)
+    res = get_momentum_desk_manager().sell(holding_id.strip(), urgent=bool(urgent))
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Verkoop+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+@app.post("/live/momentum/sell-all", response_model=None)
+async def live_momentum_sell_all(
+    urgent: int = 0,
+    _: None = Depends(require_dashboard_access),
+) -> RedirectResponse:
+    """Sell every open momentum-desk holding (dashboard sell-all)."""
+    res = get_momentum_desk_manager().sell_all(urgent=bool(urgent))
+    if not res.get("ok"):
+        return RedirectResponse(
+            url=f"/live/momentum?notice=Sell-all+geweigerd:+{res.get('reason')}", status_code=303
+        )
+    return RedirectResponse(url="/live/momentum", status_code=303)
+
+
+def _volatile_wants_redirect(body: Mapping[str, Any], request: Request) -> bool:
+    raw = body.get("redirect", request.query_params.get("redirect", "0"))
+    if isinstance(raw, str):
+        return raw.strip().lower() not in {"0", "false", "no", ""}
+    return bool(raw)
+
+
+def _volatile_redirect(notice: str | None = None) -> RedirectResponse:
+    from urllib.parse import quote
+
+    url = "/live/momentum"
+    if notice:
+        url = f"{url}?notice={quote(notice)}"
+    return RedirectResponse(url=url, status_code=303)
+
+
+async def _volatile_request_body(request: Request) -> dict[str, Any]:
+    """Accept JSON API bodies or HTML form / query params."""
+    body: dict[str, Any] = {}
+    ctype = (request.headers.get("content-type") or "").lower()
+    if "application/json" in ctype:
+        try:
+            raw = await request.json()
+            if isinstance(raw, dict):
+                body.update(raw)
+        except Exception:  # noqa: BLE001
+            pass
+    elif (
+        "application/x-www-form-urlencoded" in ctype
+        or "multipart/form-data" in ctype
+    ):
+        try:
+            form = await request.form()
+            body.update({str(k): form.get(k) for k in form.keys()})
+        except Exception:  # noqa: BLE001
+            pass
+    for key, value in request.query_params.multi_items():
+        body.setdefault(key, value)
+    return body
+
+
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", ""}
+    return bool(value)
+
+
+@app.get("/live/momentum/volatile", response_model=None)
+async def live_momentum_volatile_page(
+    days: int = 14,
+    format: str = "html",
+    refresh: int = 0,
+    notice: str = "",
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse | JSONResponse:
+    """Paper volatile sleeve dashboard (+ research shadow). Live orders gated off."""
+    settings = get_settings()
+    if not bool(getattr(settings, "momentum_volatile_enabled", False)):
+        if str(format).lower() == "json":
+            return JSONResponse(
+                {
+                    "running": False,
+                    "enabled_setting": False,
+                    "disabled": True,
+                    "reason": "momentum_volatile_enabled_false",
+                }
+            )
+        return HTMLResponse(
+            "<!doctype html><html lang='nl'><head><meta charset='utf-8'>"
+            "<title>Volatile uit</title></head><body style='font-family:sans-serif;"
+            "max-width:40rem;margin:3rem auto;padding:0 1rem'>"
+            "<h1>Volatile sleeve uitgeschakeld</h1>"
+            "<p>De volatile engine staat uit — alleen de core desk draait.</p>"
+            "<p><a href='/live/momentum'>Terug naar Momentum Desk</a></p>"
+            "</body></html>"
+        )
+
+    from bot.live.momentum_runner import desk_config_from_settings
+    from bot.live.momentum_volatile_shadow import (
+        build_volatile_shadow,
+        render_volatile_live_page,
+        render_volatile_shadow_html,
+    )
+
+    live_status: dict[str, Any]
+    try:
+        live_status = get_volatile_desk_manager().status()
+    except Exception as exc:  # noqa: BLE001
+        live_status = {"running": False, "last_error": str(exc)}
+    if str(format).lower() == "json":
+        return JSONResponse(live_status)
+
+    settings = get_settings()
+    manager = get_momentum_desk_manager()
+    live_cfg = None
+    runner = getattr(manager, "_runner", None)
+    if runner is not None and getattr(runner, "cfg", None) is not None:
+        live_cfg = runner.cfg
+    else:
+        try:
+            live_cfg = desk_config_from_settings(settings)
+        except Exception:  # noqa: BLE001
+            live_cfg = None
+    days_n = max(1, min(int(days or 14), 120))
+    alphai_path = str(
+        getattr(settings, "alphai_volatile_recommendations_path", None)
+        or "data/alphai/volatile_recommendations.json"
+    )
+    shadow_html = ""
+    try:
+        payload = build_volatile_shadow(
+            days=days_n,
+            live_cfg=live_cfg,
+            refresh=bool(refresh),
+            alphai_path=alphai_path,
+            refresh_alphai=True,
+        )
+        shadow_html = render_volatile_shadow_html(payload)
+    except Exception as exc:  # noqa: BLE001
+        shadow_html = (
+            f'<div class="hint warn">Paper shadow research niet beschikbaar: {exc}</div>'
+        )
+    return HTMLResponse(
+        render_volatile_live_page(
+            live_status,
+            notice=(notice.strip() or None),
+            shadow_html=shadow_html,
+            ledger_rows=read_ledger_tail(
+                getattr(
+                    settings,
+                    "momentum_volatile_ledger_path",
+                    "./data/momentum_volatile_ledger.jsonl",
+                ),
+                limit=400,
+            ),
+        )
+    )
+
+
+@app.get("/live/momentum/volatile/status")
+async def live_momentum_volatile_status() -> dict[str, Any]:
+    """Volatile sleeve status (paper by default; live gated by ALLOW_LIVE)."""
+    return get_volatile_desk_manager().status()
+
+
+@app.get("/live/momentum/volatile/ledger")
+async def live_momentum_volatile_ledger(limit: int = 200) -> dict[str, Any]:
+    """Tail of the volatile sleeve trade ledger (entries, exits, decisions)."""
+    path = get_settings().momentum_volatile_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+        "path": str(path),
+    }
+
+
+@app.post("/live/momentum/volatile/start", response_model=None)
+async def live_momentum_volatile_start(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Start the volatile sleeve. Paper/dry_run unless ALLOW_LIVE is armed."""
+    body = await _volatile_request_body(request)
+    settings = get_settings()
+    if not bool(getattr(settings, "momentum_volatile_enabled", False)):
+        refused = {"ok": False, "reason": "momentum_volatile_enabled_false"}
+        if _volatile_wants_redirect(body, request):
+            return _volatile_redirect("Start geweigerd: volatile sleeve is uitgeschakeld")
+        return refused
+    allow_live = bool(getattr(settings, "momentum_volatile_allow_live", False))
+    dry = _as_bool(body.get("dry_run"), default=True)
+    if not allow_live:
+        dry = True
+    venues = body.get("venues") or body.get("venue") or settings.momentum_volatile_venues
+    result = await get_volatile_desk_manager().start(
+        settings=settings, dry_run=bool(dry), venue=venues
+    )
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Start geweigerd: {result.get('reason') or result}")
+        mode = "paper" if dry else "LIVE"
+        return _volatile_redirect(f"Volatile sleeve gestart ({mode})")
+    return result
+
+
+@app.post("/live/momentum/volatile/decide", response_model=None)
+async def live_momentum_volatile_decide(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Preview (default) or execute a volatile-sleeve decision now."""
+    body = await _volatile_request_body(request)
+    execute = _as_bool(body.get("execute"), default=False)
+    result = await get_volatile_desk_manager().decide(execute=bool(execute))
+    if _volatile_wants_redirect(body, request):
+        label = "Decide+execute" if execute else "Decide preview"
+        if result.get("ok") is False:
+            return _volatile_redirect(f"{label} geweigerd: {result.get('reason') or result}")
+        return _volatile_redirect(f"{label} klaar")
+    return result
+
+
+@app.post("/live/momentum/volatile/stop", response_model=None)
+async def live_momentum_volatile_stop(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Stop the volatile sleeve loop (open positions stay on the exchange)."""
+    body = await _volatile_request_body(request)
+    result = await get_volatile_desk_manager().stop()
+    if _volatile_wants_redirect(body, request):
+        return _volatile_redirect("Volatile sleeve gestopt")
+    return result
+
+
+@app.post("/live/momentum/volatile/commit")
+async def live_momentum_volatile_commit(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Commit a previewed volatile entry set (background)."""
+    body = payload or {}
+    bases = body.get("bases") or body.get("entries") or []
+    if isinstance(bases, str):
+        bases = [b.strip() for b in bases.split(",") if b.strip()]
+    return get_volatile_desk_manager().commit(list(bases))
+
+
+@app.post("/live/momentum/volatile/sell", response_model=None)
+async def live_momentum_volatile_sell(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Sell one volatile holding by holding_id."""
+    body = await _volatile_request_body(request)
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    urgent = _as_bool(body.get("urgent"), default=False)
+    if not holding_id:
+        if _volatile_wants_redirect(body, request):
+            return _volatile_redirect("Geen positie opgegeven")
+        return {"ok": False, "reason": "holding_id_required"}
+    result = get_volatile_desk_manager().sell(holding_id, urgent=bool(urgent))
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Verkoop geweigerd: {result.get('reason') or result}")
+        return _volatile_redirect("Verkoop gestart")
+    return result
+
+
+@app.post("/live/momentum/volatile/sell-all", response_model=None)
+async def live_momentum_volatile_sell_all(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Sell every open volatile-sleeve holding."""
+    body = await _volatile_request_body(request)
+    urgent = _as_bool(body.get("urgent"), default=False)
+    result = get_volatile_desk_manager().sell_all(urgent=bool(urgent))
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Verkoop alles geweigerd: {result.get('reason') or result}")
+        return _volatile_redirect("Verkoop alles gestart")
+    return result
+
+
+@app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
+async def live_micro_dashboard_redirect() -> RedirectResponse:
+    """Legacy URL — single operator dashboard lives at /live/dashboard."""
+    return RedirectResponse(url="/live/dashboard", status_code=301)
+
+
+@app.get("/live/dashboard/metrics")
+async def live_dashboard_metrics(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """JSON KPIs for mobile polling (no full HTML reload)."""
+    payload = await _live_dashboard_payload(light=True, record=False, include_history=False)
+    return {"metrics": metrics_from_payload(payload)}
+
+
+@app.get("/live/dashboard/charts")
+async def live_dashboard_charts(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """Chart series only — polled less often than KPI metrics."""
+    history = load_history(limit=720)
+    return {
+        "history": chart_series_from_history(history),
+        "version": history[-1].get("t") if history else None,
+    }
+
+
+@app.get("/live/dashboard/history")
+async def live_dashboard_history(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    return {"points": load_history(limit=720)}
+
+
+@app.get("/live/manifest.webmanifest")
+async def live_pwa_manifest() -> Response:
+    return Response(content=MANIFEST_JSON, media_type="application/manifest+json")
+
+
+@app.get("/live/sw.js")
+async def live_service_worker() -> Response:
+    return Response(content=SERVICE_WORKER_JS, media_type="application/javascript")
+
+
+@app.get("/live/icon.svg")
+async def live_pwa_icon() -> Response:
+    return Response(content=ICON_SVG, media_type="image/svg+xml")
+
+
 @app.get("/fleet", response_class=HTMLResponse)
-async def fleet_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    """One page covering all configured paper instances."""
-    payload = await collect_fleet_overview(get_settings())
-    return render_fleet_dashboard(payload)
+@app.get("/strategy-lab", response_class=HTMLResponse)
+@app.get("/lab", response_class=HTMLResponse)
+async def legacy_research_dashboards_redirect() -> RedirectResponse:
+    """Research HTML surfaces redirect to the live operator dashboard."""
+    return RedirectResponse(url="/live/dashboard", status_code=303)
+
+
+@app.get("/paper/dashboard", response_class=HTMLResponse, response_model=None)
+@app.get("/paper/dashboard-lite", response_class=HTMLResponse, response_model=None)
+async def paper_dashboard(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse | RedirectResponse:
+    """Simple Paper Lab UI (params + status). Live process redirects away."""
+    del request  # path handled by dual route registration
+    settings = get_settings()
+    if not (
+        settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled
+    ):
+        return RedirectResponse(url="/live/dashboard", status_code=303)
+    from bot.paper.lab_dashboard import render_lab_dashboard
+
+    runner = get_paper_runner()
+    return render_lab_dashboard(
+        settings=settings,
+        status=runner.status(),
+        performance=runner.tracker.snapshot().model_dump(mode="json"),
+    )
+
+
+@app.get("/paper/lab/params")
+async def paper_lab_params(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    settings = get_settings()
+    if not (
+        settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled
+    ):
+        raise HTTPException(status_code=403, detail="Paper lab only")
+    from bot.paper.lab_dashboard import lab_params_payload
+
+    return lab_params_payload(settings)
+
+
+@app.get("/strategy-lab/api")
+@app.get("/lab/api")
+async def strategy_lab_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    raise HTTPException(status_code=410, detail="Strategy lab removed from live bot")
 
 
 @app.get("/fleet/api")
 async def fleet_api(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
-    return await collect_fleet_overview(get_settings())
-
-@app.get("/paper/dashboard", response_class=HTMLResponse)
-async def paper_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    runner = get_paper_runner()
-    snap = runner.tracker.snapshot()
-    strategies = []
-    for s in runner.tracker.strategy_stats():
-        item = s.model_dump(mode="json")
-        item["win_rate"] = str(s.win_rate)
-        strategies.append(item)
-    exchanges = []
-    for p in runner.tracker.exchange_pair_stats():
-        item = p.model_dump(mode="json")
-        item["win_rate"] = str(p.win_rate)
-        exchanges.append(item)
-    opportunities = [o.model_dump(mode="json") for o in runner.tracker.opportunities(limit=25)]
-    return render_dashboard(
-        {
-            "status": runner.status(),
-            "performance": snap.model_dump(mode="json"),
-            "strategies": strategies,
-            "exchanges": exchanges,
-            "opportunities": opportunities,
-        }
-    )
+    raise HTTPException(status_code=410, detail="Fleet/paper overview removed — use /live/dashboard")
 
 
-@app.get("/paper/dashboard-lite", response_class=HTMLResponse)
-async def paper_dashboard_lite(_: None = Depends(require_dashboard_access)) -> HTMLResponse:
-    runner = get_paper_runner()
-    snap = runner.tracker.snapshot()
-    opportunities = [o.model_dump(mode="json") for o in runner.tracker.opportunities(limit=12)]
-    return render_dashboard_lite(
-        {
-            "status": runner.status(),
-            "performance": snap.model_dump(mode="json"),
-            "opportunities": opportunities,
-        }
-    )
+
+@app.post("/fleet/reset")
+async def fleet_reset(
+    confirm: bool = Form(False),
+    restart: bool = Form(False),
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    raise HTTPException(status_code=410, detail="Fleet reset removed — live accounts untouched")
+
 
 
 @app.get("/risk/kill-switch")
@@ -514,9 +1366,9 @@ async def risk_events() -> dict[str, Any]:
 
 
 @app.post("/risk/kill-switch/recover")
-async def kill_switch_recover() -> dict[str, Any]:
+async def kill_switch_recover(force: bool = False) -> dict[str, Any]:
     ks = get_kill_switch()
-    recovered = await ks.recover()
+    recovered = await ks.recover(force=force)
     if not recovered:
         raise HTTPException(
             status_code=409,
@@ -534,22 +1386,211 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
     await get_kill_switch().emergency_stop(reason)
     status = get_kill_switch().status()
     assert status.state == KillSwitchState.EMERGENCY_STOP
-    return {"status": status.model_dump(mode="json")}
+    # Also request micro-session + desks stop so resting work winds down.
+    session_stop: dict[str, Any] | None = None
+    try:
+        from bot.live.micro_session_manager import get_micro_session_manager
+
+        mgr = get_micro_session_manager()
+        session_stop = await mgr.stop()
+    except Exception as exc:  # noqa: BLE001
+        session_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    momentum_stop: dict[str, Any] | None = None
+    try:
+        momentum_stop = await get_momentum_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        momentum_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    volatile_stop: dict[str, Any] | None = None
+    try:
+        volatile_stop = await get_volatile_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        volatile_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "status": status.model_dump(mode="json"),
+        "micro_session_stop": session_stop,
+        "momentum_desk_stop": momentum_stop,
+        "volatile_sleeve_stop": volatile_stop,
+    }
 
 
-@app.get("/")
-async def root() -> JSONResponse:
+@app.post("/integrations/alphai/webhook")
+async def alphai_webhook(request: Request) -> dict[str, Any]:
+    """Ingest AlphaI Pro push articles (HMAC verified)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    body = await request.body()
+    secret_raw = getattr(settings, "alphai_webhook_secret", None)
+    secret = (
+        secret_raw.get_secret_value()
+        if secret_raw is not None and hasattr(secret_raw, "get_secret_value")
+        else (str(secret_raw).strip() if secret_raw else "")
+    )
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_WEBHOOK_SECRET not configured")
+    from bot.integrations.alphai.webhook import verify_webhook_signature
+
+    sig = request.headers.get("X-Alphai-Signature") or request.headers.get(
+        "x-alphai-signature"
+    )
+    if not verify_webhook_signature(secret, sig, body):
+        raise HTTPException(status_code=401, detail="invalid webhook signature")
+    try:
+        import json
+
+        payload = json.loads(body.decode("utf-8") if body else "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+    article = payload.get("article") if isinstance(payload, dict) else None
+    if not isinstance(article, dict):
+        raise HTTPException(status_code=400, detail="expected { \"article\": {...} }")
+    from bot.integrations.alphai.pending import push_webhook_article
+
+    push_webhook_article(article)
+    try:
+        runner = get_paper_runner()
+        if runner.running:
+            return {"ok": True, **runner.ingest_alphai_article(article)}
+    except Exception:  # noqa: BLE001
+        logger.exception("alphai webhook immediate ingest failed")
+    return {"ok": True, "queued": True}
+
+
+@app.get("/integrations/alphai/status")
+async def alphai_status(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """AlphaI monitor snapshot (runner + live bridge blocks)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        return {"enabled": False}
+    mgr = get_micro_session_manager()
+    session = mgr.status()
+    bridge_snap = (session.get("bridge") or {}) if isinstance(session.get("bridge"), dict) else {}
+    bridge = mgr._bridge_holder.get("bridge")  # noqa: SLF001
+    if bridge is not None:
+        try:
+            bridge_snap = bridge.snapshot_bridge()
+        except Exception:  # noqa: BLE001
+            logger.exception("alphai status bridge snapshot failed")
+    from bot.integrations.alphai.status import merge_alphai_status
+
+    merged = merge_alphai_status(session, bridge_snap)
+    out: dict[str, Any] = {"enabled": True, **merged}
+    try:
+        runner = get_paper_runner()
+        if getattr(runner, "_alphai_monitor", None) is not None:
+            out["monitor"] = runner._alphai_monitor.snapshot()
+    except Exception:  # noqa: BLE001
+        pass
+    import os
+
+    out["api_key_configured"] = bool(
+        getattr(settings, "alphai_api_key", None) or os.environ.get("ALPHAI_API_KEY")
+    )
+    return out
+
+
+@app.get("/integrations/alphai/recommendations/daily")
+async def alphai_daily_recommendations(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Daily buy picks for the current 12:00–12:00 Europe/Amsterdam window."""
+    settings = get_settings()
+    from bot.integrations.alphai.daily_recommendations import load_daily_recommendations
+
+    path = getattr(
+        settings,
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    report = load_daily_recommendations(path)
+    if report:
+        return {"ok": True, **report}
+    return {
+        "ok": False,
+        "message": "No daily recommendations yet — refresh after 12:00 NL or POST /integrations/alphai/recommendations/refresh",
+    }
+
+
+@app.post("/integrations/alphai/recommendations/refresh")
+async def alphai_daily_recommendations_refresh(
+    force: bool = Query(default=True),
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Generate/refresh daily crypto picks (normally automatic at 12:00 NL)."""
+    settings = get_settings()
+    if not getattr(settings, "alphai_enabled", False):
+        raise HTTPException(status_code=404, detail="AlphaI integration disabled")
+    monitor = None
+    try:
+        runner = get_paper_runner()
+        monitor = getattr(runner, "_alphai_monitor", None)
+    except Exception:  # noqa: BLE001
+        pass
+    if monitor is not None:
+        report = await monitor.maybe_refresh_daily_picks(force=force)
+        if report:
+            return {"ok": True, **report}
+    import os
+
+    from bot.integrations.alphai.client import AlphaIClient
+    from bot.integrations.alphai.daily_recommendations import maybe_refresh_daily
+    from bot.integrations.alphai.regime import _parse_csv_bases as parse_bases
+    from bot.integrations.alphai.symbols import LIQUID_EUR_BASES
+
+    key = getattr(settings, "alphai_api_key", None)
+    secret = key.get_secret_value() if key is not None else os.environ.get("ALPHAI_API_KEY", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="ALPHAI_API_KEY not configured")
+    focus = parse_bases(
+        getattr(settings, "live_micro_focus_bases", "") or "",
+        fallback=set(LIQUID_EUR_BASES),
+    )
+    client = AlphaIClient(str(secret))
+    path = getattr(
+        settings,
+        "alphai_daily_recommendations_path",
+        "data/alphai/daily_recommendations.json",
+    )
+    report = maybe_refresh_daily(
+        client,
+        path,
+        focus_bases=focus,
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        ),
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8),
+        update_hour_local=int(
+            getattr(settings, "alphai_daily_recommendations_hour", 12) or 12
+        ),
+        interval_minutes=int(
+            getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15
+        ),
+        interval_hours=int(
+            getattr(settings, "alphai_recommendations_interval_hours", 1) or 1
+        ),
+        force=force,
+    )
+    if not report:
+        raise HTTPException(status_code=500, detail="Failed to generate recommendations")
+    return {"ok": True, **report}
+
+
+@app.get("/api")
+async def api_root() -> JSONResponse:
+    settings = get_settings()
     return JSONResponse(
         {
             "name": "Moreney",
-            "message": "Trading API. Paper dashboard at /paper/dashboard",
+            "message": "Trading API. Live dashboard at /live/dashboard",
             "docs": "/docs",
-            "paper_dashboard": "/paper/dashboard",
-            "paper_dashboard_lite": "/paper/dashboard-lite",
-            "fleet_dashboard": "/fleet",
+            "live_dashboard": "/live/dashboard",
+            "live_micro_session": "/live/micro/session",
             "dashboard_basic_auth_enabled": _dashboard_auth_enabled(),
-            "execution_mode": "paper",
-            "live_trading_enabled": False,
+            "execution_mode": settings.execution_mode.value
+            if hasattr(settings.execution_mode, "value")
+            else str(settings.execution_mode),
+            "live_trading_enabled": bool(settings.live_trading_enabled),
             "withdrawals_supported": False,
             "leverage_supported": False,
         }

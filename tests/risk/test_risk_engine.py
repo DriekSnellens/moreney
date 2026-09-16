@@ -220,6 +220,75 @@ async def test_too_many_open_positions(
 
 
 @pytest.mark.asyncio
+async def test_max_positions_allows_add_to_existing_symbol(
+    risk_engine: RiskEngine,
+    opportunity: TradeOpportunity,
+    healthy_context: RiskContext,
+) -> None:
+    """At the cap, buying more of an already-open symbol must still pass."""
+    positions = [
+        Position(
+            symbol=opportunity.symbol,
+            quantity=Decimal("1"),
+            average_entry_price=Decimal("10"),
+            side=OpportunitySide.BUY,
+        ),
+        Position(
+            symbol="OTHEREUR",
+            quantity=Decimal("1"),
+            average_entry_price=Decimal("10"),
+            side=OpportunitySide.BUY,
+        ),
+    ]
+    # Cap is 5 in conftest; force count at/above by setting open_position_count high
+    # while listing the opportunity symbol as already open.
+    portfolio = PortfolioSnapshot(
+        equity_usd=Decimal("10000"),
+        peak_equity_usd=Decimal("10000"),
+        positions=positions,
+        open_position_count=5,
+    )
+    decision = await risk_engine.evaluate(
+        opportunity,
+        make_profit(opportunity),
+        portfolio,
+        context=healthy_context,
+    )
+    assert decision.approved is True
+
+
+@pytest.mark.asyncio
+async def test_max_positions_blocks_brand_new_symbol(
+    risk_engine: RiskEngine,
+    opportunity: TradeOpportunity,
+    healthy_context: RiskContext,
+) -> None:
+    positions = [
+        Position(
+            symbol=f"S{i}EUR",
+            quantity=Decimal("1"),
+            average_entry_price=Decimal("10"),
+            side=OpportunitySide.BUY,
+        )
+        for i in range(5)
+    ]
+    portfolio = PortfolioSnapshot(
+        equity_usd=Decimal("10000"),
+        peak_equity_usd=Decimal("10000"),
+        positions=positions,
+        open_position_count=5,
+    )
+    decision = await risk_engine.evaluate(
+        opportunity,
+        make_profit(opportunity),
+        portfolio,
+        context=healthy_context,
+    )
+    assert decision.approved is False
+    assert decision.rejection_reason == RiskRejectReason.MAX_SIMULTANEOUS_POSITIONS.value
+
+
+@pytest.mark.asyncio
 async def test_too_many_trades_per_minute(
     risk_settings,
     kill_switch,

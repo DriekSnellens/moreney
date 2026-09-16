@@ -116,14 +116,22 @@ class AccountingEngine:
 
             quote_bal.available += proceeds
 
-            # Realized PnL vs average entry; fees reduce PnL.
-            if position.quantity > 0 and position.average_entry_price > 0:
-                cost_basis = position.average_entry_price * fill.quantity
-                realized = proceeds - cost_basis
-            position.quantity -= fill.quantity
+            # Realized PnL vs this symbol's average entry; leftover qty may sit
+            # on another quote pair (ATOMEUR vs ATOMUSDT) and is closed below.
+            close_qty = min(position.quantity, fill.quantity) if position.quantity > 0 else _ZERO
+            if close_qty > 0 and position.average_entry_price > 0:
+                cost_basis = position.average_entry_price * close_qty
+                realized = (proceeds * close_qty / fill.quantity) - cost_basis
+            elif close_qty > 0:
+                # Unknown basis: treat as flat (0 PnL) rather than inventing cost.
+                realized = _ZERO
+            position.quantity -= close_qty
             if position.quantity <= 0:
                 position.quantity = _ZERO
                 position.average_entry_price = _ZERO
+            leftover = fill.quantity - close_qty
+            if leftover > 0:
+                _drain_same_base_positions(state, base=base, quantity=leftover, skip_symbol=fill.symbol)
             net_cash = proceeds
 
         position.realized_pnl += realized
@@ -152,9 +160,48 @@ class AccountingEngine:
         )
 
 
+_COMMON_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "BTC")
+
+
 def _infer_base(symbol: str, quote: str) -> str:
     sym = symbol.upper().replace("/", "").replace("-", "")
     q = quote.upper()
     if sym.endswith(q) and len(sym) > len(q):
         return sym[: -len(q)]
+    for suffix in _COMMON_QUOTE_SUFFIXES:
+        if sym.endswith(suffix) and len(sym) > len(suffix):
+            return sym[: -len(suffix)]
     return sym
+
+
+def _drain_same_base_positions(
+    state: PortfolioState,
+    *,
+    base: str,
+    quantity: Decimal,
+    skip_symbol: str,
+) -> None:
+    """Close leftover coins that still sit on another quote pair's lot."""
+    if quantity <= 0:
+        return
+    quote = state.quote_asset
+    remaining = quantity
+    skip = skip_symbol.upper()
+    lots = sorted(
+        (
+            pos
+            for symbol, pos in state.positions.items()
+            if symbol != skip and pos.quantity > 0 and _infer_base(symbol, quote) == base
+        ),
+        key=lambda pos: pos.quantity,
+        reverse=True,
+    )
+    for pos in lots:
+        if remaining <= 0:
+            break
+        take = min(pos.quantity, remaining)
+        pos.quantity -= take
+        remaining -= take
+        if pos.quantity <= 0:
+            pos.quantity = _ZERO
+            pos.average_entry_price = _ZERO

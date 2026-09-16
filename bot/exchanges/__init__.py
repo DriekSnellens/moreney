@@ -12,6 +12,7 @@ from bot.exchanges.ccxt_adapter import CcxtExchangeAdapter
 from bot.exchanges.coinbase import CoinbaseExchange
 from bot.exchanges.factory import create_exchange_client
 from bot.exchanges.kraken import KrakenExchange
+from bot.exchanges.okx import OkxExchange
 from bot.exchanges.stub import StubExchangeClient
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "CcxtExchangeAdapter",
     "CoinbaseExchange",
     "KrakenExchange",
+    "OkxExchange",
     "StubExchangeClient",
     "create_exchange_client",
 ]

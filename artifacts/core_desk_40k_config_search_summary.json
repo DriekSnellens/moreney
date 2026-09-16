@@ -1,0 +1,130 @@
+{
+  "asof": "2026-09-13T19:26:51.555770+00:00",
+  "capital_eur": 40000.0,
+  "window": {
+    "start_utc": "2026-05-06T19:00:00+00:00",
+    "end_utc": "2026-09-13T19:00:00+00:00",
+    "is_end_utc": "2026-07-10T19:00:00+00:00"
+  },
+  "search": {
+    "screen_n": 242,
+    "robust_n": 20,
+    "refine_n": 320,
+    "final_n": 342,
+    "pareto_n": 4,
+    "score": "calmar_like=total/max(|dd|,250) + OOS robustness terms",
+    "dd_floor_eur": 250.0,
+    "min_trades": 12
+  },
+  "winner": {
+    "overrides": {
+      "soft_regime_on_weak_tape": true,
+      "min_excess": 0.025,
+      "trail_pct": 0.04,
+      "hard_stop_pct": 0.03,
+      "midflat_hours": 24.0,
+      "max_chase_ret_24h": 0.0,
+      "strong_clip_requires_quality": true,
+      "btc_min_ret": -0.01,
+      "entry_fee_buffer_mult": 6.0,
+      "trail_tight_after": 0.05,
+      "trail_tight_pct": 0.025
+    },
+    "full": {
+      "total_eur": 6926.53,
+      "max_drawdown_eur": -2393.65,
+      "calmar_like": 2.8937,
+      "trades": 52,
+      "win_rate": 0.5,
+      "return_on_40k_pct": 17.316,
+      "by_month": [
+        {
+          "month": "2026-05",
+          "trades": 11,
+          "win_rate": 0.273,
+          "realized_eur": -1352.93,
+          "return_on_40k_pct": -3.382
+        },
+        {
+          "month": "2026-06",
+          "trades": 5,
+          "win_rate": 0.4,
+          "realized_eur": -7.02,
+          "return_on_40k_pct": -0.018
+        },
+        {
+          "month": "2026-07",
+          "trades": 13,
+          "win_rate": 0.462,
+          "realized_eur": 1281.29,
+          "return_on_40k_pct": 3.203
+        },
+        {
+          "month": "2026-08",
+          "trades": 9,
+          "win_rate": 0.889,
+          "realized_eur": 5601.7,
+          "return_on_40k_pct": 14.004
+        },
+        {
+          "month": "2026-09",
+          "trades": 14,
+          "win_rate": 0.5,
+          "realized_eur": 1403.48,
+          "return_on_40k_pct": 3.509
+        }
+      ],
+      "by_reason": {
+        "hard_stop": {
+          "n": 12,
+          "net_eur": -5555.04
+        },
+        "trail": {
+          "n": 36,
+          "net_eur": 12922.23
+        },
+        "midflat": {
+          "n": 4,
+          "net_eur": -440.67
+        }
+      }
+    },
+    "is": {
+      "total_eur": 1053.89,
+      "max_drawdown_eur": -2393.65,
+      "trades": 23
+    },
+    "oos": {
+      "total_eur": 5872.64,
+      "max_drawdown_eur": -1212.78,
+      "trades": 29
+    },
+    "deploy_score": 3.1437
+  },
+  "baselines": {
+    "current_edge_improve": {
+      "full_total_eur": -614.93,
+      "full_dd_eur": -4384.56,
+      "oos_total_eur": 3118.19,
+      "deploy_score": 0.1098
+    },
+    "old_hard_regime_style": {
+      "full_total_eur": -1432.84,
+      "full_dd_eur": -4784.88,
+      "oos_total_eur": 2869.7,
+      "deploy_score": -0.0495
+    }
+  },
+  "deploy_recommendation": {
+    "yes": true,
+    "chosen": "best_by_deploy_score",
+    "rules": [
+      "OOS half profitable",
+      "full-window profitable",
+      "calmar_like >= 1.0",
+      "max DD better than -15% of \u20ac40k",
+      "OOS not collapsed vs IS"
+    ]
+  },
+  "note": "August +\u20ac5601.70 in the winner is the ~\u20ac7k month the operator remembered (old monthly artifact had Aug +\u20ac5604 / full-window +\u20ac7578). Drivers: min_excess 2.5%, trail 4% with 5%\u21922.5% ratchet, chase gate off."
+}

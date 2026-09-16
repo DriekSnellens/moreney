@@ -66,7 +66,7 @@ class PositionLimitCalculator:
         max_by_abs = self._max_position_abs
         per_trade_cap = min(max_by_abs, max_by_pct) if max_by_pct > 0 else max_by_abs
 
-        current_exposure = portfolio.gross_exposure_usd
+        current_exposure = self._effective_exposure(opportunity, portfolio)
         max_exposure = self.max_total_exposure(equity)
         remaining = max(max_exposure - current_exposure, _ZERO)
 
@@ -99,6 +99,35 @@ class PositionLimitCalculator:
             remaining_exposure_capacity=remaining,
             breached_codes=breached,
         )
+
+    @staticmethod
+    def _effective_exposure(
+        opportunity: TradeOpportunity,
+        portfolio: PortfolioSnapshot,
+    ) -> Decimal:
+        """Exposure for risk caps.
+
+        Cross-exchange round-trip arb completes buy+sell in one cycle, so stale
+        inventory must not permanently consume the exposure budget. Use the larger
+        of correlated BTC notionals (net directional risk) instead of summing all
+        open positions.
+        """
+        meta = opportunity.metadata or {}
+        round_trip = opportunity.strategy_name in {
+            "cross_exchange_arbitrage",
+            "maker_inventory",
+            "triangle_bridge",
+        } or (meta.get("post_only") and meta.get("round_trip"))
+        if round_trip and (meta.get("sell_exchange") or meta.get("post_only")):
+            if not portfolio.positions:
+                return _ZERO
+            notionals = [
+                abs(p.quantity * p.average_entry_price)
+                for p in portfolio.positions
+                if p.quantity > 0
+            ]
+            return max(notionals, default=_ZERO)
+        return portfolio.gross_exposure_usd
 
     def daily_loss_limit(self, equity: Decimal, settings: Settings) -> Decimal:
         pct_limit = equity * (Decimal(str(settings.max_daily_loss_percent)) / _HUNDRED)

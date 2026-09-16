@@ -9,14 +9,41 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import time
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.core.disk_guard import log_disk_guard
 from bot.core.redis_client import get_redis, ping_redis
 from bot.market_data.cache import MarketDataCache
+from bot.market_data.research.retention import (
+    effective_retention_days,
+    prune_research_marketdata,
+)
 from bot.market_data.service import MarketDataService
 
 logger = logging.getLogger(__name__)
+
+_RETENTION_INTERVAL_SEC = 6 * 3600
+
+
+def _run_tape_retention(settings: Settings) -> dict[str, object]:
+    disk = log_disk_guard(
+        "/",
+        warn_pct=float(settings.disk_guard_warn_pct),
+        block_pct=float(settings.disk_guard_block_pct),
+    )
+    days = effective_retention_days(
+        configured_days=int(settings.marketdata_retention_days),
+        disk_used_pct=float(disk["used_pct"]),
+        warn_pct=float(settings.disk_guard_warn_pct),
+        block_pct=float(settings.disk_guard_block_pct),
+    )
+    return prune_research_marketdata(
+        settings.research_marketdata_recording_path,
+        retention_days=days,
+        execute_delete=True,
+    )
 
 
 async def run_publisher(settings: Settings | None = None) -> None:
@@ -26,6 +53,12 @@ async def run_publisher(settings: Settings | None = None) -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    if not settings.research_marketdata_recording_enabled:
+        logger.info(
+            "RESEARCH_MARKETDATA_RECORDING_DISABLED — publisher will not write tape"
+        )
+    _run_tape_retention(settings)
 
     redis = get_redis(settings.redis_url)
     if not await ping_redis(redis):
@@ -58,6 +91,7 @@ async def run_publisher(settings: Settings | None = None) -> None:
     )
 
     stop = asyncio.Event()
+    retention_mono = time.monotonic()
 
     def _request_stop(*_args: Any) -> None:
         stop.set()
@@ -74,6 +108,10 @@ async def run_publisher(settings: Settings | None = None) -> None:
             for exchange in service.exchanges:
                 health = service.get_exchange_health(exchange)
                 await cache.set_health(health)
+            now = time.monotonic()
+            if now - retention_mono >= _RETENTION_INTERVAL_SEC:
+                retention_mono = now
+                _run_tape_retention(publisher_settings)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=1.0)
             except TimeoutError:

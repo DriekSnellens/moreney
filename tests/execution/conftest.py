@@ -22,6 +22,9 @@ def exec_settings() -> Settings:
         paper_partial_fills_on_thin_book=True,
         paper_reject_on_insufficient_liquidity=False,
         paper_simulated_latency_ms=0.0,
+        paper_venue_inventory=False,
+        paper_second_leg_adverse_bps=0.0,
+        paper_maker_enabled=False,
     )
 
 

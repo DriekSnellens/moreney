@@ -12,6 +12,9 @@ class LiveExecutor(BaseExecutor):
 
     Scaffolding only: real trading behavior is deferred. The client may still be
     a stub. No withdrawal paths exist.
+
+    Prefer ``bot.live.executor.MultiVenueLiveExecutor`` for multi-venue live paths;
+    both remain fail-closed unless explicitly enabled.
     """
 
     name = "live"
@@ -20,6 +23,10 @@ class LiveExecutor(BaseExecutor):
         self._client = client
         # Fail closed: live trading must be explicitly enabled when implementing.
         self._enabled = enabled
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
 
     async def execute(self, order: OrderRequest) -> ExecutionResult:
         if not self._enabled:

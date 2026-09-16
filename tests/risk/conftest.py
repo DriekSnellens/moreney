@@ -32,6 +32,7 @@ def risk_settings() -> Settings:
         max_daily_loss_percent=3.0,
         max_drawdown_percent=5.0,
         max_simultaneous_positions=5,
+        risk_allow_partial_sizing=False,
         max_trades_per_minute=30,
         max_slippage_percent=0.10,
         max_market_data_age_ms=1000.0,

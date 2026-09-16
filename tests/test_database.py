@@ -17,6 +17,7 @@ def test_orm_models_registered() -> None:
     assert "strategy_statistics" in table_names
     assert "exchange_pair_statistics" in table_names
     assert "hourly_statistics" in table_names
+    assert "funding_events" in table_names
 
 
 def test_models_have_no_withdrawal_tables() -> None:

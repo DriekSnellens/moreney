@@ -1,11 +1,15 @@
-"""Minimal paper-trading dashboard (HTML). Extends the API — no fabricated values."""
+"""Paper-trading dashboard (HTML). Extends the API — no fabricated values."""
 
 from __future__ import annotations
 
-from decimal import Decimal
+import json
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from fastapi.responses import HTMLResponse
+
+_TWO = Decimal("0.01")
+_HUNDRED = Decimal("100")
 
 
 def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
@@ -15,250 +19,991 @@ def render_dashboard(payload: dict[str, Any]) -> HTMLResponse:
     strategies = payload.get("strategies") or []
     pairs = payload.get("exchanges") or []
     opportunities = payload.get("opportunities") or []
+    hourly = payload.get("hourly") or []
+    trades = payload.get("trades") or []
 
-    def v(key: str, default: str = "0") -> str:
-        val = perf.get(key, default)
-        return _fmt(val)
+    def m(key: str, default: str = "0") -> str:
+        return _fmt_money(perf.get(key, default))
+
+    def c(key: str, default: str = "0") -> str:
+        return _fmt_count(perf.get(key, default))
+
+    def p(key: str, default: str = "0") -> str:
+        return _fmt_pct(perf.get(key, default))
 
     strategy_rows = "".join(
-        f"<tr><td>{_esc(s.get('strategy'))}</td>"
-        f"<td>{_esc(s.get('net_pnl'))}</td>"
-        f"<td>{_esc(s.get('opportunities'))}</td>"
-        f"<td>{_esc(s.get('trades'))}</td>"
-        f"<td>{_esc(s.get('win_rate'))}</td></tr>"
+        f"<tr>"
+        f"<td>{_esc(_strategy_label(s.get('strategy')))}</td>"
+        f"<td class='num {_pnl_class(s.get('net_pnl'))}'>{_esc_fmt(s.get('net_pnl'), 'money')}</td>"
+        f"<td class='num'>{_esc_fmt(s.get('opportunities'), 'count')}</td>"
+        f"<td class='num'>{_esc_fmt(s.get('trades'), 'count')}</td>"
+        f"<td class='num'>{_esc_fmt(s.get('win_rate'), 'pct')}</td>"
+        f"</tr>"
         for s in strategies
-    ) or "<tr><td colspan='5'>No strategy data yet</td></tr>"
+    ) or "<tr><td colspan='5' class='empty'>Nog geen resultaten</td></tr>"
 
     pair_rows = "".join(
-        f"<tr><td>{_esc(p.get('buy_exchange'))} → {_esc(p.get('sell_exchange'))}</td>"
-        f"<td>{_esc(p.get('net_pnl'))}</td>"
-        f"<td>{_esc(p.get('opportunities'))}</td>"
-        f"<td>{_esc(p.get('executed'))}</td>"
-        f"<td>{_esc(p.get('win_rate'))}</td></tr>"
+        f"<tr>"
+        f"<td>{_esc(_venue_label(p.get('buy_exchange')))} → {_esc(_venue_label(p.get('sell_exchange')))}</td>"
+        f"<td class='num {_pnl_class(p.get('net_pnl'))}'>{_esc_fmt(p.get('net_pnl'), 'money')}</td>"
+        f"<td class='num'>{_esc_fmt(p.get('trades'), 'count')}</td>"
+        f"<td class='num'>{_esc_fmt(p.get('win_rate'), 'pct')}</td>"
+        f"</tr>"
         for p in pairs
-    ) or "<tr><td colspan='5'>No exchange-pair data yet</td></tr>"
+    ) or "<tr><td colspan='4' class='empty'>Nog geen beursresultaten</td></tr>"
 
     opp_rows = "".join(
-        f"<tr><td>{_esc(o.get('timestamp'))}</td>"
-        f"<td>{_esc(o.get('symbol'))}</td>"
-        f"<td>{_esc(o.get('buy_exchange'))}</td>"
-        f"<td>{_esc(o.get('sell_exchange'))}</td>"
-        f"<td>{_esc(o.get('expected_net_profit'))}</td>"
-        f"<td>{_esc(o.get('realized_net_profit'))}</td>"
-        f"<td>{_esc(o.get('status'))}</td></tr>"
+        f"<tr>"
+        f"<td class='ts'>{_esc(_short_ts(o.get('timestamp')))}</td>"
+        f"<td><strong>{_esc(o.get('symbol'))}</strong></td>"
+        f"<td>{_esc(_venue_label(o.get('buy_exchange')))}</td>"
+        f"<td>{_esc(_venue_label(o.get('sell_exchange')))}</td>"
+        f"<td class='num'>{_esc_fmt(o.get('expected_net_profit'), 'money')}</td>"
+        f"<td class='num {_pnl_class(o.get('realized_net_profit'))}'>"
+        f"{_esc_fmt(o.get('realized_net_profit'), 'money')}</td>"
+        f"<td><span class='pill'>{_esc(_status_label(o.get('status')))}</span></td>"
+        f"</tr>"
         for o in opportunities[:25]
-    ) or "<tr><td colspan='7'>No opportunities recorded</td></tr>"
+    ) or "<tr><td colspan='7' class='empty'>Nog geen transacties</td></tr>"
 
-    running = "RUNNING" if status.get("running") else "STOPPED"
+    running = status.get("running")
+    status_label = "Actief" if running else "Gestopt"
+    status_cls = "ok" if running else "warn"
+    net_pnl = perf.get("net_pnl", 0)
+    pnl_cls = _pnl_class(net_pnl)
+    pnl_word = _pnl_word(net_pnl)
+    wins = perf.get("winning_trades", 0)
+    losses = perf.get("losing_trades", 0)
+    forecast = status.get("live_forecast") or {}
+    forecast_day = (
+        _fmt_money(forecast.get("projected_per_day_eur", 0))
+        if forecast.get("projection_ready", True)
+        else "n.v.t."
+    )
+    paper_day = _fmt_money(forecast.get("paper_run_rate_per_day_eur", 0))
+    vol = forecast.get("vol_capture") or {}
+    band_pct = _esc(str(vol.get("equity_move_pct") or forecast.get("projected_day_return_pct") or "—"))
+    mtm = _fmt_money(forecast.get("paper_equity_pnl") or perf.get("paper_equity_pnl") or 0)
+    forecast_note = _esc(forecast.get("note") or "Groei via NET euro per fill, niet via trade-aantal.")
+    confidence = str(forecast.get("confidence") or "very_low")
+    confidence_label = {
+        "very_low": "Nog onzeker",
+        "low": "Hoogste kans (geen garantie)",
+        "medium": "Redelijk",
+        "high": "Hoog (coupon)",
+    }.get(confidence, confidence)
+    assumptions = forecast.get("assumptions") or []
+    assumption_lis = "".join(f"<li>{_esc(a)}</li>" for a in assumptions) or (
+        "<li>Trade-through maker fills, fees, stale-edge caps</li>"
+    )
+
+    markout = status.get("markout") or {}
+    desk_scan = status.get("desk_scan") or {}
+    maker_scan = desk_scan.get("maker") or {}
+    tri_scan = desk_scan.get("triangle") or {}
+    inventory = status.get("inventory") or {}
+    desk_strategy = _esc(str(status.get("strategy") or "—"))
+    desk_tier = _esc(str(status.get("fee_tier") or "retail"))
+    realism_note = "Retail fees, fair-value aan, queue-fills uit. Dichtst bij echt geld."
+    markout_1s = f"{_esc(str(markout.get('avg_adverse_bps_1s') or '0'))} bps"
+    markout_5s = f"{_esc(str(markout.get('avg_adverse_bps_5s') or '0'))} bps"
+    markout_30s = f"{_esc(str(markout.get('avg_adverse_bps_30s') or '0'))} bps"
+    markout_60s = f"{_esc(str(markout.get('avg_adverse_bps_60s') or '0'))} bps"
+    markout_suggested = f"{_esc(str(markout.get('suggested_adverse_bps') or '0'))} bps"
+    tri_pairs = _fmt_count(tri_scan.get("pairs_evaluated", 0))
+    tri_emits = _fmt_count(tri_scan.get("opportunities_emitted", 0))
+    maker_emits = _fmt_count(maker_scan.get("opportunities_emitted", 0))
+    fx_refills = _fmt_count(inventory.get("fx_refilled", 0))
+    seeded_assets = _esc(", ".join(inventory.get("seeded_assets") or []) or "—")
+    inventory_rows = _inventory_rows(inventory.get("venues") or {})
+    funding_html = _funding_panel_html(payload.get("funding") or {})
+    live_html = _live_readiness_panel_html(payload.get("live_readiness") or {})
+    micro_html = _micro_session_panel_html(payload.get("micro_session") or {})
+
+    global_engine = status.get("global_engine") or {}
+    ge_enabled = global_engine.get("enabled")
+    ge_regime = _esc(str(global_engine.get("regime") or "—"))
+    ge_sessions = _esc(", ".join(global_engine.get("active_sessions") or []) or "—")
+    ge_exposure = global_engine.get("portfolio_exposure") or {}
+    ge_venue_exp = _esc(_exposure_summary(ge_exposure.get("venue")))
+    ge_strategy_exp = _esc(_exposure_summary(ge_exposure.get("strategy")))
+    ge_corr_exp = _esc(_exposure_summary(ge_exposure.get("correlation")))
+    ge_decision_rows = _global_decision_rows(global_engine.get("recent_decisions") or [])
+    ge_ranking_block = _global_ranking_block(global_engine.get("last_ranking"))
+    ge_equity_rows = _equity_quote_rows((global_engine.get("equity") or {}).get("quotes") or {})
+
+    net_kpis = status.get("net_kpis") or {}
+    why_not = status.get("why_not_trade") or {}
+    ev_cal = status.get("ev_calibration") or {}
+    why_rows = _why_not_rows(why_not)
+    gate_rows = _gate_table_rows(why_not.get("gate_table") or [])
+    cal_global = ev_cal.get("global") or {}
+    ev_capture = _esc(
+        str(net_kpis.get("ev_capture") or cal_global.get("raw_capture") or "—")
+    )
+
+    profit_chart = _svg_cumulative_profit(trades)
+    hourly_chart = _svg_hourly_bars(hourly)
+    winloss_chart = _svg_win_loss(wins, losses)
+
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0b0f14"/>
   <meta http-equiv="refresh" content="5"/>
-  <title>Moreney Paper Trading</title>
-  <style>
-    :root {{
-      --bg: #0f1419;
-      --panel: #1a222d;
-      --text: #e7ecf3;
-      --muted: #8b9bb4;
-      --accent: #3d9cf0;
-      --good: #3ecf8e;
-      --bad: #f07178;
-      --line: #2a3544;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-      background:
-        radial-gradient(1200px 600px at 10% -10%, #1b3a57 0%, transparent 55%),
-        radial-gradient(900px 500px at 100% 0%, #243447 0%, transparent 50%),
-        var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }}
-    header {{
-      padding: 2rem 1.5rem 1rem;
-      border-bottom: 1px solid var(--line);
-    }}
-    .brand {{
-      font-family: "IBM Plex Serif", Georgia, serif;
-      font-size: clamp(2rem, 4vw, 3rem);
-      letter-spacing: -0.03em;
-      margin: 0;
-    }}
-    .sub {{
-      color: var(--muted);
-      margin-top: 0.35rem;
-      font-size: 0.95rem;
-    }}
-    .badge {{
-      display: inline-block;
-      margin-top: 0.75rem;
-      padding: 0.25rem 0.6rem;
-      border: 1px solid var(--line);
-      color: var(--accent);
-      font-size: 0.75rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }}
-    main {{
-      display: grid;
-      gap: 1.25rem;
-      padding: 1.25rem 1.5rem 2.5rem;
-      max-width: 1200px;
-      margin: 0 auto;
-    }}
-    section {{
-      background: color-mix(in srgb, var(--panel) 88%, transparent);
-      border: 1px solid var(--line);
-      padding: 1rem 1.15rem 1.2rem;
-    }}
-    h2 {{
-      margin: 0 0 0.85rem;
-      font-size: 0.8rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--muted);
-      font-weight: 600;
-    }}
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 0.85rem;
-    }}
-    .metric .label {{ color: var(--muted); font-size: 0.75rem; }}
-    .metric .value {{
-      font-family: "IBM Plex Mono", ui-monospace, monospace;
-      font-size: 1.25rem;
-      margin-top: 0.2rem;
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }}
-    th, td {{
-      text-align: left;
-      padding: 0.45rem 0.35rem;
-      border-bottom: 1px solid var(--line);
-      font-family: "IBM Plex Mono", ui-monospace, monospace;
-    }}
-    th {{ color: var(--muted); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; }}
-    .controls {{ display: flex; gap: 0.5rem; flex-wrap: wrap; }}
-    button {{
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--line);
-      padding: 0.45rem 0.9rem;
-      cursor: pointer;
-      font: inherit;
-    }}
-    button:hover {{ border-color: var(--accent); color: var(--accent); }}
-    .footer {{
-      color: var(--muted);
-      font-size: 0.75rem;
-      padding: 0 1.5rem 2rem;
-      max-width: 1200px;
-      margin: 0 auto;
-    }}
-  </style>
+  <title>Moreney — Winst en verlies</title>
+  <style>{_shared_css()}</style>
 </head>
 <body>
-  <header>
-    <h1 class="brand">Moreney</h1>
-    <p class="sub">Paper trading dashboard — public market data only. Execution mode: PAPER.</p>
-    <span class="badge">{running} · REAL ORDERS = 0</span>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">Oefenhandel · winst per fill, niet trade-aantal</p>
+        <h1 class="brand">Moreney</h1>
+        <p class="sub">{realism_note}</p>
+      </div>
+      <div class="hero-badges">
+        <a class="link-lite" href="/fleet">Alle bots</a>
+        <span class="badge {status_cls}">{status_label}</span>
+        <span class="badge muted">Geen echte orders</span>
+      </div>
+    </div>
   </header>
-  <main>
-    <section>
-      <h2>Session</h2>
+
+  <main class="container">
+    {_shadow_validation_panel(status.get('shadow_validation') or {})}
+
+    {_pipeline_funnel_panel(status.get('pipeline_funnel') or {})}
+
+    {_economic_parity_panel(status.get('economic_parity') or {})}
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Bediening</h2>
+        <span>
+          <a class="link-lite" href="/fleet">Alle bots</a>
+          ·
+          <a class="link-lite" href="/paper/dashboard-lite">Mobiel</a>
+        </span>
+      </div>
       <div class="controls">
-        <button onclick="post('/paper/start')">Start</button>
-        <button onclick="post('/paper/stop')">Stop</button>
-        <button onclick="resetPaper()">Reset (confirm)</button>
+        <button type="button" class="btn" onclick="post('/paper/start')">Start</button>
+        <button type="button" class="btn" onclick="post('/paper/stop')">Stop</button>
+        <button type="button" class="btn btn-danger" onclick="resetPaper()">Opnieuw beginnen</button>
       </div>
     </section>
-    <section>
-      <h2>Portfolio</h2>
-      <div class="grid">
-        <div class="metric"><div class="label">Starting capital</div><div class="value">{v('starting_equity')}</div></div>
-        <div class="metric"><div class="label">Current equity</div><div class="value">{v('current_equity')}</div></div>
-        <div class="metric"><div class="label">Net PnL</div><div class="value">{v('net_pnl')}</div></div>
-        <div class="metric"><div class="label">Return %</div><div class="value">{v('return_pct')}</div></div>
-        <div class="metric"><div class="label">Drawdown</div><div class="value">{v('current_drawdown')}</div></div>
-        <div class="metric"><div class="label">Max drawdown</div><div class="value">{v('maximum_drawdown')}</div></div>
+
+    <section class="panel highlight">
+      <h2>Winst en tempo</h2>
+      <div class="metric-grid">
+        <article class="metric-card {pnl_cls}">
+          <span class="label">Paper MTM</span>
+          <span class="value">{mtm}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Live-equivalent PnL</span>
+          <span class="value">{m('net_pnl')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Maker-tempo / dag</span>
+          <span class="value">{paper_day}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Zekerheid</span>
+          <span class="value">{confidence_label}</span>
+        </article>
+      </div>
+      <p class="forecast-note">{forecast_note}</p>
+      <ul class="forecast-assumptions">{assumption_lis}</ul>
+    </section>
+
+    <section class="panel research-board">
+      <div class="panel-head">
+        <h2>Research findings</h2>
+        <span class="badge muted">Geen productie-PnL</span>
+      </div>
+      <p class="research-sub">{_esc((status.get('research_findings') or {}).get('subtitle') or 'Onderzoeksconclusies')}</p>
+      <div class="findings-grid">
+        {_research_finding_cards((status.get('research_findings') or {}).get('cards') or [])}
+      </div>
+      <div class="finding-next">
+        <span class="label">Volgende stap</span>
+        <p>{_esc((status.get('research_findings') or {}).get('next_step') or (status.get('market_data_lab') or {}).get('next_step'))}</p>
       </div>
     </section>
-    <section>
-      <h2>Trading</h2>
-      <div class="grid">
-        <div class="metric"><div class="label">Pairs evaluated</div><div class="value">{v('pairs_evaluated')}</div></div>
-        <div class="metric"><div class="label">Edges found</div><div class="value">{v('depth_edges_found')}</div></div>
-        <div class="metric"><div class="label">Scan rejects</div><div class="value">{v('scan_rejections')}</div></div>
-        <div class="metric"><div class="label">Passed gates</div><div class="value">{v('total_opportunities')}</div></div>
-        <div class="metric"><div class="label">Approved</div><div class="value">{v('approved_opportunities')}</div></div>
-        <div class="metric"><div class="label">Risk rejected</div><div class="value">{v('rejected_opportunities')}</div></div>
-        <div class="metric"><div class="label">Executed</div><div class="value">{v('executed_opportunities')}</div></div>
-        <div class="metric"><div class="label">Trades</div><div class="value">{v('trade_count')}</div></div>
-        <div class="metric"><div class="label">Win rate</div><div class="value">{v('win_rate')}</div></div>
-        <div class="metric"><div class="label">Profit factor</div><div class="value">{v('profit_factor')}</div></div>
+
+    <section class="panel">
+      <h2>Desk-monitor</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Strategie</span><span class="value">{desk_strategy}</span></article>
+        <article class="metric-card"><span class="label">Fee-tier</span><span class="value">{desk_tier}</span></article>
+        <article class="metric-card"><span class="label">Markout 1s</span><span class="value">{markout_1s}</span></article>
+        <article class="metric-card"><span class="label">Markout 5s</span><span class="value">{markout_5s}</span></article>
+        <article class="metric-card"><span class="label">Markout 30s</span><span class="value">{markout_30s}</span></article>
+        <article class="metric-card"><span class="label">Markout 60s</span><span class="value">{markout_60s}</span></article>
+        <article class="metric-card"><span class="label">Adverse (gate)</span><span class="value">{markout_suggested}</span></article>
+        <article class="metric-card"><span class="label">Triangle gescand</span><span class="value">{tri_pairs}</span></article>
+        <article class="metric-card"><span class="label">Triangle emits</span><span class="value">{tri_emits}</span></article>
+        <article class="metric-card"><span class="label">Maker emits</span><span class="value">{maker_emits}</span></article>
+        <article class="metric-card"><span class="label">FX refills</span><span class="value">{fx_refills}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Venue</th><th>EUR</th><th>USDT</th><th>Overig</th></tr></thead>
+          <tbody>{inventory_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Seeded: {seeded_assets}</p>
+    </section>
+
+    {funding_html}
+
+    {live_html}
+
+    {micro_html}
+
+    <section class="panel">
+      <h2>NET-economie (per fill)</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">NET €/fill</span><span class="value">{_esc_fmt(net_kpis.get('net_eur_per_fill'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">NET bps/fill</span><span class="value">{_esc(str(net_kpis.get('net_bps_per_fill') or '0'))}</span></article>
+        <article class="metric-card"><span class="label">EV capture</span><span class="value">{ev_capture}</span></article>
+        <article class="metric-card"><span class="label">Fees/fill</span><span class="value">{_esc_fmt(net_kpis.get('fees_per_fill'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Slippage/fill</span><span class="value">{_esc_fmt(net_kpis.get('slippage_per_fill'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Kapitaal-velocity</span><span class="value">{_esc(str(net_kpis.get('capital_velocity') or '0'))}</span></article>
+        <article class="metric-card"><span class="label">Reject opportunity cost</span><span class="value">{_esc_fmt(net_kpis.get('rejection_opportunity_cost'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Calibratie n</span><span class="value">{_esc(str(cal_global.get('n') or 0))}</span></article>
+      </div>
+      <p class="forecast-note">EV capture = sum(realized NET) / sum(expected NET) op afgeronde round-trips. Shrinkage naar 1.0 voor ranking; early route-stop bij n≥8 + raw capture ≤ −0.25.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Edge-decompositie</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Gross spread</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('gross_spread_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Fees</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('fee_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Slippage</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('slippage_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Adverse</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('adverse_selection_contribution'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">NET alpha</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('net_alpha'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">E(NET|fill)</span><span class="value">{_esc_fmt((status.get('edge_decomposition') or {}).get('overall', {}).get('e_net_given_fill'), 'money')}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Route</th><th>n</th><th>Expected</th><th>Realized</th><th>EV capture</th></tr></thead>
+          <tbody>{_edge_route_rows((status.get('edge_decomposition') or {}).get('by_route') or {})}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Waterfall: gross − fees − slippage − adverse − inventory = realized NET. execution_buffer is alleen expected haircut.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Route-status</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Route</th><th>State</th><th>n</th><th>Raw capture</th>
+              <th>Shrunk</th><th>Realized</th><th>Reden</th>
+            </tr>
+          </thead>
+          <tbody>{_route_state_rows((status.get('ev_calibration') or {}).get('route_states') or (status.get('ev_calibration') or {}).get('routes') or {})}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        EARLY_STOPPED = raw verlies overrulet positieve shrinkage.
+        Shrinkage blijft voor ranking; early-stop is aparte loss-containment.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>Toxicity shadow (pre-trade)</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Shadow mode</span><span class="value">{_esc((status.get('toxicity_shadow') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
+        <article class="metric-card"><span class="label">Wijzigt fills?</span><span class="value">Nee</span></article>
+        <article class="metric-card"><span class="label">Model n</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('model') or {}).get('global_n'))}</span></article>
+        <article class="metric-card"><span class="label">Global mean bps</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('model') or {}).get('global_mean_bps'))}</span></article>
+        <article class="metric-card"><span class="label">Predicted adverse bps</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('predicted_adverse_bps'))}</span></article>
+        <article class="metric-card"><span class="label">Uncertainty bps</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('uncertainty_bps'))}</span></article>
+        <article class="metric-card"><span class="label">Sample size</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('sample_count'))}</span></article>
+        <article class="metric-card"><span class="label">Shrinkage</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('shrinkage_source'))}</span></article>
+        <article class="metric-card"><span class="label">Toxicity %ile</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('toxicity_percentile'))}</span></article>
+        <article class="metric-card"><span class="label">Quote age bucket</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('quote_age_bucket'))}</span></article>
+        <article class="metric-card"><span class="label">Spread bucket</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('spread_bucket'))}</span></article>
+        <article class="metric-card"><span class="label">E[NET] before tox</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('expected_net_before_toxicity'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">E[adverse]</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('expected_adverse_eur'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Uncertainty penalty</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('uncertainty_penalty_eur'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Tox-adjusted NET</span><span class="value">{_esc_fmt(((status.get('toxicity_shadow') or {}).get('last') or {}).get('toxicity_adjusted_net'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Shadow decision</span><span class="value">{_esc(((status.get('toxicity_shadow') or {}).get('last') or {}).get('reason'))}</span></article>
+      </div>
+      <p class="forecast-note">
+        Pre-trade E(adverse|fill,state). Shadow only — wijzigt geen fills, fees of live toelating.
+        Observed adverse verschijnt in markout/waterfall ná fill.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>FILL MODEL LAB</h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('fill_model_lab') or {}).get('recommendation'))}">
+        <div>
+          <span class="vb-kicker">Aanbeveling</span>
+          <strong class="vb-verdict">{_esc((status.get('fill_model_lab') or {}).get('recommendation') or 'REQUIRE BETTER DATA')}</strong>
+          <p class="vb-headline">{_esc((status.get('fill_model_lab') or {}).get('headline') or 'Trade-through baseline behouden')}</p>
+        </div>
+        <div class="vb-meta">
+          <span>PnL source: {_esc((status.get('fill_model_lab') or {}).get('production_pnl_source') or 'TRADE_THROUGH_ONLY')}</span>
+          <span>Letter: {_esc((status.get('fill_model_lab') or {}).get('success_letter'))}</span>
+          <span>TT selector: {_esc(((status.get('fill_model_lab') or {}).get('toxicity_selector') or {}).get('answer'))}</span>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Label</th>
+              <th>Support</th>
+              <th>n</th>
+              <th>Fill rate</th>
+              <th>Median adverse</th>
+              <th>Mean adverse</th>
+              <th>NET</th>
+              <th>Capital lock</th>
+            </tr>
+          </thead>
+          <tbody>{_fill_model_lab_rows((status.get('fill_model_lab') or {}).get('panel') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        CONSERVATIVE BASELINE = productie headline (TRADE_THROUGH_ONLY).
+        EXPERIMENTAL COUNTERFACTUAL = observational only — nooit live-equivalent PnL.
+        Zonder book/trade recordings blijven touch/depth-modellen UNSUPPORTED.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>LEAD-LAG LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('lead_lag_lab') or {}).get('verdict'))}">
+        <div>
+          <span class="vb-kicker">Verdict</span>
+          <strong class="vb-verdict">{_esc((status.get('lead_lag_lab') or {}).get('verdict') or 'INSUFFICIENT_DATA')}</strong>
+          <p class="vb-headline">{_esc((status.get('lead_lag_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Quality: {_esc((status.get('lead_lag_lab') or {}).get('data_quality'))}</span>
+          <span>Observer n: {_esc(((status.get('lead_lag_lab') or {}).get('observer') or {}).get('n_observations'))}</span>
+          <span>Execution: {_esc((status.get('lead_lag_lab') or {}).get('execution_enabled') and 'Aan' or 'Uit')}</span>
+        </div>
+      </div>
+      <p class="forecast-note">{_esc((status.get('lead_lag_lab') or {}).get('finding'))}</p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Shadow only</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('shadow_only') and 'Ja' or 'Nee')}</span></article>
+        <article class="metric-card"><span class="label">Wijzigt PnL?</span><span class="value">Nee</span></article>
+        <article class="metric-card"><span class="label">Enabled</span><span class="value">{_esc((status.get('lead_lag_lab') or {}).get('enabled') and 'Aan' or 'Uit')}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead>
+            <tr>
+              <th>Pair</th>
+              <th>Status</th>
+              <th>Quality</th>
+              <th>n</th>
+              <th>Horizon</th>
+              <th>Hit rate</th>
+              <th>Median resp</th>
+              <th>Pred err</th>
+              <th>Shadow ops</th>
+              <th>Admitted</th>
+              <th>Shadow NET</th>
+            </tr>
+          </thead>
+          <tbody>{_lead_lag_lab_rows((status.get('lead_lag_lab') or {}).get('panel') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        RESEARCH ONLY — nooit mergen in Live-equivalent PnL.
+        Non-participation is geen alpha. Default: LEAD_LAG_EXECUTION_ENABLED=false.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>AUTONOMOUS RESEARCH <span class="pill">LOCAL LLM · RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('autonomous_research') or {}).get('LLM_STATUS')=='AVAILABLE' else 'NOT_READY')}">
+        <div>
+          <span class="vb-kicker">Research scientist — not the judge</span>
+          <strong class="vb-verdict">{_esc((status.get('autonomous_research') or {}).get('LLM_STATUS') or 'UNKNOWN')}</strong>
+          <p class="vb-headline">Provider: {_esc((status.get('autonomous_research') or {}).get('Provider') or 'ollama')} · Model: {_esc((status.get('autonomous_research') or {}).get('Model'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Connection: {_esc((status.get('autonomous_research') or {}).get('Connection'))}</span>
+          <span>Autonomous: {_esc((status.get('autonomous_research') or {}).get('Autonomous_mode'))}</span>
+          <span>Research-only: YES</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Round field</th><th>Value</th></tr></thead>
+          <tbody>{_autonomous_round_rows((status.get('autonomous_research') or {}).get('CURRENT_RESEARCH_ROUND') or {})}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">Hypothesis pipeline (canonical = tournament)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Strategy</th><th>Verdict</th><th>Gate</th></tr></thead>
+          <tbody>{_autonomous_pipeline_rows((status.get('autonomous_research') or {}).get('HYPOTHESIS_PIPELINE') or [])}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">Multiple testing exposure</h3>
+      <p class="forecast-note">{_esc(json.dumps((status.get('autonomous_research') or {}).get('multiple_testing_exposure') or {}, sort_keys=True))}</p>
+      <h3 class="subhead">WHAT THE LLM LEARNED</h3>
+      <p class="forecast-note">
+        <strong>NON-AUTHORITATIVE RESEARCH ANALYSIS</strong> —
+        {_esc((status.get('autonomous_research') or {}).get('disclaimer'))}
+      </p>
+      <ul class="finding-list">
+        {_autonomous_learning_items((status.get('autonomous_research') or {}).get('WHAT_THE_LLM_LEARNED') or {})}
+      </ul>
+      <p class="forecast-note">Run: python -m bot.research.autonomous.runner --dry-run</p>
+    </section>
+
+    <section class="panel">
+      <h2>FINAL VALIDATION <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('final_validation') or {}).get('FINAL_VALIDATION_VERDICT') or 'NOT_RUN')}">
+        <div>
+          <span class="vb-kicker">Does parent cross-venue dislocation survive realistic execution?</span>
+          <strong class="vb-verdict">FINAL_VALIDATION_VERDICT: {_esc((status.get('final_validation') or {}).get('FINAL_VALIDATION_VERDICT') or 'NOT_RUN')}</strong>
+          <p class="vb-headline">STRATEGY={_esc((status.get('final_validation') or {}).get('STRATEGY') or 'cross_venue_dislocation')} · EXECUTION=RESEARCH_ONLY</p>
+        </div>
+        <div class="vb-meta">
+          <span>DATASET: {_esc((status.get('final_validation') or {}).get('DATASET') or '—')}</span>
+          <span>DATASET_FINGERPRINT: {_esc((status.get('final_validation') or {}).get('DATASET_FINGERPRINT') or '—')}</span>
+          <span>BASELINE EXECUTION_NET: {_esc((status.get('final_validation') or {}).get('BASELINE_EXECUTION_NET') or '—')}</span>
+          <span>Windows: {_esc((status.get('final_validation') or {}).get('n_windows') or '—')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <p class="forecast-note"><strong>WHY</strong></p>
+      <ul class="finding-list">{_final_validation_why_items(status.get('final_validation') or {})}</ul>
+      <div class="finding-next">
+        <span class="label">NEXT_ACTION</span>
+        <p>{_esc((status.get('final_validation') or {}).get('NEXT_ACTION') or 'Run: python -m bot.research.final_validation.runner')}</p>
+      </div>
+      <p class="forecast-note">
+        H-0005 remains REJECT_AS_INCREMENTAL_FILTER. H-0007 remains REJECT / GATE_INACTIVE.
+        No new strategies. No live execution.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>ACCOUNTING STATUS <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('canonical_accounting') or {}).get('ACCOUNTING_AUDIT') or 'NOT_RUN')}">
+        <div>
+          <span class="vb-kicker">Canonical execution replay — expected / replay / observed are separate worlds</span>
+          <strong class="vb-verdict">{_esc((status.get('canonical_accounting') or {}).get('ACCOUNTING_AUDIT') or 'NOT_RUN')}</strong>
+          <p class="vb-headline">{_esc((status.get('canonical_accounting') or {}).get('headline') or 'Accounting not run')}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Schema: {_esc((status.get('canonical_accounting') or {}).get('schema_version') or '—')}</span>
+          <span>Replay: {_esc((status.get('canonical_accounting') or {}).get('replay_version') or '—')}</span>
+          <span>Execution: DISABLED</span>
+          <span>ROBUST_PAPER_CANDIDATES: {_esc((status.get('canonical_accounting') or {}).get('ROBUST_PAPER_CANDIDATES') or [])}</span>
+        </div>
+      </div>
+      <p class="forecast-note">
+        ACCOUNTING_FAIL keeps production execution disabled and blocks ROBUST_PAPER_CANDIDATE.
+        Naked NET / PnL / NET/fill / EV are not shown without an economic-world subtitle.
+      </p>
+      {_canonical_strategy_panels(status.get('canonical_accounting') or {})}
+    </section>
+
+    <section class="panel">
+      <h2>ALPHA ATTRIBUTION LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Forensic parent vs H-0005 — DESCRIPTIVE_ONLY, not proven alpha</span>
+          <strong class="vb-verdict">NO NEW ALPHA CLAIMED</strong>
+          <p class="vb-headline">PAIRED_DELTA_ACCOUNTING_AUDIT: {_esc((status.get('alpha_attribution') or {}).get('PAIRED_DELTA_ACCOUNTING_AUDIT') or 'NOT_RUN')}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Parent replay NET: {_esc((status.get('alpha_attribution') or {}).get('PARENT_REPLAY_NET') or '—')}</span>
+          <span>H-0005 replay NET: {_esc((status.get('alpha_attribution') or {}).get('H-0005_REPLAY_NET') or '—')}</span>
+          <span>Excluded NET: {_esc((status.get('alpha_attribution') or {}).get('EXCLUDED_SIGNAL_NET') or '—')}</span>
+          <span>Retained NET: {_esc((status.get('alpha_attribution') or {}).get('RETAINED_SIGNAL_NET') or '—')}</span>
+          <span>Execution: DISABLED</span>
+          <span>LIVE_VS_PUBLISHED: {_esc((status.get('alpha_attribution') or {}).get('LIVE_VS_PUBLISHED') or '—')}</span>
+        </div>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('alpha_attribution') or {}).get('WHY_H0005_UNDERPERFORMED') or 'Attribution not run')}
+      </p>
+      <h3 class="subhead">Groups (canonical execution replay)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>GROUP</th>
+              <th>SIGNALS</th>
+              <th>FILLS</th>
+              <th>NET <span class="th-sub">EXECUTION_REPLAY RealizedReplayNetEUR</span></th>
+              <th>NET/SIGNAL <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>Replay NET/fill <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>POSITIVE WINDOWS</th>
+            </tr>
+          </thead>
+          <tbody>{_alpha_attribution_group_rows(status.get('alpha_attribution') or {})}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">TOP ECONOMIC CONTEXTS</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>context</th>
+              <th>NET contribution <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>stability</th>
+              <th>concentration</th>
+              <th>pre-trade usable</th>
+            </tr>
+          </thead>
+          <tbody>{_alpha_attribution_context_rows(status.get('alpha_attribution') or {})}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('alpha_attribution') or {}).get('disclaimer') or 'Forensic attribution. DESCRIPTIVE_ONLY. Do not read NET as proven edge.')}
+        CONTEXT_DEPENDENCY: {_esc((status.get('alpha_attribution') or {}).get('CONTEXT_DEPENDENCY') or '—')}
+        Run: python -m bot.research.alpha_attribution.runner
+      </p>
+    </section>
+
+    </section>
+
+    <section class="panel">
+      <h2>EXECUTION REALISM LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Would canonical replay alpha survive realistic execution?</span>
+          <strong class="vb-verdict">{_esc((status.get('execution_realism') or {}).get('VERDICT') or 'NOT_RUN')}</strong>
+          <p class="vb-headline">Canonical NET → Realistic NET → Delta</p>
+        </div>
+        <div class="vb-meta">
+          <span>Canonical: {_esc((status.get('execution_realism') or {}).get('CANONICAL_REPLAY_NET') or '—')}</span>
+          <span>Realistic: {_esc((status.get('execution_realism') or {}).get('REALISTIC_EXECUTION_NET') or '—')}</span>
+          <span>Delta: {_esc((status.get('execution_realism') or {}).get('DELTA') or '—')}</span>
+          <span>Fill survival: {_esc((status.get('execution_realism') or {}).get('FILL_SURVIVAL_PCT') or '—')}%</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <p class="forecast-note">
+        Research-only counterfactual validation. Not proven live alpha.
+        Do not read positive execution NET as guaranteed profit.
+        Run: python -m bot.research.execution_realism.runner
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>RESEARCH TOURNAMENT <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner {_verdict_banner_class('PARTIAL' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'NOT_READY')}">
+        <div>
+          <span class="vb-kicker">Strategy families under identical rules</span>
+          <strong class="vb-verdict">{_esc('PAPER_CANDIDATE' if (status.get('research_tournament') or {}).get('PAPER_CANDIDATES') else 'ALL REJECTED' if (status.get('research_tournament') or {}).get('ALL_STRATEGIES_REJECTED') else 'PENDING')}</strong>
+          <p class="vb-headline">{_esc((status.get('research_tournament') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Dataset: {_esc((status.get('research_tournament') or {}).get('CURRENT_DATASET') or 'NONE')}</span>
+          <span>Candidates: {_esc(len((status.get('research_tournament') or {}).get('PAPER_CANDIDATES') or []))}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Strategy</th>
+              <th>Verdict</th>
+              <th>Failed gate</th>
+              <th>Dev signals</th>
+              <th>OOS signals</th>
+              <th>Expected NET</th>
+              <th>Exec NET</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody>{_research_tournament_rows((status.get('research_tournament') or {}).get('scoreboard') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        Gescheiden van Live-equivalent PnL / Paper MTM.
+        {_esc((status.get('research_tournament') or {}).get('disclaimer') or 'RESEARCH CANDIDATE — NOT PROVEN LIVE PROFITABLE')}
+        Run: python -m bot.research.tournament.runner
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>CONCENTRATION FORENSICS <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Why STABILITY failed — descriptive only</span>
+          <strong class="vb-verdict">PARENTS REJECTED</strong>
+          <p class="vb-headline">{_esc((status.get('concentration_forensics') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Dataset: {_esc((status.get('concentration_forensics') or {}).get('DATASET') or 'NONE')}</span>
+          <span>LLM: {_esc((status.get('concentration_forensics') or {}).get('LLM_USED') or 'NO')}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Strategy</th>
+              <th>Total result</th>
+              <th>Top symbol</th>
+              <th>Top venue</th>
+              <th>Top time block</th>
+              <th>Positive blocks</th>
+              <th>Negative blocks</th>
+              <th>Concentration verdict</th>
+              <th>Structural explanation</th>
+              <th>Recommended next hypothesis</th>
+            </tr>
+          </thead>
+          <tbody>{_concentration_forensics_rows((status.get('concentration_forensics') or {}).get('rows') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('concentration_forensics') or {}).get('disclaimer') or 'Descriptive forensics. Parents remain REJECTED.')}
+        Production trading unchanged.
+        Run: python -m bot.research.forensics.runner
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>REGIME HYPOTHESIS LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">H-0005 / H-0007 — independent of rejected parents</span>
+          <strong class="vb-verdict">CANDIDATE</strong>
+          <p class="vb-headline">{_esc((status.get('regime_hypothesis_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Data: {_esc((status.get('regime_hypothesis_lab') or {}).get('DATA_STATUS') or 'PENDING')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Parent</th>
+              <th>Mechanism</th>
+              <th>Status</th>
+              <th>Discovery NET</th>
+              <th>Expected NET/signal <span class="th-sub">SIGNAL_EXPECTATION</span></th>
+              <th>Replay NET <span class="th-sub">EXECUTION_REPLAY sum</span></th>
+              <th title="RealizedReplayNetEUR / EstimatedFillCount">Replay NET/fill <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>Sample</th>
+              <th>Stability</th>
+              <th>Top concentration</th>
+              <th>Verdict</th>
+            </tr>
+          </thead>
+          <tbody>{_regime_hypothesis_lab_rows((status.get('regime_hypothesis_lab') or {}).get('rows') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        OBSERVED / DEV / OOS / HYPOTHESIS are separate columns.
+        Discovery NET is not forensic-as-profit (always blank unless labeled OBSERVED).
+        {_esc((status.get('regime_hypothesis_lab') or {}).get('disclaimer') or '')}
+        Run: python -m bot.research.regime_lab.runner
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>EDGE ROBUSTNESS LAB <span class="pill">RESEARCH ONLY</span></h2>
+      <div class="verdict-banner warn">
+        <div>
+          <span class="vb-kicker">Second-layer interpretation — mechanical OOS_PASS unchanged</span>
+          <strong class="vb-verdict">{_esc((status.get('edge_robustness_lab') or {}).get('ACCOUNTING_AUDIT') or 'PENDING')}</strong>
+          <p class="vb-headline">{_esc((status.get('edge_robustness_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Accounting: {_esc((status.get('edge_robustness_lab') or {}).get('ACCOUNTING_AUDIT') or 'PENDING')}</span>
+          <span>Execution: DISABLED</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Mechanical</th>
+              <th>Interpretation</th>
+              <th title="RealizedReplayNetEUR / EstimatedFillCount">Replay NET/fill <span class="th-sub">EXECUTION_REPLAY</span></th>
+              <th>Edge/cost</th>
+              <th>Edge/uncertainty</th>
+              <th>BE adverse</th>
+              <th>BE fee</th>
+              <th>BE slip</th>
+              <th>Worst stress</th>
+              <th>OOS windows</th>
+              <th>Gate sel.</th>
+              <th>Parent Δ</th>
+              <th>Replication</th>
+              <th>Decision</th>
+            </tr>
+          </thead>
+          <tbody>{_edge_robustness_lab_rows((status.get('edge_robustness_lab') or {}).get('rows') or [])}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">
+        {_esc((status.get('edge_robustness_lab') or {}).get('disclaimer') or 'Mechanical OOS_PASS unchanged.')}
+        Run: python -m bot.research.robustness.runner
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>RESEARCH DATA STATUS <span class="pill">OPERATIONAL</span></h2>
+      <div class="verdict-banner {_verdict_banner_class(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('FINAL_ACCEPTANCE_VERDICT') or (status.get('market_data_lab') or {}).get('verdict'))}">
+        <div>
+          <span class="vb-kicker">CURRENT STATE</span>
+          <strong class="vb-verdict">{_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('CURRENT_STATE') or (status.get('market_data_lab') or {}).get('verdict') or 'NO_REAL_TAPE')}</strong>
+          <p class="vb-headline">{_esc((status.get('market_data_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Enabled: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('RECORDER_ENABLED'))}</span>
+          <span>Running: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('RECORDER_RUNNING'))}</span>
+          <span>Written: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('EVENTS_WRITTEN') or 0)}</span>
+          <span>Dropped: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('EVENTS_DROPPED') or 0)}</span>
+          <span>Write err: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('WRITE_ERRORS') or 0)}</span>
+          <span>Queue: {_esc(((status.get('market_data_lab') or {}).get('research_data_status') or {}).get('QUEUE_DEPTH') or 0)}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody>{_research_data_status_rows((status.get('market_data_lab') or {}).get('research_data_status') or {})}</tbody>
+        </table>
+      </div>
+      <h3 class="subhead">Horizon readiness</h3>
+      <div class="horizon-chips">
+        {_horizon_chips((status.get('market_data_lab') or {}).get('horizon_rows') or [])}
+      </div>
+      <p class="forecast-note">
+        Onderscheid: NO DATA ≠ BAD DATA ≠ USABLE FOR SLOW ≠ USABLE FOR FAST.
+        Geen Live-equivalent PnL-wijziging.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>MARKET DATA LAB <span class="pill">RESEARCH INFRASTRUCTURE</span></h2>
+      <div class="verdict-banner {_verdict_banner_class((status.get('market_data_lab') or {}).get('verdict'))}">
+        <div>
+          <span class="vb-kicker">Acceptance</span>
+          <strong class="vb-verdict">{_esc((status.get('market_data_lab') or {}).get('verdict') or 'DATA_NOT_READY')}</strong>
+          <p class="vb-headline">{_esc((status.get('market_data_lab') or {}).get('headline'))}</p>
+        </div>
+        <div class="vb-meta">
+          <span>Events: {_esc((status.get('market_data_lab') or {}).get('event_count') or 0)}</span>
+          <span>Dataset: {_esc((status.get('market_data_lab') or {}).get('dataset_id') or 'NONE')}</span>
+          <span>Dropped: {_esc(((status.get('market_data_lab') or {}).get('recorder') or {}).get('dropped') or 0)}</span>
+        </div>
+      </div>
+      <ul class="finding-list">
+        {_finding_list_items((status.get('market_data_lab') or {}).get('findings') or [])}
+      </ul>
+      <h3 class="subhead">Venues</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Venue</th>
+              <th>Exchange ts</th>
+              <th>Quality</th>
+              <th>Events</th>
+              <th>Ex-ts %</th>
+              <th>p50</th>
+              <th>p95</th>
+              <th>p99</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>{_market_data_lab_rows((status.get('market_data_lab') or {}).get('panel') or [])}</tbody>
+        </table>
+      </div>
+      <div class="finding-next">
+        <span class="label">Volgende stap</span>
+        <p>{_esc((status.get('market_data_lab') or {}).get('next_step'))}</p>
+      </div>
+      <p class="forecast-note">
+        RESEARCH INFRASTRUCTURE — timestamps, sync, replay. Geen alpha-optimalisatie.
+        Redis blijft transport; research tape leeft op de publisher vóór Redis.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>Why not trade?</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Eerste gate</th><th>Aantal</th></tr></thead>
+          <tbody>{why_rows}</tbody>
+        </table>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Gate</th><th>Rejects</th><th>Geschat terecht</th><th>Geschat gemist</th><th>Advies</th></tr></thead>
+          <tbody>{gate_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Counterfactual gebruikt alleen mid-prijzen ná de beslissing en gaat niet terug de live ranker in.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Global engine</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Engine</span><span class="value">{"Aan" if ge_enabled else "Uit"}</span></article>
+        <article class="metric-card"><span class="label">Regime</span><span class="value">{ge_regime}</span></article>
+        <article class="metric-card"><span class="label">Actieve sessies</span><span class="value">{ge_sessions}</span></article>
+        <article class="metric-card"><span class="label">Venue exposure</span><span class="value">{ge_venue_exp}</span></article>
+        <article class="metric-card"><span class="label">Strategie exposure</span><span class="value">{ge_strategy_exp}</span></article>
+        <article class="metric-card"><span class="label">Correlatie-groepen</span><span class="value">{ge_corr_exp}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Aandeel</th><th>Bid</th><th>Ask</th><th>Last</th><th>Bron</th></tr></thead>
+          <tbody>{ge_equity_rows}</tbody>
+        </table>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Tijd</th><th>Actie</th><th>Strategie</th><th>Symbool</th><th>EV</th><th>Score</th><th>Stadium</th><th>Reden</th></tr></thead>
+          <tbody>{ge_decision_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Laatste beslissingen uit de EV-ranker. Volledige log: <a class="link-lite" href="/paper/opportunity-decisions">/paper/opportunity-decisions</a></p>
+      {ge_ranking_block}
+    </section>
+
+    <section class="panel">
+      <h2>Geld</h2>
+      <div class="metric-grid">
+        <article class="metric-card">
+          <span class="label">Startkapitaal</span>
+          <span class="value">{m('starting_equity')}</span>
+        </article>
+        <article class="metric-card {pnl_cls}">
+          <span class="label">{pnl_word} (live-equivalent)</span>
+          <span class="value">{m('net_pnl')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Rendement</span>
+          <span class="value">{p('return_pct')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Oefenvermogen (incl. voorraad)</span>
+          <span class="value">{m('current_equity')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Paper-verschil (niet live)</span>
+          <span class="value">{m('paper_equity_pnl')}</span>
+        </article>
+        <article class="metric-card">
+          <span class="label">Grootste terugval</span>
+          <span class="value">{p('maximum_drawdown')}</span>
+        </article>
       </div>
     </section>
-    <section>
-      <h2>Costs</h2>
-      <div class="grid">
-        <div class="metric"><div class="label">Fees</div><div class="value">{v('fees')}</div></div>
-        <div class="metric"><div class="label">Slippage</div><div class="value">{v('slippage')}</div></div>
+
+    <section class="panel">
+      <h2>Grafieken</h2>
+      <div class="charts">
+        <figure class="chart-card">
+          <figcaption>Winst in de tijd</figcaption>
+          {profit_chart}
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Winst per uur</figcaption>
+          {hourly_chart}
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Winst vs verlies</figcaption>
+          {winloss_chart}
+        </figure>
       </div>
     </section>
-    <section>
-      <h2>Strategy performance</h2>
-      <table>
-        <thead><tr><th>Strategy</th><th>Net PnL</th><th>Opps</th><th>Trades</th><th>Win rate</th></tr></thead>
-        <tbody>{strategy_rows}</tbody>
-      </table>
+
+    <section class="panel">
+      <h2>Activiteit</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Markten bekeken</span><span class="value">{c('pairs_evaluated')}</span></article>
+        <article class="metric-card"><span class="label">Koopkansen</span><span class="value">{c('depth_edges_found')}</span></article>
+        <article class="metric-card"><span class="label">Afgewezen</span><span class="value">{c('scan_rejections')}</span></article>
+        <article class="metric-card"><span class="label">Goedgekeurd</span><span class="value">{c('approved_opportunities')}</span></article>
+        <article class="metric-card"><span class="label">Uitgevoerd</span><span class="value">{c('executed_opportunities')}</span></article>
+        <article class="metric-card"><span class="label">Transacties</span><span class="value">{c('trade_count')}</span></article>
+        <article class="metric-card"><span class="label">Winstkans</span><span class="value">{p('win_rate')}</span></article>
+        <article class="metric-card"><span class="label">Winstende deals</span><span class="value">{c('winning_trades')}</span></article>
+        <article class="metric-card"><span class="label">Verliezende deals</span><span class="value">{c('losing_trades')}</span></article>
+      </div>
     </section>
-    <section>
-      <h2>Exchange performance</h2>
-      <table>
-        <thead><tr><th>Pair</th><th>Net PnL</th><th>Opps</th><th>Executed</th><th>Win rate</th></tr></thead>
-        <tbody>{pair_rows}</tbody>
-      </table>
+
+    <section class="panel">
+      <h2>Kosten</h2>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Beurskosten</span><span class="value">{m('fees')}</span></article>
+        <article class="metric-card"><span class="label">Prijsverschil</span><span class="value">{m('slippage')}</span></article>
+        <article class="metric-card"><span class="label">Omzet</span><span class="value">{m('trading_volume')}</span></article>
+      </div>
     </section>
-    <section>
-      <h2>Recent opportunities</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Timestamp</th><th>Symbol</th><th>Buy</th><th>Sell</th>
-            <th>Expected net</th><th>Realized net</th><th>Status</th>
-          </tr>
-        </thead>
-        <tbody>{opp_rows}</tbody>
-      </table>
+
+    <section class="panel">
+      <h2>Per aanpak</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Aanpak</th><th>Winst</th><th>Kansen</th><th>Transacties</th><th>Winstkans</th></tr></thead>
+          <tbody>{strategy_rows}</tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Per beurs</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Route</th><th>Winst</th><th>Transacties</th><th>Winstkans</th></tr></thead>
+          <tbody>{pair_rows}</tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Recente transacties</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tijd</th><th>Munt</th><th>Koop</th><th>Verkoop</th>
+              <th>Verwacht</th><th>Echte winst</th><th>Uitslag</th>
+            </tr>
+          </thead>
+          <tbody>{opp_rows}</tbody>
+        </table>
+      </div>
     </section>
   </main>
-  <p class="footer">
-    WITHDRAWALS = 0 · LEVERAGE = 0 · EXECUTION MODE = PAPER · Auto-refresh 5s ·
-    Data from live paper runner only. · <a href="/logout">Logout</a>
-  </p>
-  <script>
-    async function post(url, body) {{
-      await fetch(url, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify(body || {{}})
-      }});
-      location.reload();
-    }}
-    async function resetPaper() {{
-      if (!confirm('Reset paper portfolio to starting capital? This never affects real exchange accounts.')) return;
-      await post('/paper/reset', {{confirm: true}});
-    }}
-  </script>
+
+  <footer class="footer">
+    Oefenhandel · geen opnames · geen hefboom · vernieuwt elke 5s ·
+    <a href="/logout">Uitloggen</a>
+  </footer>
+
+  <script>{_shared_js()}</script>
 </body>
 </html>"""
     return HTMLResponse(content=html)
@@ -269,84 +1014,223 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
     perf = payload.get("performance") or {}
     status = payload.get("status") or {}
     opportunities = payload.get("opportunities") or []
+    hourly = payload.get("hourly") or []
+    trades = payload.get("trades") or []
 
-    def v(key: str, default: str = "0") -> str:
-        return _fmt(perf.get(key, default))
+    running = status.get("running")
+    status_label = "Actief" if running else "Gestopt"
+    status_cls = "ok" if running else "warn"
+    pnl_cls = _pnl_class(perf.get("net_pnl", 0))
+    pnl_word = _pnl_word(perf.get("net_pnl", 0))
+
+    forecast = status.get("live_forecast") or {}
+    forecast_day = (
+        _fmt_money(forecast.get("projected_per_day_eur", 0))
+        if forecast.get("projection_ready", True)
+        else "n.v.t."
+    )
+    confidence = str(forecast.get("confidence") or "very_low")
+    confidence_label = {
+        "very_low": "Nog onzeker",
+        "low": "Hoogste kans (geen garantie)",
+        "medium": "Redelijk",
+        "high": "Hoog (coupon)",
+    }.get(confidence, confidence)
 
     recent = "".join(
-        f"<div class='opp'>"
-        f"<div><strong>{_esc(o.get('symbol'))}</strong> {_esc(o.get('status'))}</div>"
-        f"<div>{_esc(o.get('buy_exchange'))} → {_esc(o.get('sell_exchange'))}</div>"
-        f"<div>exp {_esc(o.get('expected_net_profit'))} · real {_esc(o.get('realized_net_profit'))}</div>"
+        f"<article class='opp-card'>"
+        f"<div class='opp-top'>"
+        f"<strong>{_esc(o.get('symbol'))}</strong>"
+        f"<span class='pill'>{_esc(_status_label(o.get('status')))}</span>"
         f"</div>"
+        f"<div class='opp-route'>{_esc(_venue_label(o.get('buy_exchange')))} → {_esc(_venue_label(o.get('sell_exchange')))}</div>"
+        f"<div class='opp-pnl'>"
+        f"<span>Verwacht {_esc_fmt(o.get('expected_net_profit'), 'money')}</span>"
+        f"<span class='{_pnl_class(o.get('realized_net_profit'))}'>"
+        f"{_status_label(o.get('status'))} {_esc_fmt(o.get('realized_net_profit'), 'money')}</span>"
+        f"</div>"
+        f"<div class='opp-ts'>{_esc(_short_ts(o.get('timestamp')))}</div>"
+        f"</article>"
         for o in opportunities[:12]
-    ) or "<div class='empty'>No opportunities recorded</div>"
+    ) or "<p class='empty'>Nog geen transacties</p>"
 
-    running = "RUNNING" if status.get("running") else "STOPPED"
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0b0f14"/>
   <meta http-equiv="refresh" content="5"/>
-  <title>Moreney Lite Dashboard</title>
-  <style>
-    :root {{
-      --bg:#0f1419; --card:#1a222d; --text:#e7ecf3; --muted:#8b9bb4; --line:#2a3544; --accent:#3d9cf0;
-    }}
-    * {{ box-sizing:border-box; }}
-    body {{ margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif; background:var(--bg); color:var(--text); }}
-    .wrap {{ max-width:520px; margin:0 auto; padding:1rem; display:grid; gap:.75rem; }}
-    .card {{ background:var(--card); border:1px solid var(--line); padding:.9rem; }}
-    h1 {{ margin:0 0 .35rem; font-size:1.2rem; }}
-    .sub {{ color:var(--muted); font-size:.85rem; }}
-    .badge {{ display:inline-block; margin-top:.5rem; color:var(--accent); border:1px solid var(--line); padding:.2rem .5rem; font-size:.75rem; }}
-    .grid {{ display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }}
-    .metric .k {{ color:var(--muted); font-size:.72rem; }}
-    .metric .v {{ font-family:ui-monospace,monospace; font-size:1rem; }}
-    .controls {{ display:flex; gap:.45rem; flex-wrap:wrap; }}
-    button {{ background:transparent; color:var(--text); border:1px solid var(--line); padding:.4rem .75rem; }}
-    .opp {{ border-top:1px solid var(--line); padding:.5rem 0; font-size:.82rem; }}
-    .empty {{ color:var(--muted); font-size:.82rem; }}
-  </style>
+  <title>Moreney — Winst</title>
+  <style>{_shared_css(lite=True)}</style>
+</head>
+<body class="lite">
+  <header class="hero hero-lite">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">Mobiel · live-inschatting</p>
+        <h1 class="brand">Moreney</h1>
+      </div>
+      <span class="badge {status_cls}">{status_label}</span>
+    </div>
+  </header>
+
+  <main class="container lite-container">
+    <section class="panel hero-metric {pnl_cls}">
+      <span class="label">Paper MTM</span>
+      <span class="value-xl">{_fmt_money(perf.get('paper_equity_pnl', perf.get('net_pnl', 0)))}</span>
+      <span class="sub-metric">Up-day band {forecast_day} · {confidence_label}</span>
+      <span class="sub-metric">Oefenvermogen {_fmt_money(perf.get('current_equity', 0))}</span>
+    </section>
+
+    <section class="panel">
+      <h2>Winst in de tijd</h2>
+      {_svg_cumulative_profit(trades)}
+    </section>
+
+    <section class="panel">
+      <div class="metric-grid lite-grid">
+        <article class="metric-card"><span class="label">Rendement</span><span class="value">{_fmt_pct(perf.get('return_pct', 0))}</span></article>
+        <article class="metric-card"><span class="label">Transacties</span><span class="value">{_fmt_count(perf.get('trade_count', 0))}</span></article>
+        <article class="metric-card"><span class="label">Winstkans</span><span class="value">{_fmt_pct(perf.get('win_rate', 0))}</span></article>
+        <article class="metric-card"><span class="label">Terugval</span><span class="value">{_fmt_pct(perf.get('maximum_drawdown', 0))}</span></article>
+        <article class="metric-card"><span class="label">Winstende deals</span><span class="value">{_fmt_count(perf.get('winning_trades', 0))}</span></article>
+        <article class="metric-card"><span class="label">Verliezende deals</span><span class="value">{_fmt_count(perf.get('losing_trades', 0))}</span></article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Winst per uur</h2>
+      {_svg_hourly_bars(hourly)}
+    </section>
+
+    <section class="panel">
+      <div class="controls">
+        <button type="button" class="btn" onclick="post('/paper/start')">Start</button>
+        <button type="button" class="btn" onclick="post('/paper/stop')">Stop</button>
+        <button type="button" class="btn btn-danger" onclick="resetPaper()">Opnieuw</button>
+      </div>
+      <p class="foot-lite"><a href="/fleet">Alle bots</a> · <a href="/paper/dashboard">Volledig overzicht</a> · Oefenhandel · 5s</p>
+    </section>
+
+    <section class="panel">
+      <h2>Recent</h2>
+      <div class="opp-list">{recent}</div>
+    </section>
+  </main>
+  <script>{_shared_js(lite=True)}</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
+    """Render one page covering all configured paper instances."""
+    instances = payload.get("instances") or []
+    totals = payload.get("totals") or {}
+    online = payload.get("online_count", 0)
+    configured = payload.get("configured_count", 0)
+
+    glance_html = "".join(_render_glance_card(row) for row in instances)
+    if not glance_html:
+        glance_html = "<p class='empty'>Geen rekeningen ingesteld.</p>"
+    table_html = _render_fleet_table(instances)
+    fleet_chart = _svg_fleet_bars(instances)
+    html = f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0b0f14"/>
+  <meta http-equiv="refresh" content="5"/>
+  <title>Moreney — Alle bots</title>
+  <style>{_shared_css(fleet=True)}</style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h1>Moreney Lite</h1>
-      <div class="sub">Paper mode only · Auto refresh 5s</div>
-      <div class="badge">{running} · REAL ORDERS = 0</div>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">Oefenhandel · alle rekeningen</p>
+        <h1 class="brand">Alle bots</h1>
+        <p class="sub">{online}/{configured} online · retail fees · ververst elke 5s</p>
+      </div>
+      <a class="link-lite" href="/logout">Uitloggen</a>
     </div>
-    <div class="card">
+    <div class="container totals-bar">
+      <article class="metric-card"><span class="label">Transacties</span><span class="value">{_esc_fmt(totals.get('trade_count'), 'count')}</span></article>
+      <article class="metric-card {_pnl_class(totals.get('net_pnl'))}"><span class="label">PnL</span><span class="value">{_esc_fmt(totals.get('net_pnl'), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Vermogen</span><span class="value">{_esc_fmt(totals.get('equity'), 'money')}</span></article>
+      <article class="metric-card"><span class="label">Open quotes</span><span class="value">{_esc_fmt(totals.get('open_maker_quotes'), 'count')}</span></article>
+    </div>
+    <p class="sub totals-note">PnL is winst op afgeronde transacties. Vermogen is cash plus voorraad tegen de markt — geen extra inleg.</p>
+  </header>
+  <main class="container">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Bediening</h2>
+        <span class="muted">{online}/{configured} online</span>
+      </div>
       <div class="controls">
-        <button onclick="post('/paper/start')">Start</button>
-        <button onclick="post('/paper/stop')">Stop</button>
-        <button onclick="resetPaper()">Reset</button>
+        <button type="button" class="btn btn-danger" id="fleet-reset-btn" onclick="resetFleet()">
+          Alle bots opnieuw beginnen
+        </button>
       </div>
-    </div>
-    <div class="card">
-      <div class="grid">
-        <div class="metric"><div class="k">Equity</div><div class="v">{v('current_equity')}</div></div>
-        <div class="metric"><div class="k">Net PnL</div><div class="v">{v('net_pnl')}</div></div>
-        <div class="metric"><div class="k">Opportunities</div><div class="v">{v('total_opportunities')}</div></div>
-        <div class="metric"><div class="k">Trades</div><div class="v">{v('trade_count')}</div></div>
-        <div class="metric"><div class="k">Win rate</div><div class="v">{v('win_rate')}</div></div>
-        <div class="metric"><div class="k">Drawdown</div><div class="v">{v('maximum_drawdown')}</div></div>
-      </div>
-    </div>
-    <div class="card">
-      <strong>Recent opportunities</strong>
-      {recent}
-    </div>
-  </div>
+      <p class="forecast-note" id="fleet-reset-status">
+        Zet elke oefenrekening terug naar startkapitaal (PnL, trades, markout, calibratie).
+        Raakt geen echte beursrekeningen. Bots starten daarna opnieuw.
+      </p>
+    </section>
+    <section class="glance-grid">{glance_html}</section>
+    <section class="panel">
+      <h2>Vergelijking</h2>
+      <div class="table-wrap">{table_html}</div>
+    </section>
+    <section class="panel">
+      <h2>Winst per rekening</h2>
+      {fleet_chart}
+    </section>
+  </main>
+  <footer class="footer">Oefenhandel · geen echte orders · retail fees</footer>
   <script>
-    async function post(url, body) {{
-      await fetch(url, {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(body||{{}}) }});
-      location.reload();
-    }}
-    async function resetPaper() {{
-      if (!confirm('Reset paper portfolio?')) return;
-      await post('/paper/reset', {{confirm:true}});
+    async function resetFleet() {{
+      const msg =
+        "Alle oefenbots opnieuw beginnen?\\n\\n" +
+        "PnL, trades, markout en calibratie gaan terug naar nul. " +
+        "Dit raakt geen echte beursrekeningen. Bots starten daarna opnieuw.";
+      if (!confirm(msg)) return;
+      const btn = document.getElementById("fleet-reset-btn");
+      const status = document.getElementById("fleet-reset-status");
+      if (btn) {{
+        btn.disabled = true;
+        btn.textContent = "Bezig…";
+      }}
+      if (status) status.textContent = "Alle bots worden gereset…";
+      try {{
+        const res = await fetch("/fleet/reset", {{
+          method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{confirm: true, restart: true}}),
+        }});
+        const data = await res.json().catch(() => ({{}}));
+        if (!res.ok) {{
+          throw new Error(
+            (data.detail && data.detail.message) || data.message || res.statusText
+          );
+        }}
+        const ok = data.ok_count ?? 0;
+        const total = data.configured_count ?? 0;
+        if (status) {{
+          status.textContent =
+            "Klaar: " + ok + "/" + total + " bots gereset. Pagina ververst…";
+        }}
+        setTimeout(() => location.reload(), 1200);
+      }} catch (err) {{
+        if (status) status.textContent = "Reset mislukt: " + err;
+        if (btn) {{
+          btn.disabled = false;
+          btn.textContent = "Alle bots opnieuw beginnen";
+        }}
+      }}
     }}
   </script>
 </body>
@@ -354,14 +1238,1895 @@ def render_dashboard_lite(payload: dict[str, Any]) -> HTMLResponse:
     return HTMLResponse(content=html)
 
 
+def _return_fraction(row: dict[str, Any]) -> Any:
+    start = _as_float(row.get("starting_capital"))
+    pnl = _as_float(row.get("net_pnl"))
+    if start == 0:
+        return None
+    return pnl / start
+
+
+def _render_glance_card(row: dict[str, Any]) -> str:
+    href = _esc(row.get("dashboard_url") or "#")
+    if not row.get("ok"):
+        return f"""
+        <a class="glance-card offline" href="{href}">
+          <span class="glance-label">{_esc(row.get('label'))}</span>
+          <span class="badge warn">Offline</span>
+          <span class="glance-error">{_esc(row.get('error'))}</span>
+        </a>
+        """
+    running = row.get("running")
+    status_label = "Actief" if running else "Gestopt"
+    badge_cls = "ok" if running else "warn"
+    return f"""
+    <a class="glance-card" href="{href}">
+      <span class="glance-label">{_esc(row.get('label'))}</span>
+      <span class="glance-pnl {_pnl_class(row.get('net_pnl'))}">{_esc_fmt(row.get('net_pnl'), 'money')}</span>
+      <span class="glance-sub">{_esc_fmt(_return_fraction(row), 'pct')} · {_esc_fmt(row.get('equity'), 'money')}</span>
+      <span class="badge {badge_cls}">{status_label}</span>
+    </a>
+    """
+
+
+def _render_fleet_table(instances: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for row in instances:
+        if not row.get("ok"):
+            rows.append(
+                "<tr class='offline'>"
+                f"<td>{_esc(row.get('label'))}</td>"
+                "<td><span class='badge warn'>Offline</span></td>"
+                "<td colspan='7' class='error'>"
+                f"{_esc(row.get('error'))}</td>"
+                f"<td><a href='{_esc(row.get('dashboard_url'))}'>Open</a></td>"
+                "</tr>"
+            )
+            continue
+        running = row.get("running")
+        status_label = "Actief" if running else "Gestopt"
+        badge_cls = "ok" if running else "warn"
+        dash = _esc(row.get("dashboard_url"))
+        lite = _esc(row.get("dashboard_lite_url"))
+        rows.append(
+            "<tr>"
+            f"<td><strong>{_esc(row.get('label'))}</strong></td>"
+            f"<td><span class='badge {badge_cls}'>{status_label}</span></td>"
+            f"<td class='num'>{_esc_fmt(row.get('starting_capital'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('equity'), 'money')}</td>"
+            f"<td class='num {_pnl_class(row.get('net_pnl'))}'>{_esc_fmt(row.get('net_pnl'), 'money')}</td>"
+            f"<td class='num {_pnl_class(row.get('net_pnl'))}'>{_esc_fmt(_return_fraction(row), 'pct')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('trade_count') if row.get('trade_count') is not None else 0, 'count')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('open_maker_quotes') if row.get('open_maker_quotes') is not None else 0, 'count')}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('win_rate'), 'pct')}</td>"
+            f"<td><a href='{dash}'>Overzicht</a> · <a href='{lite}'>Mobiel</a></td>"
+            "</tr>"
+        )
+    body = "".join(rows) or "<tr><td colspan='10' class='empty'>Geen rekeningen ingesteld.</td></tr>"
+    return f"""
+    <table class="fleet-table">
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Status</th>
+          <th>Inleg</th>
+          <th>Vermogen</th>
+          <th>PnL</th>
+          <th>%</th>
+          <th>Transacties</th>
+          <th>Quotes</th>
+          <th>Winstkans</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table>
+    """
+
+
+def _shared_css(*, lite: bool = False, fleet: bool = False) -> str:
+    extra = ""
+    if lite:
+        extra = """
+    body.lite { padding-bottom: env(safe-area-inset-bottom); }
+    .lite-container { max-width: 480px; }
+    .hero-lite .hero-inner { align-items: center; }
+    .hero-metric { text-align: center; padding: 1.25rem 1rem; }
+    .hero-metric .value-xl { font-size: 2rem; font-weight: 700; display: block; margin: .35rem 0; }
+    .sub-metric { color: var(--muted); font-size: .9rem; }
+    .lite-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .opp-list { display: grid; gap: .65rem; }
+    .opp-card { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .75rem; background: var(--surface-2); }
+    .opp-top { display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
+    .opp-route { color: var(--muted); font-size: .85rem; margin: .35rem 0; }
+    .opp-pnl { display: flex; justify-content: space-between; gap: .5rem; font-family: var(--mono); font-size: .82rem; }
+    .opp-ts { color: var(--muted); font-size: .75rem; margin-top: .35rem; }
+    .foot-lite { margin: .75rem 0 0; font-size: .8rem; color: var(--muted); }
+        """
+    if fleet:
+        extra += """
+    .totals-bar { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .65rem; padding: 0 1rem 1rem; max-width: 1100px; margin: 0 auto; }
+    .totals-note { max-width: 1100px; margin: 0 auto; padding: 0 1rem 1.1rem; }
+    .glance-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 1.25rem; }
+    .glance-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .85rem 1rem; display: grid; gap: .3rem; text-decoration: none; color: inherit; min-height: 7.5rem; }
+    .glance-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .glance-card.offline { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+    .glance-label { font-size: .82rem; color: var(--muted); font-weight: 600; }
+    .glance-pnl { font-family: var(--mono); font-size: 1.35rem; font-weight: 700; }
+    .glance-sub { color: var(--muted); font-size: .8rem; }
+    .glance-error { color: var(--bad); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; }
+    .fleet-table { width: 100%; border-collapse: collapse; }
+    .fleet-table th { text-align: left; color: var(--muted); font-size: .75rem; font-weight: 600; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+    .fleet-table td { padding: .55rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    .error { color: var(--bad); font-size: .85rem; margin: 0; }
+    @media (min-width: 720px) {
+      .totals-bar { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    }
+        """
+    return f"""
+    :root {{
+      --bg: #0b0f14;
+      --surface: #121820;
+      --surface-2: #171f2a;
+      --text: #eef3f8;
+      --muted: #8fa0b8;
+      --accent: #4da3ff;
+      --good: #34d399;
+      --bad: #f87171;
+      --warn: #fbbf24;
+      --line: #243041;
+      --radius: 14px;
+      --radius-sm: 10px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{ -webkit-text-size-adjust: 100%; }}
+    body {{
+      margin: 0;
+      font-family: var(--sans);
+      background:
+        radial-gradient(900px 420px at 0% -5%, rgba(77,163,255,.12), transparent 60%),
+        radial-gradient(700px 380px at 100% 0%, rgba(52,211,153,.08), transparent 55%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.45;
+    }}
+    a {{ color: var(--accent); }}
+    .hero {{
+      border-bottom: 1px solid var(--line);
+      padding: calc(1rem + env(safe-area-inset-top)) 1rem 1rem;
+      background: color-mix(in srgb, var(--surface) 70%, transparent);
+      backdrop-filter: blur(8px);
+    }}
+    .hero-inner {{
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }}
+    .eyebrow {{
+      margin: 0;
+      font-size: .72rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .brand {{
+      margin: .15rem 0 0;
+      font-size: clamp(1.6rem, 5vw, 2.35rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }}
+    .sub {{ margin: .35rem 0 0; color: var(--muted); font-size: .9rem; max-width: 42ch; }}
+    .forecast-note {{ margin: .85rem 0 .35rem; color: var(--muted); font-size: .9rem; }}
+    .forecast-assumptions {{
+      margin: 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; line-height: 1.45;
+    }}
+    .hero-badges {{ display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }}
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .28rem .65rem;
+      font-size: .72rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }}
+    .badge.ok {{ color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }}
+    .badge.warn {{ color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }}
+    .badge.muted {{ color: var(--muted); }}
+    .container {{ max-width: 1100px; margin: 0 auto; padding: 1rem; display: grid; gap: .85rem; }}
+    .panel {{
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }}
+    .panel.highlight {{
+      background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 90%, #1a2940), var(--surface));
+    }}
+    .research-board {{
+      border-color: color-mix(in srgb, var(--warn) 28%, var(--line));
+    }}
+    .shadow-board {{
+      border-color: color-mix(in srgb, var(--good) 32%, var(--line));
+    }}
+    .shadow-compare {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.85rem;
+      margin: 0.85rem 0 1rem;
+    }}
+    .shadow-compare .col-head {{
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }}
+    .shadow-progress {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 0.65rem;
+      margin: 0.75rem 0;
+    }}
+    .research-sub {{
+      margin: 0 0 1rem;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }}
+    .findings-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 0.85rem;
+    }}
+    .th-sub {{
+      display: block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .world-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.85rem;
+      margin: 0.85rem 0 1.1rem;
+    }}
+    .world-card .label {{
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    .world-card .value {{
+      display: block;
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 0.2rem;
+    }}
+    .world-card .sub {{
+      display: block;
+      margin-top: 0.25rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }}
+    .finding-card {{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.9rem 1rem;
+      background: color-mix(in srgb, var(--surface) 88%, #000);
+    }}
+    .finding-top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.55rem;
+    }}
+    .finding-title {{
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    .finding-headline {{
+      margin: 0 0 0.35rem;
+      font-size: 1.02rem;
+      font-weight: 700;
+      line-height: 1.25;
+    }}
+    .finding-detail {{
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.35;
+    }}
+    .finding-next {{
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      border: 1px dashed color-mix(in srgb, var(--warn) 40%, var(--line));
+      background: color-mix(in srgb, var(--warn) 8%, transparent);
+    }}
+    .finding-next .label {{
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      font-weight: 700;
+    }}
+    .finding-next p {{
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }}
+    .verdict-banner {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.1rem;
+      border-radius: 14px;
+      margin-bottom: 1rem;
+      border: 1px solid var(--line);
+    }}
+    .verdict-banner.bad {{
+      border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+      background: color-mix(in srgb, var(--bad) 12%, transparent);
+    }}
+    .verdict-banner.warn {{
+      border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+      background: color-mix(in srgb, var(--warn) 12%, transparent);
+    }}
+    .verdict-banner.ok {{
+      border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+      background: color-mix(in srgb, var(--good) 12%, transparent);
+    }}
+    .vb-kicker {{
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }}
+    .vb-verdict {{
+      display: block;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }}
+    .vb-headline {{
+      margin: 0.35rem 0 0;
+      color: var(--text);
+      opacity: 0.9;
+    }}
+    .vb-meta {{
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      color: var(--muted);
+      font-size: 0.86rem;
+      justify-content: center;
+    }}
+    .finding-list {{
+      margin: 0 0 1rem;
+      padding-left: 1.1rem;
+      color: var(--text);
+      line-height: 1.45;
+    }}
+    .subhead {{
+      margin: 0.4rem 0 0.55rem;
+      font-size: 0.95rem;
+    }}
+    .horizon-chips {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-bottom: 1rem;
+    }}
+    .chip {{
+      display: inline-flex;
+      align-items: center;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--muted);
+    }}
+    .chip.ok {{ color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }}
+    .chip.warn {{ color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }}
+    .chip.bad {{ color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }}
+    td.note {{ max-width: 18rem; color: var(--muted); font-size: 0.82rem; }}
+    .panel-head {{ display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .5rem; }}
+    .panel h2 {{
+      margin: 0 0 .85rem;
+      font-size: .72rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    .panel-head h2 {{ margin-bottom: 0; }}
+    .link-lite {{ font-size: .82rem; color: var(--accent); text-decoration: none; white-space: nowrap; }}
+    .metric-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+      gap: .65rem;
+    }}
+    .metric-grid.compact {{ grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); }}
+    .metric-card {{
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: .7rem .75rem;
+      min-width: 0;
+    }}
+    .metric-card.positive .value {{ color: var(--good); }}
+    .metric-card.negative .value {{ color: var(--bad); }}
+    .metric-card .label {{
+      display: block;
+      color: var(--muted);
+      font-size: .68rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }}
+    .metric-card .value {{
+      display: block;
+      margin-top: .25rem;
+      font-family: var(--mono);
+      font-size: clamp(.95rem, 2.8vw, 1.15rem);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      word-break: break-word;
+    }}
+    .controls {{ display: flex; flex-wrap: wrap; gap: .5rem; }}
+    .btn {{
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: var(--text);
+      border-radius: 999px;
+      padding: .62rem 1rem;
+      min-height: 44px;
+      font: inherit;
+      font-size: .9rem;
+      cursor: pointer;
+      touch-action: manipulation;
+    }}
+    .btn:active {{ transform: scale(.98); }}
+    .btn-danger {{ border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); color: #fecaca; }}
+    .table-wrap {{
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin: 0 -.25rem;
+      padding: 0 .25rem;
+    }}
+    table {{ width: 100%; min-width: 520px; border-collapse: collapse; font-size: .82rem; }}
+    th, td {{ text-align: left; padding: .55rem .4rem; border-bottom: 1px solid var(--line); vertical-align: top; }}
+    th {{
+      color: var(--muted);
+      font-size: .68rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    td.num, th {{ font-family: var(--mono); font-variant-numeric: tabular-nums; }}
+    td.num {{ white-space: nowrap; }}
+    td.ts {{ color: var(--muted); font-size: .75rem; white-space: nowrap; }}
+    td.positive {{ color: var(--good); }}
+    td.negative {{ color: var(--bad); }}
+    .pill {{
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .12rem .45rem;
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      white-space: nowrap;
+    }}
+    .empty {{ color: var(--muted); text-align: center; padding: .75rem 0; }}
+    .charts {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .85rem;
+    }}
+    .chart-card {{
+      margin: 0;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: .85rem;
+      min-width: 0;
+    }}
+    .chart-card figcaption {{
+      margin: 0 0 .65rem;
+      font-size: .72rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    .chart-card svg,
+    .panel svg {{
+      width: 100%;
+      height: auto;
+      display: block;
+    }}
+    .chart-empty {{
+      color: var(--muted);
+      text-align: center;
+      padding: 1.4rem .5rem;
+      font-size: .9rem;
+      margin: 0;
+    }}
+    @media (max-width: 720px) {{
+      .charts {{ grid-template-columns: 1fr; }}
+    }}
+    .footer {{
+      text-align: center;
+      color: var(--muted);
+      font-size: .75rem;
+      padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    }}
+    .muted {{ color: var(--muted); }}
+    @media (max-width: 640px) {{
+      .container {{ padding: .75rem; gap: .7rem; }}
+      .panel {{ padding: .85rem; }}
+      .hero-inner {{ align-items: stretch; }}
+      table {{ min-width: 640px; font-size: .78rem; }}
+    }}
+    {extra}
+    """
+
+
+def _shared_js(*, lite: bool = False) -> str:
+    confirm_msg = (
+        "Oefenrekening opnieuw beginnen?"
+        if lite
+        else "Oefenrekening terugzetten naar startkapitaal? Dit raakt geen echte beursrekeningen."
+    )
+    return f"""
+    async function post(url, body) {{
+      await fetch(url, {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(body || {{}})
+      }});
+      location.reload();
+    }}
+    async function resetPaper() {{
+      if (!confirm({confirm_msg!r})) return;
+      await post('/paper/reset', {{confirm: true}});
+    }}
+    """
+
+
+def _to_decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _fmt_money(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None:
+        return "—"
+    q = d.quantize(_TWO, rounding=ROUND_HALF_UP)
+    sign = "-" if q < 0 else ""
+    q = abs(q)
+    return f"{sign}{q:,.2f}"
+
+
+def _fmt_count(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None:
+        return "—"
+    return f"{int(d):,}"
+
+
+def _fmt_pct(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None:
+        return "—"
+    if abs(d) <= 1:
+        d *= _HUNDRED
+    q = d.quantize(_TWO, rounding=ROUND_HALF_UP)
+    return f"{q:,.2f}%"
+
+
+def _fmt_ratio(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None:
+        return "—"
+    q = d.quantize(_TWO, rounding=ROUND_HALF_UP)
+    return f"{q:,.2f}"
+
+
 def _fmt(value: Any) -> str:
+    """Legacy helper — money-style 2 decimal places."""
+    return _fmt_money(value)
+
+
+def _esc_fmt(value: Any, kind: str = "money") -> str:
+    if kind == "count":
+        text = _fmt_count(value)
+    elif kind == "pct":
+        text = _fmt_pct(value)
+    elif kind == "ratio":
+        text = _fmt_ratio(value)
+    else:
+        text = _fmt_money(value)
+    return _esc(text)
+
+
+def _fill_model_lab_rows(panel: list[dict[str, Any]]) -> str:
+    if not panel:
+        return "<tr><td colspan='9' class='empty'>Geen fill-lab rapport — run study</td></tr>"
+    rows: list[str] = []
+    for row in panel:
+        status = str(row.get("status") or "")
+        if status == "CONSERVATIVE_BASELINE":
+            label = "CONSERVATIVE BASELINE"
+        elif status == "UNSUPPORTED":
+            label = "EXPERIMENTAL (UNSUPPORTED)"
+        else:
+            label = "EXPERIMENTAL COUNTERFACTUAL"
+        lock = row.get("capital_lock") or {}
+        lock_med = None
+        if isinstance(lock, dict):
+            lock_med = (lock.get("capital_lock_ms") or {}).get("median")
+        adv_med = row.get("median_adverse")
+        if adv_med is None:
+            adv_med = row.get("median_adverse_bps_5s_export")
+        adv_mean = row.get("mean_adverse")
+        if adv_mean is None:
+            adv_mean = row.get("mean_adverse_bps_5s_export")
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('model'))}</td>"
+            f"<td>{_esc(label)}</td>"
+            f"<td>{_esc(row.get('support'))}</td>"
+            f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
+            f"<td class='num'>{_esc(row.get('fill_rate'))}</td>"
+            f"<td class='num'>{_esc(adv_med)}</td>"
+            f"<td class='num'>{_esc(adv_mean)}</td>"
+            f"<td class='num'>{_esc(row.get('net'))}</td>"
+            f"<td class='num'>{_esc(lock_med)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _lead_lag_lab_rows(panel: list[dict[str, Any]]) -> str:
+    if not panel:
+        return (
+            "<tr><td colspan='11' class='empty'>"
+            "Geen lead-lag rapport — run study (verwacht INSUFFICIENT_DATA zonder tape)"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for row in panel:
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('pair'))}</td>"
+            f"<td>{_esc(row.get('status'))}</td>"
+            f"<td>{_esc(row.get('data_quality'))}</td>"
+            f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
+            f"<td class='num'>{_esc(row.get('horizon_ms'))}</td>"
+            f"<td class='num'>{_esc(row.get('directional_hit_rate'))}</td>"
+            f"<td class='num'>{_esc(row.get('median_follower_response'))}</td>"
+            f"<td class='num'>{_esc(row.get('estimated_prediction_error'))}</td>"
+            f"<td class='num'>{_esc(row.get('shadow_opportunities'))}</td>"
+            f"<td class='num'>{_esc(row.get('conservative_admissions'))}</td>"
+            f"<td class='num'>{_esc(row.get('counterfactual_shadow_net'))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _autonomous_round_rows(round_info: dict[str, Any]) -> str:
+    if not round_info:
+        return "<tr><td colspan='2' class='empty'>Nog geen autonomous run</td></tr>"
+    return "".join(
+        f"<tr><td>{_esc(k)}</td><td class='note'>{_esc(v)}</td></tr>"
+        for k, v in round_info.items()
+    )
+
+
+def _autonomous_pipeline_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<tr><td colspan='3' class='empty'>Geen pipeline</td></tr>"
+    return "".join(
+        "<tr>"
+        f"<td>{_esc(r.get('strategy'))}</td>"
+        f"<td><span class='chip {_status_chip_class(r.get('verdict'))}'>{_esc(r.get('verdict'))}</span></td>"
+        f"<td>{_esc(r.get('gate') or '—')}</td>"
+        "</tr>"
+        for r in rows
+    )
+
+
+def _autonomous_learning_items(block: dict[str, Any]) -> str:
+    items = block.get("items") if isinstance(block, dict) else None
+    if not items:
+        lessons = (block or {}).get("shared_lessons") if isinstance(block, dict) else None
+        if lessons:
+            return "".join(f"<li>{_esc(x)}</li>" for x in lessons)
+        return "<li>Nog geen LLM-analyse.</li>"
+    parts = []
+    for it in items:
+        if isinstance(it, dict):
+            parts.append(
+                f"<li>{_esc(it.get('learned') or it.get('notes') or it)}</li>"
+            )
+        else:
+            parts.append(f"<li>{_esc(it)}</li>")
+    return "".join(parts)
+
+
+def _research_tournament_rows(board: list[dict[str, Any]]) -> str:
+    if not board:
+        return (
+            "<tr><td colspan='8' class='empty'>"
+            "Nog geen scoreboard — run python -m bot.research.tournament.runner"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for row in board:
+        verdict = str(row.get("VERDICT") or "")
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('STRATEGY'))}</td>"
+            f"<td><span class='chip {_status_chip_class(verdict)}'>{_esc(verdict)}</span></td>"
+            f"<td>{_esc(row.get('FAILED_GATE') or '—')}</td>"
+            f"<td class='num'>{_esc(row.get('DEV_SIGNALS'))}</td>"
+            f"<td class='num'>{_esc(row.get('OOS_SIGNALS'))}</td>"
+            f"<td class='num'>{_esc(row.get('EXPECTED_NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('EXECUTION_NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('TOURNAMENT_SCORE'))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _concentration_forensics_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "<tr><td colspan='10' class='empty'>"
+            "Nog geen forensics — run python -m bot.research.forensics.runner"
+            "</td></tr>"
+        )
+    out: list[str] = []
+    for row in rows:
+        verdict = str(row.get("CONCENTRATION_VERDICT") or "")
+        top_sym = row.get("TOP_SYMBOL") or "—"
+        top_sym_c = row.get("TOP_SYMBOL_CONTRIBUTION")
+        top_ven = row.get("TOP_VENUE") or "—"
+        top_ven_c = row.get("TOP_VENUE_CONTRIBUTION")
+        top_blk = row.get("TOP_TIME_BLOCK") or "—"
+        top_blk_c = row.get("TOP_TIME_BLOCK_CONTRIBUTION")
+        out.append(
+            "<tr>"
+            f"<td>{_esc(row.get('STRATEGY'))}</td>"
+            f"<td class='num'>{_esc_fmt(row.get('TOTAL_RESULT'), 'money')}</td>"
+            f"<td>{_esc(top_sym)} ({_esc_fmt(top_sym_c, 'money')})</td>"
+            f"<td>{_esc(top_ven)} ({_esc_fmt(top_ven_c, 'money')})</td>"
+            f"<td>{_esc(top_blk)} ({_esc_fmt(top_blk_c, 'money')})</td>"
+            f"<td class='num'>{_esc(row.get('POSITIVE_BLOCKS'))}</td>"
+            f"<td class='num'>{_esc(row.get('NEGATIVE_BLOCKS'))}</td>"
+            f"<td><span class='chip {_status_chip_class(verdict)}'>{_esc(verdict)}</span></td>"
+            f"<td>{_esc(row.get('STRUCTURAL_EXPLANATION'))}</td>"
+            f"<td>{_esc(row.get('RECOMMENDED_NEXT_HYPOTHESIS'))}</td>"
+            "</tr>"
+        )
+    return "".join(out)
+
+
+def _regime_hypothesis_lab_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "<tr><td colspan='12' class='empty'>"
+            "Nog geen regime-lab — run python -m bot.research.regime_lab.runner"
+            "</td></tr>"
+        )
+    parts: list[str] = []
+    for row in rows:
+        top = row.get("top_concentration") or {}
+        top_txt = (
+            f"{top.get('symbol') or '—'} {top.get('symbol_share') or ''} "
+            f"/ {top.get('route') or '—'}"
+        )
+        disc = row.get("Discovery_NET")
+        disc_s = "—" if disc is None else disc
+        oos_expected = row.get("OOS_NET")
+        replay_net = row.get("canonical_replay_net_eur")
+        replay_pf = row.get("canonical_replay_net_per_fill_eur")
+        if replay_pf is None:
+            replay_pf = row.get("NET_per_fill")
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('ID'))}</td>"
+            f"<td>{_esc(row.get('Parent'))}</td>"
+            f"<td>{_esc(row.get('Mechanism'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('Status'))}'>"
+            f"{_esc(row.get('Status'))}</span></td>"
+            f"<td class='num' title='OBSERVED world only; forensic discovery is not strategy PnL'>{_esc(disc_s)}</td>"
+            f"<td class='num' title='SIGNAL_EXPECTATION: ExpectedNetPerSignalEUR'>{_esc_fmt(row.get('DEV_NET'), 'money')}</td>"
+            f"<td class='num' title='SIGNAL_EXPECTATION: ExpectedNetPerSignalEUR'>{_esc_fmt(oos_expected, 'money')}</td>"
+            f"<td class='num' title='EXECUTION_REPLAY: RealizedReplayNetEUR / EstimatedFillCount'>{_esc_fmt(replay_pf, 'money')}</td>"
+            f"<td class='num'>{_esc(row.get('sample_count'))}</td>"
+            f"<td>{_esc(row.get('stability'))}</td>"
+            f"<td>{_esc(top_txt)}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('verdict'))}'>"
+            f"{_esc(row.get('verdict'))}</span></td>"
+            "</tr>"
+        )
+    return "".join(parts)
+
+
+def _edge_robustness_lab_rows(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "<tr><td colspan='15' class='empty'>"
+            "Nog geen robustness-lab — run python -m bot.research.robustness.runner"
+            "</td></tr>"
+        )
+    parts: list[str] = []
+    for row in rows:
+        netf = row.get("canonical_replay_net_per_fill_eur")
+        if netf is None:
+            netf = row.get("replay_net_per_fill_eur")
+        unit = "EUR / estimated fill"
+        net_txt = "—" if netf is None else f"{netf} {unit}".strip()
+        title = (
+            "EXECUTION_REPLAY RealizedReplayNetEUR / EstimatedFillCount. "
+            "Not mean_edge_execution_replay_net_per_fill_eur."
+        )
+        parent = row.get("parent_comparison") or {}
+        parent_txt = parent.get("positive")
+        if row.get("ID") == "H-0007" or row.get("gate_inactive") or row.get("RESEARCH_STATUS") == "GATE_INACTIVE":
+            parent_txt = "GATE INACTIVE — OOS_PASS is not selective improvement"
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('ID'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('mechanical_verdict'))}'>"
+            f"{_esc(row.get('mechanical_verdict'))}</span></td>"
+            f"<td><span class='chip {_status_chip_class(row.get('interpretation_verdict') or row.get('RESEARCH_STATUS'))}'>"
+            f"{_esc(row.get('interpretation_verdict') or row.get('RESEARCH_STATUS'))}</span></td>"
+            f"<td class='num' title='{_esc(title)}'>{_esc(net_txt)}</td>"
+            f"<td class='num'>{_esc(row.get('edge_to_cost'))}</td>"
+            f"<td class='num'>{_esc(row.get('edge_to_uncertainty'))}</td>"
+            f"<td class='num'>{_esc(row.get('break_even_adverse'))}</td>"
+            f"<td class='num'>{_esc(row.get('break_even_fee'))}</td>"
+            f"<td class='num'>{_esc(row.get('break_even_slippage'))}</td>"
+            f"<td class='num'>{_esc(row.get('worst_stress_NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('independent_oos_windows'))}</td>"
+            f"<td class='num'>{_esc(row.get('gate_selectivity'))}</td>"
+            f"<td>{_esc(parent_txt)}</td>"
+            f"<td>{_esc(row.get('replication_status'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('final_research_decision'))}'>"
+            f"{_esc(row.get('final_research_decision'))}</span></td>"
+            "</tr>"
+        )
+    return "".join(parts)
+
+
+def _canonical_strategy_panels(block: dict[str, Any]) -> str:
+    if not block:
+        return "<p class='forecast-note'>Run: python -m bot.research.accounting.runner</p>"
+    parts: list[str] = []
+    for hid in ("H-0005", "H-0007"):
+        row = next((r for r in (block.get("rows") or []) if r.get("ID") == hid), None) or block.get(hid) or {}
+        if hid == "H-0007":
+            gate_note = (
+                "<p class='forecast-note'><strong>GATE INACTIVE.</strong> "
+                "OOS_PASS does not imply selective strategy improvement. "
+                "Do not retune the WIDE threshold. No automatic child hypotheses.</p>"
+            )
+        else:
+            gate_note = (
+                "<p class='forecast-note'><strong>Parent vs child incremental</strong> "
+                "(paired same-window replay): delta="
+                f"{_esc(row.get('paired_delta_replay_net_eur') or row.get('PARENT_CHILD_PAIRED_DELTA'))} "
+                f"· mean delta={_esc(row.get('paired_mean_delta'))} "
+                f"· positive windows={_esc(row.get('paired_positive_window_fraction'))}</p>"
+            )
+        parts.append(
+            "<article class='finding-card'>"
+            f"<div class='finding-top'><span class='finding-title'>{_esc(hid)}</span>"
+            f"<span class='badge {_status_chip_class(row.get('RESEARCH_STATUS') or row.get('RESEARCH_DECISION'))}'>"
+            f"{_esc(row.get('RESEARCH_STATUS') or row.get('RESEARCH_DECISION') or 'PENDING')}</span></div>"
+            "<div class='world-grid'>"
+            "<div class='world-card'>"
+            "<span class='label'>1. Expected economics</span>"
+            f"<span class='value' title='SIGNAL_EXPECTATION ExpectedNetPerSignalEUR'>"
+            f"{_esc(row.get('expected_net_per_signal_eur'))}</span>"
+            "<span class='sub'>SIGNAL_EXPECTATION · EUR per signal · mean-edge waterfall</span>"
+            "</div>"
+            "<div class='world-card'>"
+            "<span class='label'>2. Canonical execution replay</span>"
+            f"<span class='value' title='EXECUTION_REPLAY RealizedReplayNetEUR'>"
+            f"{_esc(row.get('replay_net_eur') or row.get('CANONICAL_REPLAY_NET'))}</span>"
+            "<span class='sub'>EXECUTION_REPLAY · replay NET/fill="
+            f"{_esc(row.get('replay_net_per_fill_eur') or row.get('CANONICAL_REPLAY_NET_PER_FILL') or row.get('canonical_replay_net_per_fill_eur'))}"
+            " (RealizedReplayNetEUR / EstimatedFillCount)</span>"
+            "</div>"
+            "<div class='world-card'>"
+            "<span class='label'>3. Observed / paper</span>"
+            f"<span class='value'>{_esc(row.get('observed_status') or 'NOT_RUN')}</span>"
+            "<span class='sub'>OBSERVED · must never silently replace replay</span>"
+            "</div>"
+            "</div>"
+            f"{gate_note}"
+            "</article>"
+        )
+    return "".join(parts)
+
+
+def _final_validation_why_items(block: dict[str, Any]) -> str:
+    items = list(block.get("WHY") or [])
+    if not items:
+        return "<li>Not run — python -m bot.research.final_validation.runner</li>"
+    return "".join(f"<li>{_esc(x)}</li>" for x in items)
+
+
+def _alpha_attribution_group_rows(block: dict[str, Any]) -> str:
+    rows = list(block.get("groups") or [])
+    if not rows:
+        return "<tr><td colspan='7' class='empty'>Attribution not run</td></tr>"
+    parts: list[str] = []
+    for row in rows:
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('GROUP'))}</td>"
+            f"<td class='num'>{_esc(row.get('SIGNALS'))}</td>"
+            f"<td class='num'>{_esc(row.get('FILLS'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET/SIGNAL'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET/FILL'))}</td>"
+            f"<td class='num'>{_esc(row.get('POSITIVE_WINDOWS'))}</td>"
+            "</tr>"
+        )
+    return "".join(parts)
+
+
+def _alpha_attribution_context_rows(block: dict[str, Any]) -> str:
+    rows = list(block.get("contexts") or [])
+    if not rows:
+        return "<tr><td colspan='5' class='empty'>No descriptive contexts</td></tr>"
+    parts: list[str] = []
+    for row in rows:
+        conc = row.get("concentration") or {}
+        if isinstance(conc, dict):
+            conc_txt = (
+                f"top_symbol={conc.get('top_symbol')} {conc.get('top_symbol_share')}; "
+                f"top_route={conc.get('top_route')} {conc.get('top_route_share')}"
+            )
+        else:
+            conc_txt = str(conc)
+        parts.append(
+            "<tr>"
+            f"<td>{_esc(row.get('context'))}</td>"
+            f"<td class='num'>{_esc(row.get('NET_contribution'))}</td>"
+            f"<td><span class='pill'>{_esc(row.get('stability'))}</span></td>"
+            f"<td class='note'>{_esc(conc_txt)}</td>"
+            f"<td>{_esc(row.get('pre_trade_usable'))}</td>"
+            "</tr>"
+        )
+    return "".join(parts)
+
+
+def _research_data_status_rows(rds: dict[str, Any]) -> str:
+    if not rds:
+        return "<tr><td colspan='2' class='empty'>Geen operational status</td></tr>"
+    order = (
+        "CURRENT_STATE",
+        "RECORDER_ENABLED",
+        "RECORDER_RUNNING",
+        "EVENTS_WRITTEN",
+        "EVENTS_DROPPED",
+        "WRITE_ERRORS",
+        "QUEUE_DEPTH",
+        "LAST_WRITE",
+        "ACTIVE_DATASET",
+        "DATASET_EVENT_COUNT",
+        "DATASET_DURATION",
+        "VENUES",
+        "TIMESTAMP_COVERAGE",
+        "FINAL_ACCEPTANCE_VERDICT",
+    )
+    rows: list[str] = []
+    for key in order:
+        val: Any = rds.get(key)
+        if isinstance(val, float) and key == "DATASET_DURATION":
+            val = f"{val:.1f}s"
+        elif isinstance(val, (dict, list)):
+            val = json.dumps(val, sort_keys=True)[:180]
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(key)}</td>"
+            f"<td class='note'>{_esc(val)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _market_data_lab_rows(panel: list[dict[str, Any]]) -> str:
+    if not panel:
+        return (
+            "<tr><td colspan='9' class='empty'>"
+            "Geen venue-data — recorder nog leeg"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for row in panel:
+        note = str(row.get("note") or row.get("quality_grade") or "")
+        if len(note) > 72:
+            note = note[:69] + "…"
+        ex_cov = row.get("exchange_ts_coverage")
+        if isinstance(ex_cov, (int, float)):
+            ex_cov = f"{float(ex_cov) * 100:.0f}%"
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(row.get('venue'))}</td>"
+            f"<td>{_esc(row.get('exchange_ts') or ('Ja' if row.get('exchange_ts_coverage') else '—'))}</td>"
+            f"<td><span class='chip {_status_chip_class(row.get('quality') or row.get('quality_grade'))}'>"
+            f"{_esc(row.get('quality') or row.get('quality_grade'))}</span></td>"
+            f"<td class='num'>{_esc(row.get('events'))}</td>"
+            f"<td class='num'>{_esc(ex_cov)}</td>"
+            f"<td class='num'>{_esc(row.get('p50_ms'))}</td>"
+            f"<td class='num'>{_esc(row.get('p95_ms'))}</td>"
+            f"<td class='num'>{_esc(row.get('p99_ms'))}</td>"
+            f"<td class='note'>{_esc(note)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _pipeline_funnel_panel(funnel: dict[str, Any]) -> str:
+    """Live pipeline observability — full funnel from market scan to fill."""
+    if not funnel or not funnel.get("cycles"):
+        return ""
+    steps = [
+        ("Markets scanned", funnel.get("markets_scanned", 0)),
+        ("OKX quote available", funnel.get("okx_quote_available", 0)),
+        ("Bitvavo quote available", funnel.get("bitvavo_quote_available", 0)),
+        ("Valid synchronized observations", funnel.get("valid_synchronized", 0)),
+        ("Raw dislocations", funnel.get("raw_dislocations", 0)),
+        ("≥ 40 bps", funnel.get("above_threshold_40bps", 0)),
+        ("Candidate created (decision time)", funnel.get("candidate_created_immediately", 0)),
+        ("Profitability passed", funnel.get("profitability_passed", 0)),
+        ("Profitability rejected", funnel.get("profitability_rejected", 0)),
+        ("Risk passed", funnel.get("risk_passed", 0)),
+        ("Risk rejected", funnel.get("risk_rejected", 0)),
+        ("Paper orders", funnel.get("paper_orders", 0)),
+        ("Full fill", funnel.get("full_fill", 0)),
+        ("Partial fill", funnel.get("partial_fill", 0)),
+        ("No fill", funnel.get("no_fill", 0)),
+        ("Closed", funnel.get("closed", 0)),
+        ("T+5s outcome recorded", funnel.get("t_plus_5_outcome_recorded", 0)),
+        ("T+5s data invalid", funnel.get("t_plus_5_data_invalid", 0)),
+    ]
+    rows = "".join(
+        f"<tr><td>{_esc(label)}</td><td class='num'>{_fmt_count(count)}</td></tr>"
+        for label, count in steps
+    )
+    entry_sem = _esc(funnel.get("entry_semantics") or "Decision is made at signal time")
+    outcome_sem = _esc(funnel.get("outcome_horizon") or "5 seconds")
+    return (
+        "<section class='panel'>"
+        "<div class='panel-head'><h2>Live Pipeline — okx → bitvavo</h2>"
+        f"<span class='badge muted'>{_fmt_count(funnel.get('cycles', 0))} cycles</span></div>"
+        f"<p class='forecast-note'>"
+        f"ENTRY DECISION: {entry_sem} · OUTCOME HORIZON: {outcome_sem}"
+        "</p>"
+        "<table class='tbl'><thead><tr><th>Stap</th><th class='num'>Aantal</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+        "</section>"
+    )
+
+
+def _economic_parity_panel(block: dict[str, Any]) -> str:
+    """LIVE ECONOMIC PARITY — research vs live profitability diagnostics."""
+    if not block or not block.get("LIVE_CANDIDATES_ANALYZED"):
+        return ""
+    verdict = str(block.get("ECONOMIC_PARITY") or "UNKNOWN")
+    chip = "ok" if verdict == "ECONOMIC_PARITY_PASS" else "warn"
+    rows = [
+        ("Candidates created", block.get("candidates_created", 0)),
+        ("Research-economics profitable", block.get("research_economics_profitable", 0)),
+        ("Live-economics profitable", block.get("live_economics_profitable", 0)),
+        ("Parity mismatches", block.get("parity_mismatches", 0)),
+        ("Median dislocation (bps)", block.get("median_dislocation_bps")),
+        ("Median break-even (bps)", block.get("median_breakeven_bps")),
+        ("Median expected net (EUR)", block.get("median_expected_net")),
+    ]
+    body = "".join(
+        f"<tr><td>{_esc(label)}</td><td class='num'>{_esc_fmt(val, 'num' if isinstance(val, (int, float)) else 'raw')}</td></tr>"
+        for label, val in rows
+    )
+    buckets = block.get("diagnostic_buckets") or []
+    bucket_rows = "".join(
+        f"<tr><td>{_esc(b.get('bucket'))}</td><td class='num'>{_fmt_count(b.get('count'))}</td>"
+        f"<td class='num'>{_esc_fmt(b.get('median_expected_net'), 'money')}</td></tr>"
+        for b in buckets
+    )
+    reject = block.get("top_rejection_causes") or {}
+    reject_rows = "".join(
+        f"<tr><td>{_esc(k)}</td><td class='num'>{_fmt_count(v)}</td></tr>"
+        for k, v in sorted(reject.items(), key=lambda x: -x[1])[:5]
+    )
+    root = block.get("ROOT_CAUSE")
+    root_line = (
+        f"<p class='forecast-note'>Root cause tag: <strong>{_esc(root)}</strong></p>"
+        if root and root != "NONE"
+        else ""
+    )
+    return (
+        "<section class='panel'>"
+        "<div class='panel-head'><h2>LIVE ECONOMIC PARITY</h2>"
+        f"<span class='chip {chip}'>{_esc(verdict)}</span></div>"
+        f"{root_line}"
+        "<table class='tbl'><thead><tr><th>Metric</th><th class='num'>Value</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+        + (
+            "<h3 class='subhead'>Dislocation buckets (diagnostic only)</h3>"
+            "<table class='tbl'><thead><tr><th>Bucket</th><th class='num'>N</th>"
+            "<th class='num'>Median research NET</th></tr></thead>"
+            f"<tbody>{bucket_rows}</tbody></table>"
+            if bucket_rows
+            else ""
+        )
+        + (
+            "<h3 class='subhead'>Top rejection causes (research economics)</h3>"
+            "<table class='tbl'><thead><tr><th>Reason</th><th class='num'>Count</th></tr></thead>"
+            f"<tbody>{reject_rows}</tbody></table>"
+            if reject_rows
+            else ""
+        )
+        + "</section>"
+    )
+
+
+def _shadow_validation_panel(block: dict[str, Any]) -> str:
+    """Decision-oriented SHADOW VALIDATION scorecard at the top of the dashboard."""
+    card = block.get("scorecard") or {}
+    status = str(
+        (card.get("G_CURRENT_VERDICT") or {}).get("SHADOW_VALIDATION_VERDICT")
+        or block.get("STATUS")
+        or block.get("SHADOW_VALIDATION_VERDICT")
+        or "INSUFFICIENT_LIVE_SAMPLE"
+    )
+    sample = card.get("A_SAMPLE") or {}
+    fill = card.get("B_FILL_REALISM") or {}
+    exe = card.get("C_EXECUTION_GAP") or {}
+    mkt = card.get("D_MARKET_GAP") or {}
+    adv = card.get("E_ADVERSE_SELECTION") or {}
+    stab = card.get("F_STABILITY") or {}
+    rates = block.get("rates") or {}
+    hist = (block.get("historical") or {}) if isinstance(block.get("historical"), dict) else {}
+    research_net = hist.get("BASELINE_EXECUTION_NET_EUR", "212011.78")
+    windows = sample.get("windows") if sample else block.get("complete_windows")
+    days = sample.get("days") if sample else block.get("calendar_days")
+    min_w = sample.get("windows_required") or block.get("min_windows") or 20
+    min_d = sample.get("days_required") or block.get("min_calendar_days") or 7
+    sentence = block.get("progress_sentence") or card.get("progress_sentence") or (
+        "We need more complete windows before the frozen minimum sample is reached."
+    )
+    integrity = block.get("VALIDATION_INTEGRITY") or card.get("VALIDATION_INTEGRITY") or "UNKNOWN"
+    gap = exe.get("gap") if isinstance(exe.get("gap"), dict) else (block.get("execution_gap") or {})
+    mean_gap = gap.get("mean") if isinstance(gap, dict) else None
+    mkt_gap = mkt.get("gap") if isinstance(mkt.get("gap"), dict) else {}
+    adv_5 = (adv.get("observed_5s") or {}).get("mean") if isinstance(adv.get("observed_5s"), dict) else None
+    known = card.get("known") or ["Live shadow observation is running."]
+    unknown = card.get("unknown") or ["Frozen minimum sample is not complete."]
+    known_html = "".join(f"<li>{_esc(x)}</li>" for x in known)
+    unknown_html = "".join(f"<li>{_esc(x)}</li>" for x in unknown)
+    return (
+        "<section class='panel shadow-board'>"
+        "<div class='panel-head'><h2>CURRENT RESEARCH STATUS</h2>"
+        "<span class='badge muted'>SHADOW PAPER VALIDATION</span></div>"
+        f"<div class='verdict-banner {_verdict_banner_class(status)}'>"
+        "<div>"
+        "<span class='vb-kicker'>Does the frozen strategy survive live market data?</span>"
+        f"<strong class='vb-verdict'>G. CURRENT VERDICT: {_esc(status)}</strong>"
+        "<p class='vb-headline'>"
+        f"Frozen strategy: Cross-Venue Dislocation · okx → bitvavo · 40 bps · 5s · "
+        f"Production: DISABLED · Integrity: {_esc(integrity)}"
+        "</p></div>"
+        "<div class='vb-meta'>"
+        f"<span>Run: {_esc(block.get('validation_run_id') or '—')}</span>"
+        f"<span>NEXT_ACTION: {_esc(block.get('NEXT_ACTION') or 'CONTINUE_COLLECTING')}</span>"
+        "</div></div>"
+        f"<p class='forecast-note'><strong>What happens next:</strong> {_esc(sentence)}</p>"
+        "<div class='shadow-compare'>"
+        f"<article class='world-card'><span class='col-head'>Known</span><ul class='finding-list'>{known_html}</ul></article>"
+        f"<article class='world-card'><span class='col-head'>Still unknown</span><ul class='finding-list'>{unknown_html}</ul></article>"
+        "</div>"
+        "<h3 class='subhead'>VALIDATION INTEGRITY · FROZEN STRATEGY · LIVE SAMPLE PROGRESS</h3>"
+        "<div class='shadow-progress'>"
+        f"<article class='metric-card'><span class='label'>integrity</span><span class='value'>{_esc(integrity)}</span></article>"
+        f"<article class='metric-card'><span class='label'>windows</span><span class='value'>{_esc(windows if windows is not None else 0)} / {_esc(min_w)}</span></article>"
+        f"<article class='metric-card'><span class='label'>calendar days</span><span class='value'>{_esc(_fmt_days(days))} / {_esc(min_d)}</span></article>"
+        f"<article class='metric-card'><span class='label'>signals</span><span class='value'>{_esc(block.get('n_candidates') or sample.get('signals') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>valid</span><span class='value'>{_esc(block.get('valid_observations') or sample.get('valid_outcomes') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>FULL</span><span class='value'>{_esc(fill.get('FULL_FILL') if fill.get('FULL_FILL') is not None else block.get('FULL_FILL') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>PARTIAL</span><span class='value'>{_esc(fill.get('PARTIAL_FILL') if fill.get('PARTIAL_FILL') is not None else block.get('PARTIAL_FILL') or 0)}</span></article>"
+        f"<article class='metric-card'><span class='label'>NO_FILL</span><span class='value'>{_esc(fill.get('NO_FILL') if fill.get('NO_FILL') is not None else block.get('NO_FILL') or 0)}</span></article>"
+        "</div>"
+        "<h3 class='subhead'>LIVE EXECUTION FUNNEL</h3>"
+        f"{_shadow_funnel_html(fill.get('funnel') or block.get('funnel') or {})}"
+        "<h3 class='subhead'>EXECUTION GAP · MARKET GAP · ADVERSE REALITY CHECK</h3>"
+        "<div class='shadow-compare'>"
+        "<article class='world-card'>"
+        "<span class='col-head'>RESEARCH EXPECTATION</span>"
+        "<span class='label'>B_EXPECTED_ECONOMICS</span>"
+        f"<span class='value'>{_esc(research_net)} EUR</span>"
+        "<span class='sub'>Historical BASELINE · 67443/67443 canonical fills</span>"
+        f"<span class='sub'>Live predicted expected NET: {_esc_fmt(exe.get('RESEARCH_EXPECTATION') if exe.get('RESEARCH_EXPECTATION') is not None else block.get('RESEARCH_EXPECTED_NET'), 'money')}</span>"
+        "</article>"
+        "<article class='world-card'>"
+        "<span class='col-head'>LIVE SHADOW EXECUTION</span>"
+        "<span class='label'>C_SHADOW_EXECUTION</span>"
+        f"<span class='value'>{_esc_fmt(exe.get('LIVE_SHADOW_EXECUTION') if exe.get('LIVE_SHADOW_EXECUTION') is not None else block.get('LIVE_SHADOW_EXECUTION_NET'), 'money')}</span>"
+        f"<span class='sub'>prediction_gap mean: {_esc(_fmt_gap(mean_gap))}</span>"
+        f"<span class='sub'>full / partial / no-fill: {_esc(_fmt_rate(fill.get('full_fill_rate') if fill.get('full_fill_rate') is not None else rates.get('fill_rate')))} / {_esc(_fmt_rate(fill.get('partial_fill_rate') if fill.get('partial_fill_rate') is not None else rates.get('partial_fill_rate')))} / {_esc(_fmt_rate(fill.get('no_fill_rate') if fill.get('no_fill_rate') is not None else rates.get('no_fill_rate')))}</span>"
+        "</article>"
+        "<article class='world-card'>"
+        "<span class='col-head'>REALIZED MARKET</span>"
+        "<span class='label'>D_REALIZED_MARKET_OUTCOME</span>"
+        f"<span class='value'>{_esc_fmt(mkt.get('REALIZED_MARKET') if mkt.get('REALIZED_MARKET') is not None else block.get('REALIZED_MARKET_NET'), 'money')}</span>"
+        f"<span class='sub'>market_gap mean: {_esc(_fmt_gap(mkt_gap.get('mean') if isinstance(mkt_gap, dict) else None))}</span>"
+        f"<span class='sub'>5s markout mean: {_esc(_fmt_rate(adv_5, suffix=' bps'))} · assumed adverse {_esc(str(adv.get('research_assumption_bps') or 8.0))} bps</span>"
+        "</article>"
+        "</div>"
+        "<h3 class='subhead'>ADVERSE REALITY CHECK · WINDOW STABILITY</h3>"
+        "<p class='forecast-note'>"
+        f"Positive windows: {_esc(stab.get('positive_windows') or 0)} · "
+        f"Negative windows: {_esc(stab.get('negative_windows') or 0)} · "
+        f"Top symbol share: {_esc(_fmt_rate(stab.get('top_symbol_share') or block.get('top_symbol_share')))} · "
+        f"Top window share: {_esc(_fmt_rate(stab.get('top_window_share') or block.get('top_window_share')))} · "
+        "ROUTE_UNIVERSE_LIMITED (okx|bitvavo). These are not labeled profit."
+        "</p>"
+        "<div class='finding-next'><span class='label'>NEXT_ACTION</span>"
+        f"<p>{_esc(block.get('NEXT_ACTION') or 'CONTINUE_COLLECTING')}</p></div>"
+        "</section>"
+    )
+
+
+def _shadow_funnel_html(funnel: dict[str, Any]) -> str:
+    """Compact funnel: count / denominator, not a metric wall."""
+    if not funnel:
+        return (
+            "<p class='forecast-note'>No live funnel yet. Signals are not fills. "
+            "Never fabricate a fill.</p>"
+        )
+    keys = (
+        "signals",
+        "data_invalid",
+        "stale",
+        "leader_unavailable",
+        "follower_unavailable",
+        "quote_disappeared",
+        "no_fill",
+        "partial_fill",
+        "full_fill",
+        "hedge_success",
+        "hedge_worsened",
+        "hedge_failed",
+    )
+    cells = []
+    for key in keys:
+        row = funnel.get(key) or {}
+        count = row.get("count", 0)
+        den = row.get("denominator", 0)
+        rate = row.get("rate")
+        rate_s = f"{float(rate):.1%}" if isinstance(rate, (int, float)) else "—"
+        cells.append(
+            "<article class='metric-card'>"
+            f"<span class='label'>{_esc(key)}</span>"
+            f"<span class='value'>{_esc(count)} / {_esc(den)}</span>"
+            f"<span class='sub'>{_esc(rate_s)}</span>"
+            "</article>"
+        )
+    return "<div class='shadow-progress'>" + "".join(cells) + "</div>"
+
+
+def _fmt_days(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def _fmt_gap(value: Any) -> str:
     if value is None:
         return "—"
-    if isinstance(value, float):
-        return f"{value:.6g}"
-    if isinstance(value, Decimal):
-        return format(value, "f")
-    return str(value)
+    try:
+        return f"{float(value):.4f} EUR"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_rate(value: Any, *, suffix: str = "") -> str:
+    if value is None:
+        return "—"
+    try:
+        if suffix:
+            return f"{float(value):.3f}{suffix}"
+        return f"{float(value):.1%}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _research_finding_cards(cards: list[dict[str, Any]]) -> str:
+    if not cards:
+        return "<p class='forecast-note'>Nog geen research-conclusies geladen.</p>"
+    parts: list[str] = []
+    for card in cards:
+        tone = str(card.get("tone") or "muted")
+        parts.append(
+            "<article class='finding-card'>"
+            f"<div class='finding-top'><span class='finding-title'>{_esc(card.get('title'))}</span>"
+            f"<span class='badge {tone}'>{_esc(card.get('verdict'))}</span></div>"
+            f"<p class='finding-headline'>{_esc(card.get('headline'))}</p>"
+            f"<p class='finding-detail'>{_esc(card.get('detail'))}</p>"
+            "</article>"
+        )
+    return "".join(parts)
+
+
+def _finding_list_items(items: list[Any]) -> str:
+    if not items:
+        return "<li>Geen findings in rapport.</li>"
+    return "".join(f"<li>{_esc(x)}</li>" for x in items if x)
+
+
+def _horizon_chips(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<span class='chip warn'>Geen horizon-scores</span>"
+    parts: list[str] = []
+    for row in rows:
+        status = str(row.get("status") or "NOT_READY")
+        parts.append(
+            f"<span class='chip {_status_chip_class(status)}'>"
+            f"{_esc(row.get('horizon'))}: {_esc(status)}</span>"
+        )
+    return "".join(parts)
+
+
+def _status_chip_class(status: Any) -> str:
+    text = str(status or "").upper()
+    if text in {"READY", "HIGH", "SUPPORTED", "OK", "PASS", "ACCOUNTING_PASS"}:
+        return "ok"
+    if (
+        "CAUTION" in text
+        or "PARTIAL" in text
+        or "MEDIUM" in text
+        or "LOW" in text
+        or "PROMISING" in text
+        or "COLLECT" in text
+        or "GATE_INACTIVE" in text
+        or "NOT_RUN" in text
+        or "REPLICATING" in text
+        or text == "OOS_PASS"
+    ):
+        return "warn"
+    return "bad"
+
+
+def _verdict_banner_class(verdict: Any) -> str:
+    text = str(verdict or "").upper()
+    if "READY_FOR_FAST" in text or "READY_FOR_SLOW" in text or (
+        "READY_FOR" in text and "NOT" not in text and "PARTIAL" not in text
+    ):
+        return "ok"
+    if text in {"ACCOUNTING_PASS", "PASS", "ROBUST_PAPER_CANDIDATE", "SHADOW_VALIDATED"}:
+        return "ok"
+    if (
+        "PROMISING_BUT_INSUFFICIENT" in text
+        or "SHADOW_PROMISING" in text
+        or "INSUFFICIENT" in text
+        or "NOT_RUN" in text
+        or "PARTIAL" in text
+        or "RECORDING" in text
+        or "CAUTION" in text
+    ):
+        return "warn"
+    return "bad"
+
+
+def _pnl_class(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None or d == 0:
+        return ""
+    return "positive" if d > 0 else "negative"
+
+
+def _short_ts(value: Any) -> str:
+    if value is None:
+        return "—"
+    text = str(value)
+    if "T" in text:
+        text = text.replace("T", " ")
+    if "+" in text:
+        text = text.split("+", 1)[0]
+    if text.endswith("Z"):
+        text = text[:-1]
+    if "." in text:
+        text = text.split(".", 1)[0]
+    return text[-16:] if len(text) > 16 else text
+
+
+def _exposure_summary(exposure: Any) -> str:
+    if not exposure or not isinstance(exposure, dict):
+        return "—"
+    parts: list[str] = []
+    for key, value in sorted(exposure.items()):
+        if value in (None, 0, "0", "0.0"):
+            continue
+        parts.append(f"{key}={value}")
+    return ", ".join(parts[:4]) or "—"
+
+
+def _global_ranking_block(ranking: Any) -> str:
+    if not ranking or not isinstance(ranking, dict):
+        return ""
+    top = ranking.get("top") or []
+    if not top:
+        return (
+            '<p class="forecast-note">Laatste rank-batch: '
+            f'{_esc(ranking.get("input_candidates", 0))} kandidaten, '
+            f'{_esc(ranking.get("scored", 0))} gescoord.</p>'
+        )
+    rows = "".join(
+        "<tr>"
+        f"<td class='num'>{_esc(item.get('rank'))}</td>"
+        f"<td><strong>{_esc(item.get('symbol'))}</strong></td>"
+        f"<td>{_esc(_strategy_label(item.get('strategy')))}</td>"
+        f"<td class='num'>{_esc_fmt(item.get('expected_value'), 'money')}</td>"
+        f"<td class='num'>{_esc_fmt(item.get('score'), 'money')}</td>"
+        f"<td class='num'>{_esc_fmt(item.get('net_profit_usd'), 'money')}</td>"
+        "</tr>"
+        for item in top
+    )
+    return f"""
+      <div class="table-wrap" style="margin-top:1rem">
+        <h3 style="font-size:0.95rem;margin:0 0 0.5rem">Laatste EV-rank (top {len(top)})</h3>
+        <table>
+          <thead><tr><th>#</th><th>Symbool</th><th>Strategie</th><th>EV</th><th>Score</th><th>Net</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+        <p class="forecast-note">Batch: {_esc(ranking.get('input_candidates', 0))} in → {_esc(ranking.get('approved', 0))} goedgekeurd → {_esc(ranking.get('ranked_for_execution', 0))} uitvoerbaar</p>
+      </div>
+    """
+
+
+def _route_state_rows(routes: dict[str, Any]) -> str:
+    if not routes:
+        return "<tr><td colspan='7' class='empty'>Nog geen route-samples</td></tr>"
+    rows: list[str] = []
+    for route, cell in sorted(
+        routes.items(),
+        key=lambda kv: -int((kv[1] or {}).get("n") or 0),
+    ):
+        if not isinstance(cell, dict):
+            continue
+        state = str(cell.get("state") or ("early_stopped" if cell.get("early_stop") else "—"))
+        reason = cell.get("reason") or cell.get("detail") or ("—" if not cell.get("early_stop") else "early_raw_loss_overrides_shrinkage")
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(route)}</td>"
+            f"<td><strong>{_esc(state)}</strong></td>"
+            f"<td class='num'>{_esc(cell.get('n'))}</td>"
+            f"<td class='num'>{_esc(cell.get('raw_capture') if cell.get('raw_capture') is not None else '—')}</td>"
+            f"<td class='num'>{_esc(cell.get('shrunk_capture') if cell.get('shrunk_capture') is not None else '—')}</td>"
+            f"<td class='num {_pnl_class(cell.get('sum_realized'))}'>"
+            f"{_esc_fmt(cell.get('sum_realized'), 'money')}</td>"
+            f"<td>{_esc(reason)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='7' class='empty'>Nog geen route-samples</td></tr>"
+
+
+def _edge_route_rows(by_route: dict[str, Any]) -> str:
+    if not by_route:
+        return "<tr><td colspan='5' class='empty'>Nog geen afgeronde round-trips</td></tr>"
+    rows: list[str] = []
+    for route, cell in sorted(
+        by_route.items(),
+        key=lambda kv: -int((kv[1] or {}).get("n") or 0),
+    ):
+        if not isinstance(cell, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(route)}</td>"
+            f"<td class='num'>{_esc(cell.get('n'))}</td>"
+            f"<td class='num'>{_esc_fmt(cell.get('expected_net'), 'money')}</td>"
+            f"<td class='num {_pnl_class(cell.get('realized_net'))}'>"
+            f"{_esc_fmt(cell.get('realized_net'), 'money')}</td>"
+            f"<td class='num'>{_esc(cell.get('ev_capture') if cell.get('ev_capture') is not None else '—')}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='5' class='empty'>Nog geen afgeronde round-trips</td></tr>"
+
+
+def _why_not_rows(why_not: dict[str, Any]) -> str:
+    reasons = why_not.get("top_rejection_reasons") or []
+    if not reasons:
+        return "<tr><td colspan='2' class='empty'>Nog geen engine-rejects</td></tr>"
+    rows: list[str] = []
+    for item in reasons:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(item.get('reason'))}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('count'), 'count')}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='2' class='empty'>Nog geen engine-rejects</td></tr>"
+
+
+def _gate_table_rows(table: list[Any]) -> str:
+    if not table:
+        return "<tr><td colspan='5' class='empty'>Nog geen gate-statistiek</td></tr>"
+    rows: list[str] = []
+    for item in table:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(item.get('gate'))}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('rejections'), 'count')}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('estimated_good_rejections_eur'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(item.get('estimated_missed_profit_eur'), 'money')}</td>"
+            f"<td>{_esc(item.get('recommendation'))}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='5' class='empty'>Nog geen gate-statistiek</td></tr>"
+
+
+def _global_decision_rows(decisions: list[Any]) -> str:
+    if not decisions:
+        return "<tr><td colspan='8' class='empty'>Nog geen engine-beslissingen</td></tr>"
+    rows: list[str] = []
+    for d in reversed(decisions[-10:]):
+        if not isinstance(d, dict):
+            continue
+        action = str(d.get("action") or "—")
+        action_cls = "ok" if action in {"approve", "execute", "approved"} else "warn"
+        rows.append(
+            "<tr>"
+            f"<td class='ts'>{_esc(_short_ts(d.get('timestamp')))}</td>"
+            f"<td><span class='pill {action_cls}'>{_esc(action)}</span></td>"
+            f"<td>{_esc(_strategy_label(d.get('strategy')))}</td>"
+            f"<td><strong>{_esc(d.get('symbol'))}</strong></td>"
+            f"<td class='num'>{_esc_fmt(d.get('expected_value'), 'money')}</td>"
+            f"<td class='num'>{_esc_fmt(d.get('score'), 'money')}</td>"
+            f"<td>{_esc(d.get('stage'))}</td>"
+            f"<td>{_esc((d.get('reason') or '')[:80])}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='8' class='empty'>Nog geen engine-beslissingen</td></tr>"
+
+
+def _equity_quote_rows(quotes: dict[str, Any]) -> str:
+    if not quotes:
+        return (
+            "<tr><td colspan='5' class='empty'>"
+            "Geen aandelenfeed (GLOBAL_EQUITY_ENABLED uit, of nog geen quote)"
+            "</td></tr>"
+        )
+    rows: list[str] = []
+    for symbol, payload in sorted(quotes.items()):
+        if not isinstance(payload, dict):
+            continue
+        source = str(payload.get("source") or "—")
+        rows.append(
+            "<tr>"
+            f"<td><strong>{_esc(symbol)}</strong></td>"
+            f"<td class='num'>{_esc(payload.get('bid'))}</td>"
+            f"<td class='num'>{_esc(payload.get('ask'))}</td>"
+            f"<td class='num'>{_esc(payload.get('last'))}</td>"
+            f"<td>{_esc(source)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or (
+        "<tr><td colspan='5' class='empty'>Geen aandelenfeed</td></tr>"
+    )
+
+
+def _live_readiness_panel_html(live: dict[str, Any]) -> str:
+    if not live:
+        return ""
+    ready = bool(live.get("go_no_go_ready"))
+    ready_cls = "ok" if ready else "warn"
+    ready_label = "Groen" if ready else "Blokkers"
+    blocking = live.get("go_no_go_blocking") or live.get("blocking") or []
+    block_txt = ", ".join(str(b) for b in blocking) or "—"
+    missing = live.get("credentials_missing") or []
+    missing_txt = ", ".join(str(m) for m in missing) or "geen"
+    can_place = bool(live.get("can_place_live_orders"))
+    return f"""
+    <section class="panel">
+      <h2>Live readiness</h2>
+      <p class="forecast-note">
+        Paper blijft default. Live orders alleen na expliciete unlocks.
+        API: <code>/live/observe</code>, <code>/live/credentials</code>,
+        <code>/live/micro/dry-run</code>.
+        Micro-monitor: <a class="link-lite" href="/live/dashboard">/live/dashboard</a>.
+      </p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Fase</span><span class="value">{_esc(live.get('active_phase') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Go/no-go</span><span class="value"><span class="pill {ready_cls}">{ready_label}</span></span></article>
+        <article class="metric-card"><span class="label">Keys geconfigureerd</span><span class="value">{_esc(str(live.get('credentials_configured') or 0))}</span></article>
+        <article class="metric-card"><span class="label">Keys missing</span><span class="value">{_esc(missing_txt)}</span></article>
+        <article class="metric-card"><span class="label">Live orders</span><span class="value">{'TOEGESTAAN' if can_place else _esc(live.get('block_reason') or 'geblokkeerd')}</span></article>
+        <article class="metric-card"><span class="label">Withdrawals</span><span class="value">uit</span></article>
+      </div>
+      <p class="forecast-note">Blocking: {_esc(block_txt)}. Volgende stap: SEPA→Bitvavo, keys zonder withdraw, daarna dry-run.</p>
+    </section>
+    """
+
+
+def _micro_session_panel_html(session: dict[str, Any]) -> str:
+    """Compact panel for the full-bot € micro session."""
+    if not session:
+        session = {"running": False, "message": "idle"}
+    running = bool(session.get("running") or session.get("task_running"))
+    pill = "ok" if running else ("warn" if session.get("ok") is False else "muted")
+    state = "LIVE" if running else _esc(str(session.get("message") or "idle"))
+    bridge = session.get("bridge") or {}
+    last = session.get("last_live_trade") or {}
+    last_txt = "—"
+    if last:
+        last_txt = (
+            f"{_esc(last.get('side'))} {_esc(last.get('symbol'))} "
+            f"@ {_esc((last.get('result') or {}).get('order', {}).get('average_price') or '—')}"
+        )
+    return f"""
+    <section class="panel highlight">
+      <div class="panel-head">
+        <h2>Micro-live sessie (€ budget)</h2>
+        <span>
+          <a class="link-lite" href="/live/dashboard">Live dashboard</a>
+          · <span class="pill {pill}">{state}</span>
+        </span>
+      </div>
+      <p class="forecast-note">
+        Volledige bot-pipeline met hard kapitaallimiet. BTC mag gekocht en verkocht worden.
+        API: <code>/live/micro/session</code>
+      </p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Budget</span><span class="value">{_esc(session.get('budget_eur') or bridge.get('budget_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Free EUR</span><span class="value">{_esc(bridge.get('free_quote_eur') or bridge.get('remaining_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Turnover</span><span class="value">{_esc(bridge.get('turnover_eur') or '0')}</span></article>
+        <article class="metric-card"><span class="label">PnL pocket</span><span class="value">{_esc(session.get('pnl_paper_pocket_eur') or '—')}</span></article>
+        <article class="metric-card"><span class="label">Cycles</span><span class="value">{_esc(str(session.get('paper_cycles') or 0))}</span></article>
+        <article class="metric-card"><span class="label">Live fills</span><span class="value">{_esc(str(session.get('live_trades_executed') or 0))}/{_esc(str(session.get('live_trades_attempted') or 0))}</span></article>
+        <article class="metric-card"><span class="label">Symbols</span><span class="value">{_esc(str(session.get('symbol_count') or '—'))}</span></article>
+        <article class="metric-card"><span class="label">{'Modus' if session.get('continuous') or session.get('remaining_seconds') is None else 'Resterend'}</span><span class="value">{'continuous' if session.get('continuous') or session.get('remaining_seconds') is None else _esc(str(session.get('remaining_seconds'))) + 's'}</span></article>
+      </div>
+      <p class="forecast-note">Laatste live: {_esc(last_txt)}</p>
+      <div class="controls">
+        <button type="button" class="btn" onclick="post('/live/micro/session/start', {{minutes:null,budget_eur:2024,exclude_btc:false}})">Start continuous / €2024</button>
+        <button type="button" class="btn btn-danger" onclick="post('/live/micro/session/stop')">Stop sessie</button>
+      </div>
+    </section>
+    """
+
+
+def render_micro_session_dashboard(session: dict[str, Any]) -> HTMLResponse:
+    """Dedicated 2s-refresh monitor for the micro session."""
+    running = bool(session.get("running") or session.get("task_running"))
+    pill = "ok" if running else ("warn" if session.get("ok") is False else "muted")
+    bridge = session.get("bridge") or {}
+    skips = bridge.get("skips") or {}
+    skip_rows = "".join(
+        f"<tr><td>{_esc(k)}</td><td class='num'>{_esc(str(v))}</td></tr>"
+        for k, v in sorted(skips.items(), key=lambda kv: (-int(kv[1] or 0), str(kv[0])))
+    ) or "<tr><td colspan='2' class='empty'>Geen skips</td></tr>"
+    last = session.get("last_live_trade") or {}
+    last_json = _esc(json.dumps(last, default=str)[:500] if last else "—")
+    funnel = session.get("pipeline_funnel") or {}
+    why = session.get("why_not_trade") or {}
+    html = f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta http-equiv="refresh" content="2"/>
+  <title>Moreney — Micro-live monitor</title>
+  <style>{_shared_css()}</style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">Full-bot micro · € budget · live Bitvavo</p>
+        <h1 class="brand">Moreney</h1>
+        <p class="sub">Volledige pipeline, klein kapitaal. Refresh 2s.</p>
+      </div>
+      <div class="hero-badges">
+        <a class="link-lite" href="/paper/dashboard">Paper dashboard</a>
+        <span class="badge {pill}">{'RUNNING' if running else _esc(session.get('message') or 'idle')}</span>
+      </div>
+    </div>
+  </header>
+  <main class="container">
+    {_micro_session_panel_html(session)}
+    <section class="panel">
+      <h2>Bridge skips</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Reden</th><th>Count</th></tr></thead>
+        <tbody>{skip_rows}</tbody>
+      </table></div>
+    </section>
+    <section class="panel">
+      <h2>Laatste live trade</h2>
+      <pre style="white-space:pre-wrap;font-size:0.85rem">{last_json}</pre>
+    </section>
+    <section class="panel">
+      <h2>Pipeline / why-not</h2>
+      <pre style="white-space:pre-wrap;font-size:0.85rem">{_esc(json.dumps({'funnel': funnel, 'why_not_trade': why}, default=str)[:2500])}</pre>
+    </section>
+  </main>
+  <script>
+    async function post(url, body) {{
+      await fetch(url, {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(body || {{}})
+      }});
+      location.reload();
+    }}
+  </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+def _funding_panel_html(funding: dict[str, Any]) -> str:
+    """Portfolio / funding / rebalance panel — exchanges hold assets."""
+    if not funding:
+        return ""
+    venues = funding.get("venues") or []
+    asset_cols = ("EUR", "BTC", "ETH", "USDT", "USDC")
+    venue_rows: list[str] = []
+    for v in venues:
+        by_asset: dict[str, Any] = {}
+        for b in v.get("balances") or []:
+            by_asset[str(b.get("asset") or "").upper()] = b.get("available") or b.get("total") or "0"
+        cells = "".join(
+            f"<td class='num'>{_esc(by_asset.get(a, '—'))}</td>" for a in asset_cols
+        )
+        online = "ok" if v.get("online", True) else "warn"
+        err = v.get("error")
+        note = f" ({_esc(err)})" if err else ""
+        venue_rows.append(
+            "<tr>"
+            f"<td>{_esc(_venue_label(v.get('venue')))}"
+            f"<span class='pill {online}'>{_esc(v.get('source') or '')}{note}</span></td>"
+            f"{cells}"
+            f"<td class='num'>{_esc_fmt(v.get('total_value_eur'), 'money')}</td>"
+            "</tr>"
+        )
+    venue_body = "".join(venue_rows) or (
+        "<tr><td colspan='7' class='empty'>Nog geen balances</td></tr>"
+    )
+    recs = funding.get("recommendations") or []
+    rec_rows = "".join(
+        "<tr>"
+        f"<td>{_esc(_venue_label(r.get('from_venue')))} → {_esc(_venue_label(r.get('to_venue')))}</td>"
+        f"<td>{_esc(r.get('asset'))}</td>"
+        f"<td class='num'>{_esc(r.get('amount'))}</td>"
+        f"<td>{_esc(r.get('reason'))}</td>"
+        f"<td><span class='pill warn'>handmatig</span></td>"
+        "</tr>"
+        for r in recs[:10]
+    ) or "<tr><td colspan='5' class='empty'>Geen rebalance nodig</td></tr>"
+    deposits = funding.get("deposits") or []
+    dep_rows = "".join(
+        "<tr>"
+        f"<td class='ts'>{_esc(_short_ts(d.get('created_at')))}</td>"
+        f"<td>{_esc(_venue_label(d.get('venue')))}</td>"
+        f"<td class='num'>{_esc(d.get('amount'))} {_esc(d.get('currency') or d.get('asset'))}</td>"
+        f"<td>{_esc(d.get('status'))}</td>"
+        "</tr>"
+        for d in deposits[:8]
+    ) or "<tr><td colspan='4' class='empty'>Nog geen deposits vastgelegd — SEPA storting gaat via de exchange</td></tr>"
+    main_venue = _esc(_venue_label(funding.get("main_funding_venue") or "bitvavo"))
+    return f"""
+    <section class="panel">
+      <h2>Portfolio &amp; funding</h2>
+      <p class="forecast-note">
+        Exchanges houden je assets; Moreney monitort. Hoofdvenue (SEPA): <strong>{main_venue}</strong>.
+        Automatische withdrawals: uit. Mode: {_esc(funding.get('mode') or 'paper')}.
+      </p>
+      <div class="metric-grid compact">
+        <article class="metric-card"><span class="label">Gestort</span><span class="value">{_esc_fmt(funding.get('total_deposited'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Portfolio</span><span class="value">{_esc_fmt(funding.get('current_portfolio'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">P&amp;L</span><span class="value {_pnl_class(funding.get('pnl'))}">{_esc_fmt(funding.get('pnl'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Available</span><span class="value">{_esc_fmt(funding.get('available_capital'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Reserved</span><span class="value">{_esc_fmt(funding.get('reserved_capital'), 'money')}</span></article>
+        <article class="metric-card"><span class="label">Pending transfers</span><span class="value">{_esc(str(funding.get('pending_transfers') or 0))}</span></article>
+      </div>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Venue</th><th>EUR</th><th>BTC</th><th>ETH</th><th>USDT</th><th>USDC</th><th>Total €</th></tr></thead>
+          <tbody>{venue_body}</tbody>
+        </table>
+      </div>
+      <h3 style="margin-top:1.25rem">Rebalance-advies (niet auto)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Route</th><th>Asset</th><th>Amount</th><th>Reden</th><th>Status</th></tr></thead>
+          <tbody>{rec_rows}</tbody>
+        </table>
+      </div>
+      <h3 style="margin-top:1.25rem">Deposits</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tijd</th><th>Venue</th><th>Bedrag</th><th>Status</th></tr></thead>
+          <tbody>{dep_rows}</tbody>
+        </table>
+      </div>
+      <p class="forecast-note">Opnemen: gebruik de exchange-interface ({main_venue}). Moreney voert geen withdrawals uit.</p>
+    </section>
+    """
+
+
+def _inventory_rows(venues: dict[str, Any]) -> str:
+    if not venues:
+        return "<tr><td colspan='4' class='empty'>Nog geen venue-voorraad</td></tr>"
+    rows: list[str] = []
+    for venue, assets in sorted(venues.items()):
+        if not isinstance(assets, dict):
+            continue
+        eur = assets.get("EUR", "0")
+        usdt = assets.get("USDT", "0")
+        other = ", ".join(
+            f"{k}={v}"
+            for k, v in sorted(assets.items())
+            if k not in {"EUR", "USDT"} and _to_decimal(v) not in {None, Decimal("0")}
+        ) or "—"
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(_venue_label(venue))}</td>"
+            f"<td class='num'>{_esc(eur)}</td>"
+            f"<td class='num'>{_esc(usdt)}</td>"
+            f"<td>{_esc(other)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='4' class='empty'>Nog geen venue-voorraad</td></tr>"
 
 
 def _esc(value: Any) -> str:
@@ -374,201 +3139,207 @@ def _esc(value: Any) -> str:
     )
 
 
-def render_fleet_dashboard(payload: dict[str, Any]) -> HTMLResponse:
-    """Render one page covering all configured paper instances."""
-    instances = payload.get("instances") or []
-    totals = payload.get("totals") or {}
-    online = payload.get("online_count", 0)
-    configured = payload.get("configured_count", 0)
+def _as_float(value: Any, default: float = 0.0) -> float:
+    d = _to_decimal(value)
+    if d is None:
+        return default
+    return float(d)
 
-    cards = []
-    for row in instances:
-        if not row.get("ok"):
-            cards.append(
-                f"""
-                <article class="card bad">
-                  <header class="card-head">
-                    <h2>{_esc(row.get('label'))}</h2>
-                    <span class="badge stop">OFFLINE</span>
-                  </header>
-                  <p class="error">{_esc(row.get('error'))}</p>
-                  <p class="links"><a href="{_esc(row.get('dashboard_url'))}">Open instance</a></p>
-                </article>
-                """
-            )
-            continue
-        running = "RUNNING" if row.get("running") else "STOPPED"
-        badge_cls = "run" if row.get("running") else "stop"
-        md = row.get("market_data") or {}
-        md_bits = []
-        for exchange, health in md.items():
-            if not isinstance(health, dict):
-                continue
-            state = "ok" if health.get("synchronized") and not health.get("stale") else "warn"
-            md_bits.append(
-                f"<span class='md {state}'>{_esc(exchange)}</span>"
-            )
-        md_html = " ".join(md_bits) or "<span class='muted'>no feeds</span>"
-        cards.append(
-            f"""
-            <article class="card">
-              <header class="card-head">
-                <div>
-                  <h2>{_esc(row.get('label'))}</h2>
-                  <div class="sub">start {_esc(row.get('starting_capital'))} · cycles {_esc(row.get('cycle_count'))}</div>
-                </div>
-                <span class="badge {badge_cls}">{running}</span>
-              </header>
-              <div class="metrics">
-                <div><div class="k">Equity</div><div class="v">{_esc(row.get('equity'))}</div></div>
-                <div><div class="k">Net PnL</div><div class="v">{_esc(row.get('net_pnl'))}</div></div>
-                <div><div class="k">Trades</div><div class="v">{_esc(row.get('trade_count'))}</div></div>
-                <div><div class="k">Passed gates</div><div class="v">{_esc(row.get('total_opportunities'))}</div></div>
-                <div><div class="k">Pairs evaluated</div><div class="v">{_esc(row.get('pairs_evaluated'))}</div></div>
-                <div><div class="k">Edges found</div><div class="v">{_esc(row.get('depth_edges_found'))}</div></div>
-                <div><div class="k">Scan rejects</div><div class="v">{_esc(row.get('scan_rejections'))}</div></div>
-                <div><div class="k">Win rate</div><div class="v">{_esc(row.get('win_rate'))}</div></div>
-              </div>
-              <div class="feeds">{md_html}</div>
-              <p class="links">
-                <a href="{_esc(row.get('dashboard_url'))}">Full dashboard</a>
-                ·
-                <a href="{_esc(row.get('dashboard_lite_url'))}">Lite</a>
-              </p>
-            </article>
-            """
+
+def _as_int(value: Any, default: int = 0) -> int:
+    d = _to_decimal(value)
+    if d is None:
+        return default
+    return int(d)
+
+
+def _pnl_word(value: Any) -> str:
+    d = _to_decimal(value)
+    if d is None or d == 0:
+        return "Winst / verlies"
+    return "Winst" if d > 0 else "Verlies"
+
+
+def _strategy_label(name: Any) -> str:
+    key = str(name or "").strip().lower()
+    return {
+        "arbitrage": "Koop goedkoop, verkoop duurder",
+        "crossexchangearbitragestrategy": "Koop goedkoop, verkoop duurder",
+        "cross_exchange_arbitrage": "Koop goedkoop, verkoop duurder",
+        "maker_inventory": "Maker: bied/laat vangen",
+        "makerinventorystrategy": "Maker: bied/laat vangen",
+        "triangle_bridge": "EUR↔USDT bridge",
+        "desk_composite": "Desk (maker + triangle)",
+        "global_composite": "Global composite (EV-ranked)",
+        "funding_basis": "Funding / basis",
+        "fx_relative_value": "FX relative value",
+        "equity_mean_reversion": "Equity mean reversion",
+        "momentum": "Meegaan met de beweging",
+        "mean_reversion": "Terug naar het gemiddelde",
+        "dca": "Periodiek bijkopen",
+        "grid": "Grid-handel",
+    }.get(key, str(name or "—").replace("_", " ").title())
+
+
+def _venue_label(exchange: Any) -> str:
+    key = str(exchange or "").strip().lower()
+    return {
+        "binance": "Binance",
+        "kraken": "Kraken",
+        "coinbase": "Coinbase",
+        "bitvavo": "Bitvavo",
+        "okx": "OKX",
+        "bybit": "Bybit",
+        "nasdaq": "Nasdaq",
+        "yahoo": "Yahoo",
+        "equity_stub": "Equity stub",
+    }.get(key, str(exchange or "—").title())
+
+
+def _status_label(status: Any) -> str:
+    key = str(status or "").strip().lower()
+    return {
+        "detected": "Gezien",
+        "rejected": "Afgewezen",
+        "approved": "Goedgekeurd",
+        "executed": "Uitgevoerd",
+        "filled": "Gevuld",
+        "profitable": "Winst",
+        "unprofitable": "Verlies",
+        "breakeven": "Gelijk",
+        "running": "Actief",
+        "stopped": "Gestopt",
+        "idle": "Wacht",
+        "error": "Fout",
+    }.get(key, str(status or "—"))
+
+
+def _svg_cumulative_profit(trades: list[dict], starting: Any = 0) -> str:
+    if not trades:
+        return (
+            '<p class="chart-empty">Nog geen afgeronde transacties — '
+            "de lijn verschijnt na de eerste verkoop.</p>"
         )
+    chronological = list(reversed(trades))
+    running = _as_float(starting, 0.0)
+    values = [running]
+    for trade in chronological:
+        pnl = trade.get("realized_net_profit", trade.get("pnl"))
+        running += _as_float(pnl, 0.0)
+        values.append(running)
+    return _svg_line(values)
 
-    cards_html = "\n".join(cards) or "<p class='muted'>No fleet instances configured.</p>"
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <meta http-equiv="refresh" content="5"/>
-  <title>Moreney Fleet Dashboard</title>
-  <style>
-    :root {{
-      --bg:#0f1419; --panel:#1a222d; --text:#e7ecf3; --muted:#8b9bb4;
-      --accent:#3d9cf0; --good:#3ecf8e; --bad:#f07178; --line:#2a3544; --warn:#e6b84d;
-    }}
-    * {{ box-sizing:border-box; }}
-    body {{
-      margin:0;
-      font-family:"IBM Plex Sans","Segoe UI",sans-serif;
-      color:var(--text);
-      background:
-        radial-gradient(1100px 520px at 0% -10%, #1b3a57 0%, transparent 55%),
-        radial-gradient(900px 480px at 100% 0%, #243447 0%, transparent 50%),
-        var(--bg);
-      min-height:100vh;
-    }}
-    .top {{
-      padding:1.75rem 1.5rem 1rem;
-      border-bottom:1px solid var(--line);
-      display:flex;
-      justify-content:space-between;
-      gap:1rem;
-      flex-wrap:wrap;
-      align-items:end;
-    }}
-    .brand {{
-      font-family:"IBM Plex Serif",Georgia,serif;
-      font-size:clamp(1.8rem,3.5vw,2.6rem);
-      margin:0;
-      letter-spacing:-0.03em;
-    }}
-    .sub {{ color:var(--muted); font-size:.9rem; margin-top:.3rem; }}
-    .totals {{
-      display:grid;
-      grid-template-columns:repeat(3, minmax(0,1fr));
-      gap:.75rem;
-      min-width:min(520px,100%);
-    }}
-    .totals .box {{
-      background:color-mix(in srgb, var(--panel) 90%, transparent);
-      border:1px solid var(--line);
-      padding:.7rem .8rem;
-    }}
-    .k {{ color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; }}
-    .v {{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1.05rem; margin-top:.2rem; }}
-    main {{
-      padding:1.25rem 1.5rem 2rem;
-      display:grid;
-      gap:1rem;
-      grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
-      max-width:1400px;
-      margin:0 auto;
-    }}
-    .card {{
-      background:color-mix(in srgb, var(--panel) 90%, transparent);
-      border:1px solid var(--line);
-      padding:1rem 1.05rem 1.1rem;
-      display:grid;
-      gap:.85rem;
-    }}
-    .card.bad {{ border-color:color-mix(in srgb, var(--bad) 55%, var(--line)); }}
-    .card-head {{ display:flex; justify-content:space-between; gap:.75rem; align-items:start; }}
-    .card h2 {{ margin:0; font-size:1.15rem; }}
-    .badge {{
-      border:1px solid var(--line);
-      padding:.2rem .55rem;
-      font-size:.72rem;
-      letter-spacing:.08em;
-      text-transform:uppercase;
-      white-space:nowrap;
-    }}
-    .badge.run {{ color:var(--good); }}
-    .badge.stop {{ color:var(--bad); }}
-    .metrics {{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:.65rem .75rem;
-    }}
-    .feeds {{ display:flex; flex-wrap:wrap; gap:.35rem; }}
-    .md {{
-      border:1px solid var(--line);
-      padding:.15rem .45rem;
-      font-size:.72rem;
-      color:var(--muted);
-      text-transform:uppercase;
-    }}
-    .md.ok {{ color:var(--good); }}
-    .md.warn {{ color:var(--warn); }}
-    .links, .error {{ margin:0; font-size:.85rem; }}
-    .links a {{ color:var(--accent); text-decoration:none; }}
-    .error {{ color:var(--bad); }}
-    .muted {{ color:var(--muted); }}
-    .foot {{
-      text-align:center;
-      color:var(--muted);
-      font-size:.78rem;
-      padding:0 1rem 1.5rem;
-    }}
-    @media (max-width:980px) {{
-      .totals {{ grid-template-columns:1fr 1fr; }}
-    }}
-  </style>
-</head>
-<body>
-  <div class="top">
-    <div>
-      <h1 class="brand">Moreney Fleet</h1>
-      <div class="sub">All paper instances · {online}/{configured} online · auto-refresh 5s · real orders = 0 · <a href="/logout" style="color:var(--accent)">Logout</a></div>
-    </div>
-    <div class="totals">
-      <div class="box"><div class="k">Total equity</div><div class="v">{_esc(totals.get('equity'))}</div></div>
-      <div class="box"><div class="k">Total net PnL</div><div class="v">{_esc(totals.get('net_pnl'))}</div></div>
-      <div class="box"><div class="k">Pairs evaluated</div><div class="v">{_esc(totals.get('pairs_evaluated'))}</div></div>
-      <div class="box"><div class="k">Edges found</div><div class="v">{_esc(totals.get('depth_edges_found'))}</div></div>
-      <div class="box"><div class="k">Passed gates</div><div class="v">{_esc(totals.get('total_opportunities'))}</div></div>
-      <div class="box"><div class="k">Running</div><div class="v">{_esc(totals.get('running_count'))}/{configured}</div></div>
-    </div>
-  </div>
-  <main>
-    {cards_html}
-  </main>
-  <p class="foot">Paper mode only · withdrawals unsupported · leverage unsupported</p>
-</body>
-</html>"""
-    return HTMLResponse(content=html)
+
+def _svg_hourly_bars(hourly: list[dict]) -> str:
+    if not hourly:
+        return (
+            '<p class="chart-empty">Nog geen uurdata. '
+            "Na de eerste transacties zie je hier winst per uur.</p>"
+        )
+    values = [_as_float(row.get("net_pnl", row.get("pnl"))) for row in hourly]
+    has_activity = any(
+        value != 0 or _as_int(row.get("trades")) > 0
+        for row, value in zip(hourly, values)
+    )
+    if not has_activity:
+        return (
+            '<p class="chart-empty">Nog geen uurdata. '
+            "Na de eerste transacties zie je hier winst per uur.</p>"
+        )
+    labels = []
+    for row in hourly:
+        if row.get("hour") is not None:
+            labels.append(f"{_as_int(row.get('hour')):02d}")
+        else:
+            labels.append(str(row.get("label") or "")[-5:] or "?")
+    return _svg_bars(values, labels)
+
+
+def _svg_win_loss(wins: Any, losses: Any) -> str:
+    win_n = max(_as_int(wins), 0)
+    loss_n = max(_as_int(losses), 0)
+    total = win_n + loss_n
+    if total == 0:
+        return '<p class="chart-empty">Nog geen winst- of verliestransacties.</p>'
+    win_w = 300.0 * win_n / total
+    loss_w = 300.0 * loss_n / total
+    return f"""
+    <svg viewBox="0 0 320 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winst versus verlies">
+      <rect x="10" y="8" width="{win_w:.1f}" height="22" rx="6" fill="#34d399"/>
+      <rect x="{10 + win_w:.1f}" y="8" width="{loss_w:.1f}" height="22" rx="6" fill="#f87171"/>
+      <text x="10" y="50" fill="#34d399" font-size="13" font-weight="700">{win_n} winst</text>
+      <text x="310" y="50" fill="#f87171" font-size="13" font-weight="700" text-anchor="end">{loss_n} verlies</text>
+    </svg>
+    """
+
+
+def _svg_fleet_bars(instances: list[dict]) -> str:
+    rows = [row for row in instances if row.get("ok")]
+    if not rows:
+        return '<p class="chart-empty">Nog geen online rekeningen om te vergelijken.</p>'
+    values = [_as_float(row.get("net_pnl", row.get("pnl"))) for row in rows]
+    labels = []
+    for row in rows:
+        capital = str(row.get("starting_capital") or "")
+        compact = capital.split(".")[0] if capital else str(row.get("label") or "?")[:8]
+        labels.append(compact)
+    return _svg_bars(values, labels)
+
+
+def _svg_line(values: list[float]) -> str:
+    width, height, pad = 640, 180, 22
+    lo = min(values + [0.0])
+    hi = max(values + [0.0])
+    span = hi - lo or 1.0
+    pts: list[str] = []
+    for i, value in enumerate(values):
+        x = pad + (width - 2 * pad) * (i / max(len(values) - 1, 1))
+        y = height - pad - (height - 2 * pad) * ((value - lo) / span)
+        pts.append(f"{x:.1f},{y:.1f}")
+    last = values[-1]
+    color = "#34d399" if last >= 0 else "#f87171"
+    zero_y = height - pad - (height - 2 * pad) * ((0 - lo) / span)
+    return f"""
+    <svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winst in de tijd">
+      <line x1="{pad}" y1="{zero_y:.1f}" x2="{width - pad}" y2="{zero_y:.1f}" stroke="#243041" stroke-dasharray="4 4"/>
+      <polyline fill="none" stroke="{color}" stroke-width="3" stroke-linejoin="round" points="{" ".join(pts)}"/>
+      <text x="{width - pad}" y="16" fill="{color}" font-size="13" font-weight="700" text-anchor="end">{_fmt_money(last)}</text>
+    </svg>
+    """
+
+
+def _svg_bars(values: list[float], labels: list[str]) -> str:
+    if not values:
+        return '<p class="chart-empty">Geen data.</p>'
+    n = len(values)
+    width = max(320, 28 * n + 40)
+    height, pad = 180, 24
+    lo = min(values + [0.0])
+    hi = max(values + [0.0])
+    span = hi - lo or 1.0
+    zero_y = height - pad - (height - 2 * pad) * ((0 - lo) / span)
+    gap = 6
+    bar_w = max(8.0, (width - 2 * pad) / n - gap)
+    bars: list[str] = []
+    texts: list[str] = []
+    for i, (value, label) in enumerate(zip(values, labels)):
+        x = pad + i * ((width - 2 * pad) / n)
+        y_val = height - pad - (height - 2 * pad) * ((value - lo) / span)
+        top = min(y_val, zero_y)
+        h = max(abs(y_val - zero_y), 1.5)
+        color = "#34d399" if value >= 0 else "#f87171"
+        bars.append(
+            f'<rect x="{x:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="4" fill="{color}"/>'
+        )
+        texts.append(
+            f'<text x="{x + bar_w / 2:.1f}" y="{height - 6}" fill="#8fa0b8" font-size="9" '
+            f'text-anchor="middle">{_esc(label[:8])}</text>'
+        )
+    return f"""
+    <svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Winst per periode">
+      <line x1="{pad}" y1="{zero_y:.1f}" x2="{width - pad}" y2="{zero_y:.1f}" stroke="#243041" stroke-dasharray="4 4"/>
+      {"".join(bars)}
+      {"".join(texts)}
+    </svg>
+    """
+
