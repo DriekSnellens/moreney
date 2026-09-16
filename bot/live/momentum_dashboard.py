@@ -199,6 +199,34 @@ table.desk td:first-child, table.desk th:first-child { text-align: left; }
 }
 .btc-hold.good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
 .btc-hold.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.forecast {
+  margin: 0 0 1rem;
+  padding: 1rem 1.15rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.forecast h2 { margin: 0 0 .35rem; font-size: 1.05rem; }
+.forecast .fx-bias {
+  display: inline-block; font-family: var(--mono); font-weight: 700;
+  font-size: .95rem; margin: 0 0 .55rem;
+}
+.forecast .fx-view { margin: 0 0 .65rem; line-height: 1.45; }
+.forecast ul { margin: .2rem 0 .7rem; padding-left: 1.15rem; }
+.forecast li { margin: .2rem 0; color: var(--ink); }
+.forecast .fx-scen {
+  display: grid; gap: .45rem; margin: .35rem 0 .7rem;
+}
+@media (min-width: 820px) {
+  .forecast .fx-scen { grid-template-columns: 1fr 1fr 1fr; }
+}
+.forecast .fx-scen div {
+  border: 1px solid var(--line); border-radius: 10px; padding: .55rem .65rem;
+  background: color-mix(in srgb, var(--panel) 88%, #fff);
+}
+.forecast .fx-scen strong { font-family: var(--mono); font-size: .82rem; }
+.forecast .fx-desk { margin: 0; font-size: .9rem; }
+.forecast .fx-meta { margin: .65rem 0 0; font-size: .75rem; color: var(--muted); }
 
 @media (max-width: 720px) {
   .wrap { padding: .85rem .7rem 0; }
@@ -1244,6 +1272,68 @@ def _btc_hold_panel(hold: Mapping[str, Any] | None) -> str:
     )
 
 
+def _forecast_panel(forecast: Mapping[str, Any] | None) -> str:
+    """Weekly AlphaI+tape operator forecast."""
+    if not forecast:
+        return (
+            '<section class="forecast">'
+            "<h2>Weekprognose</h2>"
+            '<p class="muted">Nog geen prognose — wordt elke ochtend (07:00 NL) ververst, '
+            "of via POST /live/momentum/forecast/refresh.</p></section>"
+        )
+    bias = escape(str(forecast.get("bias_label") or forecast.get("bias") or "—"))
+    bias_key = str(forecast.get("bias") or "")
+    tone = (
+        "bad"
+        if bias_key == "cautious"
+        else ("good" if bias_key == "constructive" else "")
+    )
+    week = escape(str(forecast.get("week_label") or ""))
+    view = escape(str(forecast.get("week_view") or ""))
+    why_items = "".join(
+        f"<li>{escape(str(x))}</li>" for x in (forecast.get("why") or [])[:8]
+    )
+    scen_html = ""
+    for s in forecast.get("scenarios") or []:
+        if not isinstance(s, dict):
+            continue
+        scen_html += (
+            "<div>"
+            f"<strong>{escape(str(s.get('name') or ''))} · "
+            f"{escape(str(s.get('prob') or ''))}</strong>"
+            f"<p style='margin:.25rem 0 0;font-size:.86rem'>"
+            f"{escape(str(s.get('text') or ''))}</p></div>"
+        )
+    desk = escape(str(forecast.get("desk_implication") or ""))
+    as_of = escape(str(forecast.get("as_of_local") or forecast.get("as_of") or "")[:19])
+    nxt = escape(str(forecast.get("next_morning_refresh_local") or "")[:16])
+    picks = forecast.get("alphai", {}).get("picks") if isinstance(forecast.get("alphai"), dict) else None
+    avoid = forecast.get("alphai", {}).get("avoid") if isinstance(forecast.get("alphai"), dict) else None
+    pick_s = ", ".join(escape(str(p.get("base"))) for p in (picks or [])[:4] if isinstance(p, dict))
+    avoid_s = ", ".join(escape(str(a.get("base"))) for a in (avoid or [])[:5] if isinstance(a, dict))
+    alphai_line = ""
+    if pick_s or avoid_s:
+        alphai_line = (
+            f'<p class="fx-meta">AlphaI picks {pick_s or "—"} · avoid {avoid_s or "—"}'
+            f'{" · macro caution" if (forecast.get("alphai") or {}).get("macro_caution") else ""}</p>'
+        )
+    return (
+        f'<section class="forecast {tone}">'
+        f"<h2>Weekprognose · {week}</h2>"
+        f'<p class="fx-bias {tone}">{bias}</p>'
+        f'<p class="fx-view">{view}</p>'
+        "<p class='muted' style='margin:0 0 .2rem;font-size:.8rem'>Waarom</p>"
+        f"<ul>{why_items or '<li class=muted>—</li>'}</ul>"
+        "<p class='muted' style='margin:0 0 .2rem;font-size:.8rem'>Scenario’s</p>"
+        f'<div class="fx-scen">{scen_html or "<div class=muted>—</div>"}</div>'
+        f'<p class="fx-desk"><strong>Desk:</strong> {desk}</p>'
+        f"{alphai_line}"
+        f'<p class="fx-meta">peil {as_of} NL · volgende ochtend-update ~{nxt} · '
+        '<a href="/live/momentum/forecast">JSON</a></p>'
+        "</section>"
+    )
+
+
 def _sleeve_card(
     *,
     title: str,
@@ -1618,6 +1708,7 @@ def render_momentum_dashboard(
     volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_volatile: bool = False,
     show_hold: bool = False,
+    forecast: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -1677,6 +1768,7 @@ def render_momentum_dashboard(
 
     earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue, show_volatile=show_vol)
     btc_hold_html = _btc_hold_panel(hold) if show_hold else ""
+    forecast_html = _forecast_panel(forecast)
 
     heroes = "".join(
         [
@@ -1780,6 +1872,7 @@ def render_momentum_dashboard(
 <body><div class="wrap">
 {earnings_html}
 {btc_hold_html}
+{forecast_html}
 {err_html}
 {toolbar}
 {sleeves_html}

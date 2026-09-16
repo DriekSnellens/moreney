@@ -666,6 +666,11 @@ class Settings(BaseSettings):
     momentum_hold_ledger_path: str = "./data/momentum_hold_ledger.jsonl"
     momentum_hold_baseline_path: str = "./data/momentum_hold_baseline.json"
 
+    # Weekly operator forecast on the momentum dashboard (AlphaI + tape).
+    desk_weekly_forecast_enabled: bool = True
+    desk_weekly_forecast_path: str = "./data/desk_weekly_forecast.json"
+    desk_weekly_forecast_hour_local: int = Field(default=7, ge=0, le=23)
+
     # Volatile AlphaI sleeve (separate from core-16 momentum desk). Default off.
     momentum_volatile_enabled: bool = False
     # When false, start/resume may only run dry_run (paper) — no real orders.

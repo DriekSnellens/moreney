@@ -7,6 +7,7 @@ Withdrawals remain disabled / non-automatic.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -270,7 +271,20 @@ async def lifespan(_app: FastAPI):
                 logger.info("hold sleeve disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume hold sleeve")
+        try:
+            if bool(getattr(get_settings(), "desk_weekly_forecast_enabled", True)):
+                from bot.live.desk_weekly_forecast import start_forecast_background_refresh
+
+                start_forecast_background_refresh(get_settings())
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to start weekly forecast refresh")
     yield
+    try:
+        from bot.live.desk_weekly_forecast import stop_forecast_background_refresh
+
+        stop_forecast_background_refresh()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to stop weekly forecast refresh")
     if paper_runner is not None:
         try:
             await paper_runner.shutdown()
@@ -900,6 +914,15 @@ async def live_momentum_dashboard(
             hold_status = await get_hold_desk_manager().status_fresh()
         except Exception:  # noqa: BLE001
             hold_status = None
+    forecast: dict[str, Any] | None = None
+    try:
+        from bot.live.desk_weekly_forecast import maybe_refresh_forecast
+
+        if bool(getattr(settings, "desk_weekly_forecast_enabled", True)):
+            fres = await asyncio.to_thread(maybe_refresh_forecast, settings, force=False)
+            forecast = (fres or {}).get("forecast")
+    except Exception:  # noqa: BLE001
+        forecast = None
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
@@ -926,7 +949,34 @@ async def live_momentum_dashboard(
         volatile_ledger_rows=volatile_ledger if show_volatile else None,
         show_volatile=show_volatile,
         show_hold=show_hold,
+        forecast=forecast,
     )
+
+
+@app.get("/live/momentum/forecast")
+async def live_momentum_forecast(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Weekly operator forecast (AlphaI + tape); refreshes if stale."""
+    from bot.live.desk_weekly_forecast import maybe_refresh_forecast
+
+    settings = get_settings()
+    if not bool(getattr(settings, "desk_weekly_forecast_enabled", True)):
+        return {"ok": False, "reason": "disabled"}
+    return await asyncio.to_thread(maybe_refresh_forecast, settings, force=False)
+
+
+@app.post("/live/momentum/forecast/refresh")
+async def live_momentum_forecast_refresh(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Force-refresh the weekly forecast now."""
+    from bot.live.desk_weekly_forecast import maybe_refresh_forecast
+
+    settings = get_settings()
+    if not bool(getattr(settings, "desk_weekly_forecast_enabled", True)):
+        return {"ok": False, "reason": "disabled"}
+    return await asyncio.to_thread(maybe_refresh_forecast, settings, force=True)
 
 
 @app.get("/live/momentum/earnings")
