@@ -175,6 +175,58 @@ table.desk td:first-child, table.desk th:first-child { text-align: left; }
 @media (min-width: 820px) { .sleeve-split { grid-template-columns: 1fr 1fr; } }
 .sleeve-earn { font-size: .78rem; color: var(--muted); margin: .35rem 0 .15rem; }
 .sleeve-earn b { font-family: var(--mono); font-weight: 600; }
+.btc-hold {
+  margin: 0 0 1rem;
+  padding: 1rem 1.15rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, #fff), var(--panel));
+}
+.btc-hold .btc-label {
+  font-size: .78rem; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 .25rem;
+}
+.btc-hold .btc-value {
+  font-family: var(--mono); font-size: clamp(1.8rem, 4vw, 2.6rem);
+  font-weight: 700; line-height: 1.1; margin: 0;
+}
+.btc-hold .btc-delta {
+  font-family: var(--mono); font-size: 1.05rem; font-weight: 600; margin: .35rem 0 0;
+}
+.btc-hold .btc-meta {
+  margin: .45rem 0 0; font-size: .82rem; color: var(--muted);
+}
+.btc-hold.good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.btc-hold.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.forecast {
+  margin: 0 0 1rem;
+  padding: 1rem 1.15rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.forecast h2 { margin: 0 0 .35rem; font-size: 1.05rem; }
+.forecast .fx-bias {
+  display: inline-block; font-family: var(--mono); font-weight: 700;
+  font-size: .95rem; margin: 0 0 .55rem;
+}
+.forecast .fx-view { margin: 0 0 .65rem; line-height: 1.45; }
+.forecast ul { margin: .2rem 0 .7rem; padding-left: 1.15rem; }
+.forecast li { margin: .2rem 0; color: var(--ink); }
+.forecast .fx-scen {
+  display: grid; gap: .45rem; margin: .35rem 0 .7rem;
+}
+@media (min-width: 820px) {
+  .forecast .fx-scen { grid-template-columns: 1fr 1fr 1fr; }
+}
+.forecast .fx-scen div {
+  border: 1px solid var(--line); border-radius: 10px; padding: .55rem .65rem;
+  background: color-mix(in srgb, var(--panel) 88%, #fff);
+}
+.forecast .fx-scen strong { font-family: var(--mono); font-size: .82rem; }
+.forecast .fx-desk { margin: 0; font-size: .9rem; }
+.forecast .fx-meta { margin: .65rem 0 0; font-size: .75rem; color: var(--muted); }
 
 @media (max-width: 720px) {
   .wrap { padding: .85rem .7rem 0; }
@@ -253,28 +305,44 @@ def _earnings_masthead(
     pill: str,
     venue: str,
     show_volatile: bool = False,
+    show_hold: bool = False,
 ) -> str:
     """First-viewport composition: brand + week/month/all-time net."""
     if earnings is None:
         c_week = c_month = c_all = 0.0
         open_mtm = 0.0
         tw = tm = ta = 0
-        core_w = vol_w = 0.0
+        core_w = vol_w = hold_w = 0.0
         as_of = "—"
+        day_eur = 0.0
     else:
-        # Core-only masthead uses core sleeve totals when volatile is disabled.
-        sleeve = earnings.combined if show_volatile else earnings.core
+        # Include every armed sleeve in the masthead (core / hold / volatile).
+        use_combined = bool(show_volatile or show_hold)
+        sleeve = earnings.combined if use_combined else earnings.core
         c_week, c_month, c_all = sleeve.week_eur, sleeve.month_eur, sleeve.all_time_eur
         open_mtm = earnings.open_mtm_eur
         tw, tm, ta = sleeve.trades_week, sleeve.trades_month, sleeve.trades_all_time
-        core_w, vol_w = earnings.core.week_eur, earnings.volatile.week_eur
+        core_w = earnings.core.week_eur
+        vol_w = earnings.volatile.week_eur
+        hold_w = earnings.hold.week_eur
         as_of = earnings.as_of
+        day_eur = sleeve.day_eur
+    parts: list[str] = ["core"]
+    if show_hold:
+        parts.append("hold")
     if show_volatile:
-        week_meta = f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"
-        brand_sub = f"Momentum desk · core + volatile · {venue}. "
-    else:
+        parts.append("volatile")
+    brand_sub = f"Momentum desk · {' + '.join(parts)} · {venue}. "
+    meta_bits = [f"{tw} trades"]
+    if show_hold or show_volatile:
+        meta_bits.append(f"core {_fmt_eur(core_w)}")
+    if show_hold:
+        meta_bits.append(f"hold {_fmt_eur(hold_w)}")
+    if show_volatile:
+        meta_bits.append(f"vol {_fmt_eur(vol_w)}")
+    week_meta = " · ".join(meta_bits) + (" deze week" if not (show_hold or show_volatile) else "")
+    if not (show_hold or show_volatile):
         week_meta = f"{tw} trades deze week"
-        brand_sub = f"Momentum desk · core · {venue}. "
     tiles = [
         ("Deze week", c_week, week_meta),
         ("Deze maand", c_month, f"{tm} trades deze maand"),
@@ -288,11 +356,6 @@ def _earnings_masthead(
         "</div>"
         for label, val, meta in tiles
     )
-    day_eur = 0.0
-    if earnings is not None:
-        day_eur = (
-            earnings.combined.day_eur if show_volatile else earnings.core.day_eur
-        )
     return (
         '<section class="masthead">'
         '<div class="masthead-top">'
@@ -1068,7 +1131,7 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         (
             "Exit-ladder",
-            "1) hard stop → 2) fade ETA→0 (live marks) → 3) trail → 4) time-exit",
+            "1) early/hard stop → 2) fade ETA→0 (live marks) → 3) trail → 4) time-exit",
         ),
         (
             "Trail",
@@ -1077,6 +1140,16 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             f"≥ {100 * float(cfg.get('trail_tight_after') or 0):.0f}%",
         ),
         ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
+        (
+            "Early stop",
+            (
+                f"−{100 * float(cfg.get('early_stop_pct') or 0):.1f}% tot piek "
+                f"≥ {100 * float(cfg.get('early_stop_until_peak') or 0):.1f}%"
+                if float(cfg.get("early_stop_pct") or 0) > 0
+                and float(cfg.get("early_stop_until_peak") or 0) > 0
+                else "uit"
+            ),
+        ),
         (
             "Fade ETA→0",
             (
@@ -1130,6 +1203,184 @@ def _rules(cfg: Mapping[str, Any]) -> str:
     )
 
 
+def _btc_hold_panel(hold: Mapping[str, Any] | None) -> str:
+    """Prominent BTC hold MTM vs today's fixed origin baseline.
+
+    When flat after sells, show sleeve realized PnL (not phantom inventory MTM).
+    """
+    if not hold:
+        return ""
+    snap = hold.get("btc_hold") or {}
+    value = snap.get("value_eur")
+    qty_raw = snap.get("qty_btc")
+    try:
+        qty_f = float(qty_raw) if qty_raw is not None else None
+    except (TypeError, ValueError):
+        qty_f = None
+    flat = (qty_f is not None and qty_f <= 1e-10) and not (
+        hold.get("positions") or []
+    )
+    if flat:
+        realized = hold.get("realized_total_eur")
+        if realized is None:
+            realized = snap.get("realized_total_eur")
+        day_r = (hold.get("risk") or {}).get("day_realized_eur")
+        try:
+            real_f = float(realized) if realized is not None else 0.0
+        except (TypeError, ValueError):
+            real_f = 0.0
+        try:
+            day_f = float(day_r) if day_r is not None else real_f
+        except (TypeError, ValueError):
+            day_f = real_f
+        tone = _cls(real_f)
+        note = "handmatig verkocht · cash vrij"
+        return (
+            f'<section class="btc-hold {tone}" data-btc-hold data-btc-flat="1">'
+            '<p class="btc-label">BTC hold · gerealiseerd</p>'
+            f'<p class="btc-value {tone}" data-btc="value">{_fmt_eur(real_f)}</p>'
+            f'<p class="btc-delta {tone}" data-btc="pnl">'
+            f"vandaag {_fmt_eur(day_f)} · {escape(note)}</p>"
+            '<p class="btc-meta" data-btc="meta">geen BTC op de exchanges · '
+            "inventory MTM uit</p>"
+            "</section>"
+        )
+    if value is None:
+        # Fallback: sum marked positions while inventory refresh is pending.
+        value = 0.0
+        for p in hold.get("positions") or []:
+            if str(p.get("base") or "").upper() != "BTC":
+                continue
+            mark = p.get("mark") or p.get("entry_price")
+            qty = p.get("quantity")
+            try:
+                if mark is not None and qty is not None:
+                    value += float(mark) * float(qty)
+            except (TypeError, ValueError):
+                continue
+        if value <= 0:
+            value = hold.get("exposure_eur")
+    try:
+        value_f = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        value_f = None
+    if value_f is None:
+        return ""
+    base = snap.get("baseline_eur")
+    pnl = snap.get("pnl_eur")
+    pnl_pct = snap.get("pnl_pct")
+    try:
+        base_f = float(base) if base is not None else None
+    except (TypeError, ValueError):
+        base_f = None
+    try:
+        pnl_f = float(pnl) if pnl is not None else (
+            (value_f - base_f) if base_f is not None else None
+        )
+    except (TypeError, ValueError):
+        pnl_f = None
+    tone = _cls(pnl_f)
+    day = escape(str(snap.get("baseline_day") or "vandaag"))
+    qty = snap.get("qty_btc")
+    mark = snap.get("mark_eur")
+    venues = snap.get("by_venue_btc") or {}
+    venue_bits = []
+    for v, q in venues.items():
+        try:
+            venue_bits.append(f"{escape(str(v))} {float(q):.5f}")
+        except (TypeError, ValueError):
+            continue
+    if not venue_bits:
+        venue_bits.append("exchange inventory")
+    meta_bits = [
+        f"start {day} {_fmt_eur(base_f, signed=False)}" if base_f is not None else "baseline pending",
+        f"qty {float(qty):.5f} BTC" if qty is not None else None,
+        f"mark {_fmt_eur(mark, signed=False)}" if mark is not None else None,
+        " · ".join(venue_bits),
+    ]
+    meta = " · ".join(x for x in meta_bits if x)
+    if pnl_f is None:
+        delta_html = '<p class="btc-delta muted" data-btc="pnl">vs start —</p>'
+    else:
+        pct_s = _fmt_pct(pnl_pct) if pnl_pct is not None else ""
+        delta_html = (
+            f'<p class="btc-delta {tone}" data-btc="pnl">'
+            f"{_fmt_eur(pnl_f)}"
+            f"{(' · ' + pct_s) if pct_s else ''}"
+            " vs start</p>"
+        )
+    return (
+        f'<section class="btc-hold {tone}" data-btc-hold>'
+        '<p class="btc-label">BTC hold · totale waarde</p>'
+        f'<p class="btc-value {tone}" data-btc="value">{_fmt_eur(value_f, signed=False)}</p>'
+        f"{delta_html}"
+        f'<p class="btc-meta" data-btc="meta">{escape(meta)}</p>'
+        "</section>"
+    )
+
+
+def _forecast_panel(forecast: Mapping[str, Any] | None) -> str:
+    """Weekly AlphaI+tape operator forecast."""
+    if not forecast:
+        return (
+            '<section class="forecast">'
+            "<h2>Weekprognose</h2>"
+            '<p class="muted">Nog geen prognose — wordt elke ochtend (07:00 NL) ververst, '
+            "of via POST /live/momentum/forecast/refresh.</p></section>"
+        )
+    bias = escape(str(forecast.get("bias_label") or forecast.get("bias") or "—"))
+    bias_key = str(forecast.get("bias") or "")
+    tone = (
+        "bad"
+        if bias_key == "cautious"
+        else ("good" if bias_key == "constructive" else "")
+    )
+    week = escape(str(forecast.get("week_label") or ""))
+    view = escape(str(forecast.get("week_view") or ""))
+    why_items = "".join(
+        f"<li>{escape(str(x))}</li>" for x in (forecast.get("why") or [])[:8]
+    )
+    scen_html = ""
+    for s in forecast.get("scenarios") or []:
+        if not isinstance(s, dict):
+            continue
+        scen_html += (
+            "<div>"
+            f"<strong>{escape(str(s.get('name') or ''))} · "
+            f"{escape(str(s.get('prob') or ''))}</strong>"
+            f"<p style='margin:.25rem 0 0;font-size:.86rem'>"
+            f"{escape(str(s.get('text') or ''))}</p></div>"
+        )
+    desk = escape(str(forecast.get("desk_implication") or ""))
+    as_of = escape(str(forecast.get("as_of_local") or forecast.get("as_of") or "")[:19])
+    nxt = escape(str(forecast.get("next_morning_refresh_local") or "")[:16])
+    picks = forecast.get("alphai", {}).get("picks") if isinstance(forecast.get("alphai"), dict) else None
+    avoid = forecast.get("alphai", {}).get("avoid") if isinstance(forecast.get("alphai"), dict) else None
+    pick_s = ", ".join(escape(str(p.get("base"))) for p in (picks or [])[:4] if isinstance(p, dict))
+    avoid_s = ", ".join(escape(str(a.get("base"))) for a in (avoid or [])[:5] if isinstance(a, dict))
+    alphai_line = ""
+    if pick_s or avoid_s:
+        alphai_line = (
+            f'<p class="fx-meta">AlphaI picks {pick_s or "—"} · avoid {avoid_s or "—"}'
+            f'{" · macro caution" if (forecast.get("alphai") or {}).get("macro_caution") else ""}</p>'
+        )
+    return (
+        f'<section class="forecast {tone}">'
+        f"<h2>Weekprognose · {week}</h2>"
+        f'<p class="fx-bias {tone}">{bias}</p>'
+        f'<p class="fx-view">{view}</p>'
+        "<p class='muted' style='margin:0 0 .2rem;font-size:.8rem'>Waarom</p>"
+        f"<ul>{why_items or '<li class=muted>—</li>'}</ul>"
+        "<p class='muted' style='margin:0 0 .2rem;font-size:.8rem'>Scenario’s</p>"
+        f'<div class="fx-scen">{scen_html or "<div class=muted>—</div>"}</div>'
+        f'<p class="fx-desk"><strong>Desk:</strong> {desk}</p>'
+        f"{alphai_line}"
+        f'<p class="fx-meta">peil {as_of} NL · volgende ochtend-update ~{nxt} · '
+        '<a href="/live/momentum/forecast">JSON</a></p>'
+        "</section>"
+    )
+
+
 def _sleeve_card(
     *,
     title: str,
@@ -1137,6 +1388,7 @@ def _sleeve_card(
     status: Mapping[str, Any] | None,
     href: str,
     book_label: str | None = None,
+    extra_html: str = "",
 ) -> str:
     """Compact dual-sleeve tile for the integrated desk view."""
     st = status or {}
@@ -1197,51 +1449,110 @@ def _sleeve_card(
         f"pos {n_pos}/{max_pos}</p>"
         f"{book_html}"
         f"<p>{escape(schedule_s)} · next <strong>{_ts(st.get('next_decision'))}</strong></p>"
-        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul></div>"
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem'>{''.join(pos_bits)}</ul>"
+        f"{extra_html}</div>"
     )
 
 
 def _sleeves_panel(
     core: Mapping[str, Any],
-    volatile: Mapping[str, Any] | None,
+    volatile: Mapping[str, Any] | None = None,
+    hold: Mapping[str, Any] | None = None,
 ) -> str:
-    """One desk, two sleeves: stable core + aggressive volatile."""
+    """Desk sleeves: core + optional hold + optional volatile."""
     cash = float(core.get("cash_eur") or 0)
     core_exp = float(core.get("exposure_eur") or 0)
     v = volatile or {}
-    book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
-    deployed = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
-    reserved = max(0.0, book - deployed) if book else 0.0
+    h = hold or {}
+    v_book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
+    v_dep = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
+    h_book = float(h.get("book_eur") or (h.get("config") or {}).get("book_eur") or 0)
+    h_dep = float(h.get("deployed_eur") or h.get("exposure_eur") or 0)
+    reserved = max(0.0, v_book - v_dep) + max(0.0, h_book - h_dep)
     free_shared = max(0.0, cash - core_exp - reserved)
+    bits = [
+        f"Cash {_fmt_eur(cash, signed=False)}",
+        f"core {_fmt_eur(core_exp, signed=False)}",
+    ]
+    if h_book > 0 or h:
+        bits.append(
+            f"hold book {_fmt_eur(h_book, signed=False)} "
+            f"(vrij {_fmt_eur(max(0.0, h_book - h_dep), signed=False)})"
+        )
+    if v_book > 0 or v:
+        bits.append(
+            f"volatile book {_fmt_eur(v_book, signed=False)} "
+            f"(vrij {_fmt_eur(max(0.0, v_book - v_dep), signed=False)})"
+        )
+    bits.append(f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}")
     capital = (
         '<div class="hint" style="margin-bottom:.7rem">'
         "<strong>Kapitaalbeeld</strong> — gedeelde venue-cash, gescheiden boeken. "
-        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)} · "
-        f"volatile book {_fmt_eur(book, signed=False)} "
-        f"(waarvan vrij {_fmt_eur(reserved, signed=False)}) · "
-        f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}."
-        "</div>"
+        + " · ".join(bits)
+        + ".</div>"
     )
-    return (
-        '<div class="card section"><div class="card-head">'
-        "<h2>Desk sleeves</h2>"
-        '<span class="muted">stabiel core · aggressief volatile</span></div>'
-        f"{capital}"
-        '<div class="stack two">'
-        + _sleeve_card(
-            title="Core",
-            role="Stabiele RS-desk · core-16 · strengere filters",
+    cards = [
+        _sleeve_card(
+            title="Core · RS momentum",
+            role="trail / regime",
             status=core,
             href="/live/momentum",
-            book_label=None,
+            book_label="Soft book" if float(core.get("book_eur") or 0) else None,
         )
-        + _sleeve_card(
-            title="Volatile",
-            role="Agressievere AlphaI midcaps · soft book · eigen risk",
-            status=volatile,
-            href="/live/momentum/volatile",
-            book_label="Soft book",
+    ]
+    if h or h_book > 0:
+        bases = ",".join(str(b) for b in (h.get("hold_bases") or ["BTC"])[:4])
+        btc = h.get("btc_hold") or {}
+        hold_extra = ""
+        qty = btc.get("qty_btc")
+        try:
+            qty_f = float(qty) if qty is not None else None
+        except (TypeError, ValueError):
+            qty_f = None
+        flat = (qty_f is not None and qty_f <= 1e-10) and not (h.get("positions") or [])
+        if flat:
+            real = h.get("realized_total_eur")
+            hold_extra = (
+                f"<p><strong>BTC hold</strong> flat · gerealiseerd "
+                f"<span class='{_cls(real)}' data-btc-sleeve-pnl>"
+                f"{_fmt_eur(real)}</span></p>"
+            )
+        elif btc.get("value_eur") is not None:
+            hold_extra = (
+                f"<p><strong>BTC hold</strong> "
+                f"<span class='{_cls(btc.get('pnl_eur'))}' data-btc-sleeve-value>"
+                f"{_fmt_eur(btc.get('value_eur'), signed=False)}</span>"
+                f" · <span class='{_cls(btc.get('pnl_eur'))}' data-btc-sleeve-pnl>"
+                f"{_fmt_eur(btc.get('pnl_eur'))}</span> vs start</p>"
+            )
+        cards.append(
+            _sleeve_card(
+                title="Hold · spot buy&hold",
+                role=f"bases {bases}",
+                status=h,
+                href="/live/momentum/hold",
+                book_label="Hold book",
+                extra_html=hold_extra,
+            )
         )
+    if v or v_book > 0:
+        cards.append(
+            _sleeve_card(
+                title="Volatile · AlphaI midcap",
+                role="concentrated sleeve",
+                status=v,
+                href="/live/momentum/volatile",
+                book_label="Volatile book",
+            )
+        )
+    n = len(cards)
+    grid = "1fr " * n
+    return (
+        '<div class="card section">'
+        "<h2>Desk sleeves</h2>"
+        f"{capital}"
+        f'<div class="sleeve-split" style="grid-template-columns:{grid.strip()}">'
+        + "".join(cards)
         + "</div></div>"
     )
 
@@ -1275,6 +1586,7 @@ _LIVE_MARKS_JS = r"""
   if (window.__moreneyMarksPoll) return;
   window.__moreneyMarksPoll = true;
   const STATUS_URL = "/live/momentum/status";
+  const HOLD_STATUS_URL = "/live/momentum/hold/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -1380,6 +1692,76 @@ _LIVE_MARKS_JS = r"""
     const node = document.querySelector('[data-live="rules"]');
     if (html && node) node.outerHTML = html;
   }
+  function patchBtcHold(hold) {
+    if (!hold) return;
+    const snap = hold.btc_hold || hold;
+    const root = document.querySelector("[data-btc-hold]");
+    if (!root) return;
+    const qty = snap.qty_btc;
+    const flat = (qty == null || Number(qty) <= 1e-10) && !(hold.positions || []).length;
+    const realized = hold.realized_total_eur != null ? hold.realized_total_eur : snap.realized_total_eur;
+    const dayR = (hold.risk && hold.risk.day_realized_eur != null)
+      ? hold.risk.day_realized_eur
+      : realized;
+    if (flat) {
+      const tone = cls(realized);
+      root.classList.remove("good", "bad", "muted");
+      root.setAttribute("data-btc-flat", "1");
+      if (tone) root.classList.add(tone);
+      const label = root.querySelector(".btc-label");
+      if (label) label.textContent = "BTC hold · gerealiseerd";
+      const val = root.querySelector('[data-btc="value"]');
+      if (val && realized != null) {
+        val.textContent = fmtEur(realized);
+        val.classList.remove("good", "bad", "muted");
+        if (tone) val.classList.add(tone);
+      }
+      const delta = root.querySelector('[data-btc="pnl"]');
+      if (delta) {
+        delta.textContent = `vandaag ${fmtEur(dayR)} · handmatig verkocht · cash vrij`;
+        delta.classList.remove("good", "bad", "muted");
+        if (tone) delta.classList.add(tone);
+      }
+      document.querySelectorAll("[data-btc-sleeve-pnl]").forEach((el) => {
+        if (realized != null) el.textContent = fmtEur(realized);
+        el.classList.remove("good", "bad");
+        if (tone) el.classList.add(tone);
+      });
+      document.querySelectorAll("[data-btc-sleeve-value]").forEach((el) => {
+        el.textContent = "flat";
+        el.classList.remove("good", "bad");
+      });
+      return;
+    }
+    root.removeAttribute("data-btc-flat");
+    const pnl = snap.pnl_eur;
+    const tone = cls(pnl);
+    root.classList.remove("good", "bad", "muted");
+    if (tone) root.classList.add(tone);
+    const val = root.querySelector('[data-btc="value"]');
+    if (val && snap.value_eur != null) {
+      val.textContent = fmtEur(snap.value_eur).replace(/^\+/, "");
+      val.classList.remove("good", "bad");
+      if (tone) val.classList.add(tone);
+    }
+    const delta = root.querySelector('[data-btc="pnl"]');
+    if (delta && pnl != null) {
+      const pct = snap.pnl_pct != null ? ` · ${fmtPct(snap.pnl_pct)}` : "";
+      delta.textContent = `${fmtEur(pnl)}${pct} vs start`;
+      delta.classList.remove("good", "bad", "muted");
+      if (tone) delta.classList.add(tone);
+    }
+    document.querySelectorAll("[data-btc-sleeve-value]").forEach((el) => {
+      if (snap.value_eur != null) el.textContent = fmtEur(snap.value_eur).replace(/^\+/, "");
+      el.classList.remove("good", "bad");
+      if (tone) el.classList.add(tone);
+    });
+    document.querySelectorAll("[data-btc-sleeve-pnl]").forEach((el) => {
+      if (pnl != null) el.textContent = fmtEur(pnl);
+      el.classList.remove("good", "bad");
+      if (tone) el.classList.add(tone);
+    });
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
@@ -1391,6 +1773,15 @@ _LIVE_MARKS_JS = r"""
       patchRules(status);
     } catch (err) {
       /* ignore transient network blips */
+    }
+    try {
+      const holdRes = await fetch(HOLD_STATUS_URL, { cache: "no-store" });
+      if (holdRes.ok) {
+        const hold = await holdRes.json();
+        patchBtcHold(hold);
+      }
+    } catch (err) {
+      /* ignore */
     }
   }
   tick();
@@ -1410,9 +1801,12 @@ def render_momentum_dashboard(
     sell_all: bool = False,
     report: Mapping[str, Any] | None = None,
     volatile: Mapping[str, Any] | None = None,
+    hold: Mapping[str, Any] | None = None,
     earnings: DeskEarnings | None = None,
     volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_volatile: bool = False,
+    show_hold: bool = False,
+    forecast: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -1470,7 +1864,15 @@ def render_momentum_dashboard(
         else ""
     )
 
-    earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue, show_volatile=show_vol)
+    earnings_html = _earnings_masthead(
+        earnings,
+        pill=pill,
+        venue=venue,
+        show_volatile=show_vol,
+        show_hold=show_hold,
+    )
+    btc_hold_html = _btc_hold_panel(hold) if show_hold else ""
+    forecast_html = _forecast_panel(forecast)
 
     heroes = "".join(
         [
@@ -1509,7 +1911,11 @@ def render_momentum_dashboard(
     vol_earn = (
         _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
     )
-    sleeves_html = _sleeves_panel(status, volatile) if show_vol else ""
+    sleeves_html = (
+        _sleeves_panel(status, volatile if show_vol else None, hold if show_hold else None)
+        if (show_vol or show_hold)
+        else ""
+    )
     if show_vol:
         positions_html = (
             '<div class="stack two section">'
@@ -1569,6 +1975,8 @@ def render_momentum_dashboard(
 <style>{_CSS}</style></head>
 <body><div class="wrap">
 {earnings_html}
+{btc_hold_html}
+{forecast_html}
 {err_html}
 {toolbar}
 {sleeves_html}

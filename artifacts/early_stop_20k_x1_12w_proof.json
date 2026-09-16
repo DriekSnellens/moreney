@@ -1,0 +1,62 @@
+{
+  "asof": "2026-09-16T15:15:00+00:00",
+  "window": {
+    "start": "2026-06-24T10:00:00+00:00",
+    "end": "2026-09-16T10:00:00+00:00",
+    "weeks": 12
+  },
+  "book_eur": 20000.0,
+  "clip_eur": 20000.0,
+  "max_positions": 1,
+  "caveat": "15m bar replay; AlphaI timeline only late in window. Objective: cut unproven losers earlier without trail clamp.",
+  "baseline": {
+    "label": "hard_3pct_no_early",
+    "hard_stop_pct": 0.03,
+    "early_stop_pct": 0.0,
+    "total_eur": 6765.51,
+    "max_drawdown_eur": -2554.16,
+    "win_rate": 0.5,
+    "trades": 36
+  },
+  "chosen": {
+    "label": "early_2pct_until_peak_1_5pct",
+    "hard_stop_pct": 0.03,
+    "early_stop_pct": 0.02,
+    "early_stop_until_peak": 0.015,
+    "total_eur": 7497.0,
+    "max_drawdown_eur": -2180.0,
+    "delta_pnl_eur": 731.0,
+    "delta_dd_eur": 374.0,
+    "note": "Matches hard_2pct on this window; keeps 3% hard after peak confirms."
+  },
+  "rejected": [
+    {
+      "label": "trail_2_tight_1_5",
+      "total_eur": 1228.0,
+      "max_drawdown_eur": -2140.0,
+      "why": "Slays winners"
+    },
+    {
+      "label": "midflat_8h",
+      "total_eur": 5485.0,
+      "max_drawdown_eur": -1992.0,
+      "why": "PnL hit too hard"
+    },
+    {
+      "label": "time_24h",
+      "total_eur": 5812.0,
+      "max_drawdown_eur": -3508.0,
+      "why": "Worse DD"
+    }
+  ],
+  "live_wiring": {
+    "settings": [
+      "momentum_desk_early_stop_pct=0.02",
+      "momentum_desk_early_stop_until_peak=0.015"
+    ],
+    "env": [
+      "MOMENTUM_DESK_EARLY_STOP_PCT=0.02",
+      "MOMENTUM_DESK_EARLY_STOP_UNTIL_PEAK=0.015"
+    ]
+  }
+}

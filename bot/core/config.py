@@ -577,20 +577,24 @@ class Settings(BaseSettings):
     # Bitvavo book the weekly-PnL search prefers ~50% book per clip with
     # max_positions=3 (median week ~€411 / mean ~€692 over 12w) — not denser
     # hours or looser excess. Router still shrinks clips venue cash cannot fund.
-    # Strong tape (>= 85% of the universe up) sizes x1.3, thin tape x0.7.
-    momentum_desk_clip_eur: float = Field(default=1300.0, gt=0)
+    # €20k×1 full-book util winner (12w); live-micro.env overrides when smaller.
+    momentum_desk_clip_eur: float = Field(default=20_000.0, gt=0)
     momentum_desk_strong_clip_mult: float = Field(default=1.3, ge=1.0, le=2.0)
     momentum_desk_weak_clip_mult: float = Field(default=0.7, gt=0, le=1.0)
     # Weekend 24h signals print on thin liquidity and netted ~0 over 12 weeks
     # while adding a third of the drawdown; exits keep running on weekends.
     momentum_desk_skip_weekend_entries: bool = True
-    # €20k util search: 3 slots + larger clips beat 4× smaller proportional clips.
-    momentum_desk_max_positions: int = Field(default=3, ge=1, le=10)
+    # €20k×1: single full-book slot (util search); early-stop cuts unproven losers.
+    momentum_desk_max_positions: int = Field(default=1, ge=1, le=10)
     # WR winner (135d @~€4k): 3% trail with 4%→2% ratchet.
     momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
     momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
+    # Tighter stop while peak < until_peak (0 disables). €20k×1 12w: early 2%
+    # until +1.5% peak cut losers earlier (+PnL, shallower DD) without trail clamp.
+    momentum_desk_early_stop_pct: float = Field(default=0.02, ge=0.0, le=0.2)
+    momentum_desk_early_stop_until_peak: float = Field(default=0.015, ge=0.0, le=0.5)
     momentum_desk_time_exit_hours: float = Field(default=36.0, gt=0)
     # Entry/exit quality knobs (DeskConfig defaults; overridable via env).
     momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)
@@ -608,8 +612,8 @@ class Settings(BaseSettings):
     momentum_desk_fade_min_peak_pct: float = Field(default=0.012, ge=0.0, le=0.5)
     momentum_desk_fade_min_giveback_eur: float = Field(default=5.0, ge=0.0, le=10_000.0)
     momentum_desk_mark_tick_sec: float = Field(default=4.0, ge=0.0, le=60.0)
-    momentum_desk_day_loss_limit_eur: float = Field(default=100.0, gt=0)
-    momentum_desk_week_loss_limit_eur: float = Field(default=250.0, gt=0)
+    momentum_desk_day_loss_limit_eur: float = Field(default=750.0, gt=0)
+    momentum_desk_week_loss_limit_eur: float = Field(default=2000.0, gt=0)
     momentum_desk_macro_caution_mode: str = "reduce"
     # Soft/weak-tape survival: single soft-fail stays open (AlphaI half-clip);
     # double soft-fail or soft+macro caution idle (no force-longs).
@@ -637,6 +641,41 @@ class Settings(BaseSettings):
     momentum_desk_outcome_mult_max: float = Field(default=1.15, ge=1.0, le=1.5)
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
+
+    # Soft trading book for the core momentum desk (0 = no soft cap). When the
+    # hold sleeve is on, set this to the capital left for RS trading.
+    momentum_desk_book_eur: float = Field(default=20_000.0, ge=0.0)
+    # Optional total-book hint used when momentum_hold_fraction > 0.
+    momentum_total_book_eur: float = Field(default=22_000.0, ge=0.0)
+
+    # Spot buy&hold sleeve (12w quality upgrade vs WR desk: BTC BH). Soft book
+    # is reserved from core cash until deployed. Bases are a config universe.
+    momentum_hold_enabled: bool = True
+    momentum_hold_allow_live: bool = True
+    momentum_hold_venues: str = "bitvavo"
+    momentum_hold_book_eur: float = Field(default=2_000.0, gt=0)
+    # If >0, overrides book_eur as fraction of momentum_total_book_eur.
+    momentum_hold_fraction: float = Field(default=0.0, ge=0.0, le=1.0)
+    momentum_hold_bases: str = "BTC"
+    momentum_hold_equal_weight: bool = True
+    momentum_hold_fill_threshold: float = Field(default=0.97, ge=0.5, le=1.0)
+    momentum_hold_rebalance_sec: float = Field(default=3600.0, ge=60.0, le=86_400.0)
+    momentum_hold_disaster_stop: bool = True
+    momentum_hold_disaster_pct: float = Field(default=0.25, ge=0.05, le=0.80)
+    # Peak trail (same defaults as core momentum desk). 0 disables trail.
+    momentum_hold_trail_pct: float = Field(default=0.03, ge=0.0, le=0.5)
+    momentum_hold_trail_tight_after: float = Field(default=0.04, ge=0.0, le=0.5)
+    momentum_hold_trail_tight_pct: float = Field(default=0.02, ge=0.0, le=0.5)
+    # After auto trail/stop exit: keep cash free (default). Set true to rebuy.
+    momentum_hold_refill_after_exit: bool = False
+    momentum_hold_state_path: str = "./data/momentum_hold_state.json"
+    momentum_hold_ledger_path: str = "./data/momentum_hold_ledger.jsonl"
+    momentum_hold_baseline_path: str = "./data/momentum_hold_baseline.json"
+
+    # Weekly operator forecast on the momentum dashboard (AlphaI + tape).
+    desk_weekly_forecast_enabled: bool = True
+    desk_weekly_forecast_path: str = "./data/desk_weekly_forecast.json"
+    desk_weekly_forecast_hour_local: int = Field(default=7, ge=0, le=23)
 
     # Volatile AlphaI sleeve (separate from core-16 momentum desk). Default off.
     momentum_volatile_enabled: bool = False

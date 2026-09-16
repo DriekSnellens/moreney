@@ -320,6 +320,44 @@ def test_early_stop_stages_until_peak_then_hard_stop():
     assert d is not None and d.reason == "hard_stop" and d.price == pytest.approx(97.0)
 
 
+def test_live_early_stop_defaults_cut_at_2pct_until_peak():
+    """Armed live knobs: −2% early stop until +1.5% peak, then −3% hard."""
+    cfg = DeskConfig(
+        hard_stop_pct=0.03,
+        early_stop_pct=0.02,
+        early_stop_until_peak=0.015,
+        trail_pct=0.10,
+        trail_tight_after=0.0,
+        midflat_hours=0.0,
+        green_deadline_hours=0.0,
+        exit_on_touch=True,
+    )
+    pos = Position("E", 100.0, 5.0, 500.0, T0, 100.0)
+    # −2% while unproven → early_stop.
+    d = evaluate_exit(pos, [T0, 100, 100.1, 97.9, 98.0, 1], cfg)
+    assert d is not None and d.reason == "early_stop" and d.price == pytest.approx(98.0)
+    # After +1.5% peak, −2% no longer enough; need −3% hard.
+    pos2 = Position("E", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [T0, 100, 101.6, 100.0, 101.5, 1], cfg) is None
+    assert pos2.peak == pytest.approx(101.6)
+    d = evaluate_exit(pos2, [T0 + BAR_MS, 101.5, 101.5, 97.9, 98.0, 1], cfg)
+    assert d is None
+    d = evaluate_exit(pos2, [T0 + 2 * BAR_MS, 98.0, 98.0, 96.8, 97.0, 1], cfg)
+    assert d is not None and d.reason == "hard_stop" and d.price == pytest.approx(97.0)
+
+
+def test_desk_config_from_settings_wires_early_stop(monkeypatch):
+    from bot.core.config import get_settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "momentum_desk_early_stop_pct", 0.02)
+    monkeypatch.setattr(settings, "momentum_desk_early_stop_until_peak", 0.015)
+    cfg = desk_config_from_settings(settings)
+    assert cfg.early_stop_pct == pytest.approx(0.02)
+    assert cfg.early_stop_until_peak == pytest.approx(0.015)
+
+
 def test_no_green_exits_when_peak_never_confirms():
     cfg = DeskConfig(
         green_deadline_hours=4.0,
