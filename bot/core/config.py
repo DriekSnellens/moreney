@@ -649,7 +649,7 @@ class Settings(BaseSettings):
     # Live desk currently ~€4k — book matches that (scale up with capital).
     momentum_hold_enabled: bool = True
     momentum_hold_allow_live: bool = True
-    momentum_hold_venues: str = "bitvavo,okx"
+    momentum_hold_venues: str = "bitvavo"
     momentum_hold_book_eur: float = Field(default=4_000.0, gt=0)
     # If >0, overrides book_eur as fraction of momentum_total_book_eur.
     momentum_hold_fraction: float = Field(default=0.0, ge=0.0, le=1.0)

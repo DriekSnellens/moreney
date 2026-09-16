@@ -150,6 +150,7 @@ def hold_desk_config(hold: HoldSleeveConfig) -> DeskConfig:
         refill_on_exit=False,
         day_loss_limit_eur=1e12,
         week_loss_limit_eur=1e12,
+        max_entries_per_base_per_day=8,  # multi-venue top-ups same day
         universe=hold.bases,
         outcome_size_enabled=False,
     )
@@ -229,18 +230,33 @@ class HoldDeskRunner(MomentumDeskRunner):
         return sum(max(0.0, float(h.pos.notional_eur)) for h in self.holdings)
 
     def _route_entry(self, clip_eur: float) -> tuple[str, float] | None:
-        route = super()._route_entry(clip_eur)
-        if route is None:
-            return None
-        venue, clip = route
+        """Venue pick + own soft book only (do not reserve hold cash against self)."""
+        venues = self.opt.venues
         book = float(self.hold.book_eur or 0.0)
-        if book <= 0:
-            return venue, clip
-        free_book = max(0.0, book - self._deployed_eur())
+        free_book = max(0.0, book - self._deployed_eur()) if book > 0 else clip_eur
         min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
         if free_book < min_ok:
             return None
-        return venue, round(min(clip, free_book), 2)
+        want = min(clip_eur, free_book)
+        if not self._gws or not self.cash_by_venue:
+            return venues[0], round(want, 2)
+        need = want * 1.005
+        for venue in venues:
+            cash = self.cash_by_venue.get(venue)
+            if cash is not None and cash >= need and venue in self._gws:
+                return venue, round(want, 2)
+        best = max(
+            ((v, self.cash_by_venue.get(v, 0.0)) for v in venues if v in self._gws),
+            key=lambda item: item[1],
+            default=None,
+        )
+        if best is None:
+            return None
+        venue, cash = best
+        reduced = min(float(cash) / 1.005, want)
+        if reduced < min_ok:
+            return None
+        return venue, round(reduced, 2)
 
     async def tick(self) -> None:
         """Mark + optional disaster stop + top-up toward the hold book."""
@@ -284,7 +300,7 @@ class HoldDeskRunner(MomentumDeskRunner):
         self._last_rebalance_ts = now
         await self.fill_to_book(now_ms)
 
-    async def fills_to_book(self, now_ms: int | None = None) -> dict[str, Any]:
+    async def fill_to_book(self, now_ms: int | None = None) -> dict[str, Any]:
         """Buy underweight hold bases until soft book is filled."""
         now_ms = now_ms or int(self._clock() * 1000)
         book = float(self.hold.book_eur or 0.0)
@@ -302,29 +318,40 @@ class HoldDeskRunner(MomentumDeskRunner):
         bases = list(self.hold.bases)
         n = max(1, len(bases))
         target_each = book / n if self.hold.equal_weight else book
-        held = {h.pos.base.upper(): h for h in self.holdings}
         planned: list[dict[str, Any]] = []
-        for base in bases:
-            cur = 0.0
-            h = held.get(base)
-            if h is not None:
-                cur = float(h.pos.notional_eur)
-            need = max(0.0, target_each - cur)
-            if need < max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur)):
-                continue
-            # Cap by remaining book.
-            free_book = max(0.0, book - self._deployed_eur())
-            clip = min(need, free_book)
-            if clip < max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur)):
+        # Multi-venue: keep topping up until book is filled or a pass makes no progress.
+        for _pass in range(6):
+            held = {h.pos.base.upper(): h for h in self.holdings}
+            made = False
+            for base in bases:
+                cur = 0.0
+                h = held.get(base)
+                if h is not None:
+                    cur = float(h.pos.notional_eur)
+                need = max(0.0, target_each - cur)
+                min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
+                if need < min_ok:
+                    continue
+                free_book = max(0.0, book - self._deployed_eur())
+                clip = min(need, free_book)
+                if clip < min_ok:
+                    continue
+                before = self._deployed_eur()
+                planned.append({"base": base, "clip_eur": round(clip, 2), "pass": _pass})
+                await self._enter(
+                    base,
+                    clip,
+                    f"hold_fill,target={target_each:.0f},book={book:.0f}",
+                    now_ms,
+                    entry_ctx={"sleeve": "hold", "regime_label": "hold"},
+                )
+                await self._refresh_cash()
+                if self._deployed_eur() > before + 1.0:
+                    made = True
+            if not made:
                 break
-            planned.append({"base": base, "clip_eur": round(clip, 2)})
-            await self._enter(
-                base,
-                clip,
-                f"hold_fill,target={target_each:.0f},book={book:.0f}",
-                now_ms,
-                entry_ctx={"sleeve": "hold", "regime_label": "hold"},
-            )
+            if self._deployed_eur() >= book * float(self.hold.fill_threshold):
+                break
         summary = {
             "ok": True,
             "planned": planned,
