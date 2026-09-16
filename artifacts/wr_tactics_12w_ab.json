@@ -1,0 +1,1705 @@
+{
+  "asof": "2026-09-16T11:00:00+00:00",
+  "window": {
+    "start": "2026-06-24T11:00:00+00:00",
+    "end": "2026-09-16T11:00:00+00:00",
+    "weeks": 12
+  },
+  "alphai_window": {
+    "start": "2026-09-07T15:00:43.224000+00:00",
+    "end": "2026-09-15T11:30:50.949000+00:00",
+    "meta": {
+      "source": "/opt/moreney/artifacts/alphai_pick_outcomes_merged.json",
+      "sessions": 745,
+      "first": "2026-09-07T15:00:43.224000+00:00",
+      "last": "2026-09-15T10:30:50.949000+00:00",
+      "macro_caution_sessions": 158,
+      "macro_caution_rate": 0.212,
+      "min_score": null,
+      "raw_picks": 2038,
+      "kept_picks": 2038
+    },
+    "score_med_meta": {
+      "source": "/opt/moreney/artifacts/alphai_pick_outcomes_merged.json",
+      "sessions": 745,
+      "first": "2026-09-07T15:00:43.224000+00:00",
+      "last": "2026-09-15T10:30:50.949000+00:00",
+      "macro_caution_sessions": 158,
+      "macro_caution_rate": 0.212,
+      "min_score": 24.0,
+      "raw_picks": 2038,
+      "kept_picks": 1108
+    },
+    "score_p75_meta": {
+      "source": "/opt/moreney/artifacts/alphai_pick_outcomes_merged.json",
+      "sessions": 745,
+      "first": "2026-09-07T15:00:43.224000+00:00",
+      "last": "2026-09-15T10:30:50.949000+00:00",
+      "macro_caution_sessions": 158,
+      "macro_caution_rate": 0.212,
+      "min_score": 39.0,
+      "raw_picks": 2038,
+      "kept_picks": 615
+    }
+  },
+  "book_eur": 20000.0,
+  "clip_eur": 10000.0,
+  "caveats": [
+    "15m bar replay; fills at bar close (no live maker/taker path).",
+    "AlphaI timeline only covers ~last 8 days of the 12w window; A/B/C are judged on that subwindow. Earlier weeks have no picks \u2192 pick-gate would idle the desk if applied blindly over sparse history.",
+    "Fade-ETA exits disabled in replay (need dense marks).",
+    "No bot code changes \u2014 research monkeypatches only inside this script.",
+    "Volume spike = relative to median alt volume at decision time (\u00d71.5), coin-agnostic."
+  ],
+  "full_12w": {
+    "baseline_pnl_eur": 3751.68,
+    "baseline_wr": 0.484,
+    "baseline_trades": 62,
+    "deltas": {
+      "A_pick_gate": {
+        "pnl_delta_eur": -3089.72,
+        "pnl_delta_pct_pts": -15.448,
+        "wr_delta": 0.183,
+        "trades_delta": -59,
+        "verdict": "LOWER"
+      },
+      "B_confidence_med24": {
+        "pnl_delta_eur": -2932.61,
+        "pnl_delta_pct_pts": -14.663,
+        "wr_delta": 0.516,
+        "trades_delta": -60,
+        "verdict": "LOWER"
+      },
+      "B_confidence_p75_39": {
+        "pnl_delta_eur": -3751.68,
+        "pnl_delta_pct_pts": -18.758,
+        "wr_delta": null,
+        "trades_delta": -62,
+        "verdict": "LOWER"
+      },
+      "C_macro_block": {
+        "pnl_delta_eur": 273.52,
+        "pnl_delta_pct_pts": 1.368,
+        "wr_delta": 0.008,
+        "trades_delta": -1,
+        "verdict": "RAISE"
+      },
+      "D_chase_reject": {
+        "pnl_delta_eur": -1058.35,
+        "pnl_delta_pct_pts": -5.291,
+        "wr_delta": -0.009,
+        "trades_delta": -1,
+        "verdict": "LOWER"
+      },
+      "E_volume_spike": {
+        "pnl_delta_eur": -444.74,
+        "pnl_delta_pct_pts": -2.223,
+        "wr_delta": -0.022,
+        "trades_delta": -23,
+        "verdict": "LOWER"
+      },
+      "F_strong_breadth": {
+        "pnl_delta_eur": -3422.23,
+        "pnl_delta_pct_pts": -17.111,
+        "wr_delta": -0.141,
+        "trades_delta": -27,
+        "verdict": "LOWER"
+      },
+      "pack_alphai_ABC_med": {
+        "pnl_delta_eur": -3283.34,
+        "pnl_delta_pct_pts": -16.416,
+        "wr_delta": 0.516,
+        "trades_delta": -61,
+        "verdict": "LOWER"
+      },
+      "pack_tape_DEF": {
+        "pnl_delta_eur": -3139.92,
+        "pnl_delta_pct_pts": -15.699,
+        "wr_delta": -0.168,
+        "trades_delta": -43,
+        "verdict": "LOWER"
+      },
+      "pack_all_med": {
+        "pnl_delta_eur": -3751.68,
+        "pnl_delta_pct_pts": -18.758,
+        "wr_delta": null,
+        "trades_delta": -62,
+        "verdict": "LOWER"
+      }
+    },
+    "arms": {
+      "baseline_survival": {
+        "label": "baseline_survival",
+        "note": "Current WR+survival \u20ac20k\u00d7\u20ac10k\u00d73",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 62,
+          "open": 0,
+          "win_rate": 0.484,
+          "realized_eur": 3751.68,
+          "open_mtm_eur": 0,
+          "total_eur": 3751.68,
+          "fees_eur": 1785.42,
+          "avg_net_per_trade_eur": 60.51,
+          "max_drawdown_eur": -1627.01,
+          "decision_points": 180,
+          "regime_on_points": 127,
+          "by_reason": {
+            "trail": {
+              "n": 57,
+              "net_eur": 5673.35
+            },
+            "hard_stop": {
+              "n": 5,
+              "net_eur": -1921.67
+            }
+          }
+        },
+        "return_on_book_pct": 18.758,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 59,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-06-22",
+            "trades": 4,
+            "wins": 1,
+            "win_rate": 0.25,
+            "pnl_eur": -305.69
+          },
+          {
+            "week_start": "2026-06-29",
+            "trades": 7,
+            "wins": 5,
+            "win_rate": 0.714,
+            "pnl_eur": 1479.68
+          },
+          {
+            "week_start": "2026-07-06",
+            "trades": 4,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -876.13
+          },
+          {
+            "week_start": "2026-07-13",
+            "trades": 2,
+            "wins": 2,
+            "win_rate": 1.0,
+            "pnl_eur": 411.3
+          },
+          {
+            "week_start": "2026-07-20",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -384.5
+          },
+          {
+            "week_start": "2026-07-27",
+            "trades": 4,
+            "wins": 2,
+            "win_rate": 0.5,
+            "pnl_eur": 162.97
+          },
+          {
+            "week_start": "2026-08-10",
+            "trades": 2,
+            "wins": 1,
+            "win_rate": 0.5,
+            "pnl_eur": -75.96
+          },
+          {
+            "week_start": "2026-08-17",
+            "trades": 13,
+            "wins": 6,
+            "win_rate": 0.462,
+            "pnl_eur": 2002.51
+          },
+          {
+            "week_start": "2026-08-24",
+            "trades": 3,
+            "wins": 1,
+            "win_rate": 0.333,
+            "pnl_eur": -32.84
+          },
+          {
+            "week_start": "2026-08-31",
+            "trades": 9,
+            "wins": 5,
+            "win_rate": 0.556,
+            "pnl_eur": 387.85
+          },
+          {
+            "week_start": "2026-09-07",
+            "trades": 10,
+            "wins": 5,
+            "win_rate": 0.5,
+            "pnl_eur": 479.47
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 3,
+            "wins": 2,
+            "win_rate": 0.667,
+            "pnl_eur": 503.0
+          }
+        ]
+      },
+      "A_pick_gate": {
+        "label": "A_pick_gate",
+        "note": "Only AlphaI picks enter (all regimes)",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 3,
+          "open": 0,
+          "win_rate": 0.667,
+          "realized_eur": 661.96,
+          "open_mtm_eur": 0,
+          "total_eur": 661.96,
+          "fees_eur": 93.85,
+          "avg_net_per_trade_eur": 220.65,
+          "max_drawdown_eur": -197.81,
+          "decision_points": 180,
+          "regime_on_points": 127,
+          "by_reason": {
+            "trail": {
+              "n": 3,
+              "net_eur": 661.96
+            }
+          }
+        },
+        "return_on_book_pct": 3.31,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-09-07",
+            "trades": 2,
+            "wins": 1,
+            "win_rate": 0.5,
+            "pnl_eur": 270.54
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 391.43
+          }
+        ]
+      },
+      "B_confidence_med24": {
+        "label": "B_confidence_med24",
+        "note": "Pick-gate + AlphaI score \u2265 24 (median)",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 2,
+          "open": 0,
+          "win_rate": 1.0,
+          "realized_eur": 819.07,
+          "open_mtm_eur": 0,
+          "total_eur": 819.07,
+          "fees_eur": 68.55,
+          "avg_net_per_trade_eur": 409.53,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 180,
+          "regime_on_points": 127,
+          "by_reason": {
+            "trail": {
+              "n": 2,
+              "net_eur": 819.07
+            }
+          }
+        },
+        "return_on_book_pct": 4.095,
+        "alphai_pick_entries": 2,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-09-07",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 468.34
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 350.73
+          }
+        ]
+      },
+      "B_confidence_p75_39": {
+        "label": "B_confidence_p75_39",
+        "note": "Pick-gate + AlphaI score \u2265 39 (p75)",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 0,
+          "open": 0,
+          "win_rate": null,
+          "realized_eur": 0,
+          "open_mtm_eur": 0,
+          "total_eur": 0,
+          "fees_eur": 0.0,
+          "avg_net_per_trade_eur": null,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 180,
+          "regime_on_points": 127,
+          "by_reason": {}
+        },
+        "return_on_book_pct": 0.0,
+        "alphai_pick_entries": 0,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": []
+      },
+      "C_macro_block": {
+        "label": "C_macro_block",
+        "note": "Idle all new entries while AlphaI macro_caution",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 61,
+          "open": 0,
+          "win_rate": 0.492,
+          "realized_eur": 4025.2,
+          "open_mtm_eur": 0,
+          "total_eur": 4025.2,
+          "fees_eur": 1755.87,
+          "avg_net_per_trade_eur": 65.99,
+          "max_drawdown_eur": -1627.01,
+          "decision_points": 180,
+          "regime_on_points": 125,
+          "by_reason": {
+            "trail": {
+              "n": 57,
+              "net_eur": 5621.38
+            },
+            "hard_stop": {
+              "n": 4,
+              "net_eur": -1596.18
+            }
+          }
+        },
+        "return_on_book_pct": 20.126,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 60,
+        "config_delta": {
+          "macro_caution_mode": "block",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-06-22",
+            "trades": 4,
+            "wins": 1,
+            "win_rate": 0.25,
+            "pnl_eur": -305.69
+          },
+          {
+            "week_start": "2026-06-29",
+            "trades": 7,
+            "wins": 5,
+            "win_rate": 0.714,
+            "pnl_eur": 1479.68
+          },
+          {
+            "week_start": "2026-07-06",
+            "trades": 4,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -876.13
+          },
+          {
+            "week_start": "2026-07-13",
+            "trades": 2,
+            "wins": 2,
+            "win_rate": 1.0,
+            "pnl_eur": 411.3
+          },
+          {
+            "week_start": "2026-07-20",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -384.5
+          },
+          {
+            "week_start": "2026-07-27",
+            "trades": 4,
+            "wins": 2,
+            "win_rate": 0.5,
+            "pnl_eur": 162.97
+          },
+          {
+            "week_start": "2026-08-10",
+            "trades": 2,
+            "wins": 1,
+            "win_rate": 0.5,
+            "pnl_eur": -75.96
+          },
+          {
+            "week_start": "2026-08-17",
+            "trades": 13,
+            "wins": 6,
+            "win_rate": 0.462,
+            "pnl_eur": 2002.51
+          },
+          {
+            "week_start": "2026-08-24",
+            "trades": 3,
+            "wins": 1,
+            "win_rate": 0.333,
+            "pnl_eur": -32.84
+          },
+          {
+            "week_start": "2026-08-31",
+            "trades": 9,
+            "wins": 5,
+            "win_rate": 0.556,
+            "pnl_eur": 387.85
+          },
+          {
+            "week_start": "2026-09-07",
+            "trades": 9,
+            "wins": 5,
+            "win_rate": 0.556,
+            "pnl_eur": 804.97
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 3,
+            "wins": 2,
+            "win_rate": 0.667,
+            "pnl_eur": 451.03
+          }
+        ]
+      },
+      "D_chase_reject": {
+        "label": "D_chase_reject",
+        "note": "Reject ret_24h\u22659% glued to 24h high",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 61,
+          "open": 0,
+          "win_rate": 0.475,
+          "realized_eur": 2693.33,
+          "open_mtm_eur": 0,
+          "total_eur": 2693.33,
+          "fees_eur": 1755.42,
+          "avg_net_per_trade_eur": 44.15,
+          "max_drawdown_eur": -1739.42,
+          "decision_points": 180,
+          "regime_on_points": 127,
+          "by_reason": {
+            "trail": {
+              "n": 56,
+              "net_eur": 4928.17
+            },
+            "hard_stop": {
+              "n": 5,
+              "net_eur": -2234.84
+            }
+          }
+        },
+        "return_on_book_pct": 13.467,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 58,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.09,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-06-22",
+            "trades": 4,
+            "wins": 1,
+            "win_rate": 0.25,
+            "pnl_eur": -305.69
+          },
+          {
+            "week_start": "2026-06-29",
+            "trades": 7,
+            "wins": 5,
+            "win_rate": 0.714,
+            "pnl_eur": 1479.68
+          },
+          {
+            "week_start": "2026-07-06",
+            "trades": 3,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -428.85
+          },
+          {
+            "week_start": "2026-07-13",
+            "trades": 2,
+            "wins": 2,
+            "win_rate": 1.0,
+            "pnl_eur": 411.3
+          },
+          {
+            "week_start": "2026-07-20",
+            "trades": 2,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -580.52
+          },
+          {
+            "week_start": "2026-07-27",
+            "trades": 4,
+            "wins": 2,
+            "win_rate": 0.5,
+            "pnl_eur": 162.97
+          },
+          {
+            "week_start": "2026-08-10",
+            "trades": 2,
+            "wins": 1,
+            "win_rate": 0.5,
+            "pnl_eur": -75.96
+          },
+          {
+            "week_start": "2026-08-17",
+            "trades": 13,
+            "wins": 7,
+            "win_rate": 0.538,
+            "pnl_eur": 1814.74
+          },
+          {
+            "week_start": "2026-08-24",
+            "trades": 3,
+            "wins": 1,
+            "win_rate": 0.333,
+            "pnl_eur": -32.84
+          },
+          {
+            "week_start": "2026-08-31",
+            "trades": 7,
+            "wins": 3,
+            "win_rate": 0.429,
+            "pnl_eur": -259.6
+          },
+          {
+            "week_start": "2026-09-07",
+            "trades": 11,
+            "wins": 5,
+            "win_rate": 0.455,
+            "pnl_eur": 5.09
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 3,
+            "wins": 2,
+            "win_rate": 0.667,
+            "pnl_eur": 503.0
+          }
+        ]
+      },
+      "E_volume_spike": {
+        "label": "E_volume_spike",
+        "note": "Require volume \u2265 1.5\u00d7 median alt 24h EUR vol",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 39,
+          "open": 0,
+          "win_rate": 0.462,
+          "realized_eur": 3306.94,
+          "open_mtm_eur": 0,
+          "total_eur": 3306.94,
+          "fees_eur": 1164.85,
+          "avg_net_per_trade_eur": 84.79,
+          "max_drawdown_eur": -1902.4,
+          "decision_points": 180,
+          "regime_on_points": 127,
+          "by_reason": {
+            "trail": {
+              "n": 36,
+              "net_eur": 4099.93
+            },
+            "time_exit": {
+              "n": 1,
+              "net_eur": -8.74
+            },
+            "hard_stop": {
+              "n": 2,
+              "net_eur": -784.24
+            }
+          }
+        },
+        "return_on_book_pct": 16.535,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 36,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-06-22",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -72.3
+          },
+          {
+            "week_start": "2026-06-29",
+            "trades": 4,
+            "wins": 3,
+            "win_rate": 0.75,
+            "pnl_eur": 767.04
+          },
+          {
+            "week_start": "2026-07-06",
+            "trades": 2,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -536.06
+          },
+          {
+            "week_start": "2026-07-13",
+            "trades": 2,
+            "wins": 1,
+            "win_rate": 0.5,
+            "pnl_eur": 233.63
+          },
+          {
+            "week_start": "2026-07-20",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -384.5
+          },
+          {
+            "week_start": "2026-07-27",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -80.82
+          },
+          {
+            "week_start": "2026-08-10",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 43.71
+          },
+          {
+            "week_start": "2026-08-17",
+            "trades": 9,
+            "wins": 7,
+            "win_rate": 0.778,
+            "pnl_eur": 3805.34
+          },
+          {
+            "week_start": "2026-08-24",
+            "trades": 3,
+            "wins": 1,
+            "win_rate": 0.333,
+            "pnl_eur": -32.84
+          },
+          {
+            "week_start": "2026-08-31",
+            "trades": 7,
+            "wins": 2,
+            "win_rate": 0.286,
+            "pnl_eur": -466.39
+          },
+          {
+            "week_start": "2026-09-07",
+            "trades": 7,
+            "wins": 2,
+            "win_rate": 0.286,
+            "pnl_eur": -361.3
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 391.43
+          }
+        ]
+      },
+      "F_strong_breadth": {
+        "label": "F_strong_breadth",
+        "note": "Entries only when breadth\u22650.85; soft regime off",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 35,
+          "open": 0,
+          "win_rate": 0.343,
+          "realized_eur": 329.45,
+          "open_mtm_eur": 0,
+          "total_eur": 329.45,
+          "fees_eur": 1079.98,
+          "avg_net_per_trade_eur": 9.41,
+          "max_drawdown_eur": -1825.24,
+          "decision_points": 180,
+          "regime_on_points": 37,
+          "by_reason": {
+            "trail": {
+              "n": 32,
+              "net_eur": 1502.07
+            },
+            "hard_stop": {
+              "n": 3,
+              "net_eur": -1172.62
+            }
+          }
+        },
+        "return_on_book_pct": 1.647,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 34,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.85,
+          "soft_regime_on_weak_tape": false,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-06-29",
+            "trades": 6,
+            "wins": 4,
+            "win_rate": 0.667,
+            "pnl_eur": 1160.6
+          },
+          {
+            "week_start": "2026-07-06",
+            "trades": 3,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -705.64
+          },
+          {
+            "week_start": "2026-07-13",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -278.81
+          },
+          {
+            "week_start": "2026-07-20",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -384.5
+          },
+          {
+            "week_start": "2026-08-17",
+            "trades": 13,
+            "wins": 5,
+            "win_rate": 0.385,
+            "pnl_eur": 676.17
+          },
+          {
+            "week_start": "2026-08-24",
+            "trades": 2,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -222.35
+          },
+          {
+            "week_start": "2026-08-31",
+            "trades": 8,
+            "wins": 2,
+            "win_rate": 0.25,
+            "pnl_eur": -307.46
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 391.43
+          }
+        ]
+      },
+      "pack_alphai_ABC_med": {
+        "label": "pack_alphai_ABC_med",
+        "note": "A+B(med)+C",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 1,
+          "open": 0,
+          "win_rate": 1.0,
+          "realized_eur": 468.34,
+          "open_mtm_eur": 0,
+          "total_eur": 468.34,
+          "fees_eur": 39.0,
+          "avg_net_per_trade_eur": 468.34,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 180,
+          "regime_on_points": 125,
+          "by_reason": {
+            "trail": {
+              "n": 1,
+              "net_eur": 468.34
+            }
+          }
+        },
+        "return_on_book_pct": 2.342,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "block",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-09-07",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 468.34
+          }
+        ]
+      },
+      "pack_tape_DEF": {
+        "label": "pack_tape_DEF",
+        "note": "D+E+F",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 19,
+          "open": 0,
+          "win_rate": 0.316,
+          "realized_eur": 611.76,
+          "open_mtm_eur": 0,
+          "total_eur": 611.76,
+          "fees_eur": 599.98,
+          "avg_net_per_trade_eur": 32.2,
+          "max_drawdown_eur": -1025.41,
+          "decision_points": 180,
+          "regime_on_points": 37,
+          "by_reason": {
+            "trail": {
+              "n": 17,
+              "net_eur": 957.46
+            },
+            "time_exit": {
+              "n": 1,
+              "net_eur": -8.74
+            },
+            "hard_stop": {
+              "n": 1,
+              "net_eur": -336.96
+            }
+          }
+        },
+        "return_on_book_pct": 3.059,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 18,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.09,
+          "min_breadth": 0.85,
+          "soft_regime_on_weak_tape": false,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": [
+          {
+            "week_start": "2026-06-29",
+            "trades": 4,
+            "wins": 2,
+            "win_rate": 0.5,
+            "pnl_eur": 327.74
+          },
+          {
+            "week_start": "2026-07-06",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -88.78
+          },
+          {
+            "week_start": "2026-07-13",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -278.81
+          },
+          {
+            "week_start": "2026-07-20",
+            "trades": 1,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -245.66
+          },
+          {
+            "week_start": "2026-08-17",
+            "trades": 5,
+            "wins": 3,
+            "win_rate": 0.6,
+            "pnl_eur": 1531.26
+          },
+          {
+            "week_start": "2026-08-24",
+            "trades": 2,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -449.55
+          },
+          {
+            "week_start": "2026-08-31",
+            "trades": 4,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl_eur": -575.87
+          },
+          {
+            "week_start": "2026-09-14",
+            "trades": 1,
+            "wins": 1,
+            "win_rate": 1.0,
+            "pnl_eur": 391.43
+          }
+        ]
+      },
+      "pack_all_med": {
+        "label": "pack_all_med",
+        "note": "A+B(med)+C+D+E+F",
+        "summary": {
+          "window": "2026-06-24 11:00 -> 2026-09-16 11:00",
+          "trades": 0,
+          "open": 0,
+          "win_rate": null,
+          "realized_eur": 0,
+          "open_mtm_eur": 0,
+          "total_eur": 0,
+          "fees_eur": 0.0,
+          "avg_net_per_trade_eur": null,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 180,
+          "regime_on_points": 36,
+          "by_reason": {}
+        },
+        "return_on_book_pct": 0.0,
+        "alphai_pick_entries": 0,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "block",
+          "max_chase_ret_24h": 0.09,
+          "min_breadth": 0.85,
+          "soft_regime_on_weak_tape": false,
+          "min_volume_eur": 1000000.0
+        },
+        "weeks": []
+      }
+    }
+  },
+  "alphai_covered": {
+    "baseline_pnl_eur": 1309.77,
+    "baseline_wr": 0.6,
+    "baseline_trades": 10,
+    "deltas": {
+      "A_pick_gate": {
+        "pnl_delta_eur": -647.81,
+        "pnl_delta_pct_pts": -3.239,
+        "wr_delta": 0.067,
+        "trades_delta": -7,
+        "verdict": "LOWER"
+      },
+      "B_confidence_med24": {
+        "pnl_delta_eur": -490.7,
+        "pnl_delta_pct_pts": -2.454,
+        "wr_delta": 0.4,
+        "trades_delta": -8,
+        "verdict": "LOWER"
+      },
+      "B_confidence_p75_39": {
+        "pnl_delta_eur": -1309.77,
+        "pnl_delta_pct_pts": -6.549,
+        "wr_delta": null,
+        "trades_delta": -10,
+        "verdict": "LOWER"
+      },
+      "C_macro_block": {
+        "pnl_delta_eur": 273.52,
+        "pnl_delta_pct_pts": 1.367,
+        "wr_delta": 0.067,
+        "trades_delta": -1,
+        "verdict": "RAISE"
+      },
+      "D_chase_reject": {
+        "pnl_delta_eur": -474.38,
+        "pnl_delta_pct_pts": -2.372,
+        "wr_delta": -0.055,
+        "trades_delta": 1,
+        "verdict": "LOWER"
+      },
+      "E_volume_spike": {
+        "pnl_delta_eur": -968.2,
+        "pnl_delta_pct_pts": -4.841,
+        "wr_delta": -0.171,
+        "trades_delta": -3,
+        "verdict": "LOWER"
+      },
+      "F_strong_breadth": {
+        "pnl_delta_eur": -918.34,
+        "pnl_delta_pct_pts": -4.592,
+        "wr_delta": 0.4,
+        "trades_delta": -9,
+        "verdict": "LOWER"
+      },
+      "pack_alphai_ABC_med": {
+        "pnl_delta_eur": -841.43,
+        "pnl_delta_pct_pts": -4.207,
+        "wr_delta": 0.4,
+        "trades_delta": -9,
+        "verdict": "LOWER"
+      },
+      "pack_tape_DEF": {
+        "pnl_delta_eur": -918.34,
+        "pnl_delta_pct_pts": -4.592,
+        "wr_delta": 0.4,
+        "trades_delta": -9,
+        "verdict": "LOWER"
+      },
+      "pack_all_med": {
+        "pnl_delta_eur": -1309.77,
+        "pnl_delta_pct_pts": -6.549,
+        "wr_delta": null,
+        "trades_delta": -10,
+        "verdict": "LOWER"
+      }
+    },
+    "arms": {
+      "baseline_survival": {
+        "label": "baseline_survival",
+        "note": "Baseline on AlphaI timeline window only",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 10,
+          "open": 0,
+          "win_rate": 0.6,
+          "realized_eur": 1309.77,
+          "open_mtm_eur": 0,
+          "total_eur": 1309.77,
+          "fees_eur": 282.42,
+          "avg_net_per_trade_eur": 130.98,
+          "max_drawdown_eur": -325.49,
+          "decision_points": 17,
+          "regime_on_points": 11,
+          "by_reason": {
+            "trail": {
+              "n": 9,
+              "net_eur": 1635.27
+            },
+            "hard_stop": {
+              "n": 1,
+              "net_eur": -325.49
+            }
+          }
+        },
+        "return_on_book_pct": 6.549,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 7,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "A_pick_gate": {
+        "label": "A_pick_gate",
+        "note": "Only AlphaI picks enter (all regimes)",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 3,
+          "open": 0,
+          "win_rate": 0.667,
+          "realized_eur": 661.96,
+          "open_mtm_eur": 0,
+          "total_eur": 661.96,
+          "fees_eur": 93.85,
+          "avg_net_per_trade_eur": 220.65,
+          "max_drawdown_eur": -197.81,
+          "decision_points": 17,
+          "regime_on_points": 11,
+          "by_reason": {
+            "trail": {
+              "n": 3,
+              "net_eur": 661.96
+            }
+          }
+        },
+        "return_on_book_pct": 3.31,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "B_confidence_med24": {
+        "label": "B_confidence_med24",
+        "note": "Pick-gate + AlphaI score \u2265 24 (median)",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 2,
+          "open": 0,
+          "win_rate": 1.0,
+          "realized_eur": 819.07,
+          "open_mtm_eur": 0,
+          "total_eur": 819.07,
+          "fees_eur": 68.55,
+          "avg_net_per_trade_eur": 409.53,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 17,
+          "regime_on_points": 11,
+          "by_reason": {
+            "trail": {
+              "n": 2,
+              "net_eur": 819.07
+            }
+          }
+        },
+        "return_on_book_pct": 4.095,
+        "alphai_pick_entries": 2,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "B_confidence_p75_39": {
+        "label": "B_confidence_p75_39",
+        "note": "Pick-gate + AlphaI score \u2265 39 (p75)",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 0,
+          "open": 0,
+          "win_rate": null,
+          "realized_eur": 0,
+          "open_mtm_eur": 0,
+          "total_eur": 0,
+          "fees_eur": 0.0,
+          "avg_net_per_trade_eur": null,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 17,
+          "regime_on_points": 11,
+          "by_reason": {}
+        },
+        "return_on_book_pct": 0.0,
+        "alphai_pick_entries": 0,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "C_macro_block": {
+        "label": "C_macro_block",
+        "note": "Idle all new entries while AlphaI macro_caution",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 9,
+          "open": 0,
+          "win_rate": 0.667,
+          "realized_eur": 1583.29,
+          "open_mtm_eur": 0,
+          "total_eur": 1583.29,
+          "fees_eur": 252.87,
+          "avg_net_per_trade_eur": 175.92,
+          "max_drawdown_eur": -253.75,
+          "decision_points": 17,
+          "regime_on_points": 9,
+          "by_reason": {
+            "trail": {
+              "n": 9,
+              "net_eur": 1583.29
+            }
+          }
+        },
+        "return_on_book_pct": 7.916,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 8,
+        "config_delta": {
+          "macro_caution_mode": "block",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "D_chase_reject": {
+        "label": "D_chase_reject",
+        "note": "Reject ret_24h\u22659% glued to 24h high",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 11,
+          "open": 0,
+          "win_rate": 0.545,
+          "realized_eur": 835.39,
+          "open_mtm_eur": 0,
+          "total_eur": 835.39,
+          "fees_eur": 303.42,
+          "avg_net_per_trade_eur": 75.94,
+          "max_drawdown_eur": -325.49,
+          "decision_points": 17,
+          "regime_on_points": 11,
+          "by_reason": {
+            "trail": {
+              "n": 10,
+              "net_eur": 1160.89
+            },
+            "hard_stop": {
+              "n": 1,
+              "net_eur": -325.49
+            }
+          }
+        },
+        "return_on_book_pct": 4.177,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 8,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.09,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "E_volume_spike": {
+        "label": "E_volume_spike",
+        "note": "Require volume \u2265 1.5\u00d7 median alt 24h EUR vol",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 7,
+          "open": 0,
+          "win_rate": 0.429,
+          "realized_eur": 341.57,
+          "open_mtm_eur": 0,
+          "total_eur": 341.57,
+          "fees_eur": 195.85,
+          "avg_net_per_trade_eur": 48.8,
+          "max_drawdown_eur": -703.3,
+          "decision_points": 17,
+          "regime_on_points": 11,
+          "by_reason": {
+            "trail": {
+              "n": 7,
+              "net_eur": 341.57
+            }
+          }
+        },
+        "return_on_book_pct": 1.708,
+        "alphai_pick_entries": 3,
+        "non_pick_entries": 4,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "F_strong_breadth": {
+        "label": "F_strong_breadth",
+        "note": "Entries only when breadth\u22650.85; soft regime off",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 1,
+          "open": 0,
+          "win_rate": 1.0,
+          "realized_eur": 391.43,
+          "open_mtm_eur": 0,
+          "total_eur": 391.43,
+          "fees_eur": 32.98,
+          "avg_net_per_trade_eur": 391.43,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 17,
+          "regime_on_points": 1,
+          "by_reason": {
+            "trail": {
+              "n": 1,
+              "net_eur": 391.43
+            }
+          }
+        },
+        "return_on_book_pct": 1.957,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.85,
+          "soft_regime_on_weak_tape": false,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "pack_alphai_ABC_med": {
+        "label": "pack_alphai_ABC_med",
+        "note": "A+B(med)+C",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 1,
+          "open": 0,
+          "win_rate": 1.0,
+          "realized_eur": 468.34,
+          "open_mtm_eur": 0,
+          "total_eur": 468.34,
+          "fees_eur": 39.0,
+          "avg_net_per_trade_eur": 468.34,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 17,
+          "regime_on_points": 9,
+          "by_reason": {
+            "trail": {
+              "n": 1,
+              "net_eur": 468.34
+            }
+          }
+        },
+        "return_on_book_pct": 2.342,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "block",
+          "max_chase_ret_24h": 0.0,
+          "min_breadth": 0.5,
+          "soft_regime_on_weak_tape": true,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "pack_tape_DEF": {
+        "label": "pack_tape_DEF",
+        "note": "D+E+F",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 1,
+          "open": 0,
+          "win_rate": 1.0,
+          "realized_eur": 391.43,
+          "open_mtm_eur": 0,
+          "total_eur": 391.43,
+          "fees_eur": 32.98,
+          "avg_net_per_trade_eur": 391.43,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 17,
+          "regime_on_points": 1,
+          "by_reason": {
+            "trail": {
+              "n": 1,
+              "net_eur": 391.43
+            }
+          }
+        },
+        "return_on_book_pct": 1.957,
+        "alphai_pick_entries": 1,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "reduce",
+          "max_chase_ret_24h": 0.09,
+          "min_breadth": 0.85,
+          "soft_regime_on_weak_tape": false,
+          "min_volume_eur": 1000000.0
+        }
+      },
+      "pack_all_med": {
+        "label": "pack_all_med",
+        "note": "A+B(med)+C+D+E+F",
+        "summary": {
+          "window": "2026-09-07 15:00 -> 2026-09-15 11:30",
+          "trades": 0,
+          "open": 0,
+          "win_rate": null,
+          "realized_eur": 0,
+          "open_mtm_eur": 0,
+          "total_eur": 0,
+          "fees_eur": 0.0,
+          "avg_net_per_trade_eur": null,
+          "max_drawdown_eur": 0.0,
+          "decision_points": 17,
+          "regime_on_points": 0,
+          "by_reason": {}
+        },
+        "return_on_book_pct": 0.0,
+        "alphai_pick_entries": 0,
+        "non_pick_entries": 0,
+        "config_delta": {
+          "macro_caution_mode": "block",
+          "max_chase_ret_24h": 0.09,
+          "min_breadth": 0.85,
+          "soft_regime_on_weak_tape": false,
+          "min_volume_eur": 1000000.0
+        }
+      }
+    }
+  },
+  "recommendations": {
+    "A_pick_gate": {
+      "use_window": "alphai_window",
+      "pnl_delta_eur": -647.81,
+      "pnl_delta_pct_pts": -3.239,
+      "wr_delta": 0.067,
+      "trades_delta": -7,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -3089.72,
+        "pnl_delta_pct_pts": -15.448,
+        "wr_delta": 0.183,
+        "trades_delta": -59,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -647.81,
+        "pnl_delta_pct_pts": -3.239,
+        "wr_delta": 0.067,
+        "trades_delta": -7,
+        "verdict": "LOWER"
+      }
+    },
+    "B_confidence_med24": {
+      "use_window": "alphai_window",
+      "pnl_delta_eur": -490.7,
+      "pnl_delta_pct_pts": -2.454,
+      "wr_delta": 0.4,
+      "trades_delta": -8,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -2932.61,
+        "pnl_delta_pct_pts": -14.663,
+        "wr_delta": 0.516,
+        "trades_delta": -60,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -490.7,
+        "pnl_delta_pct_pts": -2.454,
+        "wr_delta": 0.4,
+        "trades_delta": -8,
+        "verdict": "LOWER"
+      }
+    },
+    "B_confidence_p75_39": {
+      "use_window": "alphai_window",
+      "pnl_delta_eur": -1309.77,
+      "pnl_delta_pct_pts": -6.549,
+      "wr_delta": null,
+      "trades_delta": -10,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -3751.68,
+        "pnl_delta_pct_pts": -18.758,
+        "wr_delta": null,
+        "trades_delta": -62,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -1309.77,
+        "pnl_delta_pct_pts": -6.549,
+        "wr_delta": null,
+        "trades_delta": -10,
+        "verdict": "LOWER"
+      }
+    },
+    "C_macro_block": {
+      "use_window": "alphai_window",
+      "pnl_delta_eur": 273.52,
+      "pnl_delta_pct_pts": 1.367,
+      "wr_delta": 0.067,
+      "trades_delta": -1,
+      "verdict": "RAISE",
+      "full_12w": {
+        "pnl_delta_eur": 273.52,
+        "pnl_delta_pct_pts": 1.368,
+        "wr_delta": 0.008,
+        "trades_delta": -1,
+        "verdict": "RAISE"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": 273.52,
+        "pnl_delta_pct_pts": 1.367,
+        "wr_delta": 0.067,
+        "trades_delta": -1,
+        "verdict": "RAISE"
+      }
+    },
+    "D_chase_reject": {
+      "use_window": "full_12w",
+      "pnl_delta_eur": -1058.35,
+      "pnl_delta_pct_pts": -5.291,
+      "wr_delta": -0.009,
+      "trades_delta": -1,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -1058.35,
+        "pnl_delta_pct_pts": -5.291,
+        "wr_delta": -0.009,
+        "trades_delta": -1,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -474.38,
+        "pnl_delta_pct_pts": -2.372,
+        "wr_delta": -0.055,
+        "trades_delta": 1,
+        "verdict": "LOWER"
+      }
+    },
+    "E_volume_spike": {
+      "use_window": "full_12w",
+      "pnl_delta_eur": -444.74,
+      "pnl_delta_pct_pts": -2.223,
+      "wr_delta": -0.022,
+      "trades_delta": -23,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -444.74,
+        "pnl_delta_pct_pts": -2.223,
+        "wr_delta": -0.022,
+        "trades_delta": -23,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -968.2,
+        "pnl_delta_pct_pts": -4.841,
+        "wr_delta": -0.171,
+        "trades_delta": -3,
+        "verdict": "LOWER"
+      }
+    },
+    "F_strong_breadth": {
+      "use_window": "full_12w",
+      "pnl_delta_eur": -3422.23,
+      "pnl_delta_pct_pts": -17.111,
+      "wr_delta": -0.141,
+      "trades_delta": -27,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -3422.23,
+        "pnl_delta_pct_pts": -17.111,
+        "wr_delta": -0.141,
+        "trades_delta": -27,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -918.34,
+        "pnl_delta_pct_pts": -4.592,
+        "wr_delta": 0.4,
+        "trades_delta": -9,
+        "verdict": "LOWER"
+      }
+    },
+    "pack_alphai_ABC_med": {
+      "use_window": "alphai_window",
+      "pnl_delta_eur": -841.43,
+      "pnl_delta_pct_pts": -4.207,
+      "wr_delta": 0.4,
+      "trades_delta": -9,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -3283.34,
+        "pnl_delta_pct_pts": -16.416,
+        "wr_delta": 0.516,
+        "trades_delta": -61,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -841.43,
+        "pnl_delta_pct_pts": -4.207,
+        "wr_delta": 0.4,
+        "trades_delta": -9,
+        "verdict": "LOWER"
+      }
+    },
+    "pack_tape_DEF": {
+      "use_window": "full_12w",
+      "pnl_delta_eur": -3139.92,
+      "pnl_delta_pct_pts": -15.699,
+      "wr_delta": -0.168,
+      "trades_delta": -43,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -3139.92,
+        "pnl_delta_pct_pts": -15.699,
+        "wr_delta": -0.168,
+        "trades_delta": -43,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -918.34,
+        "pnl_delta_pct_pts": -4.592,
+        "wr_delta": 0.4,
+        "trades_delta": -9,
+        "verdict": "LOWER"
+      }
+    },
+    "pack_all_med": {
+      "use_window": "alphai_window",
+      "pnl_delta_eur": -1309.77,
+      "pnl_delta_pct_pts": -6.549,
+      "wr_delta": null,
+      "trades_delta": -10,
+      "verdict": "LOWER",
+      "full_12w": {
+        "pnl_delta_eur": -3751.68,
+        "pnl_delta_pct_pts": -18.758,
+        "wr_delta": null,
+        "trades_delta": -62,
+        "verdict": "LOWER"
+      },
+      "alphai_window": {
+        "pnl_delta_eur": -1309.77,
+        "pnl_delta_pct_pts": -6.549,
+        "wr_delta": null,
+        "trades_delta": -10,
+        "verdict": "LOWER"
+      }
+    }
+  }
+}
