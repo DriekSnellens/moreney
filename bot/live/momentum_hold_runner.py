@@ -574,6 +574,11 @@ class HoldDeskManager:
             await self._runner.fill_to_book()
         except Exception as exc:  # noqa: BLE001
             logger.warning("hold sleeve: initial fill failed: %s", exc)
+        try:
+            await self._runner.refresh_marks()
+            await self._runner.refresh_btc_inventory()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hold sleeve: initial BTC MTM failed: %s", exc)
         logger.info(
             "hold sleeve started dry_run=%s venues=%s book=%.0f bases=%s",
             dry_run,
