@@ -177,6 +177,71 @@ async def test_hold_trail_exit_on_closed_bar(tmp_path: Path):
     assert (await runner2.fill_to_book()).get("reason") == "refill_disarmed"
 
 
+@pytest.mark.asyncio
+async def test_hold_reconcile_external_flat_disarms(tmp_path: Path):
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_hold_runner import HoldDeskRunner, HoldSleeveConfig
+    from bot.live.momentum_runner import Holding, RunnerOptions
+
+    hold = HoldSleeveConfig(
+        book_eur=2_000.0,
+        bases=("BTC",),
+        refill_after_exit=False,
+        rebalance_interval_sec=86_400.0,
+    )
+    cfg = hold_desk_config(hold)
+    clock = {"t": 1_700_000_000.0}
+
+    class _Feed:
+        async def candles(self, base: str, n: int):
+            return []
+
+        async def last_price(self, base: str):
+            return 66_000.0
+
+    async def _noop_sleep(_s: float) -> None:
+        return None
+
+    runner = HoldDeskRunner(
+        cfg,
+        None,
+        hold=hold,
+        options=RunnerOptions(
+            venues=("bitvavo",),
+            dry_run=True,
+            state_path=str(tmp_path / "state.json"),
+            ledger_path=str(tmp_path / "ledger.jsonl"),
+        ),
+        feed=_Feed(),
+        clock=lambda: clock["t"],
+        sleep=_noop_sleep,
+    )
+    pos = Position(
+        base="BTC",
+        entry_price=65_000.0,
+        quantity=0.03,
+        notional_eur=1_950.0,
+        opened_ms=int(clock["t"] * 1000) - 3_600_000,
+        peak=66_000.0,
+        venue="bitvavo",
+    )
+    runner.holdings = [Holding(pos=pos, holding_id="ext1", last_bar_ms=0)]
+    runner.marks["BTC"] = 66_000.0
+
+    async def _free(base: str, venue: str) -> float:
+        return 0.0
+
+    runner._available_base = _free  # type: ignore[method-assign]
+    closed = await runner.reconcile_external_inventory()
+    assert len(closed) == 1
+    assert closed[0]["reason"] == "manual_external"
+    assert runner.holdings == []
+    assert runner.refill_armed is False
+    snap = await runner.refresh_btc_inventory()
+    assert snap["qty_btc"] == 0.0
+    assert snap["value_eur"] == 0.0
+
+
 def test_hold_reserved_eur_when_enabled():
     settings = Settings(
         momentum_hold_enabled=True,

@@ -356,24 +356,31 @@ class HoldDeskRunner(MomentumDeskRunner):
         return fill
 
     async def refresh_btc_inventory(self) -> dict[str, Any]:
-        """Sum free BTC across hold venues and MTM vs today's origin baseline."""
+        """Sum free BTC across hold venues and MTM vs today's origin baseline.
+
+        Trust exchange free balances when the fetch succeeds (including 0).
+        Only fall back to booked sleeve qty when a venue balance is unavailable.
+        """
         by_venue: dict[str, float] = {}
+        known_venues: set[str] = set()
         for venue in self.opt.venues:
             free = await self._available_base("BTC", str(venue))
             if free is None:
                 continue
+            known_venues.add(str(venue))
             if free > 1e-10:
                 by_venue[str(venue)] = float(free)
-        # Fall back to booked holdings if balance fetch missed a venue.
+        # Fall back only when that venue's balance fetch failed.
         for h in self.holdings:
             if str(h.pos.base).upper() != "BTC":
                 continue
             v = str(h.pos.venue or "")
+            if v in known_venues:
+                continue
             booked = float(h.pos.quantity or 0.0)
             if booked <= 0:
                 continue
-            if v not in by_venue or by_venue[v] + 1e-12 < booked:
-                by_venue[v] = max(by_venue.get(v, 0.0), booked)
+            by_venue[v] = max(by_venue.get(v, 0.0), booked)
         qty = sum(by_venue.values())
         mark = self.marks.get("BTC")
         if mark is None and qty > 0:
@@ -391,6 +398,81 @@ class HoldDeskRunner(MomentumDeskRunner):
         )
         self._btc_mtm = snap
         return snap
+
+    async def reconcile_external_inventory(self) -> list[dict[str, Any]]:
+        """Drop sleeve holdings that are already gone on the exchange (manual sell)."""
+        closed: list[dict[str, Any]] = []
+        if not self.holdings:
+            return closed
+        for h in list(self.holdings):
+            if h.exiting:
+                continue
+            free = await self._available_base(h.pos.base, h.pos.venue)
+            if free is None:
+                continue
+            mark = float(
+                self.marks.get(h.pos.base)
+                or h.pos.entry_price
+                or 0.0
+            )
+            free_f = float(free)
+            if free_f * mark >= _MIN_ORDER_EUR:
+                # Exchange still has sellable inventory; clamp book if smaller.
+                if free_f + 1e-12 < float(h.pos.quantity):
+                    h.pos.quantity = free_f
+                    h.pos.notional_eur = free_f * float(h.pos.entry_price)
+                    self._save_state()
+                continue
+            row = self._book_external_flat(h, mark=mark, free=free_f)
+            closed.append(row)
+        if closed:
+            self._save_state()
+        return closed
+
+    def _book_external_flat(
+        self, h: Holding, *, mark: float, free: float
+    ) -> dict[str, Any]:
+        """Close a holding already sold outside the desk (no exchange order)."""
+        qty = float(h.pos.quantity or 0.0)
+        entry = float(h.pos.entry_price or 0.0)
+        px = float(mark) if mark > 0 else entry
+        net = qty * (px - entry) - float(h.pos.entry_fee_eur or 0.0)
+        now_ms = int(self._clock() * 1000)
+        self.realized_total_eur += net
+        self.trade_count += 1
+        self.ledger.note_close(net, now_ms)
+        row = {
+            "event": "exit",
+            "holding_id": h.holding_id,
+            "base": h.pos.base,
+            "venue": h.pos.venue,
+            "qty": qty,
+            "price": px,
+            "notional_eur": round(qty * px, 2),
+            "fee_eur": 0.0,
+            "taker": False,
+            "reason": "manual_external",
+            "gross_return": round(px / entry - 1, 5) if entry > 0 else 0.0,
+            "peak_return": round(h.pos.peak / entry - 1, 5) if entry > 0 else 0.0,
+            "hold_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
+            "net_eur": round(net, 4),
+            "entry_reason": h.pos.entry_reason,
+            "free_on_venue": free,
+            "note": "closed to match exchange after operator sell outside desk",
+        }
+        self._ledger_append(row)
+        if h in self.holdings:
+            self.holdings.remove(h)
+        self._disarm_refill("manual_external")
+        logger.info(
+            "hold sleeve: booked external flat %s %s qty=%.8f free=%.8f net=%.2f",
+            h.pos.base,
+            h.pos.venue,
+            qty,
+            free,
+            net,
+        )
+        return row
 
     def _route_entry(self, clip_eur: float) -> tuple[str, float] | None:
         """Venue pick + own soft book only (do not reserve hold cash against self)."""
@@ -429,6 +511,10 @@ class HoldDeskRunner(MomentumDeskRunner):
             await self.refresh_btc_inventory()
         except Exception as exc:  # noqa: BLE001
             logger.warning("hold sleeve: BTC inventory refresh failed: %s", exc)
+        try:
+            await self.reconcile_external_inventory()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hold sleeve: external reconcile failed: %s", exc)
         now_ms = int(self._clock() * 1000)
         # Parent path: live disaster (2× hard_stop) + 15m evaluate_exit trail.
         await self._manage_exits(now_ms)
@@ -578,6 +664,14 @@ class HoldDeskManager:
                 await self._runner.refresh_marks()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("hold sleeve: mark refresh failed: %s", exc)
+            try:
+                await self._runner.refresh_btc_inventory()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hold sleeve: inventory refresh failed: %s", exc)
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hold sleeve: external reconcile failed: %s", exc)
             try:
                 await self._runner.refresh_btc_inventory()
             except Exception as exc:  # noqa: BLE001

@@ -1198,6 +1198,25 @@ def _btc_hold_panel(hold: Mapping[str, Any] | None) -> str:
         return ""
     snap = hold.get("btc_hold") or {}
     value = snap.get("value_eur")
+    qty_raw = snap.get("qty_btc")
+    try:
+        qty_f = float(qty_raw) if qty_raw is not None else None
+    except (TypeError, ValueError):
+        qty_f = None
+    flat = (qty_f is not None and qty_f <= 1e-10) and not (
+        hold.get("positions") or []
+    )
+    if flat:
+        note = "geen BTC op de exchanges"
+        if hold.get("refill_blocked") or hold.get("refill_armed") is False:
+            note = "handmatig verkocht · cash blijft vrij"
+        return (
+            '<section class="btc-hold muted" data-btc-hold>'
+            '<p class="btc-label">BTC hold · totale waarde</p>'
+            '<p class="btc-value muted" data-btc="value">€0.00</p>'
+            f'<p class="btc-delta muted" data-btc="pnl">{escape(note)}</p>'
+            "</section>"
+        )
     if value is None:
         # Fallback: sum marked positions while inventory refresh is pending.
         value = 0.0
