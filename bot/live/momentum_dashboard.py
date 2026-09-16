@@ -305,28 +305,44 @@ def _earnings_masthead(
     pill: str,
     venue: str,
     show_volatile: bool = False,
+    show_hold: bool = False,
 ) -> str:
     """First-viewport composition: brand + week/month/all-time net."""
     if earnings is None:
         c_week = c_month = c_all = 0.0
         open_mtm = 0.0
         tw = tm = ta = 0
-        core_w = vol_w = 0.0
+        core_w = vol_w = hold_w = 0.0
         as_of = "—"
+        day_eur = 0.0
     else:
-        # Core-only masthead uses core sleeve totals when volatile is disabled.
-        sleeve = earnings.combined if show_volatile else earnings.core
+        # Include every armed sleeve in the masthead (core / hold / volatile).
+        use_combined = bool(show_volatile or show_hold)
+        sleeve = earnings.combined if use_combined else earnings.core
         c_week, c_month, c_all = sleeve.week_eur, sleeve.month_eur, sleeve.all_time_eur
         open_mtm = earnings.open_mtm_eur
         tw, tm, ta = sleeve.trades_week, sleeve.trades_month, sleeve.trades_all_time
-        core_w, vol_w = earnings.core.week_eur, earnings.volatile.week_eur
+        core_w = earnings.core.week_eur
+        vol_w = earnings.volatile.week_eur
+        hold_w = earnings.hold.week_eur
         as_of = earnings.as_of
+        day_eur = sleeve.day_eur
+    parts: list[str] = ["core"]
+    if show_hold:
+        parts.append("hold")
     if show_volatile:
-        week_meta = f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"
-        brand_sub = f"Momentum desk · core + volatile · {venue}. "
-    else:
+        parts.append("volatile")
+    brand_sub = f"Momentum desk · {' + '.join(parts)} · {venue}. "
+    meta_bits = [f"{tw} trades"]
+    if show_hold or show_volatile:
+        meta_bits.append(f"core {_fmt_eur(core_w)}")
+    if show_hold:
+        meta_bits.append(f"hold {_fmt_eur(hold_w)}")
+    if show_volatile:
+        meta_bits.append(f"vol {_fmt_eur(vol_w)}")
+    week_meta = " · ".join(meta_bits) + (" deze week" if not (show_hold or show_volatile) else "")
+    if not (show_hold or show_volatile):
         week_meta = f"{tw} trades deze week"
-        brand_sub = f"Momentum desk · core · {venue}. "
     tiles = [
         ("Deze week", c_week, week_meta),
         ("Deze maand", c_month, f"{tm} trades deze maand"),
@@ -340,11 +356,6 @@ def _earnings_masthead(
         "</div>"
         for label, val, meta in tiles
     )
-    day_eur = 0.0
-    if earnings is not None:
-        day_eur = (
-            earnings.combined.day_eur if show_volatile else earnings.core.day_eur
-        )
     return (
         '<section class="masthead">'
         '<div class="masthead-top">'
@@ -1193,7 +1204,10 @@ def _rules(cfg: Mapping[str, Any]) -> str:
 
 
 def _btc_hold_panel(hold: Mapping[str, Any] | None) -> str:
-    """Prominent BTC hold MTM vs today's fixed origin baseline."""
+    """Prominent BTC hold MTM vs today's fixed origin baseline.
+
+    When flat after sells, show sleeve realized PnL (not phantom inventory MTM).
+    """
     if not hold:
         return ""
     snap = hold.get("btc_hold") or {}
@@ -1207,14 +1221,28 @@ def _btc_hold_panel(hold: Mapping[str, Any] | None) -> str:
         hold.get("positions") or []
     )
     if flat:
-        note = "geen BTC op de exchanges"
-        if hold.get("refill_blocked") or hold.get("refill_armed") is False:
-            note = "handmatig verkocht · cash blijft vrij"
+        realized = hold.get("realized_total_eur")
+        if realized is None:
+            realized = snap.get("realized_total_eur")
+        day_r = (hold.get("risk") or {}).get("day_realized_eur")
+        try:
+            real_f = float(realized) if realized is not None else 0.0
+        except (TypeError, ValueError):
+            real_f = 0.0
+        try:
+            day_f = float(day_r) if day_r is not None else real_f
+        except (TypeError, ValueError):
+            day_f = real_f
+        tone = _cls(real_f)
+        note = "handmatig verkocht · cash vrij"
         return (
-            '<section class="btc-hold muted" data-btc-hold>'
-            '<p class="btc-label">BTC hold · totale waarde</p>'
-            '<p class="btc-value muted" data-btc="value">€0.00</p>'
-            f'<p class="btc-delta muted" data-btc="pnl">{escape(note)}</p>'
+            f'<section class="btc-hold {tone}" data-btc-hold data-btc-flat="1">'
+            '<p class="btc-label">BTC hold · gerealiseerd</p>'
+            f'<p class="btc-value {tone}" data-btc="value">{_fmt_eur(real_f)}</p>'
+            f'<p class="btc-delta {tone}" data-btc="pnl">'
+            f"vandaag {_fmt_eur(day_f)} · {escape(note)}</p>"
+            '<p class="btc-meta" data-btc="meta">geen BTC op de exchanges · '
+            "inventory MTM uit</p>"
             "</section>"
         )
     if value is None:
@@ -1476,7 +1504,20 @@ def _sleeves_panel(
         bases = ",".join(str(b) for b in (h.get("hold_bases") or ["BTC"])[:4])
         btc = h.get("btc_hold") or {}
         hold_extra = ""
-        if btc.get("value_eur") is not None:
+        qty = btc.get("qty_btc")
+        try:
+            qty_f = float(qty) if qty is not None else None
+        except (TypeError, ValueError):
+            qty_f = None
+        flat = (qty_f is not None and qty_f <= 1e-10) and not (h.get("positions") or [])
+        if flat:
+            real = h.get("realized_total_eur")
+            hold_extra = (
+                f"<p><strong>BTC hold</strong> flat · gerealiseerd "
+                f"<span class='{_cls(real)}' data-btc-sleeve-pnl>"
+                f"{_fmt_eur(real)}</span></p>"
+            )
+        elif btc.get("value_eur") is not None:
             hold_extra = (
                 f"<p><strong>BTC hold</strong> "
                 f"<span class='{_cls(btc.get('pnl_eur'))}' data-btc-sleeve-value>"
@@ -1651,13 +1692,51 @@ _LIVE_MARKS_JS = r"""
     const node = document.querySelector('[data-live="rules"]');
     if (html && node) node.outerHTML = html;
   }
-  function patchBtcHold(snap) {
-    if (!snap) return;
+  function patchBtcHold(hold) {
+    if (!hold) return;
+    const snap = hold.btc_hold || hold;
     const root = document.querySelector("[data-btc-hold]");
     if (!root) return;
+    const qty = snap.qty_btc;
+    const flat = (qty == null || Number(qty) <= 1e-10) && !(hold.positions || []).length;
+    const realized = hold.realized_total_eur != null ? hold.realized_total_eur : snap.realized_total_eur;
+    const dayR = (hold.risk && hold.risk.day_realized_eur != null)
+      ? hold.risk.day_realized_eur
+      : realized;
+    if (flat) {
+      const tone = cls(realized);
+      root.classList.remove("good", "bad", "muted");
+      root.setAttribute("data-btc-flat", "1");
+      if (tone) root.classList.add(tone);
+      const label = root.querySelector(".btc-label");
+      if (label) label.textContent = "BTC hold · gerealiseerd";
+      const val = root.querySelector('[data-btc="value"]');
+      if (val && realized != null) {
+        val.textContent = fmtEur(realized);
+        val.classList.remove("good", "bad", "muted");
+        if (tone) val.classList.add(tone);
+      }
+      const delta = root.querySelector('[data-btc="pnl"]');
+      if (delta) {
+        delta.textContent = `vandaag ${fmtEur(dayR)} · handmatig verkocht · cash vrij`;
+        delta.classList.remove("good", "bad", "muted");
+        if (tone) delta.classList.add(tone);
+      }
+      document.querySelectorAll("[data-btc-sleeve-pnl]").forEach((el) => {
+        if (realized != null) el.textContent = fmtEur(realized);
+        el.classList.remove("good", "bad");
+        if (tone) el.classList.add(tone);
+      });
+      document.querySelectorAll("[data-btc-sleeve-value]").forEach((el) => {
+        el.textContent = "flat";
+        el.classList.remove("good", "bad");
+      });
+      return;
+    }
+    root.removeAttribute("data-btc-flat");
     const pnl = snap.pnl_eur;
     const tone = cls(pnl);
-    root.classList.remove("good", "bad");
+    root.classList.remove("good", "bad", "muted");
     if (tone) root.classList.add(tone);
     const val = root.querySelector('[data-btc="value"]');
     if (val && snap.value_eur != null) {
@@ -1699,7 +1778,7 @@ _LIVE_MARKS_JS = r"""
       const holdRes = await fetch(HOLD_STATUS_URL, { cache: "no-store" });
       if (holdRes.ok) {
         const hold = await holdRes.json();
-        patchBtcHold(hold.btc_hold || null);
+        patchBtcHold(hold);
       }
     } catch (err) {
       /* ignore */
@@ -1785,7 +1864,13 @@ def render_momentum_dashboard(
         else ""
     )
 
-    earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue, show_volatile=show_vol)
+    earnings_html = _earnings_masthead(
+        earnings,
+        pill=pill,
+        venue=venue,
+        show_volatile=show_vol,
+        show_hold=show_hold,
+    )
     btc_hold_html = _btc_hold_panel(hold) if show_hold else ""
     forecast_html = _forecast_panel(forecast)
 

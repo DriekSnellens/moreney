@@ -981,9 +981,10 @@ async def live_momentum_forecast_refresh(
 
 @app.get("/live/momentum/earnings")
 async def live_momentum_earnings() -> dict[str, Any]:
-    """Week / month / all-time net PnL (Amsterdam calendar). Volatile optional."""
+    """Week / month / all-time net PnL (Amsterdam calendar). Hold/volatile optional."""
     settings = get_settings()
     show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    show_hold = bool(getattr(settings, "momentum_hold_enabled", False))
     core = get_momentum_desk_manager().status()
     volatile = None
     if show_volatile:
@@ -991,13 +992,23 @@ async def live_momentum_earnings() -> dict[str, Any]:
             volatile = get_volatile_desk_manager().status()
         except Exception:  # noqa: BLE001
             volatile = None
+    hold = None
+    if show_hold:
+        try:
+            hold = get_hold_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            hold = None
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
             settings.momentum_volatile_ledger_path if show_volatile else None
         ),
+        hold_ledger_path=(
+            settings.momentum_hold_ledger_path if show_hold else None
+        ),
         core_status=core,
         volatile_status=volatile,
+        hold_status=hold,
     )
     return earnings_as_dict(earnings)
 

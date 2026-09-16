@@ -34,6 +34,7 @@ class PeriodNet:
 class DeskEarnings:
     core: PeriodNet
     volatile: PeriodNet
+    hold: PeriodNet
     combined: PeriodNet
     open_mtm_eur: float
     as_of: str
@@ -229,6 +230,7 @@ def compute_desk_earnings(
     return DeskEarnings(
         core=core,
         volatile=volatile,
+        hold=hold,
         combined=combined,
         open_mtm_eur=round(open_mtm, 2),
         as_of=now_utc.astimezone(_OPERATOR_TZ).isoformat(),
@@ -261,5 +263,6 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
         "open_mtm_eur": e.open_mtm_eur,
         "core": _p(e.core),
         "volatile": _p(e.volatile),
+        "hold": _p(e.hold),
         "combined": _p(e.combined),
     }

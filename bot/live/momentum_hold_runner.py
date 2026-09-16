@@ -297,7 +297,12 @@ class HoldDeskRunner(MomentumDeskRunner):
         out["refill_armed"] = bool(self.refill_armed)
         out["refill_blocked"] = self.refill_blocked()
         if self._btc_mtm:
-            out["btc_hold"] = dict(self._btc_mtm)
+            out["btc_hold"] = {
+                **dict(self._btc_mtm),
+                "realized_total_eur": round(float(self.realized_total_eur), 2),
+                "flat": float(self._btc_mtm.get("qty_btc") or 0.0) <= 1e-10
+                and not self.holdings,
+            }
         out["config"] = {
             **(out.get("config") or {}),
             "max_positions": len(self.hold.bases),
