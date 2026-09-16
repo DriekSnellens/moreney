@@ -662,6 +662,15 @@ class Settings(BaseSettings):
     momentum_hold_rebalance_sec: float = Field(default=3600.0, ge=60.0, le=86_400.0)
     momentum_hold_disaster_stop: bool = True
     momentum_hold_disaster_pct: float = Field(default=0.25, ge=0.05, le=0.80)
+    # Peak trail (same defaults as core momentum desk). 0 disables trail.
+    momentum_hold_trail_pct: float = Field(default=0.03, ge=0.0, le=0.5)
+    momentum_hold_trail_tight_after: float = Field(default=0.04, ge=0.0, le=0.5)
+    momentum_hold_trail_tight_pct: float = Field(default=0.02, ge=0.0, le=0.5)
+    # After an auto trail/stop exit, do not auto-rebuy for this many seconds
+    # (cash stays free / not reserved). Manual decide/fill still works.
+    momentum_hold_refill_cooldown_sec: float = Field(
+        default=86_400.0, ge=0.0, le=7 * 86_400.0
+    )
     momentum_hold_state_path: str = "./data/momentum_hold_state.json"
     momentum_hold_ledger_path: str = "./data/momentum_hold_ledger.jsonl"
     momentum_hold_baseline_path: str = "./data/momentum_hold_baseline.json"
