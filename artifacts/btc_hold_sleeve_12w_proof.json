@@ -1,0 +1,29 @@
+{
+  "asof": "2026-09-16T12:00:00+00:00",
+  "window": {
+    "start": "2026-06-24T12:00:00+00:00",
+    "end": "2026-09-16T12:00:00+00:00",
+    "weeks": 12
+  },
+  "baseline_desk": {
+    "total_eur": 3754.58,
+    "max_drawdown_eur": -1627.01,
+    "win_rate": 0.484,
+    "trades": 62
+  },
+  "hold_btc_sleeve": {
+    "total_eur": 5099.14,
+    "max_drawdown_eur": -1649.29,
+    "return_pct": 25.496
+  },
+  "pnl_delta_eur": 1344.56,
+  "verdict": "HOLD_BETTER",
+  "implementation": {
+    "module": "bot/live/momentum_hold_runner.py",
+    "enabled_default": true,
+    "allow_live_default": false,
+    "book_eur_default": 20000,
+    "bases_default": "BTC",
+    "note": "Core reserves undeployed hold book; arm MOMENTUM_HOLD_ALLOW_LIVE=true for real buys."
+  }
+}

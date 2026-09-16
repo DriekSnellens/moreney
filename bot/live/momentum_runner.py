@@ -678,6 +678,25 @@ class MomentumDeskRunner:
         if fetched_any:
             self._cash_ts = self._clock()
 
+    def _reserved_other_sleeves_eur(self) -> float:
+        """Cash earmarked for hold (and optional core soft book leftover peer)."""
+        reserved = 0.0
+        try:
+            from bot.live.momentum_hold_runner import hold_reserved_eur
+
+            reserved += float(hold_reserved_eur() or 0.0)
+        except Exception:  # noqa: BLE001
+            pass
+        # Soft core book: do not deploy above cfg.book_eur when set.
+        book = float(getattr(self.cfg, "book_eur", 0.0) or 0.0)
+        if book > 0:
+            deployed = sum(max(0.0, float(h.pos.notional_eur)) for h in self.holdings)
+            # Cap clip by free soft book — applied below via reduced cash.
+            self._soft_book_left = max(0.0, book - deployed)
+        else:
+            self._soft_book_left = None
+        return reserved
+
     def _route_entry(self, clip_eur: float) -> tuple[str, float] | None:
         """Pick the venue for a clip: first in preference order with enough
         EUR. Without any gateway (dry-run) or balance data the primary is used.
@@ -685,24 +704,49 @@ class MomentumDeskRunner:
         If no venue can fund the full clip, deploy the leftover on the richest
         venue (most cash available) as long as that residual is still a
         meaningful order — do not require a large fraction of the planned clip.
+
+        Hold-sleeve undeployed soft book is subtracted from available cash so
+        core momentum cannot spend the buy&hold reserve.
         """
         venues = self.opt.venues
+        reserved = self._reserved_other_sleeves_eur()
+        soft_left = getattr(self, "_soft_book_left", None)
         if not self._gws or not self.cash_by_venue:
-            return venues[0], clip_eur
+            clip = clip_eur
+            if soft_left is not None:
+                clip = min(clip, float(soft_left))
+            min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
+            if clip < min_ok:
+                return None
+            return venues[0], round(clip, 2)
         need = clip_eur * 1.005  # tiny buffer for taker slippage / fee
         for venue in venues:
             cash = self.cash_by_venue.get(venue)
-            if cash is not None and cash >= need and venue in self._gws:
+            if cash is None or venue not in self._gws:
+                continue
+            avail = max(0.0, float(cash) - reserved)
+            if soft_left is not None:
+                avail = min(avail, float(soft_left))
+            if avail >= need:
                 return venue, clip_eur
         # Full clip unavailable: use the venue with the most leftover cash.
         best = max(
-            ((v, self.cash_by_venue.get(v, 0.0)) for v in venues if v in self._gws),
+            (
+                (
+                    v,
+                    max(0.0, float(self.cash_by_venue.get(v, 0.0)) - reserved),
+                )
+                for v in venues
+                if v in self._gws
+            ),
             key=lambda item: item[1],
             default=None,
         )
         if best is None:
             return None
         venue, cash = best
+        if soft_left is not None:
+            cash = min(cash, float(soft_left))
         reduced = cash / 1.005
         min_ok = max(_MIN_ORDER_EUR, float(self.opt.min_residual_clip_eur))
         if reduced < min_ok:
@@ -1713,6 +1757,7 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         soft_regime_fee_buffer_mult=float(
             getattr(settings, "momentum_desk_soft_regime_fee_buffer_mult", 6.0)
         ),
+        book_eur=float(getattr(settings, "momentum_desk_book_eur", 0.0) or 0.0),
     )
 
 

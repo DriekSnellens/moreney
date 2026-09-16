@@ -189,17 +189,21 @@ def compute_desk_earnings(
     *,
     core_ledger_path: str | Path | None,
     volatile_ledger_path: str | Path | None = None,
+    hold_ledger_path: str | Path | None = None,
     core_status: Mapping[str, Any] | None = None,
     volatile_status: Mapping[str, Any] | None = None,
+    hold_status: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> DeskEarnings:
-    """Build operator earnings for core, volatile, and combined sleeves."""
+    """Build operator earnings for core, volatile, hold, and combined sleeves."""
     core_status = core_status or {}
     volatile_status = volatile_status or {}
+    hold_status = hold_status or {}
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
     core_exits = load_exit_fills(core_ledger_path)
     vol_exits = load_exit_fills(volatile_ledger_path)
+    hold_exits = load_exit_fills(hold_ledger_path)
 
     core = sum_period(
         core_exits,
@@ -211,13 +215,21 @@ def compute_desk_earnings(
         now=now_utc,
         all_time_fallback=_as_float(volatile_status.get("realized_total_eur")),
     )
-    open_mtm = _as_float(core_status.get("unrealized_net_eur")) + _as_float(
-        volatile_status.get("unrealized_net_eur")
+    hold = sum_period(
+        hold_exits,
+        now=now_utc,
+        all_time_fallback=_as_float(hold_status.get("realized_total_eur")),
     )
+    open_mtm = (
+        _as_float(core_status.get("unrealized_net_eur"))
+        + _as_float(volatile_status.get("unrealized_net_eur"))
+        + _as_float(hold_status.get("unrealized_net_eur"))
+    )
+    combined = _combine(_combine(core, volatile), hold)
     return DeskEarnings(
         core=core,
         volatile=volatile,
-        combined=_combine(core, volatile),
+        combined=combined,
         open_mtm_eur=round(open_mtm, 2),
         as_of=now_utc.astimezone(_OPERATOR_TZ).isoformat(),
     )

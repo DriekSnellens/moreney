@@ -638,6 +638,29 @@ class Settings(BaseSettings):
     momentum_desk_state_path: str = "./data/momentum_desk_state.json"
     momentum_desk_ledger_path: str = "./data/momentum_desk_ledger.jsonl"
 
+    # Soft trading book for the core momentum desk (0 = no soft cap). When the
+    # hold sleeve is on, set this to the capital left for RS trading.
+    momentum_desk_book_eur: float = Field(default=0.0, ge=0.0)
+    # Optional total-book hint used when momentum_hold_fraction > 0.
+    momentum_total_book_eur: float = Field(default=20_000.0, ge=0.0)
+
+    # Spot buy&hold sleeve (12w quality upgrade vs WR desk: BTC BH). Soft book
+    # is reserved from core cash until deployed. Bases are a config universe.
+    momentum_hold_enabled: bool = True
+    momentum_hold_allow_live: bool = False
+    momentum_hold_venues: str = "bitvavo"
+    momentum_hold_book_eur: float = Field(default=20_000.0, gt=0)
+    # If >0, overrides book_eur as fraction of momentum_total_book_eur.
+    momentum_hold_fraction: float = Field(default=0.0, ge=0.0, le=1.0)
+    momentum_hold_bases: str = "BTC"
+    momentum_hold_equal_weight: bool = True
+    momentum_hold_fill_threshold: float = Field(default=0.97, ge=0.5, le=1.0)
+    momentum_hold_rebalance_sec: float = Field(default=3600.0, ge=60.0, le=86_400.0)
+    momentum_hold_disaster_stop: bool = True
+    momentum_hold_disaster_pct: float = Field(default=0.25, ge=0.05, le=0.80)
+    momentum_hold_state_path: str = "./data/momentum_hold_state.json"
+    momentum_hold_ledger_path: str = "./data/momentum_hold_ledger.jsonl"
+
     # Volatile AlphaI sleeve (separate from core-16 momentum desk). Default off.
     momentum_volatile_enabled: bool = False
     # When false, start/resume may only run dry_run (paper) — no real orders.

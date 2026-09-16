@@ -1203,45 +1203,79 @@ def _sleeve_card(
 
 def _sleeves_panel(
     core: Mapping[str, Any],
-    volatile: Mapping[str, Any] | None,
+    volatile: Mapping[str, Any] | None = None,
+    hold: Mapping[str, Any] | None = None,
 ) -> str:
-    """One desk, two sleeves: stable core + aggressive volatile."""
+    """Desk sleeves: core + optional hold + optional volatile."""
     cash = float(core.get("cash_eur") or 0)
     core_exp = float(core.get("exposure_eur") or 0)
     v = volatile or {}
-    book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
-    deployed = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
-    reserved = max(0.0, book - deployed) if book else 0.0
+    h = hold or {}
+    v_book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
+    v_dep = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
+    h_book = float(h.get("book_eur") or (h.get("config") or {}).get("book_eur") or 0)
+    h_dep = float(h.get("deployed_eur") or h.get("exposure_eur") or 0)
+    reserved = max(0.0, v_book - v_dep) + max(0.0, h_book - h_dep)
     free_shared = max(0.0, cash - core_exp - reserved)
+    bits = [
+        f"Cash {_fmt_eur(cash, signed=False)}",
+        f"core {_fmt_eur(core_exp, signed=False)}",
+    ]
+    if h_book > 0 or h:
+        bits.append(
+            f"hold book {_fmt_eur(h_book, signed=False)} "
+            f"(vrij {_fmt_eur(max(0.0, h_book - h_dep), signed=False)})"
+        )
+    if v_book > 0 or v:
+        bits.append(
+            f"volatile book {_fmt_eur(v_book, signed=False)} "
+            f"(vrij {_fmt_eur(max(0.0, v_book - v_dep), signed=False)})"
+        )
+    bits.append(f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}")
     capital = (
         '<div class="hint" style="margin-bottom:.7rem">'
         "<strong>Kapitaalbeeld</strong> — gedeelde venue-cash, gescheiden boeken. "
-        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)} · "
-        f"volatile book {_fmt_eur(book, signed=False)} "
-        f"(waarvan vrij {_fmt_eur(reserved, signed=False)}) · "
-        f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}."
-        "</div>"
+        + " · ".join(bits)
+        + ".</div>"
     )
-    return (
-        '<div class="card section"><div class="card-head">'
-        "<h2>Desk sleeves</h2>"
-        '<span class="muted">stabiel core · aggressief volatile</span></div>'
-        f"{capital}"
-        '<div class="stack two">'
-        + _sleeve_card(
-            title="Core",
-            role="Stabiele RS-desk · core-16 · strengere filters",
+    cards = [
+        _sleeve_card(
+            title="Core · RS momentum",
+            role="trail / regime",
             status=core,
             href="/live/momentum",
-            book_label=None,
+            book_label="Soft book" if float(core.get("book_eur") or 0) else None,
         )
-        + _sleeve_card(
-            title="Volatile",
-            role="Agressievere AlphaI midcaps · soft book · eigen risk",
-            status=volatile,
-            href="/live/momentum/volatile",
-            book_label="Soft book",
+    ]
+    if h or h_book > 0:
+        bases = ",".join(str(b) for b in (h.get("hold_bases") or ["BTC"])[:4])
+        cards.append(
+            _sleeve_card(
+                title="Hold · spot buy&hold",
+                role=f"bases {bases}",
+                status=h,
+                href="/live/momentum/hold",
+                book_label="Hold book",
+            )
         )
+    if v or v_book > 0:
+        cards.append(
+            _sleeve_card(
+                title="Volatile · AlphaI midcap",
+                role="concentrated sleeve",
+                status=v,
+                href="/live/momentum/volatile",
+                book_label="Volatile book",
+            )
+        )
+    n = len(cards)
+    grid = "1fr " * n
+    return (
+        '<div class="card section">'
+        "<h2>Desk sleeves</h2>"
+        f"{capital}"
+        f'<div class="sleeve-split" style="grid-template-columns:{grid.strip()}">'
+        + "".join(cards)
         + "</div></div>"
     )
 
@@ -1410,9 +1444,11 @@ def render_momentum_dashboard(
     sell_all: bool = False,
     report: Mapping[str, Any] | None = None,
     volatile: Mapping[str, Any] | None = None,
+    hold: Mapping[str, Any] | None = None,
     earnings: DeskEarnings | None = None,
     volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_volatile: bool = False,
+    show_hold: bool = False,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -1509,7 +1545,11 @@ def render_momentum_dashboard(
     vol_earn = (
         _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
     )
-    sleeves_html = _sleeves_panel(status, volatile) if show_vol else ""
+    sleeves_html = (
+        _sleeves_panel(status, volatile if show_vol else None, hold if show_hold else None)
+        if (show_vol or show_hold)
+        else ""
+    )
     if show_vol:
         positions_html = (
             '<div class="stack two section">'

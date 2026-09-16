@@ -63,6 +63,10 @@ from bot.live.momentum_volatile_runner import (
     get_volatile_desk_manager,
     volatile_desk_flagged_running,
 )
+from bot.live.momentum_hold_runner import (
+    get_hold_desk_manager,
+    hold_desk_flagged_running,
+)
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -255,6 +259,17 @@ async def lifespan(_app: FastAPI):
                 logger.info("volatile sleeve disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume volatile sleeve")
+        try:
+            if bool(getattr(get_settings(), "momentum_hold_enabled", False)):
+                h_resumed = await get_hold_desk_manager().resume_if_flagged()
+                if h_resumed and h_resumed.get("started"):
+                    logger.info("auto-resumed hold sleeve after process start")
+                elif h_resumed:
+                    logger.warning("hold sleeve auto-resume did not start: %s", h_resumed)
+            else:
+                logger.info("hold sleeve disabled — skip auto-resume")
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume hold sleeve")
     yield
     if paper_runner is not None:
         try:
@@ -867,8 +882,10 @@ async def live_momentum_dashboard(
     ledger = await live_momentum_ledger(limit=400)
     settings = get_settings()
     show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    show_hold = bool(getattr(settings, "momentum_hold_enabled", False))
     volatile_status: dict[str, Any] | None = None
     volatile_ledger: list[dict[str, Any]] | None = None
+    hold_status: dict[str, Any] | None = None
     if show_volatile:
         try:
             volatile_status = get_volatile_desk_manager().status()
@@ -878,13 +895,22 @@ async def live_momentum_dashboard(
             getattr(settings, "momentum_volatile_ledger_path", "./data/momentum_volatile_ledger.jsonl"),
             limit=400,
         )
+    if show_hold:
+        try:
+            hold_status = get_hold_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            hold_status = None
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
             settings.momentum_volatile_ledger_path if show_volatile else None
         ),
+        hold_ledger_path=(
+            settings.momentum_hold_ledger_path if show_hold else None
+        ),
         core_status=status,
         volatile_status=volatile_status if show_volatile else None,
+        hold_status=hold_status if show_hold else None,
     )
     return render_momentum_dashboard(
         status,
@@ -895,9 +921,11 @@ async def live_momentum_dashboard(
         sell_all=bool(sell_all),
         report=report_payload,
         volatile=volatile_status if show_volatile else None,
+        hold=hold_status if show_hold else None,
         earnings=earnings,
         volatile_ledger_rows=volatile_ledger if show_volatile else None,
         show_volatile=show_volatile,
+        show_hold=show_hold,
     )
 
 
@@ -1245,6 +1273,148 @@ async def live_momentum_volatile_sell_all(
     return result
 
 
+def _hold_wants_redirect(body: Mapping[str, Any], request: Request) -> bool:
+    return wants_html(request) or bool(body.get("redirect"))
+
+
+def _hold_redirect(notice: str | None = None) -> RedirectResponse:
+    q = f"?notice={notice}" if notice else ""
+    return RedirectResponse(url=f"/live/momentum/hold{q}", status_code=303)
+
+
+@app.get("/live/momentum/hold", response_model=None)
+async def live_momentum_hold_page(
+    request: Request,
+    notice: str | None = None,
+    _: None = Depends(require_dashboard_access),
+) -> HTMLResponse | JSONResponse:
+    """Buy&hold sleeve status page."""
+    settings = get_settings()
+    if not bool(getattr(settings, "momentum_hold_enabled", False)):
+        if wants_html(request):
+            return HTMLResponse(
+                "<h1>Hold sleeve uit</h1>"
+                "<p>Zet MOMENTUM_HOLD_ENABLED=true om de BTC buy&hold sleeve te armén.</p>",
+                status_code=200,
+            )
+        return JSONResponse(
+            {"ok": False, "reason": "momentum_hold_enabled_false"}, status_code=404
+        )
+    status = get_hold_desk_manager().status()
+    if wants_html(request):
+        from html import escape
+
+        running = "LIVE" if status.get("running") and not status.get("dry_run") else (
+            "PAPER" if status.get("running") else "STOP"
+        )
+        notice_html = f"<p><em>{escape(notice)}</em></p>" if notice else ""
+        bases = ", ".join(escape(str(b)) for b in (status.get("hold_bases") or ["BTC"]))
+        body = f"""
+        <html><head><title>Hold sleeve</title></head><body>
+        <h1>Hold · spot buy&hold</h1>
+        {notice_html}
+        <p>Status: <strong>{running}</strong> · bases {bases} ·
+        book {status.get('book_eur')} · deployed {status.get('deployed_eur')}</p>
+        <form method="post" action="/live/momentum/hold/start"><input type="hidden" name="redirect" value="1"/>
+        <button type="submit">Start (paper)</button></form>
+        <form method="post" action="/live/momentum/hold/decide"><input type="hidden" name="redirect" value="1"/>
+        <input type="hidden" name="execute" value="1"/><button type="submit">Top-up book</button></form>
+        <form method="post" action="/live/momentum/hold/stop"><input type="hidden" name="redirect" value="1"/>
+        <button type="submit">Stop</button></form>
+        <p><a href="/live/momentum">← desk</a> ·
+        <a href="/live/momentum/hold/status">JSON</a></p>
+        </body></html>
+        """
+        return HTMLResponse(body)
+    return JSONResponse(status)
+
+
+@app.get("/live/momentum/hold/status")
+async def live_momentum_hold_status() -> dict[str, Any]:
+    return get_hold_desk_manager().status()
+
+
+@app.get("/live/momentum/hold/ledger")
+async def live_momentum_hold_ledger(limit: int = 200) -> dict[str, Any]:
+    path = get_settings().momentum_hold_ledger_path
+    return {"path": path, "rows": read_ledger_tail(path, limit=limit)}
+
+
+@app.post("/live/momentum/hold/start", response_model=None)
+async def live_momentum_hold_start(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    settings = get_settings()
+    if not bool(getattr(settings, "momentum_hold_enabled", False)):
+        refused = {"ok": False, "reason": "momentum_hold_enabled_false"}
+        if _hold_wants_redirect(body, request):
+            return _hold_redirect("Start geweigerd: hold sleeve is uitgeschakeld")
+        return refused
+    allow_live = bool(getattr(settings, "momentum_hold_allow_live", False))
+    dry_run = not allow_live or _as_bool(body.get("dry_run"), default=True)
+    if allow_live and _as_bool(body.get("live"), default=False):
+        dry_run = False
+    venues = body.get("venues") or body.get("venue") or settings.momentum_hold_venues
+    result = await get_hold_desk_manager().start(
+        settings=settings, dry_run=bool(dry_run), venue=venues
+    )
+    if _hold_wants_redirect(body, request):
+        if not result.get("started"):
+            return _hold_redirect(f"Start geweigerd: {result.get('reason') or result}")
+        mode = "paper" if dry_run else "live"
+        return _hold_redirect(f"Hold sleeve gestart ({mode})")
+    return result
+
+
+@app.post("/live/momentum/hold/decide", response_model=None)
+async def live_momentum_hold_decide(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    execute = _as_bool(body.get("execute"), default=True)
+    result = await get_hold_desk_manager().decide(execute=bool(execute))
+    if _hold_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _hold_redirect(f"Top-up geweigerd: {result.get('reason') or result}")
+        return _hold_redirect("Hold top-up klaar")
+    return result
+
+
+@app.post("/live/momentum/hold/stop", response_model=None)
+async def live_momentum_hold_stop(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    result = await get_hold_desk_manager().stop()
+    if _hold_wants_redirect(body, request):
+        return _hold_redirect("Hold sleeve gestopt")
+    return result
+
+
+@app.post("/live/momentum/hold/sell", response_model=None)
+async def live_momentum_hold_sell(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    urgent = _as_bool(body.get("urgent"), default=False)
+    if not holding_id:
+        if _hold_wants_redirect(body, request):
+            return _hold_redirect("Geen positie opgegeven")
+        return {"ok": False, "reason": "holding_id_required"}
+    result = get_hold_desk_manager().sell(holding_id, urgent=bool(urgent))
+    if _hold_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _hold_redirect(f"Verkoop geweigerd: {result.get('reason') or result}")
+        return _hold_redirect("Verkoop gestart")
+    return result
+
+
 @app.get("/live/micro/dashboard", response_class=HTMLResponse, response_model=None)
 async def live_micro_dashboard_redirect() -> RedirectResponse:
     """Legacy URL — single operator dashboard lives at /live/dashboard."""
@@ -1405,11 +1575,17 @@ async def kill_switch_emergency_stop(payload: dict[str, str] | None = None) -> d
         volatile_stop = await get_volatile_desk_manager().stop()
     except Exception as exc:  # noqa: BLE001
         volatile_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    hold_stop: dict[str, Any] | None = None
+    try:
+        hold_stop = await get_hold_desk_manager().stop()
+    except Exception as exc:  # noqa: BLE001
+        hold_stop = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     return {
         "status": status.model_dump(mode="json"),
         "micro_session_stop": session_stop,
         "momentum_desk_stop": momentum_stop,
         "volatile_sleeve_stop": volatile_stop,
+        "hold_sleeve_stop": hold_stop,
     }
 
 
