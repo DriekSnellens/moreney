@@ -1296,6 +1296,8 @@ class MomentumDeskRunner:
             "fee_in_eur": round(clip * fee_side, 2),
             "fee_out_eur": round(clip * fee_side, 2),
             "hard_stop_pct": self.cfg.hard_stop_pct,
+            "early_stop_pct": self.cfg.early_stop_pct,
+            "early_stop_until_peak": self.cfg.early_stop_until_peak,
             "trail_pct": self.cfg.trail_pct,
             "trail_tight_after": self.cfg.trail_tight_after,
             "trail_tight_pct": self.cfg.trail_tight_pct,
@@ -1304,8 +1306,18 @@ class MomentumDeskRunner:
             qty = clip / price
             row["qty"] = round(qty, 8)
             row["break_even"] = round(price * (1 + self.cfg.fee_rt), 8)
+            # Unproven entries use early stop when armed; else hard stop.
+            entry_stop = (
+                float(self.cfg.early_stop_pct)
+                if float(self.cfg.early_stop_pct or 0.0) > 0.0
+                and float(self.cfg.early_stop_until_peak or 0.0) > 0.0
+                else float(self.cfg.hard_stop_pct)
+            )
             row["hard_stop_price"] = round(price * (1 - self.cfg.hard_stop_pct), 8)
             row["hard_stop_eur"] = round(-clip * self.cfg.hard_stop_pct - clip * self.cfg.fee_rt, 2)
+            row["entry_stop_pct"] = entry_stop
+            row["entry_stop_price"] = round(price * (1 - entry_stop), 8)
+            row["entry_stop_eur"] = round(-clip * entry_stop - clip * self.cfg.fee_rt, 2)
         if route is None:
             row["blocked"] = "insufficient_cash"
         return row
@@ -1700,6 +1712,10 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.04)),
         trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.02)),
         hard_stop_pct=float(getattr(settings, "momentum_desk_hard_stop_pct", 0.03)),
+        early_stop_pct=float(getattr(settings, "momentum_desk_early_stop_pct", 0.02)),
+        early_stop_until_peak=float(
+            getattr(settings, "momentum_desk_early_stop_until_peak", 0.015)
+        ),
         time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 36.0)),
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 100.0)),
         week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 250.0)),
