@@ -539,24 +539,15 @@ class HoldDeskManager:
         self._manual_exit = {
             "started_at": datetime.now(UTC).isoformat(),
             "holding_id": holding_id,
+            "urgent": bool(urgent),
             "done": False,
         }
 
         async def _run() -> None:
             try:
-                for h in list(runner.holdings):
-                    if h.holding_id != holding_id:
-                        continue
-                    px = runner.marks.get(h.pos.base) or h.pos.entry_price
-                    await runner._exit(  # noqa: SLF001
-                        h,
-                        ExitDecision("manual", h.pos.gross_return(float(px)), True),
-                        urgent=urgent,
-                    )
-                    self._manual_exit["result"] = {"ok": True, "base": h.pos.base}
-                    break
-                else:
-                    self._manual_exit["result"] = {"ok": False, "reason": "not_found"}
+                self._manual_exit["result"] = await runner.sell_now(
+                    holding_id, urgent=urgent
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.exception("hold sleeve: sell failed")
                 self._manual_exit["result"] = {"error": f"{type(exc).__name__}: {exc}"}
@@ -570,9 +561,28 @@ class HoldDeskManager:
     def sell_all(self, *, urgent: bool = False) -> dict[str, Any]:
         if self._runner is None or not self.running():
             return {"ok": False, "reason": "not_running"}
-        ids = [h.holding_id for h in self._runner.holdings]
-        results = [self.sell(hid, urgent=urgent) for hid in ids]
-        return {"ok": True, "n": len(ids), "results": results}
+        if self._sell_task is not None and not self._sell_task.done():
+            return {"ok": False, "reason": "sell_in_progress"}
+        runner = self._runner
+        self._manual_exit = {
+            "started_at": datetime.now(UTC).isoformat(),
+            "sell_all": True,
+            "urgent": bool(urgent),
+            "done": False,
+        }
+
+        async def _run() -> None:
+            try:
+                self._manual_exit["result"] = await runner.sell_all_now(urgent=urgent)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("hold sleeve: sell_all failed")
+                self._manual_exit["result"] = {"error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                self._manual_exit["done"] = True
+                self._manual_exit["finished_at"] = datetime.now(UTC).isoformat()
+
+        self._sell_task = asyncio.create_task(_run(), name="hold-sell-all")
+        return {"ok": True, "manual_exit": dict(self._manual_exit)}
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True
