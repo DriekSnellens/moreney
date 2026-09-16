@@ -73,13 +73,13 @@ def test_hold_config_trail_from_settings():
         momentum_hold_trail_pct=0.03,
         momentum_hold_trail_tight_after=0.04,
         momentum_hold_trail_tight_pct=0.02,
-        momentum_hold_refill_cooldown_sec=3_600.0,
+        momentum_hold_refill_after_exit=False,
     )
     hold = hold_config_from_settings(settings)
     assert hold.trail_pct == 0.03
     assert hold.trail_tight_after == 0.04
     assert hold.trail_tight_pct == 0.02
-    assert hold.refill_cooldown_sec == 3_600.0
+    assert hold.refill_after_exit is False
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_hold_trail_exit_on_closed_bar(tmp_path: Path):
         trail_tight_after=0.04,
         trail_tight_pct=0.02,
         hard_stop_pct=0.25,
-        refill_cooldown_sec=3_600.0,
+        refill_after_exit=False,
         rebalance_interval_sec=86_400.0,
     )
     cfg = hold_desk_config(hold)
@@ -147,15 +147,34 @@ async def test_hold_trail_exit_on_closed_bar(tmp_path: Path):
     async def _fake_exit(h, decision):
         exits.append(decision.reason)
         runner.holdings = [x for x in runner.holdings if x is not h]
-        runner._arm_refill_cooldown(decision.reason)
+        runner._disarm_refill(decision.reason)
         return None
 
     runner._exit = _fake_exit  # type: ignore[method-assign]
     await runner._manage_exits(int(clock["t"] * 1000))
     assert exits == ["trail"]
+    assert runner.refill_armed is False
     assert runner.refill_blocked() is True
     blocked = await runner.fill_to_book()
-    assert blocked.get("reason") == "refill_cooldown"
+    assert blocked.get("reason") == "refill_disarmed"
+    # Persists across reload.
+    runner._save_state()
+    runner2 = HoldDeskRunner(
+        cfg,
+        None,
+        hold=hold,
+        options=RunnerOptions(
+            venues=("bitvavo",),
+            dry_run=True,
+            state_path=str(tmp_path / "state.json"),
+            ledger_path=str(tmp_path / "ledger.jsonl"),
+        ),
+        feed=_Feed(),
+        clock=lambda: clock["t"],
+        sleep=_noop_sleep,
+    )
+    assert runner2.refill_armed is False
+    assert (await runner2.fill_to_book()).get("reason") == "refill_disarmed"
 
 
 def test_hold_reserved_eur_when_enabled():

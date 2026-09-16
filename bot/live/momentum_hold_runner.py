@@ -11,7 +11,7 @@ Behaviour:
   - No time / RS / fixed take-profit exits.
   - Soft book clamp so the sleeve cannot spend the whole venue balance.
   - Core desk reserves undeployed hold book via ``hold_reserved_eur``.
-  - After an auto trail/stop exit, refill is paused briefly so cash stays free.
+  - After an auto trail/stop exit, refill stays disarmed so cash stays free.
 """
 from __future__ import annotations
 
@@ -107,7 +107,8 @@ class HoldSleeveConfig:
     trail_pct: float = 0.03
     trail_tight_after: float = 0.04
     trail_tight_pct: float = 0.02
-    refill_cooldown_sec: float = 86_400.0
+    # After an auto trail/stop exit, never auto-rebuy (cash stays free).
+    refill_after_exit: bool = False
 
 
 def hold_config_from_settings(settings: Settings | None = None) -> HoldSleeveConfig:
@@ -158,8 +159,8 @@ def hold_config_from_settings(settings: Settings | None = None) -> HoldSleeveCon
         trail_pct=float(trail_pct or 0.0),
         trail_tight_after=float(trail_tight_after or 0.0),
         trail_tight_pct=float(trail_tight_pct or 0.0),
-        refill_cooldown_sec=float(
-            getattr(settings, "momentum_hold_refill_cooldown_sec", 86_400.0) or 0.0
+        refill_after_exit=bool(
+            getattr(settings, "momentum_hold_refill_after_exit", False)
         ),
     )
 
@@ -211,12 +212,13 @@ def hold_reserved_eur(
     book = float(hold.book_eur or 0.0)
     if book <= 0:
         return 0.0
-    # After an auto trail/stop exit, release reserve so realized cash is free.
+    # After an auto trail/stop exit, release the whole hold soft book so cash
+    # stays free for the core desk (no auto-rebuy reservation).
     try:
         mgr = get_hold_desk_manager()
         if mgr.running() and mgr._runner is not None:  # noqa: SLF001
             runner = mgr._runner  # noqa: SLF001
-            if runner.refill_blocked() and not runner.holdings:
+            if not runner.refill_armed:
                 return 0.0
             if deployed_eur is None:
                 deployed_eur = runner._deployed_eur()  # noqa: SLF001
@@ -256,15 +258,31 @@ class HoldDeskRunner(MomentumDeskRunner):
             kwargs["clock"] = clock
         if sleep is not None:
             kwargs["sleep"] = sleep
-        super().__init__(cfg, gateway, **kwargs)
+        # Default before super()._load_state(); state file may disarm it.
+        self.refill_armed = True
         self.hold = hold
         self._last_rebalance_ts = 0.0
         self._btc_mtm: dict[str, Any] = {}
+        super().__init__(cfg, gateway, **kwargs)
         self._baseline_path = baseline_path(get_settings())
-        self._refill_blocked_until = 0.0
+        # Re-read hold-specific flags in case parent load ran before attrs existed.
+        self._load_refill_armed()
+
+    def _load_refill_armed(self) -> None:
+        path = Path(self.opt.state_path)
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return
+        if "refill_armed" in data:
+            self.refill_armed = bool(data.get("refill_armed"))
+        elif float(data.get("refill_blocked_until") or 0.0) > 0.0:
+            self.refill_armed = False
 
     def refill_blocked(self) -> bool:
-        return float(self._clock()) < float(self._refill_blocked_until or 0.0)
+        return not bool(self.refill_armed)
 
     def status(self) -> dict[str, Any]:
         out = super().status()
@@ -276,11 +294,8 @@ class HoldDeskRunner(MomentumDeskRunner):
         )
         out["hold_bases"] = list(self.hold.bases)
         out["mode"] = "hold_live"
+        out["refill_armed"] = bool(self.refill_armed)
         out["refill_blocked"] = self.refill_blocked()
-        if self._refill_blocked_until > 0:
-            out["refill_blocked_until"] = datetime.fromtimestamp(
-                float(self._refill_blocked_until), UTC
-            ).isoformat()
         if self._btc_mtm:
             out["btc_hold"] = dict(self._btc_mtm)
         out["config"] = {
@@ -293,6 +308,7 @@ class HoldDeskRunner(MomentumDeskRunner):
             "trail_tight_after": float(self.hold.trail_tight_after),
             "trail_tight_pct": float(self.hold.trail_tight_pct),
             "hard_stop_pct": float(self.hold.hard_stop_pct),
+            "refill_after_exit": bool(self.hold.refill_after_exit),
         }
         return out
 
@@ -301,14 +317,7 @@ class HoldDeskRunner(MomentumDeskRunner):
 
     def _load_state(self) -> None:
         super()._load_state()
-        path = Path(self.opt.state_path)
-        if not path.exists():
-            return
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return
-        self._refill_blocked_until = float(data.get("refill_blocked_until") or 0.0)
+        self._load_refill_armed()
 
     def _save_state(self) -> None:
         path = Path(self.opt.state_path)
@@ -321,30 +330,28 @@ class HoldDeskRunner(MomentumDeskRunner):
             "realized_total_eur": round(self.realized_total_eur, 4),
             "trade_count": self.trade_count,
             "last_regime": self.last_regime,
-            "refill_blocked_until": float(self._refill_blocked_until or 0.0),
+            "refill_armed": bool(self.refill_armed),
         }
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
         tmp.replace(path)
 
-    def _arm_refill_cooldown(self, reason: str) -> None:
-        cool = float(self.hold.refill_cooldown_sec or 0.0)
-        if cool <= 0:
+    def _disarm_refill(self, reason: str) -> None:
+        if bool(self.hold.refill_after_exit):
             return
-        until = float(self._clock()) + cool
-        self._refill_blocked_until = max(float(self._refill_blocked_until or 0.0), until)
+        if not self.refill_armed:
+            return
+        self.refill_armed = False
         logger.info(
-            "hold sleeve: refill paused %.0fs after %s (until %.0f)",
-            cool,
+            "hold sleeve: refill disarmed after %s — cash stays free (no auto-rebuy)",
             reason,
-            self._refill_blocked_until,
         )
 
     async def _exit(self, h: Holding, decision: ExitDecision) -> Fill | None:
         fill = await super()._exit(h, decision)
         reason = str(decision.reason or "")
         if fill is not None and reason in _AUTO_EXIT_REASONS:
-            self._arm_refill_cooldown(reason)
+            self._disarm_refill(reason)
             self._save_state()
         return fill
 
@@ -443,14 +450,13 @@ class HoldDeskRunner(MomentumDeskRunner):
         self, now_ms: int | None = None, *, force: bool = False
     ) -> dict[str, Any]:
         """Buy underweight hold bases until soft book is filled."""
-        if self.refill_blocked() and not force:
+        del force  # Auto-trail disarm is permanent; no force-rebuy.
+        if self.refill_blocked():
             return {
                 "ok": False,
-                "reason": "refill_cooldown",
-                "refill_blocked_until": float(self._refill_blocked_until or 0.0),
+                "reason": "refill_disarmed",
+                "detail": "auto trail/stop exit — cash stays free, no rebuy",
             }
-        if force and self.refill_blocked():
-            self._refill_blocked_until = 0.0
         now_ms = now_ms or int(self._clock() * 1000)
         book = float(self.hold.book_eur or 0.0)
         if book <= 0:
@@ -526,7 +532,7 @@ class HoldDeskRunner(MomentumDeskRunner):
                 "need_eur": round(need, 2),
                 "bases": list(self.hold.bases),
             }
-        return await self.fill_to_book(force=True)
+        return await self.fill_to_book()
 
 
 class HoldDeskManager:
