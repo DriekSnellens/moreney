@@ -642,14 +642,15 @@ class Settings(BaseSettings):
     # hold sleeve is on, set this to the capital left for RS trading.
     momentum_desk_book_eur: float = Field(default=0.0, ge=0.0)
     # Optional total-book hint used when momentum_hold_fraction > 0.
-    momentum_total_book_eur: float = Field(default=20_000.0, ge=0.0)
+    momentum_total_book_eur: float = Field(default=4_000.0, ge=0.0)
 
     # Spot buy&hold sleeve (12w quality upgrade vs WR desk: BTC BH). Soft book
     # is reserved from core cash until deployed. Bases are a config universe.
+    # Live desk currently ~€4k — book matches that (scale up with capital).
     momentum_hold_enabled: bool = True
-    momentum_hold_allow_live: bool = False
-    momentum_hold_venues: str = "bitvavo"
-    momentum_hold_book_eur: float = Field(default=20_000.0, gt=0)
+    momentum_hold_allow_live: bool = True
+    momentum_hold_venues: str = "bitvavo,okx"
+    momentum_hold_book_eur: float = Field(default=4_000.0, gt=0)
     # If >0, overrides book_eur as fraction of momentum_total_book_eur.
     momentum_hold_fraction: float = Field(default=0.0, ge=0.0, le=1.0)
     momentum_hold_bases: str = "BTC"
