@@ -467,6 +467,47 @@ class MomentumDeskRunner:
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"ts": datetime.now(UTC).isoformat(), **row}) + "\n")
 
+    def reset_operator_numbers(self) -> dict[str, Any]:
+        """Zero dashboard PnL counters and archive the closed-trade ledger.
+
+        Keeps open holdings untouched. Archives the JSONL so earnings
+        week/month/all-time start at zero while history stays on disk.
+        """
+        now_ms = int(self._clock() * 1000)
+        ledger_path = Path(self.opt.ledger_path)
+        archived: str | None = None
+        prior_realized = round(self.realized_total_eur, 4)
+        prior_trades = int(self.trade_count)
+        if ledger_path.exists() and ledger_path.stat().st_size > 0:
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            archived_path = ledger_path.with_name(f"{ledger_path.name}.pre-reset-{stamp}")
+            ledger_path.replace(archived_path)
+            archived = str(archived_path)
+
+        self.realized_total_eur = 0.0
+        self.trade_count = 0
+        self.last_regime = {}
+        self.last_error = None
+        self.ledger = RiskLedger.from_dict(self.cfg, None)
+        self.ledger.roll(now_ms)
+        self._save_state()
+        self._ledger_append(
+            {
+                "event": "dashboard_reset",
+                "prior_realized_total_eur": prior_realized,
+                "prior_trade_count": prior_trades,
+                "archived_ledger": archived,
+            }
+        )
+        return {
+            "ok": True,
+            "prior_realized_total_eur": prior_realized,
+            "prior_trade_count": prior_trades,
+            "archived_ledger": archived,
+            "realized_total_eur": 0.0,
+            "trade_count": 0,
+        }
+
     def status(self) -> dict[str, Any]:
         now_ms = int(self._clock() * 1000)
         positions = []
@@ -2037,6 +2078,14 @@ class MomentumDeskManager:
             return {"ok": False, "reason": "not_running"}
         summary = await self._runner.decide_now(execute=execute)
         return {"ok": True, "decision": summary, "status": self.status()}
+
+    def reset_dashboard(self) -> dict[str, Any]:
+        """Zero operator PnL numbers on the live momentum desk dashboard."""
+        if self._runner is None:
+            return {"ok": False, "reason": "not_running"}
+        out = self._runner.reset_operator_numbers()
+        out["status"] = self.status()
+        return out
 
     def commit(self, bases: Sequence[str]) -> dict[str, Any]:
         """Execute a previewed decision in the background (orders can rest for

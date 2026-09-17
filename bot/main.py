@@ -656,6 +656,12 @@ async def live_momentum_ledger(limit: int = 200) -> dict[str, Any]:
     }
 
 
+@app.post("/live/momentum/reset-dashboard")
+async def live_momentum_reset_dashboard() -> dict[str, Any]:
+    """Zero cumulative desk PnL / risk counters; archive the closed-trade ledger."""
+    return get_momentum_desk_manager().reset_dashboard()
+
+
 @app.post("/live/micro/session/reset-dashboard")
 async def live_micro_session_reset_dashboard() -> dict[str, Any]:
     """Zero cumulative realized PnL and clear dashboard chart history."""
