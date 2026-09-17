@@ -16,24 +16,22 @@ from bot.live.momentum_period_pnl import DeskEarnings, earnings_as_dict
 _CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@500;600&display=swap');
 :root {
-  --ink: #14201c;
-  --muted: #5c6b64;
-  --line: #d5ddd7;
-  --panel: rgba(255,255,255,.78);
-  --panel-solid: #f7faf7;
-  --good: #0b7a45;
-  --bad: #b42318;
-  --warn: #9a6700;
-  --accent: #0f5c4c;
-  --accent-2: #1f7a64;
-  --blue: #0f5c4c;
-  --bg0: #e8eee9;
-  --bg1: #f4f7f4;
+  --ink: #101a17;
+  --muted: #5a6a63;
+  --line: #cfd9d3;
+  --line-soft: #e3ebe6;
+  --panel: #fbfcfb;
+  --good: #0a6b3c;
+  --bad: #a51d16;
+  --warn: #8a5a00;
+  --accent: #0c4f42;
+  --accent-2: #176b58;
+  --bg1: #f3f6f3;
   --display: "Syne", "Avenir Next", sans-serif;
   --sans: "DM Sans", "Avenir Next", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
-  --radius: 14px;
-  --shadow: 0 1px 0 rgba(20,32,28,.04);
+  --radius: 12px;
+  --ease: cubic-bezier(.22,1,.36,1);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
@@ -41,148 +39,290 @@ body {
   color: var(--ink);
   font-family: var(--sans);
   background:
-    radial-gradient(900px 420px at 12% -10%, rgba(31,122,100,.16), transparent 55%),
-    radial-gradient(800px 380px at 92% 8%, rgba(20,32,28,.08), transparent 50%),
-    linear-gradient(180deg, #eef3ef 0%, var(--bg1) 42%, #e5ebe6 100%);
+    radial-gradient(1000px 480px at 8% -12%, rgba(23,107,88,.14), transparent 58%),
+    radial-gradient(720px 360px at 100% 0%, rgba(16,26,23,.06), transparent 52%),
+    repeating-linear-gradient(-12deg, transparent, transparent 11px, rgba(16,26,23,.015) 11px, rgba(16,26,23,.015) 12px),
+    linear-gradient(180deg, #eef3ef 0%, var(--bg1) 38%, #e7ede8 100%);
   padding-bottom: 5.5rem;
 }
-.wrap { max-width: 1120px; margin: 0 auto; padding: 1.1rem 1rem 2rem; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 1rem 1rem 2.25rem; }
 .mono { font-family: var(--mono); }
 .muted { color: var(--muted); }
 .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
 
-/* Brand masthead — first viewport composition */
-.masthead {
-  display: grid; gap: 1.1rem; margin-bottom: 1.25rem;
-  padding: 1.15rem 1.2rem 1.25rem;
-  border: 1px solid var(--line);
-  border-radius: calc(var(--radius) + 4px);
-  background:
-    linear-gradient(135deg, rgba(255,255,255,.92), rgba(247,250,247,.72)),
-    linear-gradient(180deg, rgba(15,92,76,.05), transparent 60%);
-  box-shadow: var(--shadow);
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
 }
-.masthead-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}
+@keyframes soft-shine {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+
+.masthead {
+  display: grid; gap: .95rem; margin-bottom: .85rem;
+  padding: 1.05rem 1.15rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  background:
+    linear-gradient(105deg, rgba(255,255,255,.55), rgba(255,255,255,.08) 42%, transparent),
+    linear-gradient(180deg, rgba(12,79,66,.045), transparent 70%);
+  animation: rise-in .55s var(--ease) both;
+}
+.masthead-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: .85rem; flex-wrap: wrap;
+}
 .brand {
   margin: 0; font-family: var(--display); font-weight: 800;
-  font-size: clamp(2.1rem, 6vw, 3.4rem); letter-spacing: -0.045em; line-height: .95;
+  font-size: clamp(2.35rem, 7vw, 3.6rem); letter-spacing: -0.05em; line-height: .92;
   color: var(--accent);
 }
-.brand-sub { margin: .45rem 0 0; color: var(--muted); font-size: .95rem; max-width: 34rem; line-height: 1.4; }
+.brand-sub {
+  margin: .4rem 0 0; color: var(--muted); font-size: .92rem;
+  max-width: 36rem; line-height: 1.45;
+}
 .earn-label {
-  margin: 0 0 .55rem; font-size: .72rem; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--muted);
+  margin: 0 0 .4rem; font-size: .68rem; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
 }
 .earn-grid {
-  display: grid; gap: .75rem;
-  grid-template-columns: 1fr;
+  display: grid; gap: 0; grid-template-columns: 1fr;
+  border-top: 1px solid var(--line-soft);
 }
 @media (min-width: 760px) {
-  .earn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  .earn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .earn-tile + .earn-tile { border-left: 1px solid var(--line-soft); }
 }
 .earn-tile {
-  padding: .85rem .95rem .9rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,.66);
-  min-height: 6.2rem;
+  padding: .7rem .15rem .15rem;
+  min-height: auto;
+  animation: rise-in .65s var(--ease) both;
 }
-.earn-tile .period { margin: 0; font-size: .78rem; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+.earn-tile:nth-child(2) { animation-delay: .06s; }
+.earn-tile:nth-child(3) { animation-delay: .12s; }
+.earn-tile .period {
+  margin: 0; font-size: .72rem; font-weight: 600;
+  color: var(--muted); letter-spacing: .04em; text-transform: uppercase;
+}
 .earn-tile .amount {
-  margin: .35rem 0 0; font-family: var(--mono); font-weight: 600;
-  font-size: clamp(1.55rem, 4.5vw, 2.15rem); letter-spacing: -0.03em; line-height: 1.05;
+  margin: .28rem 0 0; font-family: var(--mono); font-weight: 600;
+  font-size: clamp(1.45rem, 4vw, 1.95rem); letter-spacing: -0.035em; line-height: 1.05;
 }
-.earn-tile .meta { margin: .4rem 0 0; font-size: .74rem; color: var(--muted); }
+.earn-tile .meta { margin: .28rem 0 0; font-size: .72rem; color: var(--muted); }
 .earn-foot {
-  display: flex; flex-wrap: wrap; gap: .55rem 1.1rem; margin-top: .85rem;
+  display: flex; flex-wrap: wrap; gap: .45rem 1.15rem; margin-top: .55rem;
+  padding-top: .55rem; border-top: 1px solid var(--line-soft);
   font-size: .8rem; color: var(--muted);
 }
-.earn-foot strong { color: var(--ink); font-weight: 600; }
+.earn-foot strong { color: var(--ink); font-weight: 600; font-family: var(--mono); }
 
 .pill {
-  display: inline-flex; align-items: center; gap: .35rem;
-  padding: .35rem .7rem; border-radius: 8px; border: 1px solid var(--line);
-  background: rgba(255,255,255,.7); font-size: .68rem; font-weight: 700;
-  letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .32rem .65rem; border-radius: 6px; border: 1px solid var(--line);
+  background: rgba(255,255,255,.65); font-size: .66rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
 }
-.pill .dot { width: .42rem; height: .42rem; border-radius: 2px; background: currentColor; }
-.pill.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+.pill .dot { width: .4rem; height: .4rem; border-radius: 1px; background: currentColor; }
+.pill.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 32%, var(--line)); }
+.pill.on .dot { animation: live-pulse 1.8s ease-in-out infinite; }
 .pill.off { color: var(--bad); }
 .pill.obs { color: var(--warn); }
 
-.card, .hero-card {
+.panel {
+  margin-top: .85rem;
+  padding: .85rem 0 .15rem;
+  border-top: 1px solid var(--line);
+  animation: rise-in .5s var(--ease) both;
+}
+.panel-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: .6rem; flex-wrap: wrap; margin-bottom: .55rem;
+}
+.panel-head h2, .fold-head {
+  margin: 0; font-family: var(--display); font-weight: 700;
+  font-size: 1.02rem; letter-spacing: -0.02em;
+}
+.panel-head .aside { font-size: .75rem; color: var(--muted); }
+.card {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: .9rem 1rem; box-shadow: var(--shadow);
+  padding: .85rem .95rem;
 }
-.card.section { margin-top: 1rem; }
-.card-head, .card-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.card.section { margin-top: .95rem; }
+.card-head {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: .6rem; flex-wrap: wrap;
+}
 .card-head h2, .section h2 {
-  margin: 0; font-family: var(--display); font-weight: 700; font-size: 1.05rem; letter-spacing: -0.02em;
+  margin: 0; font-family: var(--display); font-weight: 700;
+  font-size: 1.02rem; letter-spacing: -0.02em;
 }
-.section { margin-top: 1.1rem; }
-.section h2 { margin: 0 0 .6rem; }
-.hero-grid { display: grid; gap: .65rem; grid-template-columns: repeat(2, minmax(0,1fr)); margin-top: 1rem; }
-@media (min-width: 760px) { .hero-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
-.hero-card .label { margin: 0; color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.hero-card .value { margin: .35rem 0 0; font-family: var(--mono); font-size: clamp(1.15rem, 3.5vw, 1.55rem); font-weight: 600; letter-spacing: -0.02em; }
-.hero-card .hint { margin: .35rem 0 0; color: var(--muted); font-size: .74rem; border: 0; padding: 0; background: none; }
+.section { margin-top: .95rem; }
+.section h2 { margin: 0 0 .55rem; }
 
-.stack { display: grid; gap: 1rem; }
-@media (min-width: 980px) { .stack.two { grid-template-columns: 1.15fr .85fr; } }
-.hint { margin: .6rem 0; padding: .55rem .75rem; border-radius: 10px; font-size: .82rem; border: 1px solid var(--line); background: rgba(255,255,255,.55); }
+.pulse {
+  display: grid; gap: 0; margin-top: .85rem;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: rgba(255,255,255,.5);
+  overflow: hidden;
+  animation: rise-in .55s var(--ease) .05s both;
+}
+@media (min-width: 760px) {
+  .pulse { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}
+.pulse-item {
+  padding: .7rem .85rem .75rem;
+  border-top: 1px solid var(--line-soft);
+}
+@media (min-width: 760px) {
+  .pulse-item { border-top: 0; }
+  .pulse-item + .pulse-item { border-left: 1px solid var(--line-soft); }
+}
+.pulse-item .label {
+  margin: 0; color: var(--muted); font-size: .66rem; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase;
+}
+.pulse-item .value {
+  margin: .3rem 0 0; font-family: var(--mono);
+  font-size: clamp(1.05rem, 2.8vw, 1.35rem); font-weight: 600; letter-spacing: -0.02em;
+}
+.pulse-item .hint {
+  margin: .28rem 0 0; color: var(--muted); font-size: .7rem;
+  border: 0; padding: 0; background: none;
+}
+
+/* legacy class names kept for tests / older panels */
+.hero-grid { display: contents; }
+.hero-card { display: contents; }
+
+.stack { display: grid; gap: .85rem; }
+@media (min-width: 980px) { .stack.two { grid-template-columns: 1.12fr .88fr; } }
+.hint {
+  margin: .55rem 0; padding: .5rem .7rem; border-radius: 8px;
+  font-size: .8rem; border: 1px solid var(--line); background: rgba(255,255,255,.5);
+}
 .hint.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
 .hint.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
 .hint.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
 
-.btn { cursor: pointer; font: inherit; font-size: .85rem; padding: .55rem .9rem; min-height: 44px;
-  border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.75);
-  color: var(--accent); touch-action: manipulation; font-weight: 600; }
-.btn:hover { border-color: var(--accent); }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
-.btn.primary { background: var(--accent); color: #f4faf7; border-color: var(--accent); }
+.btn {
+  cursor: pointer; font: inherit; font-size: .84rem; padding: .5rem .85rem; min-height: 42px;
+  border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.8);
+  color: var(--accent); touch-action: manipulation; font-weight: 600;
+  transition: border-color .15s ease, background .15s ease, transform .15s var(--ease);
+}
+.btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 42%, var(--line)); }
+.btn.primary { background: var(--accent); color: #f3faf7; border-color: var(--accent); }
 .btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
 .btn.block { width: 100%; display: block; text-align: center; }
 
-.toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: .85rem 0 0; }
-.toolbar form { display: inline; flex: 1 1 auto; min-width: 9rem; }
+.toolbar { display: flex; flex-wrap: wrap; gap: .45rem; margin: .7rem 0 0; }
+.toolbar form { display: inline; flex: 1 1 auto; min-width: 8.5rem; }
 .toolbar .btn { width: 100%; }
 
-table.desk { width: 100%; border-collapse: collapse; font-size: .85rem; }
-table.desk th, table.desk td { padding: .45rem .55rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
-table.desk th { color: var(--muted); font-weight: 600; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
+.ops-row {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: .55rem 1rem;
+  margin-top: .65rem;
+}
+.ops-row .toolbar { margin: 0; flex: 1 1 16rem; }
+
+table.desk { width: 100%; border-collapse: collapse; font-size: .84rem; }
+table.desk th, table.desk td {
+  padding: .48rem .5rem; text-align: right;
+  border-bottom: 1px solid var(--line-soft); white-space: nowrap;
+}
+table.desk th {
+  color: var(--muted); font-weight: 600; font-size: .68rem;
+  letter-spacing: .05em; text-transform: uppercase;
+}
 table.desk td:first-child, table.desk th:first-child { text-align: left; }
+table.desk tbody tr:hover td { background: rgba(12,79,66,.03); }
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .5rem .9rem; font-size: .8rem; }
-.rules div span { display: block; color: var(--muted); font-size: .68rem; }
-.chips span { display: inline-block; margin: .15rem .25rem 0 0; padding: .15rem .5rem; border: 1px solid var(--line); border-radius: 8px; font-size: .74rem; }
+.pos-empty {
+  margin: .15rem 0 .35rem; padding: 1.1rem .2rem 1rem;
+  color: var(--muted); font-size: .92rem; line-height: 1.45;
+  border-left: 3px solid var(--line);
+  padding-left: .85rem;
+}
 
-.pos-cards { display: none; gap: .65rem; }
-.pos-card { border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .8rem; background: rgba(255,255,255,.7); }
-.pos-card .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; margin-bottom: .35rem; }
-.pos-card .meta { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem .6rem; font-size: .78rem; }
+.fold {
+  margin-top: .85rem; border-top: 1px solid var(--line);
+  padding-top: .55rem;
+}
+.fold > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center;
+  justify-content: space-between; gap: .75rem; user-select: none;
+  padding: .35rem 0 .45rem;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary .fold-head { pointer-events: none; }
+.fold > summary .chev {
+  font-size: .72rem; color: var(--muted); letter-spacing: .04em;
+  text-transform: uppercase; font-weight: 600;
+}
+.fold[open] > summary .chev::after { content: "verberg"; }
+.fold:not([open]) > summary .chev::after { content: "toon"; }
+.fold-body { padding: .35rem 0 .55rem; animation: rise-in .35s var(--ease); }
+
+.rules {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: .55rem .95rem; font-size: .8rem;
+}
+.rules div span { display: block; color: var(--muted); font-size: .66rem; margin-bottom: .12rem; }
+.chips span {
+  display: inline-block; margin: .15rem .25rem 0 0; padding: .15rem .5rem;
+  border: 1px solid var(--line); border-radius: 6px; font-size: .74rem;
+}
+
+.pos-cards { display: none; gap: .55rem; }
+.pos-card {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .7rem .8rem; background: rgba(255,255,255,.72);
+}
+.pos-card .row1 {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: .5rem; margin-bottom: .35rem;
+}
+.pos-card .meta {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .25rem .6rem; font-size: .78rem;
+}
 .pos-card .meta span { color: var(--muted); display: block; font-size: .65rem; }
 .pos-card .actions { margin-top: .55rem; }
 
-.sticky-actions { position: sticky; bottom: 0; z-index: 20; margin: 1rem -.25rem 0;
-  padding: .65rem .75rem calc(.65rem + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--bg1) 88%, transparent);
-  border-top: 1px solid var(--line); backdrop-filter: blur(8px); }
+.sticky-actions {
+  position: sticky; bottom: 0; z-index: 20; margin: 1rem -.25rem 0;
+  padding: .6rem .7rem calc(.6rem + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--bg1) 90%, transparent);
+  border-top: 1px solid var(--line); backdrop-filter: blur(10px);
+}
 .sticky-actions .toolbar { margin: 0; }
 
 .sleeve-split { display: grid; gap: .75rem; }
 @media (min-width: 820px) { .sleeve-split { grid-template-columns: 1fr 1fr; } }
-.sleeve-earn { font-size: .78rem; color: var(--muted); margin: .35rem 0 .15rem; }
+.sleeve-earn { font-size: .76rem; color: var(--muted); margin: .3rem 0 .1rem; }
 .sleeve-earn b { font-family: var(--mono); font-weight: 600; }
 
+.foot {
+  margin-top: 1.15rem; font-size: .72rem; color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: .35rem .85rem; align-items: center;
+}
+.foot a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.foot a:hover { text-decoration: underline; }
+
 @media (max-width: 720px) {
-  .wrap { padding: .85rem .7rem 0; }
-  .masthead { padding: 1rem .9rem 1.05rem; }
+  .wrap { padding: .8rem .7rem 0; }
+  .masthead { padding: .9rem .15rem 1rem; }
   .desk-wide { display: none; }
   .pos-cards { display: grid; }
   table.desk { font-size: .78rem; }
-  table.desk th, table.desk td { padding: .4rem .4rem; }
+  table.desk th, table.desk td { padding: .4rem .35rem; }
+  .pulse-item + .pulse-item { border-left: 0; }
 }
 @media (min-width: 721px) {
   .sticky-actions { display: none; }
@@ -240,7 +380,7 @@ def _hero(
     hint_html = f'<div class="hint muted">{escape(hint)}</div>' if hint else ""
     attrs = f" {value_attr}" if value_attr else ""
     return (
-        f'<div class="hero-card {cls}"><div class="label">{escape(label)}</div>'
+        f'<div class="pulse-item hero-card {cls}"><div class="label">{escape(label)}</div>'
         f'<div class="value {cls}"{attrs}>{value}</div>{hint_html}</div>'
     )
 
@@ -338,7 +478,7 @@ def _positions_table(
     ]
     cfg = status.get("config") or {}
     if not rows:
-        return f'<p class="muted" data-live="positions-empty">{escape(empty_text)}</p>'
+        return f'<p class="pos-empty muted" data-live="positions-empty">{escape(empty_text)}</p>'
     trail = float(cfg.get("trail_pct") or 0.03)
     tight_after = float(cfg.get("trail_tight_after") or 0.0)
     tight = float(cfg.get("trail_tight_pct") or trail)
@@ -1567,58 +1707,67 @@ def render_momentum_dashboard(
     sleeves_html = _sleeves_panel(status, volatile) if show_vol else ""
     if show_vol:
         positions_html = (
-            '<div class="stack two section">'
-            '<div class="card"><div class="card-head"><h2>Core · open posities</h2></div>'
+            '<section class="panel" id="open-pos">'
+            '<div class="stack two">'
+            '<div><div class="panel-head"><h2>Core · open posities</h2></div>'
             f"{_positions_table(status)}</div>"
-            '<div class="card"><div class="card-head"><h2>Volatile · open posities</h2></div>'
+            '<div><div class="panel-head"><h2>Volatile · open posities</h2></div>'
             f"""{_positions_table(
                 volatile or {},
                 sell_all_path=None,
                 post_sell_action="/live/momentum/volatile/sell",
                 empty_text="Geen open volatile-posities — soft book staat klaar.",
-            )}</div></div>"""
+            )}</div></div></section>"""
         )
         decisions_html = (
-            '<div class="stack two section">'
-            '<div class="card"><div class="card-head"><h2>Core · laatste beslissing</h2>'
+            '<section class="panel">'
+            '<div class="stack two">'
+            '<div><div class="panel-head"><h2>Core · laatste beslissing</h2>'
             f"{_simulate_button() if running and not preview else ''}</div>"
             f"{_decision_panel(status)}</div>"
-            '<div class="card"><div class="card-head"><h2>Volatile · laatste beslissing</h2>'
-            f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div></div>"
+            '<div><div class="panel-head"><h2>Volatile · laatste beslissing</h2>'
+            f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>"
+            "</div></section>"
         )
         vol_ledger_html = (
-            f'<div class="card section"><h2>Volatile ledger</h2>'
-            f"{_ledger_table(volatile_ledger_rows or [])}</div>"
+            f'<details class="fold"><summary><span class="fold-head">Volatile ledger</span>'
+            f'<span class="chev"></span></summary><div class="fold-body">'
+            f"{_ledger_table(volatile_ledger_rows or [])}</div></details>"
             if volatile_ledger_rows is not None
             else ""
         )
         footer_links = (
-            '<a href="/live/momentum/status" style="color:var(--accent)">core JSON</a> · '
-            '<a href="/live/momentum/volatile/status" style="color:var(--accent)">volatile JSON</a> · '
-            '<a href="/live/momentum/ledger" style="color:var(--accent)">core ledger</a> · '
-            '<a href="/live/momentum/volatile/ledger" style="color:var(--accent)">volatile ledger</a> · '
-            '<a href="/live/momentum/earnings" style="color:var(--accent)">earnings JSON</a>'
+            '<a href="/live/momentum/status">core JSON</a>'
+            '<a href="/live/momentum/volatile/status">volatile JSON</a>'
+            '<a href="/live/momentum/ledger">core ledger</a>'
+            '<a href="/live/momentum/volatile/ledger">volatile ledger</a>'
+            '<a href="/live/momentum/earnings">earnings</a>'
         )
     else:
         positions_html = (
-            '<div class="card section"><div class="card-head"><h2>Open posities</h2></div>'
-            f"{_positions_table(status)}</div>"
+            '<section class="panel" id="open-pos">'
+            '<div class="panel-head">'
+            '<h2>Open posities</h2>'
+            f'<span class="aside">{n_pos}/{escape(str(cfg.get("max_positions") or "—"))} slots'
+            f' · open {_fmt_eur(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur"))}'
+            "</span></div>"
+            f"{_positions_table(status)}</section>"
         )
         decisions_html = (
-            '<div class="card section"><div class="card-head"><h2>Laatste beslissing</h2>'
+            '<section class="panel"><div class="panel-head"><h2>Laatste beslissing</h2>'
             f"{_simulate_button() if running and not preview else ''}</div>"
-            f"{_decision_panel(status)}</div>"
+            f"{_decision_panel(status)}</section>"
         )
         vol_ledger_html = ""
         footer_links = (
-            '<a href="/live/momentum/status" style="color:var(--accent)">status JSON</a> · '
-            '<a href="/live/momentum/ledger" style="color:var(--accent)">ledger</a> · '
-            '<a href="/live/momentum/earnings" style="color:var(--accent)">earnings JSON</a>'
+            '<a href="/live/momentum/status">status JSON</a>'
+            '<a href="/live/momentum/ledger">ledger</a>'
+            '<a href="/live/momentum/earnings">earnings</a>'
         )
     html = f"""<!doctype html>
 <html lang="nl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f5c4c">
+<meta name="theme-color" content="#0c4f42">
 {refresh_meta}
 <title>Moreney · Momentum Desk</title>
 <style>{_CSS}</style></head>
@@ -1626,21 +1775,26 @@ def render_momentum_dashboard(
 {earnings_html}
 {positions_html}
 {err_html}
-{toolbar}
+<div class="ops-row">{toolbar}</div>
 {sleeves_html}
-{core_earn and f'<div class="muted" style="font-size:.8rem;margin:.35rem 0 0">Core netto · </div>{core_earn}' or ''}
-{vol_earn and f'<div class="muted" style="font-size:.8rem">Volatile netto · </div>{vol_earn}' or ''}
-<div class="hero-grid">{heroes}</div>
+{core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or ''}
+{vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile netto · </div>{vol_earn}' or ''}
+<div class="pulse hero-grid">{heroes}</div>
 {preview_html}
 {report_html}
 {sell_html}
 {sell_all_html}
 {decisions_html}
-<div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
+<details class="fold" open>
+<summary><span class="fold-head">Core ledger</span><span class="chev"></span></summary>
+<div class="fold-body">{_ledger_table(ledger_rows)}</div>
+</details>
 {vol_ledger_html}
-<div class="card section"><h2>Regels (core)</h2>{_rules(cfg)}</div>
-<p class="muted" style="margin-top:1rem;font-size:.75rem">{refresh_note} ·
-{footer_links}</p>
+<details class="fold">
+<summary><span class="fold-head">Regels (core)</span><span class="chev"></span></summary>
+<div class="fold-body">{_rules(cfg)}</div>
+</details>
+<p class="foot"><span>{refresh_note}</span>{footer_links}</p>
 </div>
 <div class="sticky-actions">{toolbar}</div>
 {live_js}
