@@ -1638,13 +1638,16 @@ def test_dashboard_open_positions_render_before_heroes():
         "next_decision": "2026-09-18T07:00:00+00:00",
     }
     html = render_momentum_dashboard(status, []).body.decode()
-    pos_i = html.find('card-head"><h2>Open posities</h2>')
-    hero_i = html.find('<div class="hero-grid">')
+    pos_i = html.find("Open posities</h2>")
+    hero_i = html.find('class="pulse hero-grid"')
     assert pos_i != -1 and hero_i != -1 and pos_i < hero_i
     assert "SOL" in html
     assert 'data-holding="ghost"' not in html
     assert ">FET<" not in html
     assert "positionsChanged" in html
+    assert 'class="masthead"' in html
+    assert 'class="panel"' in html
+    assert "rise-in" in html
 
 
 def test_sell_all_sells_every_holding(tmp_path):
