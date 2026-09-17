@@ -1,0 +1,538 @@
+{
+  "asof": "2026-09-17T11:00:04.844090+00:00",
+  "question": "Ignore AlphaI macro_caution for entries \u2014 better over last 12w?",
+  "window": {
+    "start": "2026-06-25T10:00:00+00:00",
+    "end": "2026-09-17T10:00:00+00:00"
+  },
+  "book": "\u20ac20k\u00d71, live trail 3/2+early2",
+  "alphai_timeline": {
+    "points": 778,
+    "first": "2026-09-07T15:00:43.224000+00:00",
+    "last": "2026-09-17T07:00:00+00:00",
+    "macro_caution_points": 171,
+    "macro_caution_rate": 0.22,
+    "sources": [
+      {
+        "file": "artifacts/alphai_pick_outcomes_merged.json",
+        "sessions": 745
+      },
+      {
+        "file": "data/momentum_desk_ledger.jsonl",
+        "sessions": 148
+      }
+    ],
+    "caveat": "AlphaI coverage starts ~2026-09-07; earlier weeks are tape-only for both arms."
+  },
+  "method": {
+    "with_macro_entry_gates": "live rules: require pick under macro, soft+macro idle, fee\u00d77, clip\u00d70.7",
+    "ignore_macro_for_entries": "macro_caution forced off in AlphaI view + knobs disabled; picks/avoid kept",
+    "tape_only_no_alphai": "control without AlphaI"
+  },
+  "full_12w": {
+    "rows": [
+      {
+        "label": "tape_only_no_alphai",
+        "total_eur": 8230.55,
+        "max_dd_eur": -2180.09,
+        "win_rate": 0.486,
+        "trades": 35,
+        "avg_net": 214.2,
+        "calmar_proxy": 3.775,
+        "by_reason": {
+          "trail": {
+            "n": 26,
+            "net_eur": 12069.87
+          },
+          "early_stop": {
+            "n": 8,
+            "net_eur": -3875.74
+          },
+          "hard_stop": {
+            "n": 1,
+            "net_eur": -697.2
+          }
+        },
+        "alphai_pick_entries": 0,
+        "macro_reduce_entries": 0,
+        "soft_regime_entries": 0,
+        "bases": [
+          "ADA",
+          "ARB",
+          "DOT",
+          "FET",
+          "LINK",
+          "LTC",
+          "NEAR",
+          "OP",
+          "SOL",
+          "SUI",
+          "UNI",
+          "XRP"
+        ],
+        "near_trades": [
+          {
+            "opened": "2026-07-02T07:00:00+00:00",
+            "closed": "2026-07-03T15:15:00+00:00",
+            "net": 1399.22,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0319,from_high=-0.0101,regime=strong,breadth_strong_gated",
+            "peak": 0.1021
+          },
+          {
+            "opened": "2026-07-06T16:00:00+00:00",
+            "closed": "2026-07-07T03:00:00+00:00",
+            "net": -340.99,
+            "reason": "early_stop",
+            "entry_reason": "excess=+0.0361,from_high=-0.0093,regime=firm,breadth_weak",
+            "peak": 0.015
+          },
+          {
+            "opened": "2026-07-14T07:00:00+00:00",
+            "closed": "2026-07-15T16:15:00+00:00",
+            "net": 350.64,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0590,from_high=-0.0057,regime=firm,breadth_weak",
+            "peak": 0.0496
+          },
+          {
+            "opened": "2026-07-30T13:00:00+00:00",
+            "closed": "2026-07-31T02:45:00+00:00",
+            "net": -147.34,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0303,from_high=-0.0144,regime=firm,breadth_weak",
+            "peak": 0.0249
+          },
+          {
+            "opened": "2026-08-20T01:30:00+00:00",
+            "closed": "2026-08-20T15:00:00+00:00",
+            "net": -407.63,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0275,from_high=-0.0172,regime=strong,breadth_strong_gated",
+            "peak": 0.0134
+          },
+          {
+            "opened": "2026-08-22T00:15:00+00:00",
+            "closed": "2026-08-22T05:15:00+00:00",
+            "net": -697.2,
+            "reason": "hard_stop",
+            "entry_reason": "excess=+0.0400,from_high=-0.0178,regime=strong,breadth_strong",
+            "peak": 0.098
+          },
+          {
+            "opened": "2026-09-01T13:00:00+00:00",
+            "closed": "2026-09-01T16:45:00+00:00",
+            "net": -191.8,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+            "peak": 0.0356
+          },
+          {
+            "opened": "2026-09-09T07:00:00+00:00",
+            "closed": "2026-09-09T13:45:00+00:00",
+            "net": 982.39,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+            "peak": 0.0981
+          },
+          {
+            "opened": "2026-09-11T13:00:00+00:00",
+            "closed": "2026-09-11T14:45:00+00:00",
+            "net": 586.35,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+            "peak": 0.0548
+          },
+          {
+            "opened": "2026-09-14T07:00:00+00:00",
+            "closed": "2026-09-14T19:30:00+00:00",
+            "net": 801.43,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+            "peak": 0.0666
+          }
+        ]
+      },
+      {
+        "label": "with_macro_entry_gates",
+        "total_eur": 7284.6,
+        "max_dd_eur": -2180.09,
+        "win_rate": 0.486,
+        "trades": 35,
+        "avg_net": 208.13,
+        "calmar_proxy": 3.341,
+        "by_reason": {
+          "trail": {
+            "n": 25,
+            "net_eur": 12365.04
+          },
+          "early_stop": {
+            "n": 9,
+            "net_eur": -4383.25
+          },
+          "hard_stop": {
+            "n": 1,
+            "net_eur": -697.2
+          }
+        },
+        "alphai_pick_entries": 0,
+        "macro_reduce_entries": 0,
+        "soft_regime_entries": 0,
+        "bases": [
+          "ADA",
+          "ARB",
+          "DOT",
+          "FET",
+          "LINK",
+          "LTC",
+          "NEAR",
+          "OP",
+          "SOL",
+          "SUI",
+          "UNI"
+        ],
+        "near_trades": [
+          {
+            "opened": "2026-07-02T07:00:00+00:00",
+            "closed": "2026-07-03T15:15:00+00:00",
+            "net": 1399.22,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0319,from_high=-0.0101,regime=strong,breadth_strong_gated",
+            "peak": 0.1021
+          },
+          {
+            "opened": "2026-07-06T16:00:00+00:00",
+            "closed": "2026-07-07T03:00:00+00:00",
+            "net": -340.99,
+            "reason": "early_stop",
+            "entry_reason": "excess=+0.0361,from_high=-0.0093,regime=firm,breadth_weak",
+            "peak": 0.015
+          },
+          {
+            "opened": "2026-07-14T07:00:00+00:00",
+            "closed": "2026-07-15T16:15:00+00:00",
+            "net": 350.64,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0590,from_high=-0.0057,regime=firm,breadth_weak",
+            "peak": 0.0496
+          },
+          {
+            "opened": "2026-07-30T13:00:00+00:00",
+            "closed": "2026-07-31T02:45:00+00:00",
+            "net": -147.34,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0303,from_high=-0.0144,regime=firm,breadth_weak",
+            "peak": 0.0249
+          },
+          {
+            "opened": "2026-08-20T01:30:00+00:00",
+            "closed": "2026-08-20T15:00:00+00:00",
+            "net": -407.63,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0275,from_high=-0.0172,regime=strong,breadth_strong_gated",
+            "peak": 0.0134
+          },
+          {
+            "opened": "2026-08-22T00:15:00+00:00",
+            "closed": "2026-08-22T05:15:00+00:00",
+            "net": -697.2,
+            "reason": "hard_stop",
+            "entry_reason": "excess=+0.0400,from_high=-0.0178,regime=strong,breadth_strong",
+            "peak": 0.098
+          },
+          {
+            "opened": "2026-09-01T13:00:00+00:00",
+            "closed": "2026-09-01T16:45:00+00:00",
+            "net": -191.8,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+            "peak": 0.0356
+          },
+          {
+            "opened": "2026-09-09T07:00:00+00:00",
+            "closed": "2026-09-09T13:45:00+00:00",
+            "net": 982.39,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+            "peak": 0.0981
+          },
+          {
+            "opened": "2026-09-11T13:00:00+00:00",
+            "closed": "2026-09-11T14:45:00+00:00",
+            "net": 586.35,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+            "peak": 0.0548
+          },
+          {
+            "opened": "2026-09-14T07:00:00+00:00",
+            "closed": "2026-09-14T19:30:00+00:00",
+            "net": 801.43,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+            "peak": 0.0666
+          }
+        ]
+      },
+      {
+        "label": "ignore_macro_for_entries",
+        "total_eur": 8018.22,
+        "max_dd_eur": -2180.09,
+        "win_rate": 0.486,
+        "trades": 35,
+        "avg_net": 208.13,
+        "calmar_proxy": 3.678,
+        "by_reason": {
+          "trail": {
+            "n": 25,
+            "net_eur": 12365.04
+          },
+          "early_stop": {
+            "n": 9,
+            "net_eur": -4383.25
+          },
+          "hard_stop": {
+            "n": 1,
+            "net_eur": -697.2
+          }
+        },
+        "alphai_pick_entries": 0,
+        "macro_reduce_entries": 0,
+        "soft_regime_entries": 0,
+        "bases": [
+          "ADA",
+          "ARB",
+          "DOT",
+          "FET",
+          "LINK",
+          "LTC",
+          "NEAR",
+          "OP",
+          "SOL",
+          "SUI",
+          "UNI"
+        ],
+        "near_trades": [
+          {
+            "opened": "2026-07-02T07:00:00+00:00",
+            "closed": "2026-07-03T15:15:00+00:00",
+            "net": 1399.22,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0319,from_high=-0.0101,regime=strong,breadth_strong_gated",
+            "peak": 0.1021
+          },
+          {
+            "opened": "2026-07-06T16:00:00+00:00",
+            "closed": "2026-07-07T03:00:00+00:00",
+            "net": -340.99,
+            "reason": "early_stop",
+            "entry_reason": "excess=+0.0361,from_high=-0.0093,regime=firm,breadth_weak",
+            "peak": 0.015
+          },
+          {
+            "opened": "2026-07-14T07:00:00+00:00",
+            "closed": "2026-07-15T16:15:00+00:00",
+            "net": 350.64,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0590,from_high=-0.0057,regime=firm,breadth_weak",
+            "peak": 0.0496
+          },
+          {
+            "opened": "2026-07-30T13:00:00+00:00",
+            "closed": "2026-07-31T02:45:00+00:00",
+            "net": -147.34,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0303,from_high=-0.0144,regime=firm,breadth_weak",
+            "peak": 0.0249
+          },
+          {
+            "opened": "2026-08-20T01:30:00+00:00",
+            "closed": "2026-08-20T15:00:00+00:00",
+            "net": -407.63,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0275,from_high=-0.0172,regime=strong,breadth_strong_gated",
+            "peak": 0.0134
+          },
+          {
+            "opened": "2026-08-22T00:15:00+00:00",
+            "closed": "2026-08-22T05:15:00+00:00",
+            "net": -697.2,
+            "reason": "hard_stop",
+            "entry_reason": "excess=+0.0400,from_high=-0.0178,regime=strong,breadth_strong",
+            "peak": 0.098
+          },
+          {
+            "opened": "2026-09-01T13:00:00+00:00",
+            "closed": "2026-09-01T16:45:00+00:00",
+            "net": -191.8,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+            "peak": 0.0356
+          },
+          {
+            "opened": "2026-09-09T07:00:00+00:00",
+            "closed": "2026-09-09T13:45:00+00:00",
+            "net": 982.39,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+            "peak": 0.0981
+          },
+          {
+            "opened": "2026-09-11T13:00:00+00:00",
+            "closed": "2026-09-11T14:45:00+00:00",
+            "net": 586.35,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+            "peak": 0.0548
+          },
+          {
+            "opened": "2026-09-14T07:00:00+00:00",
+            "closed": "2026-09-14T19:30:00+00:00",
+            "net": 801.43,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+            "peak": 0.0666
+          }
+        ]
+      }
+    ],
+    "delta_ignore_minus_with_macro": {
+      "delta_pnl": 733.62,
+      "delta_dd": 0.0,
+      "delta_trades": 0
+    },
+    "delta_ignore_minus_tape": {
+      "delta_pnl": -212.33,
+      "delta_dd": 0.0
+    }
+  },
+  "alphai_covered_window": {
+    "start": "2026-09-07T15:00:43.224000+00:00",
+    "end": "2026-09-17T10:00:00+00:00",
+    "rows": [
+      {
+        "label": "with_macro_entry_gates_alphai_window",
+        "total_eur": 2809.55,
+        "max_dd_eur": -507.51,
+        "win_rate": 0.8,
+        "trades": 5,
+        "avg_net": 561.91,
+        "calmar_proxy": 5.536,
+        "by_reason": {
+          "trail": {
+            "n": 4,
+            "net_eur": 3317.06
+          },
+          "early_stop": {
+            "n": 1,
+            "net_eur": -507.51
+          }
+        },
+        "alphai_pick_entries": 0,
+        "macro_reduce_entries": 0,
+        "soft_regime_entries": 0,
+        "bases": [
+          "DOT",
+          "NEAR",
+          "UNI"
+        ],
+        "near_trades": [
+          {
+            "opened": "2026-09-09T07:00:00+00:00",
+            "closed": "2026-09-09T13:45:00+00:00",
+            "net": 982.39,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+            "peak": 0.0981
+          },
+          {
+            "opened": "2026-09-11T13:00:00+00:00",
+            "closed": "2026-09-11T14:45:00+00:00",
+            "net": 586.35,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+            "peak": 0.0548
+          },
+          {
+            "opened": "2026-09-14T07:00:00+00:00",
+            "closed": "2026-09-14T19:30:00+00:00",
+            "net": 801.43,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+            "peak": 0.0666
+          }
+        ]
+      },
+      {
+        "label": "ignore_macro_for_entries_alphai_window",
+        "total_eur": 3543.17,
+        "max_dd_eur": -507.51,
+        "win_rate": 0.8,
+        "trades": 5,
+        "avg_net": 561.91,
+        "calmar_proxy": 6.981,
+        "by_reason": {
+          "trail": {
+            "n": 4,
+            "net_eur": 3317.06
+          },
+          "early_stop": {
+            "n": 1,
+            "net_eur": -507.51
+          }
+        },
+        "alphai_pick_entries": 0,
+        "macro_reduce_entries": 0,
+        "soft_regime_entries": 0,
+        "bases": [
+          "DOT",
+          "NEAR",
+          "UNI"
+        ],
+        "near_trades": [
+          {
+            "opened": "2026-09-09T07:00:00+00:00",
+            "closed": "2026-09-09T13:45:00+00:00",
+            "net": 982.39,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+            "peak": 0.0981
+          },
+          {
+            "opened": "2026-09-11T13:00:00+00:00",
+            "closed": "2026-09-11T14:45:00+00:00",
+            "net": 586.35,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+            "peak": 0.0548
+          },
+          {
+            "opened": "2026-09-14T07:00:00+00:00",
+            "closed": "2026-09-14T19:30:00+00:00",
+            "net": 801.43,
+            "reason": "trail",
+            "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+            "peak": 0.0666
+          }
+        ]
+      }
+    ],
+    "delta_ignore_minus_with_macro": {
+      "delta_pnl": 733.62,
+      "delta_dd": 0.0,
+      "delta_trades": 0
+    }
+  },
+  "verdict_nl": "Gesloten 12w-trades: identiek (\u20ac7285). Macro negeren zou vandaag 07:00 NEAR hebben genomen (~\u20ac+734 open MTM in de sim). Geen bewezen structurele edge over gesloten trades; wel de NEAR-miss van vanochtend verklaard.",
+  "clarification": {
+    "realized_12w_identical": true,
+    "realized_with_macro_eur": 7284.6,
+    "realized_ignore_macro_eur": 7284.6,
+    "open_mtm_only_in_ignore": {
+      "base": "NEAR",
+      "opened": "2026-09-17T07:00:00+00:00",
+      "net_eur_at_end": 733.62,
+      "note": "Entire full-12w total_eur delta is this open NEAR mark; not closed edge."
+    }
+  }
+}
