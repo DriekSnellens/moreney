@@ -102,18 +102,17 @@ class DeskConfig:
     min_volume_eur: float = 1_000_000.0
     btc_min_ret: float = -0.01
     min_breadth: float = 0.5
-    trail_pct: float = 0.03
+    # Live research winner (12w €20k×1 + rolling): fixed 5% trail.
+    trail_pct: float = 0.05
     # Ratchet: once the peak gain reaches ``trail_tight_after`` the trail
-    # narrows to ``trail_tight_pct`` (0 disables). WR winner (135d live-scale)
-    # used 4%→2% with a 3% base trail — locks gains earlier than the prior
-    # 4% / 5%→2.5% pack and lifted WR 40%→54% on the same window.
-    trail_tight_after: float = 0.04
+    # narrows to ``trail_tight_pct`` (0 ``trail_tight_after`` disables).
+    # Fixed5 beat the prior 3% / 4%→2% pack on PnL and max DD.
+    trail_tight_after: float = 0.0
     trail_tight_pct: float = 0.02
     hard_stop_pct: float = 0.03
     # Staged early stop (0 disables): until peak gain reaches
     # ``early_stop_until_peak``, use the tighter ``early_stop_pct`` instead of
-    # ``hard_stop_pct``. Cuts losers that never print a meaningful green print
-    # without clipping trails once the trade has confirmed.
+    # ``hard_stop_pct``. Off with fixed5 — early2 worsened max DD on the grid.
     early_stop_pct: float = 0.0
     early_stop_until_peak: float = 0.0
     # WR winner: 36h time exit (vs prior 24h) with the tighter trail pack.

@@ -282,6 +282,36 @@ def test_desk_config_from_settings_wires_macro_knobs(monkeypatch):
     assert cfg2.macro_caution_requires_alphai_pick is False
 
 
+def test_desk_config_from_settings_wires_trail_and_early_stop():
+    from bot.core.config import Settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    cfg = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_trail_pct=0.05,
+            momentum_desk_trail_tight_after=0.0,
+            momentum_desk_early_stop_pct=0.0,
+            momentum_desk_early_stop_until_peak=0.0,
+        )
+    )
+    assert cfg.trail_pct == 0.05
+    assert cfg.trail_tight_after == 0.0
+    assert cfg.early_stop_pct == 0.0
+    assert cfg.early_stop_until_peak == 0.0
+
+    cfg_on = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_trail_pct=0.05,
+            momentum_desk_early_stop_pct=0.02,
+            momentum_desk_early_stop_until_peak=0.015,
+        )
+    )
+    assert cfg_on.early_stop_pct == 0.02
+    assert cfg_on.early_stop_until_peak == 0.015
+
+
 def test_exit_rules_hard_stop_trail_ratchet_and_time():
     cfg = DeskConfig(
         trail_pct=0.03,

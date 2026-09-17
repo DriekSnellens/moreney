@@ -586,11 +586,14 @@ class Settings(BaseSettings):
     momentum_desk_skip_weekend_entries: bool = True
     # €20k util search: 3 slots + larger clips beat 4× smaller proportional clips.
     momentum_desk_max_positions: int = Field(default=3, ge=1, le=10)
-    # WR winner (135d @~€4k): 3% trail with 4%→2% ratchet.
-    momentum_desk_trail_pct: float = Field(default=0.03, gt=0, le=0.2)
-    momentum_desk_trail_tight_after: float = Field(default=0.04, ge=0, le=0.5)
+    # Live research winner: fixed 5% trail (tight_after=0 disables ratchet).
+    momentum_desk_trail_pct: float = Field(default=0.05, gt=0, le=0.2)
+    momentum_desk_trail_tight_after: float = Field(default=0.0, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
+    # Early stop off by default (with fixed5, early2 worsened max DD on 12w grid).
+    momentum_desk_early_stop_pct: float = Field(default=0.0, ge=0, le=0.2)
+    momentum_desk_early_stop_until_peak: float = Field(default=0.0, ge=0, le=0.5)
     momentum_desk_time_exit_hours: float = Field(default=36.0, gt=0)
     # Entry/exit quality knobs (DeskConfig defaults; overridable via env).
     momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)
