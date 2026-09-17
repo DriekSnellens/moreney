@@ -1797,10 +1797,14 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         clip_eur=float(getattr(settings, "momentum_desk_clip_eur", 500.0)),
         max_positions=int(getattr(settings, "momentum_desk_max_positions", 3)),
         # WR-pack getattr defaults (must match Settings / live-micro.env).
-        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.03)),
-        trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.04)),
+        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.05)),
+        trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.0)),
         trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.02)),
         hard_stop_pct=float(getattr(settings, "momentum_desk_hard_stop_pct", 0.03)),
+        early_stop_pct=float(getattr(settings, "momentum_desk_early_stop_pct", 0.0)),
+        early_stop_until_peak=float(
+            getattr(settings, "momentum_desk_early_stop_until_peak", 0.0)
+        ),
         time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 36.0)),
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 100.0)),
         week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 250.0)),
