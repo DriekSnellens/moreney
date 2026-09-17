@@ -1598,6 +1598,54 @@ def test_exit_dust_or_no_balance_drops_ghost_holding(tmp_path):
     assert not gw.placed
 
 
+def test_reset_operator_numbers_archives_ledger_and_zeros_counters(tmp_path):
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock(T0 / 1000)
+    gw = FakeGateway()
+    r = _runner(tmp_path, gw, clock, universe=("SOL",), clip_eur=500.0, min_volume_eur=0.0)
+    r.realized_total_eur = -403.19
+    r.trade_count = 14
+    r.last_regime = {"entries": ["UNI"]}
+    r.ledger.day_realized_eur = -504.0
+    r.ledger.week_realized_eur = -484.0
+    r.ledger.entries_today = {"UNI": 1}
+    r._ledger_append({"event": "exit", "net_eur": -100.0, "base": "UNI"})
+    r.holdings = [
+        Holding(
+            pos=Position(
+                "SOL",
+                100.0,
+                10.0,
+                1000.0,
+                T0,
+                100.0,
+                entry_fee_eur=1.0,
+                venue="bitvavo",
+            ),
+            holding_id="keep1",
+        )
+    ]
+
+    out = r.reset_operator_numbers()
+    assert out["ok"] is True
+    assert out["prior_realized_total_eur"] == pytest.approx(-403.19)
+    assert out["prior_trade_count"] == 14
+    assert out["archived_ledger"]
+    assert Path(out["archived_ledger"]).exists()
+    assert r.realized_total_eur == 0.0
+    assert r.trade_count == 0
+    assert r.last_regime == {}
+    assert r.ledger.day_realized_eur == 0.0
+    assert r.ledger.week_realized_eur == 0.0
+    assert r.ledger.entries_today == {}
+    assert len(r.holdings) == 1
+    fresh = (tmp_path / "ledger.jsonl").read_text(encoding="utf-8")
+    assert "dashboard_reset" in fresh
+    assert '"event": "exit"' not in fresh
+
+
 def test_reconcile_external_inventory_clears_gone_holding(tmp_path):
     from bot.live.momentum_desk import Position
     from bot.live.momentum_runner import Holding
