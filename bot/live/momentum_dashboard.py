@@ -475,7 +475,7 @@ def _positions_table(
     cfg = status.get("config") or {}
     if not rows:
         return f'<p class="pos-empty muted" data-live="positions-empty">{escape(empty_text)}</p>'
-    trail = float(cfg.get("trail_pct") or 0.03)
+    trail = float(cfg.get("trail_pct") or 0.05)
     tight_after = float(cfg.get("trail_tight_after") or 0.0)
     tight = float(cfg.get("trail_tight_pct") or trail)
     stop = float(cfg.get("hard_stop_pct") or 0.03)
@@ -1017,13 +1017,20 @@ def _preview_panel(
             f"<td class='mono'><strong>{sum(float(p.get('clip_eur') or 0) for p in planned):,.0f} €"
             f"</strong></td><td></td><td></td>{total_cells}</tr></tbody></table>"
         )
+        trail_note = (
+            f"trail vast {100 * float(planned[0].get('trail_pct') or 0.05):.0f}% onder de piek"
+            if float(planned[0].get("trail_tight_after") or 0.0) <= 0.0
+            else (
+                f"trail {100 * float(planned[0].get('trail_pct') or 0.05):.0f}% onder de piek "
+                f"({100 * float(planned[0].get('trail_tight_pct') or 0.02):.1f}% zodra "
+                f"+{100 * float(planned[0].get('trail_tight_after') or 0.0):.0f}% piek)"
+            )
+        )
         out.append(
             "<p class='muted' style='font-size:.75rem;margin-top:.4rem'>Netto na fees. "
             "Prijs = laatste 15m-close; uitvoering gaat als maker op het live orderboek. "
             f"Hard stop bij {100 * float(planned[0].get('hard_stop_pct') or 0.03):.0f}%, "
-            f"trail {100 * float(planned[0].get('trail_pct') or 0.03):.0f}% onder de piek "
-            f"({100 * float(planned[0].get('trail_tight_pct') or 0.02):.1f}% zodra "
-            f"+{100 * float(planned[0].get('trail_tight_after') or 0.04):.0f}% piek).</p>"
+            f"{trail_note}.</p>"
         )
     out.append(_expectancy_line(ledger_rows))
     if preview.get("rejected"):
@@ -1216,9 +1223,15 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         (
             "Trail",
-            f"{100 * float(cfg.get('trail_pct') or 0):.1f}% → "
-            f"{100 * float(cfg.get('trail_tight_pct') or 0):.1f}% na piek "
-            f"≥ {100 * float(cfg.get('trail_tight_after') or 0):.0f}%",
+            (
+                f"vast {100 * float(cfg.get('trail_pct') or 0):.1f}% onder piek"
+                if float(cfg.get("trail_tight_after") or 0.0) <= 0.0
+                else (
+                    f"{100 * float(cfg.get('trail_pct') or 0):.1f}% → "
+                    f"{100 * float(cfg.get('trail_tight_pct') or 0):.1f}% na piek "
+                    f"≥ {100 * float(cfg.get('trail_tight_after') or 0):.0f}%"
+                )
+            ),
         ),
         ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
         (
@@ -1545,9 +1558,9 @@ _LIVE_MARKS_JS = r"""
   }
   function trailKnobs(status) {
     const cfg = status.config || {};
-    // Live WR pack defaults (3% / 4%→2%); never fall back to the old 4% pack.
-    const trail = Number(cfg.trail_pct != null ? cfg.trail_pct : 0.03);
-    const tightAfter = Number(cfg.trail_tight_after != null ? cfg.trail_tight_after : 0.04);
+    // Live research defaults: fixed 5% (tight_after=0 disables ratchet).
+    const trail = Number(cfg.trail_pct != null ? cfg.trail_pct : 0.05);
+    const tightAfter = Number(cfg.trail_tight_after != null ? cfg.trail_tight_after : 0.0);
     const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
     document.querySelectorAll("table.desk[data-trail]").forEach((table) => {
       table.dataset.trail = String(trail);
