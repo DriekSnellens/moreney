@@ -142,13 +142,13 @@ class DeskConfig:
     pause_hours_after_week_limit: float = 48.0
     max_entries_per_base_per_day: int = 1
     # "reduce" scales the clip on AlphaI macro caution, "block" stops new
-    # entries, "ignore" disregards it. Evidence so far: caution kept the old
-    # desk 100% cash through an alt rally, so reduce is the default.
+    # entries, "ignore" disregards it. Default reduce: soft+macro idle +
+    # clip×0.7; do not use block (too blunt) or permanent ignore.
     macro_caution_mode: str = "reduce"
     macro_caution_clip_mult: float = 0.7
-    # Under macro caution + reduce: only AlphaI-confirmed names (skip weak
-    # tape-only entries that historically trailed into small losses).
-    macro_caution_requires_alphai_pick: bool = True
+    # Under macro caution + reduce: optional AlphaI-only gate. Default off —
+    # empty picks + strong tape caused live deadlocks (e.g. NEAR 07:00 miss).
+    macro_caution_requires_alphai_pick: bool = False
     # Soft regime: weak BTC/breadth no longer hard-blocks. Instead the
     # desk stays open for AlphaI picks at a reduced clip so early legs
     # of a bounce are not missed while tape is still thin.
