@@ -1,0 +1,764 @@
+{
+  "asof": "2026-09-17T09:10:25.343558+00:00",
+  "window": {
+    "start": "2026-06-24T10:00:00+00:00",
+    "end": "2026-09-16T10:00:00+00:00"
+  },
+  "book": "\u20ac20k\u00d71, live trail 3/2@+4% + early2, 15m close fills, no AlphaI",
+  "ideas_tested": [
+    "1 weekend entries ON",
+    "2 US-session hours 13/16 (+13/16/19)",
+    "3 ADX(14) hourly \u226525 and rising",
+    "4 volume surge \u22651.3\u00d7 prior 7d mean",
+    "5 pullback 1\u20135% off 24h high",
+    "6 multi-horizon excess score (6h/24h/72h)",
+    "combos: US hours + vol / US hours + ADX"
+  ],
+  "baseline": {
+    "label": "baseline",
+    "total_eur": 7496.93,
+    "realized_eur": 7496.93,
+    "open_mtm_eur": 0,
+    "max_dd_eur": -2180.09,
+    "win_rate": 0.486,
+    "trades": 35,
+    "avg_net": 214.2,
+    "avg_win": 829.67,
+    "avg_loss": -367.08,
+    "calmar_proxy": 3.439,
+    "decision_points": 143,
+    "regime_on_points": 91,
+    "by_reason": {
+      "trail": {
+        "n": 26,
+        "net_eur": 12069.87
+      },
+      "early_stop": {
+        "n": 8,
+        "net_eur": -3875.74
+      },
+      "hard_stop": {
+        "n": 1,
+        "net_eur": -697.2
+      }
+    },
+    "bases": [
+      "ADA",
+      "ARB",
+      "DOT",
+      "FET",
+      "LINK",
+      "LTC",
+      "NEAR",
+      "OP",
+      "SOL",
+      "SUI",
+      "UNI",
+      "XRP"
+    ]
+  },
+  "ranking_by_pnl": [
+    {
+      "label": "baseline",
+      "total_eur": 7496.93,
+      "realized_eur": 7496.93,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -2180.09,
+      "win_rate": 0.486,
+      "trades": 35,
+      "avg_net": 214.2,
+      "avg_win": 829.67,
+      "avg_loss": -367.08,
+      "calmar_proxy": 3.439,
+      "decision_points": 143,
+      "regime_on_points": 91,
+      "by_reason": {
+        "trail": {
+          "n": 26,
+          "net_eur": 12069.87
+        },
+        "early_stop": {
+          "n": 8,
+          "net_eur": -3875.74
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOT",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ]
+    },
+    {
+      "label": "4b_vol_surge_1_1",
+      "total_eur": 6325.51,
+      "realized_eur": 6325.51,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -1467.32,
+      "win_rate": 0.516,
+      "trades": 31,
+      "avg_net": 204.05,
+      "avg_win": 752.31,
+      "avg_loss": -380.76,
+      "calmar_proxy": 4.311,
+      "decision_points": 153,
+      "regime_on_points": 101,
+      "by_reason": {
+        "trail": {
+          "n": 23,
+          "net_eur": 10553.86
+        },
+        "early_stop": {
+          "n": 7,
+          "net_eur": -3531.14
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -1171.42,
+      "delta_dd": 712.77,
+      "beats_pnl": false,
+      "beats_dd": true,
+      "beats_both": false
+    },
+    {
+      "label": "3b_adx_20_any_slope",
+      "total_eur": 5738.16,
+      "realized_eur": 5738.16,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -1839.11,
+      "win_rate": 0.457,
+      "trades": 35,
+      "avg_net": 163.95,
+      "avg_win": 806.61,
+      "avg_loss": -377.24,
+      "calmar_proxy": 3.12,
+      "decision_points": 145,
+      "regime_on_points": 93,
+      "by_reason": {
+        "trail": {
+          "n": 25,
+          "net_eur": 10810.84
+        },
+        "early_stop": {
+          "n": 9,
+          "net_eur": -4375.48
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -1758.77,
+      "delta_dd": 340.98,
+      "beats_pnl": false,
+      "beats_dd": true,
+      "beats_both": false
+    },
+    {
+      "label": "6_multi_horizon",
+      "total_eur": 5294.76,
+      "realized_eur": 5294.76,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -2048.8,
+      "win_rate": 0.486,
+      "trades": 37,
+      "avg_net": 143.1,
+      "avg_win": 697.5,
+      "avg_loss": -382.11,
+      "calmar_proxy": 2.584,
+      "decision_points": 145,
+      "regime_on_points": 93,
+      "by_reason": {
+        "trail": {
+          "n": 27,
+          "net_eur": 10124.08
+        },
+        "early_stop": {
+          "n": 10,
+          "net_eur": -4829.32
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOGE",
+        "DOT",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -2202.17,
+      "delta_dd": 131.29,
+      "beats_pnl": false,
+      "beats_dd": true,
+      "beats_both": false
+    },
+    {
+      "label": "2b_hours_us_13_16_19",
+      "total_eur": 3441.94,
+      "realized_eur": 3441.94,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -3105.43,
+      "win_rate": 0.432,
+      "trades": 37,
+      "avg_net": 93.03,
+      "avg_win": 727.84,
+      "avg_loss": -390.65,
+      "calmar_proxy": 1.108,
+      "decision_points": 146,
+      "regime_on_points": 98,
+      "by_reason": {
+        "trail": {
+          "n": 27,
+          "net_eur": 9298.6
+        },
+        "early_stop": {
+          "n": 9,
+          "net_eur": -4423.18
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -1433.49
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOGE",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -4054.99,
+      "delta_dd": -925.34,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    },
+    {
+      "label": "1_weekend_on",
+      "total_eur": 3410.9,
+      "realized_eur": 3410.9,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -4292.27,
+      "win_rate": 0.373,
+      "trades": 51,
+      "avg_net": 66.88,
+      "avg_win": 795.0,
+      "avg_loss": -365.44,
+      "calmar_proxy": 0.795,
+      "decision_points": 195,
+      "regime_on_points": 136,
+      "by_reason": {
+        "trail": {
+          "n": 34,
+          "net_eur": 11606.01
+        },
+        "early_stop": {
+          "n": 15,
+          "net_eur": -7319.26
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -178.65
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOGE",
+        "DOT",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -4086.03,
+      "delta_dd": -2112.18,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    },
+    {
+      "label": "3_adx_25_rising",
+      "total_eur": 2999.64,
+      "realized_eur": 2999.64,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -1756.53,
+      "win_rate": 0.379,
+      "trades": 29,
+      "avg_net": 103.44,
+      "avg_win": 834.15,
+      "avg_loss": -343.11,
+      "calmar_proxy": 1.708,
+      "decision_points": 150,
+      "regime_on_points": 98,
+      "by_reason": {
+        "trail": {
+          "n": 20,
+          "net_eur": 7120.36
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -17.49
+        },
+        "early_stop": {
+          "n": 7,
+          "net_eur": -3406.03
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOT",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -4497.29,
+      "delta_dd": 423.56,
+      "beats_pnl": false,
+      "beats_dd": true,
+      "beats_both": false
+    },
+    {
+      "label": "4_vol_surge_1_3",
+      "total_eur": 1577.29,
+      "realized_eur": 1577.29,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -2242.19,
+      "win_rate": 0.31,
+      "trades": 29,
+      "avg_net": 54.39,
+      "avg_win": 874.88,
+      "avg_loss": -314.83,
+      "calmar_proxy": 0.703,
+      "decision_points": 158,
+      "regime_on_points": 106,
+      "by_reason": {
+        "trail": {
+          "n": 20,
+          "net_eur": 5823.12
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -17.49
+        },
+        "early_stop": {
+          "n": 7,
+          "net_eur": -3531.14
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "UNI"
+      ],
+      "delta_pnl": -5919.64,
+      "delta_dd": -62.1,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    },
+    {
+      "label": "combo_us_hours_plus_adx",
+      "total_eur": 235.4,
+      "realized_eur": 235.4,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -2306.64,
+      "win_rate": 0.333,
+      "trades": 24,
+      "avg_net": 9.81,
+      "avg_win": 723.43,
+      "avg_loss": -347.0,
+      "calmar_proxy": 0.102,
+      "decision_points": 106,
+      "regime_on_points": 71,
+      "by_reason": {
+        "trail": {
+          "n": 16,
+          "net_eur": 4228.94
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -17.49
+        },
+        "early_stop": {
+          "n": 6,
+          "net_eur": -3278.84
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOT",
+        "ETH",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -7261.53,
+      "delta_dd": -126.55,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    },
+    {
+      "label": "2_hours_us_13_16",
+      "total_eur": -356.22,
+      "realized_eur": -356.22,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -3415.2,
+      "win_rate": 0.364,
+      "trades": 33,
+      "avg_net": -10.79,
+      "avg_win": 626.64,
+      "avg_loss": -375.05,
+      "calmar_proxy": -0.104,
+      "decision_points": 103,
+      "regime_on_points": 68,
+      "by_reason": {
+        "trail": {
+          "n": 22,
+          "net_eur": 5589.17
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -17.49
+        },
+        "early_stop": {
+          "n": 9,
+          "net_eur": -4494.42
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -1433.49
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOGE",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -7853.15,
+      "delta_dd": -1235.11,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    },
+    {
+      "label": "5_pullback_1_5pct",
+      "total_eur": -906.09,
+      "realized_eur": -906.09,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -4733.22,
+      "win_rate": 0.34,
+      "trades": 47,
+      "avg_net": -19.28,
+      "avg_win": 757.7,
+      "avg_loss": -420.3,
+      "calmar_proxy": -0.191,
+      "decision_points": 146,
+      "regime_on_points": 94,
+      "by_reason": {
+        "early_stop": {
+          "n": 14,
+          "net_eur": -8247.4
+        },
+        "trail": {
+          "n": 33,
+          "net_eur": 7341.32
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOGE",
+        "ETH",
+        "FET",
+        "LINK",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -8403.02,
+      "delta_dd": -2553.13,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    },
+    {
+      "label": "combo_us_hours_plus_vol",
+      "total_eur": -1738.97,
+      "realized_eur": -1738.97,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -3930.81,
+      "win_rate": 0.267,
+      "trades": 30,
+      "avg_net": -57.97,
+      "avg_win": 758.77,
+      "avg_loss": -354.96,
+      "calmar_proxy": -0.442,
+      "decision_points": 107,
+      "regime_on_points": 72,
+      "by_reason": {
+        "trail": {
+          "n": 20,
+          "net_eur": 3865.43
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -17.49
+        },
+        "early_stop": {
+          "n": 8,
+          "net_eur": -4153.43
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -1433.49
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOGE",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI"
+      ],
+      "delta_pnl": -9235.9,
+      "delta_dd": -1750.72,
+      "beats_pnl": false,
+      "beats_dd": false,
+      "beats_both": false
+    }
+  ],
+  "outperform_pnl": [],
+  "outperform_pnl_and_dd": [],
+  "verdict_nl": "Geen van de zes idee\u00ebn (noch mildere ADX/vol sensitiviteit, noch combos) verslaat baseline op PnL in dit 12w-venster.",
+  "sensitivity_mild": [
+    {
+      "label": "3b_adx_20_any_slope",
+      "total_eur": 5738.16,
+      "realized_eur": 5738.16,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -1839.11,
+      "win_rate": 0.457,
+      "trades": 35,
+      "avg_net": 163.95,
+      "avg_win": 806.61,
+      "avg_loss": -377.24,
+      "calmar_proxy": 3.12,
+      "decision_points": 145,
+      "regime_on_points": 93,
+      "by_reason": {
+        "trail": {
+          "n": 25,
+          "net_eur": 10810.84
+        },
+        "early_stop": {
+          "n": 9,
+          "net_eur": -4375.48
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "AVAX",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "SUI",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -1758.77,
+      "delta_dd": 340.98,
+      "beats_pnl": false,
+      "beats_dd": true,
+      "beats_both": false
+    },
+    {
+      "label": "4b_vol_surge_1_1",
+      "total_eur": 6325.51,
+      "realized_eur": 6325.51,
+      "open_mtm_eur": 0,
+      "max_dd_eur": -1467.32,
+      "win_rate": 0.516,
+      "trades": 31,
+      "avg_net": 204.05,
+      "avg_win": 752.31,
+      "avg_loss": -380.76,
+      "calmar_proxy": 4.311,
+      "decision_points": 153,
+      "regime_on_points": 101,
+      "by_reason": {
+        "trail": {
+          "n": 23,
+          "net_eur": 10553.86
+        },
+        "early_stop": {
+          "n": 7,
+          "net_eur": -3531.14
+        },
+        "hard_stop": {
+          "n": 1,
+          "net_eur": -697.2
+        }
+      },
+      "bases": [
+        "ADA",
+        "ARB",
+        "DOT",
+        "ETH",
+        "FET",
+        "LINK",
+        "LTC",
+        "NEAR",
+        "OP",
+        "SOL",
+        "UNI",
+        "XRP"
+      ],
+      "delta_pnl": -1171.42,
+      "delta_dd": 712.77,
+      "beats_pnl": false,
+      "beats_dd": true,
+      "beats_both": false
+    }
+  ]
+}
