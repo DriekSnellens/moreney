@@ -614,14 +614,17 @@ class Settings(BaseSettings):
     momentum_desk_mark_tick_sec: float = Field(default=4.0, ge=0.0, le=60.0)
     momentum_desk_day_loss_limit_eur: float = Field(default=750.0, gt=0)
     momentum_desk_week_loss_limit_eur: float = Field(default=2000.0, gt=0)
-    momentum_desk_macro_caution_mode: str = "reduce"
+    # ignore = do not gate/size entries on AlphaI macro_caution (default).
+    # reduce / block remain available via env if needed.
+    momentum_desk_macro_caution_mode: str = "ignore"
     # Soft/weak-tape survival: single soft-fail stays open (AlphaI half-clip);
-    # double soft-fail or soft+macro caution idle (no force-longs).
+    # double soft-fail idles. Soft+macro idle is off by default (macro ignored).
     momentum_desk_soft_regime_on_weak_tape: bool = True
     momentum_desk_soft_regime_clip_mult: float = Field(default=0.5, gt=0.0, le=1.0)
     momentum_desk_weak_tape_idle_on_double: bool = True
-    momentum_desk_soft_regime_idle_on_macro_caution: bool = True
+    momentum_desk_soft_regime_idle_on_macro_caution: bool = False
     momentum_desk_soft_regime_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
+    momentum_desk_macro_caution_requires_alphai_pick: bool = False
     # AlphaI size overlay: binary = flat alphai_clip_mult; conviction = score/rank
     # + headline conflict + price-confirm/reliability (no harder entry gates).
     momentum_desk_alphai_size_mode: str = "conviction"

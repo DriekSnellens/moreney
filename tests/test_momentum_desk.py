@@ -156,11 +156,12 @@ def test_double_weak_tape_idles_by_default():
 
 
 def test_soft_regime_idles_under_macro_caution():
-    """Soft tape + AlphaI macro caution → idle (survival; no soft+reduce entries)."""
+    """Soft tape + AlphaI macro caution → idle when reduce+idle knobs are on."""
     cfg, candles = _universe({"A": 0.04, "B": -0.02, "C": -0.01}, btc_ret=0.01)
     cfg = cfg.with_overrides(
         soft_regime_on_weak_tape=True,
         soft_regime_idle_on_macro_caution=True,
+        macro_caution_mode="reduce",
         min_volume_eur=0.0,
         clip_eur=1000.0,
     )
@@ -173,6 +174,20 @@ def test_soft_regime_idles_under_macro_caution():
     assert "soft_macro_idle" in regime.reasons
     cands = rank_candidates(alts, regime.btc_ret or 0.0, cfg, alphai=view)
     assert select_entries(cands, regime, cfg, held_bases=[], alphai=view) == []
+
+
+def test_default_ignores_macro_caution_for_entries():
+    """Default mode=ignore: tape leaders may enter even with macro_caution + empty picks."""
+    cfg, candles = _universe({"SOL": 0.05}, 0.0)
+    cfg = cfg.with_overrides(min_volume_eur=0.0)
+    assert cfg.macro_caution_mode == "ignore"
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    view = AlphaIView(macro_caution=True, picks=frozenset())
+    cands = rank_candidates(alts, 0.0, cfg, alphai=view)
+    entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
+    assert [e.base for e in entries] == ["SOL"]
+    assert "macro_reduce" not in entries[0].reasons
 
 
 def test_rank_and_select_apply_excess_cluster_and_alphai_rules():
@@ -207,16 +222,21 @@ def test_from_high_and_macro_caution_rules():
     assert alts["SOL"].from_high == pytest.approx(-0.03 / 1.03, rel=1e-3)
     assert rank_candidates(alts, 0.0, cfg) == []
     cfg, candles = _universe({"SOL": 0.05}, 0.0)
-    cfg = cfg.with_overrides(min_volume_eur=0.0)
+    cfg = cfg.with_overrides(
+        min_volume_eur=0.0,
+        macro_caution_mode="reduce",
+        macro_caution_requires_alphai_pick=True,
+        macro_caution_clip_mult=0.7,
+    )
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    # Under macro caution, only AlphaI picks may enter (default).
+    # Under macro caution + reduce + require-pick: only AlphaI picks enter.
     view = AlphaIView(macro_caution=True, picks=frozenset({"SOL"}))
     cands = rank_candidates(alts, 0.0, cfg, alphai=view)
     entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
     assert entries[0].clip_eur == pytest.approx(455.0)  # 500 * alphai_clip 1.3 * macro 0.7
     assert "macro_reduce" in entries[0].reasons and "alphai_pick" in entries[0].reasons
-    # Non-picks are skipped while macro caution + reduce is active.
+    # Non-picks are skipped while macro caution + reduce + require-pick is active.
     skipped = select_entries(
         rank_candidates(alts, 0.0, cfg, alphai=AlphaIView(macro_caution=True)),
         regime,
@@ -236,7 +256,12 @@ def test_from_high_and_macro_caution_rules():
 
 def test_macro_caution_can_allow_non_picks_when_flag_off():
     cfg, candles = _universe({"SOL": 0.05}, 0.0)
-    cfg = cfg.with_overrides(min_volume_eur=0.0, macro_caution_requires_alphai_pick=False)
+    cfg = cfg.with_overrides(
+        min_volume_eur=0.0,
+        macro_caution_mode="reduce",
+        macro_caution_requires_alphai_pick=False,
+        macro_caution_clip_mult=0.7,
+    )
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
     view = AlphaIView(macro_caution=True, picks=frozenset())

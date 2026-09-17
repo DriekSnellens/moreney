@@ -142,13 +142,14 @@ class DeskConfig:
     pause_hours_after_week_limit: float = 48.0
     max_entries_per_base_per_day: int = 1
     # "reduce" scales the clip on AlphaI macro caution, "block" stops new
-    # entries, "ignore" disregards it. Evidence so far: caution kept the old
-    # desk 100% cash through an alt rally, so reduce is the default.
-    macro_caution_mode: str = "reduce"
+    # entries, "ignore" disregards it for entries. Default is ignore: 12w A/B
+    # showed closed-trade PnL identical vs reduce, while reduce blocked tape
+    # leaders (e.g. NEAR) when picks were empty under macro_caution.
+    macro_caution_mode: str = "ignore"
     macro_caution_clip_mult: float = 0.7
-    # Under macro caution + reduce: only AlphaI-confirmed names (skip weak
-    # tape-only entries that historically trailed into small losses).
-    macro_caution_requires_alphai_pick: bool = True
+    # Under macro caution + reduce only: optionally require AlphaI picks.
+    # Off by default so tape RS can still enter when mode is reduce.
+    macro_caution_requires_alphai_pick: bool = False
     # Soft regime: weak BTC/breadth no longer hard-blocks. Instead the
     # desk stays open for AlphaI picks at a reduced clip so early legs
     # of a bounce are not missed while tape is still thin.
@@ -157,10 +158,10 @@ class DeskConfig:
     # Survival: when BTC and breadth are both soft-fail, idle (preserve
     # capital) instead of force-longing AlphaI picks into a dead tape.
     weak_tape_idle_on_double: bool = True
-    # Survival: soft tape + AlphaI macro caution → idle. Soft+reduce was
-    # the path into early hard-stops on thin bounce attempts.
-    soft_regime_idle_on_macro_caution: bool = True
-    # Under macro caution, demand excess that clears fee_rt × buffer
+    # Soft+macro idle only applies when mode is "reduce". Default off so
+    # macro caution does not veto entries (matches macro_caution_mode=ignore).
+    soft_regime_idle_on_macro_caution: bool = False
+    # Under macro caution + reduce, demand excess that clears fee_rt × buffer
     # before a weak/tape-only name can enter (coin-agnostic fee guard).
     # Must be ≥ entry_fee_buffer_mult so caution is never looser than base.
     macro_caution_fee_buffer_mult: float = 7.0
