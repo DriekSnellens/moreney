@@ -331,7 +331,11 @@ def _positions_table(
     post_sell_action: str | None = None,
     empty_text: str = "Geen open posities — 100% cash tot de volgende beslissing.",
 ) -> str:
-    rows = status.get("positions") or []
+    rows = [
+        p
+        for p in (status.get("positions") or [])
+        if float(p.get("quantity") or 0.0) > 1e-12
+    ]
     cfg = status.get("config") or {}
     if not rows:
         return f'<p class="muted" data-live="positions-empty">{escape(empty_text)}</p>'
@@ -503,7 +507,11 @@ def _sell_confirm_panel(status: Mapping[str, Any], holding_id: str) -> str:
 
 
 def _sell_all_confirm_panel(status: Mapping[str, Any]) -> str:
-    rows = status.get("positions") or []
+    rows = [
+        p
+        for p in (status.get("positions") or [])
+        if float(p.get("quantity") or 0.0) > 1e-12
+    ]
     if not rows:
         return (
             '<div class="hint bad">Geen open posities om te verkopen. '
@@ -1362,6 +1370,35 @@ _LIVE_MARKS_JS = r"""
       }
     }
   }
+  function livePositionIds() {
+    const ids = new Set();
+    document.querySelectorAll("[data-holding]").forEach((el) => {
+      const id = el.getAttribute("data-holding");
+      if (id) ids.add(id);
+    });
+    return ids;
+  }
+  function statusPositionIds(status) {
+    const ids = new Set();
+    (status.positions || []).forEach((p) => {
+      if (Number(p.quantity || 0) <= 1e-12) return;
+      const id = String(p.holding_id || p.base || "");
+      if (id) ids.add(id);
+    });
+    return ids;
+  }
+  function positionsChanged(status) {
+    const live = livePositionIds();
+    const next = statusPositionIds(status);
+    if (live.size !== next.size) return true;
+    for (const id of next) {
+      if (!live.has(id)) return true;
+    }
+    for (const id of live) {
+      if (!next.has(id)) return true;
+    }
+    return false;
+  }
   function trailKnobs(status) {
     const cfg = status.config || {};
     // Live WR pack defaults (3% / 4%→2%); never fall back to the old 4% pack.
@@ -1385,6 +1422,12 @@ _LIVE_MARKS_JS = r"""
       const res = await fetch(STATUS_URL, { cache: "no-store" });
       if (!res.ok) return;
       const status = await res.json();
+      // Open set changed (entry/exit/ghost cleared) → full reload so the
+      // positions block at the top matches venue reality immediately.
+      if (positionsChanged(status)) {
+        window.location.reload();
+        return;
+      }
       const { trail, tightAfter, tight } = trailKnobs(status);
       (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
       patchHeroes(status);
@@ -1425,7 +1468,11 @@ def render_momentum_dashboard(
         pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
     risk = status.get("risk") or {}
     cfg = status.get("config") or {}
-    n_pos = len(status.get("positions") or [])
+    n_pos = sum(
+        1
+        for p in (status.get("positions") or [])
+        if float(p.get("quantity") or 0.0) > 1e-12
+    )
     exits = [r for r in ledger_rows if r.get("event") == "exit"]
     wins = sum(1 for r in exits if float(r.get("net_eur") or 0) > 0)
     win_rate = f"{100 * wins / len(exits):.0f}%" if exits else "—"
@@ -1569,6 +1616,7 @@ def render_momentum_dashboard(
 <style>{_CSS}</style></head>
 <body><div class="wrap">
 {earnings_html}
+{positions_html}
 {err_html}
 {toolbar}
 {sleeves_html}
@@ -1579,7 +1627,6 @@ def render_momentum_dashboard(
 {report_html}
 {sell_html}
 {sell_all_html}
-{positions_html}
 {decisions_html}
 <div class="card section"><h2>Core ledger</h2>{_ledger_table(ledger_rows)}</div>
 {vol_ledger_html}

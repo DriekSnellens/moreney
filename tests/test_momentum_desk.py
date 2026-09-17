@@ -1494,6 +1494,128 @@ def test_sell_clamps_to_free_balance_when_fee_was_taken_in_base(tmp_path):
     assert gw.placed[-1]["side"] == "sell" and gw.placed[-1]["qty"] == pytest.approx(4.9)
 
 
+def test_exit_dust_or_no_balance_drops_ghost_holding(tmp_path):
+    """Venue free=0 must not leave a qty=0 ghost polluting open PnL."""
+    from bot.live.momentum_desk import ExitDecision, Position
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock((T0 + 60_000) / 1000)
+    gw = FakeGateway(fill_maker_after_polls=1, free_by_base={"FET": 0.0})
+    r = _runner(tmp_path, gw, clock, universe=("FET",), clip_eur=500.0, min_volume_eur=0.0)
+    r.holdings = [
+        Holding(
+            pos=Position(
+                "FET",
+                0.14,
+                0.0,
+                0.0,
+                T0,
+                0.14,
+                entry_fee_eur=40.47,
+                venue="bitvavo",
+            ),
+            holding_id="ghost1",
+        )
+    ]
+    r.marks["FET"] = 0.145
+    r._gws = {"bitvavo": gw}
+    before = r.realized_total_eur
+
+    async def go():
+        return await r._exit(r.holdings[0], ExitDecision("fade_fast", -0.01, urgent=True))
+
+    fill = asyncio.run(go())
+    assert fill is None
+    assert r.holdings == []
+    assert r.realized_total_eur == pytest.approx(before)  # no phantom fee loss
+    st = r.status()
+    assert st["positions"] == []
+    assert st["unrealized_net_eur"] == pytest.approx(0.0)
+    ledger = (tmp_path / "ledger.jsonl").read_text(encoding="utf-8")
+    assert '"event": "exit"' in ledger and "dust_or_no_balance" in ledger
+    assert "exit_failed" not in ledger
+    assert not gw.placed
+
+
+def test_reconcile_external_inventory_clears_gone_holding(tmp_path):
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock((T0 + 60_000) / 1000)
+    gw = FakeGateway(fill_maker_after_polls=1, free_by_base={"SOL": 0.0})
+    r = _runner(tmp_path, gw, clock, universe=("SOL",), clip_eur=500.0, min_volume_eur=0.0)
+    r.holdings = [
+        Holding(
+            pos=Position("SOL", 100.0, 5.0, 500.0, T0, 105.0, entry_fee_eur=1.0, venue="bitvavo"),
+            holding_id="ext1",
+        )
+    ]
+    r.marks["SOL"] = 110.0
+    r._gws = {"bitvavo": gw}
+
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert len(closed) == 1
+    assert closed[0]["reason"] == "manual_external"
+    assert closed[0]["net_eur"] == pytest.approx(5.0 * (110.0 - 100.0) - 1.0)
+    assert r.holdings == []
+    assert r.status()["positions"] == []
+
+
+def test_dashboard_open_positions_render_before_heroes():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    status = {
+        "running": True,
+        "dry_run": False,
+        "venue": "bitvavo",
+        "config": {
+            k: (list(v) if isinstance(v, tuple) else v) for k, v in DeskConfig().__dict__.items()
+        },
+        "positions": [
+            {
+                "holding_id": "h1",
+                "base": "SOL",
+                "entry_price": 100.0,
+                "quantity": 5.0,
+                "notional_eur": 500,
+                "age_h": 1.0,
+                "peak_return": 0.02,
+                "mark": 101.0,
+                "gross_return": 0.01,
+                "unrealized_net_eur": 4.0,
+                "entry_reason": "excess=+0.05",
+            },
+            {
+                "holding_id": "ghost",
+                "base": "FET",
+                "entry_price": 0.14,
+                "quantity": 0.0,
+                "notional_eur": 0.0,
+                "age_h": 1.0,
+                "peak_return": 0.0,
+                "mark": 0.145,
+                "gross_return": 0.0,
+                "unrealized_net_eur": -40.0,
+                "entry_reason": "ghost",
+            },
+        ],
+        "equity_eur": 20_000.0,
+        "exposure_eur": 500.0,
+        "unrealized_net_eur": 4.0,
+        "risk": {"day_realized_eur": 0.0, "entries_allowed": True},
+        "last_regime": {},
+        "next_decision": "2026-09-18T07:00:00+00:00",
+    }
+    html = render_momentum_dashboard(status, []).body.decode()
+    pos_i = html.find('card-head"><h2>Open posities</h2>')
+    hero_i = html.find('<div class="hero-grid">')
+    assert pos_i != -1 and hero_i != -1 and pos_i < hero_i
+    assert "SOL" in html
+    assert 'data-holding="ghost"' not in html
+    assert ">FET<" not in html
+    assert "positionsChanged" in html
+
+
 def test_sell_all_sells_every_holding(tmp_path):
     clock = FakeClock((T0 + 60_000) / 1000)
     gw = FakeGateway(fill_maker_after_polls=1, free_by_base={"SOL": 5.0, "LINK": 4.0})
