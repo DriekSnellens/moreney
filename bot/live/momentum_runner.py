@@ -472,14 +472,18 @@ class MomentumDeskRunner:
         positions = []
         unrealized = 0.0
         for h in self.holdings:
+            qty = float(h.pos.quantity or 0.0)
+            # Never surface zero-qty ghosts (venue already flat / dust).
+            if qty <= 1e-12:
+                continue
             mark = self.marks.get(h.pos.base)
             gross = h.pos.gross_return(mark) if mark else None
             net = None
             if mark:
                 net = (
-                    h.pos.quantity * (mark - h.pos.entry_price)
+                    qty * (mark - h.pos.entry_price)
                     - h.pos.entry_fee_eur
-                    - (h.pos.quantity * mark * self.cfg.fee_rt / 2)
+                    - (qty * mark * self.cfg.fee_rt / 2)
                 )
                 unrealized += net
             positions.append(
@@ -510,6 +514,7 @@ class MomentumDeskRunner:
         exposure = sum(
             h.pos.quantity * (self.marks.get(h.pos.base) or h.pos.entry_price)
             for h in self.holdings
+            if float(h.pos.quantity or 0.0) > 1e-12
         )
         equity = (self.cash_eur + exposure) if self.cash_eur is not None else None
         return {
@@ -606,6 +611,10 @@ class MomentumDeskRunner:
         async with self._lock:
             now_ms = int(self._clock() * 1000)
             await self.refresh_marks()
+            try:
+                await self.reconcile_external_inventory()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("momentum desk: external reconcile failed: %s", exc)
             await self._manage_exits(now_ms)
             # Cash first: the venue router needs fresh balances at the decision hour.
             await self._refresh_cash()
@@ -659,8 +668,8 @@ class MomentumDeskRunner:
             return float(rows[-1][4]), "bitvavo_candle"
         return None, "none"
 
-    async def _refresh_cash(self) -> None:
-        if self._clock() - self._cash_ts < 60.0:
+    async def _refresh_cash(self, *, force: bool = False) -> None:
+        if not force and self._clock() - self._cash_ts < 60.0:
             return
         fetched_any = False
         for venue, gw in self._gws.items():
@@ -777,11 +786,133 @@ class MomentumDeskRunner:
             logger.warning("momentum desk: %s %s free balance failed: %s", venue, base, exc)
             return None
 
+    async def reconcile_external_inventory(self) -> list[dict[str, Any]]:
+        """Drop holdings already gone (or dust-only) on the exchange.
+
+        Keeps desk state / dashboard aligned with venue free balances — e.g.
+        after a partial fill leaves unsellable dust, or an operator sells
+        outside the desk.
+        """
+        closed: list[dict[str, Any]] = []
+        if not self.holdings:
+            return closed
+        for h in list(self.holdings):
+            if h.exiting:
+                continue
+            free = await self._available_base(h.pos.base, h.pos.venue)
+            if free is None:
+                continue
+            mark = float(
+                self.marks.get(h.pos.base) or h.pos.entry_price or 0.0
+            )
+            free_f = float(free)
+            book_qty = float(h.pos.quantity or 0.0)
+            if free_f * mark >= _MIN_ORDER_EUR:
+                if free_f + 1e-12 < book_qty:
+                    h.pos.quantity = free_f
+                    h.pos.notional_eur = free_f * float(h.pos.entry_price)
+                    self._save_state()
+                continue
+            reason = (
+                "dust_or_no_balance"
+                if book_qty * mark < _MIN_ORDER_EUR or free_f > 1e-12
+                else "manual_external"
+            )
+            row = self._book_venue_flat(
+                h,
+                mark=mark,
+                free=free_f,
+                reason=reason,
+                detail="reconcile_external",
+            )
+            closed.append(row)
+        if closed:
+            self._save_state()
+        return closed
+
+    def _book_venue_flat(
+        self,
+        h: Holding,
+        *,
+        mark: float,
+        free: float,
+        reason: str,
+        detail: str = "",
+    ) -> dict[str, Any]:
+        """Close a holding to match venue inventory without placing an order."""
+        book_qty = float(h.pos.quantity or 0.0)
+        entry = float(h.pos.entry_price or 0.0)
+        px = float(mark) if mark > 0 else entry
+        free_f = max(0.0, float(free))
+        # External full exit: book still meaningful, venue free ~0 → MTM book.
+        # Dust / already-flat: do not invent a fee loss on zero qty (partial
+        # exits already realized their fee share on the fill).
+        if book_qty * px >= _MIN_ORDER_EUR and free_f <= 1e-12:
+            close_qty = book_qty
+            net = close_qty * (px - entry) - float(h.pos.entry_fee_eur or 0.0)
+            exit_reason = reason or "manual_external"
+        elif free_f > 1e-12 and free_f * px < _MIN_ORDER_EUR:
+            close_qty = free_f
+            net = close_qty * (px - entry)
+            exit_reason = reason or "dust_or_no_balance"
+        else:
+            close_qty = 0.0
+            net = 0.0
+            exit_reason = reason or "dust_or_no_balance"
+        now_ms = int(self._clock() * 1000)
+        self.realized_total_eur += net
+        self.trade_count += 1
+        self.ledger.note_close(net, now_ms)
+        entry_ctx = dict(getattr(h.pos, "entry_ctx", None) or {})
+        row: dict[str, Any] = {
+            "event": "exit",
+            "holding_id": h.holding_id,
+            "base": h.pos.base,
+            "venue": h.pos.venue,
+            "qty": close_qty,
+            "price": px,
+            "notional_eur": round(close_qty * px, 2),
+            "fee_eur": 0.0,
+            "taker": False,
+            "reason": exit_reason,
+            "gross_return": round(px / entry - 1, 5) if entry > 0 else 0.0,
+            "peak_return": round(h.pos.peak / entry - 1, 5) if entry > 0 else 0.0,
+            "hold_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
+            "net_eur": round(net, 4),
+            "entry_reason": h.pos.entry_reason,
+            "entry_ctx": entry_ctx,
+            "regime_label": str(entry_ctx.get("regime_label") or ""),
+            "free_on_venue": free_f,
+            "book_qty": book_qty,
+        }
+        if detail:
+            row["detail"] = detail
+            row["note"] = "closed to match exchange inventory"
+        self._ledger_append(row)
+        if h in self.holdings:
+            self.holdings.remove(h)
+        if bool(getattr(self.cfg, "refill_on_exit", True)) and len(
+            self.holdings
+        ) < int(self.cfg.max_positions):
+            self._refill_pending = True
+        logger.info(
+            "momentum desk: booked venue flat %s %s book=%.8f free=%.8f net=%.2f reason=%s",
+            h.pos.base,
+            h.pos.venue,
+            book_qty,
+            free_f,
+            net,
+            exit_reason,
+        )
+        return row
+
     async def _exit(self, h: Holding, decision: ExitDecision) -> Fill | None:
         h.exiting = True
         fail_detail: str | None = None
+        fill: Fill | None = None
+        free: float | None = None
         try:
-            sell_qty = h.pos.quantity
+            sell_qty = float(h.pos.quantity or 0.0)
             free = await self._available_base(h.pos.base, h.pos.venue)
             if free is not None and free + 1e-12 < sell_qty:
                 # Typical cause: entry fee was taken in the base asset (OKX), so
@@ -793,14 +924,16 @@ class MomentumDeskRunner:
                     free,
                     h.pos.venue,
                 )
-                h.pos.quantity = free
-                h.pos.notional_eur = free * h.pos.entry_price
-                sell_qty = free
+                sell_qty = float(free)
             mark = self.marks.get(h.pos.base) or h.pos.entry_price
             if sell_qty * mark < _MIN_ORDER_EUR:
                 fail_detail = "dust_or_no_balance"
                 fill = None
             else:
+                # Align book with what we will actually sell.
+                if free is not None and abs(sell_qty - float(h.pos.quantity)) > 1e-12:
+                    h.pos.quantity = sell_qty
+                    h.pos.notional_eur = sell_qty * h.pos.entry_price
                 fill = await self._sell(
                     h.pos.base, sell_qty, urgent=decision.urgent, venue=h.pos.venue
                 )
@@ -808,6 +941,18 @@ class MomentumDeskRunner:
                     fail_detail = "order_rejected"
         finally:
             h.exiting = False
+        if fail_detail == "dust_or_no_balance":
+            mark = float(self.marks.get(h.pos.base) or h.pos.entry_price or 0.0)
+            free_f = float(free) if free is not None else 0.0
+            self._book_venue_flat(
+                h,
+                mark=mark,
+                free=free_f,
+                reason=str(decision.reason or "dust_or_no_balance"),
+                detail="dust_or_no_balance",
+            )
+            self._save_state()
+            return None
         if fill is None or fill.qty <= 0:
             self._ledger_append(
                 {
@@ -1778,12 +1923,20 @@ class MomentumDeskManager:
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
-        """Status after refreshing open-position marks from the public ticker."""
+        """Status after refreshing marks + reconciling venue inventory."""
         if self._runner is not None:
             try:
                 await self._runner.refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("momentum desk: mark refresh for status failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: reconcile for status failed")
+            try:
+                await self._runner._refresh_cash(force=True)  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: cash refresh for status failed")
         return self.status()
 
     async def start(
