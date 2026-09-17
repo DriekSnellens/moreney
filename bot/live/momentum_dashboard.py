@@ -1190,7 +1190,7 @@ def _rules(cfg: Mapping[str, Any]) -> str:
                 "soft single-fail AlphaI×"
                 f"{cfg.get('soft_regime_clip_mult', 0.5)}; "
                 f"double-weak idle={'aan' if cfg.get('weak_tape_idle_on_double', True) else 'uit'}; "
-                f"soft+macro idle={'aan' if cfg.get('soft_regime_idle_on_macro_caution', True) else 'uit'}"
+                f"soft+macro idle={'aan' if cfg.get('soft_regime_idle_on_macro_caution', False) else 'uit'}"
                 if cfg.get("soft_regime_on_weak_tape", True)
                 else "hard block (soft uit)"
             ),

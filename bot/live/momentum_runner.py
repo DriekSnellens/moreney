@@ -1719,7 +1719,10 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 36.0)),
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 100.0)),
         week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 250.0)),
-        macro_caution_mode=str(getattr(settings, "momentum_desk_macro_caution_mode", "reduce")),
+        macro_caution_mode=str(getattr(settings, "momentum_desk_macro_caution_mode", "ignore")),
+        macro_caution_requires_alphai_pick=bool(
+            getattr(settings, "momentum_desk_macro_caution_requires_alphai_pick", False)
+        ),
         strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
         weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),
         skip_weekend_entries=bool(getattr(settings, "momentum_desk_skip_weekend_entries", True)),
@@ -1768,7 +1771,7 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
             getattr(settings, "momentum_desk_weak_tape_idle_on_double", True)
         ),
         soft_regime_idle_on_macro_caution=bool(
-            getattr(settings, "momentum_desk_soft_regime_idle_on_macro_caution", True)
+            getattr(settings, "momentum_desk_soft_regime_idle_on_macro_caution", False)
         ),
         soft_regime_fee_buffer_mult=float(
             getattr(settings, "momentum_desk_soft_regime_fee_buffer_mult", 6.0)
