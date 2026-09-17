@@ -125,12 +125,9 @@ class DeskConfig:
     green_min_peak: float = 0.01
     # Midflat (0 disables). Keep off; WR winner relies on trail + 36h time exit.
     midflat_hours: float = 0.0
-    # Fade-velocity / ETA-to-zero (0 ``fade_eta_sec`` disables). Live path with
-    # dense venue marks: once peak unrealized net is meaningful, if smoothed
-    # net is falling toward zero fast enough that ETA < fade_eta_sec for
-    # ``fade_confirm_sec``, exit as ``fade_fast``. Preserves slow runners
-    # (normal trail) while cutting cascades from green toward red.
-    fade_eta_sec: float = 180.0
+    # Fade-velocity / ETA-to-zero (0 ``fade_eta_sec`` disables). Live: off —
+    # fade_fast was clipping small greens and leaving large post-exit upside.
+    fade_eta_sec: float = 0.0
     fade_confirm_sec: float = 20.0
     fade_smooth_sec: float = 40.0
     fade_min_peak_eur: float = 15.0

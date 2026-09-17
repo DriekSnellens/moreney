@@ -1819,7 +1819,7 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
             getattr(settings, "momentum_desk_green_deadline_hours", 0.0)
         ),
         green_min_peak=float(getattr(settings, "momentum_desk_green_min_peak", 0.01)),
-        fade_eta_sec=float(getattr(settings, "momentum_desk_fade_eta_sec", 180.0)),
+        fade_eta_sec=float(getattr(settings, "momentum_desk_fade_eta_sec", 0.0)),
         fade_confirm_sec=float(getattr(settings, "momentum_desk_fade_confirm_sec", 20.0)),
         fade_smooth_sec=float(getattr(settings, "momentum_desk_fade_smooth_sec", 40.0)),
         fade_min_peak_eur=float(getattr(settings, "momentum_desk_fade_min_peak_eur", 15.0)),
