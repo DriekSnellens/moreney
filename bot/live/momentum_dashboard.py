@@ -190,9 +190,9 @@ body {
   border: 0; padding: 0; background: none;
 }
 
-/* legacy class names kept for tests / older panels */
-.hero-grid { display: contents; }
-.hero-card { display: contents; }
+/* Keep legacy class names for tests while pulse owns the layout. */
+.hero-grid.pulse { display: grid; }
+.pulse .hero-card { display: block; }
 
 .stack { display: grid; gap: .85rem; }
 @media (min-width: 980px) { .stack.two { grid-template-columns: 1.12fr .88fr; } }
