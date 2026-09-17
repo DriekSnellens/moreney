@@ -1805,6 +1805,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 100.0)),
         week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 250.0)),
         macro_caution_mode=str(getattr(settings, "momentum_desk_macro_caution_mode", "reduce")),
+        macro_caution_requires_alphai_pick=bool(
+            getattr(settings, "momentum_desk_macro_caution_requires_alphai_pick", False)
+        ),
         strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
         weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),
         skip_weekend_entries=bool(getattr(settings, "momentum_desk_skip_weekend_entries", True)),

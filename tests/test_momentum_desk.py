@@ -210,13 +210,14 @@ def test_from_high_and_macro_caution_rules():
     cfg = cfg.with_overrides(min_volume_eur=0.0)
     alts = universe_stats(candles, T0, cfg)
     regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
-    # Under macro caution, only AlphaI picks may enter (default).
+    # Under macro caution + pick-gate, only AlphaI picks may enter.
+    cfg = cfg.with_overrides(macro_caution_requires_alphai_pick=True)
     view = AlphaIView(macro_caution=True, picks=frozenset({"SOL"}))
     cands = rank_candidates(alts, 0.0, cfg, alphai=view)
     entries = select_entries(cands, regime, cfg, held_bases=[], alphai=view)
     assert entries[0].clip_eur == pytest.approx(455.0)  # 500 * alphai_clip 1.3 * macro 0.7
     assert "macro_reduce" in entries[0].reasons and "alphai_pick" in entries[0].reasons
-    # Non-picks are skipped while macro caution + reduce is active.
+    # Non-picks are skipped while macro caution + reduce + pick-gate is active.
     skipped = select_entries(
         rank_candidates(alts, 0.0, cfg, alphai=AlphaIView(macro_caution=True)),
         regime,
@@ -249,6 +250,36 @@ def test_macro_caution_can_allow_non_picks_when_flag_off():
     )
     assert len(entries) == 1
     assert "macro_reduce" in entries[0].reasons
+
+
+def test_desk_config_from_settings_wires_macro_knobs(monkeypatch):
+    from bot.core.config import Settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    monkeypatch.setenv("MOMENTUM_DESK_MACRO_CAUTION_MODE", "reduce")
+    monkeypatch.setenv("MOMENTUM_DESK_SOFT_REGIME_IDLE_ON_MACRO_CAUTION", "true")
+    monkeypatch.setenv("MOMENTUM_DESK_MACRO_CAUTION_REQUIRES_ALPHAI_PICK", "false")
+    settings = Settings(
+        momentum_desk_macro_caution_mode="reduce",
+        momentum_desk_soft_regime_idle_on_macro_caution=True,
+        momentum_desk_macro_caution_requires_alphai_pick=False,
+    )
+    cfg = desk_config_from_settings(settings)
+    assert cfg.macro_caution_mode == "reduce"
+    assert cfg.soft_regime_idle_on_macro_caution is True
+    assert cfg.macro_caution_requires_alphai_pick is False
+    # Explicit kwargs win over ambient process env leftovers.
+    cfg2 = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_macro_caution_mode="reduce",
+            momentum_desk_soft_regime_idle_on_macro_caution=True,
+            momentum_desk_macro_caution_requires_alphai_pick=False,
+        )
+    )
+    assert cfg2.macro_caution_mode == "reduce"
+    assert cfg2.soft_regime_idle_on_macro_caution is True
+    assert cfg2.macro_caution_requires_alphai_pick is False
 
 
 def test_exit_rules_hard_stop_trail_ratchet_and_time():

@@ -1120,6 +1120,14 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         ("AlphaI macro", str(cfg.get("macro_caution_mode"))),
         (
+            "Macro pick-gate",
+            (
+                "aan"
+                if cfg.get("macro_caution_requires_alphai_pick", False)
+                else "uit (tape-namen ok onder reduce)"
+            ),
+        ),
+        (
             "Weak-tape survival",
             (
                 "soft single-fail AlphaI×"
