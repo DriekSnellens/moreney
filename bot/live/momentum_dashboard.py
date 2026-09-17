@@ -58,10 +58,6 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: .45; }
 }
-@keyframes soft-shine {
-  from { background-position: 0% 50%; }
-  to { background-position: 100% 50%; }
-}
 
 .masthead {
   display: grid; gap: .95rem; margin-bottom: .85rem;
