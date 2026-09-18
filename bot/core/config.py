@@ -594,6 +594,10 @@ class Settings(BaseSettings):
     # Early stop off by default (with fixed5, early2 worsened max DD on 12w grid).
     momentum_desk_early_stop_pct: float = Field(default=0.0, ge=0, le=0.2)
     momentum_desk_early_stop_until_peak: float = Field(default=0.0, ge=0, le=0.5)
+    # BE-arm + one-shot partial (0 disables). Live: arm at ~+2%, scale ~40% @ ~+2.5%.
+    momentum_desk_be_arm_peak_pct: float = Field(default=0.0, ge=0.0, le=0.5)
+    momentum_desk_partial_take_pct: float = Field(default=0.0, ge=0.0, le=0.5)
+    momentum_desk_partial_frac: float = Field(default=0.40, ge=0.0, le=0.95)
     momentum_desk_time_exit_hours: float = Field(default=36.0, gt=0)
     # Entry/exit quality knobs (DeskConfig defaults; overridable via env).
     momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)

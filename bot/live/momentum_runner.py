@@ -953,7 +953,12 @@ class MomentumDeskRunner:
         fill: Fill | None = None
         free: float | None = None
         try:
-            sell_qty = float(h.pos.quantity or 0.0)
+            book_qty = float(h.pos.quantity or 0.0)
+            frac = float(getattr(decision, "qty_frac", 1.0) or 1.0)
+            frac = min(1.0, max(0.0, frac))
+            # Intentional scale-out: sell a fraction; protective/full exits sell all.
+            target_qty = book_qty if frac >= 0.999 else book_qty * frac
+            sell_qty = float(target_qty)
             free = await self._available_base(h.pos.base, h.pos.venue)
             if free is not None and free + 1e-12 < sell_qty:
                 # Typical cause: entry fee was taken in the base asset (OKX), so
@@ -971,10 +976,15 @@ class MomentumDeskRunner:
                 fail_detail = "dust_or_no_balance"
                 fill = None
             else:
-                # Align book with what we will actually sell.
-                if free is not None and abs(sell_qty - float(h.pos.quantity)) > 1e-12:
+                # Align book with sellable free when full exit and free < book.
+                if (
+                    frac >= 0.999
+                    and free is not None
+                    and abs(sell_qty - float(h.pos.quantity)) > 1e-12
+                ):
                     h.pos.quantity = sell_qty
                     h.pos.notional_eur = sell_qty * h.pos.entry_price
+                    book_qty = sell_qty
                 fill = await self._sell(
                     h.pos.base, sell_qty, urgent=decision.urgent, venue=h.pos.venue
                 )
@@ -1007,11 +1017,11 @@ class MomentumDeskRunner:
             )
             self._save_state()
             return None
-        net = (
-            fill.qty * (fill.avg_price - h.pos.entry_price)
-            - h.pos.entry_fee_eur * (fill.qty / h.pos.quantity)
-            - fill.fee_eur
+        book_qty = float(h.pos.quantity or 0.0)
+        fee_share = (
+            h.pos.entry_fee_eur * (fill.qty / book_qty) if book_qty > 0 else 0.0
         )
+        net = fill.qty * (fill.avg_price - h.pos.entry_price) - fee_share - fill.fee_eur
         now_ms = int(self._clock() * 1000)
         self.realized_total_eur += net
         self.trade_count += 1
@@ -1029,6 +1039,7 @@ class MomentumDeskRunner:
                 "fee_eur": round(fill.fee_eur, 4),
                 "taker": fill.taker,
                 "reason": decision.reason,
+                "qty_frac": round(float(getattr(decision, "qty_frac", 1.0) or 1.0), 4),
                 "gross_return": round(fill.avg_price / h.pos.entry_price - 1, 5),
                 "peak_return": round(h.pos.peak / h.pos.entry_price - 1, 5),
                 "hold_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
@@ -1049,6 +1060,11 @@ class MomentumDeskRunner:
         else:
             h.pos.quantity = remaining
             h.pos.notional_eur = remaining * h.pos.entry_price
+            h.pos.entry_fee_eur = max(0.0, float(h.pos.entry_fee_eur) - fee_share)
+            if str(decision.reason or "") == "partial_take" or float(
+                getattr(decision, "qty_frac", 1.0) or 1.0
+            ) < 0.999:
+                h.pos.partial_taken = True
         self._save_state()
         return fill
 
@@ -1846,6 +1862,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         early_stop_until_peak=float(
             getattr(settings, "momentum_desk_early_stop_until_peak", 0.0)
         ),
+        be_arm_peak_pct=float(getattr(settings, "momentum_desk_be_arm_peak_pct", 0.0)),
+        partial_take_pct=float(getattr(settings, "momentum_desk_partial_take_pct", 0.0)),
+        partial_frac=float(getattr(settings, "momentum_desk_partial_frac", 0.40)),
         time_exit_hours=float(getattr(settings, "momentum_desk_time_exit_hours", 36.0)),
         day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 100.0)),
         week_loss_limit_eur=float(getattr(settings, "momentum_desk_week_loss_limit_eur", 250.0)),

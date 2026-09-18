@@ -1228,7 +1228,7 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         (
             "Exit-ladder",
-            "1) hard stop → 2) fade ETA→0 (live marks) → 3) trail → 4) time-exit",
+            "1) hard stop → 2) trail → 3) BE-arm → 4) partial → 5) time-exit",
         ),
         (
             "Trail",
@@ -1243,6 +1243,24 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             ),
         ),
         ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
+        (
+            "BE-arm",
+            (
+                f"na piek ≥ {100 * float(cfg.get('be_arm_peak_pct') or 0):.1f}% "
+                f"→ exit op fee-BE"
+                if float(cfg.get("be_arm_peak_pct") or 0.0) > 0.0
+                else "uit"
+            ),
+        ),
+        (
+            "Partial",
+            (
+                f"verkoop {100 * float(cfg.get('partial_frac') or 0):.0f}% "
+                f"bij +{100 * float(cfg.get('partial_take_pct') or 0):.1f}%"
+                if float(cfg.get("partial_take_pct") or 0.0) > 0.0
+                else "uit"
+            ),
+        ),
         (
             "Fade ETA→0",
             (

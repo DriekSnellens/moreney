@@ -377,6 +377,66 @@ def test_desk_config_from_settings_wires_trail_and_early_stop():
     assert cfg_on.early_stop_until_peak == 0.015
 
 
+def test_desk_config_from_settings_wires_be_arm_and_partial():
+    from bot.core.config import Settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    cfg = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_be_arm_peak_pct=0.02,
+            momentum_desk_partial_take_pct=0.025,
+            momentum_desk_partial_frac=0.40,
+        )
+    )
+    assert cfg.be_arm_peak_pct == 0.02
+    assert cfg.partial_take_pct == 0.025
+    assert cfg.partial_frac == 0.40
+
+
+def test_be_arm_exits_at_fee_be_after_peak():
+    cfg = DeskConfig(
+        trail_pct=0.10,
+        hard_stop_pct=0.03,
+        be_arm_peak_pct=0.02,
+        fee_rt=0.003,
+        midflat_hours=0.0,
+        green_deadline_hours=0.0,
+    )
+    pos = Position("B", 100.0, 5.0, 500.0, T0, 100.0)
+    # Peak +2.5% arms BE; close still green → hold.
+    assert evaluate_exit(pos, [T0, 100, 102.5, 101.0, 101.5, 1], cfg) is None
+    assert pos.peak == pytest.approx(102.5)
+    # Give back to fee-BE (gross ≤ 0.3%) → be_stop.
+    d = evaluate_exit(pos, [T0 + BAR_MS, 101.5, 101.6, 100.0, 100.2, 1], cfg)
+    assert d is not None and d.reason == "be_stop" and d.qty_frac == 1.0
+    # Below arm threshold: giveback to BE does not fire.
+    pos2 = Position("B", 100.0, 5.0, 500.0, T0, 100.0)
+    assert evaluate_exit(pos2, [T0, 100, 101.5, 100.0, 101.0, 1], cfg) is None
+    assert evaluate_exit(pos2, [T0 + BAR_MS, 101.0, 101.1, 100.0, 100.2, 1], cfg) is None
+
+
+def test_partial_take_scales_once_then_latches():
+    cfg = DeskConfig(
+        trail_pct=0.10,
+        hard_stop_pct=0.03,
+        partial_take_pct=0.025,
+        partial_frac=0.40,
+        midflat_hours=0.0,
+        green_deadline_hours=0.0,
+    )
+    pos = Position("P", 100.0, 10.0, 1000.0, T0, 100.0)
+    assert evaluate_exit(pos, [T0, 100, 102.0, 101.0, 102.0, 1], cfg) is None  # +2% < 2.5%
+    d = evaluate_exit(pos, [T0 + BAR_MS, 102.0, 103.0, 102.5, 102.6, 1], cfg)
+    assert d is not None and d.reason == "partial_take"
+    assert d.qty_frac == pytest.approx(0.40)
+    # Latch as the live/backtest runners do after a successful partial fill.
+    pos.partial_taken = True
+    pos.quantity = 6.0
+    pos.notional_eur = 600.0
+    assert evaluate_exit(pos, [T0 + 2 * BAR_MS, 102.6, 104.0, 102.0, 103.5, 1], cfg) is None
+
+
 def test_exit_rules_hard_stop_trail_ratchet_and_time():
     cfg = DeskConfig(
         trail_pct=0.03,
