@@ -599,6 +599,8 @@ class Settings(BaseSettings):
     momentum_desk_min_excess: float = Field(default=0.025, ge=0.0, le=0.2)
     momentum_desk_entry_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
     momentum_desk_max_chase_ret_24h: float = Field(default=0.0, ge=0.0, le=1.0)
+    # With max_chase: reject if still within this distance of the 24h high.
+    momentum_desk_chase_near_high: float = Field(default=0.008, ge=0.0, le=0.2)
     momentum_desk_midflat_hours: float = Field(default=0.0, ge=0.0, le=168.0)
     # Green deadline off on WR winner (0 disables).
     momentum_desk_green_deadline_hours: float = Field(default=0.0, ge=0.0, le=168.0)

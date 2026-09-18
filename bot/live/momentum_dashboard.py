@@ -1214,6 +1214,15 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ("Min excess vs BTC", _fmt_pct(cfg.get("min_excess"))),
         ("Max onder 24u-high", _fmt_pct(cfg.get("max_from_high"))),
         (
+            "Late-chase gate",
+            (
+                f"blokkeer als 24u ≥ {_fmt_pct(cfg.get('max_chase_ret_24h'))} "
+                f"én < {_fmt_pct(cfg.get('chase_near_high'))} onder high"
+                if float(cfg.get("max_chase_ret_24h") or 0.0) > 0.0
+                else "uit"
+            ),
+        ),
+        (
             "Regime",
             f"BTC 24u > {_fmt_pct(cfg.get('btc_min_ret'))}, breadth ≥ {cfg.get('min_breadth')}",
         ),

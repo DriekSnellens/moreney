@@ -300,6 +300,23 @@ def test_desk_config_from_settings_wires_requires_alphai_pick():
     assert cfg_off.requires_alphai_pick is False
 
 
+def test_desk_config_from_settings_wires_chase_gate():
+    from bot.core.config import Settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    cfg = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_max_chase_ret_24h=0.09,
+            momentum_desk_chase_near_high=0.008,
+            momentum_desk_requires_alphai_pick=False,
+        )
+    )
+    assert cfg.max_chase_ret_24h == 0.09
+    assert cfg.chase_near_high == 0.008
+    assert cfg.requires_alphai_pick is False
+
+
 def test_desk_config_from_settings_wires_macro_knobs(monkeypatch):
     from bot.core.config import Settings
     from bot.live.momentum_runner import desk_config_from_settings
