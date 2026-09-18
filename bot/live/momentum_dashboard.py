@@ -1269,6 +1269,14 @@ def _rules(cfg: Mapping[str, Any]) -> str:
         ),
         ("AlphaI macro", str(cfg.get("macro_caution_mode"))),
         (
+            "AlphaI pick-gate",
+            (
+                "aan (alleen picks)"
+                if cfg.get("requires_alphai_pick", False)
+                else "uit (tape-namen ok)"
+            ),
+        ),
+        (
             "Macro pick-gate",
             (
                 "aan"

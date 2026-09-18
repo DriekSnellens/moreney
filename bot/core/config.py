@@ -622,6 +622,8 @@ class Settings(BaseSettings):
     momentum_desk_soft_regime_idle_on_macro_caution: bool = True
     # Under macro reduce: do not require AlphaI picks (empty-pick deadlock).
     momentum_desk_macro_caution_requires_alphai_pick: bool = False
+    # Always require AlphaI pick for new entries (operator preference; idle if none).
+    momentum_desk_requires_alphai_pick: bool = False
     momentum_desk_soft_regime_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
     # AlphaI size overlay: binary = flat alphai_clip_mult; conviction = score/rank
     # + headline conflict + price-confirm/reliability (no harder entry gates).
