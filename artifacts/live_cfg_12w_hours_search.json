@@ -1,0 +1,556 @@
+{
+  "asof": "2026-09-18T12:55:19.839898+00:00",
+  "window": {
+    "days": 84,
+    "start": "2026-06-26T12:45:00+00:00",
+    "end": "2026-09-18T12:45:00+00:00"
+  },
+  "search": {
+    "hours_grid": [
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18
+    ],
+    "max_k": 3,
+    "n_combos": 377,
+    "criterion_better_total": "total_eur > baseline 7/13/16"
+  },
+  "baseline": {
+    "hours": [
+      7,
+      13,
+      16
+    ],
+    "trades": 19,
+    "win_rate": 0.421,
+    "realized_eur": 9989.01,
+    "open_mtm_eur": 6540.46,
+    "total_eur": 16529.47,
+    "max_drawdown_eur": -920.02,
+    "fees_eur": 1014.0,
+    "calmar_proxy": 17.966
+  },
+  "better_than_baseline_by_total": [
+    {
+      "hours": [
+        7,
+        10
+      ],
+      "trades": 16,
+      "win_rate": 0.562,
+      "realized_eur": 12099.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18640.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 852.0,
+      "calmar_proxy": 20.261
+    },
+    {
+      "hours": [
+        7,
+        10,
+        12
+      ],
+      "trades": 16,
+      "win_rate": 0.562,
+      "realized_eur": 12099.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18640.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 852.0,
+      "calmar_proxy": 20.261
+    },
+    {
+      "hours": [
+        7,
+        8,
+        10
+      ],
+      "trades": 17,
+      "win_rate": 0.529,
+      "realized_eur": 11855.99,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18396.45,
+      "max_drawdown_eur": -1086.43,
+      "fees_eur": 894.0,
+      "calmar_proxy": 16.933
+    },
+    {
+      "hours": [
+        7,
+        10,
+        16
+      ],
+      "trades": 18,
+      "win_rate": 0.5,
+      "realized_eur": 11163.48,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17703.94,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 954.0,
+      "calmar_proxy": 19.243
+    },
+    {
+      "hours": [
+        7,
+        11,
+        13
+      ],
+      "trades": 19,
+      "win_rate": 0.474,
+      "realized_eur": 11049.8,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17590.26,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 1014.0,
+      "calmar_proxy": 19.119
+    },
+    {
+      "hours": [
+        7,
+        13
+      ],
+      "trades": 17,
+      "win_rate": 0.471,
+      "realized_eur": 10925.24,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17465.7,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 912.0,
+      "calmar_proxy": 18.984
+    },
+    {
+      "hours": [
+        7,
+        13,
+        15
+      ],
+      "trades": 18,
+      "win_rate": 0.444,
+      "realized_eur": 10896.63,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17437.09,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 972.0,
+      "calmar_proxy": 18.953
+    },
+    {
+      "hours": [
+        7,
+        10,
+        17
+      ],
+      "trades": 18,
+      "win_rate": 0.5,
+      "realized_eur": 10742.11,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17282.57,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 972.0,
+      "calmar_proxy": 18.785
+    },
+    {
+      "hours": [
+        7,
+        8,
+        13
+      ],
+      "trades": 18,
+      "win_rate": 0.444,
+      "realized_eur": 10681.51,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17221.97,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 954.0,
+      "calmar_proxy": 18.719
+    },
+    {
+      "hours": [
+        7,
+        12
+      ],
+      "trades": 14,
+      "win_rate": 0.571,
+      "realized_eur": 10585.6,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17126.06,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 732.0,
+      "calmar_proxy": 18.615
+    },
+    {
+      "hours": [
+        7,
+        8,
+        12
+      ],
+      "trades": 15,
+      "win_rate": 0.533,
+      "realized_eur": 10341.86,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 16882.32,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 774.0,
+      "calmar_proxy": 18.35
+    },
+    {
+      "hours": [
+        7,
+        13,
+        14
+      ],
+      "trades": 20,
+      "win_rate": 0.4,
+      "realized_eur": 10219.56,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 16760.02,
+      "max_drawdown_eur": -1418.16,
+      "fees_eur": 1056.0,
+      "calmar_proxy": 11.818
+    },
+    {
+      "hours": [
+        7,
+        11,
+        16
+      ],
+      "trades": 19,
+      "win_rate": 0.474,
+      "realized_eur": 10162.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 16703.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 1014.0,
+      "calmar_proxy": 18.155
+    }
+  ],
+  "better_calmar_near_baseline_total": [
+    {
+      "hours": [
+        7,
+        10
+      ],
+      "trades": 16,
+      "win_rate": 0.562,
+      "realized_eur": 12099.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18640.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 852.0,
+      "calmar_proxy": 20.261
+    },
+    {
+      "hours": [
+        7,
+        10,
+        12
+      ],
+      "trades": 16,
+      "win_rate": 0.562,
+      "realized_eur": 12099.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18640.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 852.0,
+      "calmar_proxy": 20.261
+    },
+    {
+      "hours": [
+        7,
+        10,
+        16
+      ],
+      "trades": 18,
+      "win_rate": 0.5,
+      "realized_eur": 11163.48,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17703.94,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 954.0,
+      "calmar_proxy": 19.243
+    },
+    {
+      "hours": [
+        7,
+        11,
+        13
+      ],
+      "trades": 19,
+      "win_rate": 0.474,
+      "realized_eur": 11049.8,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17590.26,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 1014.0,
+      "calmar_proxy": 19.119
+    },
+    {
+      "hours": [
+        7,
+        13
+      ],
+      "trades": 17,
+      "win_rate": 0.471,
+      "realized_eur": 10925.24,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17465.7,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 912.0,
+      "calmar_proxy": 18.984
+    },
+    {
+      "hours": [
+        7,
+        13,
+        15
+      ],
+      "trades": 18,
+      "win_rate": 0.444,
+      "realized_eur": 10896.63,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17437.09,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 972.0,
+      "calmar_proxy": 18.953
+    },
+    {
+      "hours": [
+        7,
+        10,
+        17
+      ],
+      "trades": 18,
+      "win_rate": 0.5,
+      "realized_eur": 10742.11,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17282.57,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 972.0,
+      "calmar_proxy": 18.785
+    },
+    {
+      "hours": [
+        7,
+        8,
+        13
+      ],
+      "trades": 18,
+      "win_rate": 0.444,
+      "realized_eur": 10681.51,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17221.97,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 954.0,
+      "calmar_proxy": 18.719
+    },
+    {
+      "hours": [
+        7,
+        12
+      ],
+      "trades": 14,
+      "win_rate": 0.571,
+      "realized_eur": 10585.6,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17126.06,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 732.0,
+      "calmar_proxy": 18.615
+    },
+    {
+      "hours": [
+        7,
+        8,
+        12
+      ],
+      "trades": 15,
+      "win_rate": 0.533,
+      "realized_eur": 10341.86,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 16882.32,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 774.0,
+      "calmar_proxy": 18.35
+    },
+    {
+      "hours": [
+        7,
+        11,
+        16
+      ],
+      "trades": 19,
+      "win_rate": 0.474,
+      "realized_eur": 10162.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 16703.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 1014.0,
+      "calmar_proxy": 18.155
+    }
+  ],
+  "top10_overall_by_total": [
+    {
+      "hours": [
+        7,
+        10
+      ],
+      "trades": 16,
+      "win_rate": 0.562,
+      "realized_eur": 12099.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18640.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 852.0,
+      "calmar_proxy": 20.261
+    },
+    {
+      "hours": [
+        7,
+        10,
+        12
+      ],
+      "trades": 16,
+      "win_rate": 0.562,
+      "realized_eur": 12099.72,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18640.18,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 852.0,
+      "calmar_proxy": 20.261
+    },
+    {
+      "hours": [
+        7,
+        8,
+        10
+      ],
+      "trades": 17,
+      "win_rate": 0.529,
+      "realized_eur": 11855.99,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 18396.45,
+      "max_drawdown_eur": -1086.43,
+      "fees_eur": 894.0,
+      "calmar_proxy": 16.933
+    },
+    {
+      "hours": [
+        7,
+        10,
+        16
+      ],
+      "trades": 18,
+      "win_rate": 0.5,
+      "realized_eur": 11163.48,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17703.94,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 954.0,
+      "calmar_proxy": 19.243
+    },
+    {
+      "hours": [
+        7,
+        11,
+        13
+      ],
+      "trades": 19,
+      "win_rate": 0.474,
+      "realized_eur": 11049.8,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17590.26,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 1014.0,
+      "calmar_proxy": 19.119
+    },
+    {
+      "hours": [
+        7,
+        13
+      ],
+      "trades": 17,
+      "win_rate": 0.471,
+      "realized_eur": 10925.24,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17465.7,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 912.0,
+      "calmar_proxy": 18.984
+    },
+    {
+      "hours": [
+        7,
+        13,
+        15
+      ],
+      "trades": 18,
+      "win_rate": 0.444,
+      "realized_eur": 10896.63,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17437.09,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 972.0,
+      "calmar_proxy": 18.953
+    },
+    {
+      "hours": [
+        7,
+        10,
+        17
+      ],
+      "trades": 18,
+      "win_rate": 0.5,
+      "realized_eur": 10742.11,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17282.57,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 972.0,
+      "calmar_proxy": 18.785
+    },
+    {
+      "hours": [
+        7,
+        8,
+        13
+      ],
+      "trades": 18,
+      "win_rate": 0.444,
+      "realized_eur": 10681.51,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17221.97,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 954.0,
+      "calmar_proxy": 18.719
+    },
+    {
+      "hours": [
+        7,
+        12
+      ],
+      "trades": 14,
+      "win_rate": 0.571,
+      "realized_eur": 10585.6,
+      "open_mtm_eur": 6540.46,
+      "total_eur": 17126.06,
+      "max_drawdown_eur": -920.02,
+      "fees_eur": 732.0,
+      "calmar_proxy": 18.615
+    }
+  ],
+  "elapsed_sec": 237.1,
+  "caveats": [
+    "15m close fills; no AlphaI; live knobs otherwise fixed",
+    "hour grid 06\u201318 UTC only; k\u22643 slots",
+    "research only \u2014 live config not changed"
+  ]
+}
