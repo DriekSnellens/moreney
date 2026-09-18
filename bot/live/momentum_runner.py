@@ -1853,6 +1853,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         macro_caution_requires_alphai_pick=bool(
             getattr(settings, "momentum_desk_macro_caution_requires_alphai_pick", False)
         ),
+        requires_alphai_pick=bool(
+            getattr(settings, "momentum_desk_requires_alphai_pick", False)
+        ),
         strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
         weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),
         skip_weekend_entries=bool(getattr(settings, "momentum_desk_skip_weekend_entries", True)),

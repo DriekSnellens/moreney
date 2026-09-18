@@ -252,6 +252,54 @@ def test_macro_caution_can_allow_non_picks_when_flag_off():
     assert "macro_reduce" in entries[0].reasons
 
 
+def test_requires_alphai_pick_blocks_tape_only_entries():
+    cfg, candles = _universe({"SOL": 0.05}, 0.0)
+    cfg = cfg.with_overrides(min_volume_eur=0.0, requires_alphai_pick=True)
+    alts = universe_stats(candles, T0, cfg)
+    regime = classify_regime(bar_stats("BTC", candles["BTC"], T0), alts, cfg)
+    empty = AlphaIView(picks=frozenset())
+    assert (
+        select_entries(
+            rank_candidates(alts, 0.0, cfg, alphai=empty),
+            regime,
+            cfg,
+            held_bases=[],
+            alphai=empty,
+        )
+        == []
+    )
+    picked = AlphaIView(picks=frozenset({"SOL"}))
+    entries = select_entries(
+        rank_candidates(alts, 0.0, cfg, alphai=picked),
+        regime,
+        cfg,
+        held_bases=[],
+        alphai=picked,
+    )
+    assert len(entries) == 1 and entries[0].base == "SOL"
+    assert "alphai_pick" in entries[0].reasons
+
+
+def test_desk_config_from_settings_wires_requires_alphai_pick():
+    from bot.core.config import Settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    cfg = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_requires_alphai_pick=True,
+        )
+    )
+    assert cfg.requires_alphai_pick is True
+    cfg_off = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_requires_alphai_pick=False,
+        )
+    )
+    assert cfg_off.requires_alphai_pick is False
+
+
 def test_desk_config_from_settings_wires_macro_knobs(monkeypatch):
     from bot.core.config import Settings
     from bot.live.momentum_runner import desk_config_from_settings

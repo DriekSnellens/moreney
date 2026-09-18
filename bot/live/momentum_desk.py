@@ -145,6 +145,9 @@ class DeskConfig:
     # Under macro caution + reduce: optional AlphaI-only gate. Default off —
     # empty picks + strong tape caused live deadlocks (e.g. NEAR 07:00 miss).
     macro_caution_requires_alphai_pick: bool = False
+    # Always require an AlphaI pick for new entries (any regime). Off by default;
+    # when on, empty/stale pick lists idle the desk instead of taking tape-only names.
+    requires_alphai_pick: bool = False
     # Soft regime: weak BTC/breadth no longer hard-blocks. Instead the
     # desk stays open for AlphaI picks at a reduced clip so early legs
     # of a bounce are not missed while tape is still thin.
@@ -857,6 +860,8 @@ def select_entries(
         if len(out) >= min(slots, top_n):
             break
         if c.base in held or c.base in blocked:
+            continue
+        if cfg.requires_alphai_pick and not c.alphai_pick:
             continue
         if (
             view.macro_caution
