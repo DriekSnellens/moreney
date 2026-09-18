@@ -1066,13 +1066,14 @@ def evaluate_exit(
         if pos.peak < high:
             pos.peak = high
         gross = pos.gross_return(close)
-        # Partial on the bar high once (not only on close) under touch semantics.
+        # Partial once peak has cleared the take level and close is still
+        # above fee-BE (harvest even if price has already given some back).
         if (
             partial_take > 0.0
             and partial_frac > 0.0
             and not bool(getattr(pos, "partial_taken", False))
-            and pos.entry_price > 0
-            and (high / pos.entry_price - 1.0) >= partial_take
+            and _peak_gain(pos.peak) >= partial_take
+            and gross > float(cfg.fee_rt)
         ):
             px = max(float(high), pos.entry_price * (1.0 + partial_take))
             return ExitDecision(
@@ -1100,7 +1101,8 @@ def evaluate_exit(
             partial_take > 0.0
             and partial_frac > 0.0
             and not bool(getattr(pos, "partial_taken", False))
-            and gross >= partial_take
+            and _peak_gain(pos.peak) >= partial_take
+            and gross > float(cfg.fee_rt)
         ):
             return ExitDecision(
                 "partial_take", gross, urgent=False, qty_frac=partial_frac

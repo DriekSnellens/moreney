@@ -1256,7 +1256,8 @@ def _rules(cfg: Mapping[str, Any]) -> str:
             "Partial",
             (
                 f"verkoop {100 * float(cfg.get('partial_frac') or 0):.0f}% "
-                f"bij +{100 * float(cfg.get('partial_take_pct') or 0):.1f}%"
+                f"na piek ≥ {100 * float(cfg.get('partial_take_pct') or 0):.1f}% "
+                f"(zolang boven fee-BE)"
                 if float(cfg.get("partial_take_pct") or 0.0) > 0.0
                 else "uit"
             ),

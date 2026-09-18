@@ -422,19 +422,21 @@ def test_partial_take_scales_once_then_latches():
         hard_stop_pct=0.03,
         partial_take_pct=0.025,
         partial_frac=0.40,
+        fee_rt=0.003,
         midflat_hours=0.0,
         green_deadline_hours=0.0,
     )
     pos = Position("P", 100.0, 10.0, 1000.0, T0, 100.0)
-    assert evaluate_exit(pos, [T0, 100, 102.0, 101.0, 102.0, 1], cfg) is None  # +2% < 2.5%
-    d = evaluate_exit(pos, [T0 + BAR_MS, 102.0, 103.0, 102.5, 102.6, 1], cfg)
+    assert evaluate_exit(pos, [T0, 100, 102.0, 101.0, 102.0, 1], cfg) is None  # peak +2%
+    # Peak clears +2.5%; close still green above fee-BE → scale out.
+    d = evaluate_exit(pos, [T0 + BAR_MS, 102.0, 103.0, 101.5, 101.8, 1], cfg)
     assert d is not None and d.reason == "partial_take"
     assert d.qty_frac == pytest.approx(0.40)
     # Latch as the live/backtest runners do after a successful partial fill.
     pos.partial_taken = True
     pos.quantity = 6.0
     pos.notional_eur = 600.0
-    assert evaluate_exit(pos, [T0 + 2 * BAR_MS, 102.6, 104.0, 102.0, 103.5, 1], cfg) is None
+    assert evaluate_exit(pos, [T0 + 2 * BAR_MS, 101.8, 104.0, 101.0, 103.5, 1], cfg) is None
 
 
 def test_exit_rules_hard_stop_trail_ratchet_and_time():
