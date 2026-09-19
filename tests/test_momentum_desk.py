@@ -912,6 +912,9 @@ class FakeGateway:
     # an escalating chase that finally clears the book).
     taker_partial_count: int = 10**9
     free_by_base: dict[str, float] | None = None  # None = do not report (no clamp)
+    # Total held (free+locked). Defaults to free_by_base when unset.
+    held_by_base: dict[str, float] | None = None
+    recent_sells: list[dict] | None = None
     placed: list[dict] = field(default_factory=list)
     _orders: dict[str, dict] = field(default_factory=dict)
     _polls: int = 0
@@ -923,6 +926,31 @@ class FakeGateway:
         if self.free_by_base is None:
             return None
         return float(self.free_by_base.get(base.upper(), 0.0))
+
+    async def base_held(self, base: str):
+        if self.held_by_base is not None:
+            return float(self.held_by_base.get(base.upper(), 0.0))
+        return await self.base_free(base)
+
+    async def recent_base_sells(self, base: str, *, since_ms: int = 0, until_ms: int | None = None):
+        rows = list(self.recent_sells or [])
+        out = []
+        until = float(until_ms if until_ms is not None else 10**18)
+        for r in rows:
+            if str(r.get("base") or base).upper() != base.upper():
+                continue
+            ts = float(r.get("ts_ms") or 0)
+            if ts < since_ms or ts > until:
+                continue
+            out.append(
+                {
+                    "qty": float(r["qty"]),
+                    "price": float(r["price"]),
+                    "fee_eur": float(r.get("fee_eur") or 0.0),
+                    "ts_ms": ts,
+                }
+            )
+        return out
 
     async def place_limit(self, symbol, side, qty, price, *, post_only):
         oid = f"o{len(self.placed) + 1}"
@@ -1831,6 +1859,80 @@ def test_reconcile_external_inventory_clears_gone_holding(tmp_path):
     assert closed[0]["net_eur"] == pytest.approx(5.0 * (110.0 - 100.0) - 1.0)
     assert r.holdings == []
     assert r.status()["positions"] == []
+
+
+def test_reconcile_external_books_partial_sold_delta(tmp_path):
+    """Progressive external sells must ledger the delta — never silent shrink."""
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock((T0 + 3_600_000) / 1000)
+    # Book 10 SOL, venue still holds 4 (6 sold externally).
+    gw = FakeGateway(
+        fill_maker_after_polls=1,
+        free_by_base={"SOL": 4.0},
+        held_by_base={"SOL": 4.0},
+        recent_sells=[
+            {
+                "base": "SOL",
+                "qty": 6.0,
+                "price": 108.0,
+                "fee_eur": 1.5,
+                "ts_ms": T0 + 2_000_000,
+            }
+        ],
+    )
+    r = _runner(tmp_path, gw, clock, universe=("SOL",), clip_eur=500.0, min_volume_eur=0.0)
+    r.holdings = [
+        Holding(
+            pos=Position(
+                "SOL", 100.0, 10.0, 1000.0, T0, 105.0, entry_fee_eur=2.0, venue="bitvavo"
+            ),
+            holding_id="ext-partial",
+        )
+    ]
+    r.marks["SOL"] = 110.0
+    r._gws = {"bitvavo": gw}
+
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert len(closed) == 1
+    assert closed[0]["reason"] == "manual_external"
+    assert closed[0]["detail"] == "reconcile_external_delta"
+    assert closed[0]["qty"] == pytest.approx(6.0)
+    assert closed[0]["price"] == pytest.approx(108.0)
+    assert closed[0]["fee_eur"] == pytest.approx(1.5)
+    # net = 6*(108-100) - 1.5 - entry_fee_share(2*0.6) = 48 - 1.5 - 1.2 = 45.3
+    assert closed[0]["net_eur"] == pytest.approx(45.3)
+    assert len(r.holdings) == 1
+    assert r.holdings[0].pos.quantity == pytest.approx(4.0)
+    assert r.holdings[0].pos.entry_fee_eur == pytest.approx(0.8)
+
+
+def test_reconcile_ignores_locked_resting_sell(tmp_path):
+    """Resting limit sell locks free but total held is unchanged — do not book."""
+    from bot.live.momentum_desk import Position
+    from bot.live.momentum_runner import Holding
+
+    clock = FakeClock((T0 + 60_000) / 1000)
+    gw = FakeGateway(
+        fill_maker_after_polls=1,
+        free_by_base={"SOL": 2.0},  # 3 locked in resting sell
+        held_by_base={"SOL": 5.0},
+    )
+    r = _runner(tmp_path, gw, clock, universe=("SOL",), clip_eur=500.0, min_volume_eur=0.0)
+    r.holdings = [
+        Holding(
+            pos=Position("SOL", 100.0, 5.0, 500.0, T0, 105.0, entry_fee_eur=1.0, venue="bitvavo"),
+            holding_id="resting",
+        )
+    ]
+    r.marks["SOL"] = 110.0
+    r._gws = {"bitvavo": gw}
+
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert closed == []
+    assert len(r.holdings) == 1
+    assert r.holdings[0].pos.quantity == pytest.approx(5.0)
 
 
 def test_dashboard_open_positions_render_before_heroes():
