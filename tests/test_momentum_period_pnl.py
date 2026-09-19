@@ -124,4 +124,4 @@ def test_dashboard_shows_period_earnings(tmp_path: Path) -> None:
     assert "Netto verdiend" in html
     assert "Deze week" in html and "Deze maand" in html and "Vanaf begin" in html
     assert "+12.34" in html
-    assert "Syne" in html  # new brand font
+    assert "Plus Jakarta Sans" in html  # stitch brand font

@@ -1335,7 +1335,13 @@ def test_dashboard_renders_positions_decision_and_ledger():
         "dry_run": False,
         "venue": "bitvavo",
         "config": {
-            k: (list(v) if isinstance(v, tuple) else v) for k, v in DeskConfig().__dict__.items()
+            **{
+                k: (list(v) if isinstance(v, tuple) else v)
+                for k, v in DeskConfig().__dict__.items()
+            },
+            # Fixture expects ratchet: peak 5.5% arms the tight trail.
+            "trail_tight_after": 0.04,
+            "trail_tight_pct": 0.02,
         },
         "positions": [
             {
