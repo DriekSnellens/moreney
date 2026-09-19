@@ -468,6 +468,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   body { padding-bottom: calc(7.1rem + env(safe-area-inset-bottom, 0px)); }
   .topbar {
     padding: .5rem .7rem;
+    padding-top: calc(.5rem + env(safe-area-inset-top, 0px));
     min-height: 3.1rem;
     gap: .4rem;
   }
