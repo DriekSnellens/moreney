@@ -1242,7 +1242,14 @@ def _rules(cfg: Mapping[str, Any]) -> str:
                 )
             ),
         ),
-        ("Hard stop", f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"),
+        (
+            "Hard stop",
+            (
+                f"−{float(cfg.get('hard_stop_eur') or 0):.0f} € bruto"
+                if float(cfg.get("hard_stop_eur") or 0.0) > 0.0
+                else f"−{100 * float(cfg.get('hard_stop_pct') or 0):.1f}%"
+            ),
+        ),
         (
             "BE-arm",
             (

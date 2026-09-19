@@ -110,6 +110,9 @@ class DeskConfig:
     trail_tight_after: float = 0.0
     trail_tight_pct: float = 0.02
     hard_stop_pct: float = 0.03
+    # Absolute hard stop in EUR of gross loss (0 = use ``hard_stop_pct`` only).
+    # Live preference: fixed −€200 so large clips are not allowed −3% bleed.
+    hard_stop_eur: float = 0.0
     # Staged early stop (0 disables): until peak gain reaches
     # ``early_stop_until_peak``, use the tighter ``early_stop_pct`` instead of
     # ``hard_stop_pct``. Off with fixed5 — early2 worsened max DD on the grid.
@@ -1018,16 +1021,16 @@ def evaluate_exit(
             trail = min(trail, cfg.trail_tight_pct)
         return base_trail, trail
 
-    def _stop_pct_for(peak: float) -> tuple[float, str]:
-        """Effective stop distance and reason tag (hard_stop vs early_stop)."""
-        stop = cfg.hard_stop_pct
-        reason = "hard_stop"
+    def _stop_px_for(peak: float) -> tuple[float, str]:
+        """Hard/early stop price and reason. Prefers ``hard_stop_eur`` when set."""
         if cfg.early_stop_pct > 0.0 and cfg.early_stop_until_peak > 0.0 and pos.entry_price > 0:
             peak_gain = peak / pos.entry_price - 1.0
             if peak_gain < cfg.early_stop_until_peak:
-                stop = cfg.early_stop_pct
-                reason = "early_stop"
-        return stop, reason
+                return pos.entry_price * (1.0 - cfg.early_stop_pct), "early_stop"
+        eur_cap = float(getattr(cfg, "hard_stop_eur", 0.0) or 0.0)
+        if eur_cap > 0.0 and pos.quantity > 0 and pos.entry_price > 0:
+            return pos.entry_price - eur_cap / pos.quantity, "hard_stop"
+        return pos.entry_price * (1.0 - cfg.hard_stop_pct), "hard_stop"
 
     be_arm = float(getattr(cfg, "be_arm_peak_pct", 0.0) or 0.0)
     partial_take = float(getattr(cfg, "partial_take_pct", 0.0) or 0.0)
@@ -1045,8 +1048,7 @@ def evaluate_exit(
         # Intrabar semantics: stops are tested against the low with the peak
         # known *before* this bar (the order of high and low inside a bar is
         # unknown). A gap through the level fills at the open.
-        stop_pct, stop_reason = _stop_pct_for(pos.peak)
-        stop_px = pos.entry_price * (1.0 - stop_pct)
+        stop_px, stop_reason = _stop_px_for(pos.peak)
         if low <= stop_px:
             px = min(stop_px, open_)
             return ExitDecision(stop_reason, pos.gross_return(px), urgent=True, price=px)
@@ -1085,11 +1087,11 @@ def evaluate_exit(
             )
     else:
         # Peak for stop staging uses the pre-bar peak (same as exit_on_touch).
-        stop_pct, stop_reason = _stop_pct_for(pos.peak)
+        stop_px, stop_reason = _stop_px_for(pos.peak)
         if pos.peak < high:
             pos.peak = high
         gross = pos.gross_return(close)
-        if close <= pos.entry_price * (1.0 - stop_pct):
+        if close <= stop_px:
             return ExitDecision(stop_reason, gross, urgent=True)
         base_trail, trail = _trail_for(pos.peak)
         if pos.peak > 0 and close <= pos.peak * (1.0 - trail):

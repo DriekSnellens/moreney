@@ -394,6 +394,36 @@ def test_desk_config_from_settings_wires_be_arm_and_partial():
     assert cfg.partial_frac == 0.40
 
 
+def test_hard_stop_eur_caps_loss_independent_of_clip_pct():
+    cfg = DeskConfig(
+        hard_stop_pct=0.03,  # would be −€600 on this bag
+        hard_stop_eur=200.0,
+        trail_pct=0.10,
+        midflat_hours=0.0,
+        green_deadline_hours=0.0,
+    )
+    # €20k bag: −€200 = −1% → stop at 99.
+    pos = Position("X", 100.0, 200.0, 20_000.0, T0, 100.0)
+    assert evaluate_exit(pos, [T0, 100, 100.2, 99.5, 99.5, 1], cfg) is None
+    d = evaluate_exit(pos, [T0 + BAR_MS, 99.5, 99.6, 98.9, 98.9, 1], cfg)
+    assert d is not None and d.reason == "hard_stop" and d.urgent
+    # −1.1% ≈ −€220; pct stop would still wait for −3%.
+    assert d.gross_return == pytest.approx(-0.011)
+
+
+def test_desk_config_from_settings_wires_hard_stop_eur():
+    from bot.core.config import Settings
+    from bot.live.momentum_runner import desk_config_from_settings
+
+    cfg = desk_config_from_settings(
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            momentum_desk_hard_stop_eur=200.0,
+        )
+    )
+    assert cfg.hard_stop_eur == 200.0
+
+
 def test_be_arm_exits_at_fee_be_after_peak():
     cfg = DeskConfig(
         trail_pct=0.10,
