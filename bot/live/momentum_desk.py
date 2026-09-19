@@ -111,7 +111,7 @@ class DeskConfig:
     trail_tight_pct: float = 0.02
     hard_stop_pct: float = 0.03
     # Absolute hard stop in EUR of gross loss (0 = use ``hard_stop_pct`` only).
-    # Live preference: fixed −€200 so large clips are not allowed −3% bleed.
+    # Live preference: fixed −€300 so large clips are not allowed −3% bleed.
     hard_stop_eur: float = 0.0
     # Staged early stop (0 disables): until peak gain reaches
     # ``early_stop_until_peak``, use the tighter ``early_stop_pct`` instead of

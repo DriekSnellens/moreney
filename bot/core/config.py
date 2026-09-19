@@ -591,7 +591,7 @@ class Settings(BaseSettings):
     momentum_desk_trail_tight_after: float = Field(default=0.0, ge=0, le=0.5)
     momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
-    # Absolute gross-loss hard stop (0 = percentage only). Live: −€200.
+    # Absolute gross-loss hard stop (0 = percentage only). Live: −€300.
     momentum_desk_hard_stop_eur: float = Field(default=0.0, ge=0.0, le=50_000.0)
     # Early stop off by default (with fixed5, early2 worsened max DD on 12w grid).
     momentum_desk_early_stop_pct: float = Field(default=0.0, ge=0, le=0.2)
