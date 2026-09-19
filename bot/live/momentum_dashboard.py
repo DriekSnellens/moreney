@@ -462,27 +462,27 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 @media (max-width: 979px) {
   .mobile-dock { display: grid; }
   .sticky-actions {
-    bottom: calc(3.35rem + env(safe-area-inset-bottom, 0px));
-    padding: .5rem .65rem;
+    bottom: calc(3.25rem + env(safe-area-inset-bottom, 0px));
+    padding: .4rem .55rem;
   }
-  body { padding-bottom: calc(7.4rem + env(safe-area-inset-bottom, 0px)); }
+  body { padding-bottom: calc(7.1rem + env(safe-area-inset-bottom, 0px)); }
   .topbar {
     padding: .5rem .7rem;
     min-height: 3.1rem;
     gap: .4rem;
   }
-  .topbar-left { gap: .45rem; }
+  .topbar-left { gap: .35rem; }
   .topbar-right, .ops-row { display: none !important; }
   .top-metric {
-    display: flex; padding: 0 .35rem;
+    display: flex; padding: 0 .3rem;
     border-left: 1px solid var(--border-soft);
     min-width: 0;
   }
   .top-metric.winrate { display: none; }
-  .top-metric .k { font-size: .55rem; }
+  .top-metric .k { font-size: .52rem; }
   .top-metric .v {
-    font-size: .74rem;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 5.5rem;
+    font-size: .72rem;
+    white-space: nowrap;
   }
   .wrap {
     padding: .7rem .65rem 1.1rem;
@@ -544,17 +544,26 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
     gap: .45rem .55rem;
   }
   .btn {
-    min-height: 44px;
-    padding: .55rem .8rem;
-    font-size: .85rem;
+    min-height: 42px;
+    padding: .5rem .7rem;
+    font-size: .82rem;
   }
   .sticky-actions .toolbar {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
-    gap: .4rem;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: .35rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .sticky-actions .toolbar form { display: contents; }
-  .sticky-actions .toolbar .btn { width: 100%; }
+  .sticky-actions .toolbar .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    padding: .45rem .5rem;
+    font-size: .78rem;
+    white-space: nowrap;
+  }
   .fold > summary { padding: .8rem .75rem; min-height: 44px; }
   .fold-body { padding: 0 .75rem .8rem; }
   .rules .row {
@@ -580,11 +589,12 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 }
 
 @media (max-width: 420px) {
-  .top-metric.openpnl .k { display: none; }
-  .top-metric .v { max-width: 4.8rem; }
+  .top-metric .k { display: none; }
+  .top-metric .v { font-size: .7rem; }
   .earn-foot span { flex: 1 1 auto; }
   .earn-foot span:last-child { width: 100%; }
   .mobile-dock a { font-size: .55rem; min-height: 2.7rem; }
+  .sticky-actions .toolbar .btn { font-size: .74rem; padding: .42rem .4rem; }
   .pos-card .meta, .pos-card .grid { grid-template-columns: 1fr 1fr; }
 }
 
@@ -960,10 +970,13 @@ def _sell_all_confirm_panel(status: Mapping[str, Any]) -> str:
 
 
 def _toolbar(
-    *, running: bool, has_positions: bool, hold: bool, show_volatile: bool = False
+    *, running: bool, has_positions: bool, hold: bool, show_volatile: bool = False,
+    compact: bool = False,
 ) -> str:
     if not running:
         return ""
+    report_label = "Report" if compact else "Daily report"
+    sell_label = "Verkoop" if compact else "Verkoop alles"
     bits = [
         '<div class="toolbar">',
         '<form method="get" action="/live/momentum">'
@@ -971,13 +984,13 @@ def _toolbar(
         '<button type="submit" class="btn primary">Simuleer</button></form>',
         '<form method="get" action="/live/momentum">'
         '<input type="hidden" name="report" value="1">'
-        '<button type="submit" class="btn">Daily report</button></form>',
+        f'<button type="submit" class="btn">{report_label}</button></form>',
     ]
     if has_positions:
         bits.append(
             '<form method="get" action="/live/momentum">'
             '<input type="hidden" name="sell_all" value="1">'
-            '<button type="submit" class="btn danger">Verkoop alles</button></form>'
+            f'<button type="submit" class="btn danger">{sell_label}</button></form>'
         )
     if show_volatile:
         bits.append(
@@ -1985,6 +1998,13 @@ def render_momentum_dashboard(
     toolbar = _toolbar(
         running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=show_vol
     )
+    toolbar_mobile = _toolbar(
+        running=running,
+        has_positions=n_pos > 0,
+        hold=hold_page,
+        show_volatile=show_vol,
+        compact=True,
+    )
     sell_html = _sell_confirm_panel(status, sell) if sell else ""
     sell_all_html = _sell_all_confirm_panel(status) if sell_all else ""
     report_html = _report_panel(report) if report else ""
@@ -2154,8 +2174,8 @@ def render_momentum_dashboard(
 </nav>
 """
     sticky = (
-        f'<div class="sticky-actions">{toolbar}</div>'
-        if toolbar and not hold_page
+        f'<div class="sticky-actions">{toolbar_mobile}</div>'
+        if toolbar_mobile and not hold_page
         else ""
     )
     html = f"""<!doctype html>
