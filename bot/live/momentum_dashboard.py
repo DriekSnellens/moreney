@@ -44,6 +44,7 @@ _CSS = """
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
+html { overflow-x: clip; }
 body {
   color: var(--ink);
   font-family: var(--sans);
@@ -53,6 +54,8 @@ body {
     var(--canvas);
   padding-bottom: 5.5rem;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+  -webkit-tap-highlight-color: transparent;
 }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
@@ -155,7 +158,10 @@ body {
   background: rgba(7,11,18,.78); backdrop-filter: blur(18px);
   border-bottom: 1px solid var(--border);
 }
-.topbar-left { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.topbar-left {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: nowrap;
+  min-width: 0; flex: 1 1 auto; overflow: hidden;
+}
 .topbar-right { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
 .top-metric {
   display: none; flex-direction: column; gap: .1rem; padding: 0 .55rem;
@@ -347,7 +353,11 @@ body {
 .toolbar { display: flex; flex-wrap: wrap; gap: .45rem; margin: .7rem 0 0; }
 .ops-row { margin-top: .85rem; }
 
-.table-scroll { overflow-x: auto; border-radius: .65rem; border: 1px solid var(--border-soft); }
+.table-scroll {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  border-radius: .65rem; border: 1px solid var(--border-soft);
+  overscroll-behavior-x: contain;
+}
 table.desk, table.ledger {
   width: 100%; border-collapse: collapse; font-size: .82rem;
 }
@@ -370,16 +380,21 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   border: 1px solid var(--border); border-radius: var(--radius);
   background: rgba(15,23,42,.9); padding: .9rem 1rem;
 }
-.pos-card .title {
+.pos-card .row1, .pos-card .title {
   display: flex; justify-content: space-between; gap: .5rem; align-items: baseline;
   font-family: var(--display); font-weight: 700; font-size: 1.05rem;
 }
-.pos-card .grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: .45rem .75rem; margin-top: .7rem;
-  font-size: .78rem;
+.pos-card .row1 strong { font-size: 1.1rem; letter-spacing: -.02em; }
+.pos-card .meta, .pos-card .grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .5rem .75rem; margin-top: .7rem;
+  font-size: .8rem; font-variant-numeric: tabular-nums;
 }
-.pos-card .grid span { color: var(--muted-2); display: block; font-size: .65rem;
-  letter-spacing: .05em; text-transform: uppercase; margin-bottom: .1rem; }
+.pos-card .meta span, .pos-card .grid span {
+  color: var(--muted-2); display: block; font-size: .62rem;
+  letter-spacing: .05em; text-transform: uppercase; margin-bottom: .12rem; font-weight: 600;
+}
+.pos-card .actions { margin-top: .85rem; }
+.pos-card .actions .btn { width: 100%; min-height: 44px; }
 
 .fold {
   margin-top: 1rem; border: 1px solid var(--border); border-radius: var(--radius);
@@ -402,7 +417,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 
 .sticky-actions {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-  padding: .65rem .75rem calc(.65rem + env(safe-area-inset-bottom));
+  padding: .65rem .75rem calc(.65rem + env(safe-area-inset-bottom, 0px));
   background: rgba(7,11,18,.92); backdrop-filter: blur(16px);
   border-top: 1px solid var(--border);
 }
@@ -420,16 +435,172 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 .foot a { color: var(--primary); text-decoration: none; font-weight: 600; }
 .foot a:hover { text-decoration: underline; }
 
-@media (max-width: 720px) {
-  .wrap { padding: .85rem .7rem 0; }
-  .masthead { padding: 1rem .95rem; }
+/* Mobile bottom dock (nav) — desktop hidden */
+.mobile-dock {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+  padding: .3rem .4rem calc(.3rem + env(safe-area-inset-bottom, 0px));
+  background: rgba(10,15,29,.96); backdrop-filter: blur(18px);
+  border-top: 1px solid var(--border);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .15rem;
+}
+.mobile-dock a {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .12rem; min-height: 2.85rem; padding: .3rem .15rem; border-radius: .55rem;
+  text-decoration: none; color: var(--muted); font-size: .6rem; font-weight: 600;
+  letter-spacing: .02em; text-align: center; touch-action: manipulation;
+}
+.mobile-dock a .ico {
+  font-size: .9rem; line-height: 1; color: var(--muted-2);
+}
+.mobile-dock a.active {
+  color: #a7f3d0; background: rgba(16,185,129,.12);
+}
+.mobile-dock a.active .ico { color: var(--primary); }
+
+@media (max-width: 979px) {
+  .mobile-dock { display: grid; }
+  .sticky-actions {
+    bottom: calc(3.35rem + env(safe-area-inset-bottom, 0px));
+    padding: .5rem .65rem;
+  }
+  body { padding-bottom: calc(7.4rem + env(safe-area-inset-bottom, 0px)); }
+  .topbar {
+    padding: .5rem .7rem;
+    min-height: 3.1rem;
+    gap: .4rem;
+  }
+  .topbar-left { gap: .45rem; }
+  .topbar-right, .ops-row { display: none !important; }
+  .top-metric {
+    display: flex; padding: 0 .35rem;
+    border-left: 1px solid var(--border-soft);
+    min-width: 0;
+  }
+  .top-metric.winrate { display: none; }
+  .top-metric .k { font-size: .55rem; }
+  .top-metric .v {
+    font-size: .74rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 5.5rem;
+  }
+  .wrap {
+    padding: .7rem .65rem 1.1rem;
+    max-width: 100%;
+  }
+  .masthead {
+    padding: .85rem .75rem .9rem;
+    border-radius: .85rem;
+    gap: .65rem;
+    margin-bottom: .75rem;
+  }
+  .masthead-top { gap: .55rem; }
+  .brand {
+    font-size: clamp(1.45rem, 7.5vw, 1.95rem);
+  }
+  .brand-sub { font-size: .8rem; max-width: none; line-height: 1.4; }
+  .earn-label { margin-bottom: .3rem; }
+  .earn-grid { gap: 0; }
+  .earn-tile {
+    padding: .65rem 0;
+    border-top: 1px solid var(--border-soft);
+  }
+  .earn-tile:first-child { border-top: 0; padding-top: .5rem; }
+  .earn-tile .amount {
+    font-size: clamp(1.3rem, 6.5vw, 1.7rem);
+  }
+  .earn-foot {
+    gap: .3rem .75rem;
+    font-size: .72rem;
+  }
+  .panel {
+    margin-top: .75rem;
+    padding: .75rem .7rem .65rem;
+    border-radius: .85rem;
+  }
+  .panel-head { margin-bottom: .55rem; }
+  .panel-head h2, .fold-head, .card-head h2, .section h2 { font-size: .9rem; }
+  .pulse {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .5rem;
+    margin-top: .75rem;
+  }
+  .pulse-item, .hero-card {
+    padding: .7rem .65rem;
+    border-radius: .7rem;
+  }
+  .pulse-item .value, .hero-card .value {
+    font-size: clamp(1.02rem, 4.2vw, 1.22rem);
+  }
+  .pulse-item .hint, .hero-card .hint {
+    font-size: .65rem;
+    line-height: 1.35;
+  }
   .desk-wide { display: none; }
   .pos-cards { display: grid; }
-  table.desk { font-size: .78rem; }
-  table.desk th, table.desk td { padding: .45rem .4rem; }
+  .pos-card { padding: .75rem .8rem; }
+  .pos-card .meta, .pos-card .grid {
+    grid-template-columns: 1fr 1fr;
+    gap: .45rem .55rem;
+  }
+  .btn {
+    min-height: 44px;
+    padding: .55rem .8rem;
+    font-size: .85rem;
+  }
+  .sticky-actions .toolbar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+    gap: .4rem;
+  }
+  .sticky-actions .toolbar form { display: contents; }
+  .sticky-actions .toolbar .btn { width: 100%; }
+  .fold > summary { padding: .8rem .75rem; min-height: 44px; }
+  .fold-body { padding: 0 .75rem .8rem; }
+  .rules .row {
+    grid-template-columns: 1fr;
+    gap: .12rem;
+    padding: .4rem 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .rules .k { font-size: .64rem; }
+  .hint { font-size: .76rem; padding: .55rem .65rem; }
+  .table-scroll {
+    margin: 0 -.1rem;
+    border-radius: .55rem;
+  }
+  table.desk, table.ledger { font-size: .76rem; }
+  table.desk th, table.ledger th,
+  table.desk td, table.ledger td { padding: .55rem .5rem; }
+  .foot { font-size: .66rem; gap: .35rem .55rem; }
+  .stack.two { grid-template-columns: 1fr; }
+  .card { padding: .8rem .85rem; }
+  .card.section { margin-top: .85rem; }
+  .sleeve-split { grid-template-columns: 1fr; }
 }
-@media (min-width: 721px) {
+
+@media (max-width: 420px) {
+  .top-metric.openpnl .k { display: none; }
+  .top-metric .v { max-width: 4.8rem; }
+  .earn-foot span { flex: 1 1 auto; }
+  .earn-foot span:last-child { width: 100%; }
+  .mobile-dock a { font-size: .55rem; min-height: 2.7rem; }
+  .pos-card .meta, .pos-card .grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (min-width: 721px) and (max-width: 979px) {
+  .pulse { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .earn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .earn-tile + .earn-tile { border-left: 1px solid var(--border-soft); border-top: 0; }
+  .earn-tile { padding: .7rem .25rem .2rem; }
+  .wrap { padding: .9rem 1rem 1.4rem; }
+  .top-metric.winrate { display: flex; }
+}
+
+@media (min-width: 980px) {
+  .mobile-dock { display: none !important; }
   .sticky-actions { display: none; }
+  body { padding-bottom: 0; }
 }
 """
 
@@ -1967,17 +2138,32 @@ def render_momentum_dashboard(
     {pill}
     <div class="top-metric"><span class="k">Equity</span>
       <span class="v" data-live="equity">{_fmt_eur(equity, signed=False)}</span></div>
-    <div class="top-metric"><span class="k">Open PnL</span>
+    <div class="top-metric openpnl"><span class="k">Open</span>
       <span class="v {_cls(status.get('unrealized_net_eur'))}" data-live="open-pnl">{_fmt_eur(status.get('unrealized_net_eur'))}</span></div>
-    <div class="top-metric"><span class="k">Win rate</span><span class="v">{escape(win_rate)}</span></div>
+    <div class="top-metric winrate"><span class="k">Win rate</span><span class="v">{escape(win_rate)}</span></div>
   </div>
   <div class="topbar-right">{toolbar}</div>
 </header>
 """
+    mobile_dock = f"""
+<nav class="mobile-dock" aria-label="Mobile workspace">
+  <a class="{active_cls}" href="/live/momentum"><span class="ico">◆</span>Desk</a>
+  <a class="{vol_cls}" href="/live/momentum/volatile"><span class="ico">◇</span>Volatile</a>
+  <a href="/live/momentum/ledger"><span class="ico">☰</span>Ledger</a>
+  <a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>
+</nav>
+"""
+    sticky = (
+        f'<div class="sticky-actions">{toolbar}</div>'
+        if toolbar and not hold_page
+        else ""
+    )
     html = f"""<!doctype html>
 <html lang="nl" class="dark"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#070B12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 {refresh_meta}
 <title>Moreney · Momentum Desk</title>
 <style>{_CSS}</style></head>
@@ -2012,7 +2198,8 @@ def render_momentum_dashboard(
 </div>
 </div>
 </div>
-<div class="sticky-actions">{toolbar}</div>
+{sticky}
+{mobile_dock}
 {live_js}
 </body></html>"""
     return HTMLResponse(html)

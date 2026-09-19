@@ -2040,6 +2040,7 @@ def test_dashboard_sell_all_and_report_render():
     }
     html = render_momentum_dashboard(status, []).body.decode()
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
+    assert "mobile-dock" in html and "viewport-fit=cover" in html
     assert "Moreney" in html and ("Netto verdiend" in html or "Deze week" in html)
     # Volatile sleeve is off by default (core-only desk).
     assert "Volatile ledger" not in html
