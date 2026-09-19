@@ -320,7 +320,27 @@ def simulate(
             if decision is None:
                 continue
             exit_price = decision.price if decision.price is not None else float(bar[4])
-            net = net_pnl_eur(pos, exit_price, None, cfg)
+            frac = float(getattr(decision, "qty_frac", 1.0) or 1.0)
+            frac = min(1.0, max(0.0, frac))
+            sell_notional = pos.notional_eur if frac >= 0.999 else pos.notional_eur * frac
+            sell_qty = pos.quantity if frac >= 0.999 else pos.quantity * frac
+            # Scale fee attribution to the sold clip for partials.
+            sold = Position(
+                base=pos.base,
+                entry_price=pos.entry_price,
+                quantity=sell_qty,
+                notional_eur=sell_notional,
+                opened_ms=pos.opened_ms,
+                peak=pos.peak,
+                entry_fee_eur=pos.entry_fee_eur * (sell_qty / pos.quantity)
+                if pos.quantity > 0
+                else 0.0,
+                entry_reason=pos.entry_reason,
+                venue=pos.venue,
+                entry_ctx=dict(pos.entry_ctx),
+                partial_taken=pos.partial_taken,
+            )
+            net = net_pnl_eur(sold, exit_price, None, cfg)
             res.closed.append(
                 ClosedTrade(
                     base=pos.base,
@@ -328,7 +348,7 @@ def simulate(
                     closed_ms=t,
                     entry_price=pos.entry_price,
                     exit_price=exit_price,
-                    notional_eur=pos.notional_eur,
+                    notional_eur=sell_notional,
                     gross_return=decision.gross_return,
                     peak_return=pos.peak / pos.entry_price - 1.0,
                     net_eur=net,
@@ -337,11 +357,18 @@ def simulate(
                 )
             )
             ledger.note_close(net, t)
-            positions.remove(pos)
-            if bool(getattr(cfg, "refill_on_exit", False)):
-                _try_entries(
-                    res, ledger, positions, candles_by_base, cfg, view, t, log_decision=False
-                )
+            if frac >= 0.999 or (pos.quantity - sell_qty) * exit_price < 5.0:
+                positions.remove(pos)
+                if bool(getattr(cfg, "refill_on_exit", False)):
+                    _try_entries(
+                        res, ledger, positions, candles_by_base, cfg, view, t, log_decision=False
+                    )
+            else:
+                remain_qty = pos.quantity - sell_qty
+                pos.quantity = remain_qty
+                pos.notional_eur = remain_qty * pos.entry_price
+                pos.entry_fee_eur = max(0.0, float(pos.entry_fee_eur) - sold.entry_fee_eur)
+                pos.partial_taken = True
         # 2) Entries at decision hours.
         if is_decision_time(t, cfg):
             _try_entries(

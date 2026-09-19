@@ -110,11 +110,23 @@ class DeskConfig:
     trail_tight_after: float = 0.0
     trail_tight_pct: float = 0.02
     hard_stop_pct: float = 0.03
+    # Absolute hard stop in EUR of gross loss (0 = use ``hard_stop_pct`` only).
+    # Live preference: fixed −€300 so large clips are not allowed −3% bleed.
+    hard_stop_eur: float = 0.0
     # Staged early stop (0 disables): until peak gain reaches
     # ``early_stop_until_peak``, use the tighter ``early_stop_pct`` instead of
     # ``hard_stop_pct``. Off with fixed5 — early2 worsened max DD on the grid.
     early_stop_pct: float = 0.0
     early_stop_until_peak: float = 0.0
+    # Break-even arm (0 disables): once peak gain clears this level, exit at
+    # fee-aware BE if price gives the winner back. Keeps sub-trail greens from
+    # flipping into hard-stop losers without clipping runners still climbing.
+    be_arm_peak_pct: float = 0.0
+    # One-time scale-out (0 ``partial_take_pct`` disables): when close (or bar
+    # high under exit_on_touch) clears the gain target, sell ``partial_frac``
+    # and let the rest run under trail / BE-arm.
+    partial_take_pct: float = 0.0
+    partial_frac: float = 0.40
     # WR winner: 36h time exit (vs prior 24h) with the tighter trail pack.
     time_exit_hours: float = 36.0
     # Time-to-green (0 disables): if age ≥ ``green_deadline_hours`` and peak
@@ -501,6 +513,8 @@ class Position:
     venue: str = "bitvavo"
     # Generic attributes at entry (persisted for outcome learning on close).
     entry_ctx: dict[str, Any] = field(default_factory=dict)
+    # One-shot scale-out latch (persisted so live restart does not re-clip).
+    partial_taken: bool = False
 
     def gross_return(self, price: float) -> float:
         return price / self.entry_price - 1.0 if self.entry_price > 0 else 0.0
@@ -513,6 +527,8 @@ class ExitDecision:
     urgent: bool
     # Fill assumption for the backtest when the exit triggered intrabar.
     price: float | None = None
+    # Fraction of open qty to sell (1.0 = full exit). Partial scale-outs use <1.
+    qty_frac: float = 1.0
 
 
 @dataclass
@@ -1005,23 +1021,34 @@ def evaluate_exit(
             trail = min(trail, cfg.trail_tight_pct)
         return base_trail, trail
 
-    def _stop_pct_for(peak: float) -> tuple[float, str]:
-        """Effective stop distance and reason tag (hard_stop vs early_stop)."""
-        stop = cfg.hard_stop_pct
-        reason = "hard_stop"
+    def _stop_px_for(peak: float) -> tuple[float, str]:
+        """Hard/early stop price and reason. Prefers ``hard_stop_eur`` when set."""
         if cfg.early_stop_pct > 0.0 and cfg.early_stop_until_peak > 0.0 and pos.entry_price > 0:
             peak_gain = peak / pos.entry_price - 1.0
             if peak_gain < cfg.early_stop_until_peak:
-                stop = cfg.early_stop_pct
-                reason = "early_stop"
-        return stop, reason
+                return pos.entry_price * (1.0 - cfg.early_stop_pct), "early_stop"
+        eur_cap = float(getattr(cfg, "hard_stop_eur", 0.0) or 0.0)
+        if eur_cap > 0.0 and pos.quantity > 0 and pos.entry_price > 0:
+            return pos.entry_price - eur_cap / pos.quantity, "hard_stop"
+        return pos.entry_price * (1.0 - cfg.hard_stop_pct), "hard_stop"
+
+    be_arm = float(getattr(cfg, "be_arm_peak_pct", 0.0) or 0.0)
+    partial_take = float(getattr(cfg, "partial_take_pct", 0.0) or 0.0)
+    partial_frac = float(getattr(cfg, "partial_frac", 0.40) or 0.0)
+    partial_frac = min(0.95, max(0.0, partial_frac))
+
+    def _peak_gain(peak: float) -> float:
+        return peak / pos.entry_price - 1.0 if pos.entry_price > 0 else 0.0
+
+    def _be_stop_px() -> float:
+        # Fee-aware BE: gross must clear round-trip fee for net flat.
+        return pos.entry_price * (1.0 + float(cfg.fee_rt))
 
     if cfg.exit_on_touch:
         # Intrabar semantics: stops are tested against the low with the peak
         # known *before* this bar (the order of high and low inside a bar is
         # unknown). A gap through the level fills at the open.
-        stop_pct, stop_reason = _stop_pct_for(pos.peak)
-        stop_px = pos.entry_price * (1.0 - stop_pct)
+        stop_px, stop_reason = _stop_px_for(pos.peak)
         if low <= stop_px:
             px = min(stop_px, open_)
             return ExitDecision(stop_reason, pos.gross_return(px), urgent=True, price=px)
@@ -1032,21 +1059,56 @@ def evaluate_exit(
                 px = min(trail_px, open_)
                 reason = "trail" if low <= pos.peak * (1.0 - base_trail) else "trail_alphai"
                 return ExitDecision(reason, pos.gross_return(px), urgent=False, price=px)
+        # BE-arm uses pre-bar peak (same unknown high/low order as hard stop).
+        if be_arm > 0.0 and _peak_gain(pos.peak) >= be_arm:
+            be_px = _be_stop_px()
+            if low <= be_px:
+                px = min(be_px, open_)
+                return ExitDecision("be_stop", pos.gross_return(px), urgent=False, price=px)
         if pos.peak < high:
             pos.peak = high
         gross = pos.gross_return(close)
+        # Partial once peak has cleared the take level and close is still
+        # above fee-BE (harvest even if price has already given some back).
+        if (
+            partial_take > 0.0
+            and partial_frac > 0.0
+            and not bool(getattr(pos, "partial_taken", False))
+            and _peak_gain(pos.peak) >= partial_take
+            and gross > float(cfg.fee_rt)
+        ):
+            px = max(float(high), pos.entry_price * (1.0 + partial_take))
+            return ExitDecision(
+                "partial_take",
+                pos.gross_return(px),
+                urgent=False,
+                price=px,
+                qty_frac=partial_frac,
+            )
     else:
         # Peak for stop staging uses the pre-bar peak (same as exit_on_touch).
-        stop_pct, stop_reason = _stop_pct_for(pos.peak)
+        stop_px, stop_reason = _stop_px_for(pos.peak)
         if pos.peak < high:
             pos.peak = high
         gross = pos.gross_return(close)
-        if close <= pos.entry_price * (1.0 - stop_pct):
+        if close <= stop_px:
             return ExitDecision(stop_reason, gross, urgent=True)
         base_trail, trail = _trail_for(pos.peak)
         if pos.peak > 0 and close <= pos.peak * (1.0 - trail):
             reason = "trail" if close <= pos.peak * (1.0 - base_trail) else "trail_alphai"
             return ExitDecision(reason, gross, urgent=False)
+        if be_arm > 0.0 and _peak_gain(pos.peak) >= be_arm and gross <= float(cfg.fee_rt):
+            return ExitDecision("be_stop", gross, urgent=False)
+        if (
+            partial_take > 0.0
+            and partial_frac > 0.0
+            and not bool(getattr(pos, "partial_taken", False))
+            and _peak_gain(pos.peak) >= partial_take
+            and gross > float(cfg.fee_rt)
+        ):
+            return ExitDecision(
+                "partial_take", gross, urgent=False, qty_frac=partial_frac
+            )
     age_ms = bar_end - pos.opened_ms
     green_h = float(cfg.green_deadline_hours)
     if green_h > 0.0 and age_ms >= green_h * 3600_000:
