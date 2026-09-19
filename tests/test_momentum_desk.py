@@ -1335,7 +1335,13 @@ def test_dashboard_renders_positions_decision_and_ledger():
         "dry_run": False,
         "venue": "bitvavo",
         "config": {
-            k: (list(v) if isinstance(v, tuple) else v) for k, v in DeskConfig().__dict__.items()
+            **{
+                k: (list(v) if isinstance(v, tuple) else v)
+                for k, v in DeskConfig().__dict__.items()
+            },
+            # Fixture expects ratchet: peak 5.5% arms the tight trail.
+            "trail_tight_after": 0.04,
+            "trail_tight_pct": 0.02,
         },
         "positions": [
             {
@@ -2034,6 +2040,7 @@ def test_dashboard_sell_all_and_report_render():
     }
     html = render_momentum_dashboard(status, []).body.decode()
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
+    assert "mobile-dock" in html and "viewport-fit=cover" in html
     assert "Moreney" in html and ("Netto verdiend" in html or "Deze week" in html)
     # Volatile sleeve is off by default (core-only desk).
     assert "Volatile ledger" not in html
