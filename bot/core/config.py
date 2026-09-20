@@ -671,13 +671,13 @@ class Settings(BaseSettings):
     # Paper short-weakest sleeve (bear-regime shorts on weakest 15d trends).
     # Always paper — no live short orders. Visible on the momentum dashboard.
     momentum_short_weakest_enabled: bool = True
-    momentum_short_weakest_book_eur: float = Field(default=5_000.0, gt=0)
+    momentum_short_weakest_book_eur: float = Field(default=20_000.0, gt=0)
     momentum_short_weakest_top_n: int = Field(default=3, ge=1, le=8)
     momentum_short_weakest_trail_pct: float = Field(default=0.18, gt=0, le=0.5)
     momentum_short_weakest_max_weight: float = Field(default=0.15, gt=0, le=1.0)
     momentum_short_weakest_deploy_frac: float = Field(default=1.0, gt=0, le=1.0)
-    momentum_short_weakest_day_loss_limit_eur: float = Field(default=150.0, gt=0)
-    momentum_short_weakest_week_loss_limit_eur: float = Field(default=400.0, gt=0)
+    momentum_short_weakest_day_loss_limit_eur: float = Field(default=600.0, gt=0)
+    momentum_short_weakest_week_loss_limit_eur: float = Field(default=1_600.0, gt=0)
     momentum_short_weakest_state_path: str = "./data/momentum_short_weakest_state.json"
     momentum_short_weakest_ledger_path: str = "./data/momentum_short_weakest_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

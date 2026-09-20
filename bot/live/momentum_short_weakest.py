@@ -29,7 +29,7 @@ class ShortWeakestConfig:
     """Knobs for the paper short-weakest sleeve (sweep-optimized defaults)."""
 
     decision_hours_utc: tuple[int, ...] = (8, 16)
-    book_eur: float = 5_000.0
+    book_eur: float = 20_000.0
     lookback_days: int = 15
     top_n: int = 3
     rebalance_days: int = 14
@@ -44,8 +44,8 @@ class ShortWeakestConfig:
     require_btc_below_sma200: bool = True
     sma_days: int = 200
     fee_rt: float = 0.003
-    day_loss_limit_eur: float = 150.0
-    week_loss_limit_eur: float = 400.0
+    day_loss_limit_eur: float = 600.0
+    week_loss_limit_eur: float = 1_600.0
     # Complement momentum: trade when core is flat; cover when core is long.
     only_when_core_idle: bool = True
     cover_when_core_active: bool = True
