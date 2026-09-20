@@ -323,6 +323,7 @@ body {
 
 .stack { display: grid; gap: .85rem; }
 @media (min-width: 980px) { .stack.two { grid-template-columns: 1.12fr .88fr; } }
+@media (min-width: 1100px) { .stack.three { grid-template-columns: 1fr 1fr 1fr; } }
 .hint {
   margin: .65rem 0; padding: .65rem .8rem; border-radius: .6rem;
   font-size: .8rem; border: 1px solid var(--border); background: rgba(255,255,255,.03);
@@ -584,6 +585,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   table.desk td, table.ledger td { padding: .55rem .5rem; }
   .foot { font-size: .66rem; gap: .35rem .55rem; }
   .stack.two { grid-template-columns: 1fr; }
+  .stack.three { grid-template-columns: 1fr; }
   .card { padding: .8rem .85rem; }
   .card.section { margin-top: .85rem; }
   .sleeve-split { grid-template-columns: 1fr; }
@@ -784,18 +786,37 @@ def _positions_table(
         peak_ret = float(p.get("peak_return") or 0)
         mark = p.get("mark")
         gross = p.get("gross_return")
+        side = str(p.get("side") or "long").lower()
         live_peak_ret = peak_ret
         if mark and entry > 0:
-            live_peak_ret = max(peak_ret, float(mark) / entry - 1.0)
-        peak_px = entry * (1 + live_peak_ret)
+            if side == "short":
+                live_peak_ret = max(peak_ret, (entry - float(mark)) / entry)
+            else:
+                live_peak_ret = max(peak_ret, float(mark) / entry - 1.0)
+        peak_px = entry * (1 + live_peak_ret) if side != "short" else entry * (1 - live_peak_ret)
         eff_trail = tight if (tight_after > 0 and live_peak_ret >= tight_after) else trail
-        trail_px = peak_px * (1 - eff_trail)
-        stop_px = entry * (1 - stop)
+        if side == "short":
+            # Cover stop sits above mark as price rises against the short.
+            trail_px = (
+                float(p["trail_stop_px"])
+                if p.get("trail_stop_px") is not None
+                else entry * (1.0 - live_peak_ret + eff_trail)
+            )
+            stop_px = (
+                float(p["hard_stop_px"])
+                if p.get("hard_stop_px") is not None
+                else entry * (1 + stop)
+            )
+            side_badge = " <span class='pill obs' style='font-size:.65rem'>SHORT</span>"
+        else:
+            trail_px = peak_px * (1 - eff_trail)
+            stop_px = entry * (1 - stop)
+            side_badge = ""
         hid = escape(str(p.get("holding_id") or p.get("base") or ""))
         sell = _sell_cell(p, disabled=sell_busy, post_action=post_sell_action)
         out.append(
-            f'<tr data-holding="{hid}" data-entry="{entry}">'
-            f"<td><strong>{escape(str(p.get('base')))}</strong>"
+            f'<tr data-holding="{hid}" data-entry="{entry}" data-side="{side}">'
+            f"<td><strong>{escape(str(p.get('base')))}</strong>{side_badge}"
             f" <span class='muted' style='font-size:.7rem'>{escape(str(p.get('venue') or ''))}"
             f"</span><div class='muted' style='font-size:.7rem'>"
             f"{escape(str(p.get('entry_reason') or ''))}</div></td>"
@@ -817,7 +838,7 @@ def _positions_table(
             "</tr>"
         )
         cards.append(
-            f'<div class="pos-card" data-holding="{hid}" data-entry="{entry}">'
+            f'<div class="pos-card" data-holding="{hid}" data-entry="{entry}" data-side="{side}">'
             f'<div class="row1"><div><strong>{escape(str(p.get("base")))}</strong> '
             f'<span class="muted">{escape(str(p.get("venue") or ""))}</span></div>'
             f'<div class="{_cls(p.get("unrealized_net_eur"))}" style="font-weight:600" data-k="net">'
@@ -1704,45 +1725,93 @@ def _sleeve_card(
 def _sleeves_panel(
     core: Mapping[str, Any],
     volatile: Mapping[str, Any] | None,
+    short_weakest: Mapping[str, Any] | None = None,
 ) -> str:
-    """One desk, two sleeves: stable core + aggressive volatile."""
+    """Desk sleeves: core + optional volatile + optional paper short-weakest."""
     cash = float(core.get("cash_eur") or 0)
     core_exp = float(core.get("exposure_eur") or 0)
     v = volatile or {}
     book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
     deployed = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
     reserved = max(0.0, book - deployed) if book else 0.0
+    sw = short_weakest or {}
+    sw_book = float(sw.get("book_eur") or (sw.get("config") or {}).get("book_eur") or 0)
+    sw_dep = float(sw.get("deployed_eur") or sw.get("exposure_eur") or 0)
     free_shared = max(0.0, cash - core_exp - reserved)
     capital = (
         '<div class="hint" style="margin-bottom:.7rem">'
         "<strong>Kapitaalbeeld</strong> — gedeelde venue-cash, gescheiden boeken. "
-        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)} · "
-        f"volatile book {_fmt_eur(book, signed=False)} "
-        f"(waarvan vrij {_fmt_eur(reserved, signed=False)}) · "
-        f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}."
-        "</div>"
+        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)}"
     )
-    return (
-        '<div class="card section"><div class="card-head">'
-        "<h2>Desk sleeves</h2>"
-        '<span class="muted">stabiel core · aggressief volatile</span></div>'
-        f"{capital}"
-        '<div class="stack two">'
-        + _sleeve_card(
-            title="Core",
-            role="Stabiele RS-desk · core-16 · strengere filters",
-            status=core,
-            href="/live/momentum",
-            book_label=None,
+    if book:
+        capital += (
+            f" · volatile book {_fmt_eur(book, signed=False)} "
+            f"(vrij {_fmt_eur(reserved, signed=False)})"
         )
-        + _sleeve_card(
+    if sw_book:
+        capital += (
+            f" · short-weakest paper {_fmt_eur(sw_book, signed=False)} "
+            f"(ingezet {_fmt_eur(sw_dep, signed=False)})"
+        )
+    capital += f" · ongereserveerd ~{_fmt_eur(free_shared, signed=False)}.</div>"
+    cards = _sleeve_card(
+        title="Core",
+        role="Stabiele RS-desk · core-16 · strengere filters",
+        status=core,
+        href="/live/momentum",
+        book_label=None,
+    )
+    if volatile is not None:
+        cards += _sleeve_card(
             title="Volatile",
             role="Agressievere AlphaI midcaps · soft book · eigen risk",
             status=volatile,
             href="/live/momentum/volatile",
             book_label="Soft book",
         )
+    if short_weakest is not None:
+        cards += _sleeve_card(
+            title="Short weakest",
+            role="Paper bear-shorts · weakest 15d · AlphaI gates · geen live orders",
+            status=short_weakest,
+            href="/live/momentum/short-weakest",
+            book_label="Paper book",
+        )
+    roles = ["stabiel core"]
+    if volatile is not None:
+        roles.append("aggressief volatile")
+    if short_weakest is not None:
+        roles.append("paper short-weakest")
+    return (
+        '<div class="card section"><div class="card-head">'
+        "<h2>Desk sleeves</h2>"
+        f'<span class="muted">{" · ".join(roles)}</span></div>'
+        f"{capital}"
+        f'<div class="stack {"three" if short_weakest is not None and volatile is not None else "two"}">'
+        + cards
         + "</div></div>"
+    )
+
+
+def _short_weakest_actions(status: Mapping[str, Any] | None) -> str:
+    st = status or {}
+    if not st.get("running"):
+        return (
+            '<form method="post" action="/live/momentum/short-weakest/start" '
+            'style="display:inline">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn primary">Start short-weakest PAPER</button></form>'
+        )
+    return (
+        '<form method="post" action="/live/momentum/short-weakest/decide" '
+        'style="display:inline;margin-right:.35rem">'
+        '<input type="hidden" name="execute" value="0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Preview</button></form>'
+        '<form method="post" action="/live/momentum/short-weakest/decide" style="display:inline">'
+        '<input type="hidden" name="execute" value="1">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn primary">Decide</button></form>'
     )
 
 
@@ -1775,6 +1844,7 @@ _LIVE_MARKS_JS = r"""
   if (window.__moreneyMarksPoll) return;
   window.__moreneyMarksPoll = true;
   const STATUS_URL = "/live/momentum/status";
+  const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -1814,10 +1884,22 @@ _LIVE_MARKS_JS = r"""
     const mark = pos.mark == null ? null : Number(pos.mark);
     const peakBar = Number(pos.peak_return || 0);
     const gross = pos.gross_return;
+    const side = String(pos.side || "long").toLowerCase();
     let livePeak = peakBar;
-    if (mark && entry > 0) livePeak = Math.max(peakBar, mark / entry - 1);
+    if (mark && entry > 0) {
+      livePeak = side === "short"
+        ? Math.max(peakBar, (entry - mark) / entry)
+        : Math.max(peakBar, mark / entry - 1);
+    }
     const effTrail = (tightAfter > 0 && livePeak >= tightAfter) ? tight : trail;
-    const trailPx = entry * (1 + livePeak) * (1 - effTrail);
+    let trailPx;
+    if (side === "short") {
+      trailPx = pos.trail_stop_px != null
+        ? Number(pos.trail_stop_px)
+        : entry * (1 - livePeak + effTrail);
+    } else {
+      trailPx = entry * (1 + livePeak) * (1 - effTrail);
+    }
     nodes.forEach((root) => {
       setText(root, "mark", fmtPx(mark));
       if (pos.mark_source != null || pos.mark_age_sec != null) {
@@ -1927,6 +2009,18 @@ _LIVE_MARKS_JS = r"""
     } catch (err) {
       /* ignore transient network blips */
     }
+    try {
+      const sw = await fetch(SHORT_STATUS_URL, { cache: "no-store" });
+      if (!sw.ok) return;
+      const shortStatus = await sw.json();
+      if (!shortStatus || !shortStatus.enabled_setting) return;
+      const knobs = trailKnobs(shortStatus);
+      (shortStatus.positions || []).forEach((p) =>
+        patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight)
+      );
+    } catch (err) {
+      /* short sleeve optional */
+    }
   }
   tick();
   setInterval(tick, INTERVAL_MS);
@@ -1948,6 +2042,9 @@ def render_momentum_dashboard(
     earnings: DeskEarnings | None = None,
     volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_volatile: bool = False,
+    short_weakest: Mapping[str, Any] | None = None,
+    short_weakest_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    show_short_weakest: bool = False,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -2055,44 +2152,98 @@ def render_momentum_dashboard(
     vol_earn = (
         _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
     )
-    sleeves_html = _sleeves_panel(status, volatile) if show_vol else ""
-    if show_vol:
-        positions_html = (
-            '<section class="panel" id="open-pos">'
-            '<div class="stack two">'
+    show_sw = bool(show_short_weakest)
+    sw_earn = (
+        _sleeve_earnings_line(earnings.short_weakest if earnings else None) if show_sw else ""
+    )
+    sleeves_html = (
+        _sleeves_panel(
+            status,
+            volatile if show_vol else None,
+            short_weakest if show_sw else None,
+        )
+        if (show_vol or show_sw)
+        else ""
+    )
+    if show_vol or show_sw:
+        pos_blocks = [
             '<div><div class="panel-head"><h2>Core · open posities</h2></div>'
             f"{_positions_table(status)}</div>"
-            '<div><div class="panel-head"><h2>Volatile · open posities</h2></div>'
-            f"""{_positions_table(
-                volatile or {},
-                sell_all_path=None,
-                post_sell_action="/live/momentum/volatile/sell",
-                empty_text="Geen open volatile-posities — soft book staat klaar.",
-            )}</div></div></section>"""
+        ]
+        if show_vol:
+            pos_blocks.append(
+                '<div><div class="panel-head"><h2>Volatile · open posities</h2></div>'
+                f"""{_positions_table(
+                    volatile or {},
+                    sell_all_path=None,
+                    post_sell_action="/live/momentum/volatile/sell",
+                    empty_text="Geen open volatile-posities — soft book staat klaar.",
+                )}</div>"""
+            )
+        if show_sw:
+            pos_blocks.append(
+                '<div><div class="panel-head"><h2>Short weakest · paper</h2></div>'
+                f"""{_positions_table(
+                    short_weakest or {},
+                    sell_all_path=None,
+                    post_sell_action="/live/momentum/short-weakest/sell",
+                    empty_text="Geen open paper-shorts — wacht op bear-regime + decide.",
+                )}</div>"""
+            )
+        stack = "three" if show_vol and show_sw else "two"
+        positions_html = (
+            f'<section class="panel" id="open-pos"><div class="stack {stack}">'
+            + "".join(pos_blocks)
+            + "</div></section>"
         )
-        decisions_html = (
-            '<section class="panel">'
-            '<div class="stack two">'
+        dec_blocks = [
             '<div><div class="panel-head"><h2>Core · laatste beslissing</h2>'
             f"{_simulate_button() if running and not preview else ''}</div>"
             f"{_decision_panel(status)}</div>"
-            '<div><div class="panel-head"><h2>Volatile · laatste beslissing</h2>'
-            f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>"
-            "</div></section>"
+        ]
+        if show_vol:
+            dec_blocks.append(
+                '<div><div class="panel-head"><h2>Volatile · laatste beslissing</h2>'
+                f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>"
+            )
+        if show_sw:
+            dec_blocks.append(
+                '<div><div class="panel-head"><h2>Short weakest · laatste beslissing</h2>'
+                f"{_short_weakest_actions(short_weakest)}</div>"
+                f"{_decision_panel(short_weakest or {})}</div>"
+            )
+        decisions_html = (
+            f'<section class="panel"><div class="stack {stack}">'
+            + "".join(dec_blocks)
+            + "</div></section>"
         )
-        vol_ledger_html = (
-            f'<details class="fold"><summary><span class="fold-head">Volatile ledger</span>'
-            f'<span class="chev"></span></summary><div class="fold-body">'
-            f"{_ledger_table(volatile_ledger_rows or [])}</div></details>"
-            if volatile_ledger_rows is not None
-            else ""
-        )
+        vol_ledger_html = ""
+        if show_vol and volatile_ledger_rows is not None:
+            vol_ledger_html += (
+                f'<details class="fold"><summary><span class="fold-head">Volatile ledger</span>'
+                f'<span class="chev"></span></summary><div class="fold-body">'
+                f"{_ledger_table(volatile_ledger_rows or [])}</div></details>"
+            )
+        if show_sw and short_weakest_ledger_rows is not None:
+            vol_ledger_html += (
+                f'<details class="fold"><summary><span class="fold-head">Short-weakest ledger</span>'
+                f'<span class="chev"></span></summary><div class="fold-body">'
+                f"{_ledger_table(short_weakest_ledger_rows or [])}</div></details>"
+            )
         footer_links = (
             '<a href="/live/momentum/status">core JSON</a>'
-            '<a href="/live/momentum/volatile/status">volatile JSON</a>'
-            '<a href="/live/momentum/ledger">core ledger</a>'
-            '<a href="/live/momentum/volatile/ledger">volatile ledger</a>'
-            '<a href="/live/momentum/earnings">earnings</a>'
+            + (
+                '<a href="/live/momentum/volatile/status">volatile JSON</a>'
+                if show_vol
+                else ""
+            )
+            + (
+                '<a href="/live/momentum/short-weakest/status">short-weakest JSON</a>'
+                if show_sw
+                else ""
+            )
+            + '<a href="/live/momentum/ledger">core ledger</a>'
+            + '<a href="/live/momentum/earnings">earnings</a>'
         )
     else:
         positions_html = (
@@ -2200,6 +2351,7 @@ def render_momentum_dashboard(
 {sleeves_html}
 {core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or ''}
 {vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile netto · </div>{vol_earn}' or ''}
+{sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest netto · </div>{sw_earn}' or ''}
 <div class="pulse hero-grid">{heroes}</div>
 {preview_html}
 {report_html}
