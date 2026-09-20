@@ -76,10 +76,17 @@ def write_svg(
     path: Path,
     *,
     title: str = "Laatste 12 weken · €20k · live 15m-core vs expert-mix",
+    extra: list[tuple[str, str, list[dict[str, Any]]]] | None = None,
+    rec_label: str = "expert-mix (cash in bear)",
+    live_label: str = "live 15m-core",
 ) -> None:
-    w, h = 920, 380
-    pad_l, pad_r, pad_t, pad_b = 58, 16, 28, 40
-    vals = [BOOK] + [float(r["equity_eur"]) for r in live + rec]
+    extra = extra or []
+    w, h = 920, 400
+    pad_l, pad_r, pad_t, pad_b = 58, 16, 28, 44
+    all_rows = [live, rec] + [rows for _, _, rows in extra]
+    vals = [BOOK]
+    for rows in all_rows:
+        vals.extend(float(r["equity_eur"]) for r in rows)
     vmin, vmax = min(vals), max(vals)
     span = max(vmax - vmin, 1.0)
     n = max(len(live) - 1, 1)
@@ -99,16 +106,24 @@ def write_svg(
     x0, yb = xy(0, BOOK)
     x1, _ = xy(n, BOOK)
     ticks = [0, n // 3, (2 * n) // 3, n]
+    legend = [
+        (live_label, "#ff5d73", live),
+        (rec_label, "#3dff9a", rec),
+    ]
+    for name, color, rows in extra:
+        legend.append((name, color, rows))
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
         '<rect width="100%" height="100%" fill="#0b1020"/>',
         f'<text x="{pad_l}" y="20" fill="#e8ecf7" font-size="14" font-family="ui-sans-serif,system-ui">{title}</text>',
         f'<line x1="{x0:.1f}" y1="{yb:.1f}" x2="{x1:.1f}" y2="{yb:.1f}" stroke="#2a3348" stroke-dasharray="4 4"/>',
-        f'<path d="{path_d(live)}" fill="none" stroke="#ff5d73" stroke-width="2"/>',
-        f'<path d="{path_d(rec)}" fill="none" stroke="#3dff9a" stroke-width="2"/>',
-        f'<text x="{w - 240}" y="{pad_t + 18}" fill="#ff5d73" font-size="12" font-family="ui-sans-serif">live 15m-core</text>',
-        f'<text x="{w - 240}" y="{pad_t + 34}" fill="#3dff9a" font-size="12" font-family="ui-sans-serif">expert-mix</text>',
     ]
+    for i, (name, color, rows) in enumerate(legend):
+        parts.append(f'<path d="{path_d(rows)}" fill="none" stroke="{color}" stroke-width="2"/>')
+        parts.append(
+            f'<text x="{w - 280}" y="{pad_t + 18 + i * 16}" fill="{color}" font-size="12" '
+            f'font-family="ui-sans-serif">{name}</text>'
+        )
     for ti in ticks:
         lab = live[min(ti, len(live) - 1)]["date"]
         parts.append(
