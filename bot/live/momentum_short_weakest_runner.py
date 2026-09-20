@@ -155,6 +155,7 @@ class ShortWeakestPaperRunner:
         self.last_rebalance_ms = 0
         self._last_idle_decide_ms = 0
         self._core_snapshot: dict[str, Any] = {}
+        self._decide_lock = asyncio.Lock()
         self._load_state()
 
     def _load_state(self) -> None:
@@ -340,6 +341,10 @@ class ShortWeakestPaperRunner:
         return True, ""
 
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:
+        async with self._decide_lock:
+            return await self._decide_unlocked(execute=execute)
+
+    async def _decide_unlocked(self, *, execute: bool = True) -> dict[str, Any]:
         now = datetime.now(UTC)
         now_ms = int(now.timestamp() * 1000)
         self._roll_risk_windows(now)
@@ -414,12 +419,13 @@ class ShortWeakestPaperRunner:
 
         planned: list[dict[str, Any]] = []
         if allowed and due:
-            if execute and self.positions and not use_idle_fill:
+            if execute and self.positions:
                 for pos in list(self.positions):
-                    await self._close(pos, reason="rebalance", now_ms=now_ms)
-            elif execute and self.positions and use_idle_fill and due:
-                for pos in list(self.positions):
-                    await self._close(pos, reason="idle_fill_rebalance", now_ms=now_ms)
+                    await self._close(
+                        pos,
+                        reason=("idle_fill_rebalance" if use_idle_fill else "rebalance"),
+                        now_ms=now_ms,
+                    )
             cash_for_entries = self.cash_eur
             planned = select_shorts(
                 cands, self.cfg, cash_eur=cash_for_entries, held=set()
@@ -472,6 +478,8 @@ class ShortWeakestPaperRunner:
 
     async def _open(self, row: Mapping[str, Any], *, now_ms: int) -> None:
         base = str(row["base"])
+        if any(p.base == base for p in self.positions):
+            return
         notional = float(row["notional_eur"])
         mark = self.marks.get(base)
         if not mark:
