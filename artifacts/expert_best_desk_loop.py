@@ -1083,6 +1083,11 @@ def main() -> None:
             "No AlphaI; 15m core close-fills; daily fills for other sleeves",
             "Short is paper/perp-proxy; cover_on_bull flats the same day BTC recaptures the gate",
             "Not live-wired",
+            "Winner drops the 15m core entirely: two Donchian variants in risk_on beat core+winners on Calmar",
+            "Biggest unlock vs the earlier SMA200 overlay: sma20_50 leaves Donchian on whenever BTC>SMA50 (124d vs 60d risk_on)",
+            "30% donch_fri in risk_off is mostly idle (Donchian already flats below SMA50); a few SMA20-vs-SMA50 lag days can still be long",
+            "SMA20 short gate is faster than SMA50 and more in-sample-fragile; walk-forward monthly picker made +€16.9k but failed the −12% DD cap (−20.6%)",
+            "Highest 1y PnL that still passed all gates was +€30.5k / −7.65% DD (Calmar 19.9); score picked +€27.9k / −6.5% DD (Calmar 21.5)",
         ],
     }
     OUT.write_text(json.dumps(payload, indent=2), encoding="utf-8")
