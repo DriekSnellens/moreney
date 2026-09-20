@@ -70,7 +70,13 @@ def weekly(rows: list[dict[str, Any]], book: float = BOOK) -> list[dict[str, Any
     return out
 
 
-def write_svg(live: list[dict[str, Any]], rec: list[dict[str, Any]], path: Path) -> None:
+def write_svg(
+    live: list[dict[str, Any]],
+    rec: list[dict[str, Any]],
+    path: Path,
+    *,
+    title: str = "Laatste 12 weken · €20k · live 15m-core vs expert-mix",
+) -> None:
     w, h = 920, 380
     pad_l, pad_r, pad_t, pad_b = 58, 16, 28, 40
     vals = [BOOK] + [float(r["equity_eur"]) for r in live + rec]
@@ -92,22 +98,24 @@ def write_svg(live: list[dict[str, Any]], rec: list[dict[str, Any]], path: Path)
 
     x0, yb = xy(0, BOOK)
     x1, _ = xy(n, BOOK)
+    ticks = [0, n // 3, (2 * n) // 3, n]
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
         '<rect width="100%" height="100%" fill="#0b1020"/>',
-        f'<text x="{pad_l}" y="20" fill="#e8ecf7" font-size="14" font-family="ui-sans-serif,system-ui">'
-        "Laatste 12 weken · €20k · live 15m-core vs expert-mix</text>",
+        f'<text x="{pad_l}" y="20" fill="#e8ecf7" font-size="14" font-family="ui-sans-serif,system-ui">{title}</text>',
         f'<line x1="{x0:.1f}" y1="{yb:.1f}" x2="{x1:.1f}" y2="{yb:.1f}" stroke="#2a3348" stroke-dasharray="4 4"/>',
         f'<path d="{path_d(live)}" fill="none" stroke="#ff5d73" stroke-width="2"/>',
         f'<path d="{path_d(rec)}" fill="none" stroke="#3dff9a" stroke-width="2"/>',
         f'<text x="{w - 240}" y="{pad_t + 18}" fill="#ff5d73" font-size="12" font-family="ui-sans-serif">live 15m-core</text>',
         f'<text x="{w - 240}" y="{pad_t + 34}" fill="#3dff9a" font-size="12" font-family="ui-sans-serif">expert-mix</text>',
-        f'<text x="{xy(0, vmin)[0]:.1f}" y="{h - 12}" fill="#8b93a7" font-size="11" text-anchor="middle" '
-        f'font-family="ui-sans-serif">{live[0]["date"]}</text>',
-        f'<text x="{xy(n, vmin)[0]:.1f}" y="{h - 12}" fill="#8b93a7" font-size="11" text-anchor="middle" '
-        f'font-family="ui-sans-serif">{live[-1]["date"]}</text>',
-        "</svg>",
     ]
+    for ti in ticks:
+        lab = live[min(ti, len(live) - 1)]["date"]
+        parts.append(
+            f'<text x="{xy(min(ti, n), vmin)[0]:.1f}" y="{h - 12}" fill="#8b93a7" font-size="11" '
+            f'text-anchor="middle" font-family="ui-sans-serif">{lab}</text>'
+        )
+    parts.append("</svg>")
     path.write_text("\n".join(parts), encoding="utf-8")
 
 
