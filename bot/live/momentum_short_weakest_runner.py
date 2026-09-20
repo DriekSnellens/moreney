@@ -796,6 +796,26 @@ class ShortWeakestDeskManager:
         elif base["enabled_setting"]:
             # Show idle book even when not running so the dashboard card is visible.
             cfg = config_from_settings(settings)
+            state_path = str(
+                getattr(
+                    settings,
+                    "momentum_short_weakest_state_path",
+                    "./data/momentum_short_weakest_state.json",
+                )
+            )
+            cash = cfg.book_eur
+            realized = 0.0
+            last_regime: dict[str, Any] = {}
+            positions: list[dict[str, Any]] = []
+            try:
+                raw = json.loads(Path(state_path).read_text(encoding="utf-8"))
+                cash = float(raw.get("cash_eur", cash))
+                realized = float(raw.get("realized_total_eur") or 0.0)
+                last_regime = dict(raw.get("last_regime") or {})
+                positions = list(raw.get("positions") or [])
+            except Exception:  # noqa: BLE001
+                pass
+            bear = dict((last_regime or {}).get("bear") or {})
             pack = {
                 "name": "bear_harvest_balanced",
                 "top_n": cfg.top_n,
@@ -814,18 +834,25 @@ class ShortWeakestDeskManager:
                 "cover_when_core_active": cfg.cover_when_core_active,
                 "require_btc_below_sma200": cfg.require_btc_below_sma200,
             }
+            deployed = sum(float(p.get("notional_eur") or 0) for p in positions)
+            role = "stopped"
+            if bear.get("bear_ok"):
+                role = "stopped_bear_ok"
+            elif bear:
+                role = "stopped_standby"
             base.update(
                 {
-                    "role": "stopped",
+                    "role": role,
                     "pack": pack,
-                    "bear": {},
+                    "bear": bear,
                     "book_eur": cfg.book_eur,
-                    "cash_eur": cfg.book_eur,
-                    "equity_eur": cfg.book_eur,
-                    "deployed_eur": 0.0,
-                    "positions": [],
+                    "cash_eur": round(cash, 2),
+                    "equity_eur": round(cash, 2),
+                    "deployed_eur": round(deployed, 2),
+                    "positions": positions,
                     "unrealized_net_eur": 0.0,
-                    "realized_total_eur": 0.0,
+                    "realized_total_eur": round(realized, 2),
+                    "last_regime": last_regime,
                     "config": {
                         "book_eur": cfg.book_eur,
                         "trail_pct": cfg.trail_pct,
@@ -962,19 +989,16 @@ class ShortWeakestDeskManager:
         return await self._runner.sell_all()
 
     async def resume_if_flagged(self, settings: Settings | None = None) -> dict[str, Any] | None:
+        """Auto-start paper sleeve when enabled (survives process restarts).
+
+        Explicit Stop is session-local: with MOMENTUM_SHORT_WEAKEST_ENABLED=true
+        the paper book comes back after a service restart so the dashboard stays live.
+        """
         settings = settings or get_settings()
         if not bool(getattr(settings, "momentum_short_weakest_enabled", False)):
             return None
-        state_path = str(
-            getattr(
-                settings,
-                "momentum_short_weakest_state_path",
-                "./data/momentum_short_weakest_state.json",
-            )
-        )
-        flag = _read_flag(state_path)
-        if not flag or not flag.get("running"):
-            return None
+        if self.running():
+            return {"ok": True, "started": False, "reason": "already_running"}
         return await self.start(settings=settings)
 
 
