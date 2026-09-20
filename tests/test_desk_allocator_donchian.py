@@ -65,6 +65,87 @@ def test_snapshot_includes_why():
     assert snap["ok"] is True
     assert "why" in snap
     assert snap["core_15m"] == "idle"
+    assert "Donchian" in snap["now_trading"]["headline"]
+    assert "short_weakest" not in snap["now_trading"]["ids"]
+    assert snap["now_trading"]["stance"]
+
+
+def test_now_trading_mid_is_cash():
+    from bot.live.desk_allocator import now_trading
+
+    nt = now_trading("mid")
+    assert nt["headline"] == "Cash — geen trades"
+    assert nt["ids"] == ["cash"]
+
+
+def test_mix_panel_shows_active_strategy_and_why():
+    from bot.live.momentum_dashboard import _mix_panel
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = _mix_panel(
+        snap,
+        {
+            "running": True,
+            "positions": [
+                {
+                    "holding_id": "dc-1",
+                    "sleeve": "donch10",
+                    "base": "NEAR",
+                    "unrealized_net_eur": 12.5,
+                    "quantity": 1,
+                }
+            ],
+            "sleeves": [
+                {
+                    "id": "donch10",
+                    "title": "Donchian 10/5",
+                    "active": True,
+                    "reasons": ["breakout"],
+                }
+            ],
+        },
+    )
+    assert "Nu actief" in html
+    assert "Donchian 10/5" in html
+    assert "NEAR" in html
+    assert "SMA50" in html
+    assert "uptrend" in html.lower() or "Donchian-longs aan" in html
+    assert "AAN" in html
+    assert "Short weakest" in html
+    assert "UIT" in html
+    assert "Welke strategie nu" in html
+    assert "MIX LIVE" in html
+
+
+def test_dashboard_mix_board_renders():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = render_momentum_dashboard(
+        {
+            "running": False,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 3},
+            "positions": [],
+            "risk": {"day_realized_eur": 0, "entries_allowed": True},
+            "cash_eur": 20000,
+            "exposure_eur": 0,
+            "equity_eur": 20000,
+            "realized_total_eur": 0,
+            "trade_count": 0,
+            "unrealized_net_eur": 0,
+        },
+        [],
+        allocator=snap,
+        donchian={"running": True, "positions": [], "sleeves": []},
+        show_short_weakest=True,
+        short_weakest={"enabled_setting": True, "positions": [], "running": True},
+    ).body.decode()
+    assert 'id="mix"' in html
+    assert "Nu actief" in html
+    assert "MIX · RISK ON" in html
+    assert "Donchian · paper longs" in html
+    assert "15m WR-core staat idle" in html
 
 
 def _ohlc_breakout(n: int = 16, last_high: float = 120.0) -> list[list[float]]:

@@ -1348,6 +1348,7 @@ async def live_momentum_allocator_status() -> dict[str, Any]:
                 **alloc,
                 "donchian_running": bool(don.get("running")),
                 "sleeves_live": don.get("sleeves"),
+                "positions": don.get("positions") or [],
             }
     except Exception:  # noqa: BLE001
         pass

@@ -134,6 +134,36 @@ def euros_for(label: str, *, book: float = BOOK_EUR) -> dict[str, int]:
     return {k: int(round(book * v)) for k, v in weights_for(label).items() if v > 0}
 
 
+def now_trading(label: str) -> dict[str, Any]:
+    """Human-readable 'what is on right now' for the dashboard."""
+    wmap = weights_for(label)
+    active_ids = [sid for sid, w in wmap.items() if float(w) > 1e-9]
+    titles = [SLEEVE_META[sid]["title"] for sid in active_ids if sid in SLEEVE_META]
+    idle_ids = [
+        sid
+        for sid in SLEEVE_META
+        if sid not in wmap or float(wmap.get(sid, 0.0)) <= 1e-9
+    ]
+    idle_titles = [SLEEVE_META[sid]["title"] for sid in idle_ids]
+    if label == "mid" or (len(active_ids) == 1 and active_ids[0] == "cash"):
+        headline = "Cash — geen trades"
+    else:
+        headline = " + ".join(titles) if titles else "Cash — geen trades"
+    stance = {
+        "risk_on": "Longs aan · shorts covered",
+        "risk_off": "Shorts aan · longs grotendeels uit",
+        "mid": "Alles plat · 100% cash",
+    }.get(label, "")
+    return {
+        "ids": active_ids,
+        "titles": titles,
+        "headline": headline,
+        "idle_ids": idle_ids,
+        "idle_titles": idle_titles,
+        "stance": stance,
+    }
+
+
 def sleeve_rows(label: str, *, book: float = BOOK_EUR) -> list[dict[str, Any]]:
     wmap = weights_for(label)
     rows = []
@@ -182,6 +212,7 @@ def snapshot(
         "weights": weights_for(label),
         "euros": euros_for(label, book=book),
         "sleeves": sleeve_rows(label, book=book),
+        "now_trading": now_trading(label),
         "map": REGIME_MAP,
         "paper_short": True,
         "core_15m": "idle",
@@ -234,6 +265,7 @@ def live_snapshot(*, book: float = BOOK_EUR, btc_live: float | None = None) -> d
             "label": "mid",
             "why": f"BTC daily fetch failed: {exc} — mix stays cash tot de gate live is.",
             "sleeves": sleeve_rows("mid", book=book),
+            "now_trading": now_trading("mid"),
             "weights": weights_for("mid"),
             "euros": euros_for("mid", book=book),
             "book_eur": book,
