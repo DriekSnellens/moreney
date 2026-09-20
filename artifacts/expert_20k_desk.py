@@ -117,7 +117,6 @@ def sim_dual_mom(
     smas = {a: _sma(closes[a], sma_n) for a in assets}
     book = Book()
     last = -10**9
-    held = None
     for i in range(i0, i1 + 1):
         px = {a: closes[a][i] for a in assets}
         book.bump_peaks({a: highs[a][i] for a in book.pos if a in highs})
@@ -135,7 +134,6 @@ def sim_dual_mom(
                 book.close(b, px.get(b, book.pos[b][1]))
             if want is not None:
                 book.open(want, px[want], min(book.mark(px) * max_w, book.cash * 0.99))
-            held = want
             last = i
         book.snapshot(px)
     for b in list(book.pos):
@@ -357,17 +355,21 @@ def apply_expert(
 
 
 def expert_score(full: dict[str, Any], q90: dict[str, Any], bear: dict[str, Any]) -> tuple:
-    """Hard DD/worst-month gates, then Calmar, then PnL. Full sample is the boss."""
+    """Hard DD gate, then Calmar, then PnL. Oct-2025 crash month is not a 4% veto.
+
+    Investor rule: stay above −12% book DD and −7.5% worst month (−€1500).
+    Among feasible books, maximize Calmar (PnL per unit of DD), then full PnL.
+    """
     worst = (full.get("worst_month") or {}).get("pnl_eur") or 0.0
     dd = full["max_dd_pct"]
     dd12 = int(dd > -12)
     dd15 = int(dd > -15)
-    dd18 = int(dd > -18)
-    worst_ok = int(worst > -800)
-    worst_soft = int(worst > -1500)
+    worst_ok = int(worst > -1500)
+    worst_soft = int(worst > -2000)
     q_ok = int(q90["pnl_eur"] > 1500)
-    bear_ok = int(bear["pnl_eur"] > -800)
+    bear_ok = int(bear["pnl_eur"] > -500)
     profit = int(full["pnl_eur"] > 0)
+    # Pain-adjusted: €1 of extra DD-euro costs €1.5 of PnL (Calmar still primary).
     return (
         profit,
         dd12,
@@ -375,7 +377,6 @@ def expert_score(full: dict[str, Any], q90: dict[str, Any], bear: dict[str, Any]
         q_ok,
         bear_ok,
         dd15,
-        dd18,
         worst_soft,
         round(full["calmar"], 3),
         full["pnl_eur"],
@@ -738,6 +739,46 @@ def architectures() -> list[dict[str, Any]]:
             "thesis": "Geen regime: 40% Donchian / 30% winners / 30% cash, altijd.",
             "weights": {"donch20": 0.4, "winners": 0.3, "cash": 0.3},
         },
+        {
+            "name": "winners_donch_fri",
+            "kind": "regime",
+            "thesis": "Vorige bull-mix, maar Donchian plat op vrijdag (weekend-gap). Core 40%.",
+            "map": {
+                "risk_on": {"core": 0.4, "winners": 0.3, "donch_fri": 0.3},
+                "mid": {"donch_fri": 0.5, "cash": 0.5},
+                "risk_off": {"cash": 1.0},
+            },
+        },
+        {
+            "name": "capped_core_donch_fri",
+            "kind": "regime",
+            "thesis": "Core max 25% + Friday-Donchian + winners + BTC ballast.",
+            "map": {
+                "risk_on": {"core": 0.25, "winners": 0.30, "donch_fri": 0.30, "btc200": 0.15},
+                "mid": {"donch_fri": 0.40, "btc200": 0.10, "cash": 0.50},
+                "risk_off": {"cash": 1.0},
+            },
+        },
+        {
+            "name": "invvol_donch_fri_bull",
+            "kind": "regime",
+            "thesis": "Geen 15m-core. Inv-vol + Friday-Donchian + winners in bull; cash in bear.",
+            "map": {
+                "risk_on": {"invvol": 0.35, "donch_fri": 0.35, "winners": 0.30},
+                "mid": {"donch_fri": 0.40, "invvol": 0.15, "cash": 0.45},
+                "risk_off": {"cash": 1.0},
+            },
+        },
+        {
+            "name": "ls_mid_donch_fri",
+            "kind": "regime",
+            "thesis": "Friday-Donchian long strength + short laggards in mid; cash+short in crash.",
+            "map": {
+                "risk_on": {"core": 0.25, "winners": 0.35, "donch_fri": 0.40},
+                "mid": {"donch_fri": 0.35, "short": 0.30, "cash": 0.35},
+                "risk_off": {"short": 0.40, "cash": 0.60},
+            },
+        },
     ]
 
 
@@ -915,6 +956,30 @@ def main() -> None:
     )
     results.append(br)
 
+    fri_map = next(a["map"] for a in arch_specs if a["name"] == "winners_donch_fri")
+    fri_br = eval_arch(
+        rets_full,
+        rets_q,
+        dates_full,
+        dates_q,
+        dates_bear,
+        dates_jan,
+        dates_w12,
+        breadth_of,
+        {
+            "name": "winners_donch_fri_breadth",
+            "kind": "regime",
+            "thesis": "Friday-Donchian bull-mix, risk_on demoveert naar mid als <30% alts >SMA50.",
+            "map": fri_map,
+        },
+    )
+    print(
+        f"  winners_donch_fri_breadth full={fri_br['full']['pnl_eur']:8} dd={fri_br['full']['max_dd_pct']:6} "
+        f"q90={fri_br['q90']['pnl_eur']:8}",
+        flush=True,
+    )
+    results.append(fri_br)
+
     # small static grid on the robust names (not core-heavy)
     print("static grid (robust names, step 0.25)…", flush=True)
     gnames = ["winners", "donch20", "btc200", "short", "cash"]
@@ -966,6 +1031,16 @@ def main() -> None:
         results.extend(extra)
         results.sort(key=lambda x: x["_score"], reverse=True)
         best = results[0]
+
+    feasible = [
+        a
+        for a in results
+        if a["full"]["max_dd_pct"] > -12
+        and ((a["full"].get("worst_month") or {}).get("pnl_eur") or 0) > -1500
+        and a["q90"]["pnl_eur"] > 0
+    ] or results
+    preserve = min(feasible, key=lambda a: (abs(a["full"]["max_dd_pct"]), -a["full"]["pnl_eur"]))
+    harvest = max(feasible, key=lambda a: (a["q90"]["pnl_eur"], a["full"]["calmar"]))
 
     # ── recommendation copy ──────────────────────────────────────────────
     why = (
@@ -1024,6 +1099,21 @@ def main() -> None:
             ),
             None,
         ),
+        "frontier": {
+            "preserve_min_dd": {
+                "name": preserve["name"],
+                "euros": preserve.get("euros"),
+                "full": preserve["full"],
+                "q90": preserve["q90"],
+            },
+            "recommended": {"name": best["name"], "full": best["full"], "q90": best["q90"]},
+            "harvest_90d": {
+                "name": harvest["name"],
+                "euros": harvest.get("euros"),
+                "full": harvest["full"],
+                "q90": harvest["q90"],
+            },
+        },
     }
 
     # equity svg: rec vs core vs previous vs cash
@@ -1063,11 +1153,12 @@ def main() -> None:
         "architectures": [slim(a) for a in results],
         "recommendation": rec,
         "expert_notes": [
-            "15m-core is een yield-sleeve, geen book: cap ≤30% vanwege path-DD.",
-            "Donchian 20/10 is de meest stabiele alt-trend over okt→nu én 90d.",
+            "15m-core zonder SMA200-gate verbrandt het book in de okt-2025 bear (unit DD ~−80%). Alleen gated/capped gebruiken.",
+            "Donchian dat vrijdag flattens (weekend-gap) verslaat 20/10 op de volle sample — daytrader-regel.",
+            "Donchian 20/10 met SMA200-gate is de meest stabiele alt-trend (Calmar ~2.1, DD ~−7%).",
             "Winners-weekly is de beste Calmar-long in de recente bull, idle in bear (SMA200-gate).",
-            "Short-weakest is geen 'altijd groen' overlay; hij hoort in mid/risk_off, niet als idle-fill.",
-            "ETH-SMA200 is ballast (lagere beta dan alts), geen vervanger van Donchian.",
+            "Short-weakest is geen 'altijd groen' overlay; hij hoort in mid/risk_off, niet als idle-fill. BTC-short is toxisch.",
+            "ETH-SMA200 is ballast (laagste DD van de longs), geen vervanger van Donchian.",
             "Walk-forward monthly chase bleef OOS zwak; niet gebruiken als live allocator.",
             "Cash onder SMA50 is de drawdown-kill-switch die een desk écht schaalt.",
         ],
