@@ -290,6 +290,14 @@ def simulate_short_sleeve(
             due = True
         if use_idle and not positions:
             due = True
+        # Complement sleeve: after cover-on-core, re-arm as soon as core is idle again.
+        if (
+            cfg.only_when_core_idle
+            and cfg.cover_when_core_active
+            and core_idle
+            and not positions
+        ):
+            due = True
 
         can_enter = risk_ok and core_idle if cfg.only_when_core_idle else risk_ok
         if can_enter and (bear_ok or use_idle) and due:
