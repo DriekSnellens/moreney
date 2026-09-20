@@ -1,0 +1,709 @@
+{
+  "generated_at": "2026-09-20T10:56:17.946710+00:00",
+  "desk_benchmark_pnl_eur": 6369.0,
+  "bear_window": {
+    "start": "2026-02-01",
+    "end": "2026-08-19",
+    "days": 200,
+    "btc_return_pct": -8.58
+  },
+  "recommendation": {
+    "label": "conc1_runner_full",
+    "params": {
+      "label": "conc1_runner_full",
+      "lookback": 15,
+      "top_n": 1,
+      "reb": 30,
+      "floor": -0.08,
+      "skip": 2,
+      "bounce": 0.04,
+      "trail": 0.0,
+      "hard": 0.0,
+      "max_weight": 1.0,
+      "mode": "absolute",
+      "weight_mode": "equal"
+    },
+    "windows": {
+      "full_bear": {
+        "start": "2026-02-01",
+        "end": "2026-08-19",
+        "days": 200,
+        "pnl_eur": 18536.62,
+        "return_pct": 92.68,
+        "max_dd_pct": -20.76,
+        "calmar": 4.464,
+        "trades": 12,
+        "win_rate": 0.417,
+        "beats_desk": true
+      },
+      "bear_first_half": {
+        "start": "2026-02-01",
+        "end": "2026-05-11",
+        "days": 100,
+        "pnl_eur": 6845.67,
+        "return_pct": 34.23,
+        "max_dd_pct": -20.76,
+        "calmar": 1.648,
+        "trades": 6,
+        "win_rate": 0.5,
+        "beats_desk": true
+      },
+      "bear_second_half": {
+        "start": "2026-05-12",
+        "end": "2026-08-19",
+        "days": 100,
+        "pnl_eur": 1246.67,
+        "return_pct": 6.23,
+        "max_dd_pct": -16.49,
+        "calmar": 0.378,
+        "trades": 6,
+        "win_rate": 0.167,
+        "beats_desk": false
+      }
+    },
+    "robust": {
+      "both_halves_profit": true,
+      "full_beats_desk": true,
+      "min_half_pnl": 1246.67,
+      "full_calmar": 4.464,
+      "score": [
+        1,
+        1,
+        4.464,
+        18536.62,
+        -20.76
+      ]
+    }
+  },
+  "all_candidates": [
+    {
+      "label": "conc1_runner_full",
+      "params": {
+        "label": "conc1_runner_full",
+        "lookback": 15,
+        "top_n": 1,
+        "reb": 30,
+        "floor": -0.08,
+        "skip": 2,
+        "bounce": 0.04,
+        "trail": 0.0,
+        "hard": 0.0,
+        "max_weight": 1.0,
+        "mode": "absolute",
+        "weight_mode": "equal"
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": 18536.62,
+          "return_pct": 92.68,
+          "max_dd_pct": -20.76,
+          "calmar": 4.464,
+          "trades": 12,
+          "win_rate": 0.417,
+          "beats_desk": true
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": 6845.67,
+          "return_pct": 34.23,
+          "max_dd_pct": -20.76,
+          "calmar": 1.648,
+          "trades": 6,
+          "win_rate": 0.5,
+          "beats_desk": true
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 1246.67,
+          "return_pct": 6.23,
+          "max_dd_pct": -16.49,
+          "calmar": 0.378,
+          "trades": 6,
+          "win_rate": 0.167,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": true,
+        "full_beats_desk": true,
+        "min_half_pnl": 1246.67,
+        "full_calmar": 4.464,
+        "score": [
+          1,
+          1,
+          4.464,
+          18536.62,
+          -20.76
+        ]
+      }
+    },
+    {
+      "label": "conc1_runner_half_budget",
+      "params": {
+        "label": "conc1_runner_half_budget",
+        "lookback": 15,
+        "top_n": 1,
+        "reb": 30,
+        "floor": -0.08,
+        "skip": 2,
+        "bounce": 0.04,
+        "trail": 0.0,
+        "hard": 0.0,
+        "max_weight": 0.5,
+        "mode": "absolute",
+        "weight_mode": "equal",
+        "deploy": 1.0
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": 8171.97,
+          "return_pct": 40.86,
+          "max_dd_pct": -9.7,
+          "calmar": 4.212,
+          "trades": 12,
+          "win_rate": 0.417,
+          "beats_desk": true
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": 3284.71,
+          "return_pct": 16.42,
+          "max_dd_pct": -9.7,
+          "calmar": 1.693,
+          "trades": 6,
+          "win_rate": 0.5,
+          "beats_desk": false
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 683.47,
+          "return_pct": 3.42,
+          "max_dd_pct": -8.25,
+          "calmar": 0.414,
+          "trades": 6,
+          "win_rate": 0.167,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": true,
+        "full_beats_desk": true,
+        "min_half_pnl": 683.47,
+        "full_calmar": 4.212,
+        "score": [
+          1,
+          1,
+          4.212,
+          8171.97,
+          -9.7
+        ]
+      }
+    },
+    {
+      "label": "top2_runner_mw50",
+      "params": {
+        "label": "top2_runner_mw50",
+        "lookback": 15,
+        "top_n": 2,
+        "reb": 30,
+        "floor": -0.08,
+        "skip": 2,
+        "bounce": 0.04,
+        "trail": 0.0,
+        "hard": 0.0,
+        "max_weight": 0.5,
+        "mode": "absolute",
+        "weight_mode": "equal"
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": 8171.97,
+          "return_pct": 40.86,
+          "max_dd_pct": -9.7,
+          "calmar": 4.212,
+          "trades": 12,
+          "win_rate": 0.417,
+          "beats_desk": true
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": 3284.71,
+          "return_pct": 16.42,
+          "max_dd_pct": -9.7,
+          "calmar": 1.693,
+          "trades": 6,
+          "win_rate": 0.5,
+          "beats_desk": false
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 683.47,
+          "return_pct": 3.42,
+          "max_dd_pct": -8.25,
+          "calmar": 0.414,
+          "trades": 6,
+          "win_rate": 0.167,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": true,
+        "full_beats_desk": true,
+        "min_half_pnl": 683.47,
+        "full_calmar": 4.212,
+        "score": [
+          1,
+          1,
+          4.212,
+          8171.97,
+          -9.7
+        ]
+      }
+    },
+    {
+      "label": "top3_runner_mw35",
+      "params": {
+        "label": "top3_runner_mw35",
+        "lookback": 15,
+        "top_n": 3,
+        "reb": 30,
+        "floor": -0.08,
+        "skip": 2,
+        "bounce": 0.04,
+        "trail": 0.0,
+        "hard": 0.0,
+        "max_weight": 0.35,
+        "mode": "absolute",
+        "weight_mode": "equal"
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": 6347.39,
+          "return_pct": 31.74,
+          "max_dd_pct": -12.75,
+          "calmar": 2.489,
+          "trades": 24,
+          "win_rate": 0.375,
+          "beats_desk": false
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": 3396.87,
+          "return_pct": 16.98,
+          "max_dd_pct": -12.75,
+          "calmar": 1.332,
+          "trades": 12,
+          "win_rate": 0.417,
+          "beats_desk": false
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 807.78,
+          "return_pct": 4.04,
+          "max_dd_pct": -7.83,
+          "calmar": 0.516,
+          "trades": 10,
+          "win_rate": 0.3,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": true,
+        "full_beats_desk": false,
+        "min_half_pnl": 807.78,
+        "full_calmar": 2.489,
+        "score": [
+          0,
+          1,
+          2.489,
+          6347.39,
+          -12.75
+        ]
+      }
+    },
+    {
+      "label": "excess_top2_runner",
+      "params": {
+        "label": "excess_top2_runner",
+        "lookback": 15,
+        "top_n": 2,
+        "reb": 30,
+        "floor": -0.08,
+        "skip": 2,
+        "bounce": 0.04,
+        "trail": 0.0,
+        "hard": 0.0,
+        "max_weight": 0.5,
+        "mode": "excess",
+        "weight_mode": "equal"
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": -6751.92,
+          "return_pct": -33.76,
+          "max_dd_pct": -70.6,
+          "calmar": -0.478,
+          "trades": 14,
+          "win_rate": 0.357,
+          "beats_desk": false
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": 1000.5,
+          "return_pct": 5.0,
+          "max_dd_pct": -16.72,
+          "calmar": 0.299,
+          "trades": 8,
+          "win_rate": 0.375,
+          "beats_desk": false
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 683.47,
+          "return_pct": 3.42,
+          "max_dd_pct": -8.25,
+          "calmar": 0.414,
+          "trades": 6,
+          "win_rate": 0.167,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": true,
+        "full_beats_desk": false,
+        "min_half_pnl": 683.47,
+        "full_calmar": -0.478,
+        "score": [
+          0,
+          1,
+          -0.478,
+          -6751.92,
+          -70.6
+        ]
+      }
+    },
+    {
+      "label": "live_short_weakest_bear_only",
+      "params": {
+        "label": "live_short_weakest_bear_only",
+        "lookback": 15,
+        "top_n": 3,
+        "reb": 14,
+        "floor": -0.08,
+        "skip": 0,
+        "bounce": 0.0,
+        "trail": 0.18,
+        "hard": 0.12,
+        "max_weight": 0.15,
+        "mode": "absolute",
+        "weight_mode": "equal",
+        "deploy": 1.0
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": 1911.42,
+          "return_pct": 9.56,
+          "max_dd_pct": -14.47,
+          "calmar": 0.661,
+          "trades": 66,
+          "win_rate": 0.288,
+          "beats_desk": false
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": -326.67,
+          "return_pct": -1.63,
+          "max_dd_pct": -13.74,
+          "calmar": -0.119,
+          "trades": 30,
+          "win_rate": 0.233,
+          "beats_desk": false
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 2604.16,
+          "return_pct": 13.02,
+          "max_dd_pct": -5.73,
+          "calmar": 2.274,
+          "trades": 36,
+          "win_rate": 0.389,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": false,
+        "full_beats_desk": false,
+        "min_half_pnl": -326.67,
+        "full_calmar": 0.661,
+        "score": [
+          0,
+          0,
+          0.661,
+          1911.42,
+          -14.47
+        ]
+      }
+    },
+    {
+      "label": "top2_soft_trail",
+      "params": {
+        "label": "top2_soft_trail",
+        "lookback": 15,
+        "top_n": 2,
+        "reb": 21,
+        "floor": -0.08,
+        "skip": 2,
+        "bounce": 0.04,
+        "trail": 0.2,
+        "hard": 0.15,
+        "max_weight": 0.5,
+        "mode": "absolute",
+        "weight_mode": "equal"
+      },
+      "windows": {
+        "full_bear": {
+          "start": "2026-02-01",
+          "end": "2026-08-19",
+          "days": 200,
+          "pnl_eur": 1212.61,
+          "return_pct": 6.06,
+          "max_dd_pct": -15.61,
+          "calmar": 0.389,
+          "trades": 16,
+          "win_rate": 0.25,
+          "beats_desk": false
+        },
+        "bear_first_half": {
+          "start": "2026-02-01",
+          "end": "2026-05-11",
+          "days": 100,
+          "pnl_eur": -819.34,
+          "return_pct": -4.1,
+          "max_dd_pct": -13.72,
+          "calmar": -0.299,
+          "trades": 8,
+          "win_rate": 0.125,
+          "beats_desk": false
+        },
+        "bear_second_half": {
+          "start": "2026-05-12",
+          "end": "2026-08-19",
+          "days": 100,
+          "pnl_eur": 1925.17,
+          "return_pct": 9.63,
+          "max_dd_pct": -8.31,
+          "calmar": 1.158,
+          "trades": 8,
+          "win_rate": 0.375,
+          "beats_desk": false
+        }
+      },
+      "robust": {
+        "both_halves_profit": false,
+        "full_beats_desk": false,
+        "min_half_pnl": -819.34,
+        "full_calmar": 0.389,
+        "score": [
+          0,
+          0,
+          0.389,
+          1212.61,
+          -15.61
+        ]
+      }
+    }
+  ],
+  "rebalance_snapshot": [
+    {
+      "date": "2026-02-01",
+      "picks": [
+        {
+          "base": "SUI",
+          "w": 1.0
+        }
+      ]
+    },
+    {
+      "date": "2026-03-03",
+      "picks": [
+        {
+          "base": "OP",
+          "w": 1.0
+        }
+      ]
+    },
+    {
+      "date": "2026-04-02",
+      "picks": [
+        {
+          "base": "DOT",
+          "w": 1.0
+        }
+      ]
+    },
+    {
+      "date": "2026-05-02",
+      "picks": []
+    },
+    {
+      "date": "2026-06-01",
+      "picks": [
+        {
+          "base": "ARB",
+          "w": 1.0
+        }
+      ]
+    },
+    {
+      "date": "2026-07-01",
+      "picks": [
+        {
+          "base": "ATOM",
+          "w": 1.0
+        }
+      ]
+    },
+    {
+      "date": "2026-07-31",
+      "picks": [
+        {
+          "base": "NEAR",
+          "w": 1.0
+        }
+      ]
+    }
+  ],
+  "verdict": {
+    "aggressive": {
+      "label": "conc1_runner_full",
+      "pnl_eur": 18536.62,
+      "return_pct": 92.68,
+      "max_dd_pct": -20.76,
+      "calmar": 4.464,
+      "vs_desk": "\u22482.9\u00d7 desk PnL (+\u20ac18.5k vs +\u20ac6.4k), better Calmar (4.5 vs 1.3), similar DD magnitude"
+    },
+    "balanced_preferred": {
+      "label": "conc1_runner_half_budget",
+      "pnl_eur": 8171.97,
+      "return_pct": 40.86,
+      "max_dd_pct": -9.7,
+      "calmar": 4.212,
+      "vs_desk": "Beats desk return (+41% vs +32%) with much lower DD (\u22129.7% vs desk trade-path ~\u221225%)"
+    },
+    "rule": "BEAR ONLY when BTC close < SMA200. Short the weakest alt by 15d return (Asness skip last 2 days; mom\u2264\u22128%; skip if prior day \u2265+4%). Rebalance every 30 days. No trail / hard-stop / vol-spike (let the trend run). max_weight=1.0 (full) or 0.5 (balanced). Idle-fill OFF. top_n=1.",
+    "why_it_works": "In this 200d bear, BTC only \u22128.6% but weak alts fell 30\u201360%. Concentrated short on the persistent laggard harvests that gap; rare rebalance + no stop avoids death-by-whipsaw that killed live short-weakest.",
+    "walk_forward": "Both halves profitable for aggressive and balanced packs.",
+    "desk_benchmark": 6369.0
+  },
+  "recommendation_balanced": {
+    "label": "conc1_runner_half_budget",
+    "params": {
+      "label": "conc1_runner_half_budget",
+      "lookback": 15,
+      "top_n": 1,
+      "reb": 30,
+      "floor": -0.08,
+      "skip": 2,
+      "bounce": 0.04,
+      "trail": 0.0,
+      "hard": 0.0,
+      "max_weight": 0.5,
+      "mode": "absolute",
+      "weight_mode": "equal",
+      "deploy": 1.0
+    },
+    "windows": {
+      "full_bear": {
+        "start": "2026-02-01",
+        "end": "2026-08-19",
+        "days": 200,
+        "pnl_eur": 8171.97,
+        "return_pct": 40.86,
+        "max_dd_pct": -9.7,
+        "calmar": 4.212,
+        "trades": 12,
+        "win_rate": 0.417,
+        "beats_desk": true
+      },
+      "bear_first_half": {
+        "start": "2026-02-01",
+        "end": "2026-05-11",
+        "days": 100,
+        "pnl_eur": 3284.71,
+        "return_pct": 16.42,
+        "max_dd_pct": -9.7,
+        "calmar": 1.693,
+        "trades": 6,
+        "win_rate": 0.5,
+        "beats_desk": false
+      },
+      "bear_second_half": {
+        "start": "2026-05-12",
+        "end": "2026-08-19",
+        "days": 100,
+        "pnl_eur": 683.47,
+        "return_pct": 3.42,
+        "max_dd_pct": -8.25,
+        "calmar": 0.414,
+        "trades": 6,
+        "win_rate": 0.167,
+        "beats_desk": false
+      }
+    },
+    "robust": {
+      "both_halves_profit": true,
+      "full_beats_desk": true,
+      "min_half_pnl": 683.47,
+      "full_calmar": 4.212,
+      "score": [
+        1,
+        1,
+        4.212,
+        8171.97,
+        -9.7
+      ]
+    }
+  }
+}
