@@ -56,6 +56,28 @@ def test_rank_weakest_prefers_most_negative_and_respects_alphai_blocks():
     assert reasons["CCC"] in {"alphai_avoid", "mom_above_floor"}
 
 
+def test_rank_weakest_excess_mode_vs_btc():
+    # BTC flat; AAA lags badly → excess short candidate.
+    btc = [100.0] * 16
+    closes = {
+        "BTC": btc,
+        "AAA": [100.0] + [100.0] * 6 + [90.0],  # -10% / 7d
+        "BBB": [100.0] + [100.0] * 6 + [99.0],  # -1%
+        "CCC": [100.0] + [100.0] * 6 + [102.0],  # +2%
+    }
+    cfg = ShortWeakestConfig(
+        universe=("AAA", "BBB", "CCC"),
+        idle_lookback_days=7,
+        idle_excess_floor=-0.03,
+        lookback_days=15,
+        mom_floor=-0.08,
+    )
+    cands, rejected = rank_weakest(closes, cfg, mode="excess", btc_closes=btc)
+    assert [c["base"] for c in cands] == ["AAA"]
+    assert cands[0]["score"] < -0.03
+    assert any(r["base"] == "BBB" for r in rejected)
+
+
 def test_select_shorts_caps_max_weight():
     cfg = ShortWeakestConfig(top_n=3, max_weight=0.15, deploy_frac=1.0, min_notional_eur=50)
     cands = [

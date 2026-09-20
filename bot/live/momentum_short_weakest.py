@@ -1,13 +1,9 @@
-"""Paper short-weakest sleeve — bear-regime shorts on weakest 15d trends.
+"""Paper short-weakest sleeve — fills idle momentum capital with weak-trend shorts.
 
-Optimized defaults (bear-window sweep 2025-10→2026-06 on Bitvavo EUR dailies):
-  lookback=15, top_n=3, rebalance=14d, mom_floor=-8%, trail=18%,
-  max_weight=15% NAV, deploy=100%, equal weight, vol-spike exit on.
-Baseline Calmar ~1.11 / DD −43% → winner Calmar ~2.45 / DD −6.1%.
-
-Paper-only synthetic shorts (spot venues cannot short). AlphaI overlay:
-  macro_caution enables sleeve; avoid + bullish picks block shorts;
-  bearish headlines / low scores boost size. No per-coin hardcodes.
+Hard-bear mode (BTC < SMA200): absolute 15d weakness, sweep-optimized knobs.
+Idle-fill mode (core desk flat): short worst excess-vs-BTC over 7d so the
+desk stays active when long momentum has nothing. Cover shorts when core
+opens longs. Paper-only; AlphaI avoid/picks gate; no per-coin hardcodes.
 """
 
 from __future__ import annotations
@@ -50,6 +46,15 @@ class ShortWeakestConfig:
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 150.0
     week_loss_limit_eur: float = 400.0
+    # Complement momentum: trade when core is flat; cover when core is long.
+    only_when_core_idle: bool = True
+    cover_when_core_active: bool = True
+    # When core is idle but BTC is above SMA200, still fill with relative-weak
+    # shorts (excess vs BTC) so the desk is never fully dark.
+    idle_fill_enabled: bool = True
+    idle_lookback_days: int = 14
+    idle_excess_floor: float = -0.025
+    idle_decide_every_sec: float = 900.0  # re-check while core idle + flat
     # AlphaI
     alphai_enabled: bool = True
     alphai_block_on_pick: bool = True  # do not short AlphaI long picks
@@ -170,9 +175,18 @@ def rank_weakest(
     cfg: ShortWeakestConfig,
     *,
     alphai: AlphaIView | None = None,
+    mode: str = "absolute",
+    btc_closes: Sequence[float] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Rank universe by most negative lookback momentum."""
-    lb = int(cfg.lookback_days)
+    """Rank universe by weakness.
+
+    ``absolute``: most negative lookback return (hard-bear mode).
+    ``excess``: most negative excess vs BTC (idle-fill when core is flat).
+    """
+    use_excess = str(mode).lower() == "excess"
+    lb = int(cfg.idle_lookback_days if use_excess else cfg.lookback_days)
+    floor = float(cfg.idle_excess_floor if use_excess else cfg.mom_floor)
+    btc = list(btc_closes or closes_by_base.get("BTC") or [])
     cands: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     alphai = alphai or AlphaIView()
@@ -182,10 +196,25 @@ def rank_weakest(
             rejected.append({"base": base, "reason": "short_history"})
             continue
         mom = float(series[-1]) / float(series[-1 - lb]) - 1.0
-        reasons: list[str] = []
-        if mom > cfg.mom_floor:
-            rejected.append({"base": base, "reason": "mom_above_floor", "mom": round(mom, 4)})
+        score_val = mom
+        if use_excess:
+            if len(btc) <= lb:
+                rejected.append({"base": base, "reason": "btc_short_history"})
+                continue
+            btc_mom = float(btc[-1]) / float(btc[-1 - lb]) - 1.0
+            score_val = mom - btc_mom
+        if score_val > floor:
+            rejected.append(
+                {
+                    "base": base,
+                    "reason": "mom_above_floor",
+                    "mom": round(mom, 4),
+                    "score": round(score_val, 4),
+                    "mode": mode,
+                }
+            )
             continue
+        reasons: list[str] = [f"mode={mode}"]
         if cfg.alphai_enabled and cfg.alphai_block_on_avoid and base in alphai.avoid:
             rejected.append({"base": base, "reason": "alphai_avoid", "mom": round(mom, 4)})
             continue
@@ -201,20 +230,20 @@ def rank_weakest(
         elif bull_n > bear_n:
             size_mult *= float(cfg.alphai_bullish_size_damp)
             reasons.append("alphai_bullish_damp")
-        score = alphai.pick_scores.get(base) if alphai.pick_scores else None
-        # Lower / missing score is fine for shorts; very high bullish score damp further.
-        if score is not None and float(score) >= 60:
+        pick_score = alphai.pick_scores.get(base) if alphai.pick_scores else None
+        if pick_score is not None and float(pick_score) >= 60:
             size_mult *= float(cfg.alphai_bullish_size_damp)
             reasons.append("alphai_high_score_damp")
         cands.append(
             {
                 "base": base,
                 "mom": mom,
+                "score": score_val,
                 "size_mult": size_mult,
                 "reasons": reasons,
             }
         )
-    cands.sort(key=lambda r: float(r["mom"]))
+    cands.sort(key=lambda r: float(r["score"]))
     return cands, rejected
 
 
@@ -232,8 +261,8 @@ def select_shorts(
     if deploy < cfg.min_notional_eur:
         return []
     if cfg.weight_mode == "magnitude":
-        mag = sum(abs(float(c["mom"])) for c in picks) or 1.0
-        raw_w = [abs(float(c["mom"])) / mag for c in picks]
+        mag = sum(abs(float(c.get("score", c["mom"]))) for c in picks) or 1.0
+        raw_w = [abs(float(c.get("score", c["mom"]))) / mag for c in picks]
     else:
         raw_w = [1.0 / len(picks)] * len(picks)
     out: list[dict[str, Any]] = []

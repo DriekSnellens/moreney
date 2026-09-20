@@ -97,6 +97,34 @@ def config_from_settings(settings: Settings | None = None) -> ShortWeakestConfig
     )
 
 
+def probe_core_desk() -> dict[str, Any]:
+    """Read core momentum desk: idle when no open positions."""
+    try:
+        from bot.live.momentum_runner import get_momentum_desk_manager
+
+        st = get_momentum_desk_manager().status()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "idle": True,
+            "n_positions": 0,
+            "reason": f"probe_failed:{exc}",
+        }
+    positions = st.get("positions") or []
+    n = sum(1 for p in positions if float(p.get("quantity") or 0.0) > 1e-12)
+    regime = st.get("last_regime") or {}
+    return {
+        "ok": True,
+        "idle": n == 0,
+        "n_positions": n,
+        "running": bool(st.get("running")),
+        "regime_label": regime.get("regime_label") or regime.get("label"),
+        "soft": bool(regime.get("soft")),
+        "reasons": list(regime.get("reasons") or [])[:6],
+        "risk_block": regime.get("risk_block") or "",
+    }
+
+
 class ShortWeakestPaperRunner:
     """Synthetic short book marked with Bitvavo public prices. Paper only."""
 
@@ -125,6 +153,8 @@ class ShortWeakestPaperRunner:
         self.mark_ts: dict[str, float] = {}
         self.last_regime: dict[str, Any] = {}
         self.last_rebalance_ms = 0
+        self._last_idle_decide_ms = 0
+        self._core_snapshot: dict[str, Any] = {}
         self._load_state()
 
     def _load_state(self) -> None:
@@ -240,11 +270,15 @@ class ShortWeakestPaperRunner:
             )
         unreal = self._unrealized()
         equity = self.cash_eur + unreal
+        core = self._core_snapshot or probe_core_desk()
         return {
             "desk": "momentum_short_weakest",
             "mode": "short_weakest_paper",
             "dry_run": True,
             "paper_only": True,
+            "role": "idle_fill" if core.get("idle") else "standby_core_active",
+            "core_idle": bool(core.get("idle")),
+            "core": core,
             "cash_eur": round(self.cash_eur, 2),
             "equity_eur": round(equity, 2),
             "book_eur": float(self.cfg.book_eur),
@@ -274,6 +308,10 @@ class ShortWeakestPaperRunner:
                 "max_weight": self.cfg.max_weight,
                 "deploy_frac": self.cfg.deploy_frac,
                 "vol_spike_exit": self.cfg.vol_spike_exit,
+                "only_when_core_idle": self.cfg.only_when_core_idle,
+                "cover_when_core_active": self.cfg.cover_when_core_active,
+                "idle_fill_enabled": self.cfg.idle_fill_enabled,
+                "idle_excess_floor": self.cfg.idle_excess_floor,
                 "decision_hours_utc": list(self.cfg.decision_hours_utc),
             },
             "next_decision": self._next_decision_iso(),
@@ -307,10 +345,24 @@ class ShortWeakestPaperRunner:
         self._roll_risk_windows(now)
         await self._refresh_marks()
 
+        core = probe_core_desk()
+        self._core_snapshot = core
+        core_idle = bool(core.get("idle"))
+
+        # When core is active, stand down: cover shorts and skip new entries.
+        if (
+            execute
+            and self.cfg.cover_when_core_active
+            and not core_idle
+            and self.positions
+        ):
+            for pos in list(self.positions):
+                await self._close(pos, reason="core_active_cover", now_ms=now_ms)
+            self._save_state()
+
         alphai, alphai_meta = load_alphai_view(self.alphai_path)
         stale = alphai_is_stale(alphai, self.cfg, now_ms=now_ms)
 
-        # Daily closes for ranking + BTC regime
         closes_map: dict[str, list[float]] = {}
         need = ("BTC", *self.cfg.universe)
         for base in need:
@@ -323,28 +375,51 @@ class ShortWeakestPaperRunner:
 
         btc_closes = closes_map.get("BTC") or []
         bear_ok, bear_meta = btc_bear_ok(btc_closes, self.cfg)
-        cands, rejected = rank_weakest(closes_map, self.cfg, alphai=alphai)
+
+        # Mode selection: hard bear → absolute weakness; else idle-fill excess.
+        use_idle_fill = (
+            bool(self.cfg.idle_fill_enabled)
+            and core_idle
+            and not bear_ok
+        )
+        rank_mode = "excess" if use_idle_fill else "absolute"
+        cands, rejected = rank_weakest(
+            closes_map,
+            self.cfg,
+            alphai=alphai,
+            mode=rank_mode,
+            btc_closes=btc_closes,
+        )
 
         allowed, why = self._entries_allowed()
-        if not bear_ok:
+        if self.cfg.only_when_core_idle and not core_idle:
+            allowed, why = False, "core_active"
+        elif bear_ok:
+            pass  # hard bear always ok for absolute shorts
+        elif use_idle_fill:
+            pass  # idle-fill substitutes for SMA200 bear gate
+        else:
             allowed, why = False, "btc_not_bear"
         if self.cfg.alphai_require_macro_or_bear and not alphai.macro_caution and bear_ok:
-            # optional stricter gate — default off
             pass
         if stale and self.cfg.alphai_enabled:
-            # stale AlphaI: still allow tape shorts, but skip AlphaI size boosts
             alphai = replace_alphai_neutral(alphai)
 
         due = (now_ms - self.last_rebalance_ms) >= self.cfg.rebalance_days * 86_400_000
         if self.last_rebalance_ms <= 0:
             due = True
+        # Idle-fill: if flat and core idle, allow a fresh select even mid-cycle.
+        if use_idle_fill and not self.positions:
+            due = True
 
         planned: list[dict[str, Any]] = []
         if allowed and due:
-            # Flatten existing before re-select (rebalance)
-            if execute and self.positions:
+            if execute and self.positions and not use_idle_fill:
                 for pos in list(self.positions):
                     await self._close(pos, reason="rebalance", now_ms=now_ms)
+            elif execute and self.positions and use_idle_fill and due:
+                for pos in list(self.positions):
+                    await self._close(pos, reason="idle_fill_rebalance", now_ms=now_ms)
             cash_for_entries = self.cash_eur
             planned = select_shorts(
                 cands, self.cfg, cash_eur=cash_for_entries, held=set()
@@ -356,11 +431,19 @@ class ShortWeakestPaperRunner:
             "executed": bool(execute),
             "ok": bool(allowed),
             "desk": "momentum_short_weakest",
+            "rank_mode": rank_mode,
+            "idle_fill": use_idle_fill,
+            "core": core,
             "bear": bear_meta,
             "rebalance_due": due,
             "risk_block": "" if allowed else why,
             "candidates": [
-                {"base": c["base"], "mom": round(float(c["mom"]), 4)} for c in cands[:8]
+                {
+                    "base": c["base"],
+                    "mom": round(float(c["mom"]), 4),
+                    "score": round(float(c.get("score", c["mom"])), 4),
+                }
+                for c in cands[:8]
             ],
             "rejected": rejected[:10],
             "entries": [p["base"] for p in planned],
@@ -383,6 +466,7 @@ class ShortWeakestPaperRunner:
             for row in planned:
                 await self._open(row, now_ms=now_ms)
             self.last_rebalance_ms = now_ms
+            self._last_idle_decide_ms = now_ms
         self._save_state()
         return summary
 
@@ -504,18 +588,45 @@ class ShortWeakestPaperRunner:
         return {"ok": True, "closed": n}
 
     async def run(self, should_stop) -> None:  # noqa: ANN001
-        logger.info("short-weakest paper runner started")
+        logger.info("short-weakest paper runner started (idle-fill complementary)")
         last_hour_fire: set[str] = set()
         while not should_stop():
             try:
                 await self.manage_exits()
                 now = datetime.now(UTC)
+                now_ms = int(now.timestamp() * 1000)
+                core = probe_core_desk()
+                self._core_snapshot = core
+
+                # Cover immediately when core takes risk.
+                if (
+                    self.cfg.cover_when_core_active
+                    and not core.get("idle")
+                    and self.positions
+                ):
+                    for pos in list(self.positions):
+                        await self._close(
+                            pos, reason="core_active_cover", now_ms=now_ms
+                        )
+                    self._save_state()
+
                 key = f"{now.date()}T{now.hour}"
-                if now.hour in self.cfg.decision_hours_utc and key not in last_hour_fire:
-                    if now.minute < 5:
-                        await self.decide(execute=True)
+                scheduled = (
+                    now.hour in self.cfg.decision_hours_utc
+                    and key not in last_hour_fire
+                    and now.minute < 5
+                )
+                idle_due = (
+                    bool(core.get("idle"))
+                    and not self.positions
+                    and (now_ms - self._last_idle_decide_ms)
+                    >= float(self.cfg.idle_decide_every_sec) * 1000.0
+                )
+                if scheduled or idle_due:
+                    await self.decide(execute=True)
+                    self._last_idle_decide_ms = now_ms
+                    if scheduled:
                         last_hour_fire.add(key)
-                # prune old keys
                 if len(last_hour_fire) > 48:
                     last_hour_fire = {key}
             except Exception:  # noqa: BLE001
