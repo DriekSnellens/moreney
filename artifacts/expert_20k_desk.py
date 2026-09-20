@@ -1030,7 +1030,10 @@ def main() -> None:
             extra.append(row)
         results.extend(extra)
         results.sort(key=lambda x: x["_score"], reverse=True)
-        best = results[0]
+
+    results.sort(key=lambda x: x["_score"], reverse=True)
+    # Overlays (vol-target / DD halt) are optional risk knobs, not the live map.
+    best = next(a for a in results if a.get("kind") != "overlay")
 
     feasible = [
         a
