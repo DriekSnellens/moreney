@@ -766,10 +766,13 @@ def _positions_table(
     cfg = status.get("config") or {}
     if not rows:
         return f'<p class="pos-empty muted" data-live="positions-empty">{escape(empty_text)}</p>'
-    trail = float(cfg.get("trail_pct") or 0.05)
-    tight_after = float(cfg.get("trail_tight_after") or 0.0)
-    tight = float(cfg.get("trail_tight_pct") or trail)
-    stop = float(cfg.get("hard_stop_pct") or 0.03)
+    # Preserve explicit 0.0 (paper bear-harvest disables trail/hard-stop).
+    trail = float(cfg["trail_pct"]) if cfg.get("trail_pct") is not None else 0.05
+    tight_after = (
+        float(cfg["trail_tight_after"]) if cfg.get("trail_tight_after") is not None else 0.0
+    )
+    tight = float(cfg["trail_tight_pct"]) if cfg.get("trail_tight_pct") is not None else trail
+    stop = float(cfg["hard_stop_pct"]) if cfg.get("hard_stop_pct") is not None else 0.03
     busy = status.get("manual_exit") or {}
     sell_busy = bool(busy) and not busy.get("done")
     out = [
@@ -797,20 +800,48 @@ def _positions_table(
         eff_trail = tight if (tight_after > 0 and live_peak_ret >= tight_after) else trail
         if side == "short":
             # Cover stop sits above mark as price rises against the short.
-            trail_px = (
-                float(p["trail_stop_px"])
-                if p.get("trail_stop_px") is not None
-                else entry * (1.0 - live_peak_ret + eff_trail)
-            )
-            stop_px = (
-                float(p["hard_stop_px"])
-                if p.get("hard_stop_px") is not None
-                else entry * (1 + stop)
-            )
+            if eff_trail > 0:
+                trail_px = (
+                    float(p["trail_stop_px"])
+                    if p.get("trail_stop_px") is not None
+                    else entry * (1.0 - live_peak_ret + eff_trail)
+                )
+                trail_cell = (
+                    f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
+                    f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
+                )
+                trail_meta = (
+                    f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
+                    f"({100 * eff_trail:.1f}%)</span></div>"
+                )
+            else:
+                trail_cell = "<td class='muted' data-k='trail'>uit</td>"
+                trail_meta = "<div><span>Trail</span><span data-k='trail'>uit</span></div>"
+            if stop > 0:
+                stop_px = (
+                    float(p["hard_stop_px"])
+                    if p.get("hard_stop_px") is not None
+                    else entry * (1 + stop)
+                )
+                stop_cell = f"<td class='mono'>{stop_px:,.4f}</td>"
+                stop_meta = f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
+            else:
+                stop_cell = "<td class='muted'>uit</td>"
+                stop_meta = "<div><span>Hard stop</span>uit</div>"
             side_badge = " <span class='pill obs' style='font-size:.65rem'>SHORT</span>"
         else:
             trail_px = peak_px * (1 - eff_trail)
             stop_px = entry * (1 - stop)
+            trail_cell = (
+                f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
+                f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
+            )
+            stop_cell = f"<td class='mono'>{stop_px:,.4f}</td>"
+            trail_meta = (
+                f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
+                f"({100 * eff_trail:.1f}%)</span></div>"
+            )
+            stop_meta = f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
             side_badge = ""
         hid = escape(str(p.get("holding_id") or p.get("base") or ""))
         sell = _sell_cell(p, disabled=sell_busy, post_action=post_sell_action)
@@ -828,9 +859,7 @@ def _positions_table(
             f"</div></td>"
             f"<td class='{_cls(gross)}' data-k='gross'>{_fmt_pct(gross)}</td>"
             f"<td data-k='peak'>{_fmt_pct(live_peak_ret)}</td>"
-            f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
-            f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
-            f"<td class='mono'>{stop_px:,.4f}</td>"
+            f"{trail_cell}{stop_cell}"
             f"<td class='{_cls(p.get('unrealized_net_eur'))}' data-k='net'>"
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
             f"<td data-k='age'>{float(p.get('age_h') or 0):.1f}h</td>"
@@ -852,9 +881,7 @@ def _positions_table(
             f'<div><span>Gross</span><span class="{_cls(gross)}" data-k="gross">'
             f"{_fmt_pct(gross)}</span></div>"
             f"<div><span>Peak</span><span data-k='peak'>{_fmt_pct(live_peak_ret)}</span></div>"
-            f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
-            f"({100 * eff_trail:.1f}%)</span></div>"
-            f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
+            f"{trail_meta}{stop_meta}"
             f"<div><span>Age</span><span data-k='age'>{float(p.get('age_h') or 0):.1f}h</span></div>"
             "</div>"
             f'<div class="actions">{sell}</div></div>'
@@ -863,15 +890,16 @@ def _positions_table(
     cards.append("</div>")
     out.append("".join(cards))
     sell_all = ""
-    if rows and not sell_busy and sell_all_path:
+    if rows and not sell_busy and (sell_all_path or post_sell_action):
         if post_sell_action:
+            sell_all_action = post_sell_action.replace("/sell", "/sell-all")
             sell_all = (
                 '<div class="toolbar" style="margin-top:.55rem">'
-                f'<form method="post" action="{escape(post_sell_action.replace("/sell", "/sell-all"))}">'
+                f'<form method="post" action="{escape(sell_all_action)}">'
                 '<input type="hidden" name="redirect" value="1">'
                 '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
             )
-        else:
+        elif sell_all_path:
             sell_all = (
                 '<div class="toolbar" style="margin-top:.55rem">'
                 f'<form method="get" action="{escape(sell_all_path)}">'
@@ -1151,6 +1179,82 @@ def _report_panel(report: Mapping[str, Any]) -> str:
         '<p style="margin-top:.8rem"><a href="/live/momentum" class="muted">terug</a></p></div>'
     )
     return "".join(out)
+
+
+def _short_weakest_decision_panel(status: Mapping[str, Any]) -> str:
+    """Bear-harvest decision / regime view (not the long-desk panel)."""
+    reg = status.get("last_regime") or {}
+    bear = status.get("bear") or reg.get("bear") or {}
+    pack = status.get("pack") or status.get("config") or {}
+    risk = status.get("risk") or {}
+    bear_ok = bool(bear.get("bear_ok"))
+    if bear_ok:
+        pill = '<span class="pill on"><span class="dot"></span>BEAR ON</span>'
+    else:
+        pill = '<span class="pill off"><span class="dot"></span>STANDBY</span>'
+    btc = bear.get("btc")
+    sma = bear.get("sma200")
+    gap = bear.get("gap_pct")
+    gap_s = _fmt_pct(gap) if gap is not None else "—"
+    btc_s = f"{float(btc):,.0f}" if btc is not None else "—"
+    sma_s = f"{float(sma):,.0f}" if sma is not None else "—"
+    block = risk.get("block_reason") or reg.get("risk_block") or ""
+    block_html = (
+        f'<div class="warn">Blok: {escape(str(block))}</div>' if block else ""
+    )
+    cands = reg.get("candidates") or []
+    planned = reg.get("planned") or []
+    cand_html = (
+        "".join(
+            f"<span>{escape(str(c.get('base')))} "
+            f"mom {_fmt_pct(c.get('mom') if c.get('mom') is not None else c.get('score'))}"
+            f"</span>"
+            for c in cands[:6]
+        )
+        or '<span class="muted">geen short-kandidaten</span>'
+    )
+    planned_html = (
+        ", ".join(
+            f"{escape(str(p.get('base')))} {_fmt_eur(p.get('notional_eur'), signed=False)}"
+            for p in planned
+        )
+        or "—"
+    )
+    rejected = reg.get("rejected") or []
+    rej_counts: dict[str, int] = {}
+    for r in rejected:
+        key = str(r.get("reason") or "?")
+        rej_counts[key] = rej_counts.get(key, 0) + 1
+    rej_s = ", ".join(f"{k}×{v}" for k, v in sorted(rej_counts.items())) or "—"
+    at = reg.get("at") or status.get("next_decision")
+    pack_line = (
+        f"top{pack.get('top_n', 1)} · lb{pack.get('lookback_days', 15)} "
+        f"skip{pack.get('skip_days', 2)} · floor {_fmt_pct(pack.get('mom_floor'))} · "
+        f"reb {pack.get('rebalance_days', 30)}d · mw {pack.get('max_weight', 0.5)} · "
+        f"stops {'uit' if not float(pack.get('trail_pct') or 0) else 'aan'}"
+    )
+    return (
+        f'<div data-live="sw-decision">'
+        f"<div>{pill} <span class='muted' data-live='sw-role'>"
+        f"{escape(str(status.get('role') or ''))}</span> · "
+        f"<span class='muted'>om {_ts(at)}</span></div>"
+        f"<div class='rules' style='margin-top:.7rem' data-live='sw-bear'>"
+        f"<div><span>BTC</span><strong data-k='sw-btc'>{btc_s}</strong></div>"
+        f"<div><span>SMA200</span><strong data-k='sw-sma'>{sma_s}</strong></div>"
+        f"<div><span>Gap vs SMA</span><span data-k='sw-gap' class='{_cls(gap)}'>{gap_s}</span></div>"
+        f"<div><span>Pack</span>{escape(pack_line)}</div>"
+        f"<div><span>Equity</span><strong data-k='sw-equity'>"
+        f"{_fmt_eur(status.get('equity_eur'), signed=False)}</strong></div>"
+        f"<div><span>Gerealiseerd</span><span data-k='sw-realized' class='{_cls(status.get('realized_total_eur'))}'>"
+        f"{_fmt_eur(status.get('realized_total_eur'))}</span></div>"
+        f"<div><span>Open PnL</span><span data-k='sw-open' class='{_cls(status.get('unrealized_net_eur'))}'>"
+        f"{_fmt_eur(status.get('unrealized_net_eur'))}</span></div>"
+        f"<div><span>Planned</span>{planned_html}</div>"
+        f"<div><span>Rejected</span>{escape(rej_s)}</div>"
+        f"</div>"
+        f"<div class='chips' style='margin-top:.7rem' data-live='sw-cands'>{cand_html}</div>"
+        f"{block_html}</div>"
+    )
 
 
 def _decision_panel(status: Mapping[str, Any]) -> str:
@@ -1722,6 +1826,57 @@ def _sleeve_card(
     )
 
 
+def _short_weakest_sleeve_card(status: Mapping[str, Any] | None) -> str:
+    st = status or {}
+    running = bool(st.get("running"))
+    if not running:
+        pill = '<span class="pill off"><span class="dot"></span>STOP</span>'
+        mode = "gestopt"
+    else:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        mode = "bear-harvest paper"
+    bear = st.get("bear") or {}
+    bear_ok = bool(bear.get("bear_ok"))
+    gate = "BEAR ON" if bear_ok else "STANDBY (BTC&gt;SMA200)"
+    gate_cls = "good" if bear_ok else "muted"
+    btc = bear.get("btc")
+    sma = bear.get("sma200")
+    gap = bear.get("gap_pct")
+    n_pos = len(st.get("positions") or [])
+    pack = st.get("pack") or st.get("config") or {}
+    pos_bits: list[str] = []
+    for p in (st.get("positions") or [])[:4]:
+        base = escape(str(p.get("base") or ""))
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(
+            f"<li><strong>{base}</strong> · <span class='{_cls(net)}'>{_fmt_eur(net)}</span></li>"
+        )
+    if not pos_bits:
+        pos_bits.append("<li class='muted'>Geen open paper-shorts</li>")
+    return (
+        f'<div class="card" data-live="sw-sleeve">'
+        f'<div class="card-head"><h2>Short weakest</h2>{pill}</div>'
+        f'<p class="muted" style="margin:0 0 .5rem">Paper bear-harvest · {escape(mode)}</p>'
+        f"<p><span class='{gate_cls}' data-live='sw-gate'><strong>{gate}</strong></span> · "
+        f"BTC <span data-k='sw-btc'>{(f'{float(btc):,.0f}' if btc is not None else '—')}</span> / "
+        f"SMA <span data-k='sw-sma'>{(f'{float(sma):,.0f}' if sma is not None else '—')}</span> · "
+        f"gap <span data-k='sw-gap' class='{_cls(gap)}'>{_fmt_pct(gap) if gap is not None else '—'}</span></p>"
+        f"<p>Equity <strong data-k='sw-equity'>{_fmt_eur(st.get('equity_eur'), signed=False)}</strong> · "
+        f"real <span data-k='sw-realized' class='{_cls(st.get('realized_total_eur'))}'>"
+        f"{_fmt_eur(st.get('realized_total_eur'))}</span> · "
+        f"open <span data-k='sw-open' class='{_cls(st.get('unrealized_net_eur'))}'>"
+        f"{_fmt_eur(st.get('unrealized_net_eur'))}</span> · "
+        f"pos <span data-k='sw-npos'>{n_pos}</span>/{pack.get('top_n', 1)}</p>"
+        f"<p class='muted' style='font-size:.78rem'>Pack top{pack.get('top_n', 1)} · "
+        f"lb{pack.get('lookback_days', 15)} skip{pack.get('skip_days', 2)} · "
+        f"reb {pack.get('rebalance_days', 30)}d · mw {pack.get('max_weight', 0.5)} · "
+        f"idle-fill {'aan' if pack.get('idle_fill_enabled') else 'uit'}</p>"
+        f"<p>Next <strong data-live='sw-next'>{_ts(st.get('next_decision'))}</strong></p>"
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem' data-live='sw-poslist'>"
+        f"{''.join(pos_bits)}</ul></div>"
+    )
+
+
 def _sleeves_panel(
     core: Mapping[str, Any],
     volatile: Mapping[str, Any] | None,
@@ -1770,13 +1925,7 @@ def _sleeves_panel(
             book_label="Soft book",
         )
     if short_weakest is not None:
-        cards += _sleeve_card(
-            title="Short weakest",
-            role="Paper bear-harvest · short zwakste alt als BTC &lt; SMA200",
-            status=short_weakest,
-            href="/live/momentum/short-weakest",
-            book_label="Paper book",
-        )
+        cards += _short_weakest_sleeve_card(short_weakest)
     roles = ["stabiel core"]
     if volatile is not None:
         roles.append("aggressief volatile")
@@ -1892,13 +2041,17 @@ _LIVE_MARKS_JS = r"""
         : Math.max(peakBar, mark / entry - 1);
     }
     const effTrail = (tightAfter > 0 && livePeak >= tightAfter) ? tight : trail;
-    let trailPx;
-    if (side === "short") {
-      trailPx = pos.trail_stop_px != null
+    let trailTxt;
+    if (!(effTrail > 0)) {
+      trailTxt = "uit";
+    } else if (side === "short") {
+      const trailPx = pos.trail_stop_px != null
         ? Number(pos.trail_stop_px)
         : entry * (1 - livePeak + effTrail);
+      trailTxt = `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`;
     } else {
-      trailPx = entry * (1 + livePeak) * (1 - effTrail);
+      const trailPx = entry * (1 + livePeak) * (1 - effTrail);
+      trailTxt = `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`;
     }
     nodes.forEach((root) => {
       setText(root, "mark", fmtPx(mark));
@@ -1910,7 +2063,7 @@ _LIVE_MARKS_JS = r"""
       }
       setText(root, "gross", fmtPct(gross), cls(gross));
       setText(root, "peak", fmtPct(livePeak));
-      setText(root, "trail", `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`);
+      setText(root, "trail", trailTxt);
       setText(root, "net", fmtEur(pos.unrealized_net_eur), cls(pos.unrealized_net_eur));
       if (pos.age_h != null) setText(root, "age", `${Number(pos.age_h).toFixed(1)}h`);
     });
@@ -1991,6 +2144,99 @@ _LIVE_MARKS_JS = r"""
     const node = document.querySelector('[data-live="rules"]');
     if (html && node) node.outerHTML = html;
   }
+  function patchShortSleeve(status) {
+    const bear = status.bear || {};
+    const fmtBtc = (v) => {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    };
+    const roots = [
+      document.querySelector('[data-live="sw-sleeve"]'),
+      document.querySelector('[data-live="sw-decision"]'),
+      document.querySelector('[data-live="sw-bear"]'),
+    ].filter(Boolean);
+    const apply = (key, text, className) => {
+      roots.forEach((root) => setText(root, key, text, className));
+      // also global data-k under sw panels
+      document.querySelectorAll(`[data-k="${key}"]`).forEach((el) => {
+        if (!roots.some((r) => r.contains(el))) {
+          el.textContent = text;
+          if (className !== undefined) {
+            el.classList.remove("good", "bad");
+            if (className) el.classList.add(className);
+          }
+        }
+      });
+    };
+    apply("sw-btc", fmtBtc(bear.btc));
+    apply("sw-sma", fmtBtc(bear.sma200));
+    apply("sw-gap", fmtPct(bear.gap_pct), cls(bear.gap_pct));
+    apply("sw-equity", fmtEur(status.equity_eur).replace(/^\+/, ""));
+    apply("sw-realized", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
+    apply("sw-open", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
+    apply("sw-npos", String((status.positions || []).length));
+    const gate = document.querySelector('[data-live="sw-gate"]');
+    if (gate) {
+      const on = !!bear.bear_ok;
+      gate.innerHTML = on
+        ? "<strong>BEAR ON</strong>"
+        : "<strong>STANDBY (BTC&gt;SMA200)</strong>";
+      gate.classList.toggle("good", on);
+      gate.classList.toggle("muted", !on);
+    }
+    const decision = document.querySelector('[data-live="sw-decision"]');
+    if (decision) {
+      const pill = decision.querySelector(".pill");
+      if (pill) {
+        const on = !!bear.bear_ok;
+        pill.className = on ? "pill on" : "pill off";
+        pill.innerHTML = on
+          ? '<span class="dot"></span>BEAR ON'
+          : '<span class="dot"></span>STANDBY';
+      }
+    }
+    const role = document.querySelector('[data-live="sw-role"]');
+    if (role && status.role) role.textContent = status.role;
+    const next = document.querySelector('[data-live="sw-next"]');
+    if (next && status.next_decision) {
+      const d = new Date(status.next_decision);
+      if (!Number.isNaN(d.getTime())) {
+        const dd = String(d.getUTCDate()).padStart(2, "0");
+        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const hh = String(d.getUTCHours()).padStart(2, "0");
+        const mi = String(d.getUTCMinutes()).padStart(2, "0");
+        next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
+      }
+    }
+    // Sleeve card position chips (reload still happens on open-set change).
+    const posList = document.querySelector('[data-live="sw-poslist"]');
+    if (posList && Array.isArray(status.positions)) {
+      if (!status.positions.length) {
+        posList.innerHTML = "<li class='muted'>Geen open paper-shorts</li>";
+      } else {
+        posList.innerHTML = status.positions.slice(0, 4).map((p) => {
+          const net = p.unrealized_net_eur;
+          const c = cls(net);
+          return `<li><strong>${p.base || ""}</strong> · <span class="${c}">${fmtEur(net)}</span></li>`;
+        }).join("");
+      }
+    }
+  }
+  function shortPositionsChanged(status) {
+    const live = new Set();
+    document.querySelectorAll("#sw-open-pos [data-holding]").forEach((el) => {
+      const id = el.getAttribute("data-holding");
+      if (id) live.add(id);
+    });
+    const empty = document.querySelector("#sw-open-pos [data-live='positions-empty']");
+    const next = statusPositionIds(status);
+    if (empty && next.size > 0) return true;
+    if (!empty && next.size === 0 && document.querySelector("#sw-open-pos")) return true;
+    if (live.size !== next.size) return true;
+    for (const id of next) if (!live.has(id)) return true;
+    for (const id of live) if (!next.has(id)) return true;
+    return false;
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
@@ -2014,10 +2260,15 @@ _LIVE_MARKS_JS = r"""
       if (!sw.ok) return;
       const shortStatus = await sw.json();
       if (!shortStatus || !shortStatus.enabled_setting) return;
+      if (shortPositionsChanged(shortStatus)) {
+        window.location.reload();
+        return;
+      }
       const knobs = trailKnobs(shortStatus);
       (shortStatus.positions || []).forEach((p) =>
         patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight)
       );
+      patchShortSleeve(shortStatus);
     } catch (err) {
       /* short sleeve optional */
     }
@@ -2182,12 +2433,12 @@ def render_momentum_dashboard(
             )
         if show_sw:
             pos_blocks.append(
-                '<div><div class="panel-head"><h2>Short weakest · paper</h2></div>'
+                '<div id="sw-open-pos"><div class="panel-head"><h2>Short weakest · paper</h2></div>'
                 f"""{_positions_table(
                     short_weakest or {},
-                    sell_all_path=None,
+                    sell_all_path="/live/momentum/short-weakest/sell-all",
                     post_sell_action="/live/momentum/short-weakest/sell",
-                    empty_text="Geen open paper-shorts — wacht op bear-regime + decide.",
+                    empty_text="Geen open paper-shorts — standby tot BTC &lt; SMA200.",
                 )}</div>"""
             )
         stack = "three" if show_vol and show_sw else "two"
@@ -2208,9 +2459,9 @@ def render_momentum_dashboard(
             )
         if show_sw:
             dec_blocks.append(
-                '<div><div class="panel-head"><h2>Short weakest · laatste beslissing</h2>'
+                '<div><div class="panel-head"><h2>Short weakest · paper live</h2>'
                 f"{_short_weakest_actions(short_weakest)}</div>"
-                f"{_decision_panel(short_weakest or {})}</div>"
+                f"{_short_weakest_decision_panel(short_weakest or {})}</div>"
             )
         decisions_html = (
             f'<section class="panel"><div class="stack {stack}">'
@@ -2290,9 +2541,11 @@ def render_momentum_dashboard(
       <a class="{active_cls}" href="/live/momentum">Command Center</a>
       <a class="{vol_cls}" href="/live/momentum/volatile">Volatile sleeve
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
+      <a href="/live/momentum#sw-open-pos">Short weakest paper
+        <span class="badge">{'on' if show_sw else 'off'}</span></a>
       <a href="/live/momentum/ledger">Trade history</a>
       <a href="/live/momentum/earnings">Earnings</a>
-      <a href="/live/momentum/status">Status JSON</a>
+      <a href="/live/momentum/short-weakest/status">Short JSON</a>
     </nav>
   </div>
   <div class="side-capital">

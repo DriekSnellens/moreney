@@ -207,5 +207,9 @@ async def test_manager_paper_start_stop(tmp_path: Path):
     assert st["paper_only"] is True
     assert st["mode"] == "short_weakest_paper"
     assert st["book_eur"] == 20_000.0
+    assert st["pack"]["name"] == "bear_harvest_balanced"
+    assert st["pack"]["top_n"] == 1
+    assert "role" in st
+    assert "bear" in st
     stop = await mgr.stop()
     assert stop.get("stopped") is True

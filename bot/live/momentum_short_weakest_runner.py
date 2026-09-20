@@ -165,7 +165,14 @@ class ShortWeakestPaperRunner:
         self._last_idle_decide_ms = 0
         self._core_snapshot: dict[str, Any] = {}
         self._decide_lock = asyncio.Lock()
+        self._bear_live: dict[str, Any] = {}
+        self._btc_closes: list[float] = []
+        self._bear_refresh_ms = 0
         self._load_state()
+        # Seed bear gate from last decide if present.
+        bear = (self.last_regime or {}).get("bear")
+        if isinstance(bear, dict):
+            self._bear_live = dict(bear)
 
     def _load_state(self) -> None:
         p = Path(self.state_path)
@@ -237,6 +244,65 @@ class ShortWeakestPaperRunner:
                 self.marks[base] = float(px)
                 self.mark_ts[base] = time.time()
 
+    async def _refresh_bear_live(self, *, force: bool = False) -> dict[str, Any]:
+        """Keep BTC vs SMA200 fresh for the dashboard (even when flat)."""
+        now_ms = int(time.time() * 1000)
+        if not force and self._bear_live and now_ms - self._bear_refresh_ms < 60_000:
+            return self._bear_live
+        try:
+            rows = await asyncio.to_thread(fetch_daily_closes, "BTC", days=260)
+            closes = [c for _, c in rows]
+            self._btc_closes = closes
+            _, meta = btc_bear_ok(closes, self.cfg)
+            live_px = self.marks.get("BTC")
+            if live_px and meta.get("sma200") is not None:
+                sma = float(meta["sma200"])
+                meta = {
+                    **meta,
+                    "btc_daily": meta.get("btc"),
+                    "btc": float(live_px),
+                    "bear_ok": (float(live_px) < sma)
+                    if self.cfg.require_btc_below_sma200
+                    else True,
+                    "gap_pct": round(float(live_px) / sma - 1.0, 4) if sma else None,
+                    "source": "ticker+sma200",
+                }
+            else:
+                btc = float(meta.get("btc") or 0)
+                sma = meta.get("sma200")
+                meta = {
+                    **meta,
+                    "gap_pct": round(btc / float(sma) - 1.0, 4) if sma else None,
+                    "source": "daily",
+                }
+            self._bear_live = meta
+            self._bear_refresh_ms = now_ms
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("short-weakest bear refresh failed: %s", exc)
+            if not self._bear_live:
+                self._bear_live = {"bear_ok": False, "error": str(exc)}
+        return self._bear_live
+
+    def _pack_summary(self) -> dict[str, Any]:
+        return {
+            "name": "bear_harvest_balanced",
+            "top_n": self.cfg.top_n,
+            "lookback_days": self.cfg.lookback_days,
+            "skip_days": self.cfg.skip_days,
+            "bounce_block_pct": self.cfg.bounce_block_pct,
+            "mom_floor": self.cfg.mom_floor,
+            "rebalance_days": self.cfg.rebalance_days,
+            "max_weight": self.cfg.max_weight,
+            "deploy_frac": self.cfg.deploy_frac,
+            "trail_pct": self.cfg.trail_pct,
+            "hard_stop_pct": self.cfg.hard_stop_pct,
+            "vol_spike_exit": self.cfg.vol_spike_exit,
+            "idle_fill_enabled": self.cfg.idle_fill_enabled,
+            "only_when_core_idle": self.cfg.only_when_core_idle,
+            "cover_when_core_active": self.cfg.cover_when_core_active,
+            "require_btc_below_sma200": self.cfg.require_btc_below_sma200,
+        }
+
     def status(self) -> dict[str, Any]:
         now = time.time()
         positions = []
@@ -249,6 +315,12 @@ class ShortWeakestPaperRunner:
             peak = p.peak_return
             if mark:
                 peak = max(peak, p.short_return(mark))
+            trail_px = None
+            if mark and float(self.cfg.trail_pct) > 0:
+                trail_px = round(p.entry_price * (1.0 - peak + self.cfg.trail_pct), 6)
+            hard_px = None
+            if float(self.cfg.hard_stop_pct) > 0:
+                hard_px = round(p.entry_price * (1.0 + self.cfg.hard_stop_pct), 6)
             positions.append(
                 {
                     "holding_id": p.holding_id,
@@ -270,27 +342,30 @@ class ShortWeakestPaperRunner:
                     ),
                     "entry_reason": p.entry_reason,
                     "exiting": False,
-                    "trail_stop_px": (
-                        round(p.entry_price * (1.0 - peak + self.cfg.trail_pct), 6)
-                        if mark
-                        else None
-                    ),
-                    "hard_stop_px": round(p.entry_price * (1.0 + self.cfg.hard_stop_pct), 6),
+                    "trail_stop_px": trail_px,
+                    "hard_stop_px": hard_px,
                 }
             )
         unreal = self._unrealized()
         equity = self.cash_eur + unreal
         core = self._core_snapshot or probe_core_desk()
+        bear = dict(self._bear_live or (self.last_regime or {}).get("bear") or {})
+        bear_ok = bool(bear.get("bear_ok"))
+        if self.positions:
+            role = "bear_harvest_active" if bear_ok else "short_open_outside_bear"
+        else:
+            role = "bear_harvest" if bear_ok else "standby_btc_above_sma200"
+        block = (self.last_regime or {}).get("risk_block") or (
+            "" if bear_ok else "btc_not_bear"
+        )
         return {
             "desk": "momentum_short_weakest",
             "mode": "short_weakest_paper",
             "dry_run": True,
             "paper_only": True,
-            "role": (
-                "bear_harvest"
-                if (self.last_regime or {}).get("bear_ok")
-                else "standby_btc_above_sma200"
-            ),
+            "role": role,
+            "pack": self._pack_summary(),
+            "bear": bear,
             "core_idle": bool(core.get("idle")),
             "core": core,
             "cash_eur": round(self.cash_eur, 2),
@@ -308,6 +383,8 @@ class ShortWeakestPaperRunner:
                 "week_realized_eur": round(self.week_realized_eur, 2),
                 "day_loss_limit_eur": self.cfg.day_loss_limit_eur,
                 "week_loss_limit_eur": self.cfg.week_loss_limit_eur,
+                "entries_allowed": not bool(block),
+                "block_reason": block,
             },
             "config": {
                 "book_eur": self.cfg.book_eur,
@@ -329,6 +406,7 @@ class ShortWeakestPaperRunner:
                 "idle_fill_enabled": self.cfg.idle_fill_enabled,
                 "idle_excess_floor": self.cfg.idle_excess_floor,
                 "decision_hours_utc": list(self.cfg.decision_hours_utc),
+                "max_positions": self.cfg.top_n,
             },
             "next_decision": self._next_decision_iso(),
         }
@@ -395,6 +473,21 @@ class ShortWeakestPaperRunner:
 
         btc_closes = closes_map.get("BTC") or []
         bear_ok, bear_meta = btc_bear_ok(btc_closes, self.cfg)
+        self._btc_closes = list(btc_closes)
+        live_px = self.marks.get("BTC")
+        if live_px and bear_meta.get("sma200") is not None:
+            sma = float(bear_meta["sma200"])
+            bear_meta = {
+                **bear_meta,
+                "btc_daily": bear_meta.get("btc"),
+                "btc": float(live_px),
+                "bear_ok": float(live_px) < sma,
+                "gap_pct": round(float(live_px) / sma - 1.0, 4),
+                "source": "ticker+sma200",
+            }
+            bear_ok = bool(bear_meta["bear_ok"])
+        self._bear_live = dict(bear_meta)
+        self._bear_refresh_ms = now_ms
 
         # Mode selection: hard bear → absolute weakness; else idle-fill excess.
         use_idle_fill = (
@@ -611,10 +704,12 @@ class ShortWeakestPaperRunner:
         return {"ok": True, "closed": n}
 
     async def run(self, should_stop) -> None:  # noqa: ANN001
-        logger.info("short-weakest paper runner started (idle-fill complementary)")
+        logger.info("short-weakest paper runner started (bear-harvest pack)")
         last_hour_fire: set[str] = set()
         while not should_stop():
             try:
+                await self._refresh_marks()
+                await self._refresh_bear_live()
                 await self.manage_exits()
                 now = datetime.now(UTC)
                 now_ms = int(now.timestamp() * 1000)
@@ -639,8 +734,10 @@ class ShortWeakestPaperRunner:
                     and key not in last_hour_fire
                     and now.minute < 5
                 )
+                # Idle-fill re-decide only when that mode is enabled.
                 idle_due = (
-                    bool(core.get("idle"))
+                    bool(self.cfg.idle_fill_enabled)
+                    and bool(core.get("idle"))
                     and not self.positions
                     and (now_ms - self._last_idle_decide_ms)
                     >= float(self.cfg.idle_decide_every_sec) * 1000.0
@@ -699,8 +796,29 @@ class ShortWeakestDeskManager:
         elif base["enabled_setting"]:
             # Show idle book even when not running so the dashboard card is visible.
             cfg = config_from_settings(settings)
+            pack = {
+                "name": "bear_harvest_balanced",
+                "top_n": cfg.top_n,
+                "lookback_days": cfg.lookback_days,
+                "skip_days": cfg.skip_days,
+                "bounce_block_pct": cfg.bounce_block_pct,
+                "mom_floor": cfg.mom_floor,
+                "rebalance_days": cfg.rebalance_days,
+                "max_weight": cfg.max_weight,
+                "deploy_frac": cfg.deploy_frac,
+                "trail_pct": cfg.trail_pct,
+                "hard_stop_pct": cfg.hard_stop_pct,
+                "vol_spike_exit": cfg.vol_spike_exit,
+                "idle_fill_enabled": cfg.idle_fill_enabled,
+                "only_when_core_idle": cfg.only_when_core_idle,
+                "cover_when_core_active": cfg.cover_when_core_active,
+                "require_btc_below_sma200": cfg.require_btc_below_sma200,
+            }
             base.update(
                 {
+                    "role": "stopped",
+                    "pack": pack,
+                    "bear": {},
                     "book_eur": cfg.book_eur,
                     "cash_eur": cfg.book_eur,
                     "equity_eur": cfg.book_eur,
@@ -711,13 +829,31 @@ class ShortWeakestDeskManager:
                     "config": {
                         "book_eur": cfg.book_eur,
                         "trail_pct": cfg.trail_pct,
+                        "trail_tight_after": 0.0,
+                        "trail_tight_pct": cfg.trail_pct,
                         "hard_stop_pct": cfg.hard_stop_pct,
+                        "lookback_days": cfg.lookback_days,
                         "top_n": cfg.top_n,
+                        "rebalance_days": cfg.rebalance_days,
                         "mom_floor": cfg.mom_floor,
+                        "max_weight": cfg.max_weight,
+                        "deploy_frac": cfg.deploy_frac,
+                        "skip_days": cfg.skip_days,
+                        "bounce_block_pct": cfg.bounce_block_pct,
+                        "vol_spike_exit": cfg.vol_spike_exit,
+                        "idle_fill_enabled": cfg.idle_fill_enabled,
+                        "max_positions": cfg.top_n,
                     },
                 }
             )
         return base
+
+    async def refresh_live(self) -> dict[str, Any]:
+        """Refresh marks + BTC/SMA gate, then return enriched status for the UI."""
+        if self._runner is not None:
+            await self._runner._refresh_marks()
+            await self._runner._refresh_bear_live()
+        return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:
         if self.running():

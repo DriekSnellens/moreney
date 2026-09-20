@@ -1314,7 +1314,8 @@ async def live_momentum_short_weakest_page(
 
 @app.get("/live/momentum/short-weakest/status")
 async def live_momentum_short_weakest_status() -> dict[str, Any]:
-    return get_short_weakest_desk_manager().status()
+    """Realtime paper status: marks + BTC/SMA200 gate refreshed on each poll."""
+    return await get_short_weakest_desk_manager().refresh_live()
 
 
 @app.get("/live/momentum/short-weakest/ledger")
