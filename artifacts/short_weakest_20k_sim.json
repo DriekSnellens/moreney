@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-09-20T10:25:59.364886+00:00",
+  "book_eur": 20000,
+  "idle_fill_sizing": {
+    "top_n": 3,
+    "max_weight": 0.15,
+    "notional_per_name_eur": 3000,
+    "total_deployed_eur": 9000,
+    "cash_reserve_eur": 11000,
+    "vs_5k_per_name_eur": 750
+  },
+  "bear_window_optimized": {
+    "window": [
+      "2025-10-06",
+      "2026-06-30"
+    ],
+    "pnl_eur": 2985.21,
+    "return_pct": 14.93,
+    "max_dd_pct": -6.1,
+    "calmar": 2.448,
+    "note": "Same optimized knobs; absolute \u20ac P&L scales with book (already @20k in sweep)."
+  }
+}

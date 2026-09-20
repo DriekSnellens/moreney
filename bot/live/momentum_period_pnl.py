@@ -38,6 +38,7 @@ class DeskEarnings:
     open_mtm_eur: float
     as_of: str
     tz: str = "Europe/Amsterdam"
+    short_weakest: PeriodNet | None = None
 
 
 def _parse_ts(raw: Any) -> datetime | None:
@@ -191,15 +192,19 @@ def compute_desk_earnings(
     volatile_ledger_path: str | Path | None = None,
     core_status: Mapping[str, Any] | None = None,
     volatile_status: Mapping[str, Any] | None = None,
+    short_weakest_ledger_path: str | Path | None = None,
+    short_weakest_status: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> DeskEarnings:
-    """Build operator earnings for core, volatile, and combined sleeves."""
+    """Build operator earnings for core, volatile, short-weakest, and combined."""
     core_status = core_status or {}
     volatile_status = volatile_status or {}
+    short_weakest_status = short_weakest_status or {}
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
     core_exits = load_exit_fills(core_ledger_path)
     vol_exits = load_exit_fills(volatile_ledger_path)
+    sw_exits = load_exit_fills(short_weakest_ledger_path)
 
     core = sum_period(
         core_exits,
@@ -211,15 +216,26 @@ def compute_desk_earnings(
         now=now_utc,
         all_time_fallback=_as_float(volatile_status.get("realized_total_eur")),
     )
-    open_mtm = _as_float(core_status.get("unrealized_net_eur")) + _as_float(
-        volatile_status.get("unrealized_net_eur")
+    short_weakest = sum_period(
+        sw_exits,
+        now=now_utc,
+        all_time_fallback=_as_float(short_weakest_status.get("realized_total_eur")),
+    )
+    combined = _combine(core, volatile)
+    if short_weakest_ledger_path or short_weakest_status:
+        combined = _combine(combined, short_weakest)
+    open_mtm = (
+        _as_float(core_status.get("unrealized_net_eur"))
+        + _as_float(volatile_status.get("unrealized_net_eur"))
+        + _as_float(short_weakest_status.get("unrealized_net_eur"))
     )
     return DeskEarnings(
         core=core,
         volatile=volatile,
-        combined=_combine(core, volatile),
+        combined=combined,
         open_mtm_eur=round(open_mtm, 2),
         as_of=now_utc.astimezone(_OPERATOR_TZ).isoformat(),
+        short_weakest=short_weakest,
     )
 
 
@@ -243,7 +259,7 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
             "trades_all_time": p.trades_all_time,
         }
 
-    return {
+    out = {
         "tz": e.tz,
         "as_of": e.as_of,
         "open_mtm_eur": e.open_mtm_eur,
@@ -251,3 +267,6 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
         "volatile": _p(e.volatile),
         "combined": _p(e.combined),
     }
+    if e.short_weakest is not None:
+        out["short_weakest"] = _p(e.short_weakest)
+    return out
