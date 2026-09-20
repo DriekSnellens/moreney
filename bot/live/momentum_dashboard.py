@@ -61,6 +61,39 @@ body {
 .muted { color: var(--muted); }
 .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
 
+.mix-board { margin-bottom: 1.1rem; }
+.mix-reg {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1rem;
+  margin: 0 0 .55rem;
+}
+.mix-reg .name { font-family: var(--display); font-size: 1.45rem; font-weight: 800; letter-spacing: -.03em; }
+.mix-why { margin: 0 0 .85rem; color: var(--ink); font-size: .95rem; line-height: 1.45; max-width: 58rem; }
+.mix-gates {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem;
+  margin: 0 0 .9rem;
+}
+.mix-gates div {
+  background: var(--elevated); border: 1px solid var(--border); border-radius: .65rem;
+  padding: .55rem .7rem;
+}
+.mix-gates span { display: block; color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+.mix-gates strong { font-family: var(--mono); font-size: 1.05rem; }
+.mix-sleeves {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .65rem;
+}
+.mix-sleeve {
+  border: 1px solid var(--border); border-radius: .75rem; padding: .75rem .8rem;
+  background: rgba(15,23,42,.65); min-height: 8.2rem;
+}
+.mix-sleeve.on { border-color: rgba(52,211,153,.45); box-shadow: 0 0 0 1px rgba(52,211,153,.12) inset; }
+.mix-sleeve.off { opacity: .72; }
+.mix-sleeve h3 { margin: 0 0 .25rem; font-size: .92rem; }
+.mix-sleeve .eur { font-family: var(--mono); font-weight: 700; font-size: 1.05rem; }
+.mix-sleeve p { margin: .35rem 0 0; color: var(--muted); font-size: .78rem; line-height: 1.35; }
+@media (max-width: 720px) {
+  .mix-gates { grid-template-columns: 1fr; }
+}
+
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
@@ -1181,19 +1214,80 @@ def _report_panel(report: Mapping[str, Any]) -> str:
     return "".join(out)
 
 
+def _mix_panel(alloc: Mapping[str, Any] | None) -> str:
+    """Which strategy is on, how much €, and why (loop mix)."""
+    a = dict(alloc or {})
+    if not a:
+        return (
+            '<section class="panel mix-board" data-live="mix-board">'
+            '<div class="card-head"><h2>Actieve mix</h2>'
+            '<span class="pill off"><span class="dot"></span>GEEN DATA</span></div>'
+            '<p class="muted">Allocator nog niet geladen.</p></section>'
+        )
+    label = str(a.get("label") or (a.get("regime") or {}).get("label") or "mid")
+    why = str(a.get("why") or (a.get("regime") or {}).get("why") or "")
+    reg = a.get("regime") or {}
+    pill_cls = {"risk_on": "on", "risk_off": "obs", "mid": "off"}.get(label, "off")
+    pill_txt = {"risk_on": "RISK ON", "risk_off": "RISK OFF", "mid": "MID · CASH"}.get(
+        label, label.upper()
+    )
+    btc = reg.get("btc")
+    sma20 = reg.get("sma20")
+    sma50 = reg.get("sma50")
+
+    def px(v: Any) -> str:
+        try:
+            return f"{float(v):,.0f}"
+        except (TypeError, ValueError):
+            return "—"
+
+    cards = []
+    for sl in a.get("sleeves") or []:
+        on = bool(sl.get("active"))
+        cls = "on" if on else "off"
+        state = "AAN" if on else "UIT"
+        cards.append(
+            f'<div class="mix-sleeve {cls}" data-mix-sleeve="{escape(str(sl.get("id") or ""))}">'
+            f'<h3>{escape(str(sl.get("title") or sl.get("id")))} '
+            f'<span class="pill {"on" if on else "off"}" style="margin-left:.35rem">{state}</span></h3>'
+            f'<div class="eur" data-k="mix-eur">{_fmt_eur(sl.get("target_eur"), signed=False)}</div>'
+            f'<p data-k="mix-why-s">{escape(str(sl.get("why") or sl.get("blurb") or ""))}</p>'
+            f"</div>"
+        )
+    return (
+        f'<section class="panel mix-board" data-live="mix-board" id="mix">'
+        f'<div class="card-head"><h2>Welke strategie nu</h2>'
+        f'<span class="pill {pill_cls}" data-live="mix-pill"><span class="dot"></span>'
+        f'<span data-k="mix-label">{escape(pill_txt)}</span></span></div>'
+        f'<div class="mix-reg"><span class="name" data-k="mix-label-big">{escape(label.replace("_", " "))}</span>'
+        f'<span class="muted">classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}</span></div>'
+        f'<p class="mix-why" data-k="mix-why">{escape(why)}</p>'
+        f'<div class="mix-gates">'
+        f'<div><span>BTC</span><strong data-k="mix-btc">{px(btc)}</strong></div>'
+        f'<div><span>SMA20</span><strong data-k="mix-sma20">{px(sma20)}</strong></div>'
+        f'<div><span>SMA50</span><strong data-k="mix-sma50">{px(sma50)}</strong></div>'
+        f"</div>"
+        f'<div class="mix-sleeves" data-live="mix-sleeves">{"".join(cards)}</div>'
+        f'<p class="muted" style="margin:.75rem 0 0;font-size:.78rem">'
+        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle. "
+        f"Donchian is de long-sleeve van deze desk.</p>"
+        f"</section>"
+    )
+
+
 def _short_weakest_decision_panel(status: Mapping[str, Any]) -> str:
     """Bear-harvest decision / regime view (not the long-desk panel)."""
     reg = status.get("last_regime") or {}
     bear = status.get("bear") or reg.get("bear") or {}
     pack = status.get("pack") or status.get("config") or {}
     risk = status.get("risk") or {}
-    bear_ok = bool(bear.get("bear_ok"))
+    sma_days = int(bear.get("sma_days") or pack.get("sma_days") or 20)
     if bear_ok:
         pill = '<span class="pill on"><span class="dot"></span>BEAR ON</span>'
     else:
         pill = '<span class="pill off"><span class="dot"></span>STANDBY</span>'
     btc = bear.get("btc")
-    sma = bear.get("sma200")
+    sma = bear.get("sma") if bear.get("sma") is not None else bear.get("sma200")
     gap = bear.get("gap_pct")
     gap_s = _fmt_pct(gap) if gap is not None else "—"
     btc_s = f"{float(btc):,.0f}" if btc is not None else "—"
@@ -1240,7 +1334,7 @@ def _short_weakest_decision_panel(status: Mapping[str, Any]) -> str:
         f"<span class='muted'>om {_ts(at)}</span></div>"
         f"<div class='rules' style='margin-top:.7rem' data-live='sw-bear'>"
         f"<div><span>BTC</span><strong data-k='sw-btc'>{btc_s}</strong></div>"
-        f"<div><span>SMA200</span><strong data-k='sw-sma'>{sma_s}</strong></div>"
+        f"<div><span>SMA{sma_days}</span><strong data-k='sw-sma'>{sma_s}</strong></div>"
         f"<div><span>Gap vs SMA</span><span data-k='sw-gap' class='{_cls(gap)}'>{gap_s}</span></div>"
         f"<div><span>Pack</span>{escape(pack_line)}</div>"
         f"<div><span>Equity</span><strong data-k='sw-equity'>"
@@ -1836,14 +1930,15 @@ def _short_weakest_sleeve_card(status: Mapping[str, Any] | None) -> str:
         pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
         mode = "bear-harvest paper"
     bear = st.get("bear") or {}
+    pack = st.get("pack") or st.get("config") or {}
     bear_ok = bool(bear.get("bear_ok"))
-    gate = "BEAR ON" if bear_ok else "STANDBY (BTC&gt;SMA200)"
+    sma_n = int(bear.get("sma_days") or pack.get("sma_days") or 20)
+    gate = "BEAR ON" if bear_ok else f"STANDBY (BTC&gt;SMA{sma_n})"
     gate_cls = "good" if bear_ok else "muted"
     btc = bear.get("btc")
-    sma = bear.get("sma200")
+    sma = bear.get("sma") if bear.get("sma") is not None else bear.get("sma200")
     gap = bear.get("gap_pct")
     n_pos = len(st.get("positions") or [])
-    pack = st.get("pack") or st.get("config") or {}
     pos_bits: list[str] = []
     for p in (st.get("positions") or [])[:4]:
         base = escape(str(p.get("base") or ""))
@@ -1856,7 +1951,7 @@ def _short_weakest_sleeve_card(status: Mapping[str, Any] | None) -> str:
     return (
         f'<div class="card" data-live="sw-sleeve">'
         f'<div class="card-head"><h2>Short weakest</h2>{pill}</div>'
-        f'<p class="muted" style="margin:0 0 .5rem">Paper bear-harvest · {escape(mode)}</p>'
+        f'<p class="muted" style="margin:0 0 .5rem">Paper short · SMA{sma_n} gate · {escape(mode)}</p>'
         f"<p><span class='{gate_cls}' data-live='sw-gate'><strong>{gate}</strong></span> · "
         f"BTC <span data-k='sw-btc'>{(f'{float(btc):,.0f}' if btc is not None else '—')}</span> / "
         f"SMA <span data-k='sw-sma'>{(f'{float(sma):,.0f}' if sma is not None else '—')}</span> · "
@@ -1994,6 +2089,7 @@ _LIVE_MARKS_JS = r"""
   window.__moreneyMarksPoll = true;
   const STATUS_URL = "/live/momentum/status";
   const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
+  const MIX_STATUS_URL = "/live/momentum/allocator/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -2169,7 +2265,7 @@ _LIVE_MARKS_JS = r"""
       });
     };
     apply("sw-btc", fmtBtc(bear.btc));
-    apply("sw-sma", fmtBtc(bear.sma200));
+    apply("sw-sma", fmtBtc(bear.sma != null ? bear.sma : bear.sma200));
     apply("sw-gap", fmtPct(bear.gap_pct), cls(bear.gap_pct));
     apply("sw-equity", fmtEur(status.equity_eur).replace(/^\+/, ""));
     apply("sw-realized", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
@@ -2178,9 +2274,10 @@ _LIVE_MARKS_JS = r"""
     const gate = document.querySelector('[data-live="sw-gate"]');
     if (gate) {
       const on = !!bear.bear_ok;
+      const smaN = bear.sma_days || (status.pack && status.pack.sma_days) || 20;
       gate.innerHTML = on
         ? "<strong>BEAR ON</strong>"
-        : "<strong>STANDBY (BTC&gt;SMA200)</strong>";
+        : `<strong>STANDBY (BTC&gt;SMA${smaN})</strong>`;
       gate.classList.toggle("good", on);
       gate.classList.toggle("muted", !on);
     }
@@ -2237,6 +2334,44 @@ _LIVE_MARKS_JS = r"""
     for (const id of live) if (!next.has(id)) return true;
     return false;
   }
+  function patchMix(mix) {
+    const board = document.querySelector('[data-live="mix-board"]');
+    if (!board || !mix) return;
+    const reg = mix.regime || {};
+    const label = mix.label || reg.label || "";
+    const pillTxt = label === "risk_on" ? "RISK ON" : label === "risk_off" ? "RISK OFF" : label === "mid" ? "MID · CASH" : label;
+    const fmtBtc = (v) => {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    };
+    board.querySelectorAll('[data-k="mix-label"]').forEach((el) => { el.textContent = pillTxt; });
+    board.querySelectorAll('[data-k="mix-label-big"]').forEach((el) => { el.textContent = String(label).replace("_", " "); });
+    board.querySelectorAll('[data-k="mix-why"]').forEach((el) => { el.textContent = mix.why || reg.why || ""; });
+    board.querySelectorAll('[data-k="mix-btc"]').forEach((el) => { el.textContent = fmtBtc(reg.btc); });
+    board.querySelectorAll('[data-k="mix-sma20"]').forEach((el) => { el.textContent = fmtBtc(reg.sma20); });
+    board.querySelectorAll('[data-k="mix-sma50"]').forEach((el) => { el.textContent = fmtBtc(reg.sma50); });
+    const pill = board.querySelector('[data-live="mix-pill"]');
+    if (pill) {
+      pill.classList.remove("on", "off", "obs");
+      pill.classList.add(label === "risk_on" ? "on" : label === "risk_off" ? "obs" : "off");
+    }
+    (mix.sleeves || []).forEach((sl) => {
+      const card = board.querySelector(`[data-mix-sleeve="${sl.id}"]`);
+      if (!card) return;
+      card.classList.toggle("on", !!sl.active);
+      card.classList.toggle("off", !sl.active);
+      const eur = card.querySelector('[data-k="mix-eur"]');
+      if (eur) eur.textContent = fmtEur(sl.target_eur).replace(/^\+/, "");
+      const why = card.querySelector('[data-k="mix-why-s"]');
+      if (why) why.textContent = sl.why || sl.blurb || "";
+      const st = card.querySelector(".pill");
+      if (st) {
+        st.textContent = sl.active ? "AAN" : "UIT";
+        st.classList.toggle("on", !!sl.active);
+        st.classList.toggle("off", !sl.active);
+      }
+    });
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
@@ -2272,6 +2407,14 @@ _LIVE_MARKS_JS = r"""
     } catch (err) {
       /* short sleeve optional */
     }
+    try {
+      const mx = await fetch(MIX_STATUS_URL, { cache: "no-store" });
+      if (!mx.ok) return;
+      const mix = await mx.json();
+      patchMix(mix);
+    } catch (err) {
+      /* mix optional */
+    }
   }
   tick();
   setInterval(tick, INTERVAL_MS);
@@ -2296,6 +2439,8 @@ def render_momentum_dashboard(
     short_weakest: Mapping[str, Any] | None = None,
     short_weakest_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_short_weakest: bool = False,
+    allocator: Mapping[str, Any] | None = None,
+    donchian: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -2438,7 +2583,7 @@ def render_momentum_dashboard(
                     short_weakest or {},
                     sell_all_path="/live/momentum/short-weakest/sell-all",
                     post_sell_action="/live/momentum/short-weakest/sell",
-                    empty_text="Geen open paper-shorts — standby tot BTC &lt; SMA200.",
+                    empty_text="Geen open paper-shorts — standby tot BTC &lt; SMA20.",
                 )}</div>"""
             )
         stack = "three" if show_vol and show_sw else "two"
@@ -2538,6 +2683,7 @@ def render_momentum_dashboard(
     </div>
     <nav class="side-nav">
       <div class="label">Workspace</div>
+      <a href="/live/momentum#mix">Actieve mix</a>
       <a class="{active_cls}" href="/live/momentum">Command Center</a>
       <a class="{vol_cls}" href="/live/momentum/volatile">Volatile sleeve
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
@@ -2598,6 +2744,7 @@ def render_momentum_dashboard(
 {topbar}
 <div class="wrap">
 {earnings_html}
+{_mix_panel(allocator)}
 {positions_html}
 {err_html}
 <div class="ops-row">{toolbar}</div>

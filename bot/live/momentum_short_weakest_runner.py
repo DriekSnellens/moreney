@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.live.desk_allocator import BOOK_EUR, live_snapshot, target_book
 from bot.live.momentum_runner import CandleFeed
 from bot.live.momentum_short_weakest import (
     ShortPosition,
@@ -103,6 +104,8 @@ def config_from_settings(settings: Settings | None = None) -> ShortWeakestConfig
             "momentum_short_weakest_cover_when_core_active",
             base.cover_when_core_active,
         ),
+        sma_days=_i("momentum_short_weakest_sma_days", base.sma_days),
+        cover_on_bull=_b("momentum_short_weakest_cover_on_bull", base.cover_on_bull),
     )
 
 
@@ -168,6 +171,7 @@ class ShortWeakestPaperRunner:
         self._bear_live: dict[str, Any] = {}
         self._btc_closes: list[float] = []
         self._bear_refresh_ms = 0
+        self._alloc_book = float(cfg.book_eur)
         self._load_state()
         # Seed bear gate from last decide if present.
         bear = (self.last_regime or {}).get("bear")
@@ -265,7 +269,7 @@ class ShortWeakestPaperRunner:
                     if self.cfg.require_btc_below_sma200
                     else True,
                     "gap_pct": round(float(live_px) / sma - 1.0, 4) if sma else None,
-                    "source": "ticker+sma200",
+                    "source": "ticker+sma_gate",
                 }
             else:
                 btc = float(meta.get("btc") or 0)
@@ -285,7 +289,7 @@ class ShortWeakestPaperRunner:
 
     def _pack_summary(self) -> dict[str, Any]:
         return {
-            "name": "bear_harvest_balanced",
+            "name": "loop_sma20_short",
             "top_n": self.cfg.top_n,
             "lookback_days": self.cfg.lookback_days,
             "skip_days": self.cfg.skip_days,
@@ -301,6 +305,8 @@ class ShortWeakestPaperRunner:
             "only_when_core_idle": self.cfg.only_when_core_idle,
             "cover_when_core_active": self.cfg.cover_when_core_active,
             "require_btc_below_sma200": self.cfg.require_btc_below_sma200,
+            "sma_days": self.cfg.sma_days,
+            "cover_on_bull": self.cfg.cover_on_bull,
         }
 
     def status(self) -> dict[str, Any]:
@@ -352,9 +358,9 @@ class ShortWeakestPaperRunner:
         bear = dict(self._bear_live or (self.last_regime or {}).get("bear") or {})
         bear_ok = bool(bear.get("bear_ok"))
         if self.positions:
-            role = "bear_harvest_active" if bear_ok else "short_open_outside_bear"
+            role = "short_active" if bear_ok else "covering_btc_above_gate"
         else:
-            role = "bear_harvest" if bear_ok else "standby_btc_above_sma200"
+            role = "short_armed" if bear_ok else "standby_btc_above_sma"
         block = (self.last_regime or {}).get("risk_block") or (
             "" if bear_ok else "btc_not_bear"
         )
@@ -370,9 +376,9 @@ class ShortWeakestPaperRunner:
             "core": core,
             "cash_eur": round(self.cash_eur, 2),
             "equity_eur": round(equity, 2),
-            "book_eur": float(self.cfg.book_eur),
+            "book_eur": float(self._alloc_book or self.cfg.book_eur),
             "deployed_eur": round(self._deployed(), 2),
-            "book_left_eur": round(max(0.0, self.cfg.book_eur - self._deployed()), 2),
+            "book_left_eur": round(max(0.0, float(self._alloc_book or self.cfg.book_eur) - self._deployed()), 2),
             "exposure_eur": round(self._deployed(), 2),
             "unrealized_net_eur": round(unreal, 2),
             "realized_total_eur": round(self.realized_total_eur, 2),
@@ -483,11 +489,27 @@ class ShortWeakestPaperRunner:
                 "btc": float(live_px),
                 "bear_ok": float(live_px) < sma,
                 "gap_pct": round(float(live_px) / sma - 1.0, 4),
-                "source": "ticker+sma200",
+                "source": "ticker+sma_gate",
             }
             bear_ok = bool(bear_meta["bear_ok"])
         self._bear_live = dict(bear_meta)
         self._bear_refresh_ms = now_ms
+
+        mix = live_snapshot(book=BOOK_EUR, btc_live=float(live_px) if live_px else None)
+        alloc_target = float(target_book("short_weakest", mix))
+        self._alloc_book = alloc_target
+
+        # Cover the same day BTC recaptures the SMA gate (loop winner).
+        if execute and self.cfg.cover_on_bull and not bear_ok and self.positions:
+            for pos in list(self.positions):
+                await self._close(pos, reason="cover_on_bull", now_ms=now_ms)
+            self.last_rebalance_ms = now_ms
+            self._save_state()
+
+        if execute and alloc_target < self.cfg.min_notional_eur and self.positions:
+            for pos in list(self.positions):
+                await self._close(pos, reason="allocator_flatten", now_ms=now_ms)
+            self._save_state()
 
         # Mode selection: hard bear → absolute weakness; else idle-fill excess.
         use_idle_fill = (
@@ -510,9 +532,11 @@ class ShortWeakestPaperRunner:
         elif bear_ok:
             pass  # hard bear always ok for absolute shorts
         elif use_idle_fill:
-            pass  # idle-fill substitutes for SMA200 bear gate
+            pass  # idle-fill substitutes for SMA bear gate
         else:
             allowed, why = False, "btc_not_bear"
+        if alloc_target < self.cfg.min_notional_eur:
+            allowed, why = False, "allocator_zero_book"
         if self.cfg.alphai_require_macro_or_bear and not alphai.macro_caution and bear_ok:
             pass
         if stale and self.cfg.alphai_enabled:
@@ -534,7 +558,7 @@ class ShortWeakestPaperRunner:
                         reason=("idle_fill_rebalance" if use_idle_fill else "rebalance"),
                         now_ms=now_ms,
                     )
-            cash_for_entries = self.cash_eur
+            cash_for_entries = min(self.cash_eur, max(alloc_target, 0.0))
             planned = select_shorts(
                 cands, self.cfg, cash_eur=cash_for_entries, held=set()
             )
@@ -549,6 +573,7 @@ class ShortWeakestPaperRunner:
             "idle_fill": use_idle_fill,
             "core": core,
             "bear": bear_meta,
+            "allocator": {"target_eur": alloc_target, "label": mix.get("label"), "why": mix.get("why")},
             "rebalance_due": due,
             "risk_block": "" if allowed else why,
             "candidates": [
@@ -704,7 +729,7 @@ class ShortWeakestPaperRunner:
         return {"ok": True, "closed": n}
 
     async def run(self, should_stop) -> None:  # noqa: ANN001
-        logger.info("short-weakest paper runner started (bear-harvest pack)")
+        logger.info("short-weakest paper runner started (loop SMA20 pack)")
         last_hour_fire: set[str] = set()
         while not should_stop():
             try:
@@ -726,6 +751,16 @@ class ShortWeakestPaperRunner:
                         await self._close(
                             pos, reason="core_active_cover", now_ms=now_ms
                         )
+                    self._save_state()
+
+                bear = self._bear_live or {}
+                if (
+                    self.cfg.cover_on_bull
+                    and not bear.get("bear_ok")
+                    and self.positions
+                ):
+                    for pos in list(self.positions):
+                        await self._close(pos, reason="cover_on_bull", now_ms=now_ms)
                     self._save_state()
 
                 key = f"{now.date()}T{now.hour}"
@@ -817,7 +852,7 @@ class ShortWeakestDeskManager:
                 pass
             bear = dict((last_regime or {}).get("bear") or {})
             pack = {
-                "name": "bear_harvest_balanced",
+                "name": "loop_sma20_short",
                 "top_n": cfg.top_n,
                 "lookback_days": cfg.lookback_days,
                 "skip_days": cfg.skip_days,

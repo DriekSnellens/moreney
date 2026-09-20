@@ -1,9 +1,9 @@
-"""Paper short-weakest sleeve — bear-harvest shorts on weakest trends.
+"""Paper short-weakest sleeve — loop mix shorts on weakest trends.
 
-Balanced pack (bear_harvest_validated): trade only when BTC < SMA200; short
-the single weakest 15d name (Asness skip-2d, mom≤−8%, bounce-block +4%);
-rebalance every 30d; no trail/hard-stop/vol-spike; max_weight 0.5.
-Idle-fill OFF. Paper-only; AlphaI avoid/picks gate; no per-coin hardcodes.
+Loop pack: trade only when BTC < SMA20; cover the same day the gate turns
+off; short the single weakest 15d name (skip 1d, mom≤−3%, bounce-block +2%);
+rebalance every 7d; 10% hard stop; max_weight 0.5. Allocator sets the book
+(€14k in risk_off, €0 otherwise). Paper-only; no per-coin hardcodes.
 """
 
 from __future__ import annotations
@@ -26,28 +26,29 @@ BITVAVO_PUBLIC = "https://api.bitvavo.com/v2"
 
 @dataclass(frozen=True)
 class ShortWeakestConfig:
-    """Knobs for the paper short-weakest sleeve (bear-harvest balanced defaults)."""
+    """Knobs for the paper short-weakest sleeve (loop SMA20 pack)."""
 
     decision_hours_utc: tuple[int, ...] = (8, 16)
-    book_eur: float = 20_000.0
+    book_eur: float = 14_000.0
     lookback_days: int = 15
     top_n: int = 1
-    rebalance_days: int = 30
-    mom_floor: float = -0.08
+    rebalance_days: int = 7
+    mom_floor: float = -0.03
     # Asness-style: end lookback this many days before the latest close.
-    skip_days: int = 2
+    skip_days: int = 1
     # Reject entry if prior daily return >= this (squeeze / bounce filter).
-    bounce_block_pct: float = 0.04
+    bounce_block_pct: float = 0.02
     # 0 = disabled (bear-harvest runner lets the lag run).
     trail_pct: float = 0.0
-    hard_stop_pct: float = 0.0  # adverse move vs entry (price up); 0 = off
+    hard_stop_pct: float = 0.10  # adverse move vs entry (price up); 0 = off
     max_weight: float = 0.5
     deploy_frac: float = 1.0
     weight_mode: str = "equal"  # equal | magnitude
     vol_spike_mult: float = 3.0  # day ret >= mult * ATR14 → exit
     vol_spike_exit: bool = False
-    require_btc_below_sma200: bool = True
-    sma_days: int = 200
+    require_btc_below_sma200: bool = True  # below sma_days (env name kept)
+    sma_days: int = 20
+    cover_on_bull: bool = True  # flatten the same day BTC recaptures the gate
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 600.0
     week_loss_limit_eur: float = 1_600.0
@@ -171,7 +172,14 @@ def btc_bear_ok(btc_closes: Sequence[float], cfg: ShortWeakestConfig) -> tuple[b
     sma = _sma(btc_closes, cfg.sma_days)
     last = float(btc_closes[-1]) if btc_closes else 0.0
     ok = (not cfg.require_btc_below_sma200) or (sma is not None and last < sma)
-    return ok, {"btc": last, "sma200": sma, "bear_ok": ok}
+    return ok, {
+        "btc": last,
+        "sma200": sma,  # gate SMA; dashboard still reads this key
+        "sma": sma,
+        "sma_days": cfg.sma_days,
+        "bear_ok": ok,
+        "cover_on_bull": cfg.cover_on_bull,
+    }
 
 
 def rank_weakest(

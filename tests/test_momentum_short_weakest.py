@@ -159,23 +159,25 @@ def test_config_from_settings_reads_book():
     assert cfg.trail_pct == 0.0
     assert cfg.max_weight == 0.5
     assert cfg.idle_fill_enabled is False
-    assert cfg.rebalance_days == 30
-    assert cfg.skip_days == 2
+    assert cfg.rebalance_days == 7
+    assert cfg.skip_days == 1
 
 
 def test_bear_harvest_defaults():
     cfg = ShortWeakestConfig()
     assert cfg.top_n == 1
-    assert cfg.rebalance_days == 30
-    assert cfg.skip_days == 2
-    assert cfg.bounce_block_pct == 0.04
+    assert cfg.rebalance_days == 7
+    assert cfg.skip_days == 1
+    assert cfg.bounce_block_pct == 0.02
     assert cfg.trail_pct == 0.0
-    assert cfg.hard_stop_pct == 0.0
+    assert cfg.hard_stop_pct == 0.10
     assert cfg.vol_spike_exit is False
     assert cfg.max_weight == 0.5
     assert cfg.idle_fill_enabled is False
     assert cfg.only_when_core_idle is False
     assert cfg.cover_when_core_active is False
+    assert cfg.sma_days == 20
+    assert cfg.cover_on_bull is True
 
 
 @pytest.mark.asyncio
@@ -207,7 +209,7 @@ async def test_manager_paper_start_stop(tmp_path: Path):
     assert st["paper_only"] is True
     assert st["mode"] == "short_weakest_paper"
     assert st["book_eur"] == 20_000.0
-    assert st["pack"]["name"] == "bear_harvest_balanced"
+    assert st["pack"]["name"] == "loop_sma20_short"
     assert st["pack"]["top_n"] == 1
     assert "role" in st
     assert "bear" in st

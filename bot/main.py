@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Mapping
@@ -66,6 +67,8 @@ from bot.live.momentum_volatile_runner import (
 from bot.live.momentum_short_weakest_runner import (
     get_short_weakest_desk_manager,
 )
+from bot.live.momentum_donchian_runner import get_donchian_desk_manager
+from bot.live.desk_allocator import live_snapshot
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
 from bot.risk.risk_engine import RiskEngine
@@ -228,8 +231,9 @@ async def lifespan(_app: FastAPI):
         # The two desks share the venue cash; only one may own the book. When
         # the momentum desk is flagged running the legacy maker session never
         # auto-resumes, even if its status file still claims to be running.
-        if momentum_desk_flagged_running(settings):
-            logger.warning("momentum desk owns the book; legacy micro session not resumed")
+        mix_on = bool(getattr(get_settings(), "momentum_multi_strat_enabled", False))
+        if mix_on or momentum_desk_flagged_running(settings):
+            logger.warning("momentum/mix desk owns the book; legacy micro session not resumed")
         else:
             try:
                 resume = await get_micro_session_manager().resume_if_interrupted()
@@ -240,11 +244,18 @@ async def lifespan(_app: FastAPI):
             except Exception:  # noqa: BLE001
                 logger.exception("failed to auto-resume interrupted micro session")
         try:
-            resumed = await get_momentum_desk_manager().resume_if_flagged()
-            if resumed and resumed.get("started"):
-                logger.info("auto-resumed momentum desk after process start")
-            elif resumed:
-                logger.warning("momentum desk auto-resume did not start: %s", resumed)
+            if mix_on:
+                logger.info("loop mix owns the book — skip 15m WR-core resume")
+                mgr = get_momentum_desk_manager()
+                if mgr.running():
+                    await mgr.stop()
+                    logger.info("stopped 15m WR-core so the loop mix can run")
+            else:
+                resumed = await get_momentum_desk_manager().resume_if_flagged()
+                if resumed and resumed.get("started"):
+                    logger.info("auto-resumed momentum desk after process start")
+                elif resumed:
+                    logger.warning("momentum desk auto-resume did not start: %s", resumed)
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume momentum desk")
         try:
@@ -269,6 +280,17 @@ async def lifespan(_app: FastAPI):
                 logger.info("short-weakest sleeve disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume short-weakest sleeve")
+        try:
+            if bool(getattr(get_settings(), "momentum_donchian_enabled", False)):
+                d_resumed = await get_donchian_desk_manager().resume_if_flagged()
+                if d_resumed and d_resumed.get("started"):
+                    logger.info("auto-resumed donchian mix sleeves after process start")
+                elif d_resumed:
+                    logger.warning("donchian mix auto-resume did not start: %s", d_resumed)
+            else:
+                logger.info("donchian mix disabled — skip auto-resume")
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume donchian mix")
     yield
     if paper_runner is not None:
         try:
@@ -914,6 +936,20 @@ async def live_momentum_dashboard(
             ),
             limit=400,
         )
+    donchian_status: dict[str, Any] | None = None
+    if bool(getattr(settings, "momentum_donchian_enabled", False)):
+        try:
+            donchian_status = get_donchian_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            donchian_status = None
+    allocator = None
+    if donchian_status and isinstance(donchian_status.get("allocator"), dict) and donchian_status["allocator"].get("ok"):
+        allocator = donchian_status["allocator"]
+    else:
+        try:
+            allocator = live_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            allocator = {"ok": False, "error": str(exc), "label": "mid", "why": str(exc)}
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
@@ -941,6 +977,8 @@ async def live_momentum_dashboard(
         short_weakest=short_status if show_short_weakest else None,
         short_weakest_ledger_rows=short_ledger if show_short_weakest else None,
         show_short_weakest=show_short_weakest,
+        allocator=allocator,
+        donchian=donchian_status,
     )
 
 
@@ -1297,6 +1335,46 @@ async def live_momentum_volatile_sell_all(
             return _volatile_redirect(f"Verkoop alles geweigerd: {result.get('reason') or result}")
         return _volatile_redirect("Verkoop alles gestart")
     return result
+
+
+@app.get("/live/momentum/allocator/status")
+async def live_momentum_allocator_status() -> dict[str, Any]:
+    """Live mix: regime, SMA20/50, sleeve €, and why."""
+    try:
+        don = get_donchian_desk_manager().status()
+        alloc = don.get("allocator") if isinstance(don, dict) else None
+        if isinstance(alloc, dict) and alloc.get("ok"):
+            return {
+                **alloc,
+                "donchian_running": bool(don.get("running")),
+                "sleeves_live": don.get("sleeves"),
+            }
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return await asyncio.to_thread(live_snapshot)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "label": "mid"}
+
+
+@app.get("/live/momentum/donchian/status")
+async def live_momentum_donchian_status() -> dict[str, Any]:
+    return get_donchian_desk_manager().status()
+
+
+@app.post("/live/momentum/donchian/start")
+async def live_momentum_donchian_start(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_donchian_desk_manager().start()
+
+
+@app.post("/live/momentum/donchian/decide")
+async def live_momentum_donchian_decide(
+    execute: bool = True,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_donchian_desk_manager().decide(execute=bool(execute))
 
 
 def _sw_redirect(notice: str | None = None) -> RedirectResponse:

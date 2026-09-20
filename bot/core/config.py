@@ -668,28 +668,37 @@ class Settings(BaseSettings):
     momentum_volatile_state_path: str = "./data/momentum_volatile_state.json"
     momentum_volatile_ledger_path: str = "./data/momentum_volatile_ledger.jsonl"
 
-    # Paper short-weakest sleeve — bear-harvest balanced pack (research validated).
-    # Always paper — no live short orders. Visible on the momentum dashboard.
+    # Paper short-weakest sleeve — loop SMA20 pack. Always paper.
     momentum_short_weakest_enabled: bool = True
-    momentum_short_weakest_book_eur: float = Field(default=20_000.0, gt=0)
+    momentum_short_weakest_book_eur: float = Field(default=14_000.0, gt=0)
     momentum_short_weakest_top_n: int = Field(default=1, ge=1, le=8)
-    momentum_short_weakest_rebalance_days: int = Field(default=30, ge=1, le=90)
+    momentum_short_weakest_rebalance_days: int = Field(default=7, ge=1, le=90)
     momentum_short_weakest_lookback_days: int = Field(default=15, ge=3, le=90)
-    momentum_short_weakest_mom_floor: float = Field(default=-0.08, ge=-0.5, le=0.0)
-    momentum_short_weakest_skip_days: int = Field(default=2, ge=0, le=10)
-    momentum_short_weakest_bounce_block_pct: float = Field(default=0.04, ge=0.0, le=0.2)
+    momentum_short_weakest_mom_floor: float = Field(default=-0.03, ge=-0.5, le=0.0)
+    momentum_short_weakest_skip_days: int = Field(default=1, ge=0, le=10)
+    momentum_short_weakest_bounce_block_pct: float = Field(default=0.02, ge=0.0, le=0.2)
     momentum_short_weakest_trail_pct: float = Field(default=0.0, ge=0.0, le=0.5)
-    momentum_short_weakest_hard_stop_pct: float = Field(default=0.0, ge=0.0, le=0.5)
+    momentum_short_weakest_hard_stop_pct: float = Field(default=0.10, ge=0.0, le=0.5)
     momentum_short_weakest_max_weight: float = Field(default=0.5, gt=0, le=1.0)
     momentum_short_weakest_deploy_frac: float = Field(default=1.0, gt=0, le=1.0)
     momentum_short_weakest_vol_spike_exit: bool = False
     momentum_short_weakest_idle_fill_enabled: bool = False
     momentum_short_weakest_only_when_core_idle: bool = False
     momentum_short_weakest_cover_when_core_active: bool = False
+    momentum_short_weakest_sma_days: int = Field(default=20, ge=5, le=250)
+    momentum_short_weakest_cover_on_bull: bool = True
     momentum_short_weakest_day_loss_limit_eur: float = Field(default=600.0, gt=0)
     momentum_short_weakest_week_loss_limit_eur: float = Field(default=1_600.0, gt=0)
     momentum_short_weakest_state_path: str = "./data/momentum_short_weakest_state.json"
     momentum_short_weakest_ledger_path: str = "./data/momentum_short_weakest_ledger.jsonl"
+
+    # Loop-winner €20k mix: Donchian longs + paper short, SMA20/50 regime.
+    # 15m WR core is idle while this is on.
+    momentum_multi_strat_enabled: bool = True
+    momentum_multi_strat_book_eur: float = Field(default=20_000.0, gt=0)
+    momentum_donchian_enabled: bool = True
+    momentum_donchian_state_path: str = "./data/momentum_donchian_state.json"
+    momentum_donchian_ledger_path: str = "./data/momentum_donchian_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
