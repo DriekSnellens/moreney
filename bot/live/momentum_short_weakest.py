@@ -1,9 +1,9 @@
-"""Paper short-weakest sleeve — fills idle momentum capital with weak-trend shorts.
+"""Paper short-weakest sleeve — bear-harvest shorts on weakest trends.
 
-Hard-bear mode (BTC < SMA200): absolute 15d weakness, sweep-optimized knobs.
-Idle-fill mode (core desk flat): short worst excess-vs-BTC over 7d so the
-desk stays active when long momentum has nothing. Cover shorts when core
-opens longs. Paper-only; AlphaI avoid/picks gate; no per-coin hardcodes.
+Balanced pack (bear_harvest_validated): trade only when BTC < SMA200; short
+the single weakest 15d name (Asness skip-2d, mom≤−8%, bounce-block +4%);
+rebalance every 30d; no trail/hard-stop/vol-spike; max_weight 0.5.
+Idle-fill OFF. Paper-only; AlphaI avoid/picks gate; no per-coin hardcodes.
 """
 
 from __future__ import annotations
@@ -26,32 +26,36 @@ BITVAVO_PUBLIC = "https://api.bitvavo.com/v2"
 
 @dataclass(frozen=True)
 class ShortWeakestConfig:
-    """Knobs for the paper short-weakest sleeve (sweep-optimized defaults)."""
+    """Knobs for the paper short-weakest sleeve (bear-harvest balanced defaults)."""
 
     decision_hours_utc: tuple[int, ...] = (8, 16)
     book_eur: float = 20_000.0
     lookback_days: int = 15
-    top_n: int = 3
-    rebalance_days: int = 14
+    top_n: int = 1
+    rebalance_days: int = 30
     mom_floor: float = -0.08
-    trail_pct: float = 0.18
-    hard_stop_pct: float = 0.12  # adverse move vs entry (price up)
-    max_weight: float = 0.15
+    # Asness-style: end lookback this many days before the latest close.
+    skip_days: int = 2
+    # Reject entry if prior daily return >= this (squeeze / bounce filter).
+    bounce_block_pct: float = 0.04
+    # 0 = disabled (bear-harvest runner lets the lag run).
+    trail_pct: float = 0.0
+    hard_stop_pct: float = 0.0  # adverse move vs entry (price up); 0 = off
+    max_weight: float = 0.5
     deploy_frac: float = 1.0
     weight_mode: str = "equal"  # equal | magnitude
     vol_spike_mult: float = 3.0  # day ret >= mult * ATR14 → exit
-    vol_spike_exit: bool = True
+    vol_spike_exit: bool = False
     require_btc_below_sma200: bool = True
     sma_days: int = 200
     fee_rt: float = 0.003
     day_loss_limit_eur: float = 600.0
     week_loss_limit_eur: float = 1_600.0
-    # Complement momentum: trade when core is flat; cover when core is long.
-    only_when_core_idle: bool = True
-    cover_when_core_active: bool = True
-    # When core is idle but BTC is above SMA200, still fill with relative-weak
-    # shorts (excess vs BTC) so the desk is never fully dark.
-    idle_fill_enabled: bool = True
+    # Bear sleeve is independent of the long momentum desk.
+    only_when_core_idle: bool = False
+    cover_when_core_active: bool = False
+    # Idle-fill (excess vs BTC when core flat) — OFF; bled in 12w replay.
+    idle_fill_enabled: bool = False
     idle_lookback_days: int = 14
     idle_excess_floor: float = -0.025
     idle_decide_every_sec: float = 900.0  # re-check while core idle + flat
@@ -186,22 +190,27 @@ def rank_weakest(
     use_excess = str(mode).lower() == "excess"
     lb = int(cfg.idle_lookback_days if use_excess else cfg.lookback_days)
     floor = float(cfg.idle_excess_floor if use_excess else cfg.mom_floor)
+    skip = 0 if use_excess else max(0, int(cfg.skip_days))
+    bounce_thr = float(cfg.bounce_block_pct) if not use_excess else 0.0
     btc = list(btc_closes or closes_by_base.get("BTC") or [])
     cands: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     alphai = alphai or AlphaIView()
     for base in cfg.universe:
         series = closes_by_base.get(base) or []
-        if len(series) <= lb:
+        need = lb + skip + 1
+        if len(series) < need:
             rejected.append({"base": base, "reason": "short_history"})
             continue
-        mom = float(series[-1]) / float(series[-1 - lb]) - 1.0
+        end_i = -1 - skip
+        start_i = end_i - lb
+        mom = float(series[end_i]) / float(series[start_i]) - 1.0
         score_val = mom
         if use_excess:
-            if len(btc) <= lb:
+            if len(btc) < need:
                 rejected.append({"base": base, "reason": "btc_short_history"})
                 continue
-            btc_mom = float(btc[-1]) / float(btc[-1 - lb]) - 1.0
+            btc_mom = float(btc[end_i]) / float(btc[start_i]) - 1.0
             score_val = mom - btc_mom
         if score_val > floor:
             rejected.append(
@@ -214,7 +223,21 @@ def rank_weakest(
                 }
             )
             continue
+        if bounce_thr > 0 and len(series) >= 2:
+            day_ret = float(series[-1]) / float(series[-2]) - 1.0
+            if day_ret >= bounce_thr:
+                rejected.append(
+                    {
+                        "base": base,
+                        "reason": "bounce_block",
+                        "day_ret": round(day_ret, 4),
+                        "mom": round(mom, 4),
+                    }
+                )
+                continue
         reasons: list[str] = [f"mode={mode}"]
+        if skip:
+            reasons.append(f"skip={skip}")
         if cfg.alphai_enabled and cfg.alphai_block_on_avoid and base in alphai.avoid:
             rejected.append({"base": base, "reason": "alphai_avoid", "mom": round(mom, 4)})
             continue
@@ -293,9 +316,9 @@ def evaluate_short_exit(
     ret = pos.short_return(mark)
     peak = max(pos.peak_return, ret)
     # adverse: price rose → short return negative
-    if ret <= -float(cfg.hard_stop_pct):
+    if float(cfg.hard_stop_pct) > 0 and ret <= -float(cfg.hard_stop_pct):
         return {"reason": "hard_stop", "short_return": ret, "peak_return": peak}
-    if cfg.trail_pct > 0 and peak - ret >= float(cfg.trail_pct):
+    if float(cfg.trail_pct) > 0 and peak - ret >= float(cfg.trail_pct):
         return {"reason": "trail", "short_return": ret, "peak_return": peak}
     if cfg.vol_spike_exit and day_ret is not None:
         thr = float(cfg.vol_spike_mult) * max(float(pos.atr14), 0.01)

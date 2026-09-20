@@ -58,41 +58,50 @@ def _read_flag(state_path: str) -> dict[str, Any] | None:
 def config_from_settings(settings: Settings | None = None) -> ShortWeakestConfig:
     settings = settings or get_settings()
     base = default_config()
+
+    def _f(name: str, default: float) -> float:
+        raw = getattr(settings, name, default)
+        return float(default if raw is None else raw)
+
+    def _i(name: str, default: int) -> int:
+        raw = getattr(settings, name, default)
+        return int(default if raw is None else raw)
+
+    def _b(name: str, default: bool) -> bool:
+        raw = getattr(settings, name, default)
+        return bool(default if raw is None else raw)
+
     return replace(
         base,
-        book_eur=float(
-            getattr(settings, "momentum_short_weakest_book_eur", base.book_eur) or base.book_eur
+        book_eur=_f("momentum_short_weakest_book_eur", base.book_eur),
+        day_loss_limit_eur=_f(
+            "momentum_short_weakest_day_loss_limit_eur", base.day_loss_limit_eur
         ),
-        day_loss_limit_eur=float(
-            getattr(
-                settings,
-                "momentum_short_weakest_day_loss_limit_eur",
-                base.day_loss_limit_eur,
-            )
-            or base.day_loss_limit_eur
+        week_loss_limit_eur=_f(
+            "momentum_short_weakest_week_loss_limit_eur", base.week_loss_limit_eur
         ),
-        week_loss_limit_eur=float(
-            getattr(
-                settings,
-                "momentum_short_weakest_week_loss_limit_eur",
-                base.week_loss_limit_eur,
-            )
-            or base.week_loss_limit_eur
+        top_n=_i("momentum_short_weakest_top_n", base.top_n),
+        lookback_days=_i("momentum_short_weakest_lookback_days", base.lookback_days),
+        rebalance_days=_i("momentum_short_weakest_rebalance_days", base.rebalance_days),
+        mom_floor=_f("momentum_short_weakest_mom_floor", base.mom_floor),
+        skip_days=_i("momentum_short_weakest_skip_days", base.skip_days),
+        bounce_block_pct=_f(
+            "momentum_short_weakest_bounce_block_pct", base.bounce_block_pct
         ),
-        top_n=int(
-            getattr(settings, "momentum_short_weakest_top_n", base.top_n) or base.top_n
+        trail_pct=_f("momentum_short_weakest_trail_pct", base.trail_pct),
+        hard_stop_pct=_f("momentum_short_weakest_hard_stop_pct", base.hard_stop_pct),
+        max_weight=_f("momentum_short_weakest_max_weight", base.max_weight),
+        deploy_frac=_f("momentum_short_weakest_deploy_frac", base.deploy_frac),
+        vol_spike_exit=_b("momentum_short_weakest_vol_spike_exit", base.vol_spike_exit),
+        idle_fill_enabled=_b(
+            "momentum_short_weakest_idle_fill_enabled", base.idle_fill_enabled
         ),
-        trail_pct=float(
-            getattr(settings, "momentum_short_weakest_trail_pct", base.trail_pct)
-            or base.trail_pct
+        only_when_core_idle=_b(
+            "momentum_short_weakest_only_when_core_idle", base.only_when_core_idle
         ),
-        max_weight=float(
-            getattr(settings, "momentum_short_weakest_max_weight", base.max_weight)
-            or base.max_weight
-        ),
-        deploy_frac=float(
-            getattr(settings, "momentum_short_weakest_deploy_frac", base.deploy_frac)
-            or base.deploy_frac
+        cover_when_core_active=_b(
+            "momentum_short_weakest_cover_when_core_active",
+            base.cover_when_core_active,
         ),
     )
 
@@ -277,7 +286,11 @@ class ShortWeakestPaperRunner:
             "mode": "short_weakest_paper",
             "dry_run": True,
             "paper_only": True,
-            "role": "idle_fill" if core.get("idle") else "standby_core_active",
+            "role": (
+                "bear_harvest"
+                if (self.last_regime or {}).get("bear_ok")
+                else "standby_btc_above_sma200"
+            ),
             "core_idle": bool(core.get("idle")),
             "core": core,
             "cash_eur": round(self.cash_eur, 2),
@@ -308,6 +321,8 @@ class ShortWeakestPaperRunner:
                 "mom_floor": self.cfg.mom_floor,
                 "max_weight": self.cfg.max_weight,
                 "deploy_frac": self.cfg.deploy_frac,
+                "skip_days": self.cfg.skip_days,
+                "bounce_block_pct": self.cfg.bounce_block_pct,
                 "vol_spike_exit": self.cfg.vol_spike_exit,
                 "only_when_core_idle": self.cfg.only_when_core_idle,
                 "cover_when_core_active": self.cfg.cover_when_core_active,

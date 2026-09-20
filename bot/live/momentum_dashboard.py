@@ -1772,7 +1772,7 @@ def _sleeves_panel(
     if short_weakest is not None:
         cards += _sleeve_card(
             title="Short weakest",
-            role="Paper idle-fill · short zwakste vs BTC als core flat is",
+            role="Paper bear-harvest · short zwakste alt als BTC &lt; SMA200",
             status=short_weakest,
             href="/live/momentum/short-weakest",
             book_label="Paper book",
