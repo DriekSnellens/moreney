@@ -251,6 +251,152 @@ def test_ledger_table_maps_donchian_entry_exit_price():
     assert "−121.27" in html or "-121.27" in html
 
 
+def test_sleeve_live_caption_ignores_stale_sma_when_bags_open():
+    from bot.live.momentum_donchian import sleeve_live_caption
+
+    held = sleeve_live_caption(
+        n_positions=2,
+        friday_flatten=False,
+        risk_block="btc_below_sma",
+        mix_label="risk_on",
+        exit_n=5,
+        next_decision="2026-09-22T00:00:00+00:00",
+    )
+    assert "houdt bags" in held
+    assert "btc_below_sma" not in held
+    cash_stale = sleeve_live_caption(
+        n_positions=0,
+        friday_flatten=False,
+        risk_block="btc_below_sma",
+        mix_label="risk_on",
+        next_decision="2026-09-22T00:00:00+00:00",
+    )
+    assert "vorige decide" in cash_stale
+    fri = sleeve_live_caption(
+        n_positions=0,
+        friday_flatten=True,
+        risk_block="friday_flatten",
+        mix_label="risk_on",
+    )
+    assert "Friday-flat" in fri or "friday" in fri.lower()
+    off = sleeve_live_caption(
+        n_positions=0,
+        friday_flatten=False,
+        risk_block="allocator_zero_book",
+        mix_label="risk_off",
+        allocator_active=False,
+    )
+    assert "risk_off" in off
+
+
+def test_dashboard_mix_equity_and_donchian_table():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 1, "trail_pct": 0.05, "hard_stop_pct": 0.03},
+            "positions": [],
+            "risk": {"day_realized_eur": 12.0, "entries_allowed": True},
+            "cash_eur": 21122.60,
+            "exposure_eur": 0,
+            "equity_eur": 21122.60,
+            "realized_total_eur": 1122.60,
+            "trade_count": 40,
+            "unrealized_net_eur": 0,
+        },
+        [],
+        allocator=snap,
+        donchian={
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo"],
+            "equity_eur": 19683.82,
+            "cash_eur": 11928.16,
+            "deployed_eur": 7975.44,
+            "unrealized_net_eur": -219.77,
+            "next_decision": "2026-09-22T00:00:00+00:00",
+            "positions": [
+                {
+                    "holding_id": "dc-donch10-NEAR-bd4fc361",
+                    "base": "NEAR",
+                    "sleeve": "donch10",
+                    "venue": "bitvavo",
+                    "quantity": 1074.23163211,
+                    "entry_price": 3.70939,
+                    "notional_eur": 3984.75,
+                    "mark": 3.60,
+                    "gross_return": -0.0295,
+                    "unrealized_net_eur": -114.68,
+                    "age_h": 13.4,
+                    "entry_reason": "breakout_10",
+                },
+                {
+                    "holding_id": "dc-donch10-AVAX-19192112",
+                    "base": "AVAX",
+                    "sleeve": "donch10",
+                    "venue": "bitvavo",
+                    "quantity": 406.9801828,
+                    "entry_price": 9.80561,
+                    "notional_eur": 3990.69,
+                    "mark": 9.55,
+                    "gross_return": -0.0261,
+                    "unrealized_net_eur": -105.09,
+                    "age_h": 13.4,
+                    "entry_reason": "breakout_10",
+                },
+            ],
+            "sleeves": [
+                {
+                    "id": "donch_fri10",
+                    "title": "Donchian 10/5 Friday-flat",
+                    "active": True,
+                    "friday_flatten": True,
+                    "n_positions": 0,
+                    "risk_block": "friday_flatten",
+                    "exit_n": 5,
+                    "channel": 10,
+                },
+                {
+                    "id": "donch10",
+                    "title": "Donchian 10/5",
+                    "active": True,
+                    "friday_flatten": False,
+                    "n_positions": 2,
+                    "risk_block": "btc_below_sma",
+                    "exit_n": 5,
+                    "channel": 10,
+                    "positions": [{"base": "NEAR"}, {"base": "AVAX"}],
+                },
+            ],
+        },
+        show_short_weakest=True,
+        short_weakest={"enabled_setting": True, "positions": [], "running": True},
+    ).body.decode()
+    assert "19,683.82" in html
+    assert "21,122.60" not in html
+    assert "NEAR" in html
+    assert "AVAX" in html
+    assert "1074.2316" in html.replace(",", "")
+    assert "houdt bags" in html
+    assert "btc_below_sma" not in html.split("Execution stream")[0]
+    assert "Trail-stop" not in html.split("15m core rules")[0]
+    assert "Hard-stop" not in html.split("15m core rules")[0]
+    assert "Verkoop alles" not in html
+    assert "Simuleer" not in html
+    assert "Geen 15m trail" in html
+    assert "class=\"mix-live\"" in html or "mix-live" in html
+    assert "grid-template-columns: 1fr" in html
+    assert "patchDonchian" in html
+    assert "mixHeroesLive" in html
+    assert "Donchian · live longs" in html
+    assert ">Bags<" in html
+    assert "15m core rules (idle" in html
+    assert "name=\"sell\"" not in html
+
+
 def _ohlc_breakout(n: int = 16, last_high: float = 120.0) -> list[list[float]]:
     rows = []
     for i in range(n - 1):

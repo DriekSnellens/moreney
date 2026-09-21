@@ -24,6 +24,7 @@ from bot.live.momentum_donchian import (
     evaluate_donchian,
     friday_close_reached,
     loop_sleeve_configs,
+    sleeve_live_caption,
 )
 from bot.live.momentum_runner import CandleFeed, LiveGateway, engine_settings_for_desk, parse_venues
 from bot.live.momentum_short_weakest import fetch_daily_closes, fetch_daily_ohlc
@@ -487,6 +488,9 @@ class DonchianBundleRunner:
         realized = 0.0
         unreal = 0.0
         deployed = 0.0
+        cash = 0.0
+        mix_label = str((self._alloc or {}).get("label") or "")
+        next_iso = self._next_decision_iso()
         for name, sl in self.sleeves.items():
             fee = sl.cfg.fee_rt
             u = sl.unrealized(self.marks, fee)
@@ -494,9 +498,15 @@ class DonchianBundleRunner:
             realized += sl.realized_total_eur
             unreal += u
             deployed += d
+            cash += sl.cash_eur
             pos_rows = []
             for p in sl.positions:
                 mark = self.marks.get(p.base)
+                age_h = (
+                    round((now * 1000.0 - p.opened_ms) / 3_600_000.0, 2)
+                    if p.opened_ms
+                    else None
+                )
                 pos_rows.append(
                     {
                         "holding_id": p.holding_id,
@@ -508,16 +518,21 @@ class DonchianBundleRunner:
                         "quantity": p.quantity or (p.notional_eur / p.entry_price if p.entry_price else 0.0),
                         "notional_eur": round(p.notional_eur, 2),
                         "opened": datetime.fromtimestamp(p.opened_ms / 1000, UTC).isoformat(),
+                        "age_h": age_h,
                         "mark": mark,
                         "mark_age_sec": round(now - self.mark_ts[p.base], 1) if p.base in self.mark_ts else None,
                         "gross_return": round(p.long_return(mark), 5) if mark else None,
                         "unrealized_net_eur": round(p.unrealized_net(mark, fee), 2) if mark else None,
                         "entry_reason": p.entry_reason,
                         "exiting": False,
+                        "peak_return": 0.0,
+                        "trail_pct": 0.0,
+                        "hard_stop_pct": 0.0,
                     }
                 )
             all_pos.extend(pos_rows)
             dec = sl.last_decision or {}
+            active = sl.book_eur >= sl.cfg.min_notional_eur
             sleeves_out.append(
                 {
                     "id": name,
@@ -528,16 +543,35 @@ class DonchianBundleRunner:
                     "realized_total_eur": round(sl.realized_total_eur, 2),
                     "unrealized_net_eur": round(u, 2),
                     "n_positions": len(sl.positions),
-                    "active": sl.book_eur >= sl.cfg.min_notional_eur,
+                    "active": active,
                     "friday_flatten": sl.cfg.friday_flatten,
                     "channel": sl.cfg.channel,
                     "exit_n": sl.cfg.exit_n,
                     "risk_block": dec.get("risk_block") or "",
                     "reasons": dec.get("reasons") or [],
+                    "live_caption": sleeve_live_caption(
+                        n_positions=len(sl.positions),
+                        friday_flatten=sl.cfg.friday_flatten,
+                        risk_block=str(dec.get("risk_block") or ""),
+                        mix_label=mix_label,
+                        exit_n=int(sl.cfg.exit_n),
+                        channel=int(sl.cfg.channel),
+                        next_decision=next_iso,
+                        allocator_active=active,
+                    ),
                     "positions": pos_rows,
                 }
             )
         live = (not self.dry_run) and bool(self._gws)
+        equity = round(
+            sum(
+                sl.cash_eur
+                + sl.deployed()
+                + sl.unrealized(self.marks, sl.cfg.fee_rt)
+                for sl in self.sleeves.values()
+            ),
+            2,
+        )
         return {
             "desk": "momentum_donchian",
             "mode": "donchian_live" if live else "donchian_paper",
@@ -547,22 +581,23 @@ class DonchianBundleRunner:
             "venues": list(self.venues),
             "book_eur": self.book_eur,
             "allocator": self._alloc,
-            "equity_eur": round(
-                sum(
-                    sl.cash_eur
-                    + sl.deployed()
-                    + sl.unrealized(self.marks, sl.cfg.fee_rt)
-                    for sl in self.sleeves.values()
-                ),
-                2,
-            ),
+            "equity_eur": equity,
+            "cash_eur": round(cash, 2),
+            "exposure_eur": round(deployed, 2),
             "deployed_eur": round(deployed, 2),
             "realized_total_eur": round(realized, 2),
             "unrealized_net_eur": round(unreal, 2),
             "positions": all_pos,
             "sleeves": sleeves_out,
-            "next_decision": self._next_decision_iso(),
+            "next_decision": next_iso,
             "decision_hours_utc": list(self._decision_hours()),
+            "config": {
+                "trail_pct": 0.0,
+                "trail_tight_after": 0.0,
+                "trail_tight_pct": 0.0,
+                "hard_stop_pct": 0.0,
+                "max_positions": sum(int(sl.cfg.max_pos) for sl in self.sleeves.values()),
+            },
         }
 
     def _decision_hours(self) -> tuple[int, ...]:
