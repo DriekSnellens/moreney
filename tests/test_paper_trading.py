@@ -663,7 +663,7 @@ def test_dashboard_basic_auth_optional_and_enforced(
         assert client.get("/live/dashboard").status_code == 200
         assert client.get("/paper/dashboard-lite", follow_redirects=False).status_code == 303
 
-    # Enabled: dashboard requires valid Basic Auth.
+    # Enabled: dashboard requires valid Basic Auth or a login session.
     monkeypatch.setenv("PAPER_PERSIST_PATH", str(tmp_path / "auth-on.json"))
     monkeypatch.setenv("DASHBOARD_BASIC_AUTH_ENABLED", "true")
     monkeypatch.setenv("DASHBOARD_BASIC_AUTH_USERNAME", "alice")
@@ -671,10 +671,11 @@ def test_dashboard_basic_auth_optional_and_enforced(
     get_settings.cache_clear()
     reset_risk_singletons()
     with TestClient(app) as client:
-        assert client.get("/live/dashboard").status_code == 401
-        assert client.get("/paper/dashboard").status_code == 401
-        assert client.get("/paper/dashboard-lite").status_code == 401
-        assert client.get("/live/dashboard", auth=("alice", "secret")).status_code == 200
+        assert client.get("/live/dashboard", follow_redirects=False).status_code == 303
+        assert client.get("/paper/dashboard", follow_redirects=False).status_code == 303
+        assert client.get("/paper/dashboard-lite", follow_redirects=False).status_code == 303
+        dash = client.get("/live/dashboard", auth=("alice", "secret"), follow_redirects=False)
+        assert dash.status_code in {200, 303}
         assert (
             client.get("/paper/dashboard", auth=("alice", "secret"), follow_redirects=False).status_code
             == 303

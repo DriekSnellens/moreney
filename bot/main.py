@@ -29,9 +29,11 @@ from bot.market_data.service import MarketDataService
 from bot.paper.auth import (
     clear_session_cookie,
     credentials_valid,
+    dashboard_auth_gate,
     login_redirect,
     render_login_page,
     request_has_valid_session,
+    request_is_https,
     set_session_cookie,
     wants_html,
 )
@@ -186,7 +188,7 @@ def require_dashboard_access(
     ):
         return
     if wants_html(request):
-        next_path = request.url.path or "/live/dashboard"
+        next_path = request.url.path or "/live/momentum"
         if request.url.query:
             next_path = f"{next_path}?{request.url.query}"
         raise DashboardLoginRedirect(next_path)
@@ -315,6 +317,15 @@ app = FastAPI(
 from bot.paper.api import router as paper_api_router  # noqa: E402
 
 app.include_router(paper_api_router)
+
+
+@app.middleware("http")
+async def _enforce_dashboard_auth(request: Request, call_next):
+    blocked = dashboard_auth_gate(request, get_settings())
+    if blocked is not None:
+        return blocked
+    return await call_next(request)
+
 
 @app.exception_handler(DashboardLoginRedirect)
 async def _dashboard_login_redirect(_request: Request, exc: DashboardLoginRedirect):
@@ -812,39 +823,42 @@ async def _live_dashboard_payload(
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(next: str = Query(default="/live/dashboard")) -> HTMLResponse:
+async def login_page(next: str = Query(default="/live/momentum")) -> HTMLResponse:
     settings = get_settings()
     if not settings.dashboard_basic_auth_enabled:
         return RedirectResponse(
-            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+            url=next if next.startswith("/") else "/live/momentum", status_code=303
         )
     return render_login_page(next_path=next)
 
 
 @app.post("/login")
 async def login_submit(
+    request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    next: str = Form(default="/live/dashboard"),
+    next: str = Form(default="/live/momentum"),
 ) -> Response:
     settings = get_settings()
     if not settings.dashboard_basic_auth_enabled:
         return RedirectResponse(
-            url=next if next.startswith("/") else "/live/dashboard", status_code=303
+            url=next if next.startswith("/") else "/live/momentum", status_code=303
         )
     if not credentials_valid(settings, username, password):
         return render_login_page(next_path=next, error="Invalid username or password")
-    safe_next = next if next.startswith("/") else "/live/dashboard"
+    safe_next = next if next.startswith("/") else "/live/momentum"
     response = RedirectResponse(url=safe_next, status_code=303)
-    set_session_cookie(response, settings, username)
+    set_session_cookie(
+        response, settings, username, secure=request_is_https(request)
+    )
     return response
 
 
 @app.post("/logout")
 @app.get("/logout")
-async def logout() -> Response:
+async def logout(request: Request) -> Response:
     response = RedirectResponse(url="/login", status_code=303)
-    clear_session_cookie(response)
+    clear_session_cookie(response, secure=request_is_https(request))
     return response
 
 
