@@ -16,7 +16,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
-from bot.live.desk_allocator import REGIME_MAP, classify_sma20_50
+from bot.live.desk_allocator import classify_sma20_50
 from bot.live.momentum_desk import BAR_MS, DEFAULT_UNIVERSE, DeskConfig
 from bot.live.momentum_donchian import (
     DonchianConfig,
