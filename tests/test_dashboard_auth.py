@@ -100,3 +100,22 @@ async def test_https_login_sets_secure_cookie() -> None:
         cookie = ok.headers.get("set-cookie", "")
         assert "Secure" in cookie
         assert COOKIE_NAME in cookie
+
+
+async def test_root_redirects_to_mix_when_donchian_running(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Running:
+        def running(self) -> bool:
+            return True
+
+    monkeypatch.setattr("bot.main.get_donchian_desk_manager", lambda: _Running())
+    res = await client.get("/", auth=("alice", "secret"))
+    assert res.status_code == 303
+    assert res.headers["location"] == "/live/momentum"
+    login = await client.post(
+        "/login",
+        data={"username": "alice", "password": "secret", "next": "/"},
+    )
+    assert login.status_code == 303
+    assert login.headers["location"] == "/live/momentum"
