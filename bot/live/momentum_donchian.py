@@ -1,7 +1,9 @@
 """Daily Donchian long sleeve (loop mix). Coin-agnostic.
 
-Entry: BTC > SMA50 and today's high breaks the prior N-day high.
-Exit: today's low breaks the prior exit_n-day low, or Friday-flatten.
+Entry: BTC > SMA50 and the *completed* UTC daily high breaks the prior N-day high.
+Exit: completed-bar low breaks the prior exit_n-day low, or Friday-flatten
+after that Friday's UTC close (same as the loop sim — not Friday 00:00).
+Clips are 40% of sleeve equity (cash + deployed), capped by cash.
 """
 
 from __future__ import annotations
@@ -32,7 +34,8 @@ class DonchianConfig:
     min_notional_eur: float = 50.0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     tick_sec: float = 30.0
-    decision_hours_utc: tuple[int, ...] = (8, 16)
+    # Once per day, just after the UTC daily bar closes (matches sim close fills).
+    decision_hours_utc: tuple[int, ...] = (0,)
 
 
 @dataclass
@@ -102,9 +105,73 @@ def btc_long_ok(btc_closes: Sequence[float], cfg: DonchianConfig) -> tuple[bool,
     return ok, {"btc": last, "sma": sma, "btc_ok": ok, "sma_n": cfg.btc_sma}
 
 
-def weekend_flatten(*, now: datetime | None = None) -> bool:
+def utc_day_start_ms(now: datetime | None = None) -> int:
+    now = now or datetime.now(UTC)
+    day = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(day.timestamp() * 1000)
+
+
+def drop_incomplete_daily(
+    ohlc_by_base: Mapping[str, Sequence[Candle]],
+    *,
+    now: datetime | None = None,
+) -> dict[str, list[Candle]]:
+    """Keep bars whose open is before today's UTC 00:00 (completed 1d candles)."""
+    cutoff = utc_day_start_ms(now)
+    out: dict[str, list[Candle]] = {}
+    for base, rows in ohlc_by_base.items():
+        kept: list[Candle] = []
+        for row in rows:
+            try:
+                ts = int(row[0])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if ts < cutoff:
+                kept.append(row)
+        out[str(base)] = kept
+    return out
+
+
+def completed_bar_weekday(
+    ohlc_by_base: Mapping[str, Sequence[Candle]],
+    *,
+    now: datetime | None = None,
+) -> int | None:
+    """UTC weekday of the latest completed daily bar, or None."""
+    filtered = drop_incomplete_daily(ohlc_by_base, now=now)
+    last_ts = -1
+    for rows in filtered.values():
+        if not rows:
+            continue
+        try:
+            last_ts = max(last_ts, int(rows[-1][0]))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if last_ts < 0:
+        return None
+    return datetime.fromtimestamp(last_ts / 1000, UTC).weekday()
+
+
+def weekend_flatten(
+    *,
+    now: datetime | None = None,
+    signal_weekday: int | None = None,
+) -> bool:
+    """Fri/Sat/Sun of the *completed* daily bar (sim: flatten at Friday close).
+
+    Wall-clock Friday is still Friday's session — do not flatten then.
+    After Friday's UTC close the wall clock is Sat/Sun; that is the backup
+    when no signal bar is available.
+    """
+    if signal_weekday is not None:
+        return int(signal_weekday) >= 4
     wd = (now or datetime.now(UTC)).weekday()
-    return wd >= 4  # Fri/Sat/Sun
+    return wd >= 5  # Sat/Sun only; Friday daytime stays invested
+
+
+def friday_close_reached(now: datetime | None = None) -> bool:
+    """Intraday safety net: Friday's UTC daily bar has closed (Sat or Sun)."""
+    return (now or datetime.now(UTC)).weekday() >= 5
 
 
 def evaluate_donchian(
@@ -114,17 +181,22 @@ def evaluate_donchian(
     *,
     held: set[str],
     cash_eur: float,
+    deployed_eur: float = 0.0,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Pure daily decision. `ohlc` last bar is today."""
+    """Pure daily decision on *completed* UTC bars. Last in-progress day is ignored."""
     now = now or datetime.now(UTC)
+    ohlc = drop_incomplete_daily(ohlc_by_base, now=now)
+    if ohlc.get("BTC"):
+        btc_closes = [float(r[4]) for r in ohlc["BTC"]]
+    signal_wd = completed_bar_weekday(ohlc, now=now)
     btc_ok, btc_meta = btc_long_ok(btc_closes, cfg)
     exits: list[dict[str, Any]] = []
     entries: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     reasons: list[str] = []
 
-    if cfg.friday_flatten and weekend_flatten(now=now):
+    if cfg.friday_flatten and weekend_flatten(now=now, signal_weekday=signal_wd):
         reasons.append("friday_flatten")
         for base in held:
             exits.append({"base": base, "reason": "friday_flatten"})
@@ -136,10 +208,11 @@ def evaluate_donchian(
             "rejected": rejected,
             "reasons": reasons,
             "risk_block": "friday_flatten",
+            "signal_weekday": signal_wd,
         }
 
     for base in held:
-        rows = ohlc_by_base.get(base) or []
+        rows = ohlc.get(base) or []
         if len(rows) < cfg.exit_n + 1:
             continue
         prior_lows = [float(r[3]) for r in rows[-cfg.exit_n - 1 : -1]]
@@ -158,6 +231,7 @@ def evaluate_donchian(
             "rejected": rejected,
             "reasons": reasons,
             "risk_block": "btc_below_sma",
+            "signal_weekday": signal_wd,
         }
 
     open_slots = max(0, int(cfg.max_pos) - len(held_after))
@@ -171,13 +245,14 @@ def evaluate_donchian(
             "rejected": rejected,
             "reasons": reasons,
             "risk_block": "",
+            "signal_weekday": signal_wd,
         }
 
     cands: list[tuple[float, str]] = []
     for base in cfg.universe:
         if base in held_after:
             continue
-        rows = ohlc_by_base.get(base) or []
+        rows = ohlc.get(base) or []
         need = cfg.channel + 1
         if len(rows) < need:
             rejected.append({"base": base, "reason": "short_history"})
@@ -191,11 +266,12 @@ def evaluate_donchian(
         cands.append((_mom(closes, cfg.channel), base))
     cands.sort(reverse=True)
 
-    eq = max(cash_eur, 0.0)
+    sleeve_eq = max(float(cash_eur) + max(float(deployed_eur), 0.0), 0.0)
+    cash_left = float(cash_eur)
     for mom, base in cands:
         if len(entries) >= open_slots:
             break
-        notional = min(eq * float(cfg.weight), cash_eur * 0.95)
+        notional = min(sleeve_eq * float(cfg.weight), cash_left * 0.95)
         if notional < cfg.min_notional_eur:
             rejected.append({"base": base, "reason": "notional_too_small"})
             continue
@@ -207,7 +283,7 @@ def evaluate_donchian(
                 "reasons": [f"breakout_{cfg.channel}", f"mom={mom:.3f}"],
             }
         )
-        cash_eur -= notional
+        cash_left -= notional
     return {
         "ok": True,
         "btc": btc_meta,
@@ -217,6 +293,8 @@ def evaluate_donchian(
         "reasons": reasons or ["breakout_scan"],
         "risk_block": "",
         "candidates": [{"base": b, "mom": round(m, 4)} for m, b in cands[:8]],
+        "signal_weekday": signal_wd,
+        "sleeve_eq_eur": round(sleeve_eq, 2),
     }
 
 

@@ -1471,6 +1471,7 @@ def _mix_panel(
         f"{open_html}"
         f'<p class="mix-foot">Classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}. '
         f"{'Donchian-longs zijn LIVE Bitvavo-orders.' if don_live else 'Donchian-longs draaien paper.'} "
+        f"Decide na UTC-dagclose (00:05) op de gesloten 1d-kaars · Friday-flat pas na vrijdagclose. "
         f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
@@ -2870,7 +2871,7 @@ def render_momentum_dashboard(
                 f"""{_positions_table(
                     donchian or {},
                     sell_all_path=None,
-                    empty_text="Geen open Donchian-longs — wacht op 10d-breakout of weekend-flatten.",
+                    empty_text="Geen open Donchian-longs — wacht op 10d-breakout na UTC-dagclose.",
                 )}</div>"""
             )
         stack = "three" if show_vol and show_sw else "two"

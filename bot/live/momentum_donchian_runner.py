@@ -22,6 +22,7 @@ from bot.live.momentum_donchian import (
     DonchianConfig,
     DonchianPosition,
     evaluate_donchian,
+    friday_close_reached,
     loop_sleeve_configs,
 )
 from bot.live.momentum_runner import CandleFeed, LiveGateway, engine_settings_for_desk, parse_venues
@@ -425,6 +426,7 @@ class DonchianBundleRunner:
                 sl.cfg,
                 held=held,
                 cash_eur=sl.cash_eur,
+                deployed_eur=sl.deployed(),
                 now=now,
             )
             sl.last_decision = decision
@@ -449,16 +451,17 @@ class DonchianBundleRunner:
         return out
 
     async def manage_exits(self) -> None:
-        """Intraday: Friday flatten + allocator flatten. Channel exits wait for daily decide."""
+        """Intraday: allocator flatten. Friday-flat waits until Friday UTC close (Sat)."""
         now = datetime.now(UTC)
         now_ms = int(now.timestamp() * 1000)
         snap = self._apply_allocator()
         _ = snap
+        fri_done = friday_close_reached(now)
         for sl in self.sleeves.values():
             if sl.book_eur < sl.cfg.min_notional_eur and sl.positions:
                 for pos in list(sl.positions):
                     await self._close(sl, pos, reason="allocator_flatten", now_ms=now_ms)
-            if sl.cfg.friday_flatten and now.weekday() >= 4 and sl.positions:
+            if sl.cfg.friday_flatten and fri_done and sl.positions:
                 for pos in list(sl.positions):
                     await self._close(sl, pos, reason="friday_flatten", now_ms=now_ms)
         self._save_state()
@@ -537,11 +540,17 @@ class DonchianBundleRunner:
             "positions": all_pos,
             "sleeves": sleeves_out,
             "next_decision": self._next_decision_iso(),
+            "decision_hours_utc": list(self._decision_hours()),
         }
+
+    def _decision_hours(self) -> tuple[int, ...]:
+        sl = next(iter(self.sleeves.values()), None)
+        hours = tuple(int(h) for h in (sl.cfg.decision_hours_utc if sl else (0,)))
+        return hours or (0,)
 
     def _next_decision_iso(self) -> str | None:
         now = datetime.now(UTC)
-        hours = (8, 16)
+        hours = self._decision_hours()
         for h in hours:
             cand = now.replace(hour=h, minute=0, second=0, microsecond=0)
             if cand > now:
@@ -581,7 +590,8 @@ class DonchianBundleRunner:
                 await self.manage_exits()
                 now = datetime.now(UTC)
                 key = f"{now.date()}T{now.hour}"
-                scheduled = now.hour in (8, 16) and key not in last_hour_fire and now.minute < 5
+                hours = self._decision_hours()
+                scheduled = now.hour in hours and key not in last_hour_fire and now.minute < 5
                 if scheduled:
                     await self.decide(execute=True)
                     last_hour_fire.add(key)
