@@ -688,6 +688,64 @@ def test_donchian_live_open_places_venue_order(tmp_path):
     asyncio.run(go())
 
 
+def test_warmup_without_sma_keeps_live_bags(tmp_path):
+    import asyncio
+    import json
+
+    from bot.live import desk_allocator
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    desk_allocator._cache["snap"] = None
+    desk_allocator._cache["ms"] = 0.0
+    state = tmp_path / "s.json"
+    state.write_text(
+        json.dumps(
+            {
+                "book_eur": 20000,
+                "sleeves": {
+                    "donch10": {
+                        "book_eur": 10000,
+                        "cash_eur": 2012.56,
+                        "realized_total_eur": 0,
+                        "positions": [
+                            {
+                                "base": "AAA",
+                                "entry_price": 3.7,
+                                "notional_eur": 3984.75,
+                                "opened_ms": 1,
+                                "holding_id": "dc-1",
+                                "venue": "bitvavo",
+                                "quantity": 1074.23,
+                                "sleeve": "donch10",
+                            }
+                        ],
+                        "last_decision": {"risk_block": "btc_below_sma"},
+                    },
+                    "donch_fri10": {"book_eur": 10000, "cash_eur": 9915.6, "positions": []},
+                    "donch_fri": {"book_eur": 0, "cash_eur": 0, "positions": []},
+                },
+            }
+        )
+    )
+    r = DonchianBundleRunner(
+        state_path=str(state),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+    )
+    r._btc_closes = []
+    r.marks = {}
+    book_before = r.sleeves["donch10"].book_eur
+    snap = r._apply_allocator()
+    assert snap["regime"]["ready"] is False
+    assert r.sleeves["donch10"].book_eur == book_before
+    asyncio.run(r.manage_exits())
+    assert len(r.sleeves["donch10"].positions) == 1
+    assert r.sleeves["donch10"].positions[0].base == "AAA"
+    led = (tmp_path / "l.jsonl").read_text() if (tmp_path / "l.jsonl").exists() else ""
+    assert "allocator_flatten" not in led
+    assert '"event": "exit"' not in led
+
+
 def test_donchian_runner_decides_at_utc_close(tmp_path):
     from bot.live.momentum_donchian_runner import DonchianBundleRunner
 

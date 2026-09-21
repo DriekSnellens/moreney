@@ -208,6 +208,12 @@ class DonchianBundleRunner:
             book=self.book_eur,
         )
         self._alloc = snap
+        ready = bool((snap.get("regime") or {}).get("ready"))
+        if not ready:
+            # Empty/short BTC history classifies as mid/cash. Do not zero
+            # sleeve books or the next manage_exits would dump live bags.
+            logger.warning("donchian allocator: SMA not ready — keep sleeve books")
+            return snap
         for name, sl in self.sleeves.items():
             target = float(target_book(name, snap))
             sl.book_eur = target
@@ -416,10 +422,21 @@ class DonchianBundleRunner:
         await self._refresh_marks()
         await self._refresh_dailies(force=True)
         snap = self._apply_allocator()
+        ready = bool((snap.get("regime") or {}).get("ready"))
         out: dict[str, Any] = {"at": now.isoformat(), "regime": snap.get("label"), "why": snap.get("why"), "sleeves": {}}
         for name, sl in self.sleeves.items():
             held = {p.base for p in sl.positions}
             if sl.book_eur < sl.cfg.min_notional_eur:
+                if execute and sl.positions and not ready:
+                    sl.last_decision = {
+                        "ok": False,
+                        "risk_block": "sma_unavailable",
+                        "exits": [],
+                        "entries": [],
+                        "reasons": ["sma_unavailable", "keep_bags"],
+                    }
+                    out["sleeves"][name] = sl.last_decision
+                    continue
                 if execute:
                     for pos in list(sl.positions):
                         await self._close(sl, pos, reason="allocator_flatten", now_ms=now_ms)
@@ -470,10 +487,12 @@ class DonchianBundleRunner:
         now = datetime.now(UTC)
         now_ms = int(now.timestamp() * 1000)
         snap = self._apply_allocator()
-        _ = snap
+        ready = bool((snap.get("regime") or {}).get("ready"))
         fri_done = friday_close_reached(now)
         for sl in self.sleeves.values():
             if sl.book_eur < sl.cfg.min_notional_eur and sl.positions:
+                if not ready:
+                    continue
                 for pos in list(sl.positions):
                     await self._close(sl, pos, reason="allocator_flatten", now_ms=now_ms)
             if sl.cfg.friday_flatten and fri_done and sl.positions:
