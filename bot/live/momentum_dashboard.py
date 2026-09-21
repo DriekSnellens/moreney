@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi.responses import HTMLResponse
 
+from bot.live.momentum_donchian import sleeve_live_caption
 from bot.live.momentum_period_pnl import DeskEarnings, earnings_as_dict
 
 _CSS = """
@@ -135,6 +136,25 @@ body {
 .mix-dc-dec > div { padding: .45rem 0; border-bottom: 1px solid var(--border-soft); }
 @media (max-width: 720px) {
   .mix-gates { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 979px) {
+  .mix-board { padding: .75rem .7rem; }
+  .mix-now { font-size: clamp(1.05rem, 5.6vw, 1.45rem); }
+  .mix-why { font-size: .9rem; max-width: none; margin-bottom: .7rem; }
+  .mix-stance { font-size: .8rem; }
+  .mix-sleeves { grid-template-columns: 1fr; }
+  .mix-sleeve { min-height: 0; padding: .65rem .7rem; }
+  .mix-sleeve p { font-size: .74rem; }
+  .mix-tape { height: 3.05rem; margin-bottom: .7rem; }
+  .mix-tape .z { font-size: .52rem; padding: .22rem .35rem; letter-spacing: .04em; }
+  .mix-tape .mark { font-size: .56rem; }
+  .mix-gates { grid-template-columns: 1fr 1fr; gap: .4rem; }
+  .mix-gates div { padding: .45rem .55rem; }
+  .mix-gates strong { font-size: .95rem; }
+  .mix-chip { font-size: .74rem; padding: .28rem .5rem; max-width: 100%; }
+  .mix-open { gap: .3rem; }
+  .mix-foot { font-size: .7rem; line-height: 1.4; }
+  .mix-k { font-size: .62rem; }
 }
 
 @keyframes rise-in {
@@ -677,6 +697,11 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   .pos-card .meta, .pos-card .grid { grid-template-columns: 1fr 1fr; }
 }
 
+@media (max-width: 979px) {
+  body.mix-live { padding-bottom: calc(3.65rem + env(safe-area-inset-bottom, 0px)); }
+  .top-metric:has([data-k="mix-label-top"]) { display: none; }
+}
+
 @media (min-width: 721px) and (max-width: 979px) {
   .pulse { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .earn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -996,6 +1021,98 @@ def _positions_table(
     return "".join(out)
 
 
+def _donchian_positions_table(status: Mapping[str, Any]) -> str:
+    """Open Donchian longs: channel exits, no 15m trail/hard-stop, no 15m sell."""
+    rows = [
+        p
+        for p in (status.get("positions") or [])
+        if float(p.get("quantity") or 0.0) > 1e-12
+    ]
+    empty_text = "Geen open Donchian-longs — wacht op 10d-breakout na UTC-dagclose."
+    if not rows:
+        return f'<p class="pos-empty muted" data-live="positions-empty">{escape(empty_text)}</p>'
+    out = [
+        '<div class="table-scroll desk-wide" data-live="positions" data-mode="donchian">'
+        '<table class="desk" data-trail="0" data-tight-after="0" data-tight="0" data-stop="0">'
+        "<thead><tr>"
+        "<th>Base</th><th>Sleeve</th><th>Qty</th><th>Entry</th><th>Mark</th>"
+        "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th>"
+        "</tr></thead><tbody>",
+    ]
+    cards = ['<div class="pos-cards" data-live="position-cards" data-mode="donchian">']
+    for p in rows:
+        entry = float(p.get("entry_price") or 0)
+        mark = p.get("mark")
+        gross = p.get("gross_return")
+        qty = float(p.get("quantity") or 0)
+        notional = p.get("notional_eur")
+        hid = escape(str(p.get("holding_id") or p.get("base") or ""))
+        sleeve = escape(str(p.get("sleeve") or "donch"))
+        reason = escape(str(p.get("entry_reason") or ""))
+        venue = escape(str(p.get("venue") or ""))
+        age = p.get("age_h")
+        if age is None and p.get("opened"):
+            try:
+                opened = datetime.fromisoformat(str(p["opened"]).replace("Z", "+00:00"))
+                if opened.tzinfo is None:
+                    opened = opened.replace(tzinfo=UTC)
+                age = (datetime.now(UTC) - opened.astimezone(UTC)).total_seconds() / 3600.0
+            except ValueError:
+                age = 0.0
+        age = float(age or 0)
+        mark_s = f"{float(mark):,.4f}" if mark else "—"
+        mark_meta = escape(str(p.get("mark_source") or "—"))
+        if p.get("mark_age_sec") is not None:
+            mark_meta += f" · {int(p['mark_age_sec'])}s"
+        qty_s = f"{qty:,.4f}".rstrip("0").rstrip(".")
+        notional_s = _fmt_eur(notional, signed=False) if notional is not None else "—"
+        out.append(
+            f'<tr data-holding="{hid}" data-entry="{entry}" data-side="long">'
+            f"<td><strong>{escape(str(p.get('base')))}</strong>"
+            f" <span class='muted' style='font-size:.7rem'>{venue}</span>"
+            f"<div class='muted' style='font-size:.7rem'>{reason}</div></td>"
+            f"<td class='muted'>{sleeve}</td>"
+            f"<td class='mono' data-k='qty'>{qty_s}</td>"
+            f"<td class='mono'>{entry:,.4f}</td>"
+            f"<td class='mono' data-k='mark'>{mark_s}"
+            f"<div class='muted' style='font-size:.65rem' data-k='mark-meta'>{mark_meta}</div></td>"
+            f"<td class='{_cls(gross)}' data-k='gross'>{_fmt_pct(gross)}</td>"
+            f"<td class='mono'>{notional_s}</td>"
+            f"<td class='{_cls(p.get('unrealized_net_eur'))}' data-k='net'>"
+            f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
+            f"<td data-k='age'>{age:.1f}h</td>"
+            "</tr>"
+        )
+        cards.append(
+            f'<div class="pos-card" data-holding="{hid}" data-entry="{entry}" data-side="long">'
+            f'<div class="row1"><div><strong>{escape(str(p.get("base")))}</strong> '
+            f'<span class="muted">{venue}</span></div>'
+            f'<div class="{_cls(p.get("unrealized_net_eur"))}" style="font-weight:600" data-k="net">'
+            f"{_fmt_eur(p.get('unrealized_net_eur'))}</div></div>"
+            f'<div class="muted" style="font-size:.7rem;margin-bottom:.35rem">'
+            f"{sleeve} · {reason}</div>"
+            '<div class="meta">'
+            f"<div><span>Qty</span><span data-k='qty'>{qty_s}</span></div>"
+            f"<div><span>Notional</span>{notional_s}</div>"
+            f"<div><span>Entry</span>{entry:,.4f}</div>"
+            f"<div><span>Mark</span><span data-k='mark'>{mark_s}</span></div>"
+            f'<div><span>Gross</span><span class="{_cls(gross)}" data-k="gross">'
+            f"{_fmt_pct(gross)}</span></div>"
+            f"<div><span>Age</span><span data-k='age'>{age:.1f}h</span></div>"
+            "</div></div>"
+        )
+    out.append("</tbody></table></div>")
+    cards.append("</div>")
+    out.append("".join(cards))
+    out.append(
+        "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
+        "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
+        "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
+        "Verkoop loopt via de sleeve, niet via de 15m-desk.</p>"
+    )
+    return "".join(out)
+
+
 
 def _sell_cell(
     p: Mapping[str, Any],
@@ -1283,11 +1400,18 @@ def _mix_tape(btc: Any, sma20: Any, sma50: Any, label: str) -> str:
     def pct(v: float) -> float:
         return max(2.0, min(98.0, 100.0 * (v - lo) / span))
 
-    s20p = pct(s20) if s20 else 33.0
-    s50p = pct(s50) if s50 else 66.0
-    left_w = min(s20p, s50p)
-    mid_w = abs(s50p - s20p)
-    right_w = 100.0 - max(s20p, s50p)
+    s20p = pct(s20) if s20 else None
+    s50p = pct(s50) if s50 else None
+    # Classifier: BTC>SMA50 → risk_on; BTC<SMA20 → risk_off; else mid.
+    # When SMA20>SMA50 (typical uptrend) there is no mid band — split at SMA50.
+    if s20p is not None and s50p is not None and s20p < s50p:
+        left_w, mid_w, right_w = s20p, s50p - s20p, 100.0 - s50p
+    elif s50p is not None:
+        left_w, mid_w, right_w = s50p, 0.0, 100.0 - s50p
+    elif s20p is not None:
+        left_w, mid_w, right_w = s20p, 0.0, 100.0 - s20p
+    else:
+        left_w, mid_w, right_w = 33.0, 34.0, 33.0
     z_off = "cur" if label == "risk_off" else ""
     z_mid = "cur" if label == "mid" else ""
     z_on = "cur" if label == "risk_on" else ""
@@ -1304,11 +1428,16 @@ def _mix_tape(btc: Any, sma20: Any, sma50: Any, label: str) -> str:
         marks.append(
             f'<span class="mark btc" style="left:{pct(b):.1f}%"><i></i>BTC</span>'
         )
+    mid_html = (
+        f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%">chop</div>'
+        if mid_w >= 4.0
+        else (f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%"></div>' if mid_w > 0.05 else "")
+    )
     return (
         f'<div class="mix-tape" data-live="mix-tape">'
         f'<div class="zones">'
         f'<div class="z off {z_off}" style="width:{left_w:.1f}%">risk off</div>'
-        f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%">chop</div>'
+        f"{mid_html}"
         f'<div class="z on {z_on}" style="width:{right_w:.1f}%">risk on</div>'
         f"</div>{''.join(marks)}</div>"
     )
@@ -1320,17 +1449,27 @@ def _donchian_decision_panel(donchian: Mapping[str, Any] | None) -> str:
     if not sleeves:
         return '<p class="muted">Donchian-sleeves starten met de mix.</p>'
     bits: list[str] = []
+    nxt = (donchian or {}).get("next_decision")
+    mix_label = str(((donchian or {}).get("allocator") or {}).get("label") or "")
     for sl in sleeves:
         on = bool(sl.get("active"))
-        reasons = ", ".join(str(x) for x in (sl.get("reasons") or [])[:5]) or "—"
-        block = sl.get("risk_block") or ""
+        cap = str(sl.get("live_caption") or "")
+        if not cap:
+            cap = sleeve_live_caption(
+                n_positions=int(sl.get("n_positions") or len(sl.get("positions") or [])),
+                friday_flatten=bool(sl.get("friday_flatten")),
+                risk_block=str(sl.get("risk_block") or ""),
+                mix_label=mix_label,
+                exit_n=int(sl.get("exit_n") or 5),
+                channel=int(sl.get("channel") or 10),
+                next_decision=nxt,
+                allocator_active=on,
+            )
         bits.append(
             f"<div><strong>{escape(str(sl.get('title') or sl.get('id')))}</strong> "
             f"<span class='pill {'on' if on else 'off'}'>{'AAN' if on else 'UIT'}</span>"
-            f"<div class='muted'>{escape(reasons)}"
-            f"{(' · ' + escape(str(block))) if block else ''}</div></div>"
+            f"<div class='muted'>{escape(cap)}</div></div>"
         )
-    nxt = (donchian or {}).get("next_decision")
     return (
         f'<div class="mix-dc-dec">{"".join(bits)}</div>'
         f'<p class="muted" style="margin:.55rem 0 0">volgende dagbesluit {_ts(nxt)}</p>'
@@ -1394,11 +1533,21 @@ def _mix_panel(
         cls = "on" if on else "off"
         state = "AAN" if on else "UIT"
         live = don_live.get(sid) or {}
-        live_why = ""
-        if live.get("risk_block"):
-            live_why = str(live.get("risk_block"))
-        elif live.get("reasons"):
-            live_why = ", ".join(str(x) for x in live.get("reasons")[:4])
+        n_held = len(pos_by.get(sid) or [])
+        friday = bool(live.get("friday_flatten")) or sid in {"donch_fri10", "donch_fri"}
+        if sid.startswith("donch"):
+            why_s = str(live.get("live_caption") or "") or sleeve_live_caption(
+                n_positions=n_held,
+                friday_flatten=friday,
+                risk_block=str(live.get("risk_block") or ""),
+                mix_label=label,
+                exit_n=int(live.get("exit_n") or (10 if sid == "donch_fri" else 5)),
+                channel=int(live.get("channel") or (20 if sid == "donch_fri" else 10)),
+                next_decision=(donchian or {}).get("next_decision"),
+                allocator_active=on,
+            )
+        else:
+            why_s = str(sl.get("why") or sl.get("blurb") or "")
         pos_bits = []
         for p in pos_by.get(sid) or []:
             net = p.get("unrealized_net_eur")
@@ -1411,7 +1560,6 @@ def _mix_panel(
             if pos_bits
             else '<div class="mix-open" data-k="mix-pos"></div>'
         )
-        why_s = live_why or str(sl.get("why") or sl.get("blurb") or "")
         cards.append(
             f'<div class="mix-sleeve {cls}" data-mix-sleeve="{escape(sid)}">'
             f'<h3>{escape(str(sl.get("title") or sid))} '
@@ -2462,6 +2610,7 @@ _LIVE_MARKS_JS = r"""
     const tightAfter = Number(cfg.trail_tight_after != null ? cfg.trail_tight_after : 0.0);
     const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
     document.querySelectorAll("table.desk[data-trail]").forEach((table) => {
+      if (table.closest("#dc-open-pos") || table.getAttribute("data-mode") === "donchian") return;
       table.dataset.trail = String(trail);
       table.dataset.tightAfter = String(tightAfter);
       table.dataset.tight = String(tight);
@@ -2632,9 +2781,9 @@ _LIVE_MARKS_JS = r"""
       const eur = card.querySelector('[data-k="mix-eur"]');
       if (eur) eur.textContent = fmtEur(sl.target_eur).replace(/^\+/, "");
       const live = (mix.sleeves_live || []).find((x) => x.id === sl.id) || {};
-      const whyTxt = (live.risk_block || (live.reasons || []).join(", ") || sl.why || sl.blurb || "");
+      const whyTxt = live.live_caption || "";
       const why = card.querySelector('[data-k="mix-why-s"]');
-      if (why) why.textContent = whyTxt;
+      if (why && whyTxt) why.textContent = whyTxt;
       const st = card.querySelector(".pill");
       if (st) {
         st.textContent = sl.active ? "AAN" : "UIT";
@@ -2661,6 +2810,120 @@ _LIVE_MARKS_JS = r"""
     }
     patchMixOpen(mix);
   }
+  function mixHeroesLive() {
+    return !!document.querySelector("#dc-open-pos");
+  }
+  function dcPositionIds(don) {
+    const ids = new Set();
+    (don.positions || []).forEach((p) => {
+      if (Number(p.quantity || 0) <= 1e-12) return;
+      const id = String(p.holding_id || p.base || "");
+      if (id) ids.add(id);
+    });
+    return ids;
+  }
+  function donchianSetChanged(don) {
+    const root = document.querySelector("#dc-open-pos");
+    if (!root) return false;
+    const live = new Set();
+    root.querySelectorAll("[data-holding]").forEach((el) => {
+      const id = el.getAttribute("data-holding");
+      if (id) live.add(id);
+    });
+    const next = dcPositionIds(don);
+    const empty = root.querySelector("[data-live='positions-empty']");
+    if (empty && next.size > 0) return true;
+    if (!empty && next.size === 0) return true;
+    if (live.size !== next.size) return true;
+    for (const id of next) if (!live.has(id)) return true;
+    for (const id of live) if (!next.has(id)) return true;
+    return false;
+  }
+  function renderDonchianOpen(don) {
+    const root = document.querySelector("#dc-open-pos");
+    if (!root) return;
+    const pos = (don.positions || []).filter((p) => Number(p.quantity || 0) > 1e-12);
+    const head = root.querySelector(".panel-head");
+    const headHtml = head ? head.outerHTML : '<div class="panel-head"><h2>Donchian · live longs</h2></div>';
+    if (!pos.length) {
+      root.innerHTML = headHtml
+        + '<p class="pos-empty muted" data-live="positions-empty">'
+        + "Geen open Donchian-longs — wacht op 10d-breakout na UTC-dagclose.</p>";
+      return;
+    }
+    const rows = pos.map((p) => {
+      const hid = esc(p.holding_id || p.base || "");
+      const entry = Number(p.entry_price || 0);
+      const mark = p.mark == null ? null : Number(p.mark);
+      const qty = Number(p.quantity || 0);
+      const qtyS = qty.toLocaleString("en-US", { maximumFractionDigits: 4 });
+      const notional = p.notional_eur == null ? "—" : fmtEur(p.notional_eur).replace(/^\+/, "");
+      const markS = mark == null ? "—" : fmtPx(mark);
+      const age = p.age_h == null ? "—" : `${Number(p.age_h).toFixed(1)}h`;
+      const net = p.unrealized_net_eur;
+      const reason = esc(p.entry_reason || "");
+      const sleeve = esc(p.sleeve || "donch");
+      const venue = esc(p.venue || "");
+      return `<tr data-holding="${hid}" data-entry="${entry}" data-side="long">`
+        + `<td><strong>${esc(p.base || "")}</strong> <span class="muted" style="font-size:.7rem">${venue}</span>`
+        + `<div class="muted" style="font-size:.7rem">${reason}</div></td>`
+        + `<td class="muted">${sleeve}</td>`
+        + `<td class="mono" data-k="qty">${qtyS}</td>`
+        + `<td class="mono">${fmtPx(entry)}</td>`
+        + `<td class="mono" data-k="mark">${markS}</td>`
+        + `<td class="${cls(p.gross_return)}" data-k="gross">${fmtPct(p.gross_return)}</td>`
+        + `<td class="mono">${notional}</td>`
+        + `<td class="${cls(net)}" data-k="net">${fmtEur(net)}</td>`
+        + `<td data-k="age">${age}</td></tr>`;
+    }).join("");
+    const cards = pos.map((p) => {
+      const hid = esc(p.holding_id || p.base || "");
+      const entry = Number(p.entry_price || 0);
+      const mark = p.mark == null ? null : Number(p.mark);
+      const qty = Number(p.quantity || 0);
+      const qtyS = qty.toLocaleString("en-US", { maximumFractionDigits: 4 });
+      const notional = p.notional_eur == null ? "—" : fmtEur(p.notional_eur).replace(/^\+/, "");
+      const markS = mark == null ? "—" : fmtPx(mark);
+      const age = p.age_h == null ? "—" : `${Number(p.age_h).toFixed(1)}h`;
+      const net = p.unrealized_net_eur;
+      const reason = esc(p.entry_reason || "");
+      const sleeve = esc(p.sleeve || "donch");
+      const venue = esc(p.venue || "");
+      return `<div class="pos-card" data-holding="${hid}" data-entry="${entry}" data-side="long">`
+        + `<div class="row1"><div><strong>${esc(p.base || "")}</strong> `
+        + `<span class="muted">${venue}</span></div>`
+        + `<div class="${cls(net)}" style="font-weight:600" data-k="net">${fmtEur(net)}</div></div>`
+        + `<div class="muted" style="font-size:.7rem;margin-bottom:.35rem">${sleeve} · ${reason}</div>`
+        + `<div class="meta">`
+        + `<div><span>Qty</span><span data-k="qty">${qtyS}</span></div>`
+        + `<div><span>Notional</span>${notional}</div>`
+        + `<div><span>Entry</span>${fmtPx(entry)}</div>`
+        + `<div><span>Mark</span><span data-k="mark">${markS}</span></div>`
+        + `<div><span>Gross</span><span class="${cls(p.gross_return)}" data-k="gross">${fmtPct(p.gross_return)}</span></div>`
+        + `<div><span>Age</span><span data-k="age">${age}</span></div>`
+        + `</div></div>`;
+    }).join("");
+    root.innerHTML = headHtml
+      + '<div class="table-scroll desk-wide" data-live="positions" data-mode="donchian">'
+      + '<table class="desk" data-trail="0" data-tight-after="0" data-tight="0" data-stop="0">'
+      + "<thead><tr><th>Base</th><th>Sleeve</th><th>Qty</th><th>Entry</th><th>Mark</th>"
+      + "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th></tr></thead>"
+      + `<tbody>${rows}</tbody></table></div>`
+      + `<div class="pos-cards" data-live="position-cards" data-mode="donchian">${cards}</div>`
+      + "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
+      + "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
+      + "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
+      + "Verkoop loopt via de sleeve, niet via de 15m-desk.</p>";
+  }
+  function patchDonchian(don) {
+    if (!don) return;
+    if (mixHeroesLive()) patchHeroes(don);
+    if (donchianSetChanged(don)) {
+      renderDonchianOpen(don);
+      return;
+    }
+    (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
@@ -2668,7 +2931,7 @@ _LIVE_MARKS_JS = r"""
         const status = await res.json();
         const { trail, tightAfter, tight } = trailKnobs(status);
         (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
-        patchHeroes(status);
+        if (!mixHeroesLive()) patchHeroes(status);
         patchRules(status);
       }
     } catch (err) {
@@ -2692,8 +2955,7 @@ _LIVE_MARKS_JS = r"""
     try {
       const dc = await fetch(DONCHIAN_STATUS_URL, { cache: "no-store" });
       if (dc.ok) {
-        const don = await dc.json();
-        (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+        patchDonchian(await dc.json());
       }
     } catch (err) {
       /* donchian optional */
@@ -2761,13 +3023,23 @@ def render_momentum_dashboard(
         pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
     risk = status.get("risk") or {}
     cfg = status.get("config") or {}
+    show_vol = bool(show_volatile)
+    show_sw = bool(show_short_weakest)
+    show_dc = donchian is not None or donchian_ledger_rows is not None
+    show_mix = bool(show_dc or show_sw)
+    book = dict(donchian or {}) if show_dc else dict(status)
+    if show_dc and book.get("cash_eur") is None:
+        book["cash_eur"] = round(
+            sum(float(s.get("cash_eur") or 0) for s in (book.get("sleeves") or [])),
+            2,
+        )
     n_pos = sum(
         1
-        for p in (status.get("positions") or [])
+        for p in (book.get("positions") or [])
         if float(p.get("quantity") or 0.0) > 1e-12
     )
     fill_src: list[Mapping[str, Any]] = list(ledger_rows)
-    if donchian is not None or donchian_ledger_rows is not None:
+    if show_dc:
         fill_src = list(donchian_ledger_rows or []) + list(short_weakest_ledger_rows or [])
     exits = [r for r in fill_src if r.get("event") == "exit"]
     wins = sum(1 for r in exits if float(r.get("net_eur") or 0) > 0)
@@ -2777,13 +3049,22 @@ def render_momentum_dashboard(
     )
     err = status.get("last_error")
     err_html = f'<div class="hint bad">Laatste fout: {escape(str(err))}</div>' if err else ""
-    venue = escape(" + ".join(status.get("venues") or [str(status.get("venue") or "")]))
-    cash_by_venue = status.get("cash_by_venue") or {}
-    cash_hint = (
-        " · ".join(f"{escape(str(k))} {float(v):,.0f} €" for k, v in cash_by_venue.items())
-        if len(cash_by_venue) > 1
-        else f"cash {_fmt_eur(status.get('cash_eur'), signed=False)}"
+    venue = escape(
+        " + ".join(
+            book.get("venues")
+            or status.get("venues")
+            or [str(status.get("venue") or "")]
+        )
     )
+    cash_by_venue = status.get("cash_by_venue") or {}
+    if show_dc:
+        cash_hint = f"cash {_fmt_eur(book.get('cash_eur'), signed=False)}"
+    elif len(cash_by_venue) > 1:
+        cash_hint = " · ".join(
+            f"{escape(str(k))} {float(v):,.0f} €" for k, v in cash_by_venue.items()
+        )
+    else:
+        cash_hint = f"cash {_fmt_eur(status.get('cash_eur'), signed=False)}"
     task_err = status.get("task_error")
     if task_err:
         err_html += f'<div class="hint bad">Loop gestopt: {escape(str(task_err))}</div>'
@@ -2799,17 +3080,20 @@ def render_momentum_dashboard(
         else 'Marks live elke 3s · <span data-live="marks-age">—</span>'
     )
     live_js = "" if hold_page else _LIVE_MARKS_JS
-    show_vol = bool(show_volatile)
-    toolbar = _toolbar(
-        running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=show_vol
-    )
-    toolbar_mobile = _toolbar(
-        running=running,
-        has_positions=n_pos > 0,
-        hold=hold_page,
-        show_volatile=show_vol,
-        compact=True,
-    )
+    if show_mix:
+        toolbar = ""
+        toolbar_mobile = ""
+    else:
+        toolbar = _toolbar(
+            running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=show_vol
+        )
+        toolbar_mobile = _toolbar(
+            running=running,
+            has_positions=n_pos > 0,
+            hold=hold_page,
+            show_volatile=show_vol,
+            compact=True,
+        )
     sell_html = _sell_confirm_panel(status, sell) if sell else ""
     sell_all_html = _sell_all_confirm_panel(status) if sell_all else ""
     report_html = _report_panel(report) if report else ""
@@ -2820,9 +3104,6 @@ def render_momentum_dashboard(
         else ""
     )
 
-    show_sw = bool(show_short_weakest)
-    show_dc = donchian is not None or donchian_ledger_rows is not None
-    show_mix = bool(show_dc or show_sw)
     earnings_html = _earnings_masthead(
         earnings,
         pill=pill,
@@ -2831,36 +3112,66 @@ def render_momentum_dashboard(
         show_mix=show_mix,
     )
 
+    dc_day = earnings.donchian.day_eur if (show_dc and earnings) else risk.get("day_realized_eur")
+    open_pnl = (
+        book.get("unrealized_net_eur")
+        if show_dc
+        else (earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur"))
+    )
+    next_iso = book.get("next_decision") if show_dc else status.get("next_decision")
+    max_pos = (book.get("config") or {}).get("max_positions") if show_dc else cfg.get("max_positions")
+    bag_names = [
+        str(p.get("base") or "")
+        for p in (book.get("positions") or [])
+        if float(p.get("quantity") or 0.0) > 1e-12
+    ]
+    bags_hint = (
+        f"{n_pos} bags · {'+'.join(bag_names[:4])}" if bag_names else f"{n_pos} bags"
+    )
+    if show_dc:
+        day_hint = f"Donchian gesloten · win {win_rate} · geen 15m trail"
+        next_hint = "00:00 UTC na dagclose · geen kick-buy buiten window"
+        eq_hint = (
+            f"{cash_hint} · ingezet {_fmt_eur(book.get('deployed_eur') or book.get('exposure_eur'), signed=False)}"
+        )
+        day_label = "Donchian vandaag"
+        next_label = "Volgende dagbesluit"
+    else:
+        day_hint = f"limiet −{float(cfg.get('day_loss_limit_eur') or 0):.0f} € · win {win_rate}"
+        next_hint = (
+            "entries toegestaan"
+            if risk.get("entries_allowed", True)
+            else f"geblokkeerd: {risk.get('block_reason')}"
+        )
+        eq_hint = f"{cash_hint} · ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}"
+        day_label = "Core vandaag"
+        next_label = "Volgende beslissing"
     heroes = "".join(
         [
             _hero(
                 "Equity (cash + posities)",
-                _fmt_eur(status.get("equity_eur"), signed=False),
-                hint=f"{cash_hint} · ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}",
+                _fmt_eur(book.get("equity_eur"), signed=False),
+                hint=eq_hint,
                 value_attr='data-live="equity"',
             ),
             _hero(
-                "Core vandaag",
-                _fmt_eur(risk.get("day_realized_eur")),
-                cls=_cls(risk.get("day_realized_eur")),
-                hint=f"limiet −{float(cfg.get('day_loss_limit_eur') or 0):.0f} € · win {win_rate}",
+                day_label,
+                _fmt_eur(dc_day),
+                cls=_cls(dc_day),
+                hint=day_hint,
             ),
             _hero(
                 "Open resultaat",
-                _fmt_eur(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
-                cls=_cls(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur")),
-                hint=f"core {n_pos}/{cfg.get('max_positions')} · fees {fees:,.2f} €",
+                _fmt_eur(open_pnl),
+                cls=_cls(open_pnl),
+                hint=f"{bags_hint} · fees {fees:,.2f} €",
                 value_attr='data-live="open-pnl"',
             ),
             _hero(
-                "Volgende beslissing",
+                next_label,
                 f"<span class='mono' style='font-size:1rem' data-live='next-decision'>"
-                f"{_ts(status.get('next_decision'))}</span>",
-                hint=(
-                    "entries toegestaan"
-                    if risk.get("entries_allowed", True)
-                    else f"geblokkeerd: {risk.get('block_reason')}"
-                ),
+                f"{_ts(next_iso)}</span>",
+                hint=next_hint,
             ),
         ]
     )
@@ -2880,7 +3191,7 @@ def render_momentum_dashboard(
             volatile if show_vol else None,
             short_weakest if show_sw else None,
         )
-        if (show_vol or show_sw)
+        if (show_vol or show_sw) and not show_dc
         else ""
     )
     if show_vol or show_sw or show_dc:
@@ -2915,11 +3226,7 @@ def render_momentum_dashboard(
             dc_title = "Donchian · live longs" if don_live else "Donchian · paper longs"
             pos_blocks[0] = (
                 f'<div id="dc-open-pos"><div class="panel-head"><h2>{escape(dc_title)}</h2></div>'
-                f"""{_positions_table(
-                    donchian or {},
-                    sell_all_path=None,
-                    empty_text="Geen open Donchian-longs — wacht op 10d-breakout na UTC-dagclose.",
-                )}</div>"""
+                f"{_donchian_positions_table(donchian or {})}</div>"
             )
         stack = "three" if show_vol and show_sw else "two"
         positions_html = (
@@ -3023,9 +3330,10 @@ def render_momentum_dashboard(
             '<span class="chev"></span></summary>'
             f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
         )
-    equity = float(status.get("equity_eur") or 0)
-    exposure = float(status.get("exposure_eur") or 0)
+    equity = float(book.get("equity_eur") or 0)
+    exposure = float(book.get("deployed_eur") or book.get("exposure_eur") or 0)
     util_pct = min(100.0, max(0.0, 100.0 * exposure / equity)) if equity > 0 else 0.0
+    slots = escape(str(max_pos if max_pos is not None else "—"))
     active_cls = "active" if not show_vol else ""
     vol_cls = "active" if show_vol else ""
     sidebar = f"""
@@ -3040,7 +3348,7 @@ def render_momentum_dashboard(
     </div>
     <div class="side-status">
       <div class="row"><span>Engine</span>{pill}</div>
-      <div class="meta"><span>{venue}</span><span class="mono">{n_pos}/{escape(str(cfg.get('max_positions') or '—'))}</span></div>
+      <div class="meta"><span>{venue}</span><span class="mono">{n_pos}/{slots}</span></div>
     </div>
     <nav class="side-nav">
       <div class="label">Workspace</div>
@@ -3057,7 +3365,7 @@ def render_momentum_dashboard(
   </div>
   <div class="side-capital">
     <div class="cap-label"><span>Allocated capital</span>
-      <span class="{_cls(earnings.open_mtm_eur if earnings else status.get('unrealized_net_eur'))} mono">{_fmt_eur(earnings.open_mtm_eur if earnings else status.get('unrealized_net_eur'))}</span>
+      <span class="{_cls(open_pnl)} mono">{_fmt_eur(open_pnl)}</span>
     </div>
     <div class="cap-val" data-live="equity">{_fmt_eur(equity, signed=False)}</div>
     <div class="bar" title="exposure / equity"><i style="width:{util_pct:.1f}%"></i></div>
@@ -3073,19 +3381,28 @@ def render_momentum_dashboard(
     <div class="top-metric"><span class="k">Equity</span>
       <span class="v" data-live="equity">{_fmt_eur(equity, signed=False)}</span></div>
     <div class="top-metric openpnl"><span class="k">Open</span>
-      <span class="v {_cls(status.get('unrealized_net_eur'))}" data-live="open-pnl">{_fmt_eur(status.get('unrealized_net_eur'))}</span></div>
+      <span class="v {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</span></div>
     <div class="top-metric winrate"><span class="k">Win rate</span><span class="v">{escape(win_rate)}</span></div>
   </div>
   <div class="topbar-right">{toolbar}</div>
 </header>
 """
-    mobile_dock = f"""
+    if show_mix:
+        mobile_dock = """
+<nav class="mobile-dock" aria-label="Mobile workspace">
+  <a class="active" href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
+  <a href="/live/momentum#dc-open-pos"><span class="ico">▣</span>Bags</a>
+  <a href="/live/momentum#ledger"><span class="ico">☰</span>Ledger</a>
+  <a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>
+</nav>
+"""
+    else:
+        mobile_dock = f"""
 <nav class="mobile-dock" aria-label="Mobile workspace">
   <a href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
   <a class="{active_cls}" href="/live/momentum"><span class="ico">◆</span>Desk</a>
   <a class="{vol_cls}" href="/live/momentum/volatile"><span class="ico">◇</span>Volatile</a>
   <a href="/live/momentum#ledger"><span class="ico">☰</span>Ledger</a>
-  <a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>
 </nav>
 """
     sticky = (
@@ -3102,7 +3419,7 @@ def render_momentum_dashboard(
 {refresh_meta}
 <title>Moreney · Momentum Desk</title>
 <style>{_CSS}</style></head>
-<body><div class="shell">
+<body class="{'mix-live' if show_mix else ''}"><div class="shell">
 {sidebar}
 <div class="shell-main">
 {topbar}
@@ -3111,9 +3428,9 @@ def render_momentum_dashboard(
 {_mix_panel(allocator, donchian, short_weakest if show_sw else None)}
 {positions_html}
 {err_html}
-<div class="ops-row">{toolbar}</div>
+{'' if show_mix else f'<div class="ops-row">{toolbar}</div>'}
 {sleeves_html}
-{core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or ''}
+{'' if show_mix else (core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or '')}
 {vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile netto · </div>{vol_earn}' or ''}
 {dc_earn and f'<div class="muted" style="font-size:.78rem">Donchian netto · </div>{dc_earn}' or ''}
 {sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest netto · </div>{sw_earn}' or ''}
@@ -3126,7 +3443,7 @@ def render_momentum_dashboard(
 {exec_ledger_html}
 {vol_ledger_html}
 <details class="fold">
-<summary><span class="fold-head">Risk rules (core)</span><span class="chev"></span></summary>
+<summary><span class="fold-head">{'15m core rules (idle — niet de mix)' if show_mix else 'Risk rules (core)'}</span><span class="chev"></span></summary>
 <div class="fold-body">{_rules(cfg)}</div>
 </details>
 <p class="foot"><span>{refresh_note}</span>{footer_links}</p>

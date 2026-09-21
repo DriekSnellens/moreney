@@ -349,6 +349,76 @@ def evaluate_donchian(
     }
 
 
+def sleeve_live_caption(
+    *,
+    n_positions: int,
+    friday_flatten: bool,
+    risk_block: str,
+    mix_label: str,
+    exit_n: int = 5,
+    channel: int = 10,
+    next_decision: str | None = None,
+    allocator_active: bool | None = None,
+) -> str:
+    """Operator-facing sleeve why. Ignores stale last_decision SMA/Friday labels.
+
+    ``last_decision.risk_block`` stays frozen until the next 00:00 UTC decide.
+    Bags and mix regime are the live truth between decides.
+    """
+    nxt = ""
+    if next_decision:
+        try:
+            dt = datetime.fromisoformat(str(next_decision))
+            nxt = dt.astimezone(UTC).strftime("%d-%m %H:%M UTC")
+        except ValueError:
+            nxt = str(next_decision)
+    nxt_bit = f" · decide {nxt}" if nxt else ""
+    mix = str(mix_label or "")
+    block = str(risk_block or "")
+    n = int(n_positions or 0)
+    friday = bool(friday_flatten)
+    zero_book = block == "allocator_zero_book" or allocator_active is False
+
+    if n > 0:
+        if friday:
+            return (
+                f"houdt bags tot {exit_n}d-low of Friday-flat (na vrijdag UTC-close)"
+                f"{nxt_bit}"
+            )
+        return f"houdt bags tot {exit_n}d-low op gesloten dagkaars{nxt_bit}"
+
+    if mix == "mid":
+        return "idle · mix staat cash (BTC tussen SMA20 en SMA50)"
+
+    if zero_book:
+        if mix == "risk_off" and friday:
+            return f"risk_off · Friday {channel}/{exit_n} mag long{nxt_bit}"
+        if mix == "risk_off":
+            return "uit in risk_off (alleen short + Friday 20/10)"
+        if mix == "risk_on":
+            return "uit in risk_on (deze sleeve krijgt 0 € van de allocator)"
+        return "uit in dit regime (allocator 0 €)"
+
+    if mix == "risk_off":
+        if friday:
+            return f"risk_off · Friday {channel}/{exit_n} mag long{nxt_bit}"
+        return "uit: mix is risk_off"
+
+    if friday:
+        if block == "friday_flatten":
+            return f"cash na Friday-flat · volgende instap ma-do breakout{nxt_bit}"
+        return f"cash tot dagbesluit · Friday-sleeve koopt alleen ma-do{nxt_bit}"
+
+    if block in {"btc_below_sma", "sma_unavailable"}:
+        return (
+            f"cash tot dagbesluit{nxt_bit} · mix is risk_on "
+            "(SMA-label is van de vorige decide)"
+        )
+    if block == "data_not_ready":
+        return f"geen complete dagkaars · geen entries tot {nxt or 'volgende decide'}"
+    return f"cash tot dagbesluit{nxt_bit}"
+
+
 def loop_sleeve_configs() -> tuple[DonchianConfig, ...]:
     return (
         DonchianConfig(
