@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Replay last 14 days: €10k Donchian mix + €10k 15m momentum desk.
+"""Replay €10k Donchian mix + €10k 15m momentum desk over N days.
 
 Independent books (side-by-side). Live mix map on the Donchian book;
 live-micro knobs on the 15m book, scaled to €10k. No AlphaI timeline.
 Does not change the live engine.
+
+Default window is 14d; pass --days 84 for the last 12 weeks.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import time
 from collections import defaultdict
@@ -170,7 +173,6 @@ def sim_donchian_mix(
     ts = [int(r[0]) for r in btc_rows]
     # Align other bases to BTC index (same UTC day open); missing → skip that name.
     aligned: dict[str, list[list[float]]] = {"BTC": btc_rows}
-    btc_ts = {int(r[0]): r for r in btc_rows}
     for base, rows in ohlc.items():
         by = {int(r[0]): r for r in rows}
         aligned[base] = [by[t] if t in by else [t, 0, 0, 0, 0, 0] for t in ts]
@@ -179,6 +181,10 @@ def sim_donchian_mix(
     i1 = next((i for i in range(len(ts) - 1, -1, -1) if ts[i] <= end_ms), None)
     if i0 is None or i1 is None or i1 < i0:
         raise RuntimeError("window not in daily bars")
+    if i0 < 54:
+        raise RuntimeError(
+            f"BTC daily history before window start is {i0} bars; need ≥54 for SMA50"
+        )
 
     daily: list[dict[str, Any]] = []
     last_label = ""
@@ -187,10 +193,8 @@ def sim_donchian_mix(
         hist = {b: rows[: i + 1] for b, rows in aligned.items()}
         btc_closes = [float(r[4]) for r in aligned["BTC"][: i + 1] if float(r[4]) > 0]
         snap = classify_sma20_50(btc_closes)
-        label = str(snap.get("label") or "mid")
         # Side-by-side 10k Donchian = the live risk_on split, always on.
         # Regime flatten-to-short is not part of this 10k sleeve.
-        wmap = {"donch_fri10": 0.5, "donch10": 0.5}
         label = str(snap.get("label") or "mid")
         px = _marks(aligned, i)
         idle_cash = 0.0
@@ -274,14 +278,18 @@ def sim_donchian_mix(
         by_sleeve[str(t["sleeve"])]["n"] += 1
         by_sleeve[str(t["sleeve"])]["net_eur"] += float(t["net_eur"])
     wins = sum(1 for t in exits if float(t["net_eur"]) > 0)
+    eq_path = [float(r["equity_eur"]) for r in daily]
+    max_dd_eur, max_dd_pct = _equity_max_dd(eq_path, start_equity=book)
     return {
         "book_eur": book,
         "end_regime": last_label,
         "realized_eur": round(realized, 2),
         "open_mtm_eur": round(mtm, 2),
         "total_eur": round(realized + mtm, 2),
+        "max_dd_eur": max_dd_eur,
+        "max_dd_pct": max_dd_pct,
         "trades": len(exits),
-        "entries": len(entries),
+        "entries_n": len(entries),
         "win_rate": round(wins / len(exits), 3) if exits else None,
         "by_reason": {
             k: {"n": int(v["n"]), "net_eur": round(float(v["net_eur"]), 2)}
@@ -297,6 +305,62 @@ def sim_donchian_mix(
         "daily": daily,
         "sleeve_cash": {n: round(s.cash, 2) for n, s in sleeves.items()},
     }
+
+
+def _iso_week(day: str) -> str:
+    d = datetime.fromisoformat(day[:10]).date()
+    iso = d.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
+def _equity_max_dd(eq: list[float], *, start_equity: float) -> tuple[float, float]:
+    peak = start_equity
+    worst = 0.0
+    worst_pct = 0.0
+    for v in eq:
+        peak = max(peak, v)
+        dd = v - peak
+        if dd < worst:
+            worst = dd
+            worst_pct = 100.0 * dd / peak if peak else 0.0
+    return round(worst, 2), round(worst_pct, 2)
+
+
+def weekly_from_daily(daily: list[dict[str, Any]], *, start_equity: float) -> list[dict[str, Any]]:
+    last_by_week: dict[str, dict[str, Any]] = {}
+    for row in daily:
+        last_by_week[_iso_week(str(row["day"]))] = row
+    out: list[dict[str, Any]] = []
+    prev = start_equity
+    for week in sorted(last_by_week):
+        row = last_by_week[week]
+        eq = float(row["equity_eur"])
+        out.append(
+            {
+                "week": week,
+                "end_day": row["day"],
+                "equity_eur": round(eq, 2),
+                "delta_eur": round(eq - prev, 2),
+                "regime": row.get("regime"),
+            }
+        )
+        prev = eq
+    return out
+
+
+def weekly_from_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by: dict[str, dict[str, float | int]] = defaultdict(lambda: {"n": 0, "net_eur": 0.0})
+    for t in trades:
+        closed = str(t.get("closed") or "")
+        if len(closed) < 10:
+            continue
+        slot = by[_iso_week(closed)]
+        slot["n"] = int(slot["n"]) + 1
+        slot["net_eur"] = float(slot["net_eur"]) + float(t["net_eur"])
+    return [
+        {"week": w, "n": int(v["n"]), "net_eur": round(float(v["net_eur"]), 2)}
+        for w, v in sorted(by.items())
+    ]
 
 
 def pack_mom(res: Any, cfg: DeskConfig) -> dict[str, Any]:
@@ -341,45 +405,65 @@ def pack_mom(res: Any, cfg: DeskConfig) -> dict[str, Any]:
         },
         "open": list(getattr(res, "open_mtm", []) or []),
         "trades_closed": trades,
+        "weekly": weekly_from_trades(trades),
     }
 
 
-def main() -> None:
+def main(days: int | None = None, out: Path | None = None) -> None:
+    days = DAYS if days is None else days
+    out_path = OUT if out is None else out
     end = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=DAYS)
+    start = end - timedelta(days=days)
     end_ms = int(end.timestamp() * 1000) // BAR_MS * BAR_MS
     start_ms = int(start.timestamp() * 1000)
     print(
-        f"window {start.date()} → {end.date()} ({DAYS}d)",
+        f"window {start.date()} → {end.date()} ({days}d)",
         flush=True,
     )
     mom_cfg = live_mom_cfg(MOM_BOOK)
     print("loading 15m candles…", flush=True)
     candles = load_candles(
-        ("BTC", *mom_cfg.universe), days=DAYS + 10, end_ms=end_ms, refresh=False
+        ("BTC", *mom_cfg.universe), days=days + 10, end_ms=end_ms, refresh=False
     )
     print("simulating 15m momentum €10k…", flush=True)
     mom = simulate(candles, mom_cfg, start_ms=start_ms, end_ms=end_ms, alphai=None)
     mom_pack = pack_mom(mom, mom_cfg)
 
-    print("loading daily OHLC…", flush=True)
+    # SMA50 needs ≥55 daily bars before the window; Bitvavo 1d cap is 200.
+    daily_lookback = min(200, max(90, days + 70))
+    print(f"loading daily OHLC ({daily_lookback}d lookback)…", flush=True)
     ohlc: dict[str, list[list[float]]] = {}
     for base in ("BTC", *DEFAULT_UNIVERSE):
         try:
-            ohlc[base] = fetch_daily_ohlc(base, days=90)
+            ohlc[base] = fetch_daily_ohlc(base, days=daily_lookback)
             time.sleep(0.12)
         except Exception as exc:  # noqa: BLE001
             print(f"  skip {base}: {exc}", flush=True)
     print("simulating Donchian mix €10k…", flush=True)
     donch = sim_donchian_mix(ohlc, book=DONCH_BOOK, start_ms=start_ms, end_ms=end_ms)
+    donch["weekly"] = weekly_from_daily(donch.get("daily") or [], start_equity=DONCH_BOOK)
 
     combined_realized = donch["realized_eur"] + mom_pack["realized_eur"]
     combined_mtm = donch["open_mtm_eur"] + mom_pack["open_mtm_eur"]
     combined_total = donch["total_eur"] + mom_pack["total_eur"]
-    out = {
+    mom_week = {r["week"]: r for r in mom_pack.get("weekly") or []}
+    combined_weekly = []
+    for row in donch.get("weekly") or []:
+        mw = mom_week.get(row["week"]) or {"n": 0, "net_eur": 0.0}
+        combined_weekly.append(
+            {
+                "week": row["week"],
+                "end_day": row["end_day"],
+                "donchian_delta_eur": row["delta_eur"],
+                "momentum_realized_eur": mw["net_eur"],
+                "combined_eur": round(float(row["delta_eur"]) + float(mw["net_eur"]), 2),
+                "momentum_trades": int(mw["n"]),
+            }
+        )
+    payload = {
         "asof": datetime.now(UTC).isoformat(),
         "window": {
-            "days": DAYS,
+            "days": days,
             "start": start.isoformat(),
             "end": end.isoformat(),
         },
@@ -402,16 +486,18 @@ def main() -> None:
             "open_mtm_eur": round(combined_mtm, 2),
             "total_eur": round(combined_total, 2),
             "return_on_20k_pct": round(100.0 * combined_total / (DONCH_BOOK + MOM_BOOK), 3),
+            "weekly": combined_weekly,
         },
     }
-    OUT.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(json.dumps({
-        "wrote": str(OUT),
+        "wrote": str(out_path),
         "donchian": {
             "realized": donch["realized_eur"],
             "mtm": donch["open_mtm_eur"],
             "total": donch["total_eur"],
             "trades": donch["trades"],
+            "max_dd_eur": donch.get("max_dd_eur"),
         },
         "momentum": {
             "realized": mom_pack["realized_eur"],
@@ -419,9 +505,21 @@ def main() -> None:
             "total": mom_pack["total_eur"],
             "trades": mom_pack["trades"],
         },
-        "combined_total": out["combined_20k"],
-    }, indent=2))
+        "combined_total": payload["combined_20k"],
+    }, indent=2, default=str))
+
+
+def _default_out(days: int) -> Path:
+    if days == 84:
+        return Path(__file__).with_name("donch_mom_10k_12w_sim.json")
+    if days == DAYS:
+        return OUT
+    return Path(__file__).with_name(f"donch_mom_10k_{days}d_sim.json")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--days", type=int, default=DAYS)
+    parser.add_argument("--out", type=Path, default=None)
+    args = parser.parse_args()
+    main(days=args.days, out=args.out or _default_out(args.days))
