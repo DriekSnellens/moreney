@@ -155,6 +155,74 @@ def test_dashboard_mix_board_renders():
     assert "patchMixOpen" in html
 
 
+def test_dashboard_paper_clip_is_separate_from_mix_equity():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = render_momentum_dashboard(
+        {
+            "running": False,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 3},
+            "positions": [],
+            "risk": {"day_realized_eur": 0, "entries_allowed": True},
+            "cash_eur": 20000,
+            "exposure_eur": 0,
+            "equity_eur": 21122,
+            "realized_total_eur": 0,
+            "trade_count": 0,
+            "unrealized_net_eur": 0,
+        },
+        [],
+        allocator=snap,
+        donchian={
+            "running": True,
+            "dry_run": False,
+            "equity_eur": 19683.0,
+            "cash_eur": 9915.0,
+            "unrealized_net_eur": -40.0,
+            "positions": [
+                {
+                    "holding_id": "dc-1",
+                    "sleeve": "donch10",
+                    "base": "NEAR",
+                    "quantity": 10,
+                    "unrealized_net_eur": -12.0,
+                }
+            ],
+            "sleeves": [],
+        },
+        show_btc_rs_clip=True,
+        btc_rs_clip={
+            "running": True,
+            "equity_eur": 20100.0,
+            "book_eur": 20000.0,
+            "realized_total_eur": 0.0,
+            "unrealized_net_eur": 100.0,
+            "want_alt": "LINK",
+            "live_caption": "Paper clip: 75% BTC",
+            "positions": [
+                {
+                    "holding_id": "clip-btc",
+                    "base": "BTC",
+                    "role": "btc",
+                    "quantity": 0.2,
+                    "unrealized_net_eur": 80.0,
+                }
+            ],
+        },
+        btc_rs_clip_ledger_rows=[],
+    ).body.decode()
+    assert 'id="paper-clip"' in html
+    assert "Paper · BTC + RS-clip" in html
+    assert "19,683.00" in html
+    assert "21,122" not in html
+    assert "Paper · BTC + RS-clip" in html
+    assert "telt niet mee" in html
+    assert "BTC+RS-clip ledger" in html or "paper-clip JSON" in html
+    assert "CLIP_STATUS_URL" in html or "btc-rs-clip/status" in html
+
+
 def test_dashboard_shows_donchian_ledger_fills():
     from bot.live.momentum_dashboard import render_momentum_dashboard
 

@@ -132,6 +132,15 @@ body {
 }
 .mix-chip strong { font-family: var(--mono); }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
+.paper-clip { margin-top: .85rem; border-style: dashed; }
+.paper-clip h2 { font-size: .95rem; }
+.paper-clip .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
+.paper-clip .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
+.paper-clip .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.paper-clip .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
+@media (max-width: 720px) {
+  .paper-clip .clip-kpis { grid-template-columns: 1fr 1fr; }
+}
 .mix-dc-dec { display: grid; gap: .55rem; }
 .mix-dc-dec > div { padding: .45rem 0; border-bottom: 1px solid var(--border-soft); }
 @media (max-width: 720px) {
@@ -1625,9 +1634,60 @@ def _mix_panel(
         f'<p class="mix-foot">Classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}. '
         f"{'Donchian-longs zijn LIVE Bitvavo-orders.' if don_live else 'Donchian-longs draaien paper.'} "
         f"Decide na UTC-dagclose (00:05) op de gesloten 1d-kaars · Friday-flat pas na vrijdagclose. "
-        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle."
+        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle. "
+        f"BTC+RS-clip is een apart paper-boek en telt niet mee in deze live equity."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
+    )
+
+
+def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
+    st = status or {}
+    running = bool(st.get("running"))
+    pill = (
+        '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        if running
+        else '<span class="pill off"><span class="dot"></span>STOP</span>'
+    )
+    caption = str(st.get("live_caption") or st.get("last_decision", {}).get("caption") or "")
+    if not caption:
+        caption = "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Shadow €20k, geen Bitvavo-orders."
+    pos_bits = []
+    for p in st.get("positions") or []:
+        net = p.get("unrealized_net_eur")
+        role = escape(str(p.get("role") or "long"))
+        pos_bits.append(
+            f'<span class="mix-chip" data-holding="{escape(str(p.get("holding_id") or p.get("base") or ""))}">'
+            f'<span class="muted">{role}</span>'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
+        )
+    pos_html = (
+        f'<div class="mix-open" data-live="clip-open">{"".join(pos_bits)}</div>'
+        if pos_bits
+        else '<div class="mix-open" data-live="clip-open"><span class="muted">Nog geen paper-posities — eerste decide na start.</span></div>'
+    )
+    risk_on = bool(st.get("risk_on"))
+    gate = "BTC &gt; SMA50" if risk_on else "cash (BTC ≤ SMA50)"
+    return (
+        f'<section class="panel mix-board paper-clip" id="paper-clip" data-live="paper-clip">'
+        f'<div class="card-head"><h2>Paper · BTC + RS-clip</h2>{pill}'
+        f'<span class="pill {"on" if risk_on else "off"}" data-live="clip-gate">'
+        f'<span class="dot"></span>{gate}</span></div>'
+        f'<p class="mix-why" data-live="clip-caption">{escape(caption)}</p>'
+        f'<div class="clip-kpis">'
+        f'<div><span>Equity</span><strong data-k="clip-eq">{_fmt_eur(st.get("equity_eur"), signed=False)}</strong></div>'
+        f'<div><span>Open</span><strong data-k="clip-open" class="{_cls(st.get("unrealized_net_eur"))}">'
+        f'{_fmt_eur(st.get("unrealized_net_eur"))}</strong></div>'
+        f'<div><span>Gerealiseerd</span><strong data-k="clip-real" class="{_cls(st.get("realized_total_eur"))}">'
+        f'{_fmt_eur(st.get("realized_total_eur"))}</strong></div>'
+        f'<div><span>Boek</span><strong data-k="clip-book">{_fmt_eur(st.get("book_eur"), signed=False)}</strong></div>'
+        f"</div>"
+        f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">Alt: '
+        f'<strong data-k="clip-alt">{escape(str(st.get("want_alt") or "—"))}</strong> · '
+        f'next <strong data-live="clip-next">{_ts(st.get("next_decision"))}</strong> · '
+        f"geen live orders, geen mix-cash.</p>"
+        f"{pos_html}</section>"
     )
 
 
@@ -2470,7 +2530,8 @@ _LIVE_MARKS_JS = r"""
   const STATUS_URL = "/live/momentum/status";
   const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
   const MIX_STATUS_URL = "/live/momentum/allocator/status";
-  const DONCHIAN_STATUS_URL = "/live/momentum/donchian/status";
+    const DONCHIAN_STATUS_URL = "/live/momentum/donchian/status";
+    const CLIP_STATUS_URL = "/live/momentum/btc-rs-clip/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -2915,7 +2976,22 @@ _LIVE_MARKS_JS = r"""
       + "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
       + "Verkoop loopt via de sleeve, niet via de 15m-desk.</p>";
   }
-  function patchDonchian(don) {
+    function patchPaperClip(st) {
+      const root = document.querySelector('[data-live="paper-clip"]');
+      if (!root || !st) return;
+      setText(root, "clip-eq", fmtEur(st.equity_eur).replace(/^\+/, ""));
+      setText(root, "clip-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
+      setText(root, "clip-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
+      setText(root, "clip-alt", st.want_alt || "—");
+      const cap = document.querySelector('[data-live="clip-caption"]');
+      if (cap && st.live_caption) cap.textContent = st.live_caption;
+      const next = document.querySelector('[data-live="clip-next"]');
+      if (next && st.next_decision) {
+        const d = new Date(st.next_decision);
+        next.textContent = Number.isNaN(d.getTime()) ? String(st.next_decision) : d.toLocaleString("nl-NL");
+      }
+      (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+    }
     if (!don) return;
     if (mixHeroesLive()) patchHeroes(don);
     if (donchianSetChanged(don)) {
@@ -2961,6 +3037,12 @@ _LIVE_MARKS_JS = r"""
       /* donchian optional */
     }
     try {
+      const cl = await fetch(CLIP_STATUS_URL, { cache: "no-store" });
+      if (cl.ok) patchPaperClip(await cl.json());
+    } catch (err) {
+      /* paper clip optional */
+    }
+    try {
       const mx = await fetch(MIX_STATUS_URL, { cache: "no-store" });
       if (mx.ok) patchMix(await mx.json());
     } catch (err) {
@@ -2993,6 +3075,9 @@ def render_momentum_dashboard(
     allocator: Mapping[str, Any] | None = None,
     donchian: Mapping[str, Any] | None = None,
     donchian_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    btc_rs_clip: Mapping[str, Any] | None = None,
+    btc_rs_clip_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    show_btc_rs_clip: bool = False,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -3026,6 +3111,7 @@ def render_momentum_dashboard(
     show_vol = bool(show_volatile)
     show_sw = bool(show_short_weakest)
     show_dc = donchian is not None or donchian_ledger_rows is not None
+    show_clip = bool(show_btc_rs_clip) or btc_rs_clip is not None
     show_mix = bool(show_dc or show_sw)
     book = dict(donchian or {}) if show_dc else dict(status)
     if show_dc and book.get("cash_eur") is None:
@@ -3273,6 +3359,12 @@ def render_momentum_dashboard(
                 f'<span class="chev"></span></summary><div class="fold-body">'
                 f"{_ledger_table(short_weakest_ledger_rows or [])}</div></details>"
             )
+        if show_clip and btc_rs_clip_ledger_rows is not None:
+            vol_ledger_html += (
+                f'<details class="fold" id="clip-ledger"><summary><span class="fold-head">Paper BTC+RS-clip ledger</span>'
+                f'<span class="chev"></span></summary><div class="fold-body">'
+                f"{_ledger_table(btc_rs_clip_ledger_rows or [])}</div></details>"
+            )
         footer_links = (
             '<a href="/live/momentum/status">core JSON</a>'
             + (
@@ -3286,6 +3378,11 @@ def render_momentum_dashboard(
                 else ""
             )
             + '<a href="/live/momentum/allocator/status">mix JSON</a>'
+            + (
+                '<a href="/live/momentum/btc-rs-clip/status">paper-clip JSON</a>'
+                if show_clip
+                else ""
+            )
             + '<a href="/live/momentum/donchian/status">donchian JSON</a>'
             + '<a href="/live/momentum/donchian/ledger">donchian ledger</a>'
             + '<a href="/live/momentum/ledger">core ledger</a>'
@@ -3358,6 +3455,7 @@ def render_momentum_dashboard(
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
       <a href="/live/momentum#sw-open-pos">Short weakest paper
         <span class="badge">{'on' if show_sw else 'off'}</span></a>
+      {('<a href="/live/momentum#paper-clip">BTC+RS clip <span class="badge">paper</span></a>' if show_clip else '')}
       <a href="/live/momentum#ledger">Ledger</a>
       <a href="/live/momentum#dc-open-pos">Donchian longs</a>
       <a href="/live/momentum/allocator/status">Mix JSON</a>
@@ -3388,12 +3486,17 @@ def render_momentum_dashboard(
 </header>
 """
     if show_mix:
-        mobile_dock = """
+        clip_dock = (
+            '<a href="/live/momentum#paper-clip"><span class="ico">◇</span>Clip</a>'
+            if show_clip
+            else '<a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>'
+        )
+        mobile_dock = f"""
 <nav class="mobile-dock" aria-label="Mobile workspace">
   <a class="active" href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
   <a href="/live/momentum#dc-open-pos"><span class="ico">▣</span>Bags</a>
+  {clip_dock}
   <a href="/live/momentum#ledger"><span class="ico">☰</span>Ledger</a>
-  <a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>
 </nav>
 """
     else:
@@ -3426,6 +3529,7 @@ def render_momentum_dashboard(
 <div class="wrap">
 {earnings_html}
 {_mix_panel(allocator, donchian, short_weakest if show_sw else None)}
+{_paper_clip_panel(btc_rs_clip) if show_clip else ""}
 {positions_html}
 {err_html}
 {'' if show_mix else f'<div class="ops-row">{toolbar}</div>'}

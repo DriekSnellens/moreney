@@ -68,6 +68,7 @@ from bot.live.momentum_short_weakest_runner import (
     get_short_weakest_desk_manager,
 )
 from bot.live.momentum_donchian_runner import get_donchian_desk_manager
+from bot.live.momentum_btc_rs_clip_runner import get_btc_rs_clip_desk_manager
 from bot.live.desk_allocator import live_snapshot
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
@@ -291,6 +292,17 @@ async def lifespan(_app: FastAPI):
                 logger.info("donchian mix disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume donchian mix")
+        try:
+            if bool(getattr(get_settings(), "momentum_btc_rs_clip_enabled", False)):
+                clip = await get_btc_rs_clip_desk_manager().resume_if_flagged()
+                if clip and clip.get("started"):
+                    logger.info("auto-resumed paper BTC+RS clip shadow book")
+                elif clip:
+                    logger.warning("paper BTC+RS clip auto-resume did not start: %s", clip)
+            else:
+                logger.info("paper BTC+RS clip disabled — skip auto-resume")
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume paper BTC+RS clip")
     yield
     if paper_runner is not None:
         try:
@@ -939,6 +951,9 @@ async def live_momentum_dashboard(
     donchian_status: dict[str, Any] | None = None
     donchian_ledger: list[dict[str, Any]] | None = None
     show_donchian = bool(getattr(settings, "momentum_donchian_enabled", False))
+    show_clip = bool(getattr(settings, "momentum_btc_rs_clip_enabled", False))
+    clip_status: dict[str, Any] | None = None
+    clip_ledger: list[dict[str, Any]] | None = None
     if show_donchian:
         try:
             donchian_status = get_donchian_desk_manager().status()
@@ -949,6 +964,19 @@ async def live_momentum_dashboard(
                 settings,
                 "momentum_donchian_ledger_path",
                 "./data/momentum_donchian_ledger.jsonl",
+            ),
+            limit=400,
+        )
+    if show_clip:
+        try:
+            clip_status = get_btc_rs_clip_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            clip_status = None
+        clip_ledger = read_ledger_tail(
+            getattr(
+                settings,
+                "momentum_btc_rs_clip_ledger_path",
+                "./data/momentum_btc_rs_clip_ledger.jsonl",
             ),
             limit=400,
         )
@@ -994,6 +1022,9 @@ async def live_momentum_dashboard(
         allocator=allocator,
         donchian=donchian_status,
         donchian_ledger_rows=donchian_ledger if show_donchian else None,
+        btc_rs_clip=clip_status if show_clip else None,
+        btc_rs_clip_ledger_rows=clip_ledger if show_clip else None,
+        show_btc_rs_clip=show_clip,
     )
 
 
@@ -1400,6 +1431,39 @@ async def live_momentum_donchian_ledger(limit: int = 200) -> dict[str, Any]:
         "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
         "path": str(path),
     }
+
+
+@app.get("/live/momentum/btc-rs-clip/status")
+async def live_momentum_btc_rs_clip_status() -> dict[str, Any]:
+    return await get_btc_rs_clip_desk_manager().refresh_live()
+
+
+@app.get("/live/momentum/btc-rs-clip/ledger")
+async def live_momentum_btc_rs_clip_ledger(limit: int = 200) -> dict[str, Any]:
+    path = get_settings().momentum_btc_rs_clip_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in rows if r.get("event") == "exit"), 2),
+        "path": str(path),
+    }
+
+
+@app.post("/live/momentum/btc-rs-clip/start")
+async def live_momentum_btc_rs_clip_start(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_btc_rs_clip_desk_manager().start()
+
+
+@app.post("/live/momentum/btc-rs-clip/decide")
+async def live_momentum_btc_rs_clip_decide(
+    execute: bool = True,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_btc_rs_clip_desk_manager().decide(execute=bool(execute))
 
 
 @app.post("/live/momentum/donchian/start")
