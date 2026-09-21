@@ -1,0 +1,2204 @@
+{
+  "asof": "2026-09-21T18:26:17.785345+00:00",
+  "window": {
+    "days": 26,
+    "start": "2026-08-26T18:00:00+00:00",
+    "end": "2026-09-21T18:00:00+00:00"
+  },
+  "capital_eur": 20000.0,
+  "caveats": [
+    "Three independent \u20ac20k books (not a shared Bitvavo cash pile).",
+    "15m: live knobs, close fills, AlphaI timeline from pick_outcomes (rank/size/avoid/macro).",
+    "AlphaI labels only exist ~7\u201320 Sep; earlier bars have alphai=None (tape-only, requires_alphai_pick=false).",
+    "Donchian-only: always-on 10k Friday-10/5 + 10k 10/5. No AlphaI overlay (matches live longs).",
+    "Mix: sma20_50 map (risk_on Donchian 50/50, mid cash, risk_off short 70% + donch_fri 30%). Shorts paper + AlphaI block-on-pick.",
+    "outcome_size_enabled=False in replay. No maker/taker path."
+  ],
+  "alphai": {
+    "sources": [
+      "/opt/moreney/artifacts/alphai_pick_outcomes_merged.json",
+      "/opt/moreney/artifacts/alphai_pick_outcomes_week_snap.json",
+      "/opt/moreney/artifacts/alphai_pick_outcomes_live_copy.json",
+      "/opt/moreney/artifacts/alphai_pick_outcomes_live_now.json",
+      "/opt/moreney/artifacts/alphai_pick_outcomes_snapshot.json",
+      "/opt/moreney/data/alphai/daily_recommendations.json"
+    ],
+    "sessions": 1189,
+    "first": "2026-09-07T15:00:43.224000+00:00",
+    "last": "2026-09-20T01:32:01.966000+00:00",
+    "days": [
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+      "2026-09-12",
+      "2026-09-13",
+      "2026-09-14",
+      "2026-09-15",
+      "2026-09-16",
+      "2026-09-17",
+      "2026-09-18",
+      "2026-09-19",
+      "2026-09-20"
+    ],
+    "n_days": 14,
+    "macro_caution_sessions": 431,
+    "macro_caution_rate": 0.362,
+    "top_picks": [
+      [
+        "SOL",
+        591
+      ],
+      [
+        "ETH",
+        590
+      ],
+      [
+        "XRP",
+        576
+      ],
+      [
+        "ADA",
+        366
+      ],
+      [
+        "LTC",
+        254
+      ],
+      [
+        "LINK",
+        252
+      ],
+      [
+        "UNI",
+        169
+      ],
+      [
+        "TRX",
+        121
+      ],
+      [
+        "AVAX",
+        107
+      ],
+      [
+        "BNB",
+        84
+      ],
+      [
+        "NEAR",
+        70
+      ],
+      [
+        "DOGE",
+        37
+      ]
+    ]
+  },
+  "momentum_15m_alphai": {
+    "book_eur": 20000.0,
+    "realized_eur": 3267.93,
+    "open_mtm_eur": 0.0,
+    "total_eur": 3267.93,
+    "trades": 39,
+    "win_rate": 0.641,
+    "by_reason": {
+      "trail": {
+        "n": 12,
+        "net_eur": 6044.99
+      },
+      "partial_take": {
+        "n": 13,
+        "net_eur": 2095.57
+      },
+      "be_stop": {
+        "n": 3,
+        "net_eur": -246.79
+      },
+      "hard_stop": {
+        "n": 11,
+        "net_eur": -4625.84
+      }
+    },
+    "open": [],
+    "weekly": [
+      {
+        "week": "2026-W35",
+        "n": 3,
+        "net_eur": 511.9
+      },
+      {
+        "week": "2026-W36",
+        "n": 8,
+        "net_eur": -568.56
+      },
+      {
+        "week": "2026-W37",
+        "n": 8,
+        "net_eur": -135.6
+      },
+      {
+        "week": "2026-W38",
+        "n": 12,
+        "net_eur": 2525.12
+      },
+      {
+        "week": "2026-W39",
+        "n": 8,
+        "net_eur": 935.05
+      }
+    ],
+    "alphai_pick_entries": 3,
+    "alphai_pick_share": 0.077,
+    "max_dd_eur": -2549.53,
+    "trades_closed": [
+      {
+        "base": "SOL",
+        "opened": "2026-08-27T07:00:00+00:00",
+        "closed": "2026-08-27T08:15:00+00:00",
+        "hold_h": 1.25,
+        "notional_eur": 5600.0,
+        "net_eur": 79.32,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0474,from_high=-0.0115,regime=firm,breadth_weak",
+        "gross_pct": 1.72
+      },
+      {
+        "base": "SOL",
+        "opened": "2026-08-27T07:00:00+00:00",
+        "closed": "2026-08-27T18:30:00+00:00",
+        "hold_h": 11.5,
+        "notional_eur": 8400.0,
+        "net_eur": 466.12,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0474,from_high=-0.0115,regime=firm,breadth_weak",
+        "gross_pct": 5.85
+      },
+      {
+        "base": "LINK",
+        "opened": "2026-08-27T18:30:00+00:00",
+        "closed": "2026-08-28T02:15:00+00:00",
+        "hold_h": 7.75,
+        "notional_eur": 20000.0,
+        "net_eur": -33.54,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.0291,from_high=-0.0155,regime=strong,breadth_strong_gated",
+        "gross_pct": 0.13
+      },
+      {
+        "base": "OP",
+        "opened": "2026-09-01T07:00:00+00:00",
+        "closed": "2026-09-01T08:30:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 20000.0,
+        "net_eur": -482.06,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.1000,from_high=-0.0126,regime=strong,breadth_strong",
+        "gross_pct": -2.11
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-01T13:00:00+00:00",
+        "closed": "2026-09-01T14:15:00+00:00",
+        "hold_h": 1.25,
+        "notional_eur": 8000.0,
+        "net_eur": 197.23,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+        "gross_pct": 2.77
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-01T13:00:00+00:00",
+        "closed": "2026-09-01T16:45:00+00:00",
+        "hold_h": 3.75,
+        "notional_eur": 12000.0,
+        "net_eur": -115.08,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+        "gross_pct": -0.66
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-03T07:00:00+00:00",
+        "closed": "2026-09-03T13:45:00+00:00",
+        "hold_h": 6.75,
+        "notional_eur": 8000.0,
+        "net_eur": 181.29,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0337,from_high=-0.0146,regime=firm",
+        "gross_pct": 2.57
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-03T07:00:00+00:00",
+        "closed": "2026-09-03T22:30:00+00:00",
+        "hold_h": 15.5,
+        "notional_eur": 12000.0,
+        "net_eur": 817.11,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0337,from_high=-0.0146,regime=firm",
+        "gross_pct": 7.11
+      },
+      {
+        "base": "UNI",
+        "opened": "2026-09-03T22:30:00+00:00",
+        "closed": "2026-09-03T23:30:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 20000.0,
+        "net_eur": -395.79,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0482,from_high=-0.0115,regime=strong,breadth_strong",
+        "gross_pct": -1.68
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-05T13:00:00+00:00",
+        "closed": "2026-09-06T07:15:00+00:00",
+        "hold_h": 18.25,
+        "notional_eur": 20000.0,
+        "net_eur": -377.95,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0598,from_high=-0.0073,regime=strong,breadth_strong",
+        "gross_pct": -1.59
+      },
+      {
+        "base": "LINK",
+        "opened": "2026-09-06T13:00:00+00:00",
+        "closed": "2026-09-06T15:15:00+00:00",
+        "hold_h": 2.25,
+        "notional_eur": 20000.0,
+        "net_eur": -393.31,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0403,from_high=-0.0097,regime=strong,breadth_strong",
+        "gross_pct": -1.67
+      },
+      {
+        "base": "LTC",
+        "opened": "2026-09-07T13:00:00+00:00",
+        "closed": "2026-09-07T13:30:00+00:00",
+        "hold_h": 0.5,
+        "notional_eur": 20000.0,
+        "net_eur": -385.03,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0907,from_high=-0.0041,regime=firm",
+        "gross_pct": -1.63
+      },
+      {
+        "base": "FET",
+        "opened": "2026-09-07T13:30:00+00:00",
+        "closed": "2026-09-07T14:15:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 20000.0,
+        "net_eur": -457.95,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0877,from_high=-0.0008,regime=firm",
+        "gross_pct": -1.99
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-08T16:00:00+00:00",
+        "closed": "2026-09-08T17:30:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 20000.0,
+        "net_eur": -441.34,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0540,from_high=-0.0052,regime=firm",
+        "gross_pct": -1.91
+      },
+      {
+        "base": "DOT",
+        "opened": "2026-09-08T17:30:00+00:00",
+        "closed": "2026-09-08T19:00:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 14000.0,
+        "net_eur": -98.17,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.1182,from_high=-0.0084,regime=firm,breadth_weak",
+        "gross_pct": -0.4
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-09T07:00:00+00:00",
+        "closed": "2026-09-09T08:00:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 5600.0,
+        "net_eur": 82.24,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+        "gross_pct": 1.77
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-09T07:00:00+00:00",
+        "closed": "2026-09-09T13:45:00+00:00",
+        "hold_h": 6.75,
+        "notional_eur": 8400.0,
+        "net_eur": 589.43,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+        "gross_pct": 7.32
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-11T13:00:00+00:00",
+        "closed": "2026-09-11T14:00:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 8000.0,
+        "net_eur": 223.41,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+        "gross_pct": 3.09
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-11T13:00:00+00:00",
+        "closed": "2026-09-11T14:45:00+00:00",
+        "hold_h": 1.75,
+        "notional_eur": 12000.0,
+        "net_eur": 351.81,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+        "gross_pct": 3.23
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-14T07:00:00+00:00",
+        "closed": "2026-09-14T15:15:00+00:00",
+        "hold_h": 8.25,
+        "notional_eur": 20000.0,
+        "net_eur": -400.01,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+        "gross_pct": -1.7
+      },
+      {
+        "base": "XRP",
+        "opened": "2026-09-14T16:00:00+00:00",
+        "closed": "2026-09-14T18:00:00+00:00",
+        "hold_h": 2.0,
+        "notional_eur": 8000.0,
+        "net_eur": 144.69,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0255,from_high=-0.0047,regime=firm",
+        "gross_pct": 2.11
+      },
+      {
+        "base": "XRP",
+        "opened": "2026-09-14T16:00:00+00:00",
+        "closed": "2026-09-14T21:15:00+00:00",
+        "hold_h": 5.25,
+        "notional_eur": 12000.0,
+        "net_eur": 364.88,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0255,from_high=-0.0047,regime=firm",
+        "gross_pct": 3.34
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-17T07:00:00+00:00",
+        "closed": "2026-09-17T07:45:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 7280.0,
+        "net_eur": 101.34,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.1416,from_high=-0.0094,regime=strong,macro_reduce,breadth_strong",
+        "gross_pct": 1.69
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-17T07:00:00+00:00",
+        "closed": "2026-09-17T10:15:00+00:00",
+        "hold_h": 3.25,
+        "notional_eur": 10920.0,
+        "net_eur": 329.81,
+        "reason": "trail",
+        "entry_reason": "excess=+0.1416,from_high=-0.0094,regime=strong,macro_reduce,breadth_strong",
+        "gross_pct": 3.32
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-17T10:15:00+00:00",
+        "closed": "2026-09-17T16:15:00+00:00",
+        "hold_h": 6.0,
+        "notional_eur": 5600.0,
+        "net_eur": 98.69,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0400,from_high=-0.0088,regime=strong,macro_reduce,breadth_strong_gated",
+        "gross_pct": 2.06
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-17T10:15:00+00:00",
+        "closed": "2026-09-18T11:15:00+00:00",
+        "hold_h": 25.0,
+        "notional_eur": 8400.0,
+        "net_eur": 733.42,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0400,from_high=-0.0088,regime=strong,macro_reduce,breadth_strong_gated",
+        "gross_pct": 9.03
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-18T11:15:00+00:00",
+        "closed": "2026-09-18T14:00:00+00:00",
+        "hold_h": 2.75,
+        "notional_eur": 8000.0,
+        "net_eur": 130.57,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0541,from_high=-0.0177,regime=strong,breadth_strong",
+        "gross_pct": 1.93
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-18T11:15:00+00:00",
+        "closed": "2026-09-19T04:30:00+00:00",
+        "hold_h": 17.25,
+        "notional_eur": 12000.0,
+        "net_eur": 773.86,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0541,from_high=-0.0177,regime=strong,breadth_strong",
+        "gross_pct": 6.75
+      },
+      {
+        "base": "SOL",
+        "opened": "2026-09-19T04:30:00+00:00",
+        "closed": "2026-09-19T18:15:00+00:00",
+        "hold_h": 13.75,
+        "notional_eur": 20000.0,
+        "net_eur": -425.64,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0290,from_high=-0.0156,alphai_pick,alphai_conv=1.00,alphai_clip_x1.30,regime=strong,macro_reduce,breadth_strong",
+        "gross_pct": -1.83
+      },
+      {
+        "base": "AVAX",
+        "opened": "2026-09-19T18:15:00+00:00",
+        "closed": "2026-09-19T23:30:00+00:00",
+        "hold_h": 5.25,
+        "notional_eur": 5600.0,
+        "net_eur": 140.54,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.1840,from_high=-0.0154,regime=firm,breadth_weak",
+        "gross_pct": 2.81
+      },
+      {
+        "base": "AVAX",
+        "opened": "2026-09-19T18:15:00+00:00",
+        "closed": "2026-09-20T01:00:00+00:00",
+        "hold_h": 6.75,
+        "notional_eur": 8400.0,
+        "net_eur": 532.97,
+        "reason": "trail",
+        "entry_reason": "excess=+0.1840,from_high=-0.0154,regime=firm,breadth_weak",
+        "gross_pct": 6.64
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-21T07:00:00+00:00",
+        "closed": "2026-09-21T07:45:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 20000.0,
+        "net_eur": -360.99,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.1542,from_high=-0.0156,regime=strong,breadth_strong",
+        "gross_pct": -1.5
+      },
+      {
+        "base": "FET",
+        "opened": "2026-09-21T07:45:00+00:00",
+        "closed": "2026-09-21T08:45:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 8000.0,
+        "net_eur": 204.89,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0572,from_high=-0.0184,regime=strong,breadth_strong",
+        "gross_pct": 2.86
+      },
+      {
+        "base": "FET",
+        "opened": "2026-09-21T07:45:00+00:00",
+        "closed": "2026-09-21T09:15:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 12000.0,
+        "net_eur": 581.7,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0572,from_high=-0.0184,regime=strong,breadth_strong",
+        "gross_pct": 5.15
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-21T09:15:00+00:00",
+        "closed": "2026-09-21T11:15:00+00:00",
+        "hold_h": 2.0,
+        "notional_eur": 8000.0,
+        "net_eur": 197.87,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0326,from_high=-0.0044,alphai_pick,alphai_stale,regime=strong,breadth_strong",
+        "gross_pct": 2.77
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-21T09:15:00+00:00",
+        "closed": "2026-09-21T13:30:00+00:00",
+        "hold_h": 4.25,
+        "notional_eur": 12000.0,
+        "net_eur": 244.44,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0326,from_high=-0.0044,alphai_pick,alphai_stale,regime=strong,breadth_strong",
+        "gross_pct": 2.34
+      },
+      {
+        "base": "DOGE",
+        "opened": "2026-09-21T13:30:00+00:00",
+        "closed": "2026-09-21T15:15:00+00:00",
+        "hold_h": 1.75,
+        "notional_eur": 8000.0,
+        "net_eur": 313.49,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0444,from_high=-0.0152,regime=strong,breadth_strong",
+        "gross_pct": 4.22
+      },
+      {
+        "base": "DOGE",
+        "opened": "2026-09-21T13:30:00+00:00",
+        "closed": "2026-09-21T15:30:00+00:00",
+        "hold_h": 2.0,
+        "notional_eur": 12000.0,
+        "net_eur": 259.43,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0444,from_high=-0.0152,regime=strong,breadth_strong",
+        "gross_pct": 2.46
+      },
+      {
+        "base": "LTC",
+        "opened": "2026-09-21T16:00:00+00:00",
+        "closed": "2026-09-21T18:00:00+00:00",
+        "hold_h": 2.0,
+        "notional_eur": 20000.0,
+        "net_eur": -505.78,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0307,from_high=-0.0135,regime=strong,breadth_strong_gated",
+        "gross_pct": -2.23
+      }
+    ]
+  },
+  "momentum_15m_no_alphai": {
+    "book_eur": 20000.0,
+    "realized_eur": 3256.32,
+    "open_mtm_eur": -358.73,
+    "total_eur": 2897.59,
+    "trades": 37,
+    "win_rate": 0.595,
+    "by_reason": {
+      "trail": {
+        "n": 10,
+        "net_eur": 5888.07
+      },
+      "partial_take": {
+        "n": 12,
+        "net_eur": 1791.72
+      },
+      "be_stop": {
+        "n": 5,
+        "net_eur": -303.41
+      },
+      "hard_stop": {
+        "n": 10,
+        "net_eur": -4120.06
+      }
+    },
+    "open": [
+      {
+        "base": "ADA",
+        "opened": "2026-09-21 13:15",
+        "entry_price": 0.21357,
+        "mark": 0.21038,
+        "gross_return": -0.0149,
+        "peak_return": 0.0077,
+        "net_eur": -358.73
+      }
+    ],
+    "weekly": [
+      {
+        "week": "2026-W35",
+        "n": 3,
+        "net_eur": 511.9
+      },
+      {
+        "week": "2026-W36",
+        "n": 8,
+        "net_eur": -568.56
+      },
+      {
+        "week": "2026-W37",
+        "n": 8,
+        "net_eur": -135.6
+      },
+      {
+        "week": "2026-W38",
+        "n": 12,
+        "net_eur": 2924.39
+      },
+      {
+        "week": "2026-W39",
+        "n": 6,
+        "net_eur": 524.17
+      }
+    ],
+    "alphai_pick_entries": 0,
+    "alphai_pick_share": 0.0,
+    "max_dd_eur": -2549.53,
+    "trades_closed": [
+      {
+        "base": "SOL",
+        "opened": "2026-08-27T07:00:00+00:00",
+        "closed": "2026-08-27T08:15:00+00:00",
+        "hold_h": 1.25,
+        "notional_eur": 5600.0,
+        "net_eur": 79.32,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0474,from_high=-0.0115,regime=firm,breadth_weak",
+        "gross_pct": 1.72
+      },
+      {
+        "base": "SOL",
+        "opened": "2026-08-27T07:00:00+00:00",
+        "closed": "2026-08-27T18:30:00+00:00",
+        "hold_h": 11.5,
+        "notional_eur": 8400.0,
+        "net_eur": 466.12,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0474,from_high=-0.0115,regime=firm,breadth_weak",
+        "gross_pct": 5.85
+      },
+      {
+        "base": "LINK",
+        "opened": "2026-08-27T18:30:00+00:00",
+        "closed": "2026-08-28T02:15:00+00:00",
+        "hold_h": 7.75,
+        "notional_eur": 20000.0,
+        "net_eur": -33.54,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.0291,from_high=-0.0155,regime=strong,breadth_strong_gated",
+        "gross_pct": 0.13
+      },
+      {
+        "base": "OP",
+        "opened": "2026-09-01T07:00:00+00:00",
+        "closed": "2026-09-01T08:30:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 20000.0,
+        "net_eur": -482.06,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.1000,from_high=-0.0126,regime=strong,breadth_strong",
+        "gross_pct": -2.11
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-01T13:00:00+00:00",
+        "closed": "2026-09-01T14:15:00+00:00",
+        "hold_h": 1.25,
+        "notional_eur": 8000.0,
+        "net_eur": 197.23,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+        "gross_pct": 2.77
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-01T13:00:00+00:00",
+        "closed": "2026-09-01T16:45:00+00:00",
+        "hold_h": 3.75,
+        "notional_eur": 12000.0,
+        "net_eur": -115.08,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.0684,from_high=-0.0160,regime=strong,breadth_strong",
+        "gross_pct": -0.66
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-03T07:00:00+00:00",
+        "closed": "2026-09-03T13:45:00+00:00",
+        "hold_h": 6.75,
+        "notional_eur": 8000.0,
+        "net_eur": 181.29,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0337,from_high=-0.0146,regime=firm",
+        "gross_pct": 2.57
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-03T07:00:00+00:00",
+        "closed": "2026-09-03T22:30:00+00:00",
+        "hold_h": 15.5,
+        "notional_eur": 12000.0,
+        "net_eur": 817.11,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0337,from_high=-0.0146,regime=firm",
+        "gross_pct": 7.11
+      },
+      {
+        "base": "UNI",
+        "opened": "2026-09-03T22:30:00+00:00",
+        "closed": "2026-09-03T23:30:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 20000.0,
+        "net_eur": -395.79,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0482,from_high=-0.0115,regime=strong,breadth_strong",
+        "gross_pct": -1.68
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-05T13:00:00+00:00",
+        "closed": "2026-09-06T07:15:00+00:00",
+        "hold_h": 18.25,
+        "notional_eur": 20000.0,
+        "net_eur": -377.95,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0598,from_high=-0.0073,regime=strong,breadth_strong",
+        "gross_pct": -1.59
+      },
+      {
+        "base": "LINK",
+        "opened": "2026-09-06T13:00:00+00:00",
+        "closed": "2026-09-06T15:15:00+00:00",
+        "hold_h": 2.25,
+        "notional_eur": 20000.0,
+        "net_eur": -393.31,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0403,from_high=-0.0097,regime=strong,breadth_strong",
+        "gross_pct": -1.67
+      },
+      {
+        "base": "LTC",
+        "opened": "2026-09-07T13:00:00+00:00",
+        "closed": "2026-09-07T13:30:00+00:00",
+        "hold_h": 0.5,
+        "notional_eur": 20000.0,
+        "net_eur": -385.03,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0907,from_high=-0.0041,regime=firm",
+        "gross_pct": -1.63
+      },
+      {
+        "base": "FET",
+        "opened": "2026-09-07T13:30:00+00:00",
+        "closed": "2026-09-07T14:15:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 20000.0,
+        "net_eur": -457.95,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0877,from_high=-0.0008,regime=firm",
+        "gross_pct": -1.99
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-08T16:00:00+00:00",
+        "closed": "2026-09-08T17:30:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 20000.0,
+        "net_eur": -441.34,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0540,from_high=-0.0052,regime=firm",
+        "gross_pct": -1.91
+      },
+      {
+        "base": "DOT",
+        "opened": "2026-09-08T17:30:00+00:00",
+        "closed": "2026-09-08T19:00:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 14000.0,
+        "net_eur": -98.17,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.1182,from_high=-0.0084,regime=firm,breadth_weak",
+        "gross_pct": -0.4
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-09T07:00:00+00:00",
+        "closed": "2026-09-09T08:00:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 5600.0,
+        "net_eur": 82.24,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+        "gross_pct": 1.77
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-09T07:00:00+00:00",
+        "closed": "2026-09-09T13:45:00+00:00",
+        "hold_h": 6.75,
+        "notional_eur": 8400.0,
+        "net_eur": 589.43,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0406,from_high=-0.0177,regime=firm,breadth_weak",
+        "gross_pct": 7.32
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-11T13:00:00+00:00",
+        "closed": "2026-09-11T14:00:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 8000.0,
+        "net_eur": 223.41,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+        "gross_pct": 3.09
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-11T13:00:00+00:00",
+        "closed": "2026-09-11T14:45:00+00:00",
+        "hold_h": 1.75,
+        "notional_eur": 12000.0,
+        "net_eur": 351.81,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0611,from_high=+0.0000,regime=firm",
+        "gross_pct": 3.23
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-14T07:00:00+00:00",
+        "closed": "2026-09-14T15:15:00+00:00",
+        "hold_h": 8.25,
+        "notional_eur": 20000.0,
+        "net_eur": -400.01,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0486,from_high=-0.0072,regime=firm",
+        "gross_pct": -1.7
+      },
+      {
+        "base": "XRP",
+        "opened": "2026-09-14T16:00:00+00:00",
+        "closed": "2026-09-14T18:00:00+00:00",
+        "hold_h": 2.0,
+        "notional_eur": 8000.0,
+        "net_eur": 144.69,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0255,from_high=-0.0047,regime=firm",
+        "gross_pct": 2.11
+      },
+      {
+        "base": "XRP",
+        "opened": "2026-09-14T16:00:00+00:00",
+        "closed": "2026-09-14T21:15:00+00:00",
+        "hold_h": 5.25,
+        "notional_eur": 12000.0,
+        "net_eur": 364.88,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0255,from_high=-0.0047,regime=firm",
+        "gross_pct": 3.34
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-17T07:00:00+00:00",
+        "closed": "2026-09-17T07:45:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 8000.0,
+        "net_eur": 111.37,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.1416,from_high=-0.0094,regime=strong,breadth_strong",
+        "gross_pct": 1.69
+      },
+      {
+        "base": "NEAR",
+        "opened": "2026-09-17T07:00:00+00:00",
+        "closed": "2026-09-17T10:15:00+00:00",
+        "hold_h": 3.25,
+        "notional_eur": 12000.0,
+        "net_eur": 362.43,
+        "reason": "trail",
+        "entry_reason": "excess=+0.1416,from_high=-0.0094,regime=strong,breadth_strong",
+        "gross_pct": 3.32
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-17T10:15:00+00:00",
+        "closed": "2026-09-17T16:15:00+00:00",
+        "hold_h": 6.0,
+        "notional_eur": 8000.0,
+        "net_eur": 140.99,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0400,from_high=-0.0088,regime=strong,breadth_strong_gated",
+        "gross_pct": 2.06
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-17T10:15:00+00:00",
+        "closed": "2026-09-18T11:15:00+00:00",
+        "hold_h": 25.0,
+        "notional_eur": 12000.0,
+        "net_eur": 1047.74,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0400,from_high=-0.0088,regime=strong,breadth_strong_gated",
+        "gross_pct": 9.03
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-18T11:15:00+00:00",
+        "closed": "2026-09-18T14:00:00+00:00",
+        "hold_h": 2.75,
+        "notional_eur": 8000.0,
+        "net_eur": 130.57,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0541,from_high=-0.0177,regime=strong,breadth_strong",
+        "gross_pct": 1.93
+      },
+      {
+        "base": "ADA",
+        "opened": "2026-09-18T11:15:00+00:00",
+        "closed": "2026-09-19T04:30:00+00:00",
+        "hold_h": 17.25,
+        "notional_eur": 12000.0,
+        "net_eur": 773.86,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0541,from_high=-0.0177,regime=strong,breadth_strong",
+        "gross_pct": 6.75
+      },
+      {
+        "base": "SOL",
+        "opened": "2026-09-19T04:30:00+00:00",
+        "closed": "2026-09-19T18:15:00+00:00",
+        "hold_h": 13.75,
+        "notional_eur": 20000.0,
+        "net_eur": -425.64,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.0290,from_high=-0.0156,regime=strong,breadth_strong_gated",
+        "gross_pct": -1.83
+      },
+      {
+        "base": "AVAX",
+        "opened": "2026-09-19T18:15:00+00:00",
+        "closed": "2026-09-19T23:30:00+00:00",
+        "hold_h": 5.25,
+        "notional_eur": 5600.0,
+        "net_eur": 140.54,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.1840,from_high=-0.0154,regime=firm,breadth_weak",
+        "gross_pct": 2.81
+      },
+      {
+        "base": "AVAX",
+        "opened": "2026-09-19T18:15:00+00:00",
+        "closed": "2026-09-20T01:00:00+00:00",
+        "hold_h": 6.75,
+        "notional_eur": 8400.0,
+        "net_eur": 532.97,
+        "reason": "trail",
+        "entry_reason": "excess=+0.1840,from_high=-0.0154,regime=firm,breadth_weak",
+        "gross_pct": 6.64
+      },
+      {
+        "base": "SUI",
+        "opened": "2026-09-21T07:00:00+00:00",
+        "closed": "2026-09-21T07:45:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 20000.0,
+        "net_eur": -360.99,
+        "reason": "hard_stop",
+        "entry_reason": "excess=+0.1542,from_high=-0.0156,regime=strong,breadth_strong",
+        "gross_pct": -1.5
+      },
+      {
+        "base": "FET",
+        "opened": "2026-09-21T07:45:00+00:00",
+        "closed": "2026-09-21T08:45:00+00:00",
+        "hold_h": 1.0,
+        "notional_eur": 8000.0,
+        "net_eur": 204.89,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0572,from_high=-0.0184,regime=strong,breadth_strong",
+        "gross_pct": 2.86
+      },
+      {
+        "base": "FET",
+        "opened": "2026-09-21T07:45:00+00:00",
+        "closed": "2026-09-21T09:15:00+00:00",
+        "hold_h": 1.5,
+        "notional_eur": 12000.0,
+        "net_eur": 581.7,
+        "reason": "trail",
+        "entry_reason": "excess=+0.0572,from_high=-0.0184,regime=strong,breadth_strong",
+        "gross_pct": 5.15
+      },
+      {
+        "base": "DOGE",
+        "opened": "2026-09-21T09:15:00+00:00",
+        "closed": "2026-09-21T09:45:00+00:00",
+        "hold_h": 0.5,
+        "notional_eur": 8000.0,
+        "net_eur": 155.19,
+        "reason": "partial_take",
+        "entry_reason": "excess=+0.0375,from_high=-0.0074,regime=strong,breadth_strong_gated",
+        "gross_pct": 2.24
+      },
+      {
+        "base": "DOGE",
+        "opened": "2026-09-21T09:15:00+00:00",
+        "closed": "2026-09-21T10:00:00+00:00",
+        "hold_h": 0.75,
+        "notional_eur": 12000.0,
+        "net_eur": -2.27,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.0375,from_high=-0.0074,regime=strong,breadth_strong_gated",
+        "gross_pct": 0.28
+      },
+      {
+        "base": "ARB",
+        "opened": "2026-09-21T13:00:00+00:00",
+        "closed": "2026-09-21T13:15:00+00:00",
+        "hold_h": 0.25,
+        "notional_eur": 20000.0,
+        "net_eur": -54.35,
+        "reason": "be_stop",
+        "entry_reason": "excess=+0.0934,from_high=-0.0097,regime=strong,breadth_strong",
+        "gross_pct": 0.03
+      }
+    ]
+  },
+  "alphai_delta_eur": 370.34,
+  "donchian_20k": {
+    "book_eur": 20000.0,
+    "end_regime": "risk_on",
+    "realized_eur": 2041.88,
+    "open_mtm_eur": 3528.73,
+    "total_eur": 5570.61,
+    "max_dd_eur": -3120.98,
+    "max_dd_pct": -13.07,
+    "trades": 13,
+    "entries_n": 17,
+    "win_rate": 0.462,
+    "by_reason": {
+      "friday_flatten": {
+        "n": 8,
+        "net_eur": 1391.71
+      },
+      "channel_low": {
+        "n": 5,
+        "net_eur": 650.16
+      }
+    },
+    "by_sleeve": {
+      "donch_fri10": {
+        "n": 9,
+        "net_eur": 984.98
+      },
+      "donch10": {
+        "n": 4,
+        "net_eur": 1056.89
+      }
+    },
+    "open": [
+      {
+        "sleeve": "donch_fri10",
+        "base": "NEAR",
+        "entry_price": 3.4729,
+        "mark": 3.4729,
+        "notional_eur": 4393.34,
+        "unrealized_net_eur": -6.59,
+        "opened": "2026-09-21T00:00:00+00:00"
+      },
+      {
+        "sleeve": "donch_fri10",
+        "base": "ARB",
+        "entry_price": 0.19689,
+        "mark": 0.19689,
+        "notional_eur": 4393.34,
+        "unrealized_net_eur": -6.59,
+        "opened": "2026-09-21T00:00:00+00:00"
+      },
+      {
+        "sleeve": "donch10",
+        "base": "NEAR",
+        "entry_price": 2.04,
+        "mark": 3.4729,
+        "notional_eur": 4304.28,
+        "unrealized_net_eur": 3016.88,
+        "opened": "2026-09-11T00:00:00+00:00"
+      },
+      {
+        "sleeve": "donch10",
+        "base": "UNI",
+        "entry_price": 6.8031,
+        "mark": 7.6215,
+        "notional_eur": 4419.52,
+        "unrealized_net_eur": 525.03,
+        "opened": "2026-09-17T00:00:00+00:00"
+      }
+    ],
+    "weekly": [
+      {
+        "week": "2026-W35",
+        "end_day": "2026-08-30",
+        "equity_eur": 19778.01,
+        "delta_eur": -221.99,
+        "regime": "risk_on"
+      },
+      {
+        "week": "2026-W36",
+        "end_day": "2026-09-06",
+        "equity_eur": 23875.9,
+        "delta_eur": 4097.89,
+        "regime": "risk_on"
+      },
+      {
+        "week": "2026-W37",
+        "end_day": "2026-09-13",
+        "equity_eur": 21180.88,
+        "delta_eur": -2695.02,
+        "regime": "risk_off"
+      },
+      {
+        "week": "2026-W38",
+        "end_day": "2026-09-20",
+        "equity_eur": 25882.97,
+        "delta_eur": 4702.09,
+        "regime": "risk_on"
+      },
+      {
+        "week": "2026-W39",
+        "end_day": "2026-09-21",
+        "equity_eur": 25541.06,
+        "delta_eur": -341.91,
+        "regime": "risk_on"
+      }
+    ],
+    "daily": [
+      {
+        "day": "2026-08-27",
+        "regime": "risk_on",
+        "equity_eur": 19952.0,
+        "realized_eur": 0.0,
+        "open_mtm_eur": -24.0,
+        "deployed_eur": 16000.0
+      },
+      {
+        "day": "2026-08-28",
+        "regime": "risk_on",
+        "equity_eur": 19243.08,
+        "realized_eur": -378.72,
+        "open_mtm_eur": -366.72,
+        "deployed_eur": 8000.0
+      },
+      {
+        "day": "2026-08-29",
+        "regime": "risk_on",
+        "equity_eur": 19528.44,
+        "realized_eur": -378.72,
+        "open_mtm_eur": -81.37,
+        "deployed_eur": 8000.0
+      },
+      {
+        "day": "2026-08-30",
+        "regime": "risk_on",
+        "equity_eur": 19778.01,
+        "realized_eur": -378.72,
+        "open_mtm_eur": 168.2,
+        "deployed_eur": 8000.0
+      },
+      {
+        "day": "2026-08-31",
+        "regime": "risk_on",
+        "equity_eur": 19863.09,
+        "realized_eur": -378.72,
+        "open_mtm_eur": 259.05,
+        "deployed_eur": 11848.72
+      },
+      {
+        "day": "2026-09-01",
+        "regime": "risk_on",
+        "equity_eur": 20307.86,
+        "realized_eur": -708.62,
+        "open_mtm_eur": 1035.85,
+        "deployed_eur": 13583.73
+      },
+      {
+        "day": "2026-09-02",
+        "regime": "risk_on",
+        "equity_eur": 21049.4,
+        "realized_eur": -708.62,
+        "open_mtm_eur": 1777.38,
+        "deployed_eur": 13583.73
+      },
+      {
+        "day": "2026-09-03",
+        "regime": "risk_on",
+        "equity_eur": 22632.47,
+        "realized_eur": -708.62,
+        "open_mtm_eur": 3360.46,
+        "deployed_eur": 13583.73
+      },
+      {
+        "day": "2026-09-04",
+        "regime": "risk_on",
+        "equity_eur": 21946.49,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 1666.85,
+        "deployed_eur": 5888.6
+      },
+      {
+        "day": "2026-09-05",
+        "regime": "risk_on",
+        "equity_eur": 23461.25,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 3181.61,
+        "deployed_eur": 5888.6
+      },
+      {
+        "day": "2026-09-06",
+        "regime": "risk_on",
+        "equity_eur": 23875.9,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 3596.26,
+        "deployed_eur": 5888.6
+      },
+      {
+        "day": "2026-09-07",
+        "regime": "risk_on",
+        "equity_eur": 23124.61,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 2857.72,
+        "deployed_eur": 14382.9
+      },
+      {
+        "day": "2026-09-08",
+        "regime": "risk_on",
+        "equity_eur": 23592.03,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 3325.14,
+        "deployed_eur": 14382.9
+      },
+      {
+        "day": "2026-09-09",
+        "regime": "risk_off",
+        "equity_eur": 22095.93,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 1829.03,
+        "deployed_eur": 14382.9
+      },
+      {
+        "day": "2026-09-10",
+        "regime": "risk_off",
+        "equity_eur": 21514.94,
+        "realized_eur": 1383.59,
+        "open_mtm_eur": 149.1,
+        "deployed_eur": 10382.9
+      },
+      {
+        "day": "2026-09-11",
+        "regime": "risk_off",
+        "equity_eur": 21368.22,
+        "realized_eur": 1396.29,
+        "open_mtm_eur": -12.91,
+        "deployed_eur": 8608.56
+      },
+      {
+        "day": "2026-09-12",
+        "regime": "risk_off",
+        "equity_eur": 21401.24,
+        "realized_eur": 1396.29,
+        "open_mtm_eur": 20.11,
+        "deployed_eur": 8608.56
+      },
+      {
+        "day": "2026-09-13",
+        "regime": "risk_off",
+        "equity_eur": 21180.88,
+        "realized_eur": 1396.29,
+        "open_mtm_eur": -200.25,
+        "deployed_eur": 8608.56
+      },
+      {
+        "day": "2026-09-14",
+        "regime": "risk_on",
+        "equity_eur": 21575.2,
+        "realized_eur": 1396.29,
+        "open_mtm_eur": 200.15,
+        "deployed_eur": 12665.92
+      },
+      {
+        "day": "2026-09-15",
+        "regime": "risk_off",
+        "equity_eur": 20754.92,
+        "realized_eur": 793.9,
+        "open_mtm_eur": -31.14,
+        "deployed_eur": 4304.28
+      },
+      {
+        "day": "2026-09-16",
+        "regime": "risk_off",
+        "equity_eur": 21292.96,
+        "realized_eur": 793.9,
+        "open_mtm_eur": 506.89,
+        "deployed_eur": 4304.28
+      },
+      {
+        "day": "2026-09-17",
+        "regime": "risk_off",
+        "equity_eur": 22226.48,
+        "realized_eur": 793.9,
+        "open_mtm_eur": 1458.73,
+        "deployed_eur": 16513.62
+      },
+      {
+        "day": "2026-09-18",
+        "regime": "risk_on",
+        "equity_eur": 25200.98,
+        "realized_eur": 2041.88,
+        "open_mtm_eur": 3175.47,
+        "deployed_eur": 8723.8
+      },
+      {
+        "day": "2026-09-19",
+        "regime": "risk_on",
+        "equity_eur": 24768.85,
+        "realized_eur": 2041.88,
+        "open_mtm_eur": 2743.34,
+        "deployed_eur": 8723.8
+      },
+      {
+        "day": "2026-09-20",
+        "regime": "risk_on",
+        "equity_eur": 25882.97,
+        "realized_eur": 2041.88,
+        "open_mtm_eur": 3857.47,
+        "deployed_eur": 8723.8
+      },
+      {
+        "day": "2026-09-21",
+        "regime": "risk_on",
+        "equity_eur": 25541.06,
+        "realized_eur": 2041.88,
+        "open_mtm_eur": 3528.73,
+        "deployed_eur": 17510.48
+      }
+    ],
+    "exits": [
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "SOL",
+        "reason": "friday_flatten",
+        "entry_price": 93.691,
+        "exit_price": 89.893,
+        "notional_eur": 4000.0,
+        "net_eur": -174.15,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1787875200000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "UNI",
+        "reason": "friday_flatten",
+        "entry_price": 4.013,
+        "exit_price": 3.8198,
+        "notional_eur": 4000.0,
+        "net_eur": -204.57,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1787875200000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "ARB",
+        "reason": "friday_flatten",
+        "entry_price": 0.09419,
+        "exit_price": 0.11353,
+        "notional_eur": 3848.72,
+        "net_eur": 778.71,
+        "opened_ms": 1788134400000,
+        "closed_ms": 1788480000000,
+        "hold_h": 96.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "UNI",
+        "reason": "friday_flatten",
+        "entry_price": 5.0292,
+        "exit_price": 5.3305,
+        "notional_eur": 3846.41,
+        "net_eur": 218.9,
+        "opened_ms": 1788220800000,
+        "closed_ms": 1788480000000,
+        "hold_h": 72.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "DOT",
+        "reason": "friday_flatten",
+        "entry_price": 0.914,
+        "exit_price": 0.9003,
+        "notional_eur": 4247.15,
+        "net_eur": -76.4,
+        "opened_ms": 1788739200000,
+        "closed_ms": 1789084800000,
+        "hold_h": 96.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "FET",
+        "reason": "friday_flatten",
+        "entry_price": 0.15778,
+        "exit_price": 0.14344,
+        "notional_eur": 4247.15,
+        "net_eur": -398.75,
+        "opened_ms": 1788739200000,
+        "closed_ms": 1789084800000,
+        "hold_h": 96.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "XRP",
+        "reason": "channel_low",
+        "entry_price": 1.23163,
+        "exit_price": 1.11186,
+        "notional_eur": 4057.36,
+        "net_eur": -406.73,
+        "opened_ms": 1789344000000,
+        "closed_ms": 1789430400000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "UNI",
+        "reason": "friday_flatten",
+        "entry_price": 6.8031,
+        "exit_price": 7.7187,
+        "notional_eur": 3894.91,
+        "net_eur": 512.51,
+        "opened_ms": 1789603200000,
+        "closed_ms": 1789689600000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "NEAR",
+        "reason": "friday_flatten",
+        "entry_price": 2.7431,
+        "exit_price": 3.2693,
+        "notional_eur": 3894.91,
+        "net_eur": 735.46,
+        "opened_ms": 1789603200000,
+        "closed_ms": 1789689600000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "SOL",
+        "reason": "channel_low",
+        "entry_price": 93.691,
+        "exit_price": 86.245,
+        "notional_eur": 4000.0,
+        "net_eur": -329.9,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1788220800000,
+        "hold_h": 120.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "UNI",
+        "reason": "channel_low",
+        "entry_price": 4.013,
+        "exit_price": 5.1232,
+        "notional_eur": 4000.0,
+        "net_eur": 1094.6,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1788998400000,
+        "hold_h": 336.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "ARB",
+        "reason": "channel_low",
+        "entry_price": 0.09525,
+        "exit_price": 0.12014,
+        "notional_eur": 1888.6,
+        "net_eur": 487.85,
+        "opened_ms": 1788220800000,
+        "closed_ms": 1789084800000,
+        "hold_h": 240.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "ETH",
+        "reason": "channel_low",
+        "entry_price": 2169.52,
+        "exit_price": 2077.41,
+        "notional_eur": 4304.28,
+        "net_eur": -195.66,
+        "opened_ms": 1789084800000,
+        "closed_ms": 1789430400000,
+        "hold_h": 96.0
+      }
+    ]
+  },
+  "mix_20k": {
+    "book_eur": 20000.0,
+    "end_regime": "risk_on",
+    "realized_eur": 925.16,
+    "open_mtm_eur": 321.65,
+    "total_eur": 1246.81,
+    "max_dd_eur": -3430.39,
+    "max_dd_pct": -14.37,
+    "trades": 17,
+    "win_rate": 0.412,
+    "by_reason": {
+      "regime_off": {
+        "n": 8,
+        "net_eur": 1774.49
+      },
+      "friday_flatten": {
+        "n": 6,
+        "net_eur": 214.96
+      },
+      "channel_low": {
+        "n": 1,
+        "net_eur": -329.9
+      },
+      "regime_cover": {
+        "n": 2,
+        "net_eur": -734.38
+      }
+    },
+    "open": [
+      {
+        "kind": "long",
+        "sleeve": "donch_fri10",
+        "base": "NEAR",
+        "entry_price": 3.4729,
+        "mark": 3.4729,
+        "notional_eur": 4000.0,
+        "unrealized_net_eur": -6.0
+      },
+      {
+        "kind": "long",
+        "sleeve": "donch_fri10",
+        "base": "ARB",
+        "entry_price": 0.19689,
+        "mark": 0.19689,
+        "notional_eur": 4000.0,
+        "unrealized_net_eur": -6.0
+      },
+      {
+        "kind": "long",
+        "sleeve": "donch10",
+        "base": "NEAR",
+        "entry_price": 3.2693,
+        "mark": 3.4729,
+        "notional_eur": 4000.0,
+        "unrealized_net_eur": 243.11
+      },
+      {
+        "kind": "long",
+        "sleeve": "donch10",
+        "base": "ARB",
+        "entry_price": 0.19225,
+        "mark": 0.19689,
+        "notional_eur": 4000.0,
+        "unrealized_net_eur": 90.54
+      }
+    ],
+    "exits": [
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "SOL",
+        "reason": "friday_flatten",
+        "entry_price": 93.691,
+        "exit_price": 89.893,
+        "notional_eur": 4000.0,
+        "net_eur": -174.15,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1787875200000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "UNI",
+        "reason": "friday_flatten",
+        "entry_price": 4.013,
+        "exit_price": 3.8198,
+        "notional_eur": 4000.0,
+        "net_eur": -204.57,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1787875200000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "ARB",
+        "reason": "friday_flatten",
+        "entry_price": 0.09419,
+        "exit_price": 0.11353,
+        "notional_eur": 3848.72,
+        "net_eur": 778.71,
+        "opened_ms": 1788134400000,
+        "closed_ms": 1788480000000,
+        "hold_h": 96.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "UNI",
+        "reason": "friday_flatten",
+        "entry_price": 5.0292,
+        "exit_price": 5.3305,
+        "notional_eur": 3846.41,
+        "net_eur": 218.9,
+        "opened_ms": 1788220800000,
+        "closed_ms": 1788480000000,
+        "hold_h": 72.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "DOT",
+        "reason": "regime_off",
+        "entry_price": 0.914,
+        "exit_price": 0.9642,
+        "notional_eur": 4247.15,
+        "net_eur": 220.53,
+        "opened_ms": 1788739200000,
+        "closed_ms": 1788912000000,
+        "hold_h": 48.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "FET",
+        "reason": "regime_off",
+        "entry_price": 0.15778,
+        "exit_price": 0.1461,
+        "notional_eur": 4247.15,
+        "net_eur": -327.15,
+        "opened_ms": 1788739200000,
+        "closed_ms": 1788912000000,
+        "hold_h": 48.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri10",
+        "base": "XRP",
+        "reason": "regime_off",
+        "entry_price": 1.23163,
+        "exit_price": 1.11186,
+        "notional_eur": 4000.0,
+        "net_eur": -400.98,
+        "opened_ms": 1789344000000,
+        "closed_ms": 1789430400000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "SOL",
+        "reason": "channel_low",
+        "entry_price": 93.691,
+        "exit_price": 86.245,
+        "notional_eur": 4000.0,
+        "net_eur": -329.9,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1788220800000,
+        "hold_h": 120.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "UNI",
+        "reason": "regime_off",
+        "entry_price": 4.013,
+        "exit_price": 5.2904,
+        "notional_eur": 4000.0,
+        "net_eur": 1261.26,
+        "opened_ms": 1787788800000,
+        "closed_ms": 1788912000000,
+        "hold_h": 312.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "ARB",
+        "reason": "regime_off",
+        "entry_price": 0.09525,
+        "exit_price": 0.12846,
+        "notional_eur": 1888.6,
+        "net_eur": 652.82,
+        "opened_ms": 1788220800000,
+        "closed_ms": 1788912000000,
+        "hold_h": 192.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch10",
+        "base": "XRP",
+        "reason": "regime_off",
+        "entry_price": 1.23163,
+        "exit_price": 1.11186,
+        "notional_eur": 4000.0,
+        "net_eur": -400.98,
+        "opened_ms": 1789344000000,
+        "closed_ms": 1789430400000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri",
+        "base": "NEAR",
+        "reason": "friday_flatten",
+        "entry_price": 2.1368,
+        "exit_price": 2.04,
+        "notional_eur": 2400.0,
+        "net_eur": -115.92,
+        "opened_ms": 1788912000000,
+        "closed_ms": 1789084800000,
+        "hold_h": 48.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri",
+        "base": "ATOM",
+        "reason": "friday_flatten",
+        "entry_price": 1.5974,
+        "exit_price": 1.4105,
+        "notional_eur": 2400.0,
+        "net_eur": -288.01,
+        "opened_ms": 1788912000000,
+        "closed_ms": 1789084800000,
+        "hold_h": 48.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri",
+        "base": "UNI",
+        "reason": "regime_off",
+        "entry_price": 6.8031,
+        "exit_price": 7.7187,
+        "notional_eur": 2400.0,
+        "net_eur": 315.81,
+        "opened_ms": 1789603200000,
+        "closed_ms": 1789689600000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "sleeve": "donch_fri",
+        "base": "NEAR",
+        "reason": "regime_off",
+        "entry_price": 2.7431,
+        "exit_price": 3.2693,
+        "notional_eur": 2400.0,
+        "net_eur": 453.18,
+        "opened_ms": 1789603200000,
+        "closed_ms": 1789689600000,
+        "hold_h": 24.0
+      },
+      {
+        "event": "exit",
+        "base": "XRP",
+        "reason": "regime_cover",
+        "entry_price": 1.19951,
+        "exit_price": 1.23163,
+        "notional_eur": 7000.0,
+        "net_eur": -208.44,
+        "opened_ms": 1788912000000,
+        "closed_ms": 1789344000000
+      },
+      {
+        "event": "exit",
+        "base": "XRP",
+        "reason": "regime_cover",
+        "entry_price": 1.13233,
+        "exit_price": 1.21401,
+        "notional_eur": 7000.0,
+        "net_eur": -525.94,
+        "opened_ms": 1789516800000,
+        "closed_ms": 1789689600000
+      }
+    ],
+    "daily": [
+      {
+        "day": "2026-08-27",
+        "regime": "risk_on",
+        "why": "BTC 68,888 > SMA50 57,678 (SMA20 60,014) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 19952.0,
+        "realized_eur": 0.0,
+        "open_mtm_eur": -24.0,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 16000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-08-28",
+        "regime": "risk_on",
+        "why": "BTC 67,176 > SMA50 57,916 (SMA20 60,563) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 19243.08,
+        "realized_eur": -378.72,
+        "open_mtm_eur": -366.72,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-08-29",
+        "regime": "risk_on",
+        "why": "BTC 67,591 > SMA50 58,144 (SMA20 61,136) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 19528.44,
+        "realized_eur": -378.72,
+        "open_mtm_eur": -81.37,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-08-30",
+        "regime": "risk_on",
+        "why": "BTC 67,051 > SMA50 58,367 (SMA20 61,721) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 19778.01,
+        "realized_eur": -378.72,
+        "open_mtm_eur": 168.2,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-08-31",
+        "regime": "risk_on",
+        "why": "BTC 67,630 > SMA50 58,602 (SMA20 62,350) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 19863.09,
+        "realized_eur": -378.72,
+        "open_mtm_eur": 259.05,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 11848.72,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-01",
+        "regime": "risk_on",
+        "why": "BTC 66,783 > SMA50 58,843 (SMA20 62,938) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 20307.86,
+        "realized_eur": -708.62,
+        "open_mtm_eur": 1035.85,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 13583.73,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-02",
+        "regime": "risk_on",
+        "why": "BTC 66,735 > SMA50 59,040 (SMA20 63,525) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 21049.4,
+        "realized_eur": -708.62,
+        "open_mtm_eur": 1777.38,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 13583.73,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-03",
+        "regime": "risk_on",
+        "why": "BTC 69,872 > SMA50 59,309 (SMA20 64,296) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 22632.47,
+        "realized_eur": -708.62,
+        "open_mtm_eur": 3360.46,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 13583.73,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-04",
+        "regime": "risk_on",
+        "why": "BTC 68,634 > SMA50 59,566 (SMA20 65,003) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 21946.49,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 1666.85,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 5888.6,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-05",
+        "regime": "risk_on",
+        "why": "BTC 68,770 > SMA50 59,824 (SMA20 65,726) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 23461.25,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 3181.61,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 5888.6,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-06",
+        "regime": "risk_on",
+        "why": "BTC 69,202 > SMA50 60,075 (SMA20 66,403) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 23875.9,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 3596.26,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 5888.6,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-07",
+        "regime": "risk_on",
+        "why": "BTC 68,050 > SMA50 60,303 (SMA20 67,012) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 23124.61,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 2857.72,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 14382.9,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-08",
+        "regime": "risk_on",
+        "why": "BTC 67,486 > SMA50 60,511 (SMA20 67,418) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 23592.03,
+        "realized_eur": 288.99,
+        "open_mtm_eur": 3325.14,
+        "pool_eur": 0.0,
+        "donch_deployed_eur": 14382.9,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-09",
+        "regime": "risk_off",
+        "why": "BTC 67,327 < SMA20 67,662 (SMA50 60,690) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 22057.75,
+        "realized_eur": 2096.45,
+        "open_mtm_eur": -17.7,
+        "pool_eur": 2093.15,
+        "donch_deployed_eur": 4800.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-10",
+        "regime": "risk_off",
+        "why": "BTC 65,928 < SMA20 67,608 (SMA50 60,851) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 22236.98,
+        "realized_eur": 2096.45,
+        "open_mtm_eur": 161.53,
+        "pool_eur": 2075.45,
+        "donch_deployed_eur": 4800.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-11",
+        "regime": "risk_off",
+        "why": "BTC 66,585 < SMA20 67,648 (SMA50 61,039) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 21845.45,
+        "realized_eur": 1692.52,
+        "open_mtm_eur": 166.15,
+        "pool_eur": 2075.45,
+        "donch_deployed_eur": 0.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-12",
+        "regime": "risk_off",
+        "why": "BTC 66,678 < SMA20 67,656 (SMA50 61,244) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 21789.02,
+        "realized_eur": 1692.52,
+        "open_mtm_eur": 109.72,
+        "pool_eur": 1679.31,
+        "donch_deployed_eur": 0.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-13",
+        "regime": "risk_off",
+        "why": "BTC 66,268 < SMA20 67,584 (SMA50 61,438) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 21917.87,
+        "realized_eur": 1692.52,
+        "open_mtm_eur": 238.57,
+        "pool_eur": 1679.31,
+        "donch_deployed_eur": 0.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-14",
+        "regime": "risk_on",
+        "why": "BTC 67,682 > SMA50 61,645 (SMA20 67,607) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 21457.64,
+        "realized_eur": 1484.08,
+        "open_mtm_eur": -12.0,
+        "pool_eur": 1481.64,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-15",
+        "regime": "risk_off",
+        "why": "BTC 65,531 < SMA20 67,493 (SMA50 61,835) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 20680.85,
+        "realized_eur": 682.11,
+        "open_mtm_eur": 0.0,
+        "pool_eur": 680.85,
+        "donch_deployed_eur": 0.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-16",
+        "regime": "risk_off",
+        "why": "BTC 66,400 < SMA20 67,369 (SMA50 62,041) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 20659.85,
+        "realized_eur": 682.11,
+        "open_mtm_eur": -10.5,
+        "pool_eur": 680.85,
+        "donch_deployed_eur": 0.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-17",
+        "regime": "risk_off",
+        "why": "BTC 66,558 < SMA20 67,338 (SMA50 62,258) \u2014 downtrend. Shorts aan, longs uit.",
+        "equity_eur": 20669.87,
+        "realized_eur": 682.11,
+        "open_mtm_eur": 6.72,
+        "pool_eur": 670.35,
+        "donch_deployed_eur": 4800.0,
+        "short_deployed_eur": 7000.0
+      },
+      {
+        "day": "2026-09-18",
+        "regime": "risk_on",
+        "why": "BTC 70,324 > SMA50 62,541 (SMA20 67,475) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 20899.48,
+        "realized_eur": 925.16,
+        "open_mtm_eur": -12.0,
+        "pool_eur": 923.48,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-19",
+        "regime": "risk_on",
+        "why": "BTC 70,654 > SMA50 62,864 (SMA20 67,655) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 20445.51,
+        "realized_eur": 925.16,
+        "open_mtm_eur": -465.97,
+        "pool_eur": 911.48,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-20",
+        "regime": "risk_on",
+        "why": "BTC 70,706 > SMA50 63,188 (SMA20 67,809) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 21292.44,
+        "realized_eur": 925.16,
+        "open_mtm_eur": 380.96,
+        "pool_eur": 911.48,
+        "donch_deployed_eur": 8000.0,
+        "short_deployed_eur": 0
+      },
+      {
+        "day": "2026-09-21",
+        "regime": "risk_on",
+        "why": "BTC 74,950 > SMA50 63,587 (SMA20 68,217) \u2014 uptrend. Donchian-longs aan, shorts covered.",
+        "equity_eur": 21221.13,
+        "realized_eur": 925.16,
+        "open_mtm_eur": 321.65,
+        "pool_eur": 911.48,
+        "donch_deployed_eur": 16000.0,
+        "short_deployed_eur": 0
+      }
+    ],
+    "weekly": [
+      {
+        "week": "2026-W35",
+        "end_day": "2026-08-30",
+        "equity_eur": 19778.01,
+        "delta_eur": -221.99,
+        "regime": "risk_on"
+      },
+      {
+        "week": "2026-W36",
+        "end_day": "2026-09-06",
+        "equity_eur": 23875.9,
+        "delta_eur": 4097.89,
+        "regime": "risk_on"
+      },
+      {
+        "week": "2026-W37",
+        "end_day": "2026-09-13",
+        "equity_eur": 21917.87,
+        "delta_eur": -1958.03,
+        "regime": "risk_off"
+      },
+      {
+        "week": "2026-W38",
+        "end_day": "2026-09-20",
+        "equity_eur": 21292.44,
+        "delta_eur": -625.43,
+        "regime": "risk_on"
+      },
+      {
+        "week": "2026-W39",
+        "end_day": "2026-09-21",
+        "equity_eur": 21221.13,
+        "delta_eur": -71.31,
+        "regime": "risk_on"
+      }
+    ],
+    "short_trades": [
+      {
+        "event": "entry",
+        "base": "XRP",
+        "reason": "mode=absolute,skip=1,mom=-0.040",
+        "entry_price": 1.19951,
+        "notional_eur": 7000.0,
+        "opened_ms": 1788912000000
+      },
+      {
+        "event": "exit",
+        "base": "XRP",
+        "reason": "regime_cover",
+        "entry_price": 1.19951,
+        "exit_price": 1.23163,
+        "notional_eur": 7000.0,
+        "net_eur": -208.44,
+        "opened_ms": 1788912000000,
+        "closed_ms": 1789344000000
+      },
+      {
+        "event": "entry",
+        "base": "XRP",
+        "reason": "mode=absolute,skip=1,mom=-0.064",
+        "entry_price": 1.13233,
+        "notional_eur": 7000.0,
+        "opened_ms": 1789516800000
+      },
+      {
+        "event": "exit",
+        "base": "XRP",
+        "reason": "regime_cover",
+        "entry_price": 1.13233,
+        "exit_price": 1.21401,
+        "notional_eur": 7000.0,
+        "net_eur": -525.94,
+        "opened_ms": 1789516800000,
+        "closed_ms": 1789689600000
+      }
+    ],
+    "end_pool_eur": 911.48
+  }
+}
