@@ -436,7 +436,7 @@ def _mini_report(results: dict[str, Any]) -> str:
             "",
             *[f"- {n}" for n in results.get("notes") or []],
             "",
-            "See docs/STRATEGY_LAB_REPORT.md for the full research report.",
+            "Strategy-lab tournament complete.",
         ]
     )
     return "\n".join(lines) + "\n"
