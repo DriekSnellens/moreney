@@ -111,6 +111,12 @@ def utc_day_start_ms(now: datetime | None = None) -> int:
     return int(day.timestamp() * 1000)
 
 
+def _ts_ms(ts: int) -> int:
+    """Bitvavo daily opens are ms; tolerate accidental second-scale stamps."""
+    t = int(ts)
+    return t * 1000 if 0 < t < 10_000_000_000 else t
+
+
 def drop_incomplete_daily(
     ohlc_by_base: Mapping[str, Sequence[Candle]],
     *,
@@ -123,7 +129,7 @@ def drop_incomplete_daily(
         kept: list[Candle] = []
         for row in rows:
             try:
-                ts = int(row[0])
+                ts = _ts_ms(int(row[0]))
             except (TypeError, ValueError, IndexError):
                 continue
             if ts < cutoff:
@@ -144,7 +150,7 @@ def completed_bar_weekday(
         if not rows:
             continue
         try:
-            last_ts = max(last_ts, int(rows[-1][0]))
+            last_ts = max(last_ts, _ts_ms(int(rows[-1][0])))
         except (TypeError, ValueError, IndexError):
             continue
     if last_ts < 0:
@@ -160,13 +166,34 @@ def weekend_flatten(
     """Fri/Sat/Sun of the *completed* daily bar (sim: flatten at Friday close).
 
     Wall-clock Friday is still Friday's session — do not flatten then.
-    After Friday's UTC close the wall clock is Sat/Sun; that is the backup
-    when no signal bar is available.
+    If the signal bar is unknown, only Sat/Sun wall-clock is a flatten
+    backup. Weekdays with no bars must not look like a trading day (that
+    was the Monday live-kick: buy, then dump when Sunday's bar arrived).
     """
     if signal_weekday is not None:
         return int(signal_weekday) >= 4
-    wd = (now or datetime.now(UTC)).weekday()
-    return wd >= 5  # Sat/Sun only; Friday daytime stays invested
+    return friday_close_reached(now)
+
+
+def _blocked(
+    *,
+    btc_meta: Mapping[str, Any],
+    signal_wd: int | None,
+    risk_block: str,
+    reasons: list[str] | None = None,
+    exits: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    why = list(reasons or [risk_block])
+    return {
+        "ok": False,
+        "btc": dict(btc_meta),
+        "exits": list(exits or []),
+        "entries": [],
+        "rejected": [],
+        "reasons": why,
+        "risk_block": risk_block,
+        "signal_weekday": signal_wd,
+    }
 
 
 def friday_close_reached(now: datetime | None = None) -> bool:
@@ -187,8 +214,11 @@ def evaluate_donchian(
     """Pure daily decision on *completed* UTC bars. Last in-progress day is ignored."""
     now = now or datetime.now(UTC)
     ohlc = drop_incomplete_daily(ohlc_by_base, now=now)
-    if ohlc.get("BTC"):
-        btc_closes = [float(r[4]) for r in ohlc["BTC"]]
+    ohlc_btc = ohlc.get("BTC") or []
+    # Prefer the long close series for SMA; a short BTC OHLC fetch must not
+    # wipe SMA to null and look like btc_below_sma.
+    if len(ohlc_btc) >= int(cfg.btc_sma):
+        btc_closes = [float(r[4]) for r in ohlc_btc]
     signal_wd = completed_bar_weekday(ohlc, now=now)
     btc_ok, btc_meta = btc_long_ok(btc_closes, cfg)
     exits: list[dict[str, Any]] = []
@@ -196,20 +226,35 @@ def evaluate_donchian(
     rejected: list[dict[str, Any]] = []
     reasons: list[str] = []
 
+    if signal_wd is None:
+        if cfg.friday_flatten and friday_close_reached(now):
+            reasons.append("friday_flatten")
+            for base in held:
+                exits.append({"base": base, "reason": "friday_flatten"})
+            return _blocked(
+                btc_meta=btc_meta,
+                signal_wd=signal_wd,
+                risk_block="friday_flatten",
+                reasons=reasons,
+                exits=exits,
+            )
+        return _blocked(
+            btc_meta=btc_meta,
+            signal_wd=signal_wd,
+            risk_block="data_not_ready",
+        )
+
     if cfg.friday_flatten and weekend_flatten(now=now, signal_weekday=signal_wd):
         reasons.append("friday_flatten")
         for base in held:
             exits.append({"base": base, "reason": "friday_flatten"})
-        return {
-            "ok": False,
-            "btc": btc_meta,
-            "exits": exits,
-            "entries": entries,
-            "rejected": rejected,
-            "reasons": reasons,
-            "risk_block": "friday_flatten",
-            "signal_weekday": signal_wd,
-        }
+        return _blocked(
+            btc_meta=btc_meta,
+            signal_wd=signal_wd,
+            risk_block="friday_flatten",
+            reasons=reasons,
+            exits=exits,
+        )
 
     for base in held:
         rows = ohlc.get(base) or []
@@ -221,18 +266,24 @@ def evaluate_donchian(
             exits.append({"base": base, "reason": "channel_low"})
 
     held_after = set(held) - {e["base"] for e in exits}
+    if btc_meta.get("sma") is None:
+        reasons.append("sma_unavailable")
+        return _blocked(
+            btc_meta=btc_meta,
+            signal_wd=signal_wd,
+            risk_block="sma_unavailable",
+            reasons=reasons,
+            exits=exits,
+        )
     if not btc_ok:
         reasons.append("btc_below_sma")
-        return {
-            "ok": False,
-            "btc": btc_meta,
-            "exits": exits,
-            "entries": entries,
-            "rejected": rejected,
-            "reasons": reasons,
-            "risk_block": "btc_below_sma",
-            "signal_weekday": signal_wd,
-        }
+        return _blocked(
+            btc_meta=btc_meta,
+            signal_wd=signal_wd,
+            risk_block="btc_below_sma",
+            reasons=reasons,
+            exits=exits,
+        )
 
     open_slots = max(0, int(cfg.max_pos) - len(held_after))
     if open_slots <= 0:

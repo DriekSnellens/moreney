@@ -114,6 +114,7 @@ class DonchianBundleRunner:
         self._btc_closes: list[float] = []
         self._ohlc: dict[str, list[list[float]]] = {}
         self._alloc: dict[str, Any] = {}
+        self._dailies_ts: float = 0.0
         self._decide_lock = asyncio.Lock()
         self._load_state()
 
@@ -172,10 +173,19 @@ class DonchianBundleRunner:
             except Exception:  # noqa: BLE001
                 continue
 
-    async def _refresh_dailies(self) -> None:
+    async def _refresh_dailies(self, *, force: bool = False) -> None:
+        now = time.time()
+        if (
+            not force
+            and self._btc_closes
+            and self._ohlc
+            and (now - self._dailies_ts) < 900.0
+        ):
+            return
         try:
             rows = await asyncio.to_thread(fetch_daily_closes, "BTC", days=80)
-            self._btc_closes = [c for _, c in rows]
+            if rows:
+                self._btc_closes = [c for _, c in rows]
         except Exception as exc:  # noqa: BLE001
             logger.warning("donchian BTC daily failed: %s", exc)
         need = {"BTC"}
@@ -188,6 +198,7 @@ class DonchianBundleRunner:
                 await asyncio.sleep(0.03)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("donchian ohlc %s failed: %s", base, exc)
+        self._dailies_ts = time.time()
 
     def _apply_allocator(self) -> dict[str, Any]:
         snap = cached_snapshot(
@@ -402,7 +413,7 @@ class DonchianBundleRunner:
         now = datetime.now(UTC)
         now_ms = int(now.timestamp() * 1000)
         await self._refresh_marks()
-        await self._refresh_dailies()
+        await self._refresh_dailies(force=True)
         snap = self._apply_allocator()
         out: dict[str, Any] = {"at": now.isoformat(), "regime": snap.get("label"), "why": snap.get("why"), "sleeves": {}}
         for name, sl in self.sleeves.items():
@@ -444,8 +455,11 @@ class DonchianBundleRunner:
                 pos = next((p for p in sl.positions if p.base == ex["base"]), None)
                 if pos:
                     await self._close(sl, pos, reason=str(ex.get("reason") or "exit"), now_ms=now_ms)
-            for row in decision.get("entries") or []:
-                await self._open(sl, row, now_ms=now_ms)
+            # Never open when bars/SMA are missing — even if a stale candidate leaked in.
+            block = str(decision.get("risk_block") or "")
+            if block not in {"data_not_ready", "sma_unavailable"}:
+                for row in decision.get("entries") or []:
+                    await self._open(sl, row, now_ms=now_ms)
             self._ledger_append({"event": "decision", "sleeve": name, **out["sleeves"][name]})
         self._save_state()
         return out
@@ -533,7 +547,15 @@ class DonchianBundleRunner:
             "venues": list(self.venues),
             "book_eur": self.book_eur,
             "allocator": self._alloc,
-            "equity_eur": round(sum(sl.cash_eur + sl.unrealized(self.marks, sl.cfg.fee_rt) for sl in self.sleeves.values()), 2),
+            "equity_eur": round(
+                sum(
+                    sl.cash_eur
+                    + sl.deployed()
+                    + sl.unrealized(self.marks, sl.cfg.fee_rt)
+                    for sl in self.sleeves.values()
+                ),
+                2,
+            ),
             "deployed_eur": round(deployed, 2),
             "realized_total_eur": round(realized, 2),
             "unrealized_net_eur": round(unreal, 2),
@@ -547,6 +569,10 @@ class DonchianBundleRunner:
         sl = next(iter(self.sleeves.values()), None)
         hours = tuple(int(h) for h in (sl.cfg.decision_hours_utc if sl else (0,)))
         return hours or (0,)
+
+    def _in_decision_window(self, now: datetime | None = None) -> bool:
+        now = now or datetime.now(UTC)
+        return now.hour in self._decision_hours() and now.minute < 5
 
     def _next_decision_iso(self) -> str | None:
         now = datetime.now(UTC)
@@ -584,8 +610,7 @@ class DonchianBundleRunner:
         while not should_stop():
             try:
                 await self._refresh_marks()
-                if not self._btc_closes:
-                    await self._refresh_dailies()
+                await self._refresh_dailies()
                 self._apply_allocator()
                 await self.manage_exits()
                 now = datetime.now(UTC)
@@ -718,17 +743,29 @@ class DonchianDeskManager:
         self._task = asyncio.create_task(self._runner.run(lambda: self._stop), name="momentum-donchian")
         _write_flag(state_path, running=True, paper_only=dry_run, dry_run=dry_run)
         if not dry_run:
-            asyncio.create_task(self._kick_live_decide(), name="donchian-live-kick")
+            asyncio.create_task(self._kick_live_warmup(), name="donchian-live-kick")
         return {"ok": True, "started": True, "dry_run": dry_run, "venues": list(venues), "status": self.status()}
 
-    async def _kick_live_decide(self) -> None:
+    async def _kick_live_warmup(self) -> None:
+        """Load dailies + weekend flatten. Do not open bags outside hour 0."""
         await asyncio.sleep(2.0)
         try:
-            if self._runner is not None:
+            if self._runner is None:
+                return
+            await self._runner._refresh_marks()
+            await self._runner._refresh_dailies(force=True)
+            self._runner._apply_allocator()
+            await self._runner.manage_exits()
+            if self._runner._in_decision_window():
                 out = await self._runner.decide(execute=True)
-                logger.info("donchian live kick decide: %s", {k: v.get("risk_block") or v.get("reasons") for k, v in (out.get("sleeves") or {}).items()})
+                logger.info(
+                    "donchian live kick decide: %s",
+                    {k: v.get("risk_block") or v.get("reasons") for k, v in (out.get("sleeves") or {}).items()},
+                )
+            else:
+                logger.info("donchian live kick: warmup only (outside UTC decide window)")
         except Exception:  # noqa: BLE001
-            logger.exception("donchian live kick decide failed")
+            logger.exception("donchian live kick warmup failed")
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True
