@@ -18,7 +18,7 @@ from typing import Any
 
 BOOK_EUR = 20_000.0
 
-# Loop-winner map (artifacts/expert_best_desk_loop.json).
+# Loop-winner map (sma20_50 Donchian/short).
 REGIME_MAP: dict[str, dict[str, float]] = {
     "risk_on": {"donch_fri10": 0.5, "donch10": 0.5},
     "mid": {"cash": 1.0},

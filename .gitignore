@@ -40,3 +40,6 @@ redis_data/
 *.log
 logs/
 data/
+
+# One-off sim dumps / screenshots (regenerate locally if needed)
+artifacts/

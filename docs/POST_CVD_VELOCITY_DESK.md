@@ -42,7 +42,7 @@ No LIMITED_LIVE CVD sleeve. No dual-sleeve €50–100 thesis that depends on S2
 | executable VWAP arb | Lab **0 accepts** under gates | Unknown / thin |
 | funding / triangle / FX / equity | Off or no data | No |
 
-Sources: `docs/STRATEGY_LAB_REPORT.md`, `docs/STRATEGY_RESEARCH_TOURNAMENT_REPORT.md`, `data/research/strategy_pnl_gap.json`, `data/research/live_underperformance_diagnosis.json`.
+Sources: strategy lab + tournament verdicts (CVD abandoned; no replacement sleeve).
 
 **There is no proven profitable replacement.** Claiming one would invent alpha the tape rejects.
 
@@ -150,10 +150,6 @@ Mean-reversion was the least-dead tournament survivor and is still **not** deplo
 
 ---
 
-## 8. Related artifacts
+## 8. Related
 
-- `docs/CVD_SHADOW_GAP_DIAGNOSIS.md`
-- `docs/LIVE_UNDERPERFORMANCE_DIAGNOSIS.md` (if present) / `data/research/live_underperformance_diagnosis.json`
-- `docs/STRATEGY_LAB_REPORT.md`
-- `docs/PAPER_VS_RESEARCH_PNL_GAP_REPORT.md` (if present) / `data/research/strategy_pnl_gap.json`
-- Supersedes dual-sleeve CVD half of `docs/PROFIT_ARCHITECTURE_DUAL_SLEEVE.md` (that thesis is product-rejected for S2).
+CVD inject is abandoned. Dual-sleeve CVD is product-rejected for S2.
