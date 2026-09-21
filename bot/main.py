@@ -29,9 +29,11 @@ from bot.market_data.service import MarketDataService
 from bot.paper.auth import (
     clear_session_cookie,
     credentials_valid,
+    dashboard_auth_gate,
     login_redirect,
     render_login_page,
     request_has_valid_session,
+    request_is_https,
     set_session_cookie,
     wants_html,
 )
@@ -166,6 +168,37 @@ def _dashboard_auth_enabled() -> bool:
     return bool(get_settings().dashboard_basic_auth_enabled)
 
 
+_HOME_ALIASES = frozenset({"/", "/dashboard", "/live/dashboard"})
+
+
+def _operator_home() -> str:
+    """Public site home: mix desk when it is the live book, else legacy maker UI."""
+    settings = get_settings()
+    if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
+        return "/paper/dashboard"
+    try:
+        if get_donchian_desk_manager().running():
+            return "/live/momentum"
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if get_momentum_desk_manager().running() and not bool(
+            get_micro_session_manager().status().get("running")
+        ):
+            return "/live/momentum"
+    except Exception:  # noqa: BLE001
+        pass
+    return "/live/dashboard"
+
+
+def _safe_post_login_path(next_path: str) -> str:
+    if not next_path.startswith("/"):
+        return _operator_home()
+    if next_path in _HOME_ALIASES:
+        return _operator_home()
+    return next_path
+
+
 def require_dashboard_access(
     request: Request,
     credentials: HTTPBasicCredentials | None = Security(_dashboard_basic),
@@ -186,7 +219,9 @@ def require_dashboard_access(
     ):
         return
     if wants_html(request):
-        next_path = request.url.path or "/live/dashboard"
+        next_path = request.url.path or _operator_home()
+        if next_path in _HOME_ALIASES:
+            next_path = _operator_home()
         if request.url.query:
             next_path = f"{next_path}?{request.url.query}"
         raise DashboardLoginRedirect(next_path)
@@ -315,6 +350,15 @@ app = FastAPI(
 from bot.paper.api import router as paper_api_router  # noqa: E402
 
 app.include_router(paper_api_router)
+
+
+@app.middleware("http")
+async def _enforce_dashboard_auth(request: Request, call_next):
+    blocked = dashboard_auth_gate(request, get_settings())
+    if blocked is not None:
+        return blocked
+    return await call_next(request)
+
 
 @app.exception_handler(DashboardLoginRedirect)
 async def _dashboard_login_redirect(_request: Request, exc: DashboardLoginRedirect):
@@ -812,39 +856,39 @@ async def _live_dashboard_payload(
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(next: str = Query(default="/live/dashboard")) -> HTMLResponse:
+async def login_page(next: str = Query(default="/live/momentum")) -> HTMLResponse:
     settings = get_settings()
+    safe_next = _safe_post_login_path(next)
     if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(
-            url=next if next.startswith("/") else "/live/dashboard", status_code=303
-        )
-    return render_login_page(next_path=next)
+        return RedirectResponse(url=safe_next, status_code=303)
+    return render_login_page(next_path=safe_next)
 
 
 @app.post("/login")
 async def login_submit(
+    request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    next: str = Form(default="/live/dashboard"),
+    next: str = Form(default="/live/momentum"),
 ) -> Response:
     settings = get_settings()
+    safe_next = _safe_post_login_path(next)
     if not settings.dashboard_basic_auth_enabled:
-        return RedirectResponse(
-            url=next if next.startswith("/") else "/live/dashboard", status_code=303
-        )
+        return RedirectResponse(url=safe_next, status_code=303)
     if not credentials_valid(settings, username, password):
-        return render_login_page(next_path=next, error="Invalid username or password")
-    safe_next = next if next.startswith("/") else "/live/dashboard"
+        return render_login_page(next_path=safe_next, error="Invalid username or password")
     response = RedirectResponse(url=safe_next, status_code=303)
-    set_session_cookie(response, settings, username)
+    set_session_cookie(
+        response, settings, username, secure=request_is_https(request)
+    )
     return response
 
 
 @app.post("/logout")
 @app.get("/logout")
-async def logout() -> Response:
+async def logout(request: Request) -> Response:
     response = RedirectResponse(url="/login", status_code=303)
-    clear_session_cookie(response)
+    clear_session_cookie(response, secure=request_is_https(request))
     return response
 
 
@@ -853,15 +897,9 @@ async def logout() -> Response:
 @app.get("/dashboard", response_class=HTMLResponse, response_model=None)
 async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse | RedirectResponse:
     """Live operator dashboard; paper lab instances redirect to the simple lab UI."""
-    settings = get_settings()
-    if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
-        return RedirectResponse(url="/paper/dashboard", status_code=303)
-    # The momentum desk owns the operator view while it runs and the legacy
-    # maker desk is stopped; the old page stays reachable at /live/dashboard/legacy.
-    if get_momentum_desk_manager().running() and not bool(
-        get_micro_session_manager().status().get("running")
-    ):
-        return RedirectResponse(url="/live/momentum", status_code=303)
+    home = _operator_home()
+    if home != "/live/dashboard":
+        return RedirectResponse(url=home, status_code=303)
     return render_live_dashboard(await _live_dashboard_payload())
 
 
