@@ -155,6 +155,102 @@ def test_dashboard_mix_board_renders():
     assert "patchMixOpen" in html
 
 
+def test_dashboard_shows_donchian_ledger_fills():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    rows = [
+        {
+            "ts": "2026-09-21T06:19:22+00:00",
+            "event": "entry",
+            "sleeve": "donch_fri10",
+            "base": "NEAR",
+            "venue": "bitvavo",
+            "notional_eur": 3993.11,
+            "entry_price": 3.7106,
+            "fee_eur": 0.0,
+            "reason": "breakout_10,mom=0.817",
+            "dry_run": False,
+        },
+        {
+            "ts": "2026-09-21T08:16:57+00:00",
+            "event": "exit",
+            "sleeve": "donch_fri10",
+            "base": "NEAR",
+            "venue": "bitvavo",
+            "notional_eur": 3993.11,
+            "entry_price": 3.7106,
+            "exit_price": 3.7449,
+            "net_eur": 36.87,
+            "reason": "friday_flatten",
+            "dry_run": False,
+        },
+        {
+            "ts": "2026-09-21T08:17:00+00:00",
+            "event": "decision",
+            "sleeve": "donch_fri10",
+            "ok": False,
+            "reasons": ["friday_flatten"],
+        },
+    ]
+    html = render_momentum_dashboard(
+        {
+            "running": False,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 3},
+            "positions": [],
+            "risk": {"day_realized_eur": 0, "entries_allowed": True},
+            "cash_eur": 20000,
+            "exposure_eur": 0,
+            "equity_eur": 20000,
+            "realized_total_eur": 0,
+            "trade_count": 0,
+            "unrealized_net_eur": 0,
+        },
+        [],
+        allocator=snap,
+        donchian={"running": True, "dry_run": False, "positions": [], "sleeves": []},
+        donchian_ledger_rows=rows,
+        show_short_weakest=True,
+        short_weakest={"enabled_setting": True, "positions": [], "running": True},
+        short_weakest_ledger_rows=[],
+    ).body.decode()
+    assert "Execution stream · Donchian ledger" in html
+    assert "15m core ledger (idle)" in html
+    assert "friday_flatten" in html
+    assert "donch_fri10" in html
+    assert "NEAR" in html
+    assert "3.7449" in html
+    assert "+36.86" in html or "+36.87" in html
+    assert 'id="ledger"' in html
+    assert "Donchian · live longs" in html
+    assert "/live/momentum#ledger" in html
+
+
+def test_ledger_table_maps_donchian_entry_exit_price():
+    from bot.live.momentum_dashboard import _ledger_table
+
+    html = _ledger_table(
+        [
+            {
+                "ts": "2026-09-21T08:17:04+00:00",
+                "event": "exit",
+                "sleeve": "donch10",
+                "base": "AVAX",
+                "venue": "bitvavo",
+                "notional_eur": 3994.12,
+                "exit_price": 9.5111,
+                "net_eur": -121.27,
+                "reason": "friday_flatten",
+            }
+        ]
+    )
+    assert "AVAX" in html
+    assert "9.5111" in html
+    assert "donch10 · friday_flatten" in html
+    assert "−121.27" in html or "-121.27" in html
+
+
 def _ohlc_breakout(n: int = 16, last_high: float = 120.0) -> list[list[float]]:
     rows = []
     for i in range(n - 1):

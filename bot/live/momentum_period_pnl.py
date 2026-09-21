@@ -39,6 +39,7 @@ class DeskEarnings:
     as_of: str
     tz: str = "Europe/Amsterdam"
     short_weakest: PeriodNet | None = None
+    donchian: PeriodNet | None = None
 
 
 def _parse_ts(raw: Any) -> datetime | None:
@@ -194,17 +195,21 @@ def compute_desk_earnings(
     volatile_status: Mapping[str, Any] | None = None,
     short_weakest_ledger_path: str | Path | None = None,
     short_weakest_status: Mapping[str, Any] | None = None,
+    donchian_ledger_path: str | Path | None = None,
+    donchian_status: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> DeskEarnings:
-    """Build operator earnings for core, volatile, short-weakest, and combined."""
+    """Build operator earnings for core, mix sleeves, and combined."""
     core_status = core_status or {}
     volatile_status = volatile_status or {}
     short_weakest_status = short_weakest_status or {}
+    donchian_status = donchian_status or {}
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
     core_exits = load_exit_fills(core_ledger_path)
     vol_exits = load_exit_fills(volatile_ledger_path)
     sw_exits = load_exit_fills(short_weakest_ledger_path)
+    dc_exits = load_exit_fills(donchian_ledger_path)
 
     core = sum_period(
         core_exits,
@@ -221,13 +226,21 @@ def compute_desk_earnings(
         now=now_utc,
         all_time_fallback=_as_float(short_weakest_status.get("realized_total_eur")),
     )
+    donchian = sum_period(
+        dc_exits,
+        now=now_utc,
+        all_time_fallback=_as_float(donchian_status.get("realized_total_eur")),
+    )
     combined = _combine(core, volatile)
     if short_weakest_ledger_path or short_weakest_status:
         combined = _combine(combined, short_weakest)
+    if donchian_ledger_path or donchian_status:
+        combined = _combine(combined, donchian)
     open_mtm = (
         _as_float(core_status.get("unrealized_net_eur"))
         + _as_float(volatile_status.get("unrealized_net_eur"))
         + _as_float(short_weakest_status.get("unrealized_net_eur"))
+        + _as_float(donchian_status.get("unrealized_net_eur"))
     )
     return DeskEarnings(
         core=core,
@@ -236,6 +249,7 @@ def compute_desk_earnings(
         open_mtm_eur=round(open_mtm, 2),
         as_of=now_utc.astimezone(_OPERATOR_TZ).isoformat(),
         short_weakest=short_weakest,
+        donchian=donchian,
     )
 
 
@@ -269,4 +283,6 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
     }
     if e.short_weakest is not None:
         out["short_weakest"] = _p(e.short_weakest)
+    if e.donchian is not None:
+        out["donchian"] = _p(e.donchian)
     return out

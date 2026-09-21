@@ -88,6 +88,42 @@ def test_combined_desk_earnings(tmp_path: Path) -> None:
     assert earn.open_mtm_eur == 1.5
 
 
+def test_donchian_exits_fold_into_combined_earnings(tmp_path: Path) -> None:
+    core = tmp_path / "core.jsonl"
+    dc = tmp_path / "donch.jsonl"
+    _write_ledger(core, [])
+    _write_ledger(
+        dc,
+        [
+            {
+                "ts": "2026-09-21T08:16:57+00:00",
+                "event": "exit",
+                "base": "NEAR",
+                "sleeve": "donch_fri10",
+                "net_eur": 36.87,
+            },
+            {
+                "ts": "2026-09-21T08:17:04+00:00",
+                "event": "exit",
+                "base": "AVAX",
+                "sleeve": "donch_fri10",
+                "net_eur": -121.27,
+            },
+        ],
+    )
+    earn = compute_desk_earnings(
+        core_ledger_path=core,
+        donchian_ledger_path=dc,
+        donchian_status={"unrealized_net_eur": 12.5, "realized_total_eur": -84.4},
+        now=datetime(2026, 9, 21, 12, 0, tzinfo=UTC),
+    )
+    assert earn.donchian is not None
+    assert earn.donchian.week_eur == -84.4
+    assert earn.donchian.trades_week == 2
+    assert earn.combined.week_eur == -84.4
+    assert earn.open_mtm_eur == 12.5
+
+
 def test_dashboard_shows_period_earnings(tmp_path: Path) -> None:
     from bot.live.momentum_dashboard import render_momentum_dashboard
     from bot.live.momentum_period_pnl import compute_desk_earnings
