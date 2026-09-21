@@ -1,0 +1,1045 @@
+{
+  "generated_at": "2026-09-21T07:22:10.094777+00:00",
+  "window": {
+    "start": "2025-09-20",
+    "end": "2026-09-19",
+    "days": 365
+  },
+  "question": "Does the loop-winner mix scale linearly to \u20ac50k and \u20ac100k?",
+  "answer": "Percent returns are almost linear in the search accounting (unit sleeves, 15 bps/side). On Bitvavo they are not: taker+cross+impact and max_pos=2 clips eat a growing share at \u20ac50k/\u20ac100k.",
+  "published_20k": {
+    "pnl_eur": 27929.76,
+    "max_dd_pct": -6.5,
+    "replayed_original_unit_mix_pnl_eur": 27987.47,
+    "note": "In-sample unit-return mix, 15 bps/side, no ADV cap. Book \u20ac20k, not profit \u20ac20k."
+  },
+  "naive_linear": {
+    "20000": 27929.76,
+    "50000": 69824.4,
+    "100000": 139648.8
+  },
+  "assumptions": {
+    "fee": "Bitvavo Category A taker (0.25% / 0.20% / 0.18% at \u20ac20k/\u20ac50k/\u20ac100k turnover)",
+    "spread": "20 bps live taker-cross, widens as 1/sqrt(ADV) below \u20ac1m",
+    "impact": "0.75 \u00d7 20d sigma \u00d7 sqrt(Q/ADV)",
+    "participation_cap": "12% of venue daily quote ADV (TWAP)",
+    "stacking": "donch_fri10 + donch10 share ADV with 1.8\u00d7 stack on impact/cap",
+    "shorts": "perp proxy, 8\u00d7 Bitvavo ADV, funding -5e-05/day (spot cannot short)",
+    "alpha_i": "not simulated",
+    "in_sample": true
+  },
+  "runs": [
+    {
+      "book_eur": 20000.0,
+      "mode": "original",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 27987.47,
+      "end_eur": 47987.47,
+      "return_pct": 139.94,
+      "max_dd_eur": -1300.48,
+      "max_dd_pct": -6.5,
+      "calmar": 21.521,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -776.6,
+        "end_eur": 37566.0
+      },
+      "fill_ratio": 1.0,
+      "cap_hits": 0,
+      "sleeve_cost_eur": 4006.62,
+      "unit_ends": {
+        "donch10": 26101.93,
+        "donch_fri10": 30035.76,
+        "donch_fri": 25852.71,
+        "short_weakest": 37085.38
+      },
+      "variant": "unit_original",
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -139.45,
+          "end_eur": 19860.55
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 1166.07,
+          "end_eur": 21026.62
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 865.24,
+          "end_eur": 21891.86
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 897.87,
+          "end_eur": 22789.73
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": 1623.65,
+          "end_eur": 24413.38
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 4763.77,
+          "end_eur": 29177.15
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 1864.45,
+          "end_eur": 31041.6
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": 607.46,
+          "end_eur": 31649.06
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 2554.96,
+          "end_eur": 34204.02
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 4138.58,
+          "end_eur": 38342.6
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -776.6,
+          "end_eur": 37566.0
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 1777.19,
+          "end_eur": 39343.19
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 8644.28,
+          "end_eur": 47987.47
+        }
+      ]
+    },
+    {
+      "book_eur": 20000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 12650.77,
+      "end_eur": 32650.77,
+      "return_pct": 63.25,
+      "max_dd_eur": -2494.17,
+      "max_dd_pct": -12.47,
+      "calmar": 5.072,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -1045.85,
+        "end_eur": 27765.15
+      },
+      "fill_ratio": 0.9895,
+      "cap_hits": 11,
+      "sleeve_cost_eur": 15107.19,
+      "unit_ends": {
+        "donch10": 18616.63,
+        "donch_fri10": 14792.18,
+        "donch_fri": 14793.67,
+        "short_weakest": 30011.6
+      },
+      "variant": "unit_realistic",
+      "naive_pnl_eur": 27929.76,
+      "naive_end_eur": 47929.76,
+      "scale_vs_published_linear_pct": 45.3,
+      "scale_vs_20k_realistic_pct": 100.0,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -239.3,
+          "end_eur": 19760.7
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 263.68,
+          "end_eur": 20024.38
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 527.64,
+          "end_eur": 20552.02
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 669.99,
+          "end_eur": 21222.01
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": -32.06,
+          "end_eur": 21189.95
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 3407.83,
+          "end_eur": 24597.78
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 1152.34,
+          "end_eur": 25750.12
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": -571.81,
+          "end_eur": 25178.31
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 695.09,
+          "end_eur": 25873.4
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 2937.6,
+          "end_eur": 28811.0
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -1045.85,
+          "end_eur": 27765.15
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 196.69,
+          "end_eur": 27961.84
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 4688.93,
+          "end_eur": 32650.77
+        }
+      ]
+    },
+    {
+      "book_eur": 50000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 32200.16,
+      "end_eur": 82200.16,
+      "return_pct": 64.4,
+      "max_dd_eur": -5225.73,
+      "max_dd_pct": -10.45,
+      "calmar": 6.162,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -2479.38,
+        "end_eur": 69775.8
+      },
+      "fill_ratio": 0.9769,
+      "cap_hits": 23,
+      "sleeve_cost_eur": 38165.3,
+      "unit_ends": {
+        "donch10": 48795.46,
+        "donch_fri10": 37293.11,
+        "donch_fri": 36052.11,
+        "short_weakest": 73783.09
+      },
+      "variant": "unit_realistic",
+      "naive_pnl_eur": 69824.4,
+      "naive_end_eur": 119824.4,
+      "scale_vs_published_linear_pct": 46.1,
+      "scale_vs_20k_realistic_pct": 101.8,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -649.82,
+          "end_eur": 49350.18
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 472.01,
+          "end_eur": 49822.19
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 1299.87,
+          "end_eur": 51122.06
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 1611.36,
+          "end_eur": 52733.42
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": 975.48,
+          "end_eur": 53708.9
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 7844.37,
+          "end_eur": 61553.27
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 2793.47,
+          "end_eur": 64346.74
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": -1423.01,
+          "end_eur": 62923.73
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 2363.92,
+          "end_eur": 65287.65
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 6967.53,
+          "end_eur": 72255.18
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -2479.38,
+          "end_eur": 69775.8
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 431.98,
+          "end_eur": 70207.78
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 11992.38,
+          "end_eur": 82200.16
+        }
+      ]
+    },
+    {
+      "book_eur": 100000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 57624.58,
+      "end_eur": 157624.58,
+      "return_pct": 57.62,
+      "max_dd_eur": -13534.17,
+      "max_dd_pct": -13.53,
+      "calmar": 4.258,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -4244.65,
+        "end_eur": 135096.93
+      },
+      "fill_ratio": 0.9604,
+      "cap_hits": 33,
+      "sleeve_cost_eur": 75438.74,
+      "unit_ends": {
+        "donch10": 94781.69,
+        "donch_fri10": 63813.56,
+        "donch_fri": 62190.71,
+        "short_weakest": 147029.87
+      },
+      "variant": "unit_realistic",
+      "naive_pnl_eur": 139648.8,
+      "naive_end_eur": 239648.8,
+      "scale_vs_published_linear_pct": 41.3,
+      "scale_vs_20k_realistic_pct": 91.1,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -1441.09,
+          "end_eur": 98558.91
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 191.27,
+          "end_eur": 98750.18
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 2359.25,
+          "end_eur": 101109.43
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 2987.77,
+          "end_eur": 104097.2
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": -961.84,
+          "end_eur": 103135.36
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 16612.6,
+          "end_eur": 119747.96
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 5304.26,
+          "end_eur": 125052.22
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": -2667.78,
+          "end_eur": 122384.44
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 3531.2,
+          "end_eur": 125915.64
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 13425.94,
+          "end_eur": 139341.58
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -4244.65,
+          "end_eur": 135096.93
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 426.81,
+          "end_eur": 135523.74
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 22100.84,
+          "end_eur": 157624.58
+        }
+      ]
+    },
+    {
+      "book_eur": 20000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 8059.61,
+      "end_eur": 28059.61,
+      "return_pct": 40.3,
+      "max_dd_eur": -4537.19,
+      "max_dd_pct": -22.69,
+      "calmar": 1.776,
+      "worst_month": {
+        "month": "2026-03",
+        "pnl_eur": -1669.26,
+        "end_eur": 23054.12
+      },
+      "fill_ratio": 0.9979,
+      "cap_hits": 3,
+      "stacked_days": 12,
+      "fills": 219,
+      "fees_eur": 2678.81,
+      "spread_eur": 2954.88,
+      "impact_eur": 1735.44,
+      "funding_eur": -66.06,
+      "cost_eur": 7435.18,
+      "vol_30d_peak_eur": 184841.88,
+      "taker_fee_end": 0.002,
+      "median_participation": 0.0014,
+      "cap_by_base": {
+        "ATOM": 3
+      },
+      "scale_vs_linear_pct": null,
+      "variant": "live_combined",
+      "naive_pnl_eur": 27929.76,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": 296.3,
+          "end_eur": 20296.3
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 230.09,
+          "end_eur": 20526.39
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 1688.79,
+          "end_eur": 22215.18
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": -301.83,
+          "end_eur": 21913.35
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": 15.4,
+          "end_eur": 21928.75
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 2794.63,
+          "end_eur": 24723.38
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": -1669.26,
+          "end_eur": 23054.12
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": 1105.19,
+          "end_eur": 24159.31
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 702.73,
+          "end_eur": 24862.04
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 1698.77,
+          "end_eur": 26560.81
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -1235.57,
+          "end_eur": 25325.24
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 1816.45,
+          "end_eur": 27141.69
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 917.92,
+          "end_eur": 28059.61
+        }
+      ]
+    },
+    {
+      "book_eur": 50000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 19068.63,
+      "end_eur": 69068.63,
+      "return_pct": 38.14,
+      "max_dd_eur": -11499.78,
+      "max_dd_pct": -23.0,
+      "calmar": 1.658,
+      "worst_month": {
+        "month": "2026-03",
+        "pnl_eur": -4325.05,
+        "end_eur": 57080.02
+      },
+      "fill_ratio": 0.9902,
+      "cap_hits": 6,
+      "stacked_days": 12,
+      "fills": 221,
+      "fees_eur": 5690.47,
+      "spread_eur": 7160.4,
+      "impact_eur": 6463.84,
+      "funding_eur": -165.14,
+      "cost_eur": 19479.85,
+      "vol_30d_peak_eur": 462009.06,
+      "taker_fee_end": 0.0018,
+      "median_participation": 0.0035,
+      "cap_by_base": {
+        "ATOM": 6
+      },
+      "scale_vs_linear_pct": null,
+      "variant": "live_combined",
+      "naive_pnl_eur": 69824.4,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": 711.21,
+          "end_eur": 50711.21
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 491.01,
+          "end_eur": 51202.22
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 4189.54,
+          "end_eur": 55391.76
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": -823.08,
+          "end_eur": 54568.68
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": -1.23,
+          "end_eur": 54567.45
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 6837.62,
+          "end_eur": 61405.07
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": -4325.05,
+          "end_eur": 57080.02
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": 2475.01,
+          "end_eur": 59555.03
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 1802.42,
+          "end_eur": 61357.45
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 4209.0,
+          "end_eur": 65566.45
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -3114.01,
+          "end_eur": 62452.44
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 4521.71,
+          "end_eur": 66974.15
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 2094.48,
+          "end_eur": 69068.63
+        }
+      ]
+    },
+    {
+      "book_eur": 100000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 35855.56,
+      "end_eur": 135855.56,
+      "return_pct": 35.86,
+      "max_dd_eur": -23364.63,
+      "max_dd_pct": -23.36,
+      "calmar": 1.535,
+      "worst_month": {
+        "month": "2026-03",
+        "pnl_eur": -9042.1,
+        "end_eur": 113075.52
+      },
+      "fill_ratio": 0.9803,
+      "cap_hits": 12,
+      "stacked_days": 13,
+      "fills": 224,
+      "fees_eur": 10112.0,
+      "spread_eur": 13829.63,
+      "impact_eur": 16921.36,
+      "funding_eur": -330.02,
+      "cost_eur": 41193.01,
+      "vol_30d_peak_eur": 923802.42,
+      "taker_fee_end": 0.0016,
+      "median_participation": 0.007,
+      "cap_by_base": {
+        "ATOM": 10,
+        "OP": 2
+      },
+      "scale_vs_linear_pct": null,
+      "variant": "live_combined",
+      "naive_pnl_eur": 139648.8,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": 1355.83,
+          "end_eur": 101355.83
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 716.87,
+          "end_eur": 102072.7
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 8263.59,
+          "end_eur": 110336.29
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": -1942.01,
+          "end_eur": 108394.28
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": 408.49,
+          "end_eur": 108802.77
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 13314.85,
+          "end_eur": 122117.62
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": -9042.1,
+          "end_eur": 113075.52
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": 4572.03,
+          "end_eur": 117647.55
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 3780.83,
+          "end_eur": 121428.38
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 8267.54,
+          "end_eur": 129695.92
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -6393.34,
+          "end_eur": 123302.58
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 8829.16,
+          "end_eur": 132131.74
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 3723.82,
+          "end_eur": 135855.56
+        }
+      ]
+    },
+    {
+      "book_eur": 20000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 2,
+      "pnl_eur": 12650.77,
+      "end_eur": 32650.77,
+      "return_pct": 63.25,
+      "max_dd_eur": -2494.17,
+      "max_dd_pct": -12.47,
+      "calmar": 5.072,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -1045.85,
+        "end_eur": 27765.15
+      },
+      "fill_ratio": 0.9895,
+      "cap_hits": 11,
+      "sleeve_cost_eur": 15107.19,
+      "unit_ends": {
+        "donch10": 18616.63,
+        "donch_fri10": 14792.18,
+        "donch_fri": 14793.67,
+        "short_weakest": 30011.6
+      },
+      "variant": "unit_spread_slots",
+      "naive_pnl_eur": 27929.76,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -239.3,
+          "end_eur": 19760.7
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": 263.68,
+          "end_eur": 20024.38
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 527.64,
+          "end_eur": 20552.02
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 669.99,
+          "end_eur": 21222.01
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": -32.06,
+          "end_eur": 21189.95
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 3407.83,
+          "end_eur": 24597.78
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 1152.34,
+          "end_eur": 25750.12
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": -571.81,
+          "end_eur": 25178.31
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 695.09,
+          "end_eur": 25873.4
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 2937.6,
+          "end_eur": 28811.0
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -1045.85,
+          "end_eur": 27765.15
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 196.69,
+          "end_eur": 27961.84
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 4688.93,
+          "end_eur": 32650.77
+        }
+      ]
+    },
+    {
+      "book_eur": 50000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 5,
+      "pnl_eur": 27371.93,
+      "end_eur": 77371.93,
+      "return_pct": 54.74,
+      "max_dd_eur": -5874.1,
+      "max_dd_pct": -11.75,
+      "calmar": 4.66,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -2696.0,
+        "end_eur": 67412.86
+      },
+      "fill_ratio": 0.9817,
+      "cap_hits": 21,
+      "sleeve_cost_eur": 40046.96,
+      "unit_ends": {
+        "donch10": 43385.46,
+        "donch_fri10": 29875.39,
+        "donch_fri": 33391.09,
+        "short_weakest": 73783.09
+      },
+      "variant": "unit_spread_slots",
+      "naive_pnl_eur": 69824.4,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -649.82,
+          "end_eur": 49350.18
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": -210.88,
+          "end_eur": 49139.3
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 1299.86,
+          "end_eur": 50439.16
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 1611.36,
+          "end_eur": 52050.52
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": 327.11,
+          "end_eur": 52377.63
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 7844.37,
+          "end_eur": 60222.0
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 2119.28,
+          "end_eur": 62341.28
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": -504.34,
+          "end_eur": 61836.94
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 1304.39,
+          "end_eur": 63141.33
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 6967.53,
+          "end_eur": 70108.86
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -2696.0,
+          "end_eur": 67412.86
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 746.29,
+          "end_eur": 68159.15
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 9212.78,
+          "end_eur": 77371.93
+        }
+      ]
+    },
+    {
+      "book_eur": 100000.0,
+      "mode": "realistic",
+      "compound": false,
+      "max_pos": 10,
+      "pnl_eur": 48633.58,
+      "end_eur": 148633.58,
+      "return_pct": 48.63,
+      "max_dd_eur": -15049.17,
+      "max_dd_pct": -15.05,
+      "calmar": 3.232,
+      "worst_month": {
+        "month": "2026-07",
+        "pnl_eur": -4615.0,
+        "end_eur": 130766.62
+      },
+      "fill_ratio": 0.9694,
+      "cap_hits": 33,
+      "sleeve_cost_eur": 78878.07,
+      "unit_ends": {
+        "donch10": 83397.46,
+        "donch_fri10": 50774.18,
+        "donch_fri": 55495.95,
+        "short_weakest": 147029.87
+      },
+      "variant": "unit_spread_slots",
+      "naive_pnl_eur": 139648.8,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl_eur": -1441.09,
+          "end_eur": 98558.91
+        },
+        {
+          "month": "2025-10",
+          "pnl_eur": -1293.58,
+          "end_eur": 97265.33
+        },
+        {
+          "month": "2025-11",
+          "pnl_eur": 2359.25,
+          "end_eur": 99624.58
+        },
+        {
+          "month": "2025-12",
+          "pnl_eur": 2987.77,
+          "end_eur": 102612.35
+        },
+        {
+          "month": "2026-01",
+          "pnl_eur": -2476.83,
+          "end_eur": 100135.52
+        },
+        {
+          "month": "2026-02",
+          "pnl_eur": 16612.6,
+          "end_eur": 116748.12
+        },
+        {
+          "month": "2026-03",
+          "pnl_eur": 3914.89,
+          "end_eur": 120663.01
+        },
+        {
+          "month": "2026-04",
+          "pnl_eur": -412.09,
+          "end_eur": 120250.92
+        },
+        {
+          "month": "2026-05",
+          "pnl_eur": 1704.76,
+          "end_eur": 121955.68
+        },
+        {
+          "month": "2026-06",
+          "pnl_eur": 13425.94,
+          "end_eur": 135381.62
+        },
+        {
+          "month": "2026-07",
+          "pnl_eur": -4615.0,
+          "end_eur": 130766.62
+        },
+        {
+          "month": "2026-08",
+          "pnl_eur": 1031.64,
+          "end_eur": 131798.26
+        },
+        {
+          "month": "2026-09",
+          "pnl_eur": 16835.32,
+          "end_eur": 148633.58
+        }
+      ]
+    }
+  ],
+  "headline": {
+    "20000": {
+      "pnl_eur": 12650.77,
+      "return_pct": 63.25,
+      "max_dd_pct": -12.47,
+      "naive_pnl_eur": 27929.76,
+      "efficiency_vs_published_linear_pct": 45.3,
+      "efficiency_vs_20k_realistic_pct": 100.0,
+      "fill_ratio": 0.9895,
+      "end_eur": 32650.77
+    },
+    "50000": {
+      "pnl_eur": 32200.16,
+      "return_pct": 64.4,
+      "max_dd_pct": -10.45,
+      "naive_pnl_eur": 69824.4,
+      "efficiency_vs_published_linear_pct": 46.1,
+      "efficiency_vs_20k_realistic_pct": 101.8,
+      "fill_ratio": 0.9769,
+      "end_eur": 82200.16
+    },
+    "100000": {
+      "pnl_eur": 57624.58,
+      "return_pct": 57.62,
+      "max_dd_pct": -13.53,
+      "naive_pnl_eur": 139648.8,
+      "efficiency_vs_published_linear_pct": 41.3,
+      "efficiency_vs_20k_realistic_pct": 91.1,
+      "fill_ratio": 0.9604,
+      "end_eur": 157624.58
+    }
+  }
+}
