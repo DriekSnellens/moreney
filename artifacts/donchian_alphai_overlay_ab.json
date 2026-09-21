@@ -1,0 +1,914 @@
+{
+  "generated_at": "2026-09-21T11:30:03.808304+00:00",
+  "live_engine_changed": false,
+  "book_eur": 20000.0,
+  "fee_rt": 0.003,
+  "window": {
+    "start": "2026-09-07",
+    "end": "2026-09-20",
+    "days": 14
+  },
+  "regime_days": {
+    "risk_on": 6,
+    "risk_off": 8
+  },
+  "alphai": {
+    "sources": [
+      "artifacts/alphai_pick_outcomes_week_snap.json",
+      "artifacts/alphai_pick_outcomes_live_copy.json",
+      "artifacts/alphai_pick_outcomes_merged.json",
+      "data/alphai/daily_recommendations.json"
+    ],
+    "sessions": 1153,
+    "first": "2026-09-07T15:00:43.224810+00:00",
+    "last": "2026-09-20T01:32:01.966380+00:00",
+    "macro_rate": 0.374,
+    "avoid_sessions": 0,
+    "days_with_picks": 14,
+    "unique_picks": [
+      "ADA",
+      "AVAX",
+      "BCH",
+      "BNB",
+      "DOGE",
+      "ETH",
+      "LINK",
+      "LTC",
+      "NEAR",
+      "SOL",
+      "TRX",
+      "UNI",
+      "XRP"
+    ]
+  },
+  "data_ceiling_nl": "Candle-historie is ~1y, AlphaI-labels starten 7 sep 2026. Zonder labels is geen echte with/without Donchian-A/B over het loop-jaar mogelijk.",
+  "mix": {
+    "risk_on": {
+      "donch_fri10": 0.5,
+      "donch10": 0.5
+    },
+    "mid": {
+      "cash": 1.0
+    },
+    "risk_off": {
+      "donch_fri": 0.3,
+      "cash": 0.7
+    }
+  },
+  "note": "risk_off cash 70% ipv short-weakest \u2014 deze test is Donchian+AlphaI, niet de short-sleeve.",
+  "overlap_mix": {
+    "baseline": {
+      "pnl_eur": 3771.37,
+      "max_dd_pct": -3.59,
+      "calmar": 5.258,
+      "end_eur": 23771.37,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 7,
+          "entries_nonpick": 5,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "exits_channel": 1,
+          "entries_pick": 2
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 5,
+          "entries_nonpick": 3,
+          "days_macro": 4,
+          "exits_channel": 3,
+          "entries_pick": 2
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 6,
+          "entries_nonpick": 4,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "entries_pick": 2
+        }
+      },
+      "delta_vs_baseline_eur": 0.0,
+      "sleeve_end": {
+        "donch_fri10": 21877.81,
+        "donch10": 20300.26,
+        "donch_fri": 23260.95
+      }
+    },
+    "require_pick": {
+      "pnl_eur": 2821.39,
+      "max_dd_pct": -1.7,
+      "calmar": 8.294,
+      "end_eur": 22821.39,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "blocked_nonpick": 22,
+          "entries": 5,
+          "entries_pick": 5,
+          "days_macro": 4,
+          "exits_friday": 5
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "blocked_nonpick": 15,
+          "entries": 3,
+          "entries_pick": 3,
+          "days_macro": 4,
+          "exits_channel": 1
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "blocked_nonpick": 19,
+          "days_macro": 4,
+          "entries": 3,
+          "entries_pick": 3,
+          "exits_friday": 3
+        }
+      },
+      "delta_vs_baseline_eur": -949.98,
+      "sleeve_end": {
+        "donch_fri10": 21815.68,
+        "donch10": 22663.05,
+        "donch_fri": 22516.07
+      }
+    },
+    "rank_pick": {
+      "pnl_eur": 4212.59,
+      "max_dd_pct": -3.15,
+      "calmar": 6.679,
+      "end_eur": 24212.59,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 7,
+          "entries_pick": 5,
+          "entries_nonpick": 2,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "exits_channel": 1
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 5,
+          "entries_pick": 2,
+          "entries_nonpick": 3,
+          "days_macro": 4,
+          "exits_channel": 3
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 6,
+          "entries_nonpick": 3,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "entries_pick": 3
+        }
+      },
+      "delta_vs_baseline_eur": 441.22,
+      "sleeve_end": {
+        "donch_fri10": 20734.81,
+        "donch10": 24928.94,
+        "donch_fri": 21929.94
+      }
+    },
+    "size_pick": {
+      "pnl_eur": 4245.11,
+      "max_dd_pct": -2.55,
+      "calmar": 8.329,
+      "end_eur": 24245.11,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 7,
+          "entries_nonpick": 5,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "exits_channel": 1,
+          "entries_pick": 2
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 5,
+          "entries_nonpick": 3,
+          "days_macro": 4,
+          "exits_channel": 3,
+          "entries_pick": 2
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 6,
+          "entries_nonpick": 4,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "entries_pick": 2
+        }
+      },
+      "delta_vs_baseline_eur": 473.74,
+      "sleeve_end": {
+        "donch_fri10": 22660.4,
+        "donch10": 22021.98,
+        "donch_fri": 23580.45
+      }
+    },
+    "skip_macro": {
+      "pnl_eur": 3771.37,
+      "max_dd_pct": -3.59,
+      "calmar": 5.258,
+      "end_eur": 23771.37,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 7,
+          "entries_nonpick": 5,
+          "days_macro": 4,
+          "blocked_macro": 3,
+          "exits_friday": 6,
+          "exits_channel": 1,
+          "entries_pick": 2
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 5,
+          "entries_nonpick": 3,
+          "days_macro": 4,
+          "blocked_macro": 4,
+          "exits_channel": 3,
+          "entries_pick": 2
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 6,
+          "entries_nonpick": 4,
+          "days_macro": 4,
+          "blocked_macro": 3,
+          "exits_friday": 6,
+          "entries_pick": 2
+        }
+      },
+      "delta_vs_baseline_eur": 0.0,
+      "sleeve_end": {
+        "donch_fri10": 21877.81,
+        "donch10": 20300.26,
+        "donch_fri": 23260.95
+      }
+    },
+    "flatten_macro": {
+      "pnl_eur": 4642.55,
+      "max_dd_pct": -2.9,
+      "calmar": 7.999,
+      "end_eur": 24642.55,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 9,
+          "entries_nonpick": 7,
+          "days_macro": 4,
+          "exits_macro": 3,
+          "exits_friday": 6,
+          "entries_pick": 2
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 8,
+          "entries_nonpick": 6,
+          "days_macro": 4,
+          "exits_macro": 6,
+          "entries_pick": 2
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 8,
+          "entries_nonpick": 6,
+          "days_macro": 4,
+          "exits_macro": 2,
+          "exits_friday": 6,
+          "entries_pick": 2
+        }
+      },
+      "delta_vs_baseline_eur": 871.18,
+      "sleeve_end": {
+        "donch_fri10": 22085.38,
+        "donch10": 22520.45,
+        "donch_fri": 23481.64
+      }
+    },
+    "dump_nonpick": {
+      "pnl_eur": 3908.03,
+      "max_dd_pct": -2.8,
+      "calmar": 6.97,
+      "end_eur": 23908.03,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 13,
+          "entries_nonpick": 11,
+          "exits_dump_nonpick": 7,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "entries_pick": 2
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 15,
+          "entries_nonpick": 13,
+          "exits_dump_nonpick": 13,
+          "days_macro": 4,
+          "entries_pick": 2
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 12,
+          "entries_nonpick": 10,
+          "exits_dump_nonpick": 6,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "entries_pick": 2
+        }
+      },
+      "delta_vs_baseline_eur": 136.66,
+      "sleeve_end": {
+        "donch_fri10": 22551.1,
+        "donch10": 21388.87,
+        "donch_fri": 23441.23
+      }
+    },
+    "avoid_block": {
+      "pnl_eur": 3771.37,
+      "max_dd_pct": -3.59,
+      "calmar": 5.258,
+      "end_eur": 23771.37,
+      "trades_hint": {
+        "donch_fri10": {
+          "days_with_alphai": 14,
+          "entries": 7,
+          "entries_nonpick": 5,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "exits_channel": 1,
+          "entries_pick": 2
+        },
+        "donch10": {
+          "days_with_alphai": 14,
+          "entries": 5,
+          "entries_nonpick": 3,
+          "days_macro": 4,
+          "exits_channel": 3,
+          "entries_pick": 2
+        },
+        "donch_fri": {
+          "days_with_alphai": 14,
+          "entries": 6,
+          "entries_nonpick": 4,
+          "days_macro": 4,
+          "exits_friday": 6,
+          "entries_pick": 2
+        }
+      },
+      "delta_vs_baseline_eur": 0.0,
+      "sleeve_end": {
+        "donch_fri10": 21877.81,
+        "donch10": 20300.26,
+        "donch_fri": 23260.95
+      }
+    }
+  },
+  "unit_donch10": {
+    "baseline": {
+      "pnl_eur": 300.26,
+      "trades": 5,
+      "wins": 2,
+      "stats": {
+        "days_with_alphai": 14,
+        "entries": 5,
+        "entries_nonpick": 3,
+        "days_macro": 4,
+        "exits_channel": 3,
+        "entries_pick": 2
+      }
+    },
+    "require_pick": {
+      "pnl_eur": 2663.05,
+      "trades": 3,
+      "wins": 2,
+      "stats": {
+        "days_with_alphai": 14,
+        "blocked_nonpick": 15,
+        "entries": 3,
+        "entries_pick": 3,
+        "days_macro": 4,
+        "exits_channel": 1
+      }
+    },
+    "skip_macro": {
+      "pnl_eur": 300.26,
+      "trades": 5,
+      "wins": 2,
+      "stats": {
+        "days_with_alphai": 14,
+        "entries": 5,
+        "entries_nonpick": 3,
+        "days_macro": 4,
+        "blocked_macro": 4,
+        "exits_channel": 3,
+        "entries_pick": 2
+      }
+    },
+    "size_pick": {
+      "pnl_eur": 2021.98,
+      "trades": 5,
+      "wins": 2,
+      "stats": {
+        "days_with_alphai": 14,
+        "entries": 5,
+        "entries_nonpick": 3,
+        "days_macro": 4,
+        "exits_channel": 3,
+        "entries_pick": 2
+      }
+    }
+  },
+  "candidate_quality": {
+    "n_breakouts": 44,
+    "n_pick": 9,
+    "n_nonpick": 35,
+    "ret_1d_pick": {
+      "n": 9,
+      "mean": 0.03122
+    },
+    "ret_1d_nonpick": {
+      "n": 35,
+      "mean": 0.01467
+    },
+    "ret_5d_pick": {
+      "n": 1,
+      "mean": -0.081
+    },
+    "ret_5d_nonpick": {
+      "n": 16,
+      "mean": -0.062
+    },
+    "xs_btc_1d_pick": {
+      "n": 9,
+      "mean": 0.01726
+    },
+    "xs_btc_1d_nonpick": {
+      "n": 35,
+      "mean": 0.01686
+    },
+    "xs_btc_5d_pick": {
+      "n": 1,
+      "mean": -0.06084
+    },
+    "xs_btc_5d_nonpick": {
+      "n": 16,
+      "mean": -0.05185
+    }
+  },
+  "candidate_sample": [
+    {
+      "date": "2026-09-07",
+      "base": "LINK",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.01815,
+      "ret_5d": -0.09458,
+      "xs_btc_1d": -0.00986,
+      "xs_btc_5d": -0.07442
+    },
+    {
+      "date": "2026-09-07",
+      "base": "DOT",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.1744,
+      "ret_5d": -0.03359,
+      "xs_btc_1d": 0.18269,
+      "xs_btc_5d": -0.01343
+    },
+    {
+      "date": "2026-09-07",
+      "base": "AVAX",
+      "pick": true,
+      "macro": false,
+      "ret_1d": -0.00911,
+      "ret_5d": -0.081,
+      "xs_btc_1d": -0.00082,
+      "xs_btc_5d": -0.06084
+    },
+    {
+      "date": "2026-09-07",
+      "base": "LTC",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.01844,
+      "ret_5d": -0.02604,
+      "xs_btc_1d": -0.01016,
+      "xs_btc_5d": -0.00587
+    },
+    {
+      "date": "2026-09-07",
+      "base": "ATOM",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.13697,
+      "ret_5d": -0.01589,
+      "xs_btc_1d": 0.14526,
+      "xs_btc_5d": 0.00427
+    },
+    {
+      "date": "2026-09-07",
+      "base": "SUI",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.00891,
+      "ret_5d": -0.11157,
+      "xs_btc_1d": -0.00062,
+      "xs_btc_5d": -0.09141
+    },
+    {
+      "date": "2026-09-07",
+      "base": "FET",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.02307,
+      "ret_5d": -0.08594,
+      "xs_btc_1d": -0.01478,
+      "xs_btc_5d": -0.06578
+    },
+    {
+      "date": "2026-09-08",
+      "base": "ADA",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.03455,
+      "ret_5d": -0.07,
+      "xs_btc_1d": -0.03219,
+      "xs_btc_5d": -0.05195
+    },
+    {
+      "date": "2026-09-08",
+      "base": "DOT",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.10173,
+      "ret_5d": -0.19471,
+      "xs_btc_1d": -0.09938,
+      "xs_btc_5d": -0.17666
+    },
+    {
+      "date": "2026-09-08",
+      "base": "AVAX",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.02664,
+      "ret_5d": -0.08683,
+      "xs_btc_1d": -0.02429,
+      "xs_btc_5d": -0.06878
+    },
+    {
+      "date": "2026-09-08",
+      "base": "ATOM",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.00125,
+      "ret_5d": -0.1436,
+      "xs_btc_1d": 0.00361,
+      "xs_btc_5d": -0.12555
+    },
+    {
+      "date": "2026-09-08",
+      "base": "FET",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.05216,
+      "ret_5d": -0.07013,
+      "xs_btc_1d": -0.0498,
+      "xs_btc_5d": -0.05208
+    },
+    {
+      "date": "2026-09-09",
+      "base": "NEAR",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.01633,
+      "ret_5d": -0.00033,
+      "xs_btc_1d": 0.00445,
+      "xs_btc_5d": -0.0056
+    },
+    {
+      "date": "2026-09-09",
+      "base": "ATOM",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.03193,
+      "ret_5d": -0.14486,
+      "xs_btc_1d": -0.01115,
+      "xs_btc_5d": -0.15013
+    },
+    {
+      "date": "2026-09-11",
+      "base": "ETH",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.00454,
+      "ret_5d": -0.0287,
+      "xs_btc_1d": 0.00314,
+      "xs_btc_5d": -0.02592
+    },
+    {
+      "date": "2026-09-11",
+      "base": "NEAR",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.00314,
+      "ret_5d": 0.11926,
+      "xs_btc_1d": 0.00174,
+      "xs_btc_5d": 0.12204
+    },
+    {
+      "date": "2026-09-14",
+      "base": "XRP",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.09725,
+      "ret_5d": -0.00443,
+      "xs_btc_1d": -0.06546,
+      "xs_btc_5d": -0.04834
+    },
+    {
+      "date": "2026-09-17",
+      "base": "NEAR",
+      "pick": true,
+      "macro": false,
+      "ret_1d": 0.19183,
+      "ret_5d": null,
+      "xs_btc_1d": 0.13524,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-17",
+      "base": "UNI",
+      "pick": true,
+      "macro": false,
+      "ret_1d": 0.13459,
+      "ret_5d": null,
+      "xs_btc_1d": 0.078,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "ETH",
+      "pick": true,
+      "macro": true,
+      "ret_1d": 0.008,
+      "ret_5d": null,
+      "xs_btc_1d": 0.0033,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "SOL",
+      "pick": true,
+      "macro": true,
+      "ret_1d": -0.01414,
+      "ret_5d": null,
+      "xs_btc_1d": -0.01883,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "AVAX",
+      "pick": false,
+      "macro": true,
+      "ret_1d": 0.231,
+      "ret_5d": null,
+      "xs_btc_1d": 0.2263,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "LTC",
+      "pick": false,
+      "macro": true,
+      "ret_1d": 0.00622,
+      "ret_5d": null,
+      "xs_btc_1d": 0.00153,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "NEAR",
+      "pick": false,
+      "macro": true,
+      "ret_1d": -0.04478,
+      "ret_5d": null,
+      "xs_btc_1d": -0.04947,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "OP",
+      "pick": false,
+      "macro": true,
+      "ret_1d": 0.00228,
+      "ret_5d": null,
+      "xs_btc_1d": -0.00241,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "ARB",
+      "pick": false,
+      "macro": true,
+      "ret_1d": -0.06871,
+      "ret_5d": null,
+      "xs_btc_1d": -0.07341,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "FET",
+      "pick": false,
+      "macro": true,
+      "ret_1d": -0.04475,
+      "ret_5d": null,
+      "xs_btc_1d": -0.04944,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-18",
+      "base": "UNI",
+      "pick": true,
+      "macro": true,
+      "ret_1d": -0.02458,
+      "ret_5d": null,
+      "xs_btc_1d": -0.02927,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "ETH",
+      "pick": true,
+      "macro": false,
+      "ret_1d": 0.00652,
+      "ret_5d": null,
+      "xs_btc_1d": 0.00578,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "ADA",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.00187,
+      "ret_5d": null,
+      "xs_btc_1d": 0.00113,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "DOGE",
+      "pick": false,
+      "macro": false,
+      "ret_1d": -0.00307,
+      "ret_5d": null,
+      "xs_btc_1d": -0.0038,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "LINK",
+      "pick": true,
+      "macro": false,
+      "ret_1d": 0.00919,
+      "ret_5d": null,
+      "xs_btc_1d": 0.00845,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "AVAX",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.12155,
+      "ret_5d": null,
+      "xs_btc_1d": 0.12081,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "LTC",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.00661,
+      "ret_5d": null,
+      "xs_btc_1d": 0.00588,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "NEAR",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.16187,
+      "ret_5d": null,
+      "xs_btc_1d": 0.16113,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "OP",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.03373,
+      "ret_5d": null,
+      "xs_btc_1d": 0.033,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "ARB",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.06133,
+      "ret_5d": null,
+      "xs_btc_1d": 0.06059,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "SUI",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.04786,
+      "ret_5d": null,
+      "xs_btc_1d": 0.04713,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-19",
+      "base": "UNI",
+      "pick": false,
+      "macro": false,
+      "ret_1d": 0.00972,
+      "ret_5d": null,
+      "xs_btc_1d": 0.00899,
+      "xs_btc_5d": null
+    },
+    {
+      "date": "2026-09-20",
+      "base": "AVAX",
+      "pick": true,
+      "macro": false,
+      "ret_1d": -0.02128,
+      "ret_5d": null,
+      "xs_btc_1d": -0.0265,
+      "xs_btc_5d": null
+    }
+  ],
+  "one_year_donchian_mix_no_alphai": {
+    "window": {
+      "start": "2025-09-20",
+      "end": "2026-09-20"
+    },
+    "pnl_eur": 15227.94,
+    "max_dd_pct": -9.02,
+    "calmar": 8.443
+  },
+  "verdict": {
+    "add_to_live_donchian": false,
+    "confidence": "LOW",
+    "headline_nl": "Niet verwerken in live Donchian. Picks-only kost ~\u20ac950 op 14 dagen; 1d excess vs BTC is gelijk voor pick vs non-pick. Rank/size/macro-plussen zijn \u00e9\u00e9n kort pad, geen 1y-bewijs.",
+    "why_nl": [
+      "AlphaI-labels: 1153 sessions, 2026-09-07\u20132026-09-20 (14 dagen). Het loop-jaar heeft geen AlphaI-tape.",
+      "require_pick -950 \u20ac \u2014 non-pick breakouts waren de winst.",
+      "Breakout 1d excess vs BTC: pick 0.01726 (n=9) vs non-pick 0.01686 (n=35) \u2014 praktisch gelijk.",
+      "rank_pick +441 / size_pick +474 / flatten_macro +871 op 14 dagen is te weinig om live knoppen te wijzigen.",
+      "avoid_block en skip_macro = 0 \u20ac (avoid leeg; macro viel niet samen met extra entries)."
+    ],
+    "helpful_modes": [
+      "rank_pick",
+      "size_pick",
+      "flatten_macro",
+      "dump_nonpick"
+    ],
+    "hurt_modes": [
+      "require_pick"
+    ],
+    "deltas": {
+      "require_pick": -949.98,
+      "rank_pick": 441.22,
+      "skip_macro": 0.0,
+      "size_pick": 473.74,
+      "flatten_macro": 871.18,
+      "dump_nonpick": 136.66
+    },
+    "pick_xs_btc_1d": 0.01726,
+    "nonpick_xs_btc_1d": 0.01686,
+    "pick_xs_btc_5d": -0.06084,
+    "nonpick_xs_btc_5d": -0.05185,
+    "pick_xs_btc_5d_n": 1
+  }
+}
