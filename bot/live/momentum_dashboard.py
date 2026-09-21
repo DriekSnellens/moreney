@@ -756,8 +756,10 @@ def _earnings_masthead(
     pill: str,
     venue: str,
     show_volatile: bool = False,
+    show_mix: bool = False,
 ) -> str:
     """First-viewport composition: brand + week/month/all-time net."""
+    use_combined = bool(show_volatile or show_mix)
     if earnings is None:
         c_week = c_month = c_all = 0.0
         open_mtm = 0.0
@@ -765,14 +767,17 @@ def _earnings_masthead(
         core_w = vol_w = 0.0
         as_of = "—"
     else:
-        # Core-only masthead uses core sleeve totals when volatile is disabled.
-        sleeve = earnings.combined if show_volatile else earnings.core
+        # Mix / dual-sleeve masthead uses combined (Donchian + shorts + idle core).
+        sleeve = earnings.combined if use_combined else earnings.core
         c_week, c_month, c_all = sleeve.week_eur, sleeve.month_eur, sleeve.all_time_eur
         open_mtm = earnings.open_mtm_eur
         tw, tm, ta = sleeve.trades_week, sleeve.trades_month, sleeve.trades_all_time
         core_w, vol_w = earnings.core.week_eur, earnings.volatile.week_eur
         as_of = earnings.as_of
-    if show_volatile:
+    if show_mix:
+        week_meta = f"{tw} trades · mix deze week"
+        brand_sub = f"Momentum desk · mix · {venue}. "
+    elif show_volatile:
         week_meta = f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"
         brand_sub = f"Momentum desk · core + volatile · {venue}. "
     else:
@@ -794,7 +799,7 @@ def _earnings_masthead(
     day_eur = 0.0
     if earnings is not None:
         day_eur = (
-            earnings.combined.day_eur if show_volatile else earnings.core.day_eur
+            earnings.combined.day_eur if use_combined else earnings.core.day_eur
         )
     return (
         '<section class="masthead">'
@@ -1858,6 +1863,24 @@ def read_ledger_tail(path: str | Path, *, limit: int = 400) -> list[dict[str, An
     return rows
 
 
+def _ledger_fill_price(row: Mapping[str, Any]) -> Any:
+    """Core rows use ``price``; Donchian JSONL uses ``entry_price`` / ``exit_price``."""
+    if row.get("price") not in (None, ""):
+        return row.get("price")
+    ev = str(row.get("event") or "")
+    if ev.startswith("exit"):
+        return row.get("exit_price") if row.get("exit_price") not in (None, "") else row.get("entry_price")
+    return row.get("entry_price") if row.get("entry_price") not in (None, "") else row.get("exit_price")
+
+
+def _ledger_reason(row: Mapping[str, Any]) -> str:
+    reason = str(row.get("reason") or "")
+    sleeve = str(row.get("sleeve") or "")
+    if sleeve and reason:
+        return f"{sleeve} · {reason}"
+    return sleeve or reason
+
+
 def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
     fills = [r for r in rows if r.get("event") in {"entry", "exit", "entry_failed", "exit_failed"}]
     if not fills:
@@ -1869,6 +1892,11 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
     for r in reversed(fills[-40:]):
         ev = str(r.get("event"))
         ev_cls = "good" if ev == "entry" else ("bad" if ev.endswith("failed") else "")
+        px = _ledger_fill_price(r)
+        try:
+            px_txt = f"{float(px):,.4f}" if px not in (None, "") else "—"
+        except (TypeError, ValueError):
+            px_txt = "—"
         out.append(
             "<tr>"
             f"<td>{_ts(r.get('ts'))}</td>"
@@ -1876,14 +1904,14 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
             f"<td><strong>{escape(str(r.get('base') or ''))}</strong>"
             f" <span class='muted' style='font-size:.7rem'>{escape(str(r.get('venue') or ''))}"
             "</span></td>"
-            f"<td class='mono'>{(f'{float(r["price"]):,.4f}' if r.get('price') else '—')}</td>"
+            f"<td class='mono'>{px_txt}</td>"
             f"<td>{_fmt_eur(r.get('notional_eur'), signed=False)}</td>"
             f"<td>{_fmt_eur(r.get('fee_eur'), signed=False)}</td>"
             f"<td class='{_cls(r.get('gross_return'))}'>{_fmt_pct(r.get('gross_return'))}</td>"
             f"<td>{_fmt_pct(r.get('peak_return'))}</td>"
             f"<td class='{_cls(r.get('net_eur'))}'>{_fmt_eur(r.get('net_eur'))}</td>"
             f"<td class='muted' style='text-align:left;max-width:220px;overflow:hidden;"
-            f"text-overflow:ellipsis'>{escape(str(r.get('reason') or ''))}</td>"
+            f"text-overflow:ellipsis'>{escape(_ledger_reason(r))}</td>"
             "</tr>"
         )
     out.append("</tbody></table>")
@@ -2702,6 +2730,7 @@ def render_momentum_dashboard(
     show_short_weakest: bool = False,
     allocator: Mapping[str, Any] | None = None,
     donchian: Mapping[str, Any] | None = None,
+    donchian_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
@@ -2737,11 +2766,14 @@ def render_momentum_dashboard(
         for p in (status.get("positions") or [])
         if float(p.get("quantity") or 0.0) > 1e-12
     )
-    exits = [r for r in ledger_rows if r.get("event") == "exit"]
+    fill_src: list[Mapping[str, Any]] = list(ledger_rows)
+    if donchian is not None or donchian_ledger_rows is not None:
+        fill_src = list(donchian_ledger_rows or []) + list(short_weakest_ledger_rows or [])
+    exits = [r for r in fill_src if r.get("event") == "exit"]
     wins = sum(1 for r in exits if float(r.get("net_eur") or 0) > 0)
     win_rate = f"{100 * wins / len(exits):.0f}%" if exits else "—"
     fees = sum(
-        float(r.get("fee_eur") or 0) for r in ledger_rows if r.get("event") in {"entry", "exit"}
+        float(r.get("fee_eur") or 0) for r in fill_src if r.get("event") in {"entry", "exit"}
     )
     err = status.get("last_error")
     err_html = f'<div class="hint bad">Laatste fout: {escape(str(err))}</div>' if err else ""
@@ -2788,7 +2820,16 @@ def render_momentum_dashboard(
         else ""
     )
 
-    earnings_html = _earnings_masthead(earnings, pill=pill, venue=venue, show_volatile=show_vol)
+    show_sw = bool(show_short_weakest)
+    show_dc = donchian is not None or donchian_ledger_rows is not None
+    show_mix = bool(show_dc or show_sw)
+    earnings_html = _earnings_masthead(
+        earnings,
+        pill=pill,
+        venue=venue,
+        show_volatile=show_vol,
+        show_mix=show_mix,
+    )
 
     heroes = "".join(
         [
@@ -2827,9 +2868,11 @@ def render_momentum_dashboard(
     vol_earn = (
         _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
     )
-    show_sw = bool(show_short_weakest)
     sw_earn = (
         _sleeve_earnings_line(earnings.short_weakest if earnings else None) if show_sw else ""
+    )
+    dc_earn = (
+        _sleeve_earnings_line(earnings.donchian if earnings else None) if show_dc else ""
     )
     sleeves_html = (
         _sleeves_panel(
@@ -2840,7 +2883,7 @@ def render_momentum_dashboard(
         if (show_vol or show_sw)
         else ""
     )
-    if show_vol or show_sw:
+    if show_vol or show_sw or show_dc:
         pos_blocks = [
             '<div><div class="panel-head"><h2>Core · open posities</h2></div>'
             f"{_positions_table(status)}</div>"
@@ -2865,9 +2908,13 @@ def render_momentum_dashboard(
                     empty_text="Geen open paper-shorts — standby tot BTC &lt; SMA20.",
                 )}</div>"""
             )
-        if donchian is not None:
+        if show_dc:
+            don_live = bool((donchian or {}).get("running")) and not bool(
+                (donchian or {}).get("dry_run", True)
+            )
+            dc_title = "Donchian · live longs" if don_live else "Donchian · paper longs"
             pos_blocks[0] = (
-                '<div id="dc-open-pos"><div class="panel-head"><h2>Donchian · paper longs</h2></div>'
+                f'<div id="dc-open-pos"><div class="panel-head"><h2>{escape(dc_title)}</h2></div>'
                 f"""{_positions_table(
                     donchian or {},
                     sell_all_path=None,
@@ -2933,6 +2980,7 @@ def render_momentum_dashboard(
             )
             + '<a href="/live/momentum/allocator/status">mix JSON</a>'
             + '<a href="/live/momentum/donchian/status">donchian JSON</a>'
+            + '<a href="/live/momentum/donchian/ledger">donchian ledger</a>'
             + '<a href="/live/momentum/ledger">core ledger</a>'
             + '<a href="/live/momentum/earnings">earnings</a>'
         )
@@ -2956,6 +3004,24 @@ def render_momentum_dashboard(
             '<a href="/live/momentum/status">status JSON</a>'
             '<a href="/live/momentum/ledger">ledger</a>'
             '<a href="/live/momentum/earnings">earnings</a>'
+        )
+    if show_dc:
+        exec_ledger_html = (
+            '<details class="fold" open id="ledger">'
+            '<summary><span class="fold-head">Execution stream · Donchian ledger</span>'
+            '<span class="chev"></span></summary>'
+            f'<div class="fold-body">{_ledger_table(donchian_ledger_rows or [])}</div></details>'
+            '<details class="fold">'
+            '<summary><span class="fold-head">15m core ledger (idle)</span>'
+            '<span class="chev"></span></summary>'
+            f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
+        )
+    else:
+        exec_ledger_html = (
+            '<details class="fold" open id="ledger">'
+            '<summary><span class="fold-head">Execution stream · core ledger</span>'
+            '<span class="chev"></span></summary>'
+            f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
         )
     equity = float(status.get("equity_eur") or 0)
     exposure = float(status.get("exposure_eur") or 0)
@@ -2984,6 +3050,7 @@ def render_momentum_dashboard(
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
       <a href="/live/momentum#sw-open-pos">Short weakest paper
         <span class="badge">{'on' if show_sw else 'off'}</span></a>
+      <a href="/live/momentum#ledger">Ledger</a>
       <a href="/live/momentum#dc-open-pos">Donchian longs</a>
       <a href="/live/momentum/allocator/status">Mix JSON</a>
     </nav>
@@ -3017,7 +3084,7 @@ def render_momentum_dashboard(
   <a href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
   <a class="{active_cls}" href="/live/momentum"><span class="ico">◆</span>Desk</a>
   <a class="{vol_cls}" href="/live/momentum/volatile"><span class="ico">◇</span>Volatile</a>
-  <a href="/live/momentum/ledger"><span class="ico">☰</span>Ledger</a>
+  <a href="/live/momentum#ledger"><span class="ico">☰</span>Ledger</a>
   <a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>
 </nav>
 """
@@ -3048,6 +3115,7 @@ def render_momentum_dashboard(
 {sleeves_html}
 {core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or ''}
 {vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile netto · </div>{vol_earn}' or ''}
+{dc_earn and f'<div class="muted" style="font-size:.78rem">Donchian netto · </div>{dc_earn}' or ''}
 {sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest netto · </div>{sw_earn}' or ''}
 <div class="pulse hero-grid">{heroes}</div>
 {preview_html}
@@ -3055,10 +3123,7 @@ def render_momentum_dashboard(
 {sell_html}
 {sell_all_html}
 {decisions_html}
-<details class="fold" open>
-<summary><span class="fold-head">Execution stream · core ledger</span><span class="chev"></span></summary>
-<div class="fold-body">{_ledger_table(ledger_rows)}</div>
-</details>
+{exec_ledger_html}
 {vol_ledger_html}
 <details class="fold">
 <summary><span class="fold-head">Risk rules (core)</span><span class="chev"></span></summary>

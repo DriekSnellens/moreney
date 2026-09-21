@@ -937,11 +937,21 @@ async def live_momentum_dashboard(
             limit=400,
         )
     donchian_status: dict[str, Any] | None = None
-    if bool(getattr(settings, "momentum_donchian_enabled", False)):
+    donchian_ledger: list[dict[str, Any]] | None = None
+    show_donchian = bool(getattr(settings, "momentum_donchian_enabled", False))
+    if show_donchian:
         try:
             donchian_status = get_donchian_desk_manager().status()
         except Exception:  # noqa: BLE001
             donchian_status = None
+        donchian_ledger = read_ledger_tail(
+            getattr(
+                settings,
+                "momentum_donchian_ledger_path",
+                "./data/momentum_donchian_ledger.jsonl",
+            ),
+            limit=400,
+        )
     allocator = None
     if donchian_status and isinstance(donchian_status.get("allocator"), dict) and donchian_status["allocator"].get("ok"):
         allocator = donchian_status["allocator"]
@@ -961,6 +971,10 @@ async def live_momentum_dashboard(
             settings.momentum_short_weakest_ledger_path if show_short_weakest else None
         ),
         short_weakest_status=short_status if show_short_weakest else None,
+        donchian_ledger_path=(
+            settings.momentum_donchian_ledger_path if show_donchian else None
+        ),
+        donchian_status=donchian_status if show_donchian else None,
     )
     return render_momentum_dashboard(
         status,
@@ -979,6 +993,7 @@ async def live_momentum_dashboard(
         show_short_weakest=show_short_weakest,
         allocator=allocator,
         donchian=donchian_status,
+        donchian_ledger_rows=donchian_ledger if show_donchian else None,
     )
 
 
@@ -988,6 +1003,7 @@ async def live_momentum_earnings() -> dict[str, Any]:
     settings = get_settings()
     show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
     show_short_weakest = bool(getattr(settings, "momentum_short_weakest_enabled", False))
+    show_donchian = bool(getattr(settings, "momentum_donchian_enabled", False))
     core = get_momentum_desk_manager().status()
     volatile = None
     if show_volatile:
@@ -1001,6 +1017,12 @@ async def live_momentum_earnings() -> dict[str, Any]:
             short_status = get_short_weakest_desk_manager().status()
         except Exception:  # noqa: BLE001
             short_status = None
+    donchian_status = None
+    if show_donchian:
+        try:
+            donchian_status = get_donchian_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            donchian_status = None
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
@@ -1012,6 +1034,10 @@ async def live_momentum_earnings() -> dict[str, Any]:
             settings.momentum_short_weakest_ledger_path if show_short_weakest else None
         ),
         short_weakest_status=short_status,
+        donchian_ledger_path=(
+            settings.momentum_donchian_ledger_path if show_donchian else None
+        ),
+        donchian_status=donchian_status,
     )
     return earnings_as_dict(earnings)
 
@@ -1361,6 +1387,19 @@ async def live_momentum_allocator_status() -> dict[str, Any]:
 @app.get("/live/momentum/donchian/status")
 async def live_momentum_donchian_status() -> dict[str, Any]:
     return get_donchian_desk_manager().status()
+
+
+@app.get("/live/momentum/donchian/ledger")
+async def live_momentum_donchian_ledger(limit: int = 200) -> dict[str, Any]:
+    path = get_settings().momentum_donchian_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(sum(float(r.get("net_eur") or 0) for r in exits), 2),
+        "path": str(path),
+    }
 
 
 @app.post("/live/momentum/donchian/start")
