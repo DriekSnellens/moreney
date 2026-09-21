@@ -61,6 +61,82 @@ body {
 .muted { color: var(--muted); }
 .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
 
+.mix-board { margin: 0 0 1.15rem; border-width: 1.5px; }
+.mix-board.risk_on { border-color: rgba(52,211,153,.42); }
+.mix-board.risk_off { border-color: rgba(245,158,11,.45); }
+.mix-board.mid { border-color: rgba(148,163,184,.28); }
+.mix-k {
+  margin: 0 0 .2rem; color: var(--muted); font-size: .68rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.mix-now {
+  font-family: var(--display); font-size: clamp(1.35rem, 3vw, 1.85rem);
+  font-weight: 800; letter-spacing: -.03em; line-height: 1.15; margin: 0 0 .35rem;
+}
+.mix-stance { margin: 0 0 .65rem; color: var(--muted); font-size: .88rem; }
+.mix-why {
+  margin: 0 0 .9rem; color: var(--ink); font-size: 1.02rem; line-height: 1.45;
+  max-width: 62rem; font-weight: 500;
+}
+.mix-why em { font-style: normal; color: var(--primary); }
+.mix-tape {
+  position: relative; height: 3.6rem; margin: 0 0 .9rem;
+  border-radius: .7rem; overflow: hidden; border: 1px solid var(--border);
+  background: var(--elevated);
+}
+.mix-tape .zones { position: absolute; inset: 0; display: flex; }
+.mix-tape .z { display: flex; align-items: flex-end; padding: .35rem .5rem; font-size: .62rem;
+  font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgba(248,250,252,.55); }
+.mix-tape .z.off { background: rgba(248,113,113,.16); }
+.mix-tape .z.mid { background: rgba(245,158,11,.14); }
+.mix-tape .z.on { background: rgba(52,211,153,.16); }
+.mix-tape .z.cur { color: var(--ink); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+.mix-tape .mark {
+  position: absolute; top: .2rem; transform: translateX(-50%);
+  font-family: var(--mono); font-size: .68rem; font-weight: 700; white-space: nowrap;
+  color: var(--ink);
+}
+.mix-tape .mark i {
+  display: block; width: 2px; height: 1.55rem; margin: 0 auto .15rem;
+  background: currentColor; border-radius: 2px;
+}
+.mix-tape .mark.btc { color: var(--primary); }
+.mix-gates {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem;
+  margin: 0 0 .9rem;
+}
+.mix-gates div {
+  background: var(--elevated); border: 1px solid var(--border); border-radius: .65rem;
+  padding: .55rem .7rem;
+}
+.mix-gates span { display: block; color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+.mix-gates strong { font-family: var(--mono); font-size: 1.05rem; }
+.mix-sleeves {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .65rem;
+}
+.mix-sleeve {
+  border: 1px solid var(--border); border-radius: .75rem; padding: .75rem .8rem;
+  background: rgba(15,23,42,.65); min-height: 8.2rem;
+}
+.mix-sleeve.on { border-color: rgba(52,211,153,.45); box-shadow: 0 0 0 1px rgba(52,211,153,.12) inset; }
+.mix-sleeve.off { opacity: .72; }
+.mix-sleeve h3 { margin: 0 0 .25rem; font-size: .92rem; }
+.mix-sleeve .eur { font-family: var(--mono); font-weight: 700; font-size: 1.05rem; }
+.mix-sleeve p { margin: .35rem 0 0; color: var(--muted); font-size: .78rem; line-height: 1.35; }
+.mix-open { margin: .75rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem; }
+.mix-chip {
+  display: inline-flex; align-items: baseline; gap: .4rem;
+  padding: .35rem .65rem; border-radius: 999px; border: 1px solid var(--border);
+  background: rgba(15,23,42,.8); font-size: .8rem;
+}
+.mix-chip strong { font-family: var(--mono); }
+.mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
+.mix-dc-dec { display: grid; gap: .55rem; }
+.mix-dc-dec > div { padding: .45rem 0; border-bottom: 1px solid var(--border-soft); }
+@media (max-width: 720px) {
+  .mix-gates { grid-template-columns: 1fr 1fr; }
+}
+
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
@@ -323,6 +399,7 @@ body {
 
 .stack { display: grid; gap: .85rem; }
 @media (min-width: 980px) { .stack.two { grid-template-columns: 1.12fr .88fr; } }
+@media (min-width: 1100px) { .stack.three { grid-template-columns: 1fr 1fr 1fr; } }
 .hint {
   margin: .65rem 0; padding: .65rem .8rem; border-radius: .6rem;
   font-size: .8rem; border: 1px solid var(--border); background: rgba(255,255,255,.03);
@@ -584,6 +661,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   table.desk td, table.ledger td { padding: .55rem .5rem; }
   .foot { font-size: .66rem; gap: .35rem .55rem; }
   .stack.two { grid-template-columns: 1fr; }
+  .stack.three { grid-template-columns: 1fr; }
   .card { padding: .8rem .85rem; }
   .card.section { margin-top: .85rem; }
   .sleeve-split { grid-template-columns: 1fr; }
@@ -764,10 +842,13 @@ def _positions_table(
     cfg = status.get("config") or {}
     if not rows:
         return f'<p class="pos-empty muted" data-live="positions-empty">{escape(empty_text)}</p>'
-    trail = float(cfg.get("trail_pct") or 0.05)
-    tight_after = float(cfg.get("trail_tight_after") or 0.0)
-    tight = float(cfg.get("trail_tight_pct") or trail)
-    stop = float(cfg.get("hard_stop_pct") or 0.03)
+    # Preserve explicit 0.0 (paper bear-harvest disables trail/hard-stop).
+    trail = float(cfg["trail_pct"]) if cfg.get("trail_pct") is not None else 0.05
+    tight_after = (
+        float(cfg["trail_tight_after"]) if cfg.get("trail_tight_after") is not None else 0.0
+    )
+    tight = float(cfg["trail_tight_pct"]) if cfg.get("trail_tight_pct") is not None else trail
+    stop = float(cfg["hard_stop_pct"]) if cfg.get("hard_stop_pct") is not None else 0.03
     busy = status.get("manual_exit") or {}
     sell_busy = bool(busy) and not busy.get("done")
     out = [
@@ -784,18 +865,65 @@ def _positions_table(
         peak_ret = float(p.get("peak_return") or 0)
         mark = p.get("mark")
         gross = p.get("gross_return")
+        side = str(p.get("side") or "long").lower()
         live_peak_ret = peak_ret
         if mark and entry > 0:
-            live_peak_ret = max(peak_ret, float(mark) / entry - 1.0)
-        peak_px = entry * (1 + live_peak_ret)
+            if side == "short":
+                live_peak_ret = max(peak_ret, (entry - float(mark)) / entry)
+            else:
+                live_peak_ret = max(peak_ret, float(mark) / entry - 1.0)
+        peak_px = entry * (1 + live_peak_ret) if side != "short" else entry * (1 - live_peak_ret)
         eff_trail = tight if (tight_after > 0 and live_peak_ret >= tight_after) else trail
-        trail_px = peak_px * (1 - eff_trail)
-        stop_px = entry * (1 - stop)
+        if side == "short":
+            # Cover stop sits above mark as price rises against the short.
+            if eff_trail > 0:
+                trail_px = (
+                    float(p["trail_stop_px"])
+                    if p.get("trail_stop_px") is not None
+                    else entry * (1.0 - live_peak_ret + eff_trail)
+                )
+                trail_cell = (
+                    f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
+                    f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
+                )
+                trail_meta = (
+                    f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
+                    f"({100 * eff_trail:.1f}%)</span></div>"
+                )
+            else:
+                trail_cell = "<td class='muted' data-k='trail'>uit</td>"
+                trail_meta = "<div><span>Trail</span><span data-k='trail'>uit</span></div>"
+            if stop > 0:
+                stop_px = (
+                    float(p["hard_stop_px"])
+                    if p.get("hard_stop_px") is not None
+                    else entry * (1 + stop)
+                )
+                stop_cell = f"<td class='mono'>{stop_px:,.4f}</td>"
+                stop_meta = f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
+            else:
+                stop_cell = "<td class='muted'>uit</td>"
+                stop_meta = "<div><span>Hard stop</span>uit</div>"
+            side_badge = " <span class='pill obs' style='font-size:.65rem'>SHORT</span>"
+        else:
+            trail_px = peak_px * (1 - eff_trail)
+            stop_px = entry * (1 - stop)
+            trail_cell = (
+                f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
+                f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
+            )
+            stop_cell = f"<td class='mono'>{stop_px:,.4f}</td>"
+            trail_meta = (
+                f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
+                f"({100 * eff_trail:.1f}%)</span></div>"
+            )
+            stop_meta = f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
+            side_badge = ""
         hid = escape(str(p.get("holding_id") or p.get("base") or ""))
         sell = _sell_cell(p, disabled=sell_busy, post_action=post_sell_action)
         out.append(
-            f'<tr data-holding="{hid}" data-entry="{entry}">'
-            f"<td><strong>{escape(str(p.get('base')))}</strong>"
+            f'<tr data-holding="{hid}" data-entry="{entry}" data-side="{side}">'
+            f"<td><strong>{escape(str(p.get('base')))}</strong>{side_badge}"
             f" <span class='muted' style='font-size:.7rem'>{escape(str(p.get('venue') or ''))}"
             f"</span><div class='muted' style='font-size:.7rem'>"
             f"{escape(str(p.get('entry_reason') or ''))}</div></td>"
@@ -807,9 +935,7 @@ def _positions_table(
             f"</div></td>"
             f"<td class='{_cls(gross)}' data-k='gross'>{_fmt_pct(gross)}</td>"
             f"<td data-k='peak'>{_fmt_pct(live_peak_ret)}</td>"
-            f"<td class='mono' data-k='trail'>{trail_px:,.4f} "
-            f"<span class='muted'>({100 * eff_trail:.1f}%)</span></td>"
-            f"<td class='mono'>{stop_px:,.4f}</td>"
+            f"{trail_cell}{stop_cell}"
             f"<td class='{_cls(p.get('unrealized_net_eur'))}' data-k='net'>"
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
             f"<td data-k='age'>{float(p.get('age_h') or 0):.1f}h</td>"
@@ -817,7 +943,7 @@ def _positions_table(
             "</tr>"
         )
         cards.append(
-            f'<div class="pos-card" data-holding="{hid}" data-entry="{entry}">'
+            f'<div class="pos-card" data-holding="{hid}" data-entry="{entry}" data-side="{side}">'
             f'<div class="row1"><div><strong>{escape(str(p.get("base")))}</strong> '
             f'<span class="muted">{escape(str(p.get("venue") or ""))}</span></div>'
             f'<div class="{_cls(p.get("unrealized_net_eur"))}" style="font-weight:600" data-k="net">'
@@ -831,9 +957,7 @@ def _positions_table(
             f'<div><span>Gross</span><span class="{_cls(gross)}" data-k="gross">'
             f"{_fmt_pct(gross)}</span></div>"
             f"<div><span>Peak</span><span data-k='peak'>{_fmt_pct(live_peak_ret)}</span></div>"
-            f"<div><span>Trail</span><span data-k='trail'>{trail_px:,.4f} "
-            f"({100 * eff_trail:.1f}%)</span></div>"
-            f"<div><span>Hard stop</span>{stop_px:,.4f}</div>"
+            f"{trail_meta}{stop_meta}"
             f"<div><span>Age</span><span data-k='age'>{float(p.get('age_h') or 0):.1f}h</span></div>"
             "</div>"
             f'<div class="actions">{sell}</div></div>'
@@ -842,15 +966,16 @@ def _positions_table(
     cards.append("</div>")
     out.append("".join(cards))
     sell_all = ""
-    if rows and not sell_busy and sell_all_path:
+    if rows and not sell_busy and (sell_all_path or post_sell_action):
         if post_sell_action:
+            sell_all_action = post_sell_action.replace("/sell", "/sell-all")
             sell_all = (
                 '<div class="toolbar" style="margin-top:.55rem">'
-                f'<form method="post" action="{escape(post_sell_action.replace("/sell", "/sell-all"))}">'
+                f'<form method="post" action="{escape(sell_all_action)}">'
                 '<input type="hidden" name="redirect" value="1">'
                 '<button type="submit" class="btn danger">Verkoop alles…</button></form></div>'
             )
-        else:
+        elif sell_all_path:
             sell_all = (
                 '<div class="toolbar" style="margin-top:.55rem">'
                 f'<form method="get" action="{escape(sell_all_path)}">'
@@ -1130,6 +1255,303 @@ def _report_panel(report: Mapping[str, Any]) -> str:
         '<p style="margin-top:.8rem"><a href="/live/momentum" class="muted">terug</a></p></div>'
     )
     return "".join(out)
+
+
+def _mix_tape(btc: Any, sma20: Any, sma50: Any, label: str) -> str:
+    """Price tape: SMA20 | SMA50 | BTC so the regime is visible at a glance."""
+    try:
+        b = float(btc) if btc is not None else None
+        s20 = float(sma20) if sma20 is not None else None
+        s50 = float(sma50) if sma50 is not None else None
+    except (TypeError, ValueError):
+        return ""
+    nums = [v for v in (b, s20, s50) if v is not None and v > 0]
+    if len(nums) < 2:
+        return ""
+    lo = min(nums)
+    hi = max(nums)
+    pad = (hi - lo) * 0.14 or max(hi * 0.01, 1.0)
+    lo -= pad
+    hi += pad
+    span = hi - lo or 1.0
+
+    def pct(v: float) -> float:
+        return max(2.0, min(98.0, 100.0 * (v - lo) / span))
+
+    s20p = pct(s20) if s20 else 33.0
+    s50p = pct(s50) if s50 else 66.0
+    left_w = min(s20p, s50p)
+    mid_w = abs(s50p - s20p)
+    right_w = 100.0 - max(s20p, s50p)
+    z_off = "cur" if label == "risk_off" else ""
+    z_mid = "cur" if label == "mid" else ""
+    z_on = "cur" if label == "risk_on" else ""
+    marks = []
+    if s20:
+        marks.append(
+            f'<span class="mark" style="left:{s20p:.1f}%"><i></i>SMA20</span>'
+        )
+    if s50:
+        marks.append(
+            f'<span class="mark" style="left:{s50p:.1f}%"><i></i>SMA50</span>'
+        )
+    if b:
+        marks.append(
+            f'<span class="mark btc" style="left:{pct(b):.1f}%"><i></i>BTC</span>'
+        )
+    return (
+        f'<div class="mix-tape" data-live="mix-tape">'
+        f'<div class="zones">'
+        f'<div class="z off {z_off}" style="width:{left_w:.1f}%">risk off</div>'
+        f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%">chop</div>'
+        f'<div class="z on {z_on}" style="width:{right_w:.1f}%">risk on</div>'
+        f"</div>{''.join(marks)}</div>"
+    )
+
+
+def _donchian_decision_panel(donchian: Mapping[str, Any] | None) -> str:
+    """Per-sleeve last Donchian decision (why this long is on/off)."""
+    sleeves = (donchian or {}).get("sleeves") or []
+    if not sleeves:
+        return '<p class="muted">Donchian-sleeves starten met de mix.</p>'
+    bits: list[str] = []
+    for sl in sleeves:
+        on = bool(sl.get("active"))
+        reasons = ", ".join(str(x) for x in (sl.get("reasons") or [])[:5]) or "—"
+        block = sl.get("risk_block") or ""
+        bits.append(
+            f"<div><strong>{escape(str(sl.get('title') or sl.get('id')))}</strong> "
+            f"<span class='pill {'on' if on else 'off'}'>{'AAN' if on else 'UIT'}</span>"
+            f"<div class='muted'>{escape(reasons)}"
+            f"{(' · ' + escape(str(block))) if block else ''}</div></div>"
+        )
+    nxt = (donchian or {}).get("next_decision")
+    return (
+        f'<div class="mix-dc-dec">{"".join(bits)}</div>'
+        f'<p class="muted" style="margin:.55rem 0 0">volgende dagbesluit {_ts(nxt)}</p>'
+    )
+
+
+def _mix_panel(
+    alloc: Mapping[str, Any] | None,
+    donchian: Mapping[str, Any] | None = None,
+    short_weakest: Mapping[str, Any] | None = None,
+) -> str:
+    """Which strategy is on, how much €, and why (loop mix)."""
+    a = dict(alloc or {})
+    if not a:
+        return (
+            '<section class="panel mix-board" data-live="mix-board">'
+            '<div class="card-head"><h2>Actieve mix</h2>'
+            '<span class="pill off"><span class="dot"></span>GEEN DATA</span></div>'
+            '<p class="muted">Allocator nog niet geladen.</p></section>'
+        )
+    label = str(a.get("label") or (a.get("regime") or {}).get("label") or "mid")
+    why = str(a.get("why") or (a.get("regime") or {}).get("why") or "")
+    nt = a.get("now_trading") or {}
+    headline = str(nt.get("headline") or "")
+    if not headline:
+        active_titles = [
+            str(sl.get("title") or sl.get("id"))
+            for sl in (a.get("sleeves") or [])
+            if sl.get("active")
+        ]
+        headline = " + ".join(active_titles) if active_titles else "Cash — geen trades"
+    stance = str(nt.get("stance") or "")
+    idle = " · ".join(str(x) for x in (nt.get("idle_titles") or [])[:4])
+    reg = a.get("regime") or {}
+    pill_cls = {"risk_on": "on", "risk_off": "obs", "mid": "off"}.get(label, "off")
+    pill_txt = {"risk_on": "RISK ON", "risk_off": "RISK OFF", "mid": "MID · CASH"}.get(
+        label, label.upper()
+    )
+    btc = reg.get("btc")
+    sma20 = reg.get("sma20")
+    sma50 = reg.get("sma50")
+    gap50 = reg.get("gap_vs_sma50_pct")
+    gap20 = reg.get("gap_vs_sma20_pct")
+    don_live = {str(s.get("id")): s for s in ((donchian or {}).get("sleeves") or [])}
+    pos_by: dict[str, list[Mapping[str, Any]]] = {}
+    for p in (donchian or {}).get("positions") or []:
+        pos_by.setdefault(str(p.get("sleeve") or ""), []).append(p)
+    for p in (short_weakest or {}).get("positions") or []:
+        pos_by.setdefault("short_weakest", []).append(p)
+
+    def px(v: Any) -> str:
+        try:
+            return f"{float(v):,.0f}"
+        except (TypeError, ValueError):
+            return "—"
+
+    cards = []
+    for sl in a.get("sleeves") or []:
+        sid = str(sl.get("id") or "")
+        on = bool(sl.get("active"))
+        cls = "on" if on else "off"
+        state = "AAN" if on else "UIT"
+        live = don_live.get(sid) or {}
+        live_why = ""
+        if live.get("risk_block"):
+            live_why = str(live.get("risk_block"))
+        elif live.get("reasons"):
+            live_why = ", ".join(str(x) for x in live.get("reasons")[:4])
+        pos_bits = []
+        for p in pos_by.get(sid) or []:
+            net = p.get("unrealized_net_eur")
+            pos_bits.append(
+                f'<span class="mix-chip"><strong>{escape(str(p.get("base") or ""))}</strong>'
+                f'<span class="{_cls(net)}">{_fmt_eur(net)}</span></span>'
+            )
+        pos_html = (
+            f'<div class="mix-open" data-k="mix-pos">{"".join(pos_bits)}</div>'
+            if pos_bits
+            else '<div class="mix-open" data-k="mix-pos"></div>'
+        )
+        why_s = live_why or str(sl.get("why") or sl.get("blurb") or "")
+        cards.append(
+            f'<div class="mix-sleeve {cls}" data-mix-sleeve="{escape(sid)}">'
+            f'<h3>{escape(str(sl.get("title") or sid))} '
+            f'<span class="pill {"on" if on else "off"}" style="margin-left:.35rem">{state}</span></h3>'
+            f'<div class="eur" data-k="mix-eur">{_fmt_eur(sl.get("target_eur"), signed=False)}</div>'
+            f'<p data-k="mix-why-s">{escape(why_s)}</p>'
+            f"{pos_html}</div>"
+        )
+    open_all = []
+    for p in (donchian or {}).get("positions") or []:
+        open_all.append(
+            f'<span class="mix-chip" data-mix-pos="{escape(str(p.get("holding_id") or p.get("base") or ""))}">'
+            f'<span class="muted">{escape(str(p.get("sleeve") or "donch"))}</span>'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(p.get("unrealized_net_eur"))}">{_fmt_eur(p.get("unrealized_net_eur"))}</span>'
+            f"</span>"
+        )
+    for p in (short_weakest or {}).get("positions") or []:
+        open_all.append(
+            f'<span class="mix-chip">'
+            f'<span class="muted">short</span>'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(p.get("unrealized_net_eur"))}">{_fmt_eur(p.get("unrealized_net_eur"))}</span>'
+            f"</span>"
+        )
+    open_html = (
+        f'<div class="mix-open" data-live="mix-open">{"".join(open_all)}</div>'
+        if open_all
+        else '<div class="mix-open" data-live="mix-open"><span class="muted">Geen open mix-posities.</span></div>'
+    )
+    don_run = bool((donchian or {}).get("running"))
+    don_live = don_run and not bool((donchian or {}).get("dry_run", True))
+    if don_live:
+        run_pill = '<span class="pill on"><span class="dot"></span>DONCHIAN LIVE</span>'
+    elif don_run:
+        run_pill = '<span class="pill obs"><span class="dot"></span>MIX PAPER</span>'
+    else:
+        run_pill = '<span class="pill obs"><span class="dot"></span>MIX</span>'
+    return (
+        f'<section class="panel mix-board {escape(label)}" data-live="mix-board" '
+        f'data-mix-label="{escape(label)}" id="mix">'
+        f'<div class="card-head"><h2>Welke strategie nu</h2>'
+        f"{run_pill}"
+        f'<span class="pill {pill_cls}" data-live="mix-pill"><span class="dot"></span>'
+        f'<span data-k="mix-label">{escape(pill_txt)}</span></span></div>'
+        f'<p class="mix-k">Nu actief</p>'
+        f'<div class="mix-now" data-k="mix-now">{escape(headline)}</div>'
+        f'<p class="mix-stance" data-k="mix-stance">{escape(stance)}</p>'
+        f'<p class="mix-why" data-k="mix-why">{escape(why)}</p>'
+        f"{_mix_tape(btc, sma20, sma50, label)}"
+        f'<div class="mix-gates">'
+        f'<div><span>BTC</span><strong data-k="mix-btc">{px(btc)}</strong></div>'
+        f'<div><span>SMA20</span><strong data-k="mix-sma20">{px(sma20)}</strong></div>'
+        f'<div><span>SMA50</span><strong data-k="mix-sma50">{px(sma50)}</strong></div>'
+        f'<div><span>vs SMA50</span><strong data-k="mix-gap50" class="{_cls(gap50)}">'
+        f"{_fmt_pct(gap50)}</strong>"
+        f'<span class="muted" style="margin-top:.15rem">vs SMA20 '
+        f'<span data-k="mix-gap20">{_fmt_pct(gap20)}</span></span></div>'
+        f"</div>"
+        f'<div class="mix-sleeves" data-live="mix-sleeves">{"".join(cards)}</div>'
+        f'<p class="mix-k" style="margin-top:.85rem">Open in deze mix</p>'
+        f"{open_html}"
+        f'<p class="mix-foot">Classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}. '
+        f"{'Donchian-longs zijn LIVE Bitvavo-orders.' if don_live else 'Donchian-longs draaien paper.'} "
+        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle."
+        f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
+        f"</section>"
+    )
+
+
+def _short_weakest_decision_panel(status: Mapping[str, Any]) -> str:
+    """Bear-harvest decision / regime view (not the long-desk panel)."""
+    reg = status.get("last_regime") or {}
+    bear = status.get("bear") or reg.get("bear") or {}
+    pack = status.get("pack") or status.get("config") or {}
+    risk = status.get("risk") or {}
+    bear_ok = bool(bear.get("bear_ok"))
+    sma_days = int(bear.get("sma_days") or pack.get("sma_days") or 20)
+    if bear_ok:
+        pill = '<span class="pill on"><span class="dot"></span>BEAR ON</span>'
+    else:
+        pill = '<span class="pill off"><span class="dot"></span>STANDBY</span>'
+    btc = bear.get("btc")
+    sma = bear.get("sma") if bear.get("sma") is not None else bear.get("sma200")
+    gap = bear.get("gap_pct")
+    gap_s = _fmt_pct(gap) if gap is not None else "—"
+    btc_s = f"{float(btc):,.0f}" if btc is not None else "—"
+    sma_s = f"{float(sma):,.0f}" if sma is not None else "—"
+    block = risk.get("block_reason") or reg.get("risk_block") or ""
+    block_html = (
+        f'<div class="warn">Blok: {escape(str(block))}</div>' if block else ""
+    )
+    cands = reg.get("candidates") or []
+    planned = reg.get("planned") or []
+    cand_html = (
+        "".join(
+            f"<span>{escape(str(c.get('base')))} "
+            f"mom {_fmt_pct(c.get('mom') if c.get('mom') is not None else c.get('score'))}"
+            f"</span>"
+            for c in cands[:6]
+        )
+        or '<span class="muted">geen short-kandidaten</span>'
+    )
+    planned_html = (
+        ", ".join(
+            f"{escape(str(p.get('base')))} {_fmt_eur(p.get('notional_eur'), signed=False)}"
+            for p in planned
+        )
+        or "—"
+    )
+    rejected = reg.get("rejected") or []
+    rej_counts: dict[str, int] = {}
+    for r in rejected:
+        key = str(r.get("reason") or "?")
+        rej_counts[key] = rej_counts.get(key, 0) + 1
+    rej_s = ", ".join(f"{k}×{v}" for k, v in sorted(rej_counts.items())) or "—"
+    at = reg.get("at") or status.get("next_decision")
+    pack_line = (
+        f"top{pack.get('top_n', 1)} · lb{pack.get('lookback_days', 15)} "
+        f"skip{pack.get('skip_days', 2)} · floor {_fmt_pct(pack.get('mom_floor'))} · "
+        f"reb {pack.get('rebalance_days', 30)}d · mw {pack.get('max_weight', 0.5)} · "
+        f"stops {'uit' if not float(pack.get('trail_pct') or 0) else 'aan'}"
+    )
+    return (
+        f'<div data-live="sw-decision">'
+        f"<div>{pill} <span class='muted' data-live='sw-role'>"
+        f"{escape(str(status.get('role') or ''))}</span> · "
+        f"<span class='muted'>om {_ts(at)}</span></div>"
+        f"<div class='rules' style='margin-top:.7rem' data-live='sw-bear'>"
+        f"<div><span>BTC</span><strong data-k='sw-btc'>{btc_s}</strong></div>"
+        f"<div><span>SMA{sma_days}</span><strong data-k='sw-sma'>{sma_s}</strong></div>"
+        f"<div><span>Gap vs SMA</span><span data-k='sw-gap' class='{_cls(gap)}'>{gap_s}</span></div>"
+        f"<div><span>Pack</span>{escape(pack_line)}</div>"
+        f"<div><span>Equity</span><strong data-k='sw-equity'>"
+        f"{_fmt_eur(status.get('equity_eur'), signed=False)}</strong></div>"
+        f"<div><span>Gerealiseerd</span><span data-k='sw-realized' class='{_cls(status.get('realized_total_eur'))}'>"
+        f"{_fmt_eur(status.get('realized_total_eur'))}</span></div>"
+        f"<div><span>Open PnL</span><span data-k='sw-open' class='{_cls(status.get('unrealized_net_eur'))}'>"
+        f"{_fmt_eur(status.get('unrealized_net_eur'))}</span></div>"
+        f"<div><span>Planned</span>{planned_html}</div>"
+        f"<div><span>Rejected</span>{escape(rej_s)}</div>"
+        f"</div>"
+        f"<div class='chips' style='margin-top:.7rem' data-live='sw-cands'>{cand_html}</div>"
+        f"{block_html}</div>"
+    )
 
 
 def _decision_panel(status: Mapping[str, Any]) -> str:
@@ -1701,48 +2123,142 @@ def _sleeve_card(
     )
 
 
+def _short_weakest_sleeve_card(status: Mapping[str, Any] | None) -> str:
+    st = status or {}
+    running = bool(st.get("running"))
+    if not running:
+        pill = '<span class="pill off"><span class="dot"></span>STOP</span>'
+        mode = "gestopt"
+    else:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        mode = "bear-harvest paper"
+    bear = st.get("bear") or {}
+    pack = st.get("pack") or st.get("config") or {}
+    bear_ok = bool(bear.get("bear_ok"))
+    sma_n = int(bear.get("sma_days") or pack.get("sma_days") or 20)
+    gate = "BEAR ON" if bear_ok else f"STANDBY (BTC&gt;SMA{sma_n})"
+    gate_cls = "good" if bear_ok else "muted"
+    btc = bear.get("btc")
+    sma = bear.get("sma") if bear.get("sma") is not None else bear.get("sma200")
+    gap = bear.get("gap_pct")
+    n_pos = len(st.get("positions") or [])
+    pos_bits: list[str] = []
+    for p in (st.get("positions") or [])[:4]:
+        base = escape(str(p.get("base") or ""))
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(
+            f"<li><strong>{base}</strong> · <span class='{_cls(net)}'>{_fmt_eur(net)}</span></li>"
+        )
+    if not pos_bits:
+        pos_bits.append("<li class='muted'>Geen open paper-shorts</li>")
+    return (
+        f'<div class="card" data-live="sw-sleeve">'
+        f'<div class="card-head"><h2>Short weakest</h2>{pill}</div>'
+        f'<p class="muted" style="margin:0 0 .5rem">Paper short · SMA{sma_n} gate · {escape(mode)}</p>'
+        f"<p><span class='{gate_cls}' data-live='sw-gate'><strong>{gate}</strong></span> · "
+        f"BTC <span data-k='sw-btc'>{(f'{float(btc):,.0f}' if btc is not None else '—')}</span> / "
+        f"SMA <span data-k='sw-sma'>{(f'{float(sma):,.0f}' if sma is not None else '—')}</span> · "
+        f"gap <span data-k='sw-gap' class='{_cls(gap)}'>{_fmt_pct(gap) if gap is not None else '—'}</span></p>"
+        f"<p>Equity <strong data-k='sw-equity'>{_fmt_eur(st.get('equity_eur'), signed=False)}</strong> · "
+        f"real <span data-k='sw-realized' class='{_cls(st.get('realized_total_eur'))}'>"
+        f"{_fmt_eur(st.get('realized_total_eur'))}</span> · "
+        f"open <span data-k='sw-open' class='{_cls(st.get('unrealized_net_eur'))}'>"
+        f"{_fmt_eur(st.get('unrealized_net_eur'))}</span> · "
+        f"pos <span data-k='sw-npos'>{n_pos}</span>/{pack.get('top_n', 1)}</p>"
+        f"<p class='muted' style='font-size:.78rem'>Pack top{pack.get('top_n', 1)} · "
+        f"lb{pack.get('lookback_days', 15)} skip{pack.get('skip_days', 2)} · "
+        f"reb {pack.get('rebalance_days', 30)}d · mw {pack.get('max_weight', 0.5)} · "
+        f"idle-fill {'aan' if pack.get('idle_fill_enabled') else 'uit'}</p>"
+        f"<p>Next <strong data-live='sw-next'>{_ts(st.get('next_decision'))}</strong></p>"
+        f"<ul style='margin:.4rem 0 .6rem;padding-left:1.1rem' data-live='sw-poslist'>"
+        f"{''.join(pos_bits)}</ul></div>"
+    )
+
+
 def _sleeves_panel(
     core: Mapping[str, Any],
     volatile: Mapping[str, Any] | None,
+    short_weakest: Mapping[str, Any] | None = None,
 ) -> str:
-    """One desk, two sleeves: stable core + aggressive volatile."""
+    """Desk sleeves: core + optional volatile + optional paper short-weakest."""
     cash = float(core.get("cash_eur") or 0)
     core_exp = float(core.get("exposure_eur") or 0)
     v = volatile or {}
     book = float(v.get("book_eur") or (v.get("config") or {}).get("book_eur") or 0)
     deployed = float(v.get("deployed_eur") or v.get("exposure_eur") or 0)
     reserved = max(0.0, book - deployed) if book else 0.0
+    sw = short_weakest or {}
+    sw_book = float(sw.get("book_eur") or (sw.get("config") or {}).get("book_eur") or 0)
+    sw_dep = float(sw.get("deployed_eur") or sw.get("exposure_eur") or 0)
     free_shared = max(0.0, cash - core_exp - reserved)
     capital = (
         '<div class="hint" style="margin-bottom:.7rem">'
         "<strong>Kapitaalbeeld</strong> — gedeelde venue-cash, gescheiden boeken. "
-        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)} · "
-        f"volatile book {_fmt_eur(book, signed=False)} "
-        f"(waarvan vrij {_fmt_eur(reserved, signed=False)}) · "
-        f"ongereserveerd ~{_fmt_eur(free_shared, signed=False)}."
-        "</div>"
+        f"Cash {_fmt_eur(cash, signed=False)} · core ingezet {_fmt_eur(core_exp, signed=False)}"
     )
-    return (
-        '<div class="card section"><div class="card-head">'
-        "<h2>Desk sleeves</h2>"
-        '<span class="muted">stabiel core · aggressief volatile</span></div>'
-        f"{capital}"
-        '<div class="stack two">'
-        + _sleeve_card(
-            title="Core",
-            role="Stabiele RS-desk · core-16 · strengere filters",
-            status=core,
-            href="/live/momentum",
-            book_label=None,
+    if book:
+        capital += (
+            f" · volatile book {_fmt_eur(book, signed=False)} "
+            f"(vrij {_fmt_eur(reserved, signed=False)})"
         )
-        + _sleeve_card(
+    if sw_book:
+        capital += (
+            f" · short-weakest paper {_fmt_eur(sw_book, signed=False)} "
+            f"(ingezet {_fmt_eur(sw_dep, signed=False)})"
+        )
+    capital += f" · ongereserveerd ~{_fmt_eur(free_shared, signed=False)}.</div>"
+    cards = _sleeve_card(
+        title="Core",
+        role="Stabiele RS-desk · core-16 · strengere filters",
+        status=core,
+        href="/live/momentum",
+        book_label=None,
+    )
+    if volatile is not None:
+        cards += _sleeve_card(
             title="Volatile",
             role="Agressievere AlphaI midcaps · soft book · eigen risk",
             status=volatile,
             href="/live/momentum/volatile",
             book_label="Soft book",
         )
+    if short_weakest is not None:
+        cards += _short_weakest_sleeve_card(short_weakest)
+    roles = ["stabiel core"]
+    if volatile is not None:
+        roles.append("aggressief volatile")
+    if short_weakest is not None:
+        roles.append("paper short-weakest")
+    return (
+        '<div class="card section"><div class="card-head">'
+        "<h2>Desk sleeves</h2>"
+        f'<span class="muted">{" · ".join(roles)}</span></div>'
+        f"{capital}"
+        f'<div class="stack {"three" if short_weakest is not None and volatile is not None else "two"}">'
+        + cards
         + "</div></div>"
+    )
+
+
+def _short_weakest_actions(status: Mapping[str, Any] | None) -> str:
+    st = status or {}
+    if not st.get("running"):
+        return (
+            '<form method="post" action="/live/momentum/short-weakest/start" '
+            'style="display:inline">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn primary">Start short-weakest PAPER</button></form>'
+        )
+    return (
+        '<form method="post" action="/live/momentum/short-weakest/decide" '
+        'style="display:inline;margin-right:.35rem">'
+        '<input type="hidden" name="execute" value="0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn">Preview</button></form>'
+        '<form method="post" action="/live/momentum/short-weakest/decide" style="display:inline">'
+        '<input type="hidden" name="execute" value="1">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn primary">Decide</button></form>'
     )
 
 
@@ -1775,6 +2291,9 @@ _LIVE_MARKS_JS = r"""
   if (window.__moreneyMarksPoll) return;
   window.__moreneyMarksPoll = true;
   const STATUS_URL = "/live/momentum/status";
+  const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
+  const MIX_STATUS_URL = "/live/momentum/allocator/status";
+  const DONCHIAN_STATUS_URL = "/live/momentum/donchian/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -1814,10 +2333,26 @@ _LIVE_MARKS_JS = r"""
     const mark = pos.mark == null ? null : Number(pos.mark);
     const peakBar = Number(pos.peak_return || 0);
     const gross = pos.gross_return;
+    const side = String(pos.side || "long").toLowerCase();
     let livePeak = peakBar;
-    if (mark && entry > 0) livePeak = Math.max(peakBar, mark / entry - 1);
+    if (mark && entry > 0) {
+      livePeak = side === "short"
+        ? Math.max(peakBar, (entry - mark) / entry)
+        : Math.max(peakBar, mark / entry - 1);
+    }
     const effTrail = (tightAfter > 0 && livePeak >= tightAfter) ? tight : trail;
-    const trailPx = entry * (1 + livePeak) * (1 - effTrail);
+    let trailTxt;
+    if (!(effTrail > 0)) {
+      trailTxt = "uit";
+    } else if (side === "short") {
+      const trailPx = pos.trail_stop_px != null
+        ? Number(pos.trail_stop_px)
+        : entry * (1 - livePeak + effTrail);
+      trailTxt = `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`;
+    } else {
+      const trailPx = entry * (1 + livePeak) * (1 - effTrail);
+      trailTxt = `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`;
+    }
     nodes.forEach((root) => {
       setText(root, "mark", fmtPx(mark));
       if (pos.mark_source != null || pos.mark_age_sec != null) {
@@ -1828,7 +2363,7 @@ _LIVE_MARKS_JS = r"""
       }
       setText(root, "gross", fmtPct(gross), cls(gross));
       setText(root, "peak", fmtPct(livePeak));
-      setText(root, "trail", `${fmtPx(trailPx)} (${(100 * effTrail).toFixed(1)}%)`);
+      setText(root, "trail", trailTxt);
       setText(root, "net", fmtEur(pos.unrealized_net_eur), cls(pos.unrealized_net_eur));
       if (pos.age_h != null) setText(root, "age", `${Number(pos.age_h).toFixed(1)}h`);
     });
@@ -1909,23 +2444,236 @@ _LIVE_MARKS_JS = r"""
     const node = document.querySelector('[data-live="rules"]');
     if (html && node) node.outerHTML = html;
   }
+  function patchShortSleeve(status) {
+    const bear = status.bear || {};
+    const fmtBtc = (v) => {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    };
+    const roots = [
+      document.querySelector('[data-live="sw-sleeve"]'),
+      document.querySelector('[data-live="sw-decision"]'),
+      document.querySelector('[data-live="sw-bear"]'),
+    ].filter(Boolean);
+    const apply = (key, text, className) => {
+      roots.forEach((root) => setText(root, key, text, className));
+      // also global data-k under sw panels
+      document.querySelectorAll(`[data-k="${key}"]`).forEach((el) => {
+        if (!roots.some((r) => r.contains(el))) {
+          el.textContent = text;
+          if (className !== undefined) {
+            el.classList.remove("good", "bad");
+            if (className) el.classList.add(className);
+          }
+        }
+      });
+    };
+    apply("sw-btc", fmtBtc(bear.btc));
+    apply("sw-sma", fmtBtc(bear.sma != null ? bear.sma : bear.sma200));
+    apply("sw-gap", fmtPct(bear.gap_pct), cls(bear.gap_pct));
+    apply("sw-equity", fmtEur(status.equity_eur).replace(/^\+/, ""));
+    apply("sw-realized", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
+    apply("sw-open", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
+    apply("sw-npos", String((status.positions || []).length));
+    const gate = document.querySelector('[data-live="sw-gate"]');
+    if (gate) {
+      const on = !!bear.bear_ok;
+      const smaN = bear.sma_days || (status.pack && status.pack.sma_days) || 20;
+      gate.innerHTML = on
+        ? "<strong>BEAR ON</strong>"
+        : `<strong>STANDBY (BTC&gt;SMA${smaN})</strong>`;
+      gate.classList.toggle("good", on);
+      gate.classList.toggle("muted", !on);
+    }
+    const decision = document.querySelector('[data-live="sw-decision"]');
+    if (decision) {
+      const pill = decision.querySelector(".pill");
+      if (pill) {
+        const on = !!bear.bear_ok;
+        pill.className = on ? "pill on" : "pill off";
+        pill.innerHTML = on
+          ? '<span class="dot"></span>BEAR ON'
+          : '<span class="dot"></span>STANDBY';
+      }
+    }
+    const role = document.querySelector('[data-live="sw-role"]');
+    if (role && status.role) role.textContent = status.role;
+    const next = document.querySelector('[data-live="sw-next"]');
+    if (next && status.next_decision) {
+      const d = new Date(status.next_decision);
+      if (!Number.isNaN(d.getTime())) {
+        const dd = String(d.getUTCDate()).padStart(2, "0");
+        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const hh = String(d.getUTCHours()).padStart(2, "0");
+        const mi = String(d.getUTCMinutes()).padStart(2, "0");
+        next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
+      }
+    }
+    const posList = document.querySelector('[data-live="sw-poslist"]');
+    if (posList && Array.isArray(status.positions)) {
+      if (!status.positions.length) {
+        posList.innerHTML = "<li class='muted'>Geen open paper-shorts</li>";
+      } else {
+        posList.innerHTML = status.positions.slice(0, 4).map((p) => {
+          const net = p.unrealized_net_eur;
+          const c = cls(net);
+          return `<li><strong>${p.base || ""}</strong> · <span class="${c}">${fmtEur(net)}</span></li>`;
+        }).join("");
+      }
+    }
+  }
+  function shortPositionsChanged(status) {
+    const live = new Set();
+    document.querySelectorAll("#sw-open-pos [data-holding]").forEach((el) => {
+      const id = el.getAttribute("data-holding");
+      if (id) live.add(id);
+    });
+    const empty = document.querySelector("#sw-open-pos [data-live='positions-empty']");
+    const next = statusPositionIds(status);
+    if (empty && next.size > 0) return true;
+    if (!empty && next.size === 0 && document.querySelector("#sw-open-pos")) return true;
+    if (live.size !== next.size) return true;
+    for (const id of next) if (!live.has(id)) return true;
+    for (const id of live) if (!next.has(id)) return true;
+    return false;
+  }
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => (
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+    ));
+  }
+  function patchMixOpen(mix) {
+    const root = document.querySelector('[data-live="mix-open"]');
+    if (!root || !Array.isArray(mix.positions)) return;
+    const pos = mix.positions.filter((p) => Number(p.quantity || 1) > 1e-12);
+    if (!pos.length) {
+      root.innerHTML = '<span class="muted">Geen open mix-posities.</span>';
+      return;
+    }
+    root.innerHTML = pos.map((p) => {
+      const net = p.unrealized_net_eur;
+      const hid = String(p.holding_id || p.base || "");
+      return `<span class="mix-chip" data-mix-pos="${esc(hid)}">`
+        + `<span class="muted">${esc(p.sleeve || "donch")}</span>`
+        + `<strong>${esc(p.base || "")}</strong>`
+        + `<span class="${cls(net)}">${fmtEur(net)}</span></span>`;
+    }).join("");
+  }
+  function patchMix(mix) {
+    const board = document.querySelector('[data-live="mix-board"]');
+    if (!board || !mix) return;
+    const reg = mix.regime || {};
+    const label = mix.label || reg.label || "";
+    if (label) {
+      board.classList.remove("risk_on", "risk_off", "mid");
+      board.classList.add(label);
+      board.setAttribute("data-mix-label", label);
+    }
+    const pillTxt = label === "risk_on" ? "RISK ON" : label === "risk_off" ? "RISK OFF" : label === "mid" ? "MID · CASH" : label;
+    const nt = mix.now_trading || {};
+    const fmtBtc = (v) => {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+      return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    };
+    board.querySelectorAll('[data-k="mix-label"]').forEach((el) => { el.textContent = pillTxt; });
+    board.querySelectorAll('[data-k="mix-now"]').forEach((el) => { el.textContent = nt.headline || el.textContent; });
+    board.querySelectorAll('[data-k="mix-stance"]').forEach((el) => { el.textContent = nt.stance || ""; });
+    board.querySelectorAll('[data-k="mix-why"]').forEach((el) => { el.textContent = mix.why || reg.why || ""; });
+    board.querySelectorAll('[data-k="mix-btc"]').forEach((el) => { el.textContent = fmtBtc(reg.btc); });
+    board.querySelectorAll('[data-k="mix-sma20"]').forEach((el) => { el.textContent = fmtBtc(reg.sma20); });
+    board.querySelectorAll('[data-k="mix-sma50"]').forEach((el) => { el.textContent = fmtBtc(reg.sma50); });
+    board.querySelectorAll('[data-k="mix-gap50"]').forEach((el) => {
+      el.textContent = fmtPct(reg.gap_vs_sma50_pct);
+      el.classList.remove("good", "bad");
+      const c = cls(reg.gap_vs_sma50_pct);
+      if (c) el.classList.add(c);
+    });
+    board.querySelectorAll('[data-k="mix-gap20"]').forEach((el) => { el.textContent = fmtPct(reg.gap_vs_sma20_pct); });
+    const pill = board.querySelector('[data-live="mix-pill"]');
+    if (pill) {
+      pill.classList.remove("on", "off", "obs");
+      pill.classList.add(label === "risk_on" ? "on" : label === "risk_off" ? "obs" : "off");
+    }
+    document.querySelectorAll('[data-k="mix-label-top"]').forEach((el) => { el.textContent = pillTxt; });
+    (mix.sleeves || []).forEach((sl) => {
+      const card = board.querySelector(`[data-mix-sleeve="${sl.id}"]`);
+      if (!card) return;
+      card.classList.toggle("on", !!sl.active);
+      card.classList.toggle("off", !sl.active);
+      const eur = card.querySelector('[data-k="mix-eur"]');
+      if (eur) eur.textContent = fmtEur(sl.target_eur).replace(/^\+/, "");
+      const live = (mix.sleeves_live || []).find((x) => x.id === sl.id) || {};
+      const whyTxt = (live.risk_block || (live.reasons || []).join(", ") || sl.why || sl.blurb || "");
+      const why = card.querySelector('[data-k="mix-why-s"]');
+      if (why) why.textContent = whyTxt;
+      const st = card.querySelector(".pill");
+      if (st) {
+        st.textContent = sl.active ? "AAN" : "UIT";
+        st.classList.toggle("on", !!sl.active);
+        st.classList.toggle("off", !sl.active);
+      }
+      const box = card.querySelector('[data-k="mix-pos"]');
+      if (box) {
+        const livePos = Array.isArray(live.positions)
+          ? live.positions
+          : (mix.positions || []).filter((p) => String(p.sleeve || "") === sl.id);
+        box.innerHTML = livePos.map((p) => {
+          const net = p.unrealized_net_eur;
+          return `<span class="mix-chip"><strong>${esc(p.base || "")}</strong>`
+            + `<span class="${cls(net)}">${fmtEur(net)}</span></span>`;
+        }).join("");
+      }
+    });
+    const engine = document.querySelector('[data-live="mix-engine-pill"]');
+    if (engine && pillTxt) {
+      engine.classList.remove("on", "off", "obs");
+      engine.classList.add(label === "risk_on" ? "on" : label === "risk_off" ? "obs" : "off");
+      engine.innerHTML = `<span class="dot"></span>MIX · ${esc(pillTxt)}`;
+    }
+    patchMixOpen(mix);
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
-      if (!res.ok) return;
-      const status = await res.json();
-      // Open set changed (entry/exit/ghost cleared) → full reload so the
-      // positions block at the top matches venue reality immediately.
-      if (positionsChanged(status)) {
-        window.location.reload();
-        return;
+      if (res.ok) {
+        const status = await res.json();
+        const { trail, tightAfter, tight } = trailKnobs(status);
+        (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
+        patchHeroes(status);
+        patchRules(status);
       }
-      const { trail, tightAfter, tight } = trailKnobs(status);
-      (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
-      patchHeroes(status);
-      patchRules(status);
     } catch (err) {
       /* ignore transient network blips */
+    }
+    try {
+      const sw = await fetch(SHORT_STATUS_URL, { cache: "no-store" });
+      if (sw.ok) {
+        const shortStatus = await sw.json();
+        if (shortStatus && shortStatus.enabled_setting) {
+          const knobs = trailKnobs(shortStatus);
+          (shortStatus.positions || []).forEach((p) =>
+            patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight)
+          );
+          patchShortSleeve(shortStatus);
+        }
+      }
+    } catch (err) {
+      /* short sleeve optional */
+    }
+    try {
+      const dc = await fetch(DONCHIAN_STATUS_URL, { cache: "no-store" });
+      if (dc.ok) {
+        const don = await dc.json();
+        (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+      }
+    } catch (err) {
+      /* donchian optional */
+    }
+    try {
+      const mx = await fetch(MIX_STATUS_URL, { cache: "no-store" });
+      if (mx.ok) patchMix(await mx.json());
+    } catch (err) {
+      /* mix optional */
     }
   }
   tick();
@@ -1948,11 +2696,34 @@ def render_momentum_dashboard(
     earnings: DeskEarnings | None = None,
     volatile_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_volatile: bool = False,
+    short_weakest: Mapping[str, Any] | None = None,
+    short_weakest_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    show_short_weakest: bool = False,
+    allocator: Mapping[str, Any] | None = None,
+    donchian: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
     dry = bool(status.get("dry_run"))
-    if not running:
+    mix_label = str((allocator or {}).get("label") or "")
+    mix_on = bool(allocator) and mix_label
+    mix_top_txt = {
+        "risk_on": "RISK ON",
+        "risk_off": "RISK OFF",
+        "mid": "MID · CASH",
+    }.get(mix_label, mix_label or "—")
+    if mix_on:
+        mix_pill_cls = {"risk_on": "on", "risk_off": "obs", "mid": "off"}.get(mix_label, "off")
+        mix_pill_txt = {
+            "risk_on": "MIX · RISK ON",
+            "risk_off": "MIX · RISK OFF",
+            "mid": "MIX · CASH",
+        }.get(mix_label, "MIX")
+        pill = (
+            f'<span class="pill {mix_pill_cls}" data-live="mix-engine-pill">'
+            f'<span class="dot"></span>{escape(mix_pill_txt)}</span>'
+        )
+    elif not running:
         pill = '<span class="pill off"><span class="dot"></span>GESTOPT</span>'
     elif dry:
         pill = '<span class="pill obs"><span class="dot"></span>SHADOW</span>'
@@ -2055,44 +2826,114 @@ def render_momentum_dashboard(
     vol_earn = (
         _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
     )
-    sleeves_html = _sleeves_panel(status, volatile) if show_vol else ""
-    if show_vol:
-        positions_html = (
-            '<section class="panel" id="open-pos">'
-            '<div class="stack two">'
+    show_sw = bool(show_short_weakest)
+    sw_earn = (
+        _sleeve_earnings_line(earnings.short_weakest if earnings else None) if show_sw else ""
+    )
+    sleeves_html = (
+        _sleeves_panel(
+            status,
+            volatile if show_vol else None,
+            short_weakest if show_sw else None,
+        )
+        if (show_vol or show_sw)
+        else ""
+    )
+    if show_vol or show_sw:
+        pos_blocks = [
             '<div><div class="panel-head"><h2>Core · open posities</h2></div>'
             f"{_positions_table(status)}</div>"
-            '<div><div class="panel-head"><h2>Volatile · open posities</h2></div>'
-            f"""{_positions_table(
-                volatile or {},
-                sell_all_path=None,
-                post_sell_action="/live/momentum/volatile/sell",
-                empty_text="Geen open volatile-posities — soft book staat klaar.",
-            )}</div></div></section>"""
+        ]
+        if show_vol:
+            pos_blocks.append(
+                '<div><div class="panel-head"><h2>Volatile · open posities</h2></div>'
+                f"""{_positions_table(
+                    volatile or {},
+                    sell_all_path=None,
+                    post_sell_action="/live/momentum/volatile/sell",
+                    empty_text="Geen open volatile-posities — soft book staat klaar.",
+                )}</div>"""
+            )
+        if show_sw:
+            pos_blocks.append(
+                '<div id="sw-open-pos"><div class="panel-head"><h2>Short weakest · paper</h2></div>'
+                f"""{_positions_table(
+                    short_weakest or {},
+                    sell_all_path="/live/momentum/short-weakest/sell-all",
+                    post_sell_action="/live/momentum/short-weakest/sell",
+                    empty_text="Geen open paper-shorts — standby tot BTC &lt; SMA20.",
+                )}</div>"""
+            )
+        if donchian is not None:
+            pos_blocks[0] = (
+                '<div id="dc-open-pos"><div class="panel-head"><h2>Donchian · paper longs</h2></div>'
+                f"""{_positions_table(
+                    donchian or {},
+                    sell_all_path=None,
+                    empty_text="Geen open Donchian-longs — wacht op 10d-breakout of weekend-flatten.",
+                )}</div>"""
+            )
+        stack = "three" if show_vol and show_sw else "two"
+        positions_html = (
+            f'<section class="panel" id="open-pos"><div class="stack {stack}">'
+            + "".join(pos_blocks)
+            + "</div></section>"
         )
-        decisions_html = (
-            '<section class="panel">'
-            '<div class="stack two">'
+        dec_blocks = [
             '<div><div class="panel-head"><h2>Core · laatste beslissing</h2>'
             f"{_simulate_button() if running and not preview else ''}</div>"
             f"{_decision_panel(status)}</div>"
-            '<div><div class="panel-head"><h2>Volatile · laatste beslissing</h2>'
-            f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>"
-            "</div></section>"
+        ]
+        if show_vol:
+            dec_blocks.append(
+                '<div><div class="panel-head"><h2>Volatile · laatste beslissing</h2>'
+                f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>"
+            )
+        if show_sw:
+            dec_blocks.append(
+                '<div><div class="panel-head"><h2>Short weakest · paper live</h2>'
+                f"{_short_weakest_actions(short_weakest)}</div>"
+                f"{_short_weakest_decision_panel(short_weakest or {})}</div>"
+            )
+        if donchian is not None:
+            dec_blocks[0] = (
+                '<div><div class="panel-head"><h2>Donchian · laatste beslissing</h2></div>'
+                f"{_donchian_decision_panel(donchian)}</div>"
+            )
+        decisions_html = (
+            f'<section class="panel"><div class="stack {stack}">'
+            + "".join(dec_blocks)
+            + "</div></section>"
         )
-        vol_ledger_html = (
-            f'<details class="fold"><summary><span class="fold-head">Volatile ledger</span>'
-            f'<span class="chev"></span></summary><div class="fold-body">'
-            f"{_ledger_table(volatile_ledger_rows or [])}</div></details>"
-            if volatile_ledger_rows is not None
-            else ""
-        )
+        vol_ledger_html = ""
+        if show_vol and volatile_ledger_rows is not None:
+            vol_ledger_html += (
+                f'<details class="fold"><summary><span class="fold-head">Volatile ledger</span>'
+                f'<span class="chev"></span></summary><div class="fold-body">'
+                f"{_ledger_table(volatile_ledger_rows or [])}</div></details>"
+            )
+        if show_sw and short_weakest_ledger_rows is not None:
+            vol_ledger_html += (
+                f'<details class="fold"><summary><span class="fold-head">Short-weakest ledger</span>'
+                f'<span class="chev"></span></summary><div class="fold-body">'
+                f"{_ledger_table(short_weakest_ledger_rows or [])}</div></details>"
+            )
         footer_links = (
             '<a href="/live/momentum/status">core JSON</a>'
-            '<a href="/live/momentum/volatile/status">volatile JSON</a>'
-            '<a href="/live/momentum/ledger">core ledger</a>'
-            '<a href="/live/momentum/volatile/ledger">volatile ledger</a>'
-            '<a href="/live/momentum/earnings">earnings</a>'
+            + (
+                '<a href="/live/momentum/volatile/status">volatile JSON</a>'
+                if show_vol
+                else ""
+            )
+            + (
+                '<a href="/live/momentum/short-weakest/status">short-weakest JSON</a>'
+                if show_sw
+                else ""
+            )
+            + '<a href="/live/momentum/allocator/status">mix JSON</a>'
+            + '<a href="/live/momentum/donchian/status">donchian JSON</a>'
+            + '<a href="/live/momentum/ledger">core ledger</a>'
+            + '<a href="/live/momentum/earnings">earnings</a>'
         )
     else:
         positions_html = (
@@ -2127,7 +2968,7 @@ def render_momentum_dashboard(
       <div class="side-logo">M</div>
       <div>
         <strong>Moreney</strong>
-        <span>Momentum desk · institutional</span>
+        <span>Loop mix · SMA20/50</span>
       </div>
     </div>
     <div class="side-status">
@@ -2136,12 +2977,14 @@ def render_momentum_dashboard(
     </div>
     <nav class="side-nav">
       <div class="label">Workspace</div>
+      <a class="active" href="/live/momentum#mix">Actieve mix</a>
       <a class="{active_cls}" href="/live/momentum">Command Center</a>
       <a class="{vol_cls}" href="/live/momentum/volatile">Volatile sleeve
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
-      <a href="/live/momentum/ledger">Trade history</a>
-      <a href="/live/momentum/earnings">Earnings</a>
-      <a href="/live/momentum/status">Status JSON</a>
+      <a href="/live/momentum#sw-open-pos">Short weakest paper
+        <span class="badge">{'on' if show_sw else 'off'}</span></a>
+      <a href="/live/momentum#dc-open-pos">Donchian longs</a>
+      <a href="/live/momentum/allocator/status">Mix JSON</a>
     </nav>
   </div>
   <div class="side-capital">
@@ -2157,6 +3000,8 @@ def render_momentum_dashboard(
 <header class="topbar">
   <div class="topbar-left">
     {pill}
+    <div class="top-metric"><span class="k">Mix</span>
+      <span class="v" data-k="mix-label-top">{escape(mix_top_txt)}</span></div>
     <div class="top-metric"><span class="k">Equity</span>
       <span class="v" data-live="equity">{_fmt_eur(equity, signed=False)}</span></div>
     <div class="top-metric openpnl"><span class="k">Open</span>
@@ -2168,6 +3013,7 @@ def render_momentum_dashboard(
 """
     mobile_dock = f"""
 <nav class="mobile-dock" aria-label="Mobile workspace">
+  <a href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
   <a class="{active_cls}" href="/live/momentum"><span class="ico">◆</span>Desk</a>
   <a class="{vol_cls}" href="/live/momentum/volatile"><span class="ico">◇</span>Volatile</a>
   <a href="/live/momentum/ledger"><span class="ico">☰</span>Ledger</a>
@@ -2194,12 +3040,14 @@ def render_momentum_dashboard(
 {topbar}
 <div class="wrap">
 {earnings_html}
+{_mix_panel(allocator, donchian, short_weakest if show_sw else None)}
 {positions_html}
 {err_html}
 <div class="ops-row">{toolbar}</div>
 {sleeves_html}
 {core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or ''}
 {vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile netto · </div>{vol_earn}' or ''}
+{sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest netto · </div>{sw_earn}' or ''}
 <div class="pulse hero-grid">{heroes}</div>
 {preview_html}
 {report_html}

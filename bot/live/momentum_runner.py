@@ -175,6 +175,168 @@ class LiveGateway:
                 return float(getattr(bal, "free", None) or bal.total or 0.0)
         return 0.0
 
+    async def base_held(self, base: str) -> float | None:
+        """Total units of ``base`` on venue (free + locked). None if fetch fails.
+
+        Prefer this over ``base_free`` when reconciling desk inventory: a resting
+        sell order locks coins so free drops while the position is still held.
+        """
+        try:
+            snap = await self._client(trading=False).get_balances()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: %s balance fetch failed: %s", self._venue, exc)
+            return None
+        want = base.upper()
+        for bal in snap.balances:
+            if str(bal.asset).upper() == want:
+                total = getattr(bal, "total", None)
+                if total is not None:
+                    return float(total)
+                free = float(getattr(bal, "free", None) or 0.0)
+                locked = float(getattr(bal, "locked", None) or 0.0)
+                return free + locked
+        return 0.0
+
+    async def recent_base_sells(
+        self, base: str, *, since_ms: int, until_ms: int | None = None
+    ) -> list[dict[str, float]]:
+        """Sell fills for ``base``/EUR since ``since_ms``.
+
+        Prefers Bitvavo account/history (covers UI/market sells that
+        ``fetch_my_trades`` can miss), then falls back to my-trades.
+        Each row: ``{qty, price, fee_eur, ts_ms}``.
+        """
+        until = int(until_ms or (time.time() * 1000))
+        since = int(since_ms)
+        out: list[dict[str, float]] = []
+        want = base.upper()
+        try:
+            client = self._client(trading=False)
+            ex = await client._get_exchange()  # noqa: SLF001
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: %s exchange for sells failed: %s", self._venue, exc)
+            return out
+
+        # 1) Account history / ledger (authoritative for Bitvavo UI sells).
+        try:
+            if hasattr(ex, "privateGetAccountHistory"):
+                res = await ex.privateGetAccountHistory({})
+                items = res.get("items") if isinstance(res, dict) else res
+                for raw in items or []:
+                    if str(raw.get("type") or "").lower() != "sell":
+                        continue
+                    if str(raw.get("sentCurrency") or "").upper() != want:
+                        continue
+                    if str(raw.get("priceCurrency") or raw.get("receivedCurrency") or "").upper() not in {
+                        "EUR",
+                        "",
+                    }:
+                        # still allow when received is EUR
+                        if str(raw.get("receivedCurrency") or "").upper() != "EUR":
+                            continue
+                    ts_raw = raw.get("executedAt") or ""
+                    try:
+                        ts_ms = int(
+                            datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")).timestamp()
+                            * 1000
+                        )
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if ts_ms < since or ts_ms > until:
+                        continue
+                    qty = float(raw.get("sentAmount") or 0.0)
+                    px = float(raw.get("priceAmount") or 0.0)
+                    fee = float(raw.get("feesAmount") or 0.0)
+                    if qty <= 0 or px <= 0:
+                        continue
+                    out.append({"qty": qty, "price": px, "fee_eur": fee, "ts_ms": float(ts_ms)})
+            elif hasattr(ex, "fetch_ledger"):
+                rows = await ex.fetch_ledger(
+                    code=want, since=since, limit=200
+                )
+                for row in rows or []:
+                    info = row.get("info") or {}
+                    if str(info.get("type") or row.get("type") or "").lower() not in {
+                        "sell",
+                        "trade",
+                    }:
+                        continue
+                    if str(info.get("type") or "").lower() == "buy":
+                        continue
+                    if str(info.get("type") or "").lower() != "sell" and str(
+                        row.get("direction") or ""
+                    ).lower() != "out":
+                        continue
+                    ts_ms = int(row.get("timestamp") or 0)
+                    if ts_ms < since or ts_ms > until:
+                        continue
+                    info_px = float(info.get("priceAmount") or 0.0)
+                    qty = float(
+                        info.get("sentAmount")
+                        or row.get("amount")
+                        or 0.0
+                    )
+                    if str(info.get("sentCurrency") or "").upper() not in {want, ""}:
+                        if str(info.get("type") or "").lower() != "sell":
+                            continue
+                    fee = float((row.get("fee") or {}).get("cost") or info.get("feesAmount") or 0.0)
+                    if qty <= 0 or info_px <= 0:
+                        continue
+                    out.append(
+                        {
+                            "qty": abs(qty),
+                            "price": info_px,
+                            "fee_eur": abs(fee),
+                            "ts_ms": float(ts_ms),
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "momentum desk: %s accountHistory sells unavailable: %s", self._venue, exc
+            )
+
+        if out:
+            # De-dupe by (ts, qty, price)
+            seen: set[tuple[float, float, float]] = set()
+            uniq: list[dict[str, float]] = []
+            for row in sorted(out, key=lambda r: r["ts_ms"]):
+                key = (round(row["ts_ms"], 0), round(row["qty"], 8), round(row["price"], 6))
+                if key in seen:
+                    continue
+                seen.add(key)
+                uniq.append(row)
+            return uniq
+
+        # 2) Fallback: fetch_my_trades
+        try:
+            symbol = f"{want}/EUR"
+            trades: list[Any] = []
+            cursor = since
+            for _ in range(8):
+                batch = await ex.fetch_my_trades(symbol, since=cursor, limit=200)
+                if not batch:
+                    break
+                trades.extend(batch)
+                last = max(int(t.get("timestamp") or 0) for t in batch)
+                if last <= cursor or len(batch) < 200:
+                    break
+                cursor = last + 1
+            for t in trades:
+                if str(t.get("side") or "").lower() != "sell":
+                    continue
+                ts_ms = int(t.get("timestamp") or 0)
+                if ts_ms < since or ts_ms > until:
+                    continue
+                qty = float(t.get("amount") or 0.0)
+                px = float(t.get("price") or 0.0)
+                fee = float((t.get("fee") or {}).get("cost") or 0.0)
+                if qty <= 0 or px <= 0:
+                    continue
+                out.append({"qty": qty, "price": px, "fee_eur": fee, "ts_ms": float(ts_ms)})
+        except Exception as exc:  # noqa: BLE001
+            logger.info("momentum desk: %s fetch_my_trades sells failed: %s", self._venue, exc)
+        return sorted(out, key=lambda r: r["ts_ms"])
+
 
 def _norm_status(raw: Any) -> str:
     text = str(getattr(raw, "value", raw) or "").lower()
@@ -836,42 +998,131 @@ class MomentumDeskRunner:
             logger.warning("momentum desk: %s %s free balance failed: %s", venue, base, exc)
             return None
 
-    async def reconcile_external_inventory(self) -> list[dict[str, Any]]:
-        """Drop holdings already gone (or dust-only) on the exchange.
+    async def _held_base(self, base: str, venue: str) -> float | None:
+        """Total venue inventory (free+locked); falls back to free if needed."""
+        gw = self._gateway(venue)
+        if gw is None:
+            return None
+        held_fn = getattr(gw, "base_held", None)
+        if held_fn is not None:
+            try:
+                held = await held_fn(base)
+                if held is not None:
+                    return float(held)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "momentum desk: %s %s held balance failed: %s", venue, base, exc
+                )
+        return await self._available_base(base, venue)
 
-        Keeps desk state / dashboard aligned with venue free balances — e.g.
-        after a partial fill leaves unsellable dust, or an operator sells
-        outside the desk.
+    async def _recent_sells_for(
+        self, h: Holding, *, until_ms: int | None = None
+    ) -> list[dict[str, float]]:
+        gw = self._gateway(h.pos.venue)
+        fetch = getattr(gw, "recent_base_sells", None) if gw is not None else None
+        if fetch is None:
+            return []
+        since = max(0, int(h.pos.opened_ms) - 60_000)
+        try:
+            return list(await fetch(h.pos.base, since_ms=since, until_ms=until_ms))
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "momentum desk: recent sells for %s failed: %s", h.pos.base, exc
+            )
+            return []
+
+    @staticmethod
+    def _vwap_for_sold(
+        sells: Sequence[Mapping[str, float]], sold_qty: float
+    ) -> tuple[float, float] | None:
+        """Match newest sells covering ``sold_qty`` → (vwap, fee_eur)."""
+        if sold_qty <= 0 or not sells:
+            return None
+        need = float(sold_qty)
+        taken_qty = 0.0
+        taken_notional = 0.0
+        taken_fee = 0.0
+        for row in sorted(sells, key=lambda r: float(r.get("ts_ms") or 0), reverse=True):
+            qty = float(row.get("qty") or 0.0)
+            px = float(row.get("price") or 0.0)
+            fee = float(row.get("fee_eur") or 0.0)
+            if qty <= 0 or px <= 0:
+                continue
+            take = min(qty, need - taken_qty)
+            if take <= 0:
+                break
+            frac = take / qty
+            taken_qty += take
+            taken_notional += take * px
+            taken_fee += fee * frac
+            if taken_qty + 1e-12 >= need:
+                break
+        if taken_qty + 1e-8 < need * 0.95:
+            return None
+        return taken_notional / taken_qty, taken_fee
+
+    async def reconcile_external_inventory(self) -> list[dict[str, Any]]:
+        """Book inventory that left the venue outside the desk.
+
+        Uses **total** held (free+locked) so resting sell orders do not look
+        like external flats. Any sold delta ≥ min notional is ledgered — never
+        silently shrink the book. Fill VWAP from account history / trades when
+        available; otherwise mark.
         """
         closed: list[dict[str, Any]] = []
         if not self.holdings:
             return closed
+        now_ms = int(self._clock() * 1000)
         for h in list(self.holdings):
             if h.exiting:
                 continue
-            free = await self._available_base(h.pos.base, h.pos.venue)
-            if free is None:
+            held = await self._held_base(h.pos.base, h.pos.venue)
+            if held is None:
                 continue
-            mark = float(
-                self.marks.get(h.pos.base) or h.pos.entry_price or 0.0
-            )
-            free_f = float(free)
+            free = await self._available_base(h.pos.base, h.pos.venue)
+            free_f = float(free) if free is not None else float(held)
+            mark = float(self.marks.get(h.pos.base) or h.pos.entry_price or 0.0)
+            held_f = max(0.0, float(held))
             book_qty = float(h.pos.quantity or 0.0)
-            if free_f * mark >= _MIN_ORDER_EUR:
-                if free_f + 1e-12 < book_qty:
-                    h.pos.quantity = free_f
-                    h.pos.notional_eur = free_f * float(h.pos.entry_price)
-                    self._save_state()
+            if book_qty <= 1e-12:
+                continue
+            sold_qty = book_qty - held_f
+            if sold_qty * mark >= _MIN_ORDER_EUR:
+                sells = await self._recent_sells_for(h, until_ms=now_ms)
+                vwap = self._vwap_for_sold(sells, sold_qty)
+                if vwap is not None:
+                    px, fee = vwap
+                else:
+                    px, fee = (mark if mark > 0 else float(h.pos.entry_price)), 0.0
+                row = self._book_external_sold(
+                    h,
+                    sold_qty=sold_qty,
+                    price=px,
+                    fee_eur=fee,
+                    remaining_qty=held_f,
+                    free_on_venue=free_f,
+                    reason="manual_external",
+                    detail="reconcile_external_delta",
+                )
+                closed.append(row)
+                book_qty = float(h.pos.quantity or 0.0) if h in self.holdings else 0.0
+                if h not in self.holdings:
+                    continue
+            if book_qty <= 1e-12:
+                if h in self.holdings:
+                    self.holdings.remove(h)
+                continue
+            if held_f * mark >= _MIN_ORDER_EUR:
                 continue
             reason = (
                 "dust_or_no_balance"
-                if book_qty * mark < _MIN_ORDER_EUR or free_f > 1e-12
+                if book_qty * mark < _MIN_ORDER_EUR or held_f > 1e-12
                 else "manual_external"
             )
             row = self._book_venue_flat(
                 h,
                 mark=mark,
-                free=free_f,
+                free=held_f,
                 reason=reason,
                 detail="reconcile_external",
             )
@@ -879,6 +1130,82 @@ class MomentumDeskRunner:
         if closed:
             self._save_state()
         return closed
+
+    def _book_external_sold(
+        self,
+        h: Holding,
+        *,
+        sold_qty: float,
+        price: float,
+        fee_eur: float = 0.0,
+        remaining_qty: float,
+        free_on_venue: float,
+        reason: str = "manual_external",
+        detail: str = "",
+    ) -> dict[str, Any]:
+        """Ledger an external sell for ``sold_qty`` and leave ``remaining_qty``."""
+        book_qty = float(h.pos.quantity or 0.0)
+        entry = float(h.pos.entry_price or 0.0)
+        px = float(price) if price > 0 else entry
+        close_qty = max(0.0, min(float(sold_qty), book_qty))
+        rem = max(0.0, float(remaining_qty))
+        entry_fee = float(h.pos.entry_fee_eur or 0.0)
+        fee_share = entry_fee * (close_qty / book_qty) if book_qty > 0 else 0.0
+        exit_fee = max(0.0, float(fee_eur))
+        net = close_qty * (px - entry) - exit_fee - fee_share
+        now_ms = int(self._clock() * 1000)
+        self.realized_total_eur += net
+        self.trade_count += 1
+        self.ledger.note_close(net, now_ms)
+        entry_ctx = dict(getattr(h.pos, "entry_ctx", None) or {})
+        row: dict[str, Any] = {
+            "event": "exit",
+            "holding_id": h.holding_id,
+            "base": h.pos.base,
+            "venue": h.pos.venue,
+            "qty": close_qty,
+            "price": px,
+            "notional_eur": round(close_qty * px, 2),
+            "fee_eur": round(exit_fee, 4),
+            "taker": False,
+            "reason": reason or "manual_external",
+            "qty_frac": round(close_qty / book_qty, 4) if book_qty > 0 else 1.0,
+            "gross_return": round(px / entry - 1, 5) if entry > 0 else 0.0,
+            "peak_return": round(h.pos.peak / entry - 1, 5) if entry > 0 else 0.0,
+            "hold_h": round((now_ms - h.pos.opened_ms) / 3_600_000, 2),
+            "net_eur": round(net, 4),
+            "entry_reason": h.pos.entry_reason,
+            "entry_ctx": entry_ctx,
+            "regime_label": str(entry_ctx.get("regime_label") or ""),
+            "free_on_venue": float(free_on_venue),
+            "book_qty": book_qty,
+            "remaining_qty": rem,
+        }
+        if detail:
+            row["detail"] = detail
+            row["note"] = "external sell matched to venue inventory drop"
+        self._ledger_append(row)
+        if rem * px < _MIN_ORDER_EUR:
+            if h in self.holdings:
+                self.holdings.remove(h)
+            if bool(getattr(self.cfg, "refill_on_exit", True)) and len(
+                self.holdings
+            ) < int(self.cfg.max_positions):
+                self._refill_pending = True
+        else:
+            h.pos.quantity = rem
+            h.pos.notional_eur = rem * entry
+            h.pos.entry_fee_eur = max(0.0, entry_fee - fee_share)
+        logger.info(
+            "momentum desk: booked external sold %s %s qty=%.8f px=%.4f net=%.2f rem=%.8f",
+            h.pos.base,
+            h.pos.venue,
+            close_qty,
+            px,
+            net,
+            rem if rem * px >= _MIN_ORDER_EUR else 0.0,
+        )
+        return row
 
     def _book_venue_flat(
         self,
