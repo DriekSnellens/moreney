@@ -313,6 +313,67 @@ def test_donchian_friday_flattens_after_friday_close():
     assert out["exits"][0]["base"] == "AAA"
 
 
+def test_donchian_monday_without_bars_does_not_buy_or_dump():
+    """Live-kick race: SMA from closes, no OHLC, Monday wall clock."""
+    cfg = DonchianConfig(name="t", title="t", friday_flatten=True, universe=("AAA",))
+    monday = datetime(2026, 9, 21, 6, 19, tzinfo=UTC)
+    out = evaluate_donchian(
+        {}, _ramp(60, 100.0, 2.0), cfg, held={"AAA"}, cash_eur=10_000.0, now=monday
+    )
+    assert out["risk_block"] == "data_not_ready"
+    assert out["entries"] == []
+    assert out["exits"] == []
+
+
+def test_donchian_saturday_without_bars_still_flattens():
+    cfg = DonchianConfig(name="t", title="t", friday_flatten=True)
+    saturday = datetime(2026, 9, 19, 0, 5, tzinfo=UTC)
+    out = evaluate_donchian(
+        {}, _ramp(60, 100.0, 2.0), cfg, held={"AAA"}, cash_eur=10_000.0, now=saturday
+    )
+    assert out["risk_block"] == "friday_flatten"
+    assert out["exits"][0]["base"] == "AAA"
+
+
+def test_donchian_short_btc_ohlc_keeps_sma_series():
+    cfg = DonchianConfig(
+        name="t", title="t", channel=10, exit_n=5, friday_flatten=False, universe=("AAA",)
+    )
+    ohlc = {
+        "AAA": _ohlc_breakout(16, last_high=140.0),
+        "BTC": [[i, 100.0, 101.0, 99.0, 100.0, 1.0] for i in range(3)],
+    }
+    out = evaluate_donchian(
+        ohlc, _ramp(60, 100.0, 2.0), cfg, held=set(), cash_eur=10_000.0,
+        now=datetime(2026, 9, 21, tzinfo=UTC),
+    )
+    assert out["btc"]["sma"] is not None
+    assert out["risk_block"] != "sma_unavailable"
+    assert out["entries"]
+
+
+def test_donchian_sma_unavailable_blocks_entries_keeps_bag():
+    cfg = DonchianConfig(name="t", title="t", friday_flatten=False, universe=("AAA",))
+    thu_ms = _day_ms(2026, 9, 17)
+    ohlc = {"AAA": [[thu_ms, 100.0, 101.0, 99.0, 100.0, 1.0]]}
+    out = evaluate_donchian(
+        ohlc, [100.0, 101.0], cfg, held={"AAA"}, cash_eur=10_000.0,
+        now=datetime(2026, 9, 21, 12, tzinfo=UTC),
+    )
+    assert out["risk_block"] == "sma_unavailable"
+    assert out["entries"] == []
+    assert out["exits"] == []
+
+
+def test_donchian_decision_window_hour_zero_only():
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    r = DonchianBundleRunner(state_path="s.json", ledger_path="l.jsonl", dry_run=True)
+    assert r._in_decision_window(datetime(2026, 9, 22, 0, 3, tzinfo=UTC)) is True
+    assert r._in_decision_window(datetime(2026, 9, 21, 6, 19, tzinfo=UTC)) is False
+    assert r._in_decision_window(datetime(2026, 9, 22, 0, 5, tzinfo=UTC)) is False
+
+
 def test_donchian_ignores_in_progress_daily_breakout():
     cfg = DonchianConfig(name="t", title="t", channel=10, exit_n=5, universe=("AAA",))
     now = datetime(2026, 9, 21, 12, tzinfo=UTC)  # Monday midday
@@ -372,6 +433,28 @@ def test_donchian_channel_low_exit():
     btc = _ramp(60, 100.0, 2.0)
     out = evaluate_donchian(ohlc, btc, cfg, held={"AAA"}, cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC))
     assert any(e["base"] == "AAA" and e["reason"] == "channel_low" for e in out["exits"])
+
+
+def test_donchian_equity_counts_open_notional(tmp_path):
+    from bot.live.momentum_donchian import DonchianPosition
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    r = DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        book_eur=20_000,
+        dry_run=True,
+    )
+    sl = r.sleeves["donch10"]
+    sl.cash_eur = 2_000.0
+    sl.positions = [
+        DonchianPosition(base="AAA", entry_price=10.0, notional_eur=4_000.0, opened_ms=1, venue="bitvavo")
+    ]
+    r.marks["AAA"] = 10.0
+    eq = r.status()["equity_eur"]
+    # cash + notional + unrealized (~ -half-fee on 4000 * 0.003/2)
+    assert eq > 5_900
+    assert eq < 6_100
 
 
 def test_discard_paper_lots_restores_cash(tmp_path):
