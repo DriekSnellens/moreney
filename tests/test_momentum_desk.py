@@ -1988,6 +1988,8 @@ def test_dashboard_open_positions_render_before_heroes():
     assert 'data-holding="ghost"' not in html
     assert ">FET<" not in html
     assert "positionsChanged" in html
+    assert "location.reload" not in html
+    assert "DONCHIAN_STATUS_URL" in html
     assert 'class="masthead"' in html
     assert 'class="panel"' in html
     assert "rise-in" in html

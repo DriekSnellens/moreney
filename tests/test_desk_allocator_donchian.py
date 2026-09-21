@@ -146,6 +146,8 @@ def test_dashboard_mix_board_renders():
     assert "MIX · RISK ON" in html
     assert "Donchian · paper longs" in html
     assert "15m WR-core staat idle" in html
+    assert "location.reload" not in html
+    assert "patchMixOpen" in html
 
 
 def _ohlc_breakout(n: int = 16, last_high: float = 120.0) -> list[list[float]]:

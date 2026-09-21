@@ -2291,6 +2291,7 @@ _LIVE_MARKS_JS = r"""
   const STATUS_URL = "/live/momentum/status";
   const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
   const MIX_STATUS_URL = "/live/momentum/allocator/status";
+  const DONCHIAN_STATUS_URL = "/live/momentum/donchian/status";
   const INTERVAL_MS = 3000;
 
   function fmtPct(v) {
@@ -2506,7 +2507,6 @@ _LIVE_MARKS_JS = r"""
         next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
       }
     }
-    // Sleeve card position chips (reload still happens on open-set change).
     const posList = document.querySelector('[data-live="sw-poslist"]');
     if (posList && Array.isArray(status.positions)) {
       if (!status.positions.length) {
@@ -2535,36 +2535,37 @@ _LIVE_MARKS_JS = r"""
     for (const id of live) if (!next.has(id)) return true;
     return false;
   }
-  function mixPositionsChanged(mix) {
-    if (!mix || !Array.isArray(mix.positions)) return false;
-    const live = new Set();
-    document.querySelectorAll("[data-live='mix-open'] [data-mix-pos]").forEach((el) => {
-      const id = el.getAttribute("data-mix-pos");
-      if (id) live.add(id);
-    });
-    const next = new Set();
-    mix.positions.forEach((p) => {
-      const id = String(p.holding_id || p.base || "");
-      if (id) next.add(id);
-    });
-    if (live.size !== next.size) return true;
-    for (const id of next) if (!live.has(id)) return true;
-    for (const id of live) if (!next.has(id)) return true;
-    return false;
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => (
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+    ));
+  }
+  function patchMixOpen(mix) {
+    const root = document.querySelector('[data-live="mix-open"]');
+    if (!root || !Array.isArray(mix.positions)) return;
+    const pos = mix.positions.filter((p) => Number(p.quantity || 1) > 1e-12);
+    if (!pos.length) {
+      root.innerHTML = '<span class="muted">Geen open mix-posities.</span>';
+      return;
+    }
+    root.innerHTML = pos.map((p) => {
+      const net = p.unrealized_net_eur;
+      const hid = String(p.holding_id || p.base || "");
+      return `<span class="mix-chip" data-mix-pos="${esc(hid)}">`
+        + `<span class="muted">${esc(p.sleeve || "donch")}</span>`
+        + `<strong>${esc(p.base || "")}</strong>`
+        + `<span class="${cls(net)}">${fmtEur(net)}</span></span>`;
+    }).join("");
   }
   function patchMix(mix) {
     const board = document.querySelector('[data-live="mix-board"]');
     if (!board || !mix) return;
     const reg = mix.regime || {};
     const label = mix.label || reg.label || "";
-    const prev = board.getAttribute("data-mix-label") || "";
-    if (prev && label && prev !== label) {
-      window.location.reload();
-      return;
-    }
-    if (mixPositionsChanged(mix)) {
-      window.location.reload();
-      return;
+    if (label) {
+      board.classList.remove("risk_on", "risk_off", "mid");
+      board.classList.add(label);
+      board.setAttribute("data-mix-label", label);
     }
     const pillTxt = label === "risk_on" ? "RISK ON" : label === "risk_off" ? "RISK OFF" : label === "mid" ? "MID · CASH" : label;
     const nt = mix.now_trading || {};
@@ -2609,48 +2610,66 @@ _LIVE_MARKS_JS = r"""
         st.classList.toggle("on", !!sl.active);
         st.classList.toggle("off", !sl.active);
       }
+      const box = card.querySelector('[data-k="mix-pos"]');
+      if (box) {
+        const livePos = Array.isArray(live.positions)
+          ? live.positions
+          : (mix.positions || []).filter((p) => String(p.sleeve || "") === sl.id);
+        box.innerHTML = livePos.map((p) => {
+          const net = p.unrealized_net_eur;
+          return `<span class="mix-chip"><strong>${esc(p.base || "")}</strong>`
+            + `<span class="${cls(net)}">${fmtEur(net)}</span></span>`;
+        }).join("");
+      }
     });
+    const engine = document.querySelector('[data-live="mix-engine-pill"]');
+    if (engine && pillTxt) {
+      engine.classList.remove("on", "off", "obs");
+      engine.classList.add(label === "risk_on" ? "on" : label === "risk_off" ? "obs" : "off");
+      engine.innerHTML = `<span class="dot"></span>MIX · ${esc(pillTxt)}`;
+    }
+    patchMixOpen(mix);
   }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
-      if (!res.ok) return;
-      const status = await res.json();
-      // Open set changed (entry/exit/ghost cleared) → full reload so the
-      // positions block at the top matches venue reality immediately.
-      if (positionsChanged(status)) {
-        window.location.reload();
-        return;
+      if (res.ok) {
+        const status = await res.json();
+        const { trail, tightAfter, tight } = trailKnobs(status);
+        (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
+        patchHeroes(status);
+        patchRules(status);
       }
-      const { trail, tightAfter, tight } = trailKnobs(status);
-      (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
-      patchHeroes(status);
-      patchRules(status);
     } catch (err) {
       /* ignore transient network blips */
     }
     try {
       const sw = await fetch(SHORT_STATUS_URL, { cache: "no-store" });
-      if (!sw.ok) return;
-      const shortStatus = await sw.json();
-      if (!shortStatus || !shortStatus.enabled_setting) return;
-      if (shortPositionsChanged(shortStatus)) {
-        window.location.reload();
-        return;
+      if (sw.ok) {
+        const shortStatus = await sw.json();
+        if (shortStatus && shortStatus.enabled_setting) {
+          const knobs = trailKnobs(shortStatus);
+          (shortStatus.positions || []).forEach((p) =>
+            patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight)
+          );
+          patchShortSleeve(shortStatus);
+        }
       }
-      const knobs = trailKnobs(shortStatus);
-      (shortStatus.positions || []).forEach((p) =>
-        patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight)
-      );
-      patchShortSleeve(shortStatus);
     } catch (err) {
       /* short sleeve optional */
     }
     try {
+      const dc = await fetch(DONCHIAN_STATUS_URL, { cache: "no-store" });
+      if (dc.ok) {
+        const don = await dc.json();
+        (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+      }
+    } catch (err) {
+      /* donchian optional */
+    }
+    try {
       const mx = await fetch(MIX_STATUS_URL, { cache: "no-store" });
-      if (!mx.ok) return;
-      const mix = await mx.json();
-      patchMix(mix);
+      if (mx.ok) patchMix(await mx.json());
     } catch (err) {
       /* mix optional */
     }
