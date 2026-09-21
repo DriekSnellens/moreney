@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from bot.live.desk_allocator import classify_sma20_50, euros_for, sleeve_rows, snapshot
 from bot.live.momentum_donchian import DonchianConfig, evaluate_donchian
@@ -118,6 +118,8 @@ def test_mix_panel_shows_active_strategy_and_why():
     assert "Welke strategie nu" in html
     assert "DONCHIAN LIVE" in html
     assert "LIVE Bitvavo-orders" in html
+    assert "UTC-dagclose" in html
+    assert "vrijdagclose" in html
 
 
 def test_dashboard_mix_board_renders():
@@ -162,6 +164,10 @@ def _ohlc_breakout(n: int = 16, last_high: float = 120.0) -> list[list[float]]:
     return rows
 
 
+def _day_ms(year: int, month: int, day: int) -> int:
+    return int(datetime(year, month, day, tzinfo=UTC).timestamp() * 1000)
+
+
 def test_donchian_breakout_enters_when_btc_ok():
     cfg = DonchianConfig(name="t", title="t", channel=10, exit_n=5, friday_flatten=False, universe=("AAA",))
     ohlc = {"AAA": _ohlc_breakout(16, last_high=140.0)}
@@ -184,12 +190,79 @@ def test_donchian_no_breakout_rejected():
     assert any(r["reason"] == "no_breakout" for r in out["rejected"])
 
 
-def test_donchian_friday_flattens():
+def test_donchian_friday_morning_does_not_flatten():
+    from bot.live.momentum_donchian import friday_close_reached, weekend_flatten
+
     cfg = DonchianConfig(name="t", title="t", friday_flatten=True)
-    friday = datetime(2026, 9, 18, tzinfo=UTC)  # Friday
-    out = evaluate_donchian({}, _ramp(60, 100.0, 2.0), cfg, held={"AAA"}, cash_eur=10_000.0, now=friday)
+    friday_noon = datetime(2026, 9, 18, 12, tzinfo=UTC)
+    thu_ms = _day_ms(2026, 9, 17)
+    ohlc = {"AAA": [[thu_ms, 100.0, 101.0, 99.0, 100.0, 1.0]]}
+    out = evaluate_donchian(
+        ohlc, _ramp(60, 100.0, 2.0), cfg, held={"AAA"}, cash_eur=10_000.0, now=friday_noon
+    )
+    assert out["risk_block"] != "friday_flatten"
+    assert friday_close_reached(friday_noon) is False
+    assert weekend_flatten(now=friday_noon, signal_weekday=3) is False
+
+
+def test_donchian_friday_flattens_after_friday_close():
+    cfg = DonchianConfig(name="t", title="t", friday_flatten=True)
+    saturday = datetime(2026, 9, 19, 0, 5, tzinfo=UTC)
+    fri_ms = _day_ms(2026, 9, 18)
+    ohlc = {"AAA": [[fri_ms, 100.0, 101.0, 99.0, 100.0, 1.0]]}
+    out = evaluate_donchian(
+        ohlc, _ramp(60, 100.0, 2.0), cfg, held={"AAA"}, cash_eur=10_000.0, now=saturday
+    )
     assert out["risk_block"] == "friday_flatten"
     assert out["exits"][0]["base"] == "AAA"
+
+
+def test_donchian_ignores_in_progress_daily_breakout():
+    cfg = DonchianConfig(name="t", title="t", channel=10, exit_n=5, universe=("AAA",))
+    now = datetime(2026, 9, 21, 12, tzinfo=UTC)  # Monday midday
+    start = datetime(2026, 9, 5, tzinfo=UTC)
+    rows = []
+    for i in range(16):
+        t = start + timedelta(days=i)
+        px = 100.0
+        rows.append([int(t.timestamp() * 1000), px, px + 1.0, px - 1.0, px, 1.0])
+    # In-progress Monday bar breaks out — must not fire until UTC close.
+    today_ms = _day_ms(2026, 9, 21)
+    rows.append([today_ms, 110.0, 140.0, 109.0, 110.0, 1.0])
+    out = evaluate_donchian(
+        {"AAA": rows}, _ramp(60, 100.0, 2.0), cfg, held=set(), cash_eur=10_000.0, now=now
+    )
+    assert out["entries"] == []
+    assert any(r["reason"] == "no_breakout" for r in out["rejected"])
+
+
+def test_donchian_second_clip_uses_sleeve_equity():
+    cfg = DonchianConfig(
+        name="t",
+        title="t",
+        channel=10,
+        exit_n=5,
+        max_pos=2,
+        weight=0.4,
+        universe=("AAA", "BBB"),
+    )
+    ohlc = {
+        "AAA": _ohlc_breakout(16, last_high=140.0),
+        "BBB": _ohlc_breakout(16, last_high=141.0),
+    }
+    btc = _ramp(60, 100.0, 2.0)
+    out = evaluate_donchian(
+        ohlc, btc, cfg, held=set(), cash_eur=10_000.0, deployed_eur=0.0,
+        now=datetime(2026, 9, 21, tzinfo=UTC),
+    )
+    assert len(out["entries"]) == 2
+    assert out["entries"][0]["notional_eur"] == 4000.0
+    assert out["entries"][1]["notional_eur"] == 4000.0
+
+
+def test_donchian_eod_decision_hour_default():
+    cfg = DonchianConfig(name="t", title="t")
+    assert cfg.decision_hours_utc == (0,)
 
 
 def test_donchian_channel_low_exit():
@@ -275,3 +348,16 @@ def test_donchian_live_open_places_venue_order(tmp_path):
         assert st["paper_only"] is False
 
     asyncio.run(go())
+
+
+def test_donchian_runner_decides_at_utc_close(tmp_path):
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    r = DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        book_eur=20_000,
+        dry_run=True,
+    )
+    assert r._decision_hours() == (0,)
+    assert r.status()["decision_hours_utc"] == [0]
