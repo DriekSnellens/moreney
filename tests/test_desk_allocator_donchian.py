@@ -86,6 +86,8 @@ def test_mix_panel_shows_active_strategy_and_why():
         snap,
         {
             "running": True,
+            "dry_run": False,
+            "paper_only": False,
             "positions": [
                 {
                     "holding_id": "dc-1",
@@ -114,7 +116,8 @@ def test_mix_panel_shows_active_strategy_and_why():
     assert "Short weakest" in html
     assert "UIT" in html
     assert "Welke strategie nu" in html
-    assert "MIX LIVE" in html
+    assert "DONCHIAN LIVE" in html
+    assert "LIVE Bitvavo-orders" in html
 
 
 def test_dashboard_mix_board_renders():
@@ -200,3 +203,75 @@ def test_donchian_channel_low_exit():
     btc = _ramp(60, 100.0, 2.0)
     out = evaluate_donchian(ohlc, btc, cfg, held={"AAA"}, cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC))
     assert any(e["base"] == "AAA" and e["reason"] == "channel_low" for e in out["exits"])
+
+
+def test_discard_paper_lots_restores_cash(tmp_path):
+    from bot.live.momentum_donchian import DonchianPosition
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    r = DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        book_eur=20_000,
+        dry_run=True,
+    )
+    sl = r.sleeves["donch10"]
+    sl.cash_eur = 0.0
+    sl.positions = [
+        DonchianPosition(base="AAA", entry_price=10.0, notional_eur=4000.0, opened_ms=1, venue="paper")
+    ]
+    n = r.discard_paper_positions()
+    assert n == 1
+    assert sl.positions == []
+    assert sl.cash_eur == 4000.0
+
+
+def test_donchian_live_open_places_venue_order(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+    from bot.live.momentum_runner import OrderState
+
+    class Gw:
+        def __init__(self) -> None:
+            self.placed: list[dict] = []
+
+        async def best_bid_ask(self, symbol):
+            return 10.0, 10.1
+
+        async def place_limit(self, symbol, side, qty, price, *, post_only):
+            self.placed.append({"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only})
+            return OrderState("o1", "closed", qty, price, qty * price * 0.001)
+
+        async def fetch_order(self, order_id, symbol):
+            p = self.placed[-1]
+            return OrderState("o1", "closed", p["qty"], p["price"], 0.0)
+
+        async def cancel_order(self, order_id, symbol):
+            return await self.fetch_order(order_id, symbol)
+
+    async def go() -> None:
+        gw = Gw()
+        r = DonchianBundleRunner(
+            state_path=str(tmp_path / "s.json"),
+            ledger_path=str(tmp_path / "l.jsonl"),
+            book_eur=20_000,
+            dry_run=False,
+            venues=("bitvavo",),
+            gateways={"bitvavo": gw},
+        )
+        sl = r.sleeves["donch10"]
+        sl.book_eur = 10_000
+        sl.cash_eur = 10_000
+        await r._open(sl, {"base": "AAA", "notional_eur": 4000, "reasons": ["breakout"]}, now_ms=1)
+        assert gw.placed and gw.placed[0]["side"] == "buy"
+        assert gw.placed[0]["post_only"] is False
+        assert sl.positions
+        assert sl.positions[0].venue == "bitvavo"
+        assert sl.positions[0].is_paper() is False
+        st = r.status()
+        assert st["mode"] == "donchian_live"
+        assert st["dry_run"] is False
+        assert st["paper_only"] is False
+
+    asyncio.run(go())

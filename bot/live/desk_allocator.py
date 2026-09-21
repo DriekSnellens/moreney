@@ -29,12 +29,12 @@ SLEEVE_META: dict[str, dict[str, str]] = {
     "donch_fri10": {
         "title": "Donchian 10/5 Friday-flat",
         "kind": "long",
-        "blurb": "Dagelijks 10d-breakout, 5d-exit, vrijdag plat (weekend-gap).",
+        "blurb": "Live 10d-breakout, 5d-exit, vrijdag plat (weekend-gap).",
     },
     "donch10": {
         "title": "Donchian 10/5",
         "kind": "long",
-        "blurb": "Dagelijks 10d-breakout, 5d-exit, BTC boven SMA50.",
+        "blurb": "Live 10d-breakout, 5d-exit, BTC boven SMA50.",
     },
     "donch_fri": {
         "title": "Donchian 20/10 Friday-flat",

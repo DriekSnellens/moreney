@@ -1438,11 +1438,13 @@ def _mix_panel(
         else '<div class="mix-open" data-live="mix-open"><span class="muted">Geen open mix-posities.</span></div>'
     )
     don_run = bool((donchian or {}).get("running"))
-    run_pill = (
-        '<span class="pill on"><span class="dot"></span>MIX LIVE</span>'
-        if don_run
-        else '<span class="pill obs"><span class="dot"></span>MIX</span>'
-    )
+    don_live = don_run and not bool((donchian or {}).get("dry_run", True))
+    if don_live:
+        run_pill = '<span class="pill on"><span class="dot"></span>DONCHIAN LIVE</span>'
+    elif don_run:
+        run_pill = '<span class="pill obs"><span class="dot"></span>MIX PAPER</span>'
+    else:
+        run_pill = '<span class="pill obs"><span class="dot"></span>MIX</span>'
     return (
         f'<section class="panel mix-board {escape(label)}" data-live="mix-board" '
         f'data-mix-label="{escape(label)}" id="mix">'
@@ -1468,8 +1470,8 @@ def _mix_panel(
         f'<p class="mix-k" style="margin-top:.85rem">Open in deze mix</p>'
         f"{open_html}"
         f'<p class="mix-foot">Classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}. '
-        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle. "
-        f"Donchian is de long-sleeve van deze desk."
+        f"{'Donchian-longs zijn LIVE Bitvavo-orders.' if don_live else 'Donchian-longs draaien paper.'} "
+        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
     )

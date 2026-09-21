@@ -697,6 +697,8 @@ class Settings(BaseSettings):
     momentum_multi_strat_enabled: bool = True
     momentum_multi_strat_book_eur: float = Field(default=20_000.0, gt=0)
     momentum_donchian_enabled: bool = True
+    momentum_donchian_allow_live: bool = False
+    momentum_donchian_venues: str = "bitvavo"
     momentum_donchian_state_path: str = "./data/momentum_donchian_state.json"
     momentum_donchian_ledger_path: str = "./data/momentum_donchian_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

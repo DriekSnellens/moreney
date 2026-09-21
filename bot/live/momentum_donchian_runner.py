@@ -1,7 +1,7 @@
-"""Paper/live-desk runner for the Donchian sleeves of the loop mix.
+"""Donchian sleeves of the loop mix — live longs via LiveMicroEngine.
 
-Synthetic long books marked with Bitvavo public prices (same pattern as
-short-weakest). Allocator sets per-sleeve target EUR; book=0 flattens.
+Paper path stays for tests/shadow. Live buys/sells reuse momentum-desk
+LiveGateway (fail-closed policy). Shorts stay paper (spot cannot short).
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,10 +24,24 @@ from bot.live.momentum_donchian import (
     evaluate_donchian,
     loop_sleeve_configs,
 )
-from bot.live.momentum_runner import CandleFeed
+from bot.live.momentum_runner import CandleFeed, LiveGateway, engine_settings_for_desk, parse_venues
 from bot.live.momentum_short_weakest import fetch_daily_closes, fetch_daily_ohlc
 
 logger = logging.getLogger("bot.live.momentum_donchian_runner")
+
+_MIN_ORDER_EUR = 5.0
+_TAKER_CROSS = 0.002
+
+
+@dataclass
+class _Fill:
+    qty: float
+    avg_price: float
+    fee_eur: float
+
+    @property
+    def notional(self) -> float:
+        return self.qty * self.avg_price
 
 
 def _flag_path(state_path: str) -> Path:
@@ -81,11 +96,17 @@ class DonchianBundleRunner:
         ledger_path: str,
         book_eur: float = BOOK_EUR,
         feed: CandleFeed | None = None,
+        dry_run: bool = True,
+        venues: tuple[str, ...] = ("bitvavo",),
+        gateways: Mapping[str, Any] | None = None,
     ) -> None:
         self.state_path = state_path
         self.ledger_path = ledger_path
         self.book_eur = float(book_eur)
         self._feed = feed or CandleFeed()
+        self.dry_run = bool(dry_run)
+        self.venues = tuple(venues) or ("bitvavo",)
+        self._gws: dict[str, Any] = dict(gateways or {})
         self.sleeves = {c.name: _SleeveBook(c, 0.0) for c in loop_sleeve_configs()}
         self.marks: dict[str, float] = {}
         self.mark_ts: dict[str, float] = {}
@@ -186,13 +207,119 @@ class DonchianBundleRunner:
                 sl.cash_eur = max(0.0, target - deployed)
         return snap
 
+    def discard_paper_positions(self, *, reason: str = "paper_reset_for_live") -> int:
+        """Drop synthetic lots so live mode does not skip real buys."""
+        n = 0
+        for sl in self.sleeves.values():
+            keep: list[DonchianPosition] = []
+            for pos in sl.positions:
+                if not pos.is_paper():
+                    keep.append(pos)
+                    continue
+                sl.cash_eur += pos.notional_eur
+                self._ledger_append(
+                    {
+                        "event": "paper_reset",
+                        "reason": reason,
+                        "sleeve": sl.cfg.name,
+                        "base": pos.base,
+                        "notional_eur": pos.notional_eur,
+                        "holding_id": pos.holding_id,
+                    }
+                )
+                n += 1
+            sl.positions = keep
+        if n:
+            self._save_state()
+        return n
+
+    def _primary_gw(self) -> Any | None:
+        for v in self.venues:
+            if v in self._gws:
+                return self._gws[v]
+        return next(iter(self._gws.values()), None)
+
+    async def _fill(
+        self,
+        base: str,
+        side: str,
+        *,
+        qty: float | None = None,
+        notional_eur: float | None = None,
+    ) -> _Fill | None:
+        symbol = f"{base}EUR"
+        gw = self._primary_gw()
+        if self.dry_run or gw is None:
+            px = float(self.marks.get(base) or 0.0)
+            if px <= 0:
+                last = await self._feed.last_price(base)
+                px = float(last or 0.0)
+            if px <= 0:
+                return None
+            q = float(qty) if qty is not None else float(notional_eur or 0.0) / px
+            if q <= 0:
+                return None
+            return _Fill(qty=q, avg_price=px, fee_eur=q * px * 0.0015)
+        try:
+            bid, ask = await gw.best_bid_ask(symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("donchian book %s failed: %s", symbol, exc)
+            return None
+        price = float(ask) * (1.0 + _TAKER_CROSS) if side == "buy" else float(bid) * (1.0 - _TAKER_CROSS)
+        if price <= 0:
+            return None
+        q = float(qty) if qty is not None else float(notional_eur or 0.0) / price
+        if q * price < _MIN_ORDER_EUR:
+            return None
+        try:
+            state = await gw.place_limit(symbol, side, q, price, post_only=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("donchian %s %s rejected: %s", side, symbol, exc)
+            return None
+        deadline = time.time() + 20.0
+        while getattr(state, "status", "") == "open" and time.time() < deadline:
+            await asyncio.sleep(1.0)
+            try:
+                state = await gw.fetch_order(state.order_id, symbol)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("donchian fetch_order %s: %s", symbol, exc)
+                break
+        if getattr(state, "status", "") == "open":
+            try:
+                await gw.cancel_order(state.order_id, symbol)
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(0.4)
+            try:
+                state = await gw.fetch_order(state.order_id, symbol)
+            except Exception:  # noqa: BLE001
+                pass
+        filled = float(getattr(state, "filled_qty", 0.0) or 0.0)
+        avg = getattr(state, "avg_price", None)
+        if filled <= 0 or not avg:
+            return None
+        fee = float(getattr(state, "fee_eur", 0.0) or 0.0)
+        return _Fill(qty=filled, avg_price=float(avg), fee_eur=fee)
+
     async def _close(self, sl: _SleeveBook, pos: DonchianPosition, *, reason: str, now_ms: int) -> None:
-        mark = self.marks.get(pos.base)
-        if not mark:
-            px = await self._feed.last_price(pos.base)
-            mark = float(px) if px else pos.entry_price
+        qty = float(pos.quantity or 0.0)
+        if qty <= 0 and pos.entry_price > 0:
+            qty = pos.notional_eur / pos.entry_price
+        fill: _Fill | None = None
+        if pos.is_paper() or self.dry_run:
+            mark = self.marks.get(pos.base)
+            if not mark:
+                px = await self._feed.last_price(pos.base)
+                mark = float(px) if px else pos.entry_price
+            fill = _Fill(qty=qty, avg_price=float(mark), fee_eur=pos.notional_eur * (sl.cfg.fee_rt / 2))
+        else:
+            fill = await self._fill(pos.base, "sell", qty=qty)
+            if fill is None:
+                logger.warning("donchian live sell failed %s %s — keeping lot", sl.cfg.name, pos.base)
+                return
+        mark = fill.avg_price
         ret = pos.long_return(mark)
-        net = pos.notional_eur * ret - pos.notional_eur * (sl.cfg.fee_rt)
+        net = pos.notional_eur * ret - fill.fee_eur
         sl.cash_eur += pos.notional_eur + net
         sl.realized_total_eur += net
         sl.positions = [p for p in sl.positions if p.holding_id != pos.holding_id]
@@ -202,12 +329,15 @@ class DonchianBundleRunner:
                 "side": "long",
                 "sleeve": sl.cfg.name,
                 "base": pos.base,
+                "venue": pos.venue,
                 "notional_eur": pos.notional_eur,
+                "quantity": fill.qty,
                 "entry_price": pos.entry_price,
                 "exit_price": mark,
                 "net_eur": round(net, 2),
                 "reason": reason,
                 "holding_id": pos.holding_id,
+                "dry_run": self.dry_run,
             }
         )
 
@@ -216,24 +346,35 @@ class DonchianBundleRunner:
         if any(p.base == base for p in sl.positions):
             return
         notional = float(row["notional_eur"])
-        mark = self.marks.get(base)
-        if not mark:
-            px = await self._feed.last_price(base)
-            mark = float(px) if px else 0.0
-        if mark <= 0 or notional > sl.cash_eur:
+        if notional > sl.cash_eur + 1.0 or notional < sl.cfg.min_notional_eur:
             return
-        fee = notional * (sl.cfg.fee_rt / 2)
-        sl.cash_eur -= fee + notional
+        fill = await self._fill(base, "buy", notional_eur=notional)
+        if fill is None or fill.qty <= 0:
+            logger.warning("donchian buy skipped %s %s (no fill)", sl.cfg.name, base)
+            return
+        cost = fill.notional + fill.fee_eur
+        if cost > sl.cash_eur + 1.0:
+            logger.warning(
+                "donchian buy over cash %s %s cost=%.2f cash=%.2f",
+                sl.cfg.name,
+                base,
+                cost,
+                sl.cash_eur,
+            )
+        sl.cash_eur = max(0.0, sl.cash_eur - cost)
+        venue = "paper" if self.dry_run or not self._gws else (self.venues[0] if self.venues else "bitvavo")
         pos = DonchianPosition(
             base=base,
-            entry_price=mark,
-            notional_eur=notional,
+            entry_price=fill.avg_price,
+            notional_eur=fill.notional,
             opened_ms=now_ms,
             entry_reason=",".join(str(x) for x in (row.get("reasons") or [])),
             sleeve=sl.cfg.name,
+            venue=venue,
+            quantity=fill.qty,
         )
         sl.positions.append(pos)
-        self.marks[base] = mark
+        self.marks[base] = fill.avg_price
         self.mark_ts[base] = time.time()
         self._ledger_append(
             {
@@ -241,10 +382,14 @@ class DonchianBundleRunner:
                 "side": "long",
                 "sleeve": sl.cfg.name,
                 "base": base,
-                "notional_eur": notional,
-                "entry_price": mark,
+                "venue": venue,
+                "notional_eur": round(fill.notional, 2),
+                "quantity": fill.qty,
+                "entry_price": fill.avg_price,
+                "fee_eur": round(fill.fee_eur, 2),
                 "holding_id": pos.holding_id,
                 "reason": pos.entry_reason,
+                "dry_run": self.dry_run,
             }
         )
 
@@ -341,9 +486,9 @@ class DonchianBundleRunner:
                         "base": p.base,
                         "side": "long",
                         "sleeve": name,
-                        "venue": "paper",
+                        "venue": p.venue or ("paper" if self.dry_run else (self.venues[0] if self.venues else "bitvavo")),
                         "entry_price": p.entry_price,
-                        "quantity": p.notional_eur / p.entry_price if p.entry_price else 0.0,
+                        "quantity": p.quantity or (p.notional_eur / p.entry_price if p.entry_price else 0.0),
                         "notional_eur": round(p.notional_eur, 2),
                         "opened": datetime.fromtimestamp(p.opened_ms / 1000, UTC).isoformat(),
                         "mark": mark,
@@ -375,11 +520,14 @@ class DonchianBundleRunner:
                     "positions": pos_rows,
                 }
             )
+        live = (not self.dry_run) and bool(self._gws)
         return {
             "desk": "momentum_donchian",
-            "mode": "donchian_paper",
-            "paper_only": True,
-            "dry_run": True,
+            "mode": "donchian_live" if live else "donchian_paper",
+            "paper_only": not live,
+            "dry_run": self.dry_run,
+            "allow_live": live,
+            "venues": list(self.venues),
             "book_eur": self.book_eur,
             "allocator": self._alloc,
             "equity_eur": round(sum(sl.cash_eur + sl.unrealized(self.marks, sl.cfg.fee_rt) for sl in self.sleeves.values()), 2),
@@ -451,6 +599,7 @@ class DonchianDeskManager:
         self._runner: DonchianBundleRunner | None = None
         self._task: asyncio.Task | None = None
         self._stop = False
+        self._engine: Any = None
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -458,29 +607,56 @@ class DonchianDeskManager:
     def status(self) -> dict[str, Any]:
         settings = get_settings()
         enabled = bool(getattr(settings, "momentum_donchian_enabled", False))
+        allow_live = bool(getattr(settings, "momentum_donchian_allow_live", False))
         base = {
             "ok": True,
             "running": self.running(),
             "enabled_setting": enabled,
-            "paper_only": True,
+            "allow_live": allow_live,
         }
         if self._runner is not None:
             base.update(self._runner.status())
+            base["allow_live"] = allow_live
             return base
         state_path = str(getattr(settings, "momentum_donchian_state_path", "./data/momentum_donchian_state.json"))
-        if Path(state_path).exists() and self._runner is None:
-            # idle snapshot from disk
+        if Path(state_path).exists():
             tmp = DonchianBundleRunner(
                 state_path=state_path,
                 ledger_path=str(getattr(settings, "momentum_donchian_ledger_path", "./data/momentum_donchian_ledger.jsonl")),
             )
             base.update(tmp.status())
+            base["allow_live"] = allow_live
+            base["running"] = False
+        else:
+            base.update(
+                {
+                    "paper_only": not allow_live,
+                    "dry_run": True,
+                    "mode": "donchian_paper",
+                }
+            )
         return base
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:
-        if self.running():
-            return {"ok": False, "started": False, "reason": "already_running", "status": self.status()}
         settings = settings or get_settings()
+        allow_live = bool(getattr(settings, "momentum_donchian_allow_live", False))
+        if self.running():
+            already_live = bool(self._runner and not self._runner.dry_run and self._runner._gws)
+            if allow_live and already_live:
+                return {
+                    "ok": False,
+                    "started": False,
+                    "reason": "already_running",
+                    "status": self.status(),
+                }
+            if not allow_live and self._runner and self._runner.dry_run:
+                return {
+                    "ok": False,
+                    "started": False,
+                    "reason": "already_running",
+                    "status": self.status(),
+                }
+            await self.stop()
         if not bool(getattr(settings, "momentum_donchian_enabled", False)):
             return {
                 "ok": False,
@@ -490,11 +666,59 @@ class DonchianDeskManager:
         state_path = str(getattr(settings, "momentum_donchian_state_path", "./data/momentum_donchian_state.json"))
         ledger_path = str(getattr(settings, "momentum_donchian_ledger_path", "./data/momentum_donchian_ledger.jsonl"))
         book = float(getattr(settings, "momentum_multi_strat_book_eur", BOOK_EUR) or BOOK_EUR)
-        self._runner = DonchianBundleRunner(state_path=state_path, ledger_path=ledger_path, book_eur=book)
+        venues = parse_venues(str(getattr(settings, "momentum_donchian_venues", "bitvavo") or "bitvavo"))
+        gateways: dict[str, Any] = {}
+        dry_run = not allow_live
+        if allow_live:
+            from bot.live.micro_engine import LiveMicroEngine
+            from bot.live.momentum_desk import DeskConfig
+
+            cfg = DeskConfig(
+                clip_eur=max(book / 2.0, 500.0),
+                max_positions=4,
+                day_loss_limit_eur=float(getattr(settings, "momentum_desk_day_loss_limit_eur", 750.0)),
+            )
+            engine = LiveMicroEngine(engine_settings_for_desk(settings, cfg, venues))
+            armed = engine.arm()
+            if not armed.get("armed"):
+                logger.error("donchian live arm failed: %s", armed)
+                return {"ok": False, "started": False, "reason": "arm_failed", "detail": armed}
+            for v in venues:
+                if engine._registry.get_client(v, enable_trading=True) is None:  # noqa: SLF001
+                    logger.warning("donchian: no trading credentials for %s; skipped", v)
+                    continue
+                gateways[v] = LiveGateway(engine, v)
+            if not gateways:
+                return {"ok": False, "started": False, "reason": "no_venue_credentials", "venues": list(venues)}
+            venues = tuple(v for v in venues if v in gateways)
+            dry_run = False
+            self._engine = engine
+        self._runner = DonchianBundleRunner(
+            state_path=state_path,
+            ledger_path=ledger_path,
+            book_eur=book,
+            dry_run=dry_run,
+            venues=venues,
+            gateways=gateways,
+        )
+        if not dry_run:
+            dropped = self._runner.discard_paper_positions()
+            logger.info("donchian live: dropped %s paper lots before venue orders", dropped)
         self._stop = False
         self._task = asyncio.create_task(self._runner.run(lambda: self._stop), name="momentum-donchian")
-        _write_flag(state_path, running=True, paper_only=True)
-        return {"ok": True, "started": True, "status": self.status()}
+        _write_flag(state_path, running=True, paper_only=dry_run, dry_run=dry_run)
+        if not dry_run:
+            asyncio.create_task(self._kick_live_decide(), name="donchian-live-kick")
+        return {"ok": True, "started": True, "dry_run": dry_run, "venues": list(venues), "status": self.status()}
+
+    async def _kick_live_decide(self) -> None:
+        await asyncio.sleep(2.0)
+        try:
+            if self._runner is not None:
+                out = await self._runner.decide(execute=True)
+                logger.info("donchian live kick decide: %s", {k: v.get("risk_block") or v.get("reasons") for k, v in (out.get("sleeves") or {}).items()})
+        except Exception:  # noqa: BLE001
+            logger.exception("donchian live kick decide failed")
 
     async def stop(self) -> dict[str, Any]:
         self._stop = True
@@ -507,6 +731,7 @@ class DonchianDeskManager:
         state_path = str(getattr(settings, "momentum_donchian_state_path", "./data/momentum_donchian_state.json"))
         _write_flag(state_path, running=False)
         self._task = None
+        self._engine = None
         return {"ok": True, "stopped": True, "status": self.status()}
 
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:

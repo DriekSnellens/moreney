@@ -44,10 +44,17 @@ class DonchianPosition:
     holding_id: str = ""
     entry_reason: str = ""
     sleeve: str = ""
+    venue: str = "paper"
+    quantity: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.holding_id:
             self.holding_id = f"dc-{self.sleeve or 'x'}-{self.base}-{uuid.uuid4().hex[:8]}"
+        if self.quantity <= 0 and self.entry_price > 0:
+            self.quantity = self.notional_eur / self.entry_price
+
+    def is_paper(self) -> bool:
+        return str(self.venue or "paper").lower() in {"paper", "", "synthetic"}
 
     def long_return(self, mark: float) -> float:
         if self.entry_price <= 0 or mark <= 0:
@@ -71,6 +78,8 @@ class DonchianPosition:
             holding_id=str(raw.get("holding_id") or ""),
             entry_reason=str(raw.get("entry_reason") or ""),
             sleeve=str(raw.get("sleeve") or ""),
+            venue=str(raw.get("venue") or "paper"),
+            quantity=float(raw.get("quantity") or 0.0),
         )
 
 
