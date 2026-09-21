@@ -397,6 +397,19 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert "name=\"sell\"" not in html
 
 
+def test_mix_tape_uptrend_splits_at_sma50_not_chop():
+    from bot.live.momentum_dashboard import _mix_tape
+
+    html = _mix_tape(75447.0, 68245.0, 63598.0, "risk_on")
+    assert "chop" not in html
+    assert "risk on" in html
+    assert "SMA50" in html
+    assert "SMA20" in html
+    # Death-cross (SMA20 below SMA50) still has a mid band.
+    chop = _mix_tape(100.0, 90.0, 120.0, "mid")
+    assert "chop" in chop
+
+
 def _ohlc_breakout(n: int = 16, last_high: float = 120.0) -> list[list[float]]:
     rows = []
     for i in range(n - 1):

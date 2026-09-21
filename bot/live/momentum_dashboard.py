@@ -699,6 +699,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 
 @media (max-width: 979px) {
   body.mix-live { padding-bottom: calc(3.65rem + env(safe-area-inset-bottom, 0px)); }
+  .top-metric:has([data-k="mix-label-top"]) { display: none; }
 }
 
 @media (min-width: 721px) and (max-width: 979px) {
@@ -1049,7 +1050,16 @@ def _donchian_positions_table(status: Mapping[str, Any]) -> str:
         sleeve = escape(str(p.get("sleeve") or "donch"))
         reason = escape(str(p.get("entry_reason") or ""))
         venue = escape(str(p.get("venue") or ""))
-        age = float(p.get("age_h") or 0)
+        age = p.get("age_h")
+        if age is None and p.get("opened"):
+            try:
+                opened = datetime.fromisoformat(str(p["opened"]).replace("Z", "+00:00"))
+                if opened.tzinfo is None:
+                    opened = opened.replace(tzinfo=UTC)
+                age = (datetime.now(UTC) - opened.astimezone(UTC)).total_seconds() / 3600.0
+            except ValueError:
+                age = 0.0
+        age = float(age or 0)
         mark_s = f"{float(mark):,.4f}" if mark else "—"
         mark_meta = escape(str(p.get("mark_source") or "—"))
         if p.get("mark_age_sec") is not None:
@@ -1390,11 +1400,18 @@ def _mix_tape(btc: Any, sma20: Any, sma50: Any, label: str) -> str:
     def pct(v: float) -> float:
         return max(2.0, min(98.0, 100.0 * (v - lo) / span))
 
-    s20p = pct(s20) if s20 else 33.0
-    s50p = pct(s50) if s50 else 66.0
-    left_w = min(s20p, s50p)
-    mid_w = abs(s50p - s20p)
-    right_w = 100.0 - max(s20p, s50p)
+    s20p = pct(s20) if s20 else None
+    s50p = pct(s50) if s50 else None
+    # Classifier: BTC>SMA50 → risk_on; BTC<SMA20 → risk_off; else mid.
+    # When SMA20>SMA50 (typical uptrend) there is no mid band — split at SMA50.
+    if s20p is not None and s50p is not None and s20p < s50p:
+        left_w, mid_w, right_w = s20p, s50p - s20p, 100.0 - s50p
+    elif s50p is not None:
+        left_w, mid_w, right_w = s50p, 0.0, 100.0 - s50p
+    elif s20p is not None:
+        left_w, mid_w, right_w = s20p, 0.0, 100.0 - s20p
+    else:
+        left_w, mid_w, right_w = 33.0, 34.0, 33.0
     z_off = "cur" if label == "risk_off" else ""
     z_mid = "cur" if label == "mid" else ""
     z_on = "cur" if label == "risk_on" else ""
@@ -1411,11 +1428,16 @@ def _mix_tape(btc: Any, sma20: Any, sma50: Any, label: str) -> str:
         marks.append(
             f'<span class="mark btc" style="left:{pct(b):.1f}%"><i></i>BTC</span>'
         )
+    mid_html = (
+        f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%">chop</div>'
+        if mid_w >= 4.0
+        else (f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%"></div>' if mid_w > 0.05 else "")
+    )
     return (
         f'<div class="mix-tape" data-live="mix-tape">'
         f'<div class="zones">'
         f'<div class="z off {z_off}" style="width:{left_w:.1f}%">risk off</div>'
-        f'<div class="z mid {z_mid}" style="width:{mid_w:.1f}%">chop</div>'
+        f"{mid_html}"
         f'<div class="z on {z_on}" style="width:{right_w:.1f}%">risk on</div>'
         f"</div>{''.join(marks)}</div>"
     )
@@ -3006,6 +3028,11 @@ def render_momentum_dashboard(
     show_dc = donchian is not None or donchian_ledger_rows is not None
     show_mix = bool(show_dc or show_sw)
     book = dict(donchian or {}) if show_dc else dict(status)
+    if show_dc and book.get("cash_eur") is None:
+        book["cash_eur"] = round(
+            sum(float(s.get("cash_eur") or 0) for s in (book.get("sleeves") or [])),
+            2,
+        )
     n_pos = sum(
         1
         for p in (book.get("positions") or [])
