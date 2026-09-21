@@ -1,0 +1,21 @@
+# HTTPS front door for the live dashboard.
+# Origin stays on 127.0.0.1:8020 — do not expose 8020 on the public NIC.
+#
+# Cloudflare: orange-cloud A/AAAA to this VPS, SSL/TLS mode Full.
+# For Full (strict), replace the self-signed pair with a Cloudflare
+# Origin Certificate at the same paths.
+
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+:443 {
+	reverse_proxy 127.0.0.1:8020
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+	}
+}

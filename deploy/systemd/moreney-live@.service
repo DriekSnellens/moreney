@@ -12,7 +12,8 @@ EnvironmentFile=-/opt/moreney/.env
 EnvironmentFile=/opt/moreney/env/bitvavo-observe.env
 EnvironmentFile=/opt/moreney/env/live-%i.env
 Environment=PYTHONPATH=/opt/moreney
-ExecStart=/bin/bash -c 'exec /opt/moreney/.venv/bin/python -m uvicorn bot.main:app --host 0.0.0.0 --port "${API_PORT}"'
+# Bind loopback only; Caddy on :443 is the public HTTPS front.
+ExecStart=/bin/bash -c 'exec /opt/moreney/.venv/bin/python -m uvicorn bot.main:app --host "${API_HOST:-127.0.0.1}" --port "${API_PORT}"'
 Restart=always
 RestartSec=10
 TimeoutStopSec=60
