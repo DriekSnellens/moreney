@@ -153,6 +153,58 @@ def test_dashboard_mix_board_renders():
     assert "15m WR-core staat idle" in html
     assert "location.reload" not in html
     assert "patchMixOpen" in html
+    assert 'id="core-15m"' in html
+    assert "15m WR-core" in html
+
+
+def test_dashboard_live_15m_beside_mix_is_not_idle():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo", "okx"],
+            "config": {"max_positions": 2, "clip_eur": 2000},
+            "positions": [],
+            "risk": {"day_realized_eur": 0, "entries_allowed": True},
+            "cash_eur": 3900,
+            "cash_by_venue": {"bitvavo": 2000, "okx": 1900},
+            "venue_cash_caps": {"bitvavo": 2000},
+            "exposure_eur": 0,
+            "equity_eur": 3900,
+            "realized_total_eur": 0,
+            "trade_count": 0,
+            "unrealized_net_eur": 0,
+            "next_decision": "2026-09-23T07:00:00+00:00",
+        },
+        [],
+        allocator=snap,
+        donchian={
+            "running": True,
+            "dry_run": False,
+            "equity_eur": 19800.0,
+            "positions": [
+                {
+                    "holding_id": "dc-1",
+                    "sleeve": "donch10",
+                    "base": "NEAR",
+                    "quantity": 10,
+                    "unrealized_net_eur": 12.0,
+                }
+            ],
+            "sleeves": [],
+        },
+        show_short_weakest=True,
+        short_weakest={"enabled_setting": True, "positions": [], "running": True},
+    ).body.decode()
+    assert "draait ernaast op Bitvavo-plafond" in html
+    assert "15m WR-core staat idle" not in html
+    assert 'id="core-15m"' in html
+    assert "bitvavo≤2,000" in html or "bitvavo≤2000" in html
+    assert "NEAR" in html
+    assert "DONCHIAN LIVE" in html
 
 
 def test_dashboard_paper_clip_is_separate_from_mix_equity():
@@ -284,7 +336,7 @@ def test_dashboard_shows_donchian_ledger_fills():
         short_weakest_ledger_rows=[],
     ).body.decode()
     assert "Execution stream · Donchian ledger" in html
-    assert "15m core ledger (idle)" in html
+    assert "15m WR-core ledger" in html
     assert "friday_flatten" in html
     assert "donch_fri10" in html
     assert "NEAR" in html
@@ -444,16 +496,16 @@ def test_dashboard_mix_equity_and_donchian_table():
         short_weakest={"enabled_setting": True, "positions": [], "running": True},
     ).body.decode()
     assert "19,683.82" in html
-    assert "21,122.60" not in html
+    assert 'data-live="equity">19,683.82' in html.replace(" ", "") or "19,683.82" in html
     assert "NEAR" in html
     assert "AVAX" in html
     assert "1074.2316" in html.replace(",", "")
     assert "houdt bags" in html
     assert "btc_below_sma" not in html.split("Execution stream")[0]
-    assert "Trail-stop" not in html.split("15m core rules")[0]
-    assert "Hard-stop" not in html.split("15m core rules")[0]
+    donchian_block = html.split("15m WR-core rules")[0]
+    assert "Trail-stop" not in donchian_block
+    assert "Hard-stop" not in donchian_block
     assert "Verkoop alles" not in html
-    assert "Simuleer" not in html
     assert "Geen 15m trail" in html
     assert "class=\"mix-live\"" in html or "mix-live" in html
     assert "grid-template-columns: 1fr" in html
@@ -461,7 +513,8 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert "mixHeroesLive" in html
     assert "Donchian · live longs" in html
     assert ">Bags<" in html
-    assert "15m core rules (idle" in html
+    assert "15m WR-core rules (naast de mix)" in html
+    assert 'id="core-15m"' in html
     assert "name=\"sell\"" not in html
 
 

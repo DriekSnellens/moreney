@@ -245,18 +245,24 @@ async def lifespan(_app: FastAPI):
             except Exception:  # noqa: BLE001
                 logger.exception("failed to auto-resume interrupted micro session")
         try:
-            if mix_on:
-                logger.info("loop mix owns the book — skip 15m WR-core resume")
-                mgr = get_momentum_desk_manager()
-                if mgr.running():
-                    await mgr.stop()
-                    logger.info("stopped 15m WR-core so the loop mix can run")
-            else:
-                resumed = await get_momentum_desk_manager().resume_if_flagged()
-                if resumed and resumed.get("started"):
-                    logger.info("auto-resumed momentum desk after process start")
-                elif resumed:
-                    logger.warning("momentum desk auto-resume did not start: %s", resumed)
+            # 15m WR-core may run beside Donchian: Bitvavo spend is capped so
+            # mix bags keep their EUR. OKX quote cash is uncapped.
+            mgr = get_momentum_desk_manager()
+            resumed = await mgr.resume_if_flagged()
+            if resumed and resumed.get("started"):
+                logger.info("auto-resumed momentum desk after process start")
+            elif resumed:
+                logger.warning("momentum desk auto-resume did not start: %s", resumed)
+            elif bool(getattr(get_settings(), "momentum_desk_enabled", False)) and not mgr.running():
+                started = await mgr.start(
+                    settings=get_settings(),
+                    dry_run=False,
+                    venue=getattr(get_settings(), "momentum_desk_venues", "bitvavo,okx"),
+                )
+                if started.get("started"):
+                    logger.info("started 15m WR-core beside mix: %s", started.get("reason"))
+                else:
+                    logger.warning("15m WR-core start skipped: %s", started)
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume momentum desk")
         try:

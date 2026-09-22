@@ -132,14 +132,15 @@ body {
 }
 .mix-chip strong { font-family: var(--mono); }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
-.paper-clip { margin-top: .85rem; border-style: dashed; }
-.paper-clip h2 { font-size: .95rem; }
-.paper-clip .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
-.paper-clip .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
-.paper-clip .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.paper-clip .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
+.paper-clip, .side-15m { margin-top: .85rem; }
+.paper-clip { border-style: dashed; }
+.paper-clip h2, .side-15m h2 { font-size: .95rem; }
+.paper-clip .clip-kpis, .side-15m .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
+.paper-clip .clip-kpis div, .side-15m .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
+.paper-clip .clip-kpis span, .side-15m .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.paper-clip .clip-kpis strong, .side-15m .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
 @media (max-width: 720px) {
-  .paper-clip .clip-kpis { grid-template-columns: 1fr 1fr; }
+  .paper-clip .clip-kpis, .side-15m .clip-kpis { grid-template-columns: 1fr 1fr; }
 }
 .mix-dc-dec { display: grid; gap: .55rem; }
 .mix-dc-dec > div { padding: .45rem 0; border-bottom: 1px solid var(--border-soft); }
@@ -1489,6 +1490,7 @@ def _mix_panel(
     alloc: Mapping[str, Any] | None,
     donchian: Mapping[str, Any] | None = None,
     short_weakest: Mapping[str, Any] | None = None,
+    core_15m: Mapping[str, Any] | None = None,
 ) -> str:
     """Which strategy is on, how much €, and why (loop mix)."""
     a = dict(alloc or {})
@@ -1634,10 +1636,111 @@ def _mix_panel(
         f'<p class="mix-foot">Classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}. '
         f"{'Donchian-longs zijn LIVE Bitvavo-orders.' if don_live else 'Donchian-longs draaien paper.'} "
         f"Decide na UTC-dagclose (00:05) op de gesloten 1d-kaars · Friday-flat pas na vrijdagclose. "
-        f"Shorts blijven paper (spot kan niet short). 15m WR-core staat idle. "
+        f"Shorts blijven paper (spot kan niet short). {_core_15m_mix_note(core_15m)} "
         f"BTC+RS-clip is een apart paper-boek en telt niet mee in deze live equity."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
+    )
+
+
+def _core_15m_mix_note(status: Mapping[str, Any] | None) -> str:
+    st = status or {}
+    running = bool(st.get("running"))
+    dry = bool(st.get("dry_run"))
+    if running and not dry:
+        return (
+            "15m WR-core draait ernaast op Bitvavo-plafond + alle OKX "
+            "(niet in de €20k mix)."
+        )
+    if running:
+        return "15m WR-core draait ernaast in shadow (geen live orders)."
+    return "15m WR-core staat idle."
+
+
+def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
+    """Live 15m WR-core beside the mix — capped Bitvavo + all OKX."""
+    st = dict(status or {})
+    running = bool(st.get("running"))
+    dry = bool(st.get("dry_run"))
+    if running and not dry:
+        pill = '<span class="pill on" data-live="core15-pill"><span class="dot"></span>LIVE</span>'
+    elif running:
+        pill = '<span class="pill obs" data-live="core15-pill"><span class="dot"></span>SHADOW</span>'
+    else:
+        pill = '<span class="pill off" data-live="core15-pill"><span class="dot"></span>STOP</span>'
+    cash_by = st.get("cash_by_venue") or {}
+    if cash_by:
+        cash_txt = " · ".join(
+            f"{escape(str(k))} {float(v):,.0f} €" for k, v in cash_by.items()
+        )
+    else:
+        cash_txt = f"cash {_fmt_eur(st.get('cash_eur'), signed=False)}"
+    caps = st.get("venue_cash_caps") or {}
+    cap_txt = (
+        " · ".join(f"{escape(str(k))}≤{float(v):,.0f} €" for k, v in caps.items())
+        if caps
+        else "geen Bitvavo-plafond"
+    )
+    pos_bits = []
+    for p in st.get("positions") or []:
+        if float(p.get("quantity") or 0.0) <= 1e-12:
+            continue
+        net = p.get("unrealized_net_eur")
+        hid = escape(str(p.get("holding_id") or p.get("base") or ""))
+        pos_bits.append(
+            f'<span class="mix-chip" data-holding="{hid}">'
+            f'<span class="muted">{escape(str(p.get("venue") or ""))}</span>'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
+        )
+    pos_html = (
+        f'<div class="mix-open" data-live="core15-open">{"".join(pos_bits)}</div>'
+        if pos_bits
+        else '<div class="mix-open" data-live="core15-open"><span class="muted">Geen open 15m-posities — wacht op slot 7/13/16 UTC.</span></div>'
+    )
+    n_pos = len(pos_bits)
+    actions = ""
+    if running:
+        bits = [
+            '<form method="get" action="/live/momentum" style="display:inline">'
+            '<input type="hidden" name="simulate" value="1">'
+            '<button type="submit" class="btn">Simuleer</button></form>'
+        ]
+        if n_pos:
+            bits.append(
+                '<form method="get" action="/live/momentum" style="display:inline">'
+                '<input type="hidden" name="sell_all" value="1">'
+                '<button type="submit" class="btn danger">Verkoop 15m</button></form>'
+            )
+        actions = f'<div class="toolbar" style="margin:.4rem 0 0">{"".join(bits)}</div>'
+    risk = st.get("risk") or {}
+    block = ""
+    if not risk.get("entries_allowed", True):
+        block = (
+            f' · geblokkeerd: {escape(str(risk.get("block_reason") or "risk"))}'
+        )
+    eq = st.get("equity_eur") if running else None
+    cash_show = cash_txt if running else "—"
+    cap_show = cap_txt if running else "gestopt"
+    return (
+        f'<section class="panel mix-board side-15m" id="core-15m" data-live="core-15m">'
+        f'<div class="card-head"><h2>15m WR-core</h2>{pill}'
+        f'<span class="pill {"on" if running and not dry else "off"}">'
+        f'<span class="dot"></span>naast Donchian</span></div>'
+        f'<p class="mix-why" data-live="core15-caption">Live 15m-desk op Bitvavo-plafond '
+        f"+ alle OKX-cash. Raakt Donchian-bags niet. Hours 7/13/16 UTC{block}.</p>"
+        f'<div class="clip-kpis">'
+        f'<div><span>Equity</span><strong data-k="core15-eq">{_fmt_eur(eq, signed=False)}</strong></div>'
+        f'<div><span>Open</span><strong data-k="core15-open-pnl" class="{_cls(st.get("unrealized_net_eur") if running else None)}">'
+        f'{_fmt_eur(st.get("unrealized_net_eur") if running else None)}</strong></div>'
+        f'<div><span>Gerealiseerd</span><strong data-k="core15-real" class="{_cls(st.get("realized_total_eur") if running else None)}">'
+        f'{_fmt_eur(st.get("realized_total_eur") if running else None)}</strong></div>'
+        f'<div><span>Cash</span><strong data-k="core15-cash">{escape(cash_show)}</strong></div>'
+        f"</div>"
+        f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
+        f'<span data-k="core15-caps">{escape(cap_show)}</span> · next '
+        f'<strong data-live="core15-next">{_ts(st.get("next_decision") if running else None)}</strong></p>'
+        f"{pos_html}{actions}</section>"
     )
 
 
@@ -3000,6 +3103,55 @@ _LIVE_MARKS_JS = r"""
     }
     (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
   }
+  function patchCore15m(status) {
+    const root = document.querySelector('[data-live="core-15m"]');
+    if (!root || !status) return;
+    setText(root, "core15-eq", fmtEur(status.equity_eur).replace(/^\+/, ""));
+    setText(root, "core15-open-pnl", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
+    setText(root, "core15-real", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
+    const cashBy = status.cash_by_venue || {};
+    const cashKeys = Object.keys(cashBy);
+    if (cashKeys.length) {
+      setText(root, "core15-cash", cashKeys.map((k) => `${k} ${Number(cashBy[k]).toLocaleString("en-US", { maximumFractionDigits: 0 })} €`).join(" · "));
+    }
+    const nextEl = document.querySelector('[data-live="core15-next"]');
+    if (nextEl && status.next_decision) {
+      const d = new Date(status.next_decision);
+      if (!Number.isNaN(d.getTime())) {
+        const dd = String(d.getUTCDate()).padStart(2, "0");
+        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const hh = String(d.getUTCHours()).padStart(2, "0");
+        const mi = String(d.getUTCMinutes()).padStart(2, "0");
+        nextEl.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
+      }
+    }
+    const pill = document.querySelector('[data-live="core15-pill"]');
+    if (pill) {
+      const on = !!status.running && !status.dry_run;
+      pill.className = on ? "pill on" : (status.running ? "pill obs" : "pill off");
+      pill.innerHTML = on
+        ? '<span class="dot"></span>LIVE'
+        : (status.running ? '<span class="dot"></span>SHADOW' : '<span class="dot"></span>STOP');
+    }
+    const open = root.querySelector('[data-live="core15-open"]');
+    if (open) {
+      const pos = (status.positions || []).filter((p) => Number(p.quantity || 0) > 1e-12);
+      if (!pos.length) {
+        open.innerHTML = '<span class="muted">Geen open 15m-posities — wacht op slot 7/13/16 UTC.</span>';
+      } else {
+        open.innerHTML = pos.map((p) => {
+          const net = p.unrealized_net_eur;
+          const hid = esc(p.holding_id || p.base || "");
+          return `<span class="mix-chip" data-holding="${hid}">`
+            + `<span class="muted">${esc(p.venue || "")}</span>`
+            + `<strong>${esc(p.base || "")}</strong>`
+            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+        }).join("");
+      }
+    }
+    const knobs = trailKnobs(status);
+    (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
+  }
   async function tick() {
     try {
       const res = await fetch(STATUS_URL, { cache: "no-store" });
@@ -3008,6 +3160,7 @@ _LIVE_MARKS_JS = r"""
         const { trail, tightAfter, tight } = trailKnobs(status);
         (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
         if (!mixHeroesLive()) patchHeroes(status);
+        else patchCore15m(status);
         patchRules(status);
       }
     } catch (err) {
@@ -3416,7 +3569,7 @@ def render_momentum_dashboard(
             '<span class="chev"></span></summary>'
             f'<div class="fold-body">{_ledger_table(donchian_ledger_rows or [])}</div></details>'
             '<details class="fold">'
-            '<summary><span class="fold-head">15m core ledger (idle)</span>'
+            '<summary><span class="fold-head">15m WR-core ledger</span>'
             '<span class="chev"></span></summary>'
             f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
         )
@@ -3456,6 +3609,8 @@ def render_momentum_dashboard(
       <a href="/live/momentum#sw-open-pos">Short weakest paper
         <span class="badge">{'on' if show_sw else 'off'}</span></a>
       {('<a href="/live/momentum#paper-clip">BTC+RS clip <span class="badge">paper</span></a>' if show_clip else '')}
+      <a href="/live/momentum#core-15m">15m WR-core
+        <span class="badge">{'live' if running and not dry else ('on' if running else 'off')}</span></a>
       <a href="/live/momentum#ledger">Ledger</a>
       <a href="/live/momentum#dc-open-pos">Donchian longs</a>
       <a href="/live/momentum/allocator/status">Mix JSON</a>
@@ -3528,7 +3683,8 @@ def render_momentum_dashboard(
 {topbar}
 <div class="wrap">
 {earnings_html}
-{_mix_panel(allocator, donchian, short_weakest if show_sw else None)}
+{_mix_panel(allocator, donchian, short_weakest if show_sw else None, status if show_mix else None)}
+{_core_15m_panel(status) if show_mix else ""}
 {_paper_clip_panel(btc_rs_clip) if show_clip else ""}
 {positions_html}
 {err_html}
@@ -3547,7 +3703,7 @@ def render_momentum_dashboard(
 {exec_ledger_html}
 {vol_ledger_html}
 <details class="fold">
-<summary><span class="fold-head">{'15m core rules (idle — niet de mix)' if show_mix else 'Risk rules (core)'}</span><span class="chev"></span></summary>
+<summary><span class="fold-head">{'15m WR-core rules (naast de mix)' if show_mix else 'Risk rules (core)'}</span><span class="chev"></span></summary>
 <div class="fold-body">{_rules(cfg)}</div>
 </details>
 <p class="foot"><span>{refresh_note}</span>{footer_links}</p>
