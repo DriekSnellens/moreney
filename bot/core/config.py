@@ -561,10 +561,19 @@ class Settings(BaseSettings):
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
     # Daily Momentum Desk (bot/live/momentum_desk.py + momentum_runner.py).
+    # When the Donchian mix is on, 15m still auto-starts if this is true (or
+    # if the running-flag is set). Bitvavo spend is capped so mix bags stay.
     momentum_desk_enabled: bool = False
     # Entry venues in preference order (cheapest fees first); later venues are
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
+    # Per-venue EUR spend caps for 15m entries: ``bitvavo:2000``. Missing venue
+    # = unlimited (OKX uses all quote cash). 15m exposure on that venue counts
+    # against the cap so a refill cannot spend mix leftover.
+    momentum_desk_venue_cash_caps: str = ""
+    # When the loop mix is on and Bitvavo is missing from the cap string,
+    # clamp 15m Bitvavo spend to this (the reserved ~€2k beside the €20k mix).
+    momentum_desk_mix_bitvavo_cap_eur: float = Field(default=2_000.0, ge=0.0)
     # Quality hours (135d live-scale): 7+13+16 ≈ WR 52.5% / +€888 vs peak
     # 7+16 WR 54% / +€951. Midday 13 catches EU session without every-bar bleed.
     momentum_desk_decision_hours_utc: str = "7,13,16"
@@ -693,7 +702,7 @@ class Settings(BaseSettings):
     momentum_short_weakest_ledger_path: str = "./data/momentum_short_weakest_ledger.jsonl"
 
     # Loop-winner €20k mix: Donchian longs + paper short, SMA20/50 regime.
-    # 15m WR core is idle while this is on.
+    # 15m WR-core may run beside it on capped Bitvavo leftover + all OKX.
     momentum_multi_strat_enabled: bool = True
     momentum_multi_strat_book_eur: float = Field(default=20_000.0, gt=0)
     momentum_donchian_enabled: bool = True

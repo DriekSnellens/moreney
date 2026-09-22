@@ -30,10 +30,13 @@ from bot.live.momentum_desk import (
 )
 from bot.live.momentum_runner import (
     Fill,
+    Holding,
     MomentumDeskRunner,
     OrderState,
     RunnerOptions,
     engine_settings_for_desk,
+    parse_venue_cash_caps,
+    venue_cash_caps_from_settings,
 )
 from bot.research.momentum_backtest.engine import simulate
 
@@ -1590,6 +1593,76 @@ def test_route_prefers_primary_and_overflows_to_second_venue(tmp_path):
     assert r._route_entry(1690.0) is None
 
 
+def test_parse_venue_cash_caps_skips_non_positive():
+    assert parse_venue_cash_caps("bitvavo:2000,okx:1500") == {
+        "bitvavo": 2000.0,
+        "okx": 1500.0,
+    }
+    assert parse_venue_cash_caps("bitvavo:2000,okx:0") == {"bitvavo": 2000.0}
+    assert parse_venue_cash_caps({"BITVAVO": "2000", "okx": -1}) == {"bitvavo": 2000.0}
+    assert parse_venue_cash_caps("") == {}
+
+
+def test_mix_injects_bitvavo_cap_when_unset():
+    from bot.core.config import Settings
+
+    s = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        momentum_multi_strat_enabled=True,
+        momentum_desk_venue_cash_caps="",
+        momentum_desk_mix_bitvavo_cap_eur=2000.0,
+    )
+    assert venue_cash_caps_from_settings(s, mix_on=True) == {"bitvavo": 2000.0}
+    s2 = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        momentum_multi_strat_enabled=True,
+        momentum_desk_venue_cash_caps="bitvavo:1500",
+    )
+    assert venue_cash_caps_from_settings(s2, mix_on=True) == {"bitvavo": 1500.0}
+    s3 = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        momentum_multi_strat_enabled=False,
+        momentum_desk_venue_cash_caps="",
+    )
+    assert venue_cash_caps_from_settings(s3, mix_on=False) == {}
+
+
+def _bitvavo_holding(notional: float, *, px: float = 100.0) -> Holding:
+    qty = notional / px
+    return Holding(
+        pos=Position(
+            base="SOL",
+            entry_price=px,
+            quantity=qty,
+            notional_eur=notional,
+            opened_ms=T0,
+            peak=px,
+            venue="bitvavo",
+        ),
+        holding_id="h-sol",
+    )
+
+
+def test_route_respects_bitvavo_cap_and_leaves_okx_uncapped(tmp_path):
+    clock = FakeClock(T0 / 1000)
+    r, _ = _multi_runner(tmp_path, clock, bitvavo_cash=6000.0, okx_cash=1900.0)
+    r.opt.venue_cash_caps = {"bitvavo": 2000.0}
+    asyncio.run(r._refresh_cash())
+    # Mix leftover on Bitvavo is not spendable above the €2k ceiling.
+    assert r._spendable_cash("bitvavo") == pytest.approx(2000.0)
+    assert r._spendable_cash("okx") == pytest.approx(1900.0)
+    assert r.cash_eur == pytest.approx(3900.0)
+    assert r._route_entry(1500.0) == ("bitvavo", 1500.0)
+    venue, clip = r._route_entry(2500.0)
+    assert venue == "bitvavo" and 1990.0 < clip <= 2000.0
+    # After 15m already holds €1.8k on Bitvavo, leftover cap is €200 → OKX.
+    r.holdings = [_bitvavo_holding(1800.0)]
+    assert r._spendable_cash("bitvavo") == pytest.approx(200.0)
+    assert r._route_entry(600.0) == ("okx", 600.0)
+    venue, clip = r._route_entry(2500.0)
+    assert venue == "okx" and 1885.0 < clip <= 1900.0
+
+
 def test_multi_venue_entry_and_exit_use_position_venue(tmp_path):
     cfg, candles = _universe({"SOL": 0.06, "LINK": 0.0}, 0.0)
     clock = FakeClock((T0 + 60_000) / 1000)
@@ -1606,7 +1679,7 @@ def test_multi_venue_entry_and_exit_use_position_venue(tmp_path):
     asyncio.run(r.tick())
     assert [h.pos.venue for h in r.holdings] == ["okx"]
     assert gws["bitvavo"].placed == [] and gws["okx"].placed
-    assert r.cash_by_venue["okx"] < 1900.0 - 499.0
+    assert r.cash_by_venue["okx"] < 1900.0 - 400.0
     ledger = (tmp_path / "ledger.jsonl").read_text().splitlines()
     assert '"event": "entry"' in ledger[-1] and '"venue": "okx"' in ledger[-1]
     status = r.status()

@@ -5,9 +5,9 @@ Regime: sma20_50
   mid      SMA20–SMA50     → 100% cash
   risk_off BTC < SMA20     → short-weakest 70% + Donchian 20/10 Friday 30%
 
-15m WR core is dropped. Shorts stay paper (spot cannot short). Donchian is
-the live long sleeve (paper book on the same desk process). No per-coin
-hardcodes.
+15m WR core can run beside this mix on capped Bitvavo leftover + all OKX.
+Shorts stay paper (spot cannot short). Donchian is the live €20k long sleeve.
+No per-coin hardcodes.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ SLEEVE_META: dict[str, dict[str, str]] = {
     "core_15m": {
         "title": "15m WR-core",
         "kind": "idle",
-        "blurb": "Loop-winnaar heeft de 15m-desk laten vallen (te veel DD).",
+        "blurb": "Apart boek naast de mix: Bitvavo-plafond + alle OKX, niet in de €20k.",
     },
 }
 

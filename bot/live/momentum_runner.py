@@ -528,6 +528,8 @@ class RunnerOptions:
     outcome_mult_min: float = 0.75
     outcome_mult_max: float = 1.15
     dry_run: bool = False
+    # Venue → max 15m EUR (cash + open 15m notional). Missing = unlimited.
+    venue_cash_caps: dict[str, float] = field(default_factory=dict)
 
 
 class MomentumDeskRunner:
@@ -584,7 +586,33 @@ class MomentumDeskRunner:
     def cash_eur(self) -> float | None:
         if not self.cash_by_venue:
             return None
-        return sum(self.cash_by_venue.values())
+        return sum(self._spendable_cash(v) or 0.0 for v in self.cash_by_venue)
+
+    def _venue_exposure_eur(self, venue: str) -> float:
+        want = str(venue or "").strip().lower()
+        total = 0.0
+        for h in self.holdings:
+            if str(h.pos.venue or "").strip().lower() != want:
+                continue
+            qty = float(h.pos.quantity or 0.0)
+            if qty <= 1e-12:
+                continue
+            px = float(self.marks.get(h.pos.base) or h.pos.entry_price or 0.0)
+            if px <= 0:
+                px = float(h.pos.entry_price or 0.0)
+            total += qty * px
+        return total
+
+    def _spendable_cash(self, venue: str) -> float | None:
+        """EUR this desk may still deploy on ``venue`` (cap minus open 15m)."""
+        if venue not in self.cash_by_venue:
+            return None
+        raw = float(self.cash_by_venue.get(venue) or 0.0)
+        cap = (self.opt.venue_cash_caps or {}).get(venue)
+        if cap is None:
+            return raw
+        left = max(0.0, float(cap) - self._venue_exposure_eur(venue))
+        return min(raw, left)
 
     def _gateway(self, venue: str) -> Gateway | None:
         return self._gws.get(venue)
@@ -720,10 +748,17 @@ class MomentumDeskRunner:
             if float(h.pos.quantity or 0.0) > 1e-12
         )
         equity = (self.cash_eur + exposure) if self.cash_eur is not None else None
+        spendable = {
+            k: round(self._spendable_cash(k) or 0.0, 2) for k in sorted(self.cash_by_venue)
+        }
         return {
             "desk": "momentum",
             "cash_eur": round(self.cash_eur, 2) if self.cash_eur is not None else None,
-            "cash_by_venue": {k: round(v, 2) for k, v in sorted(self.cash_by_venue.items())},
+            "cash_by_venue": spendable,
+            "cash_by_venue_raw": {k: round(v, 2) for k, v in sorted(self.cash_by_venue.items())},
+            "venue_cash_caps": {
+                k: round(float(v), 2) for k, v in sorted((self.opt.venue_cash_caps or {}).items())
+            },
             "exposure_eur": round(exposure, 2),
             "equity_eur": round(equity, 2) if equity is not None else None,
             "venue": self.opt.venues[0],
@@ -903,12 +938,17 @@ class MomentumDeskRunner:
             return venues[0], clip_eur
         need = clip_eur * 1.005  # tiny buffer for taker slippage / fee
         for venue in venues:
-            cash = self.cash_by_venue.get(venue)
+            cash = self._spendable_cash(venue)
             if cash is not None and cash >= need and venue in self._gws:
                 return venue, clip_eur
-        # Full clip unavailable: use the venue with the most leftover cash.
+        # Full clip unavailable: use the venue with the most leftover cash
+        # that this desk is still allowed to spend (venue caps apply).
         best = max(
-            ((v, self.cash_by_venue.get(v, 0.0)) for v in venues if v in self._gws),
+            (
+                (v, self._spendable_cash(v) or 0.0)
+                for v in venues
+                if v in self._gws
+            ),
             key=lambda item: item[1],
             default=None,
         )
@@ -2288,6 +2328,53 @@ def parse_venues(raw: Any) -> tuple[str, ...]:
     return tuple(out) or ("bitvavo",)
 
 
+def parse_venue_cash_caps(raw: Any) -> dict[str, float]:
+    """``"bitvavo:2000,okx:1500"`` → ``{"bitvavo": 2000.0, "okx": 1500.0}``.
+
+    A missing venue is uncapped (all quote cash). Non-positive amounts are
+    ignored so operators can omit a venue rather than write ``0``.
+    """
+    if isinstance(raw, Mapping):
+        items = raw.items()
+    else:
+        items = []
+        for part in str(raw or "").split(","):
+            if ":" not in part:
+                continue
+            venue, _, amount = part.partition(":")
+            items.append((venue, amount))
+    out: dict[str, float] = {}
+    for venue_raw, amount_raw in items:
+        venue = str(venue_raw).strip().lower()
+        if not venue:
+            continue
+        try:
+            amount = float(amount_raw)
+        except (TypeError, ValueError):
+            continue
+        if amount > 0:
+            out[venue] = amount
+    return out
+
+
+def venue_cash_caps_from_settings(
+    settings: Settings, *, mix_on: bool | None = None
+) -> dict[str, float]:
+    """Caps for the 15m desk. Mix-on injects a Bitvavo ceiling if unset."""
+    caps = parse_venue_cash_caps(
+        getattr(settings, "momentum_desk_venue_cash_caps", "") or ""
+    )
+    if mix_on is None:
+        mix_on = bool(getattr(settings, "momentum_multi_strat_enabled", False))
+    if mix_on and "bitvavo" not in caps:
+        bitvavo_cap = float(
+            getattr(settings, "momentum_desk_mix_bitvavo_cap_eur", 2_000.0) or 0.0
+        )
+        if bitvavo_cap > 0:
+            caps["bitvavo"] = bitvavo_cap
+    return caps
+
+
 def engine_settings_for_desk(
     settings: Settings, cfg: DeskConfig, venue: str | Sequence[str]
 ) -> Settings:
@@ -2427,6 +2514,7 @@ class MomentumDeskManager:
             outcome_mult_max=float(
                 getattr(settings, "momentum_desk_outcome_mult_max", 1.15)
             ),
+            venue_cash_caps=venue_cash_caps_from_settings(settings),
         )
         self._runner = MomentumDeskRunner(cfg, None, options=options, gateways=gateways)
         self._stop = False
@@ -2685,6 +2773,8 @@ __all__ = [
     "engine_settings_for_desk",
     "get_momentum_desk_manager",
     "momentum_desk_flagged_running",
+    "parse_venue_cash_caps",
     "parse_venues",
     "reset_momentum_desk_manager",
+    "venue_cash_caps_from_settings",
 ]
