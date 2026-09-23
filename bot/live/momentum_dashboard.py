@@ -132,15 +132,15 @@ body {
 }
 .mix-chip strong { font-family: var(--mono); }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
-.paper-clip, .side-15m { margin-top: .85rem; }
-.paper-clip { border-style: dashed; }
-.paper-clip h2, .side-15m h2 { font-size: .95rem; }
-.paper-clip .clip-kpis, .side-15m .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
-.paper-clip .clip-kpis div, .side-15m .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
-.paper-clip .clip-kpis span, .side-15m .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.paper-clip .clip-kpis strong, .side-15m .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
+.paper-clip, .paper-sw, .side-15m { margin-top: .85rem; }
+.paper-clip, .paper-sw { border-style: dashed; }
+.paper-clip h2, .paper-sw h2, .side-15m h2 { font-size: .95rem; }
+.paper-clip .clip-kpis, .paper-sw .clip-kpis, .side-15m .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
+.paper-clip .clip-kpis div, .paper-sw .clip-kpis div, .side-15m .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
+.paper-clip .clip-kpis span, .paper-sw .clip-kpis span, .side-15m .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.paper-clip .clip-kpis strong, .paper-sw .clip-kpis strong, .side-15m .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
 @media (max-width: 720px) {
-  .paper-clip .clip-kpis, .side-15m .clip-kpis { grid-template-columns: 1fr 1fr; }
+  .paper-clip .clip-kpis, .paper-sw .clip-kpis, .side-15m .clip-kpis { grid-template-columns: 1fr 1fr; }
 }
 .mix-dc-dec { display: grid; gap: .55rem; }
 .mix-dc-dec > div { padding: .45rem 0; border-bottom: 1px solid var(--border-soft); }
@@ -1636,7 +1636,8 @@ def _mix_panel(
         f'<p class="mix-foot">Classifier sma20/50 · boek {_fmt_eur(a.get("book_eur"), signed=False)}. '
         f"{'Donchian-longs zijn LIVE Bitvavo-orders.' if don_live else 'Donchian-longs draaien paper.'} "
         f"Decide na UTC-dagclose (00:05) op de gesloten 1d-kaars · Friday-flat pas na vrijdagclose. "
-        f"Shorts blijven paper (spot kan niet short). {_core_15m_mix_note(core_15m)} "
+        f"{_core_15m_mix_note(core_15m)} "
+        f"Short-weakest is een apart paper-boek (BTC&lt;SMA20) en telt niet mee in deze live equity. "
         f"BTC+RS-clip is een apart paper-boek en telt niet mee in deze live equity."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
@@ -1789,6 +1790,72 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
         f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">Alt: '
         f'<strong data-k="clip-alt">{escape(str(st.get("want_alt") or "—"))}</strong> · '
         f'next <strong data-live="clip-next">{_ts(st.get("next_decision"))}</strong> · '
+        f"geen live orders, geen mix-cash.</p>"
+        f"{pos_html}</section>"
+    )
+
+
+def _paper_sw_panel(status: Mapping[str, Any] | None) -> str:
+    """Independent paper short-weakest book beside the live Donchian mix."""
+    st = status or {}
+    running = bool(st.get("running"))
+    pill = (
+        '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        if running
+        else '<span class="pill off"><span class="dot"></span>STOP</span>'
+    )
+    bear = st.get("bear") or {}
+    pack = st.get("pack") or st.get("config") or {}
+    bear_ok = bool(bear.get("bear_ok"))
+    sma_n = int(bear.get("sma_days") or pack.get("sma_days") or 20)
+    gate = "BEAR ON" if bear_ok else f"STANDBY (BTC&gt;SMA{sma_n})"
+    caption = str(st.get("live_caption") or "")
+    if not caption:
+        caption = (
+            "Paper short op de zwakste alt als BTC onder SMA20. "
+            "Apart boek naast Donchian, geen Bitvavo-orders."
+        )
+    pos_bits = []
+    for p in st.get("positions") or []:
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(
+            f'<span class="mix-chip" data-holding="{escape(str(p.get("holding_id") or p.get("base") or ""))}">'
+            f'<span class="muted">short</span>'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
+        )
+    pos_html = (
+        f'<div class="mix-open" data-live="sw-open">{"".join(pos_bits)}</div>'
+        if pos_bits
+        else (
+            '<div class="mix-open" data-live="sw-open">'
+            '<span class="muted">Geen open paper-shorts — standby tot BTC &lt; SMA20.</span></div>'
+        )
+    )
+    btc = bear.get("btc")
+    sma = bear.get("sma") if bear.get("sma") is not None else bear.get("sma200")
+    gap = bear.get("gap_pct")
+    btc_s = f"{float(btc):,.0f}" if btc is not None else "—"
+    sma_s = f"{float(sma):,.0f}" if sma is not None else "—"
+    return (
+        f'<section class="panel mix-board paper-sw" id="paper-sw" data-live="paper-sw">'
+        f'<div class="card-head"><h2>Paper · Short weakest</h2>{pill}'
+        f'<span class="pill {"on" if bear_ok else "off"}" data-live="sw-gate">'
+        f'<span class="dot"></span>{gate}</span></div>'
+        f'<p class="mix-why" data-live="sw-caption">{escape(caption)}</p>'
+        f'<div class="clip-kpis">'
+        f'<div><span>Equity</span><strong data-k="sw-equity">{_fmt_eur(st.get("equity_eur"), signed=False)}</strong></div>'
+        f'<div><span>Open</span><strong data-k="sw-open" class="{_cls(st.get("unrealized_net_eur"))}">'
+        f'{_fmt_eur(st.get("unrealized_net_eur"))}</strong></div>'
+        f'<div><span>Gerealiseerd</span><strong data-k="sw-realized" class="{_cls(st.get("realized_total_eur"))}">'
+        f'{_fmt_eur(st.get("realized_total_eur"))}</strong></div>'
+        f'<div><span>Boek</span><strong data-k="sw-book">{_fmt_eur(st.get("book_eur") or pack.get("book_eur"), signed=False)}</strong></div>'
+        f"</div>"
+        f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
+        f'BTC <strong data-k="sw-btc">{escape(btc_s)}</strong> / '
+        f'SMA{sma_n} <strong data-k="sw-sma">{escape(sma_s)}</strong> · '
+        f'gap <span data-k="sw-gap" class="{_cls(gap)}">{_fmt_pct(gap) if gap is not None else "—"}</span> · '
+        f'next <strong data-live="sw-next">{_ts(st.get("next_decision"))}</strong> · '
         f"geen live orders, geen mix-cash.</p>"
         f"{pos_html}</section>"
     )
@@ -2817,15 +2884,37 @@ _LIVE_MARKS_JS = r"""
     apply("sw-realized", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
     apply("sw-open", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
     apply("sw-npos", String((status.positions || []).length));
-    const gate = document.querySelector('[data-live="sw-gate"]');
-    if (gate) {
+    document.querySelectorAll('[data-live="sw-gate"]').forEach((gate) => {
       const on = !!bear.bear_ok;
       const smaN = bear.sma_days || (status.pack && status.pack.sma_days) || 20;
-      gate.innerHTML = on
-        ? "<strong>BEAR ON</strong>"
-        : `<strong>STANDBY (BTC&gt;SMA${smaN})</strong>`;
-      gate.classList.toggle("good", on);
-      gate.classList.toggle("muted", !on);
+      const label = on ? "BEAR ON" : `STANDBY (BTC>SMA${smaN})`;
+      if (gate.classList.contains("pill")) {
+        gate.innerHTML = `<span class="dot"></span>${label}`;
+        gate.classList.remove("on", "off");
+        gate.classList.add(on ? "on" : "off");
+      } else {
+        gate.innerHTML = on
+          ? "<strong>BEAR ON</strong>"
+          : `<strong>STANDBY (BTC&gt;SMA${smaN})</strong>`;
+        gate.classList.toggle("good", on);
+        gate.classList.toggle("muted", !on);
+      }
+    });
+    apply("sw-book", fmtEur(status.book_eur).replace(/^\+/, ""));
+    const cap = document.querySelector('[data-live="sw-caption"]');
+    if (cap && status.live_caption) cap.textContent = status.live_caption;
+    const swOpen = document.querySelector('[data-live="paper-sw"] [data-live="sw-open"]');
+    if (swOpen && Array.isArray(status.positions)) {
+      const pos = status.positions.filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
+      if (!pos.length) {
+        swOpen.innerHTML = '<span class="muted">Geen open paper-shorts — standby tot BTC &lt; SMA20.</span>';
+      } else {
+        swOpen.innerHTML = pos.map((p) => {
+          const net = p.unrealized_net_eur;
+          const hid = esc(p.holding_id || p.base || "");
+          return `<span class="mix-chip" data-holding="${hid}"><span class="muted">short</span><strong>${esc(p.base || "")}</strong><span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+        }).join("");
+      }
     }
     const decision = document.querySelector('[data-live="sw-decision"]');
     if (decision) {
@@ -3606,7 +3695,7 @@ def render_momentum_dashboard(
       <a class="{active_cls}" href="/live/momentum">Command Center</a>
       <a class="{vol_cls}" href="/live/momentum/volatile">Volatile sleeve
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
-      <a href="/live/momentum#sw-open-pos">Short weakest paper
+      <a href="/live/momentum#paper-sw">Short weakest paper
         <span class="badge">{'on' if show_sw else 'off'}</span></a>
       {('<a href="/live/momentum#paper-clip">BTC+RS clip <span class="badge">paper</span></a>' if show_clip else '')}
       <a href="/live/momentum#core-15m">15m WR-core
@@ -3685,6 +3774,7 @@ def render_momentum_dashboard(
 {earnings_html}
 {_mix_panel(allocator, donchian, short_weakest if show_sw else None, status if show_mix else None)}
 {_core_15m_panel(status) if show_mix else ""}
+{_paper_sw_panel(short_weakest) if show_sw else ""}
 {_paper_clip_panel(btc_rs_clip) if show_clip else ""}
 {positions_html}
 {err_html}

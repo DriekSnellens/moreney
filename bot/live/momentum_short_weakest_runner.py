@@ -364,6 +364,8 @@ class ShortWeakestPaperRunner:
         block = (self.last_regime or {}).get("risk_block") or (
             "" if bear_ok else "btc_not_bear"
         )
+        if block == "allocator_zero_book":
+            block = "" if bear_ok else "btc_not_bear"
         return {
             "desk": "momentum_short_weakest",
             "mode": "short_weakest_paper",
@@ -415,7 +417,21 @@ class ShortWeakestPaperRunner:
                 "max_positions": self.cfg.top_n,
             },
             "next_decision": self._next_decision_iso(),
+            "live_caption": self._live_caption(bear_ok=bear_ok, block=block),
         }
+
+    def _live_caption(self, *, bear_ok: bool, block: str) -> str:
+        if bear_ok:
+            return (
+                "Paper short: BTC onder SMA20, zwakste alt. Apart €-boek, geen Bitvavo-orders."
+            )
+        if block == "btc_not_bear":
+            return (
+                "Paper short standby: BTC boven SMA20. Apart boek, geen mix-cash, geen live orders."
+            )
+        if block:
+            return f"Paper short geblokkeerd: {block}. Apart boek, geen Bitvavo-orders."
+        return "Paper short-weakest. Apart boek naast de live Donchian-mix."
 
     def _next_decision_iso(self) -> str | None:
         now = datetime.now(UTC)
@@ -496,7 +512,9 @@ class ShortWeakestPaperRunner:
         self._bear_refresh_ms = now_ms
 
         mix = live_snapshot(book=BOOK_EUR, btc_live=float(live_px) if live_px else None)
-        alloc_target = float(target_book("short_weakest", mix))
+        mix_target = float(target_book("short_weakest", mix))
+        # Independent paper book — mix weights are the live Donchian plan, not this sleeve.
+        alloc_target = float(self.cfg.book_eur)
         self._alloc_book = alloc_target
 
         # Cover the same day BTC recaptures the SMA gate (loop winner).
@@ -504,11 +522,6 @@ class ShortWeakestPaperRunner:
             for pos in list(self.positions):
                 await self._close(pos, reason="cover_on_bull", now_ms=now_ms)
             self.last_rebalance_ms = now_ms
-            self._save_state()
-
-        if execute and alloc_target < self.cfg.min_notional_eur and self.positions:
-            for pos in list(self.positions):
-                await self._close(pos, reason="allocator_flatten", now_ms=now_ms)
             self._save_state()
 
         # Mode selection: hard bear → absolute weakness; else idle-fill excess.
@@ -535,8 +548,6 @@ class ShortWeakestPaperRunner:
             pass  # idle-fill substitutes for SMA bear gate
         else:
             allowed, why = False, "btc_not_bear"
-        if alloc_target < self.cfg.min_notional_eur:
-            allowed, why = False, "allocator_zero_book"
         if self.cfg.alphai_require_macro_or_bear and not alphai.macro_caution and bear_ok:
             pass
         if stale and self.cfg.alphai_enabled:
@@ -573,7 +584,13 @@ class ShortWeakestPaperRunner:
             "idle_fill": use_idle_fill,
             "core": core,
             "bear": bear_meta,
-            "allocator": {"target_eur": alloc_target, "label": mix.get("label"), "why": mix.get("why")},
+            "allocator": {
+                "target_eur": alloc_target,
+                "mix_target_eur": mix_target,
+                "paper_independent": True,
+                "label": mix.get("label"),
+                "why": mix.get("why"),
+            },
             "rebalance_due": due,
             "risk_block": "" if allowed else why,
             "candidates": [
