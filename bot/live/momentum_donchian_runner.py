@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -360,6 +360,230 @@ class DonchianBundleRunner:
             }
         )
 
+    def _pos_qty(self, pos: DonchianPosition) -> float:
+        qty = float(pos.quantity or 0.0)
+        if qty <= 0 and pos.entry_price > 0:
+            qty = pos.notional_eur / pos.entry_price
+        return max(0.0, qty)
+
+    def _gateway(self, venue: str) -> Any | None:
+        want = str(venue or "").strip().lower()
+        if want and want in self._gws:
+            return self._gws[want]
+        if want:
+            return None
+        return self._primary_gw()
+
+    async def _held_base(self, base: str, venue: str) -> float | None:
+        gw = self._gateway(venue)
+        if gw is None:
+            return None
+        held_fn = getattr(gw, "base_held", None)
+        if held_fn is not None:
+            try:
+                held = await held_fn(base)
+                if held is not None:
+                    return float(held)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("donchian: %s %s held balance failed: %s", venue, base, exc)
+        free_fn = getattr(gw, "base_free", None)
+        if free_fn is None:
+            return None
+        try:
+            free = await free_fn(base)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("donchian: %s %s free balance failed: %s", venue, base, exc)
+            return None
+        return None if free is None else float(free)
+
+    async def _recent_sells(
+        self, base: str, venue: str, *, since_ms: int
+    ) -> list[dict[str, float]]:
+        gw = self._gateway(venue)
+        fetch = getattr(gw, "recent_base_sells", None) if gw is not None else None
+        if fetch is None:
+            return []
+        try:
+            return list(await fetch(base, since_ms=max(0, int(since_ms) - 60_000)))
+        except Exception as exc:  # noqa: BLE001
+            logger.info("donchian: recent sells for %s failed: %s", base, exc)
+            return []
+
+    @staticmethod
+    def _vwap_for_sold(
+        sells: Sequence[Mapping[str, float]], sold_qty: float
+    ) -> tuple[float, float] | None:
+        if sold_qty <= 0 or not sells:
+            return None
+        need = float(sold_qty)
+        taken_qty = 0.0
+        taken_notional = 0.0
+        taken_fee = 0.0
+        for row in sorted(sells, key=lambda r: float(r.get("ts_ms") or 0), reverse=True):
+            qty = float(row.get("qty") or 0.0)
+            px = float(row.get("price") or 0.0)
+            fee = float(row.get("fee_eur") or 0.0)
+            if qty <= 0 or px <= 0:
+                continue
+            take = min(qty, need - taken_qty)
+            if take <= 0:
+                break
+            frac = take / qty
+            taken_qty += take
+            taken_notional += take * px
+            taken_fee += fee * frac
+            if taken_qty + 1e-12 >= need:
+                break
+        if taken_qty + 1e-8 < need * 0.95:
+            return None
+        return taken_notional / taken_qty, taken_fee
+
+    def _other_desk_qty(self, base: str, venue: str) -> float:
+        """Qty of ``base`` on ``venue`` that belongs to the 15m desk, not mix."""
+        want_v = str(venue or "").strip().lower()
+        want_b = str(base or "").strip().upper()
+        try:
+            from bot.live.momentum_runner import get_momentum_desk_manager
+
+            runner = getattr(get_momentum_desk_manager(), "_runner", None)
+        except Exception:  # noqa: BLE001
+            return 0.0
+        if runner is None:
+            return 0.0
+        total = 0.0
+        for h in getattr(runner, "holdings", None) or []:
+            pos = getattr(h, "pos", None)
+            if pos is None:
+                continue
+            if str(getattr(pos, "base", "") or "").upper() != want_b:
+                continue
+            if str(getattr(pos, "venue", "") or "").strip().lower() != want_v:
+                continue
+            total += float(getattr(pos, "quantity", 0.0) or 0.0)
+        return total
+
+    def _close_external(
+        self,
+        sl: _SleeveBook,
+        pos: DonchianPosition,
+        *,
+        sold_qty: float,
+        price: float,
+        fee_eur: float,
+    ) -> dict[str, Any]:
+        """Ledger an external (UI) sell. Never places an order."""
+        book_qty = self._pos_qty(pos)
+        entry = float(pos.entry_price or 0.0)
+        px = float(price) if price > 0 else entry
+        close_qty = max(0.0, min(float(sold_qty), book_qty))
+        rem = max(0.0, book_qty - close_qty)
+        fee = max(0.0, float(fee_eur))
+        net = close_qty * (px - entry) - fee
+        sl.cash_eur += close_qty * px - fee
+        sl.realized_total_eur += net
+        row: dict[str, Any] = {
+            "event": "exit",
+            "side": "long",
+            "sleeve": sl.cfg.name,
+            "base": pos.base,
+            "venue": pos.venue,
+            "notional_eur": round(close_qty * px, 2),
+            "quantity": close_qty,
+            "entry_price": entry,
+            "exit_price": px,
+            "fee_eur": round(fee, 4),
+            "net_eur": round(net, 2),
+            "reason": "manual_external",
+            "holding_id": pos.holding_id,
+            "dry_run": self.dry_run,
+            "detail": "reconcile_external_delta",
+            "remaining_qty": rem,
+        }
+        self._ledger_append(row)
+        if rem * px < _MIN_ORDER_EUR:
+            sl.positions = [p for p in sl.positions if p.holding_id != pos.holding_id]
+        else:
+            pos.quantity = rem
+            pos.notional_eur = rem * entry
+        logger.info(
+            "donchian: booked external sold %s %s qty=%.8f px=%.4f net=%.2f rem=%.8f",
+            sl.cfg.name,
+            pos.base,
+            close_qty,
+            px,
+            net,
+            rem if rem * px >= _MIN_ORDER_EUR else 0.0,
+        )
+        return row
+
+    async def reconcile_external_inventory(self) -> list[dict[str, Any]]:
+        """Book mix lots that left the venue outside the Donchian desk.
+
+        Does not place sells. Does not import 15m inventory. Remaining venue
+        coins still on the book stay open.
+        """
+        async with self._decide_lock:
+            return await self._reconcile_external_inventory_unlocked()
+
+    async def _reconcile_external_inventory_unlocked(self) -> list[dict[str, Any]]:
+        closed: list[dict[str, Any]] = []
+        if self.dry_run or not self._gws:
+            return closed
+        groups: dict[tuple[str, str], list[tuple[_SleeveBook, DonchianPosition]]] = {}
+        for sl in self.sleeves.values():
+            for pos in list(sl.positions):
+                if pos.is_paper():
+                    continue
+                venue = str(pos.venue or (self.venues[0] if self.venues else "bitvavo")).lower()
+                groups.setdefault((venue, pos.base.upper()), []).append((sl, pos))
+        for (venue, base), lots in groups.items():
+            lots.sort(key=lambda item: int(item[1].opened_ms or 0))
+            held = await self._held_base(base, venue)
+            if held is None:
+                continue
+            avail = max(0.0, float(held) - self._other_desk_qty(base, venue))
+            book_qty = sum(self._pos_qty(p) for _, p in lots)
+            mark = float(self.marks.get(base) or (lots[0][1].entry_price if lots else 0.0) or 0.0)
+            sold = book_qty - avail
+            if sold <= 0 or sold * max(mark, 1e-12) < _MIN_ORDER_EUR:
+                continue
+            since = min(int(p.opened_ms or 0) for _, p in lots)
+            vwap = self._vwap_for_sold(await self._recent_sells(base, venue, since_ms=since), sold)
+            if vwap is not None:
+                px, fee_left = vwap
+            else:
+                px, fee_left = (mark if mark > 0 else float(lots[0][1].entry_price)), 0.0
+            remaining = sold
+            for sl, pos in lots:
+                if remaining * px < _MIN_ORDER_EUR:
+                    break
+                take = min(self._pos_qty(pos), remaining)
+                if take * px < _MIN_ORDER_EUR:
+                    continue
+                fee_share = fee_left * (take / remaining) if remaining > 0 else 0.0
+                closed.append(
+                    self._close_external(
+                        sl, pos, sold_qty=take, price=px, fee_eur=fee_share
+                    )
+                )
+                remaining -= take
+                fee_left -= fee_share
+        if closed:
+            self._save_state()
+        return closed
+
+    async def refresh_open_marks(self) -> None:
+        """Ticker marks for still-open lots only (dashboard poll, not universe)."""
+        bases = {p.base for sl in self.sleeves.values() for p in sl.positions}
+        for base in sorted(bases):
+            try:
+                px = await self._feed.last_price(base)
+                if px:
+                    self.marks[base] = float(px)
+                    self.mark_ts[base] = time.time()
+            except Exception:  # noqa: BLE001
+                continue
+
     async def _open(self, sl: _SleeveBook, row: Mapping[str, Any], *, now_ms: int) -> None:
         base = str(row["base"])
         if any(p.base == base for p in sl.positions):
@@ -664,6 +888,10 @@ class DonchianBundleRunner:
         while not should_stop():
             try:
                 await self._refresh_marks()
+                try:
+                    await self.reconcile_external_inventory()
+                except Exception:  # noqa: BLE001
+                    logger.exception("donchian: external reconcile failed")
                 await self._refresh_dailies()
                 self._apply_allocator()
                 await self.manage_exits()
@@ -725,6 +953,19 @@ class DonchianDeskManager:
                 }
             )
         return base
+
+    async def status_fresh(self) -> dict[str, Any]:
+        """Status after reconciling venue inventory (dashboard poll books UI sells)."""
+        if self._runner is not None:
+            try:
+                await self._runner.refresh_open_marks()
+            except Exception:  # noqa: BLE001
+                logger.exception("donchian: mark refresh for status failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("donchian: reconcile for status failed")
+        return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:
         settings = settings or get_settings()
@@ -807,6 +1048,10 @@ class DonchianDeskManager:
             if self._runner is None:
                 return
             await self._runner._refresh_marks()
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("donchian live kick: external reconcile failed")
             await self._runner._refresh_dailies(force=True)
             self._runner._apply_allocator()
             await self._runner.manage_exits()

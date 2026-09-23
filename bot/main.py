@@ -962,7 +962,7 @@ async def live_momentum_dashboard(
     clip_ledger: list[dict[str, Any]] | None = None
     if show_donchian:
         try:
-            donchian_status = get_donchian_desk_manager().status()
+            donchian_status = await get_donchian_desk_manager().status_fresh()
         except Exception:  # noqa: BLE001
             donchian_status = None
         donchian_ledger = read_ledger_tail(
@@ -1057,7 +1057,7 @@ async def live_momentum_earnings() -> dict[str, Any]:
     donchian_status = None
     if show_donchian:
         try:
-            donchian_status = get_donchian_desk_manager().status()
+            donchian_status = await get_donchian_desk_manager().status_fresh()
         except Exception:  # noqa: BLE001
             donchian_status = None
     earnings = compute_desk_earnings(
@@ -1404,7 +1404,7 @@ async def live_momentum_volatile_sell_all(
 async def live_momentum_allocator_status() -> dict[str, Any]:
     """Live mix: regime, SMA20/50, sleeve €, and why."""
     try:
-        don = get_donchian_desk_manager().status()
+        don = await get_donchian_desk_manager().status_fresh()
         alloc = don.get("allocator") if isinstance(don, dict) else None
         if isinstance(alloc, dict) and alloc.get("ok"):
             return {
@@ -1423,7 +1423,7 @@ async def live_momentum_allocator_status() -> dict[str, Any]:
 
 @app.get("/live/momentum/donchian/status")
 async def live_momentum_donchian_status() -> dict[str, Any]:
-    return get_donchian_desk_manager().status()
+    return await get_donchian_desk_manager().status_fresh()
 
 
 @app.get("/live/momentum/donchian/ledger")
