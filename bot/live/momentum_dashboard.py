@@ -1646,7 +1646,7 @@ def _mix_panel(
         f"Decide na UTC-dagclose (00:05) op de gesloten 1d-kaars · Friday-flat pas na vrijdagclose. "
         f"{_core_15m_mix_note(core_15m)} "
         f"Short-weakest is een apart paper-boek (BTC&lt;SMA20) en telt niet mee in deze live equity. "
-        f"BTC+RS-clip is een apart boek en telt niet mee in deze live equity."
+        f"BTC+RS-clip is de live €20k-owner op Bitvavo (na het 15m-plafond)."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
     )
@@ -1658,8 +1658,8 @@ def _core_15m_mix_note(status: Mapping[str, Any] | None) -> str:
     dry = bool(st.get("dry_run"))
     if running and not dry:
         return (
-            "15m WR-core draait ernaast op Bitvavo-plafond + alle OKX "
-            "(niet in de €20k mix)."
+            "15m WR-core is de €2k Bitvavo-satelliet (OKX-rest mag mee); "
+            "niet de €20k-owner."
         )
     if running:
         return "15m WR-core draait ernaast in shadow (geen live orders)."
@@ -1667,7 +1667,7 @@ def _core_15m_mix_note(status: Mapping[str, Any] | None) -> str:
 
 
 def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
-    """Live 15m WR-core beside the mix — capped Bitvavo + all OKX."""
+    """Live 15m WR-core satellite — €2k Bitvavo cap + OKX leftover."""
     st = dict(status or {})
     running = bool(st.get("running"))
     dry = bool(st.get("dry_run"))
@@ -1735,9 +1735,9 @@ def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
         f'<section class="panel mix-board side-15m" id="core-15m" data-live="core-15m">'
         f'<div class="card-head"><h2>15m WR-core</h2>{pill}'
         f'<span class="pill {"on" if running and not dry else "off"}">'
-        f'<span class="dot"></span>naast Donchian</span></div>'
-        f'<p class="mix-why" data-live="core15-caption">Live 15m-desk op Bitvavo-plafond '
-        f"+ alle OKX-cash. Raakt Donchian-bags niet. Hours 7/13/16 UTC{block}.</p>"
+        f'<span class="dot"></span>€2k-satelliet</span></div>'
+        f'<p class="mix-why" data-live="core15-caption">Satelliet naast de BTC+RS-clip: '
+        f"Bitvavo-plafond €2k, OKX-rest mag mee. Hours 7/13/16 UTC{block}.</p>"
         f'<div class="clip-kpis">'
         f'<div><span>Equity</span><strong data-k="core15-eq">{_fmt_eur(eq, signed=False)}</strong></div>'
         f'<div><span>Open</span><strong data-k="core15-open-pnl" class="{_cls(st.get("unrealized_net_eur") if running else None)}">'
@@ -1771,7 +1771,7 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     caption = str(st.get("live_caption") or st.get("last_decision", {}).get("caption") or "")
     if not caption:
         caption = (
-            "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Live Bitvavo, 15m-plafond blijft staan."
+            "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Live €20k-owner, 15m blijft €2k-satelliet."
             if live
             else "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Shadow €20k, geen Bitvavo-orders."
         )
@@ -1798,7 +1798,7 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     risk_on = bool(st.get("risk_on"))
     gate = "BTC &gt; SMA50" if risk_on else "cash (BTC ≤ SMA50)"
     foot = (
-        "Bitvavo live · 15m-plafond blijft gereserveerd · geen mix-cash."
+        "Owner · Bitvavo live · 15m €2k-satelliet gereserveerd."
         if live
         else "geen live orders, geen mix-cash."
     )
@@ -3236,7 +3236,7 @@ _LIVE_MARKS_JS = r"""
     const foot = root.querySelector('[data-live="clip-foot"]');
     if (foot) {
       foot.textContent = live
-        ? "Bitvavo live · 15m-plafond blijft gereserveerd · geen mix-cash."
+        ? "Owner · Bitvavo live · 15m €2k-satelliet gereserveerd."
         : "geen live orders, geen mix-cash.";
     }
     (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
@@ -3911,7 +3911,7 @@ def render_momentum_dashboard(
 {exec_ledger_html}
 {vol_ledger_html}
 <details class="fold">
-<summary><span class="fold-head">{'15m WR-core rules (naast de mix)' if show_mix else 'Risk rules (core)'}</span><span class="chev"></span></summary>
+<summary><span class="fold-head">{'15m satelliet rules (€2k Bitvavo)' if show_mix else 'Risk rules (core)'}</span><span class="chev"></span></summary>
 <div class="fold-body">{_rules(cfg)}</div>
 </details>
 <p class="foot"><span>{refresh_note}</span>{footer_links}</p>

@@ -54,7 +54,7 @@ SLEEVE_META: dict[str, dict[str, str]] = {
     "core_15m": {
         "title": "15m WR-core",
         "kind": "idle",
-        "blurb": "Apart boek naast de mix: Bitvavo-plafond + alle OKX, niet in de €20k.",
+        "blurb": "€2k Bitvavo-satelliet naast de clip-owner; OKX-rest blijft satelliet-cash.",
     },
 }
 

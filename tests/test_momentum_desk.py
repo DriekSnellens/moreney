@@ -1631,6 +1631,14 @@ def test_mix_injects_bitvavo_cap_when_unset():
         momentum_desk_venue_cash_caps="",
     )
     assert venue_cash_caps_from_settings(s3, mix_on=False) == {}
+    s4 = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        momentum_btc_rs_clip_enabled=True,
+        momentum_multi_strat_enabled=False,
+        momentum_desk_venue_cash_caps="",
+        momentum_desk_mix_bitvavo_cap_eur=2000.0,
+    )
+    assert venue_cash_caps_from_settings(s4, mix_on=False) == {"bitvavo": 2000.0}
 
 
 def _bitvavo_holding(notional: float, *, px: float = 100.0) -> Holding:

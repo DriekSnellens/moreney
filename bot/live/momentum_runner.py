@@ -2441,13 +2441,14 @@ def parse_venue_cash_caps(raw: Any) -> dict[str, float]:
 def venue_cash_caps_from_settings(
     settings: Settings, *, mix_on: bool | None = None
 ) -> dict[str, float]:
-    """Caps for the 15m desk. Mix-on injects a Bitvavo ceiling if unset."""
+    """Caps for the 15m satellite. Clip/mix owners inject a Bitvavo ceiling if unset."""
     caps = parse_venue_cash_caps(
         getattr(settings, "momentum_desk_venue_cash_caps", "") or ""
     )
     if mix_on is None:
         mix_on = bool(getattr(settings, "momentum_multi_strat_enabled", False))
-    if mix_on and "bitvavo" not in caps:
+    clip_on = bool(getattr(settings, "momentum_btc_rs_clip_enabled", False))
+    if (mix_on or clip_on) and "bitvavo" not in caps:
         bitvavo_cap = float(
             getattr(settings, "momentum_desk_mix_bitvavo_cap_eur", 2_000.0) or 0.0
         )

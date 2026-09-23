@@ -246,7 +246,7 @@ def test_dashboard_live_15m_beside_mix_is_not_idle():
         show_short_weakest=True,
         short_weakest={"enabled_setting": True, "positions": [], "running": True},
     ).body.decode()
-    assert "draait ernaast op Bitvavo-plafond" in html
+    assert "€2k Bitvavo-satelliet" in html
     assert "15m WR-core staat idle" not in html
     assert 'id="core-15m"' in html
     assert "bitvavo≤2,000" in html or "bitvavo≤2000" in html
@@ -371,7 +371,7 @@ def test_dashboard_clip_live_pill():
     assert 'data-live="clip-title">Live · BTC + RS-clip</h2>' in html
     assert 'data-live="clip-pill"' in html
     assert ">LIVE</span>" in html
-    assert "15m-plafond blijft gereserveerd" in html
+    assert "15m-plafond blijft gereserveerd" in html or "15m €2k-satelliet gereserveerd" in html
     assert 'data-live="clip-title">Paper · BTC + RS-clip</h2>' not in html
 
 
@@ -836,7 +836,7 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert "mixHeroesLive" in html
     assert "Donchian · live longs" in html
     assert ">Bags<" in html
-    assert "15m WR-core rules (naast de mix)" in html
+    assert "15m satelliet rules (€2k Bitvavo)" in html
     assert 'id="core-15m"' in html
     assert 'name="sell"' not in html
     assert "Leeg Donchian" in html
