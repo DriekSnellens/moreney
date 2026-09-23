@@ -1046,7 +1046,7 @@ def _donchian_positions_table(status: Mapping[str, Any]) -> str:
         '<table class="desk" data-trail="0" data-tight-after="0" data-tight="0" data-stop="0">'
         "<thead><tr>"
         "<th>Base</th><th>Sleeve</th><th>Qty</th><th>Entry</th><th>Mark</th>"
-        "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th>"
+        "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th><th>Actie</th>"
         "</tr></thead><tbody>",
     ]
     cards = ['<div class="pos-cards" data-live="position-cards" data-mode="donchian">']
@@ -1091,6 +1091,7 @@ def _donchian_positions_table(status: Mapping[str, Any]) -> str:
             f"<td class='{_cls(p.get('unrealized_net_eur'))}' data-k='net'>"
             f"{_fmt_eur(p.get('unrealized_net_eur'))}</td>"
             f"<td data-k='age'>{age:.1f}h</td>"
+            f"<td>{_sell_cell(p, disabled=False, post_action='/live/momentum/donchian/sell')}</td>"
             "</tr>"
         )
         cards.append(
@@ -1109,16 +1110,23 @@ def _donchian_positions_table(status: Mapping[str, Any]) -> str:
             f'<div><span>Gross</span><span class="{_cls(gross)}" data-k="gross">'
             f"{_fmt_pct(gross)}</span></div>"
             f"<div><span>Age</span><span data-k='age'>{age:.1f}h</span></div>"
-            "</div></div>"
+            "</div>"
+            f"{_sell_cell(p, disabled=False, post_action='/live/momentum/donchian/sell')}</div>"
         )
     out.append("</tbody></table></div>")
     cards.append("</div>")
     out.append("".join(cards))
     out.append(
+        '<form method="post" action="/live/momentum/donchian/sell-all" '
+        'style="margin:.55rem 0 0">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn danger">Leeg Donchian</button></form>'
+    )
+    out.append(
         "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
         "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
         "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
-        "Verkoop loopt via de sleeve, niet via de 15m-desk.</p>"
+        "Verkoop loopt via de Donchian-sleeve, niet via de 15m-desk.</p>"
     )
     return "".join(out)
 
@@ -3127,7 +3135,11 @@ _LIVE_MARKS_JS = r"""
         + `<td class="${cls(p.gross_return)}" data-k="gross">${fmtPct(p.gross_return)}</td>`
         + `<td class="mono">${notional}</td>`
         + `<td class="${cls(net)}" data-k="net">${fmtEur(net)}</td>`
-        + `<td data-k="age">${age}</td></tr>`;
+        + `<td data-k="age">${age}</td>`
+        + `<td><form method="post" action="/live/momentum/donchian/sell" style="display:inline">`
+        + `<input type="hidden" name="holding_id" value="${hid}">`
+        + `<input type="hidden" name="redirect" value="1">`
+        + `<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;min-height:40px">Verkoop</button></form></td></tr>`;
     }).join("");
     const cards = pos.map((p) => {
       const hid = esc(p.holding_id || p.base || "");
@@ -3160,13 +3172,16 @@ _LIVE_MARKS_JS = r"""
       + '<div class="table-scroll desk-wide" data-live="positions" data-mode="donchian">'
       + '<table class="desk" data-trail="0" data-tight-after="0" data-tight="0" data-stop="0">'
       + "<thead><tr><th>Base</th><th>Sleeve</th><th>Qty</th><th>Entry</th><th>Mark</th>"
-      + "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th></tr></thead>"
+      + "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th><th>Actie</th></tr></thead>"
       + `<tbody>${rows}</tbody></table></div>`
       + `<div class="pos-cards" data-live="position-cards" data-mode="donchian">${cards}</div>`
+      + '<form method="post" action="/live/momentum/donchian/sell-all" style="margin:.55rem 0 0">'
+      + '<input type="hidden" name="redirect" value="1">'
+      + '<button type="submit" class="btn danger">Leeg Donchian</button></form>'
       + "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
       + "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
       + "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
-      + "Verkoop loopt via de sleeve, niet via de 15m-desk.</p>";
+      + "Verkoop loopt via de Donchian-sleeve, niet via de 15m-desk.</p>";
   }
     function patchPaperClip(st) {
       const root = document.querySelector('[data-live="paper-clip"]');
