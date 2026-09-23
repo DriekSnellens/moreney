@@ -160,6 +160,47 @@ def test_clip_wet_flatten_uses_next_session() -> None:
     assert wet["end_hold"] == "cash" or "BTC" not in wet["end_hold"]
 
 
+def test_liq_top_n_keeps_highest_quote_volume() -> None:
+    btc = _bars(40, 100.0, 0.0)
+    liquid = _bars(40, 10.0, 0.2, vol=50_000.0)
+    jumpy = _bars(40, 5.0, 0.8, vol=5_000.0)
+    ohlc = {"BTC": btc, "ETH": liquid, "SOL": jumpy}
+    _, end = _dates(btc)
+    wide = pick_residual(ohlc, end, universe=("ETH", "SOL"), min_qvol_eur=1.0)
+    liq = pick_residual(ohlc, end, universe=("ETH", "SOL"), min_qvol_eur=1.0, liq_top_n=1)
+    assert wide["want"] == "SOL"
+    assert liq["want"] == "ETH"
+
+
+def test_rotate_gap_skips_small_excess_upgrades() -> None:
+    btc = _bars(80, 100.0, 0.0)
+    eth = _bars(80, 10.0, 0.0)
+    sol = _bars(80, 20.0, 0.0)
+    for i in range(25, 55):
+        eth[i][4] = 10.0 + (i - 24) * 0.6
+        eth[i][1] = eth[i][4]
+    for i in range(55, 80):
+        # SOL only slightly ahead of ETH — below a 0.20 rotate gap.
+        sol[i][4] = 20.0 + (i - 54) * 0.15
+        sol[i][1] = sol[i][4]
+        eth[i][4] = eth[54][4]
+        eth[i][1] = eth[i][4]
+    ohlc = {"BTC": btc, "ETH": eth, "SOL": sol}
+    start, end = _dates(btc)
+    kw = dict(
+        start=start,
+        end=end,
+        book_eur=10_000.0,
+        model=DRY,
+        universe=("ETH", "SOL"),
+        min_qvol_eur=1_000.0,
+    )
+    loose = run_residual(ohlc, **kw)
+    sticky = run_residual(ohlc, rotate_gap=0.20, **kw)
+    assert "SOL" in [p["to"] for p in loose["picks"]]
+    assert sticky["picks"][-1]["to"] == "ETH"
+
+
 def test_no_per_coin_branch_in_engine() -> None:
     from pathlib import Path
 

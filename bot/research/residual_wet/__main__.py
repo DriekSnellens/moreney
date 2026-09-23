@@ -92,26 +92,69 @@ def load_ohlc(
     return out
 
 
+ORIGINAL_DRY = {
+    "fair_2y": {
+        "residual_weekly_liq": {
+            "pnl_eur": 62526.46,
+            "max_dd_pct": 0.6112,
+            "calmar": 1.24,
+            "n_trades": 56,
+        },
+        "btc_rs_clip": {
+            "pnl_eur": 17961.9,
+            "max_dd_pct": 0.3104,
+            "calmar": 0.94,
+            "n_trades": 77,
+        },
+    },
+    "since_2025": {
+        "residual_weekly_liq": {"pnl_eur": 6550.98, "max_dd_pct": 0.5424, "calmar": 0.33},
+        "btc_rs_clip": {"pnl_eur": 7180.15, "max_dd_pct": 0.2606, "calmar": 0.75},
+    },
+    "last_90d": {
+        "residual_weekly_liq": {"pnl_eur": 16325.1, "max_dd_pct": 0.2518, "n_trades": 6},
+        "btc_rs_clip": None,
+    },
+}
+
+
+def _pair(
+    ohlc: dict[str, list[list[float]]],
+    start: str,
+    end: str,
+    book_eur: float,
+    runner,
+    **kw,
+) -> dict[str, Any]:
+    return {
+        "dry": runner(ohlc, start=start, end=end, book_eur=book_eur, model=DRY, **kw),
+        "wet": runner(ohlc, start=start, end=end, book_eur=book_eur, model=WET, **kw),
+    }
+
+
 def _run_window(
     ohlc: dict[str, list[list[float]]], start: str, end: str, book_eur: float
 ) -> dict[str, Any]:
     return {
         "start": start,
         "end": end,
-        "residual_weekly": {
-            "dry": run_residual(ohlc, start=start, end=end, book_eur=book_eur, model=DRY),
-            "wet": run_residual(ohlc, start=start, end=end, book_eur=book_eur, model=WET),
-        },
-        "btc_rs_clip": {
-            "dry": run_clip(ohlc, start=start, end=end, book_eur=book_eur, model=DRY),
-            "wet": run_clip(ohlc, start=start, end=end, book_eur=book_eur, model=WET),
-        },
+        "residual_weekly": _pair(ohlc, start, end, book_eur, run_residual),
+        "residual_weekly_liq": _pair(
+            ohlc,
+            start,
+            end,
+            book_eur,
+            run_residual,
+            liq_top_n=5,
+            strategy="residual_weekly_liq",
+        ),
+        "btc_rs_clip": _pair(ohlc, start, end, book_eur, run_clip),
     }
 
 
 def _line(label: str, row: dict[str, Any]) -> str:
     return (
-        f"  {label:<22} pnl {row['pnl_eur']:+9.0f}  "
+        f"  {label:<26} pnl {row['pnl_eur']:+9.0f}  "
         f"dd {row['max_dd_pct']*100:5.1f}%  calmar {row['calmar']:5.2f}  "
         f"ann {row['ann_pct']*100:6.1f}%  trades {row['n_trades']:3d}  hold {row.get('end_hold')}"
     )
@@ -164,14 +207,16 @@ def main() -> None:
                 "alphai": False,
             },
         },
+        "original_dry_reference": ORIGINAL_DRY,
         "windows": {},
     }
+    strats = ("residual_weekly", "residual_weekly_liq", "btc_rs_clip")
     for name, start, end in WINDOWS:
         use_end = min(end, last)
         print(f"\n== {name} {start} → {use_end} ==", flush=True)
         block = _run_window(ohlc, start, use_end, args.book)
         payload["windows"][name] = block
-        for strat in ("residual_weekly", "btc_rs_clip"):
+        for strat in strats:
             for model in ("dry", "wet"):
                 print(_line(f"{strat}/{model}", block[strat][model]))
 

@@ -13,6 +13,7 @@ Wet fills: next bar OPEN, Bitvavo taker 25 bps/side, extra impact
 
 from __future__ import annotations
 
+import bisect
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -88,6 +89,22 @@ def bar_date(row: Sequence[float]) -> str:
     return datetime.fromtimestamp(int(row[0]) / 1000, UTC).strftime("%Y-%m-%d")
 
 
+_DATE_CACHE: dict[int, list[str]] = {}
+
+
+def _dates_of(rows: Sequence[Sequence[float]]) -> list[str]:
+    key = id(rows)
+    cached = _DATE_CACHE.get(key)
+    if cached is None or len(cached) != len(rows):
+        cached = [bar_date(r) for r in rows]
+        _DATE_CACHE[key] = cached
+    return cached
+
+
+def _cut(rows: Sequence[Sequence[float]], date: str) -> int:
+    return bisect.bisect_right(_dates_of(rows), date)
+
+
 def extra_slip(notional: float, adv: float, model: FillModel) -> float:
     if model.impact_k <= 0 or model.impact_cap <= 0:
         return 0.0
@@ -106,28 +123,21 @@ def fill_px(ref: float, side: str, *, notional: float, adv: float, model: FillMo
 
 
 def rows_through(rows: Sequence[Sequence[float]], date: str) -> list[list[float]]:
-    return [list(r) for r in rows if bar_date(r) <= date]
+    return [list(r) for r in rows[: _cut(rows, date)]]
 
 
 def bar_on_or_after(rows: Sequence[Sequence[float]], date: str) -> list[float] | None:
-    for r in rows:
-        if bar_date(r) >= date:
-            return list(r)
-    return None
-
-
-def next_date(dates: Sequence[str], date: str) -> str | None:
-    for d in dates:
-        if d > date:
-            return d
-    return None
+    i = bisect.bisect_left(_dates_of(rows), date)
+    if i >= len(rows):
+        return None
+    return list(rows[i])
 
 
 def last_px(rows: Sequence[Sequence[float]], date: str, *, use_open: bool = False) -> float:
-    through = rows_through(rows, date)
-    if not through:
+    i = _cut(rows, date) - 1
+    if i < 0:
         return 0.0
-    return float(through[-1][1 if use_open else 4])
+    return float(rows[i][1 if use_open else 4])
 
 
 def metrics(
@@ -301,8 +311,13 @@ def pick_residual(
     min_qvol_eur: float = MIN_QVOL_EUR,
     lookback_days: int = 20,
     skip_days: int = 1,
+    liq_top_n: int = 0,
 ) -> dict[str, Any]:
-    """Top liquid 20d skip-1 excess vs BTC; BTC when max excess ≤ 0."""
+    """Top liquid 20d skip-1 excess vs BTC; BTC when max excess ≤ 0.
+
+    ``liq_top_n`` > 0 first keeps the N highest quote-volume names, then
+    ranks those by excess. Generic liquidity cap, not a per-coin list.
+    """
     btc_rows = rows_through(ohlc.get("BTC") or [], date)
     btc_c = closes_of(btc_rows)
     ranked: list[dict[str, Any]] = []
@@ -326,6 +341,9 @@ def pick_residual(
             )
             continue
         ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
+    if liq_top_n > 0:
+        ranked.sort(key=lambda r: float(r["qvol"]), reverse=True)
+        ranked = ranked[:liq_top_n]
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want = "BTC"
     if ranked and float(ranked[0]["excess"]) > 0:
@@ -339,7 +357,22 @@ def _calendar(ohlc: Mapping[str, Sequence[Sequence[float]]]) -> list[str]:
 
 
 def _adv(ohlc: Mapping[str, Sequence[Sequence[float]]], base: str, date: str) -> float:
-    return quote_vol(rows_through(ohlc.get(base) or [], date))
+    rows = ohlc.get(base) or []
+    i = _cut(rows, date)
+    return quote_vol(rows[max(0, i - 20) : i])
+
+
+def _year_pnl(dated: Sequence[tuple[str, float]], start_eur: float) -> dict[str, float]:
+    first: dict[str, float] = {}
+    last: dict[str, float] = {}
+    prev = start_eur
+    for date, eq in dated:
+        y = date[:4]
+        if y not in first:
+            first[y] = prev
+        last[y] = eq
+        prev = eq
+    return {y: round(last[y] - first[y], 2) for y in last}
 
 
 def run_residual(
@@ -354,14 +387,18 @@ def run_residual(
     rebalance_days: int = 7,
     lookback_days: int = 20,
     skip_days: int = 1,
+    liq_top_n: int = 0,
+    rotate_gap: float = 0.0,
+    strategy: str = "residual_weekly",
 ) -> dict[str, Any]:
     dates = _calendar(ohlc)
     book = Book(book_eur)
     pending: list[Order] = []
-    equity: list[float] = []
+    dated: list[tuple[str, float]] = []
     trades: list[dict[str, Any]] = []
     last_reb = 0
     held = ""
+    _DATE_CACHE.clear()
     picks: list[dict[str, Any]] = []
     need = lookback_days + skip_days + 1
 
@@ -384,9 +421,16 @@ def run_residual(
                 min_qvol_eur=min_qvol_eur,
                 lookback_days=lookback_days,
                 skip_days=skip_days,
+                liq_top_n=liq_top_n,
             )
+            ranked_xs = {str(r["base"]): float(r["excess"]) for r in pick["ranked"]}
             want = str(pick["want"])
             last_reb = ts
+            if rotate_gap > 0 and held and held != want:
+                new_xs = ranked_xs.get(want, 0.0 if want == "BTC" else -9.0)
+                old_xs = ranked_xs.get(held, 0.0 if held == "BTC" else -9.0)
+                if new_xs < old_xs + rotate_gap:
+                    want = held
             if want != held:
                 orders: list[Order] = []
                 eq = book.mark(_px_map(ohlc, date, use_open=False))
@@ -421,10 +465,11 @@ def run_residual(
                 else:
                     trades.extend(_apply_orders(book, orders, ohlc, date, model))
                 held = want
-        equity.append(book.mark(_px_map(ohlc, date, use_open=False)))
+        dated.append((date, book.mark(_px_map(ohlc, date, use_open=False))))
 
+    equity = [v for _, v in dated]
     return {
-        "strategy": "residual_weekly",
+        "strategy": strategy,
         "model": model.name,
         "held": held,
         "picks": picks[-16:],
@@ -435,7 +480,13 @@ def run_residual(
             start_eur=book_eur,
             n_trades=len(trades),
             n_days=len(equity),
-            extra={"end_hold": held, "n_rotates": len(picks)},
+            extra={
+                "end_hold": held,
+                "n_rotates": len(picks),
+                "year_pnl": _year_pnl(dated, book_eur),
+                "liq_top_n": liq_top_n,
+                "rotate_gap": rotate_gap,
+            },
         ),
     }
 
@@ -453,10 +504,11 @@ def run_clip(
     dates = _calendar(ohlc)
     book = Book(book_eur)
     pending: list[Order] = []
-    equity: list[float] = []
+    dated: list[tuple[str, float]] = []
     trades: list[dict[str, Any]] = []
     last_reb = 0
     n_flatten = 0
+    _DATE_CACHE.clear()
 
     for date in dates:
         if date < start:
@@ -468,7 +520,11 @@ def run_clip(
             pending = []
         now = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=UTC)
         now_ms = int(now.timestamp() * 1000)
-        sliced = {b: rows_through(rows, date) for b, rows in ohlc.items()}
+        keep = max(cfg.sma_n, cfg.lookback_days + cfg.skip_days) + 2
+        sliced = {
+            b: list(rows[max(0, _cut(rows, date) - keep) : _cut(rows, date)])
+            for b, rows in ohlc.items()
+        }
         px = _px_map(ohlc, date, use_open=False)
         deployed = sum(lot.qty * (px.get(lot.base) or lot.entry_px) for lot in book.lots.values())
         held = {lot.base: lot.role for lot in book.lots.values()}
@@ -515,9 +571,10 @@ def run_clip(
                 pending = orders
             else:
                 trades.extend(_apply_orders(book, orders, ohlc, date, model))
-        equity.append(book.mark(_px_map(ohlc, date, use_open=False)))
+        dated.append((date, book.mark(_px_map(ohlc, date, use_open=False))))
 
     hold = ",".join(sorted(book.lots)) or "cash"
+    equity = [v for _, v in dated]
     return {
         "strategy": "btc_rs_clip",
         "model": model.name,
@@ -529,6 +586,10 @@ def run_clip(
             start_eur=book_eur,
             n_trades=len(trades),
             n_days=len(equity),
-            extra={"end_hold": hold, "n_flatten": n_flatten},
+            extra={
+                "end_hold": hold,
+                "n_flatten": n_flatten,
+                "year_pnl": _year_pnl(dated, book_eur),
+            },
         ),
     }
