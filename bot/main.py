@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Mapping
@@ -329,6 +330,20 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+_NO_STORE = {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache",
+}
+
+
+@app.middleware("http")
+async def _no_store_live_dashboard(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/live/momentum"):
+        response.headers["Cache-Control"] = _NO_STORE["Cache-Control"]
+        response.headers["Pragma"] = _NO_STORE["Pragma"]
+    return response
 
 from bot.paper.api import router as paper_api_router  # noqa: E402
 
@@ -665,6 +680,29 @@ async def live_momentum_status() -> dict[str, Any]:
     dashboard poll stays near real-time even between 20s exit ticks.
     """
     return await get_momentum_desk_manager().status_fresh()
+
+
+@app.get("/live/momentum/pulse")
+async def live_momentum_pulse() -> dict[str, Any]:
+    """One round-trip for 1s dashboard marks: all desks, parallel refresh."""
+    core, sw, don, clip = await asyncio.gather(
+        get_momentum_desk_manager().status_fresh(),
+        get_short_weakest_desk_manager().refresh_live(),
+        get_donchian_desk_manager().status_fresh(),
+        get_btc_rs_clip_desk_manager().refresh_live(),
+        return_exceptions=True,
+    )
+
+    def _ok(payload: object) -> dict[str, Any] | None:
+        return payload if isinstance(payload, dict) else None
+
+    return {
+        "core": _ok(core),
+        "short_weakest": _ok(sw),
+        "donchian": _ok(don),
+        "clip": _ok(clip),
+        "ts": time.time(),
+    }
 
 
 @app.post("/live/momentum/start")

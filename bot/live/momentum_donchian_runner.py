@@ -574,15 +574,21 @@ class DonchianBundleRunner:
 
     async def refresh_open_marks(self) -> None:
         """Ticker marks for still-open lots only (dashboard poll, not universe)."""
-        bases = {p.base for sl in self.sleeves.values() for p in sl.positions} | {"BTC"}
-        for base in sorted(bases):
+        bases = sorted({p.base for sl in self.sleeves.values() for p in sl.positions} | {"BTC"})
+
+        async def _one(base: str) -> tuple[str, float | None]:
             try:
                 px = await self._feed.last_price(base)
-                if px:
-                    self.marks[base] = float(px)
-                    self.mark_ts[base] = time.time()
+                return base, float(px) if px else None
             except Exception:  # noqa: BLE001
-                continue
+                return base, None
+
+        rows = await asyncio.gather(*(_one(base) for base in bases))
+        now = time.time()
+        for base, px in rows:
+            if px and px > 0:
+                self.marks[base] = float(px)
+                self.mark_ts[base] = now
 
     async def _open(self, sl: _SleeveBook, row: Mapping[str, Any], *, now_ms: int) -> None:
         base = str(row["base"])
@@ -815,6 +821,25 @@ class DonchianBundleRunner:
             ),
             2,
         )
+        alloc = self._alloc
+        btc_live = self.marks.get("BTC")
+        if isinstance(alloc, dict) and btc_live and btc_live > 0:
+            reg = dict(alloc.get("regime") or {})
+            sma20 = reg.get("sma20")
+            sma50 = reg.get("sma50")
+            reg["btc"] = round(float(btc_live), 2)
+            try:
+                if sma20:
+                    sma20f = float(sma20)
+                    if sma20f > 0:
+                        reg["gap_vs_sma20_pct"] = round(float(btc_live) / sma20f - 1.0, 4)
+                if sma50:
+                    sma50f = float(sma50)
+                    if sma50f > 0:
+                        reg["gap_vs_sma50_pct"] = round(float(btc_live) / sma50f - 1.0, 4)
+            except (TypeError, ValueError):
+                pass
+            alloc = {**alloc, "regime": reg}
         return {
             "desk": "momentum_donchian",
             "mode": "donchian_live" if live else "donchian_paper",
@@ -823,7 +848,7 @@ class DonchianBundleRunner:
             "allow_live": live,
             "venues": list(self.venues),
             "book_eur": self.book_eur,
-            "allocator": self._alloc,
+            "allocator": alloc,
             "equity_eur": equity,
             "cash_eur": round(cash, 2),
             "exposure_eur": round(deployed, 2),

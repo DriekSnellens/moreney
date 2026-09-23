@@ -831,6 +831,8 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert 'class="mix-live"' in html or "mix-live" in html
     assert "grid-template-columns: 1fr" in html
     assert "patchDonchian" in html
+    assert "applyPulse" in html
+    assert "/live/momentum/pulse" in html
     assert "mixHeroesLive" in html
     assert "Donchian · live longs" in html
     assert ">Bags<" in html

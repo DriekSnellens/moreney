@@ -253,12 +253,21 @@ class BtcRsClipPaperRunner:
         return total
 
     async def _refresh_marks(self) -> None:
-        bases = {p.base for p in self.positions} | {"BTC"}
-        for base in bases:
-            px = await self._feed.last_price(base)
+        bases = sorted({p.base for p in self.positions} | {"BTC"})
+
+        async def _one(base: str) -> tuple[str, float | None]:
+            try:
+                px = await self._feed.last_price(base)
+                return base, float(px) if px else None
+            except Exception:  # noqa: BLE001
+                return base, None
+
+        rows = await asyncio.gather(*(_one(base) for base in bases))
+        now = time.time()
+        for base, px in rows:
             if px and px > 0:
                 self.marks[base] = float(px)
-                self.mark_ts[base] = time.time()
+                self.mark_ts[base] = now
 
     async def _load_ohlc(self) -> dict[str, list[list[float]]]:
         out: dict[str, list[list[float]]] = {}
@@ -690,7 +699,7 @@ class BtcRsClipPaperRunner:
             "live_caption": str(last.get("caption") or ""),
             "risk_on": bool(last.get("risk_on")),
             "sma50": last.get("sma50"),
-            "btc": last.get("btc") or self.marks.get("BTC"),
+            "btc": self.marks.get("BTC") or last.get("btc"),
             "gap_pct": last.get("gap_pct"),
             "want_alt": last.get("want_alt"),
             "next_decision": self.next_decision(),

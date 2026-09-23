@@ -420,3 +420,18 @@ def test_reserved_quote_uses_15m_cap():
     assert reserved_quote_eur_from_settings(s) == 2000.0
     off = Settings(momentum_desk_enabled=False, momentum_multi_strat_enabled=False)
     assert reserved_quote_eur_from_settings(off) == 0.0
+
+
+def test_clip_status_btc_prefers_live_mark(tmp_path):
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+    )
+    r.last_decision = {"btc": 60_000.0, "sma50": 65_000.0, "caption": "stale decide"}
+    r.marks["BTC"] = 71_234.5
+    st = r.status()
+    assert st["btc"] == 71_234.5

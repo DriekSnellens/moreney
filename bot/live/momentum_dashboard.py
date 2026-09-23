@@ -2726,6 +2726,7 @@ _LIVE_MARKS_JS = r"""
 (function () {
   if (window.__moreneyMarksPoll) return;
   window.__moreneyMarksPoll = true;
+  const PULSE_URL = "/live/momentum/pulse";
   const STATUS_URL = "/live/momentum/status";
   const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
   const MIX_STATUS_URL = "/live/momentum/allocator/status";
@@ -3239,6 +3240,25 @@ _LIVE_MARKS_JS = r"""
         : "geen live orders, geen mix-cash.";
     }
     (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+    const open = root.querySelector('[data-live="clip-open"]');
+    if (open) {
+      const pos = (st.positions || []).filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
+      if (!pos.length) {
+        const liveEmpty = !!st.running && !st.dry_run && st.allow_live !== false;
+        open.innerHTML = liveEmpty
+          ? '<span class="muted">Nog geen live-posities — eerste decide koopt 75% BTC + RS-alt.</span>'
+          : '<span class="muted">Nog geen paper-posities — eerste decide na start.</span>';
+      } else {
+        open.innerHTML = pos.map((p) => {
+          const net = p.unrealized_net_eur;
+          const hid = esc(p.holding_id || p.base || "");
+          return `<span class="mix-chip" data-holding="${hid}">`
+            + `<span class="muted">${esc(p.role || p.venue || "")}</span>`
+            + `<strong>${esc(p.base || "")}</strong>`
+            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+        }).join("");
+      }
+    }
     const btc = st.btc;
     const sma50 = st.sma50;
     if (btc != null) {
@@ -3325,17 +3345,15 @@ _LIVE_MARKS_JS = r"""
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
   }
   async function fetchJson(url) {
-    const res = await fetch(url, { cache: "no-store" });
+    const sep = url.includes("?") ? "&" : "?";
+    const res = await fetch(url + sep + "_=" + Date.now(), {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
+    });
     if (!res.ok) return null;
     return res.json();
   }
-  async function tick() {
-    const [core, sw, don, clip] = await Promise.all([
-      fetchJson(STATUS_URL).catch(() => null),
-      fetchJson(SHORT_STATUS_URL).catch(() => null),
-      fetchJson(DONCHIAN_STATUS_URL).catch(() => null),
-      fetchJson(CLIP_STATUS_URL).catch(() => null),
-    ]);
+  function applyPulse(core, sw, don, clip) {
     if (core) {
       const knobs = trailKnobs(core);
       (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
@@ -3349,7 +3367,31 @@ _LIVE_MARKS_JS = r"""
       patchShortSleeve(sw);
     }
     if (don) patchDonchian(don);
-    else {
+    else if (!clip) {
+      /* mix fallback below */
+    }
+    if (clip) patchPaperClip(clip);
+  }
+  async function tick() {
+    const pulse = await fetchJson(PULSE_URL).catch(() => null);
+    if (pulse && (pulse.core || pulse.donchian || pulse.clip || pulse.short_weakest)) {
+      applyPulse(pulse.core, pulse.short_weakest, pulse.donchian, pulse.clip);
+      if (!pulse.donchian && !pulse.clip) {
+        try {
+          const mix = await fetchJson(MIX_STATUS_URL);
+          if (mix) patchMix(mix);
+        } catch (err) { /* mix optional */ }
+      }
+      return;
+    }
+    const [core, sw, don, clip] = await Promise.all([
+      fetchJson(STATUS_URL).catch(() => null),
+      fetchJson(SHORT_STATUS_URL).catch(() => null),
+      fetchJson(DONCHIAN_STATUS_URL).catch(() => null),
+      fetchJson(CLIP_STATUS_URL).catch(() => null),
+    ]);
+    applyPulse(core, sw, don, clip);
+    if (!don) {
       try {
         const mix = await fetchJson(MIX_STATUS_URL);
         if (mix) patchMix(mix);
@@ -3357,7 +3399,6 @@ _LIVE_MARKS_JS = r"""
         /* mix optional */
       }
     }
-    if (clip) patchPaperClip(clip);
   }
   (async function pollLoop() {
     while (true) {
@@ -3881,4 +3922,10 @@ def render_momentum_dashboard(
 {mobile_dock}
 {live_js}
 </body></html>"""
-    return HTMLResponse(html)
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
