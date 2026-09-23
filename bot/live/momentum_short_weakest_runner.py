@@ -241,12 +241,21 @@ class ShortWeakestPaperRunner:
         return total
 
     async def _refresh_marks(self) -> None:
-        bases = {p.base for p in self.positions} | {"BTC"}
-        for base in bases:
-            px = await self._feed.last_price(base)
+        bases = sorted({p.base for p in self.positions} | {"BTC"})
+
+        async def _one(base: str) -> tuple[str, float | None]:
+            try:
+                px = await self._feed.last_price(base)
+                return base, float(px) if px else None
+            except Exception:  # noqa: BLE001
+                return base, None
+
+        rows = await asyncio.gather(*(_one(base) for base in bases))
+        now = time.time()
+        for base, px in rows:
             if px and px > 0:
                 self.marks[base] = float(px)
-                self.mark_ts[base] = time.time()
+                self.mark_ts[base] = now
 
     async def _refresh_bear_live(self, *, force: bool = False) -> dict[str, Any]:
         """Keep BTC vs SMA200 fresh for the dashboard (even when flat)."""

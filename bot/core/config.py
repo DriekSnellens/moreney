@@ -561,18 +561,20 @@ class Settings(BaseSettings):
     live_micro_trail_dd_gain_scale_enabled: bool = True
     live_micro_trail_dd_max_pct: float = Field(default=0.03, ge=0.005, le=0.10)
     # Daily Momentum Desk (bot/live/momentum_desk.py + momentum_runner.py).
-    # When the Donchian mix is on, 15m still auto-starts if this is true (or
-    # if the running-flag is set). Bitvavo spend is capped so mix bags stay.
+    # 15m WR-core satellite beside the live owner (BTC+RS clip). Auto-starts
+    # when true (or the running-flag is set). Bitvavo spend is capped at the
+    # mix/clip ceiling so the €20k owner keeps the leftover.
     momentum_desk_enabled: bool = False
     # Entry venues in preference order (cheapest fees first); later venues are
     # overflow capital once the primary cannot fund a full clip.
     momentum_desk_venues: str = "bitvavo,okx"
-    # Per-venue EUR spend caps for 15m entries: ``bitvavo:2000``. Missing venue
-    # = unlimited (OKX uses all quote cash). 15m exposure on that venue counts
-    # against the cap so a refill cannot spend mix leftover.
+    # Per-venue EUR spend caps for 15m satellite entries: ``bitvavo:2000``.
+    # Missing venue = unlimited on that venue (OKX leftover stays satellite).
+    # 15m exposure on a capped venue counts against the cap so a refill cannot
+    # spend clip/mix leftover.
     momentum_desk_venue_cash_caps: str = ""
-    # When the loop mix is on and Bitvavo is missing from the cap string,
-    # clamp 15m Bitvavo spend to this (the reserved ~€2k beside the €20k mix).
+    # When clip or the loop mix is on and Bitvavo is missing from the cap
+    # string, clamp 15m Bitvavo spend to this (€2k satellite beside the owner).
     momentum_desk_mix_bitvavo_cap_eur: float = Field(default=2_000.0, ge=0.0)
     # Quality hours (135d live-scale): 7+13+16 ≈ WR 52.5% / +€888 vs peak
     # 7+16 WR 54% / +€951. Midday 13 catches EU session without every-bar bleed.
@@ -710,8 +712,10 @@ class Settings(BaseSettings):
     momentum_donchian_venues: str = "bitvavo"
     momentum_donchian_state_path: str = "./data/momentum_donchian_state.json"
     momentum_donchian_ledger_path: str = "./data/momentum_donchian_ledger.jsonl"
-    # Independent paper shadow book next to the live mix (never live orders).
+    # Independent BTC-core + RS clip beside the mix. Live only when allow_live.
     momentum_btc_rs_clip_enabled: bool = False
+    momentum_btc_rs_clip_allow_live: bool = False
+    momentum_btc_rs_clip_venues: str = "bitvavo"
     momentum_btc_rs_clip_book_eur: float = Field(default=20_000.0, gt=0)
     momentum_btc_rs_clip_btc_frac: float = Field(default=0.75, gt=0, le=1.0)
     momentum_btc_rs_clip_alt_frac: float = Field(default=0.25, gt=0, le=1.0)

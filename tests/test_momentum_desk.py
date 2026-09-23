@@ -1439,7 +1439,13 @@ def test_dashboard_renders_positions_decision_and_ledger():
     assert "Refill na exit" in html
     assert "Fade ETA" in html
     assert "Exit-ladder" in html
-    assert "/live/momentum/status" in html and "Marks live elke 3s" in html
+    assert "/live/momentum/status" in html and "Marks live elke 1s" in html
+    assert "INTERVAL_MS = 1000" in html
+    assert 'PULSE_URL = "/live/momentum/pulse"' in html
+    assert "function patchDonchian" in html
+    assert "applyPulse" in html
+    html_resp = render_momentum_dashboard(status, rows)
+    assert "no-store" in (html_resp.headers.get("cache-control") or "")
     assert 'data-live="open-pnl"' in html
     # Sell button is a GET to the confirmation step, never a direct POST.
     assert 'name="sell" value="h-dot"' in html and "/live/momentum/sell" not in html
@@ -1625,6 +1631,14 @@ def test_mix_injects_bitvavo_cap_when_unset():
         momentum_desk_venue_cash_caps="",
     )
     assert venue_cash_caps_from_settings(s3, mix_on=False) == {}
+    s4 = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        momentum_btc_rs_clip_enabled=True,
+        momentum_multi_strat_enabled=False,
+        momentum_desk_venue_cash_caps="",
+        momentum_desk_mix_bitvavo_cap_eur=2000.0,
+    )
+    assert venue_cash_caps_from_settings(s4, mix_on=False) == {"bitvavo": 2000.0}
 
 
 def _bitvavo_holding(notional: float, *, px: float = 100.0) -> Holding:
@@ -2554,3 +2568,31 @@ def test_summarize_regime_pnl_buckets_by_entry_label():
     assert out["strong"]["n"] == 1 and out["strong"]["net_eur"] == 10.0
     assert out["soft"]["n"] == 3 and out["soft"]["net_eur"] == -4.0
     assert out["soft"]["wins"] == 1
+
+
+def test_candlefeed_all_ticker_snapshot_is_shared():
+    from bot.live.momentum_runner import CandleFeed
+
+    CandleFeed.reset_ticker_cache()
+    calls = {"n": 0}
+
+    async def fake_all() -> dict[str, float]:
+        calls["n"] += 1
+        return {"BTC": 70_000.0, "ETH": 3_000.0}
+
+    feed = CandleFeed(ticker_ttl_sec=5.0)
+    feed._fetch_all_tickers = fake_all  # type: ignore[method-assign]
+
+    async def go() -> tuple[float | None, float | None, float | None]:
+        a = await feed.last_price("BTC")
+        b = await feed.last_price("ETH")
+        other = CandleFeed(ticker_ttl_sec=5.0)
+        c = await other.last_price("BTC")
+        return a, b, c
+
+    try:
+        a, b, c = asyncio.run(go())
+        assert (a, b, c) == (70_000.0, 3_000.0, 70_000.0)
+        assert calls["n"] == 1
+    finally:
+        CandleFeed.reset_ticker_cache()

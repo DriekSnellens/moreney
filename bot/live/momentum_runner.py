@@ -382,18 +382,40 @@ def _from_exchange_order(order: Any, symbol: str | None = None) -> OrderState:
 class CandleFeed:
     """Bitvavo public 15m candles + last-trade ticker with small TTL caches."""
 
+    _snap: tuple[float, dict[str, float]] | None = None
+    _snap_lock: asyncio.Lock | None = None
+    _http: httpx.AsyncClient | None = None
+
     def __init__(
         self,
         base_url: str = BITVAVO_PUBLIC,
         ttl_sec: float = 10.0,
         *,
-        ticker_ttl_sec: float = 2.0,
+        ticker_ttl_sec: float = 0.5,
     ) -> None:
         self._base_url = base_url
         self._ttl = ttl_sec
         self._ticker_ttl = ticker_ttl_sec
         self._cache: dict[tuple[str, int], tuple[float, list[list[float]]]] = {}
         self._ticker_cache: dict[str, tuple[float, float]] = {}
+
+    @classmethod
+    def reset_ticker_cache(cls) -> None:
+        cls._snap = None
+        cls._snap_lock = None
+        cls._http = None
+
+    @classmethod
+    def _lock(cls) -> asyncio.Lock:
+        if cls._snap_lock is None:
+            cls._snap_lock = asyncio.Lock()
+        return cls._snap_lock
+
+    async def _client(self) -> httpx.AsyncClient:
+        cls = type(self)
+        if cls._http is None or cls._http.is_closed:
+            cls._http = httpx.AsyncClient(timeout=8.0)
+        return cls._http
 
     async def candles(self, base: str, limit: int) -> list[list[float]]:
         key = (base, limit)
@@ -418,16 +440,68 @@ class CandleFeed:
 
     async def last_price(self, base: str) -> float | None:
         """Last trade price for dashboard / live marks (Bitvavo public ticker)."""
+        want = str(base or "").upper()
+        if not want:
+            return None
+        snap = await self._ticker_snapshot()
+        px = snap.get(want)
+        if px and px > 0:
+            return px
+        return await self._last_price_one(want)
+
+    async def _ticker_snapshot(self) -> dict[str, float]:
+        """One all-market ticker pull, shared across desks (~0.5s TTL)."""
+        now = time.time()
+        hit = type(self)._snap
+        if hit and now - hit[0] < self._ticker_ttl:
+            return hit[1]
+        async with type(self)._lock():
+            hit = type(self)._snap
+            now = time.time()
+            if hit and now - hit[0] < self._ticker_ttl:
+                return hit[1]
+            try:
+                prices = await self._fetch_all_tickers()
+            except Exception:  # noqa: BLE001
+                return hit[1] if hit else {}
+            if not prices:
+                return hit[1] if hit else {}
+            type(self)._snap = (time.time(), prices)
+            return prices
+
+    async def _fetch_all_tickers(self) -> dict[str, float]:
+        url = f"{self._base_url}/ticker/price"
+        client = await self._client()
+        resp = await client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload if isinstance(payload, list) else [payload]
+        out: dict[str, float] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            market = str(row.get("market") or "")
+            if not market.endswith("-EUR"):
+                continue
+            try:
+                price = float(row.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                out[market[:-4]] = price
+        return out
+
+    async def _last_price_one(self, base: str) -> float | None:
         now = time.time()
         hit = self._ticker_cache.get(base)
         if hit and now - hit[0] < self._ticker_ttl:
             return hit[1]
         url = f"{self._base_url}/ticker/price"
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, params={"market": f"{base}-EUR"})
-                resp.raise_for_status()
-                payload = resp.json()
+            client = await self._client()
+            resp = await client.get(url, params={"market": f"{base}-EUR"})
+            resp.raise_for_status()
+            payload = resp.json()
             price = float(payload["price"] if isinstance(payload, dict) else payload[0]["price"])
         except Exception:  # noqa: BLE001
             return None
@@ -870,11 +944,18 @@ class MomentumDeskRunner:
         """
         if not self.holdings:
             return
+        open_h = [h for h in list(self.holdings) if not h.exiting]
+        if not open_h:
+            return
+        results = await asyncio.gather(
+            *(self._mark_for_holding(h) for h in open_h),
+            return_exceptions=True,
+        )
         updated = False
-        for h in list(self.holdings):
-            if h.exiting:
+        for h, res in zip(open_h, results, strict=False):
+            if isinstance(res, BaseException):
                 continue
-            px, source = await self._mark_for_holding(h)
+            px, source = res
             if px is None or px <= 0:
                 continue
             self.marks[h.pos.base] = float(px)
@@ -2360,13 +2441,14 @@ def parse_venue_cash_caps(raw: Any) -> dict[str, float]:
 def venue_cash_caps_from_settings(
     settings: Settings, *, mix_on: bool | None = None
 ) -> dict[str, float]:
-    """Caps for the 15m desk. Mix-on injects a Bitvavo ceiling if unset."""
+    """Caps for the 15m satellite. Clip/mix owners inject a Bitvavo ceiling if unset."""
     caps = parse_venue_cash_caps(
         getattr(settings, "momentum_desk_venue_cash_caps", "") or ""
     )
     if mix_on is None:
         mix_on = bool(getattr(settings, "momentum_multi_strat_enabled", False))
-    if mix_on and "bitvavo" not in caps:
+    clip_on = bool(getattr(settings, "momentum_btc_rs_clip_enabled", False))
+    if (mix_on or clip_on) and "bitvavo" not in caps:
         bitvavo_cap = float(
             getattr(settings, "momentum_desk_mix_bitvavo_cap_eur", 2_000.0) or 0.0
         )
@@ -2402,6 +2484,7 @@ class MomentumDeskManager:
         self._commit: dict[str, Any] = {}
         self._sell_task: asyncio.Task[None] | None = None
         self._manual_exit: dict[str, Any] = {}
+        self._last_reconcile_mono = 0.0
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -2426,20 +2509,23 @@ class MomentumDeskManager:
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
-        """Status after refreshing marks + reconciling venue inventory."""
+        """Fresh marks every poll; inventory/cash reconcile is throttled for 1s UI."""
         if self._runner is not None:
             try:
                 await self._runner.refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("momentum desk: mark refresh for status failed")
-            try:
-                await self._runner.reconcile_external_inventory()
-            except Exception:  # noqa: BLE001
-                logger.exception("momentum desk: reconcile for status failed")
-            try:
-                await self._runner._refresh_cash(force=True)  # noqa: SLF001
-            except Exception:  # noqa: BLE001
-                logger.exception("momentum desk: cash refresh for status failed")
+            now = time.monotonic()
+            if now - self._last_reconcile_mono >= 5.0:
+                self._last_reconcile_mono = now
+                try:
+                    await self._runner.reconcile_external_inventory()
+                except Exception:  # noqa: BLE001
+                    logger.exception("momentum desk: reconcile for status failed")
+                try:
+                    await self._runner._refresh_cash(force=True)  # noqa: SLF001
+                except Exception:  # noqa: BLE001
+                    logger.exception("momentum desk: cash refresh for status failed")
         return self.status()
 
     async def start(

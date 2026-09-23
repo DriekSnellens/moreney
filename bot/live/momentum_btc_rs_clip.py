@@ -1,7 +1,8 @@
-"""Paper BTC-core + 25% weekly RS clip — independent shadow book.
+"""BTC-core + 25% weekly RS clip — independent book beside the mix.
 
 75% BTC while close > SMA50; at most 25% in one liquid alt if 20d skip-1
-excess vs BTC ≥ 8%. Weekly rebalance. No per-coin hardcodes. Paper only.
+excess vs BTC ≥ 8%. Weekly rebalance. No per-coin hardcodes.
+Paper until ``momentum_btc_rs_clip_allow_live`` arms venue fills.
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ class ClipPosition:
             self.holding_id = f"clip-{self.base}-{uuid.uuid4().hex[:8]}"
 
     def is_paper(self) -> bool:
-        return True
+        return str(self.venue or "paper").lower() in {"paper", "", "synthetic"}
 
     def gross_return(self, mark: float) -> float:
         if self.entry_price <= 0 or mark <= 0:
@@ -79,7 +80,7 @@ class ClipPosition:
             opened_ms=int(raw["opened_ms"]),
             role=str(raw.get("role") or "btc"),
             holding_id=str(raw.get("holding_id") or ""),
-            venue="paper",
+            venue=str(raw.get("venue") or "paper"),
             entry_reason=str(raw.get("entry_reason") or ""),
         )
 
@@ -92,7 +93,9 @@ def fill_px(close: float, side: str, *, slip: float = SLIP) -> float:
     return close * (1.0 - slip)
 
 
-def completed_ohlc(rows: Sequence[Sequence[float]], *, now: datetime | None = None) -> list[list[float]]:
+def completed_ohlc(
+    rows: Sequence[Sequence[float]], *, now: datetime | None = None
+) -> list[list[float]]:
     """Drop the in-progress UTC day so signals use closed 1d bars only."""
     out = [list(r) for r in rows]
     if not out:
@@ -154,7 +157,7 @@ def evaluate_clip(
     last_rebalance_ms: int,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Decide paper longs. ``held`` maps base → role (btc|alt)."""
+    """Decide clip longs. ``held`` maps base → role (btc|alt)."""
     now = now or datetime.now(UTC)
     btc_rows = completed_ohlc(ohlc_by_base.get("BTC") or [], now=now)
     btc_c = closes_of(btc_rows)
@@ -171,7 +174,7 @@ def evaluate_clip(
             "entries": [],
             "want_btc": False,
             "want_alt": None,
-            "caption": "BTC SMA50 nog niet klaar — paper bags blijven staan.",
+            "caption": "BTC SMA50 nog niet klaar — bags blijven staan.",
             "ranked": [],
             "rebalance_due": False,
         }
@@ -194,7 +197,7 @@ def evaluate_clip(
             "entries": [],
             "want_btc": False,
             "want_alt": None,
-            "caption": "BTC onder SMA50 — paper clip in cash.",
+            "caption": "BTC onder SMA50 — clip in cash.",
             "ranked": [],
             "rebalance_due": False,
             "gap_pct": round(last / s50 - 1.0, 4),
@@ -214,7 +217,14 @@ def evaluate_clip(
             skipped.append({"base": base, "reason": "short_history"})
             continue
         if qv < cfg.min_qvol_eur:
-            skipped.append({"base": base, "reason": "thin_volume", "qvol": round(qv, 0), "excess": round(xs, 4)})
+            skipped.append(
+                {
+                    "base": base,
+                    "reason": "thin_volume",
+                    "qvol": round(qv, 0),
+                    "excess": round(xs, 4),
+                }
+            )
             continue
         ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
@@ -225,7 +235,9 @@ def evaluate_clip(
         want_alt = held_alt
 
     if held_alt and held_alt != want_alt:
-        exits.append({"base": held_alt, "reason": "rs_rotate" if want_alt else "rs_drop", "role": "alt"})
+        exits.append(
+            {"base": held_alt, "reason": "rs_rotate" if want_alt else "rs_drop", "role": "alt"}
+        )
 
     cash_left = float(cash_eur)
     # Conservative: assume exits free cash after they fill; entries size from equity.
@@ -259,7 +271,7 @@ def evaluate_clip(
 
     alt_txt = want_alt or "geen alt"
     caption = (
-        f"Paper clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
+        f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
         f"{int(cfg.alt_frac * 100)}% {alt_txt}"
         + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
         + ". Telt niet mee in live mix-equity."
