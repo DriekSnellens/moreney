@@ -1487,6 +1487,38 @@ async def live_momentum_donchian_decide(
     return await get_donchian_desk_manager().decide(execute=bool(execute))
 
 
+@app.post("/live/momentum/donchian/sell", response_model=None)
+async def live_momentum_donchian_sell(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    if not holding_id:
+        result: dict[str, Any] = {"ok": False, "reason": "missing_holding_id"}
+    else:
+        result = await get_donchian_desk_manager().sell(holding_id)
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Donchian verkoop geweigerd: {result.get('reason')}")
+        return _volatile_redirect("Donchian lot verkocht")
+    return result
+
+
+@app.post("/live/momentum/donchian/sell-all", response_model=None)
+async def live_momentum_donchian_sell_all(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    result = await get_donchian_desk_manager().sell_all()
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Donchian leegmaken geweigerd: {result.get('reason')}")
+        return _volatile_redirect(f"Donchian geleegd ({result.get('closed', 0)} lots)")
+    return result
+
+
 def _sw_redirect(notice: str | None = None) -> RedirectResponse:
     q = f"?notice={notice}" if notice else ""
     return RedirectResponse(url=f"/live/momentum{q}", status_code=303)

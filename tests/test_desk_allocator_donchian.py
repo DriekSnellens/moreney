@@ -776,6 +776,9 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert "15m WR-core rules (naast de mix)" in html
     assert 'id="core-15m"' in html
     assert "name=\"sell\"" not in html
+    assert "Leeg Donchian" in html
+    assert "/live/momentum/donchian/sell" in html
+    assert "/live/momentum/donchian/sell-all" in html
 
 
 def test_mix_tape_uptrend_splits_at_sma50_not_chop():
@@ -1067,6 +1070,110 @@ def test_donchian_live_open_places_venue_order(tmp_path):
         assert st["paper_only"] is False
 
     asyncio.run(go())
+
+
+def test_donchian_sell_all_places_live_sell(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_donchian import DonchianPosition
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+    from bot.live.momentum_runner import OrderState
+
+    class Gw:
+        def __init__(self) -> None:
+            self.placed: list[dict] = []
+
+        async def best_bid_ask(self, symbol):
+            return 9.8, 9.9
+
+        async def place_limit(self, symbol, side, qty, price, *, post_only):
+            self.placed.append(
+                {"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only}
+            )
+            return OrderState("s1", "closed", qty, price, qty * price * 0.001)
+
+        async def fetch_order(self, order_id, symbol):
+            p = self.placed[-1]
+            return OrderState("s1", "closed", p["qty"], p["price"], 0.0)
+
+        async def cancel_order(self, order_id, symbol):
+            return await self.fetch_order(order_id, symbol)
+
+    gw = Gw()
+    r = DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        book_eur=20_000,
+        dry_run=False,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+    )
+    sl = r.sleeves["donch10"]
+    sl.book_eur = 10_000
+    sl.cash_eur = 6000.0
+    sl.positions = [
+        DonchianPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=4000.0,
+            opened_ms=1,
+            holding_id="dc-aaa",
+            sleeve="donch10",
+            venue="bitvavo",
+            quantity=400.0,
+        )
+    ]
+    r.marks["AAA"] = 9.8
+    out = asyncio.run(r.sell_all())
+    assert out == {"ok": True, "closed": 1}
+    assert gw.placed and gw.placed[0]["side"] == "sell"
+    assert sl.positions == []
+    led = (tmp_path / "l.jsonl").read_text()
+    assert "manual_sell_all" in led
+    assert '"event": "exit"' in led
+
+
+def test_donchian_paper_sell_all_skips_venue(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_donchian import DonchianPosition
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    class Gw:
+        def __init__(self) -> None:
+            self.placed: list[dict] = []
+
+        async def place_limit(self, *a, **k):
+            self.placed.append((a, k))
+            raise AssertionError("paper sell_all must not place venue orders")
+
+    gw = Gw()
+    r = DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        book_eur=20_000,
+        dry_run=True,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+    )
+    sl = r.sleeves["donch10"]
+    sl.positions = [
+        DonchianPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=4000.0,
+            opened_ms=1,
+            holding_id="dc-p",
+            sleeve="donch10",
+            venue="paper",
+            quantity=400.0,
+        )
+    ]
+    r.marks["AAA"] = 10.0
+    out = asyncio.run(r.sell_all())
+    assert out["closed"] == 1
+    assert sl.positions == []
+    assert gw.placed == []
 
 
 def test_warmup_without_sma_keeps_live_bags(tmp_path):
