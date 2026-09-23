@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from bot.live.desk_allocator import classify_sma20_50, euros_for, sleeve_rows, snapshot
 from bot.live.momentum_donchian import DonchianConfig, evaluate_donchian
 
@@ -369,6 +371,219 @@ def test_ledger_table_maps_donchian_entry_exit_price():
     assert "9.5111" in html
     assert "donch10 · friday_flatten" in html
     assert "−121.27" in html or "-121.27" in html
+
+
+def test_ledger_table_maps_manual_external():
+    from bot.live.momentum_dashboard import _ledger_table
+
+    html = _ledger_table(
+        [
+            {
+                "ts": "2026-09-23T08:20:00+00:00",
+                "event": "exit",
+                "sleeve": "donch_fri10",
+                "base": "AAA",
+                "venue": "bitvavo",
+                "notional_eur": 3900.0,
+                "exit_price": 3.65,
+                "net_eur": -80.5,
+                "reason": "manual_external",
+                "detail": "reconcile_external_delta",
+            }
+        ]
+    )
+    assert "AAA" in html
+    assert "3.65" in html
+    assert "donch_fri10 · manual_external" in html
+
+
+class _ReconGw:
+    def __init__(
+        self,
+        *,
+        held: dict[str, float] | None = None,
+        sells: list[dict] | None = None,
+    ) -> None:
+        self.held = {str(k).upper(): float(v) for k, v in (held or {}).items()}
+        self.sells = list(sells or [])
+        self.placed: list[dict] = []
+
+    async def base_held(self, base: str) -> float:
+        return float(self.held.get(str(base).upper(), 0.0))
+
+    async def recent_base_sells(self, base: str, *, since_ms: int, until_ms: int | None = None):
+        want = str(base).upper()
+        return [row for row in self.sells if str(row.get("base") or "").upper() == want]
+
+    async def place_limit(self, symbol, side, qty, price, *, post_only):
+        self.placed.append(
+            {"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only}
+        )
+        raise AssertionError("external reconcile must not place venue orders")
+
+
+class _Feed:
+    def __init__(self, px: float = 10.0) -> None:
+        self.px = px
+
+    async def last_price(self, base: str) -> float:
+        return self.px
+
+
+def _live_runner(tmp_path, gw: _ReconGw, **kwargs):
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    return DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        book_eur=20_000,
+        feed=_Feed(),
+        dry_run=False,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+        **kwargs,
+    )
+
+
+def _seed_live_lot(r, sleeve: str, *, base: str, qty: float, px: float, opened_ms: int, hid: str):
+    from bot.live.momentum_donchian import DonchianPosition
+
+    sl = r.sleeves[sleeve]
+    sl.book_eur = 10_000
+    sl.positions.append(
+        DonchianPosition(
+            base=base,
+            entry_price=px,
+            notional_eur=qty * px,
+            opened_ms=opened_ms,
+            holding_id=hid,
+            sleeve=sleeve,
+            venue="bitvavo",
+            quantity=qty,
+        )
+    )
+    r.marks[base] = px
+
+
+def test_reconcile_external_closes_gone_lots_keeps_held(tmp_path):
+    """UI-sold lots leave the book; matching venue qty stays. No sell orders."""
+    import asyncio
+    import json
+
+    gw = _ReconGw(
+        held={"CCC": 406.9801828},
+        sells=[
+            {"base": "AAA", "qty": 2138.44008843, "price": 3.65, "fee_eur": 7.8, "ts_ms": 2_000},
+            {"base": "BBB", "qty": 20036.05665769, "price": 0.19, "fee_eur": 7.6, "ts_ms": 2_001},
+        ],
+    )
+    r = _live_runner(tmp_path, gw)
+    r.sleeves["donch10"].cash_eur = 2012.56
+    r.sleeves["donch_fri10"].cash_eur = 1995.46
+    _seed_live_lot(r, "donch10", base="AAA", qty=1074.23163211, px=3.7094, opened_ms=1_000, hid="dc-a")
+    _seed_live_lot(r, "donch10", base="CCC", qty=406.9801828, px=9.8056, opened_ms=1_000, hid="dc-c")
+    _seed_live_lot(r, "donch_fri10", base="AAA", qty=1064.20845632, px=3.7219, opened_ms=2_000, hid="dc-a2")
+    _seed_live_lot(r, "donch_fri10", base="BBB", qty=20036.05665769, px=0.1976, opened_ms=2_000, hid="dc-b")
+
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert gw.placed == []
+    assert {row["base"] for row in closed} == {"AAA", "BBB"}
+    assert all(row["reason"] == "manual_external" for row in closed)
+    assert all(row["detail"] == "reconcile_external_delta" for row in closed)
+    assert len(closed) == 3
+    open_pos = r.status()["positions"]
+    assert len(open_pos) == 1
+    assert open_pos[0]["base"] == "CCC"
+    assert open_pos[0]["quantity"] == pytest.approx(406.9801828)
+    assert r.sleeves["donch10"].positions[0].base == "CCC"
+    assert r.sleeves["donch_fri10"].positions == []
+    led = json.loads("[" + ",".join((tmp_path / "l.jsonl").read_text().splitlines()) + "]")
+    exits = [row for row in led if row.get("event") == "exit"]
+    assert len(exits) == 3
+    assert {row["holding_id"] for row in exits} == {"dc-a", "dc-a2", "dc-b"}
+    saved = json.loads((tmp_path / "s.json").read_text())
+    assert [p["base"] for p in saved["sleeves"]["donch10"]["positions"]] == ["CCC"]
+    assert saved["sleeves"]["donch_fri10"]["positions"] == []
+
+
+def test_reconcile_external_fifo_partial(tmp_path):
+    import asyncio
+
+    gw = _ReconGw(
+        held={"AAA": 10.0},
+        sells=[{"base": "AAA", "qty": 10.0, "price": 11.0, "fee_eur": 1.0, "ts_ms": 3_000}],
+    )
+    r = _live_runner(tmp_path, gw)
+    r.sleeves["donch10"].cash_eur = 0.0
+    _seed_live_lot(r, "donch10", base="AAA", qty=10.0, px=10.0, opened_ms=1_000, hid="old")
+    _seed_live_lot(r, "donch10", base="AAA", qty=10.0, px=10.0, opened_ms=2_000, hid="new")
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert len(closed) == 1
+    assert closed[0]["holding_id"] == "old"
+    assert closed[0]["quantity"] == pytest.approx(10.0)
+    assert closed[0]["exit_price"] == pytest.approx(11.0)
+    assert closed[0]["fee_eur"] == pytest.approx(1.0)
+    assert closed[0]["net_eur"] == pytest.approx(10.0 * (11.0 - 10.0) - 1.0)
+    assert [p.holding_id for p in r.sleeves["donch10"].positions] == ["new"]
+    assert r.sleeves["donch10"].positions[0].quantity == pytest.approx(10.0)
+    assert r.sleeves["donch10"].cash_eur == pytest.approx(10.0 * 11.0 - 1.0)
+
+
+def test_reconcile_external_skips_dry_run(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_donchian_runner import DonchianBundleRunner
+
+    gw = _ReconGw(held={})
+    r = DonchianBundleRunner(
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        feed=_Feed(),
+        dry_run=True,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+    )
+    _seed_live_lot(r, "donch10", base="AAA", qty=10.0, px=10.0, opened_ms=1, hid="p")
+    # Paper venue is skipped even if dry_run were false; force a live venue on a dry runner.
+    r.sleeves["donch10"].positions[0].venue = "bitvavo"
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert closed == []
+    assert len(r.sleeves["donch10"].positions) == 1
+    assert gw.placed == []
+
+
+def test_reconcile_external_reserves_other_desk_qty(tmp_path):
+    """Venue coins that belong to 15m must not be treated as Donchian inventory."""
+    import asyncio
+
+    gw = _ReconGw(held={"AAA": 50.0})
+    r = _live_runner(tmp_path, gw)
+    r.sleeves["donch10"].cash_eur = 0.0
+    _seed_live_lot(r, "donch10", base="AAA", qty=100.0, px=10.0, opened_ms=1, hid="mix")
+    r._other_desk_qty = lambda base, venue: 50.0 if str(base).upper() == "AAA" else 0.0  # noqa: ARG005
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert len(closed) == 1
+    assert closed[0]["quantity"] == pytest.approx(100.0)
+    assert r.sleeves["donch10"].positions == []
+    assert gw.placed == []
+
+
+def test_donchian_status_fresh_books_external(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_donchian_runner import DonchianDeskManager
+
+    gw = _ReconGw(held={})
+    r = _live_runner(tmp_path, gw)
+    _seed_live_lot(r, "donch10", base="AAA", qty=10.0, px=10.0, opened_ms=1, hid="gone")
+    mgr = DonchianDeskManager()
+    mgr._runner = r
+    st = asyncio.run(mgr.status_fresh())
+    assert st["positions"] == []
+    assert r.sleeves["donch10"].positions == []
+    led = (tmp_path / "l.jsonl").read_text()
+    assert "manual_external" in led
+    assert gw.placed == []
 
 
 def test_sleeve_live_caption_ignores_stale_sma_when_bags_open():
