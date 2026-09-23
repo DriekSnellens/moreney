@@ -215,3 +215,43 @@ async def test_manager_paper_start_stop(tmp_path: Path):
     assert "bear" in st
     stop = await mgr.stop()
     assert stop.get("stopped") is True
+
+
+@pytest.mark.asyncio
+async def test_paper_book_ignores_mix_zero_allocation(tmp_path: Path, monkeypatch):
+    """Mix risk_on zeros the sleeve weight; paper book must keep its own €."""
+    from bot.live import momentum_short_weakest_runner as mod
+    from bot.live.momentum_short_weakest_runner import ShortWeakestPaperRunner
+
+    cfg = ShortWeakestConfig(book_eur=14_000.0, universe=("AAA",), alphai_enabled=False)
+
+    monkeypatch.setattr(
+        mod, "fetch_daily_closes", lambda base, days=260: [(i, 100.0 + i) for i in range(80)]
+    )
+    monkeypatch.setattr(mod, "live_snapshot", lambda **_kw: {"label": "risk_on", "why": "uptrend"})
+    monkeypatch.setattr(mod, "target_book", lambda _name, _mix: 0.0)
+    monkeypatch.setattr(mod, "probe_core_desk", lambda: {"ok": True, "idle": True, "n_positions": 0})
+    monkeypatch.setattr(mod, "load_alphai_view", lambda _path: (AlphaIView(), {}))
+    monkeypatch.setattr(mod, "alphai_is_stale", lambda *_a, **_k: False)
+
+    async def _no_marks(_self):
+        return None
+
+    monkeypatch.setattr(ShortWeakestPaperRunner, "_refresh_marks", _no_marks)
+
+    runner = ShortWeakestPaperRunner(
+        cfg,
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        alphai_path=str(tmp_path / "a.json"),
+    )
+    out = await runner.decide(execute=False)
+    assert out.get("risk_block") == "btc_not_bear"
+    assert out["allocator"]["target_eur"] == 14_000.0
+    assert out["allocator"]["mix_target_eur"] == 0.0
+    assert out["allocator"]["paper_independent"] is True
+    st = runner.status()
+    assert st["book_eur"] == 14_000.0
+    assert st["paper_only"] is True
+    assert st["risk"]["block_reason"] != "allocator_zero_book"
+    assert "allocator_zero_book" not in str(out)

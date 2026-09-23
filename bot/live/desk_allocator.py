@@ -44,7 +44,7 @@ SLEEVE_META: dict[str, dict[str, str]] = {
     "short_weakest": {
         "title": "Short weakest",
         "kind": "short_paper",
-        "blurb": "Paper short op zwakste alt. Gate: BTC onder SMA20, cover dezelfde dag.",
+        "blurb": "Apart paper-boek. Shorts als BTC onder SMA20; geen mix-cash, geen venue-orders.",
     },
     "cash": {
         "title": "Cash",

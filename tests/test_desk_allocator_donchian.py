@@ -159,6 +159,51 @@ def test_dashboard_mix_board_renders():
     assert "15m WR-core" in html
 
 
+def test_dashboard_paper_sw_panel_beside_mix():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 3},
+            "positions": [],
+            "risk": {"day_realized_eur": 0, "entries_allowed": True},
+            "cash_eur": 20000,
+            "exposure_eur": 0,
+            "equity_eur": 20000,
+            "realized_total_eur": 0,
+            "trade_count": 0,
+            "unrealized_net_eur": 0,
+        },
+        [],
+        allocator=snap,
+        donchian={"running": True, "dry_run": False, "positions": [], "sleeves": []},
+        show_short_weakest=True,
+        short_weakest={
+            "running": True,
+            "paper_only": True,
+            "mode": "short_weakest_paper",
+            "book_eur": 14000,
+            "equity_eur": 14000,
+            "realized_total_eur": 0,
+            "unrealized_net_eur": 0,
+            "positions": [],
+            "bear": {"bear_ok": False, "btc": 75000, "sma": 69000, "sma_days": 20, "gap_pct": 0.09},
+            "live_caption": "Paper short standby: BTC boven SMA20.",
+        },
+        short_weakest_ledger_rows=[],
+    ).body.decode()
+    assert 'id="paper-sw"' in html
+    assert "Paper · Short weakest" in html
+    assert "PAPER" in html
+    assert "geen mix-cash" in html
+    assert "Short-weakest ledger" in html
+    assert "SHORT_STATUS_URL" in html or "short-weakest/status" in html
+    assert "apart paper-boek" in html
+
+
 def test_dashboard_live_15m_beside_mix_is_not_idle():
     from bot.live.momentum_dashboard import render_momentum_dashboard
 
