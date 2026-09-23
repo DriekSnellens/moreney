@@ -710,8 +710,10 @@ class Settings(BaseSettings):
     momentum_donchian_venues: str = "bitvavo"
     momentum_donchian_state_path: str = "./data/momentum_donchian_state.json"
     momentum_donchian_ledger_path: str = "./data/momentum_donchian_ledger.jsonl"
-    # Independent paper shadow book next to the live mix (never live orders).
+    # Independent BTC-core + RS clip beside the mix. Live only when allow_live.
     momentum_btc_rs_clip_enabled: bool = False
+    momentum_btc_rs_clip_allow_live: bool = False
+    momentum_btc_rs_clip_venues: str = "bitvavo"
     momentum_btc_rs_clip_book_eur: float = Field(default=20_000.0, gt=0)
     momentum_btc_rs_clip_btc_frac: float = Field(default=0.75, gt=0, le=1.0)
     momentum_btc_rs_clip_alt_frac: float = Field(default=0.25, gt=0, le=1.0)

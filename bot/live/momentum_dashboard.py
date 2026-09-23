@@ -1646,7 +1646,7 @@ def _mix_panel(
         f"Decide na UTC-dagclose (00:05) op de gesloten 1d-kaars · Friday-flat pas na vrijdagclose. "
         f"{_core_15m_mix_note(core_15m)} "
         f"Short-weakest is een apart paper-boek (BTC&lt;SMA20) en telt niet mee in deze live equity. "
-        f"BTC+RS-clip is een apart paper-boek en telt niet mee in deze live equity."
+        f"BTC+RS-clip is een apart boek en telt niet mee in deze live equity."
         f"{(' Uit: ' + escape(idle) + '.') if idle else ''}</p>"
         f"</section>"
     )
@@ -1756,14 +1756,25 @@ def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
 def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     st = status or {}
     running = bool(st.get("running"))
-    pill = (
-        '<span class="pill obs"><span class="dot"></span>PAPER</span>'
-        if running
-        else '<span class="pill off"><span class="dot"></span>STOP</span>'
-    )
+    dry = bool(st.get("dry_run", True))
+    allow_live = st.get("allow_live")
+    live = running and not dry and allow_live is not False
+    if not running:
+        pill = '<span class="pill off" data-live="clip-pill"><span class="dot"></span>STOP</span>'
+        title = "BTC + RS-clip"
+    elif live:
+        pill = '<span class="pill on" data-live="clip-pill"><span class="dot"></span>LIVE</span>'
+        title = "Live · BTC + RS-clip"
+    else:
+        pill = '<span class="pill obs" data-live="clip-pill"><span class="dot"></span>PAPER</span>'
+        title = "Paper · BTC + RS-clip"
     caption = str(st.get("live_caption") or st.get("last_decision", {}).get("caption") or "")
     if not caption:
-        caption = "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Shadow €20k, geen Bitvavo-orders."
+        caption = (
+            "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Live Bitvavo, 15m-plafond blijft staan."
+            if live
+            else "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Shadow €20k, geen Bitvavo-orders."
+        )
     pos_bits = []
     for p in st.get("positions") or []:
         net = p.get("unrealized_net_eur")
@@ -1774,16 +1785,26 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
             f'<strong>{escape(str(p.get("base") or ""))}</strong>'
             f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
         )
+    empty = (
+        "Nog geen live-posities — eerste decide koopt 75% BTC + RS-alt."
+        if live
+        else "Nog geen paper-posities — eerste decide na start."
+    )
     pos_html = (
         f'<div class="mix-open" data-live="clip-open">{"".join(pos_bits)}</div>'
         if pos_bits
-        else '<div class="mix-open" data-live="clip-open"><span class="muted">Nog geen paper-posities — eerste decide na start.</span></div>'
+        else f'<div class="mix-open" data-live="clip-open"><span class="muted">{empty}</span></div>'
     )
     risk_on = bool(st.get("risk_on"))
     gate = "BTC &gt; SMA50" if risk_on else "cash (BTC ≤ SMA50)"
+    foot = (
+        "Bitvavo live · 15m-plafond blijft gereserveerd · geen mix-cash."
+        if live
+        else "geen live orders, geen mix-cash."
+    )
     return (
         f'<section class="panel mix-board paper-clip" id="paper-clip" data-live="paper-clip">'
-        f'<div class="card-head"><h2>Paper · BTC + RS-clip</h2>{pill}'
+        f'<div class="card-head"><h2 data-live="clip-title">{escape(title)}</h2>{pill}'
         f'<span class="pill {"on" if risk_on else "off"}" data-live="clip-gate">'
         f'<span class="dot"></span>{gate}</span></div>'
         f'<p class="mix-why" data-live="clip-caption">{escape(caption)}</p>'
@@ -1798,7 +1819,7 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
         f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">Alt: '
         f'<strong data-k="clip-alt">{escape(str(st.get("want_alt") or "—"))}</strong> · '
         f'next <strong data-live="clip-next">{_ts(st.get("next_decision"))}</strong> · '
-        f"geen live orders, geen mix-cash.</p>"
+        f'<span data-live="clip-foot">{foot}</span></p>'
         f"{pos_html}</section>"
     )
 
@@ -3197,6 +3218,24 @@ _LIVE_MARKS_JS = r"""
         const d = new Date(st.next_decision);
         next.textContent = Number.isNaN(d.getTime()) ? String(st.next_decision) : d.toLocaleString("nl-NL");
       }
+      const live = !!st.running && !st.dry_run && st.allow_live !== false;
+      const pill = root.querySelector('[data-live="clip-pill"]');
+      if (pill) {
+        pill.className = !st.running ? "pill off" : (live ? "pill on" : "pill obs");
+        pill.innerHTML = !st.running
+          ? '<span class="dot"></span>STOP'
+          : (live ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>PAPER');
+      }
+      const title = root.querySelector('[data-live="clip-title"]');
+      if (title) {
+        title.textContent = !st.running ? "BTC + RS-clip" : (live ? "Live · BTC + RS-clip" : "Paper · BTC + RS-clip");
+      }
+      const foot = root.querySelector('[data-live="clip-foot"]');
+      if (foot) {
+        foot.textContent = live
+          ? "Bitvavo live · 15m-plafond blijft gereserveerd · geen mix-cash."
+          : "geen live orders, geen mix-cash.";
+      }
       (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
     }
     if (!don) return;
@@ -3618,7 +3657,7 @@ def render_momentum_dashboard(
             )
         if show_clip and btc_rs_clip_ledger_rows is not None:
             vol_ledger_html += (
-                f'<details class="fold" id="clip-ledger"><summary><span class="fold-head">Paper BTC+RS-clip ledger</span>'
+                f'<details class="fold" id="clip-ledger"><summary><span class="fold-head">BTC+RS-clip ledger</span>'
                 f'<span class="chev"></span></summary><div class="fold-body">'
                 f"{_ledger_table(btc_rs_clip_ledger_rows or [])}</div></details>"
             )
@@ -3712,7 +3751,10 @@ def render_momentum_dashboard(
         <span class="badge">{'on' if show_vol else 'off'}</span></a>
       <a href="/live/momentum#paper-sw">Short weakest paper
         <span class="badge">{'on' if show_sw else 'off'}</span></a>
-      {('<a href="/live/momentum#paper-clip">BTC+RS clip <span class="badge">paper</span></a>' if show_clip else '')}
+      {('<a href="/live/momentum#paper-clip">BTC+RS clip <span class="badge">'
+        + ('live' if (btc_rs_clip or {}).get('running') and not bool((btc_rs_clip or {}).get('dry_run', True))
+           else 'paper')
+        + '</span></a>' if show_clip else '')}
       <a href="/live/momentum#core-15m">15m WR-core
         <span class="badge">{'live' if running and not dry else ('on' if running else 'off')}</span></a>
       <a href="/live/momentum#ledger">Ledger</a>

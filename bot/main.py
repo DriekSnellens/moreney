@@ -302,13 +302,13 @@ async def lifespan(_app: FastAPI):
             if bool(getattr(get_settings(), "momentum_btc_rs_clip_enabled", False)):
                 clip = await get_btc_rs_clip_desk_manager().resume_if_flagged()
                 if clip and clip.get("started"):
-                    logger.info("auto-resumed paper BTC+RS clip shadow book")
+                    logger.info("auto-resumed BTC+RS clip book")
                 elif clip:
-                    logger.warning("paper BTC+RS clip auto-resume did not start: %s", clip)
+                    logger.warning("BTC+RS clip auto-resume did not start: %s", clip)
             else:
-                logger.info("paper BTC+RS clip disabled — skip auto-resume")
+                logger.info("BTC+RS clip disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
-            logger.exception("failed to auto-resume paper BTC+RS clip")
+            logger.exception("failed to auto-resume BTC+RS clip")
     yield
     if paper_runner is not None:
         try:

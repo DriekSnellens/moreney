@@ -322,6 +322,59 @@ def test_dashboard_paper_clip_is_separate_from_mix_equity():
     assert "CLIP_STATUS_URL" in html or "btc-rs-clip/status" in html
 
 
+def test_dashboard_clip_live_pill():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    snap = snapshot(_ramp(60, 100.0, 2.0))
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": True,
+            "equity_eur": 2000,
+            "realized_total_eur": 0,
+            "trade_count": 0,
+            "unrealized_net_eur": 0,
+        },
+        [],
+        allocator=snap,
+        donchian={
+            "running": True,
+            "dry_run": True,
+            "equity_eur": 19900.0,
+            "positions": [],
+            "sleeves": [],
+        },
+        show_btc_rs_clip=True,
+        btc_rs_clip={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "equity_eur": 20100.0,
+            "book_eur": 20000.0,
+            "realized_total_eur": 0.0,
+            "unrealized_net_eur": 100.0,
+            "want_alt": "NEAR",
+            "live_caption": "Clip: 75% BTC boven SMA50, 25% NEAR",
+            "positions": [
+                {
+                    "holding_id": "clip-btc",
+                    "base": "BTC",
+                    "role": "btc",
+                    "quantity": 0.2,
+                    "unrealized_net_eur": 80.0,
+                    "venue": "bitvavo",
+                }
+            ],
+        },
+        btc_rs_clip_ledger_rows=[],
+    ).body.decode()
+    assert 'data-live="clip-title">Live · BTC + RS-clip</h2>' in html
+    assert 'data-live="clip-pill"' in html
+    assert ">LIVE</span>" in html
+    assert "15m-plafond blijft gereserveerd" in html
+    assert 'data-live="clip-title">Paper · BTC + RS-clip</h2>' not in html
+
+
 def test_dashboard_shows_donchian_ledger_fills():
     from bot.live.momentum_dashboard import render_momentum_dashboard
 
@@ -525,10 +578,18 @@ def test_reconcile_external_closes_gone_lots_keeps_held(tmp_path):
     r = _live_runner(tmp_path, gw)
     r.sleeves["donch10"].cash_eur = 2012.56
     r.sleeves["donch_fri10"].cash_eur = 1995.46
-    _seed_live_lot(r, "donch10", base="AAA", qty=1074.23163211, px=3.7094, opened_ms=1_000, hid="dc-a")
-    _seed_live_lot(r, "donch10", base="CCC", qty=406.9801828, px=9.8056, opened_ms=1_000, hid="dc-c")
-    _seed_live_lot(r, "donch_fri10", base="AAA", qty=1064.20845632, px=3.7219, opened_ms=2_000, hid="dc-a2")
-    _seed_live_lot(r, "donch_fri10", base="BBB", qty=20036.05665769, px=0.1976, opened_ms=2_000, hid="dc-b")
+    _seed_live_lot(
+        r, "donch10", base="AAA", qty=1074.23163211, px=3.7094, opened_ms=1_000, hid="dc-a"
+    )
+    _seed_live_lot(
+        r, "donch10", base="CCC", qty=406.9801828, px=9.8056, opened_ms=1_000, hid="dc-c"
+    )
+    _seed_live_lot(
+        r, "donch_fri10", base="AAA", qty=1064.20845632, px=3.7219, opened_ms=2_000, hid="dc-a2"
+    )
+    _seed_live_lot(
+        r, "donch_fri10", base="BBB", qty=20036.05665769, px=0.1976, opened_ms=2_000, hid="dc-b"
+    )
 
     closed = asyncio.run(r.reconcile_external_inventory())
     assert gw.placed == []
@@ -767,7 +828,7 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert "Hard-stop" not in donchian_block
     assert "Verkoop alles" not in html
     assert "Geen 15m trail" in html
-    assert "class=\"mix-live\"" in html or "mix-live" in html
+    assert 'class="mix-live"' in html or "mix-live" in html
     assert "grid-template-columns: 1fr" in html
     assert "patchDonchian" in html
     assert "mixHeroesLive" in html
@@ -775,7 +836,7 @@ def test_dashboard_mix_equity_and_donchian_table():
     assert ">Bags<" in html
     assert "15m WR-core rules (naast de mix)" in html
     assert 'id="core-15m"' in html
-    assert "name=\"sell\"" not in html
+    assert 'name="sell"' not in html
     assert "Leeg Donchian" in html
     assert "/live/momentum/donchian/sell" in html
     assert "/live/momentum/donchian/sell-all" in html
@@ -808,10 +869,14 @@ def _day_ms(year: int, month: int, day: int) -> int:
 
 
 def test_donchian_breakout_enters_when_btc_ok():
-    cfg = DonchianConfig(name="t", title="t", channel=10, exit_n=5, friday_flatten=False, universe=("AAA",))
+    cfg = DonchianConfig(
+        name="t", title="t", channel=10, exit_n=5, friday_flatten=False, universe=("AAA",)
+    )
     ohlc = {"AAA": _ohlc_breakout(16, last_high=140.0)}
     btc = _ramp(60, 100.0, 2.0)
-    out = evaluate_donchian(ohlc, btc, cfg, held=set(), cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC))
+    out = evaluate_donchian(
+        ohlc, btc, cfg, held=set(), cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC)
+    )
     assert out["ok"] is True
     assert out["entries"]
     assert out["entries"][0]["base"] == "AAA"
@@ -824,7 +889,9 @@ def test_donchian_no_breakout_rejected():
     rows[-1][2] = 100.5
     ohlc = {"AAA": rows}
     btc = _ramp(60, 100.0, 2.0)
-    out = evaluate_donchian(ohlc, btc, cfg, held=set(), cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC))
+    out = evaluate_donchian(
+        ohlc, btc, cfg, held=set(), cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC)
+    )
     assert out["entries"] == []
     assert any(r["reason"] == "no_breakout" for r in out["rejected"])
 
@@ -887,7 +954,11 @@ def test_donchian_short_btc_ohlc_keeps_sma_series():
         "BTC": [[i, 100.0, 101.0, 99.0, 100.0, 1.0] for i in range(3)],
     }
     out = evaluate_donchian(
-        ohlc, _ramp(60, 100.0, 2.0), cfg, held=set(), cash_eur=10_000.0,
+        ohlc,
+        _ramp(60, 100.0, 2.0),
+        cfg,
+        held=set(),
+        cash_eur=10_000.0,
         now=datetime(2026, 9, 21, tzinfo=UTC),
     )
     assert out["btc"]["sma"] is not None
@@ -900,7 +971,11 @@ def test_donchian_sma_unavailable_blocks_entries_keeps_bag():
     thu_ms = _day_ms(2026, 9, 17)
     ohlc = {"AAA": [[thu_ms, 100.0, 101.0, 99.0, 100.0, 1.0]]}
     out = evaluate_donchian(
-        ohlc, [100.0, 101.0], cfg, held={"AAA"}, cash_eur=10_000.0,
+        ohlc,
+        [100.0, 101.0],
+        cfg,
+        held={"AAA"},
+        cash_eur=10_000.0,
         now=datetime(2026, 9, 21, 12, tzinfo=UTC),
     )
     assert out["risk_block"] == "sma_unavailable"
@@ -952,7 +1027,12 @@ def test_donchian_second_clip_uses_sleeve_equity():
     }
     btc = _ramp(60, 100.0, 2.0)
     out = evaluate_donchian(
-        ohlc, btc, cfg, held=set(), cash_eur=10_000.0, deployed_eur=0.0,
+        ohlc,
+        btc,
+        cfg,
+        held=set(),
+        cash_eur=10_000.0,
+        deployed_eur=0.0,
         now=datetime(2026, 9, 21, tzinfo=UTC),
     )
     assert len(out["entries"]) == 2
@@ -974,7 +1054,9 @@ def test_donchian_channel_low_exit():
     rows.append([12, 98.0, 99.0, 90.0, 91.0, 1.0])  # today low 90 < prior lows ~99
     ohlc = {"AAA": rows}
     btc = _ramp(60, 100.0, 2.0)
-    out = evaluate_donchian(ohlc, btc, cfg, held={"AAA"}, cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC))
+    out = evaluate_donchian(
+        ohlc, btc, cfg, held={"AAA"}, cash_eur=10_000.0, now=datetime(2026, 9, 21, tzinfo=UTC)
+    )
     assert any(e["base"] == "AAA" and e["reason"] == "channel_low" for e in out["exits"])
 
 
@@ -991,7 +1073,9 @@ def test_donchian_equity_counts_open_notional(tmp_path):
     sl = r.sleeves["donch10"]
     sl.cash_eur = 2_000.0
     sl.positions = [
-        DonchianPosition(base="AAA", entry_price=10.0, notional_eur=4_000.0, opened_ms=1, venue="bitvavo")
+        DonchianPosition(
+            base="AAA", entry_price=10.0, notional_eur=4_000.0, opened_ms=1, venue="bitvavo"
+        )
     ]
     r.marks["AAA"] = 10.0
     eq = r.status()["equity_eur"]
@@ -1013,7 +1097,9 @@ def test_discard_paper_lots_restores_cash(tmp_path):
     sl = r.sleeves["donch10"]
     sl.cash_eur = 0.0
     sl.positions = [
-        DonchianPosition(base="AAA", entry_price=10.0, notional_eur=4000.0, opened_ms=1, venue="paper")
+        DonchianPosition(
+            base="AAA", entry_price=10.0, notional_eur=4000.0, opened_ms=1, venue="paper"
+        )
     ]
     n = r.discard_paper_positions()
     assert n == 1
@@ -1035,7 +1121,9 @@ def test_donchian_live_open_places_venue_order(tmp_path):
             return 10.0, 10.1
 
         async def place_limit(self, symbol, side, qty, price, *, post_only):
-            self.placed.append({"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only})
+            self.placed.append(
+                {"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only}
+            )
             return OrderState("o1", "closed", qty, price, qty * price * 0.001)
 
         async def fetch_order(self, order_id, symbol):
