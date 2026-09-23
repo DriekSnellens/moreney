@@ -387,7 +387,7 @@ class CandleFeed:
         base_url: str = BITVAVO_PUBLIC,
         ttl_sec: float = 10.0,
         *,
-        ticker_ttl_sec: float = 2.0,
+        ticker_ttl_sec: float = 0.5,
     ) -> None:
         self._base_url = base_url
         self._ttl = ttl_sec
@@ -2402,6 +2402,7 @@ class MomentumDeskManager:
         self._commit: dict[str, Any] = {}
         self._sell_task: asyncio.Task[None] | None = None
         self._manual_exit: dict[str, Any] = {}
+        self._last_reconcile_mono = 0.0
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -2426,20 +2427,23 @@ class MomentumDeskManager:
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
-        """Status after refreshing marks + reconciling venue inventory."""
+        """Fresh marks every poll; inventory/cash reconcile is throttled for 1s UI."""
         if self._runner is not None:
             try:
                 await self._runner.refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("momentum desk: mark refresh for status failed")
-            try:
-                await self._runner.reconcile_external_inventory()
-            except Exception:  # noqa: BLE001
-                logger.exception("momentum desk: reconcile for status failed")
-            try:
-                await self._runner._refresh_cash(force=True)  # noqa: SLF001
-            except Exception:  # noqa: BLE001
-                logger.exception("momentum desk: cash refresh for status failed")
+            now = time.monotonic()
+            if now - self._last_reconcile_mono >= 5.0:
+                self._last_reconcile_mono = now
+                try:
+                    await self._runner.reconcile_external_inventory()
+                except Exception:  # noqa: BLE001
+                    logger.exception("momentum desk: reconcile for status failed")
+                try:
+                    await self._runner._refresh_cash(force=True)  # noqa: SLF001
+                except Exception:  # noqa: BLE001
+                    logger.exception("momentum desk: cash refresh for status failed")
         return self.status()
 
     async def start(

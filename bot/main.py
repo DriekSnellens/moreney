@@ -922,7 +922,7 @@ async def live_momentum_dashboard(
         else:
             notice = f"Report niet mogelijk: {res.get('reason')}"
     settings = get_settings()
-    # Fresh venue marks on first paint (JS poll continues every 3s).
+    # Fresh venue marks on first paint (JS poll continues every 1s).
     status = await manager.status_fresh()
     ledger = await live_momentum_ledger(limit=400)
     settings = get_settings()

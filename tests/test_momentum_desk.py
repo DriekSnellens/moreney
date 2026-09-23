@@ -1439,7 +1439,9 @@ def test_dashboard_renders_positions_decision_and_ledger():
     assert "Refill na exit" in html
     assert "Fade ETA" in html
     assert "Exit-ladder" in html
-    assert "/live/momentum/status" in html and "Marks live elke 3s" in html
+    assert "/live/momentum/status" in html and "Marks live elke 1s" in html
+    assert "INTERVAL_MS = 1000" in html
+    assert "function patchDonchian" in html
     assert 'data-live="open-pnl"' in html
     # Sell button is a GET to the confirmation step, never a direct POST.
     assert 'name="sell" value="h-dot"' in html and "/live/momentum/sell" not in html

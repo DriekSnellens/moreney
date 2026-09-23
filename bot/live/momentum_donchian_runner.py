@@ -574,7 +574,7 @@ class DonchianBundleRunner:
 
     async def refresh_open_marks(self) -> None:
         """Ticker marks for still-open lots only (dashboard poll, not universe)."""
-        bases = {p.base for sl in self.sleeves.values() for p in sl.positions}
+        bases = {p.base for sl in self.sleeves.values() for p in sl.positions} | {"BTC"}
         for base in sorted(bases):
             try:
                 px = await self._feed.last_price(base)
@@ -917,6 +917,7 @@ class DonchianDeskManager:
         self._task: asyncio.Task | None = None
         self._stop = False
         self._engine: Any = None
+        self._last_reconcile_mono = 0.0
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -955,16 +956,19 @@ class DonchianDeskManager:
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
-        """Status after reconciling venue inventory (dashboard poll books UI sells)."""
+        """Fresh marks every poll; venue reconcile is throttled so 1s UI stays light."""
         if self._runner is not None:
             try:
                 await self._runner.refresh_open_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("donchian: mark refresh for status failed")
-            try:
-                await self._runner.reconcile_external_inventory()
-            except Exception:  # noqa: BLE001
-                logger.exception("donchian: reconcile for status failed")
+            now = time.monotonic()
+            if now - self._last_reconcile_mono >= 5.0:
+                self._last_reconcile_mono = now
+                try:
+                    await self._runner.reconcile_external_inventory()
+                except Exception:  # noqa: BLE001
+                    logger.exception("donchian: reconcile for status failed")
         return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:

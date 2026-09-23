@@ -1026,7 +1026,7 @@ def _positions_table(
     out.append(
         "<p class='muted' style='font-size:.72rem;margin-top:.4rem'>Verkoop = maker-order op de "
         "bied, valt na 60 s terug op taker. Wordt in de ledger geboekt als <em>manual</em>. "
-        "Marks vernieuwen elke 3s via ticker.</p>"
+        "Marks vernieuwen elke 1s via ticker.</p>"
     )
     return "".join(out)
 
@@ -1125,7 +1125,7 @@ def _donchian_positions_table(status: Mapping[str, Any]) -> str:
     out.append(
         "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
         "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
-        "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
+        "of Friday-flat pas na vrijdag UTC-close. Marks elke 1s. "
         "Verkoop loopt via de Donchian-sleeve, niet via de 15m-desk.</p>"
     )
     return "".join(out)
@@ -2731,7 +2731,7 @@ _LIVE_MARKS_JS = r"""
   const MIX_STATUS_URL = "/live/momentum/allocator/status";
     const DONCHIAN_STATUS_URL = "/live/momentum/donchian/status";
     const CLIP_STATUS_URL = "/live/momentum/btc-rs-clip/status";
-  const INTERVAL_MS = 3000;
+  const INTERVAL_MS = 1000;
 
   function fmtPct(v) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
@@ -2816,12 +2816,7 @@ _LIVE_MARKS_JS = r"""
     }
     const eq = document.querySelector('[data-live="equity"]');
     if (eq && status.equity_eur != null) eq.textContent = fmtEur(status.equity_eur).replace(/^\+/, "");
-    const stamp = document.querySelector('[data-live="marks-age"]');
-    if (stamp) {
-      const age = (status.positions || []).map(p => p.mark_age_sec).filter(v => v != null);
-      if (age.length) stamp.textContent = `marks ${Math.max(...age).toFixed(0)}s geleden`;
-      else if (status.marks_updated_at) stamp.textContent = "marks live";
-    }
+    stampMarks(status);
     const next = document.querySelector('[data-live="next-decision"]');
     if (next && status.next_decision) {
       const d = new Date(status.next_decision);
@@ -2833,6 +2828,13 @@ _LIVE_MARKS_JS = r"""
         next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
       }
     }
+  }
+  function stampMarks(status) {
+    const stamp = document.querySelector('[data-live="marks-age"]');
+    if (!stamp || !status) return;
+    const age = (status.positions || []).map((p) => p.mark_age_sec).filter((v) => v != null);
+    if (age.length) stamp.textContent = `marks ${Math.max(...age).toFixed(0)}s geleden`;
+    else stamp.textContent = "marks live";
   }
   function livePositionIds() {
     const ids = new Set();
@@ -3201,50 +3203,77 @@ _LIVE_MARKS_JS = r"""
       + '<button type="submit" class="btn danger">Leeg Donchian</button></form>'
       + "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
       + "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
-      + "of Friday-flat pas na vrijdag UTC-close. Marks elke 3s. "
+      + "of Friday-flat pas na vrijdag UTC-close. Marks elke 1s. "
       + "Verkoop loopt via de Donchian-sleeve, niet via de 15m-desk.</p>";
   }
-    function patchPaperClip(st) {
-      const root = document.querySelector('[data-live="paper-clip"]');
-      if (!root || !st) return;
-      setText(root, "clip-eq", fmtEur(st.equity_eur).replace(/^\+/, ""));
-      setText(root, "clip-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
-      setText(root, "clip-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
-      setText(root, "clip-alt", st.want_alt || "—");
-      const cap = document.querySelector('[data-live="clip-caption"]');
-      if (cap && st.live_caption) cap.textContent = st.live_caption;
-      const next = document.querySelector('[data-live="clip-next"]');
-      if (next && st.next_decision) {
-        const d = new Date(st.next_decision);
-        next.textContent = Number.isNaN(d.getTime()) ? String(st.next_decision) : d.toLocaleString("nl-NL");
-      }
-      const live = !!st.running && !st.dry_run && st.allow_live !== false;
-      const pill = root.querySelector('[data-live="clip-pill"]');
-      if (pill) {
-        pill.className = !st.running ? "pill off" : (live ? "pill on" : "pill obs");
-        pill.innerHTML = !st.running
-          ? '<span class="dot"></span>STOP'
-          : (live ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>PAPER');
-      }
-      const title = root.querySelector('[data-live="clip-title"]');
-      if (title) {
-        title.textContent = !st.running ? "BTC + RS-clip" : (live ? "Live · BTC + RS-clip" : "Paper · BTC + RS-clip");
-      }
-      const foot = root.querySelector('[data-live="clip-foot"]');
-      if (foot) {
-        foot.textContent = live
-          ? "Bitvavo live · 15m-plafond blijft gereserveerd · geen mix-cash."
-          : "geen live orders, geen mix-cash.";
-      }
-      (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+  function patchPaperClip(st) {
+    const root = document.querySelector('[data-live="paper-clip"]');
+    if (!root || !st) return;
+    setText(root, "clip-eq", fmtEur(st.equity_eur).replace(/^\+/, ""));
+    setText(root, "clip-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
+    setText(root, "clip-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
+    setText(root, "clip-alt", st.want_alt || "—");
+    const cap = document.querySelector('[data-live="clip-caption"]');
+    if (cap && st.live_caption) cap.textContent = st.live_caption;
+    const next = document.querySelector('[data-live="clip-next"]');
+    if (next && st.next_decision) {
+      const d = new Date(st.next_decision);
+      next.textContent = Number.isNaN(d.getTime()) ? String(st.next_decision) : d.toLocaleString("nl-NL");
     }
+    const live = !!st.running && !st.dry_run && st.allow_live !== false;
+    const pill = root.querySelector('[data-live="clip-pill"]');
+    if (pill) {
+      pill.className = !st.running ? "pill off" : (live ? "pill on" : "pill obs");
+      pill.innerHTML = !st.running
+        ? '<span class="dot"></span>STOP'
+        : (live ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>PAPER');
+    }
+    const title = root.querySelector('[data-live="clip-title"]');
+    if (title) {
+      title.textContent = !st.running ? "BTC + RS-clip" : (live ? "Live · BTC + RS-clip" : "Paper · BTC + RS-clip");
+    }
+    const foot = root.querySelector('[data-live="clip-foot"]');
+    if (foot) {
+      foot.textContent = live
+        ? "Bitvavo live · 15m-plafond blijft gereserveerd · geen mix-cash."
+        : "geen live orders, geen mix-cash.";
+    }
+    (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+    const btc = st.btc;
+    const sma50 = st.sma50;
+    if (btc != null) {
+      document.querySelectorAll('[data-k="mix-btc"]').forEach((el) => {
+        el.textContent = Number(btc).toLocaleString("en-US", { maximumFractionDigits: 0 });
+      });
+    }
+    if (btc != null && sma50) {
+      const gap = Number(btc) / Number(sma50) - 1;
+      document.querySelectorAll('[data-k="mix-gap50"]').forEach((el) => {
+        el.textContent = fmtPct(gap);
+        el.classList.remove("good", "bad");
+        const c = cls(gap);
+        if (c) el.classList.add(c);
+      });
+    }
+    stampMarks(st);
+  }
+  function patchDonchian(don) {
     if (!don) return;
     if (mixHeroesLive()) patchHeroes(don);
     if (donchianSetChanged(don)) {
       renderDonchianOpen(don);
-      return;
+    } else {
+      (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
     }
-    (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+    const alloc = don.allocator;
+    if (alloc && (alloc.label || alloc.regime)) {
+      patchMix({
+        ...alloc,
+        sleeves_live: don.sleeves,
+        positions: don.positions || alloc.positions || [],
+      });
+    }
+    stampMarks(don);
   }
   function patchCore15m(status) {
     const root = document.querySelector('[data-live="core-15m"]');
@@ -3295,58 +3324,49 @@ _LIVE_MARKS_JS = r"""
     const knobs = trailKnobs(status);
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
   }
-  async function tick() {
-    try {
-      const res = await fetch(STATUS_URL, { cache: "no-store" });
-      if (res.ok) {
-        const status = await res.json();
-        const { trail, tightAfter, tight } = trailKnobs(status);
-        (status.positions || []).forEach((p) => patchHolding(p, trail, tightAfter, tight));
-        if (!mixHeroesLive()) patchHeroes(status);
-        else patchCore15m(status);
-        patchRules(status);
-      }
-    } catch (err) {
-      /* ignore transient network blips */
-    }
-    try {
-      const sw = await fetch(SHORT_STATUS_URL, { cache: "no-store" });
-      if (sw.ok) {
-        const shortStatus = await sw.json();
-        if (shortStatus && shortStatus.enabled_setting) {
-          const knobs = trailKnobs(shortStatus);
-          (shortStatus.positions || []).forEach((p) =>
-            patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight)
-          );
-          patchShortSleeve(shortStatus);
-        }
-      }
-    } catch (err) {
-      /* short sleeve optional */
-    }
-    try {
-      const dc = await fetch(DONCHIAN_STATUS_URL, { cache: "no-store" });
-      if (dc.ok) {
-        patchDonchian(await dc.json());
-      }
-    } catch (err) {
-      /* donchian optional */
-    }
-    try {
-      const cl = await fetch(CLIP_STATUS_URL, { cache: "no-store" });
-      if (cl.ok) patchPaperClip(await cl.json());
-    } catch (err) {
-      /* paper clip optional */
-    }
-    try {
-      const mx = await fetch(MIX_STATUS_URL, { cache: "no-store" });
-      if (mx.ok) patchMix(await mx.json());
-    } catch (err) {
-      /* mix optional */
-    }
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    return res.json();
   }
-  tick();
-  setInterval(tick, INTERVAL_MS);
+  async function tick() {
+    const [core, sw, don, clip] = await Promise.all([
+      fetchJson(STATUS_URL).catch(() => null),
+      fetchJson(SHORT_STATUS_URL).catch(() => null),
+      fetchJson(DONCHIAN_STATUS_URL).catch(() => null),
+      fetchJson(CLIP_STATUS_URL).catch(() => null),
+    ]);
+    if (core) {
+      const knobs = trailKnobs(core);
+      (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
+      if (mixHeroesLive()) patchCore15m(core);
+      else patchHeroes(core);
+      patchRules(core);
+    }
+    if (sw && sw.enabled_setting) {
+      const knobs = trailKnobs(sw);
+      (sw.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
+      patchShortSleeve(sw);
+    }
+    if (don) patchDonchian(don);
+    else {
+      try {
+        const mix = await fetchJson(MIX_STATUS_URL);
+        if (mix) patchMix(mix);
+      } catch (err) {
+        /* mix optional */
+      }
+    }
+    if (clip) patchPaperClip(clip);
+  }
+  (async function pollLoop() {
+    while (true) {
+      const t0 = Date.now();
+      try { await tick(); } catch (err) { /* ignore transient network blips */ }
+      const wait = Math.max(0, INTERVAL_MS - (Date.now() - t0));
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  })();
 })();
 </script>
 """
@@ -3459,7 +3479,7 @@ def render_momentum_dashboard(
     refresh_note = (
         "Geen live-update tijdens bevestiging"
         if hold_page
-        else 'Marks live elke 3s · <span data-live="marks-age">—</span>'
+        else 'Marks live elke 1s · <span data-live="marks-age">—</span>'
     )
     live_js = "" if hold_page else _LIVE_MARKS_JS
     if show_mix:
