@@ -131,6 +131,8 @@ body {
   background: rgba(15,23,42,.8); font-size: .8rem;
 }
 .mix-chip strong { font-family: var(--mono); }
+.paper-clip .mix-chip { align-items: center; }
+.paper-clip .mix-chip form { margin: 0; }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
 .paper-clip, .paper-sw, .side-15m { margin-top: .85rem; }
 .paper-clip, .paper-sw { border-style: dashed; }
@@ -1777,13 +1779,16 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
         )
     pos_bits = []
     for p in st.get("positions") or []:
+        if float(p.get("quantity") or p.get("notional_eur") or 0.0) <= 1e-12:
+            continue
         net = p.get("unrealized_net_eur")
         role = escape(str(p.get("role") or "long"))
         pos_bits.append(
             f'<span class="mix-chip" data-holding="{escape(str(p.get("holding_id") or p.get("base") or ""))}">'
             f'<span class="muted">{role}</span>'
             f'<strong>{escape(str(p.get("base") or ""))}</strong>'
-            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
+            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span>'
+            f"{_sell_cell(p, disabled=False, post_action='/live/momentum/btc-rs-clip/sell')}</span>"
         )
     empty = (
         "Nog geen live-posities — eerste decide koopt 75% BTC + RS-alt."
@@ -1795,6 +1800,20 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
         if pos_bits
         else f'<div class="mix-open" data-live="clip-open"><span class="muted">{empty}</span></div>'
     )
+    actions = ""
+    if pos_bits:
+        actions = (
+            '<div class="toolbar" style="margin:.45rem 0 0" data-live="clip-actions">'
+            '<form method="post" action="/live/momentum/btc-rs-clip/sell-all" '
+            'onsubmit="return confirm(\'Clip nu op Bitvavo verkopen? 15m blijft staan. '
+            "Na 00:05 UTC kan de bot opnieuw instappen.\');\""
+            ">"
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn danger">Verkoop clip</button></form>'
+            '<p class="muted" style="font-size:.72rem;margin:.35rem 0 0;max-width:36rem">'
+            "Taker-sell via de clip-sleeve, niet via Bitvavo-UI. 15m-qty blijft gereserveerd."
+            "</p></div>"
+        )
     risk_on = bool(st.get("risk_on"))
     gate = "BTC &gt; SMA50" if risk_on else "cash (BTC ≤ SMA50)"
     foot = (
@@ -1820,7 +1839,7 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
         f'<strong data-k="clip-alt">{escape(str(st.get("want_alt") or "—"))}</strong> · '
         f'next <strong data-live="clip-next">{_ts(st.get("next_decision"))}</strong> · '
         f'<span data-live="clip-foot">{foot}</span></p>'
-        f"{pos_html}</section>"
+        f"{pos_html}{actions}</section>"
     )
 
 
@@ -3255,8 +3274,31 @@ _LIVE_MARKS_JS = r"""
           return `<span class="mix-chip" data-holding="${hid}">`
             + `<span class="muted">${esc(p.role || p.venue || "")}</span>`
             + `<strong>${esc(p.base || "")}</strong>`
-            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span>`
+            + (hid ? `<form method="post" action="/live/momentum/btc-rs-clip/sell" style="display:inline">`
+              + `<input type="hidden" name="holding_id" value="${hid}">`
+              + `<input type="hidden" name="redirect" value="1">`
+              + `<button type="submit" class="btn danger" style="font-size:.72rem;padding:.28rem .55rem;min-height:32px">Verkoop</button></form>` : "")
+            + `</span>`;
         }).join("");
+      }
+      let actions = root.querySelector('[data-live="clip-actions"]');
+      if (!actions) {
+        actions = document.createElement("div");
+        actions.setAttribute("data-live", "clip-actions");
+        actions.className = "toolbar";
+        actions.style.margin = ".45rem 0 0";
+        open.insertAdjacentElement("afterend", actions);
+      }
+      if (!pos.length) {
+        actions.innerHTML = "";
+      } else {
+        actions.innerHTML = '<form method="post" action="/live/momentum/btc-rs-clip/sell-all"'
+          + ' onsubmit="return confirm(\'Clip nu op Bitvavo verkopen? 15m blijft staan. Na 00:05 UTC kan de bot opnieuw instappen.\');">'
+          + '<input type="hidden" name="redirect" value="1">'
+          + '<button type="submit" class="btn danger">Verkoop clip</button></form>'
+          + '<p class="muted" style="font-size:.72rem;margin:.35rem 0 0;max-width:36rem">'
+          + "Taker-sell via de clip-sleeve, niet via Bitvavo-UI. 15m-qty blijft gereserveerd.</p>";
       }
     }
     const btc = st.btc;

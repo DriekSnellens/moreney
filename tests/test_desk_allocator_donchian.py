@@ -373,6 +373,11 @@ def test_dashboard_clip_live_pill():
     assert ">LIVE</span>" in html
     assert "15m-plafond blijft gereserveerd" in html or "15m €2k-satelliet gereserveerd" in html
     assert 'data-live="clip-title">Paper · BTC + RS-clip</h2>' not in html
+    assert "/live/momentum/btc-rs-clip/sell" in html
+    assert "/live/momentum/btc-rs-clip/sell-all" in html
+    assert "Verkoop clip" in html
+    assert "Verkoop alles" not in html
+    assert "clip-btc" in html
 
 
 def test_dashboard_shows_donchian_ledger_fills():

@@ -435,3 +435,119 @@ def test_clip_status_btc_prefers_live_mark(tmp_path):
     r.marks["BTC"] = 71_234.5
     st = r.status()
     assert st["btc"] == 71_234.5
+
+
+def test_clip_sell_all_places_live_sells(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+    from bot.live.momentum_runner import OrderState
+
+    class Gw:
+        def __init__(self) -> None:
+            self.placed: list[dict] = []
+
+        async def best_bid_ask(self, symbol):
+            if str(symbol).startswith("BTC"):
+                return 71_000.0, 71_010.0
+            return 9.8, 9.9
+
+        async def place_limit(self, symbol, side, qty, price, *, post_only):
+            self.placed.append(
+                {"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only}
+            )
+            return OrderState("s1", "closed", qty, price, qty * price * 0.001)
+
+        async def fetch_order(self, order_id, symbol):
+            p = self.placed[-1]
+            return OrderState("s1", "closed", p["qty"], p["price"], 0.0)
+
+        async def cancel_order(self, order_id, symbol):
+            return await self.fetch_order(order_id, symbol)
+
+    gw = Gw()
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=False,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+    )
+    r.cash_eur = 0.0
+    r.last_rebalance_ms = 99
+    r.positions = [
+        ClipPosition(
+            base="BTC",
+            entry_price=70_000.0,
+            notional_eur=15_000.0,
+            qty=0.2,
+            opened_ms=1,
+            venue="bitvavo",
+            role="btc",
+            holding_id="clip-btc",
+        ),
+        ClipPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=5_000.0,
+            qty=500.0,
+            opened_ms=1,
+            venue="bitvavo",
+            role="alt",
+            holding_id="clip-alt",
+        ),
+    ]
+    r.marks = {"BTC": 71_000.0, "AAA": 9.8}
+    out = asyncio.run(r.sell_all())
+    assert out["ok"] is True
+    assert out["closed"] == 2
+    assert r.positions == []
+    assert r.last_rebalance_ms == 0
+    assert [p["side"] for p in gw.placed] == ["sell", "sell"]
+    led = (tmp_path / "l.jsonl").read_text()
+    assert "manual_sell_all" in led
+
+
+def test_clip_paper_sell_skips_venue(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    class Gw:
+        async def place_limit(self, *args, **kwargs):
+            raise AssertionError("paper sell must not place venue orders")
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+        venues=("bitvavo",),
+        gateways={"bitvavo": Gw()},
+    )
+    r.positions = [
+        ClipPosition(
+            base="BTC",
+            entry_price=70_000.0,
+            notional_eur=15_000.0,
+            qty=0.2,
+            opened_ms=1,
+            venue="paper",
+            role="btc",
+            holding_id="clip-btc",
+        )
+    ]
+    out = asyncio.run(r.sell("clip-btc"))
+    assert out["ok"] is True
+    assert r.positions == []
+
+
+def test_clip_manager_sell_requires_running():
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipDeskManager
+
+    m = BtcRsClipDeskManager()
+    import asyncio
+
+    assert asyncio.run(m.sell("x")) == {"ok": False, "reason": "not_running"}
+    assert asyncio.run(m.sell_all()) == {"ok": False, "reason": "not_running"}
