@@ -186,6 +186,16 @@ def combine_books(
     if len(series) >= 2:
         c = _corr(series[0], series[1])
         extra["corr_daily"] = None if c is None else round(float(c), 3)
+        names = [
+            str(p.get("strategy") or p.get("policy") or p.get("sleeve") or f"p{i}")
+            for i, p in enumerate(parts)
+        ]
+        pairs: dict[str, float | None] = {}
+        for i in range(len(series)):
+            for j in range(i + 1, len(series)):
+                cj = _corr(series[i], series[j])
+                pairs[f"{names[i]}__{names[j]}"] = None if cj is None else round(float(cj), 3)
+        extra["corr_pairs"] = pairs
     out = {
         "strategy": name,
         "model": parts[0].get("model") if parts else "",
