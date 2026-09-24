@@ -35,6 +35,8 @@ logger = logging.getLogger("bot.live.momentum_btc_rs_clip_runner")
 
 _MIN_ORDER_EUR = 5.0
 _TAKER_CROSS = 0.002
+_EQUITY_CURVE_MAX = 2016
+_EQUITY_CURVE_MIN_GAP_SEC = 5.0
 
 
 @dataclass
@@ -181,8 +183,10 @@ class BtcRsClipPaperRunner:
         self.last_decision: dict[str, Any] = {}
         self.marks: dict[str, float] = {}
         self.mark_ts: dict[str, float] = {}
+        self.equity_curve: list[list[float]] = []
         self._day_key = ""
         self._decide_lock = asyncio.Lock()
+        self._last_curve_save = 0.0
         self._load_state()
 
     def _desk(self) -> str:
@@ -211,6 +215,37 @@ class BtcRsClipPaperRunner:
         self.last_rebalance_ms = int(raw.get("last_rebalance_ms") or 0)
         self.positions = [ClipPosition.from_dict(row) for row in (raw.get("positions") or [])]
         self.last_decision = dict(raw.get("last_decision") or {})
+        curve: list[list[float]] = []
+        for row in raw.get("equity_curve") or []:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                continue
+            try:
+                curve.append([float(row[0]), float(row[1])])
+            except (TypeError, ValueError):
+                continue
+        self.equity_curve = curve[-_EQUITY_CURVE_MAX:]
+
+    def _equity_now(self) -> float:
+        return self.cash_eur + self._deployed() + self._unrealized()
+
+    def _sample_equity(self, *, persist: bool = False) -> None:
+        eq = round(self._equity_now(), 2)
+        now_ms = time.time() * 1000.0
+        gap_ms = _EQUITY_CURVE_MIN_GAP_SEC * 1000.0
+        if self.equity_curve:
+            last_t, _last_eq = self.equity_curve[-1]
+            if (now_ms - last_t) < gap_ms:
+                self.equity_curve[-1] = [round(now_ms), eq]
+            else:
+                self.equity_curve.append([round(now_ms), eq])
+        else:
+            self.equity_curve.append([round(now_ms), eq])
+        if len(self.equity_curve) > _EQUITY_CURVE_MAX:
+            self.equity_curve = self.equity_curve[-_EQUITY_CURVE_MAX:]
+        now = time.time()
+        if persist or (now - self._last_curve_save) >= _EQUITY_CURVE_MIN_GAP_SEC:
+            self._save_state()
+            self._last_curve_save = now
 
     def _save_state(self) -> None:
         Path(self.state_path).parent.mkdir(parents=True, exist_ok=True)
@@ -223,6 +258,10 @@ class BtcRsClipPaperRunner:
                     "last_rebalance_ms": self.last_rebalance_ms,
                     "positions": [p.to_dict() for p in self.positions],
                     "last_decision": self.last_decision,
+                    "equity_curve": [
+                        [round(float(t), 1), round(float(eq), 2)]
+                        for t, eq in self.equity_curve[-_EQUITY_CURVE_MAX:]
+                    ],
                     "paper_only": self.dry_run,
                     "allow_live": not self.dry_run,
                     "updated_at": datetime.now(UTC).isoformat(),
@@ -279,6 +318,7 @@ class BtcRsClipPaperRunner:
                 pos.peak_px = mark
             else:
                 pos.peak_px = max(float(pos.peak_px), mark)
+        self._sample_equity()
 
     async def _load_ohlc(self) -> dict[str, list[list[float]]]:
         out: dict[str, list[list[float]]] = {}
@@ -843,7 +883,7 @@ class BtcRsClipPaperRunner:
                     "quantity": p.qty,
                 }
             )
-        equity = self.cash_eur + self._deployed() + self._unrealized()
+        equity = self._equity_now()
         last = self.last_decision or {}
         live = not self.dry_run
         return {
@@ -861,6 +901,9 @@ class BtcRsClipPaperRunner:
             "unrealized_net_eur": round(self._unrealized(), 2),
             "realized_total_eur": round(self.realized_total_eur, 2),
             "day_realized_eur": round(self.day_realized_eur, 2),
+            "equity_curve": [
+                [round(float(t), 1), round(float(eq), 2)] for t, eq in self.equity_curve
+            ],
             "positions": positions,
             "last_decision": last,
             "live_caption": str(last.get("caption") or ""),
@@ -957,12 +1000,20 @@ class BtcRsClipDeskManager:
             realized = 0.0
             positions: list[dict[str, Any]] = []
             last: dict[str, Any] = {}
+            curve: list[list[float]] = []
             try:
                 raw = json.loads(Path(state_path).read_text(encoding="utf-8"))
                 cash = float(raw.get("cash_eur", cash))
                 realized = float(raw.get("realized_total_eur") or 0.0)
                 positions = list(raw.get("positions") or [])
                 last = dict(raw.get("last_decision") or {})
+                for row in raw.get("equity_curve") or []:
+                    if not isinstance(row, (list, tuple)) or len(row) < 2:
+                        continue
+                    try:
+                        curve.append([float(row[0]), float(row[1])])
+                    except (TypeError, ValueError):
+                        continue
             except Exception:  # noqa: BLE001
                 pass
             deployed = sum(float(p.get("notional_eur") or 0) for p in positions)
@@ -975,6 +1026,7 @@ class BtcRsClipDeskManager:
                     "positions": positions,
                     "realized_total_eur": round(realized, 2),
                     "unrealized_net_eur": 0.0,
+                    "equity_curve": curve[-_EQUITY_CURVE_MAX:],
                     "last_decision": last,
                     "live_caption": str(
                         last.get("caption") or "BTC+RS clip staat klaar (niet gestart)."

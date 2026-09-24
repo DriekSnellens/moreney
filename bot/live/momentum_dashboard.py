@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from html import escape
@@ -12,7 +13,7 @@ from typing import Any
 from fastapi.responses import HTMLResponse
 
 from bot.live.momentum_donchian import sleeve_live_caption
-from bot.live.momentum_period_pnl import DeskEarnings, PeriodNet, sleeve_is_live
+from bot.live.momentum_period_pnl import DeskEarnings, PeriodNet
 
 _CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
@@ -742,6 +743,150 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   .sticky-actions { display: none; }
   body { padding-bottom: 0; }
 }
+
+/* Live-only visual desk */
+.eq-hero {
+  margin: 0 0 .75rem; padding: .85rem .9rem .7rem;
+  border: 1px solid var(--border); border-radius: 1.05rem;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.045), transparent 46%),
+    rgba(15,23,42,.9);
+  box-shadow: 0 10px 36px -10px rgba(0,0,0,.5);
+  animation: rise-in .55s var(--ease) both;
+}
+.eq-top {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: .75rem; margin-bottom: .35rem;
+}
+.eq-k {
+  margin: 0; font-size: .62rem; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.eq-val {
+  margin: .15rem 0 0; font-family: var(--display); font-weight: 800;
+  font-size: clamp(1.7rem, 7vw, 2.55rem); letter-spacing: -.04em;
+  line-height: .95; font-variant-numeric: tabular-nums;
+}
+.eq-open {
+  margin: .1rem 0 0; font-family: var(--display); font-weight: 700;
+  font-size: clamp(1.05rem, 3.8vw, 1.35rem); letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.eq-chart {
+  height: 168px; margin: .15rem -0.25rem 0; position: relative;
+}
+.eq-chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.eq-chart .eq-range {
+  position: absolute; right: .15rem; top: 0; bottom: 0;
+  display: flex; flex-direction: column; justify-content: space-between;
+  font-family: var(--mono); font-size: .58rem; color: var(--muted-2);
+  pointer-events: none;
+}
+.alloc-bar {
+  display: flex; height: 1.15rem; border-radius: 999px; overflow: hidden;
+  background: #1e293b; margin: .7rem 0 .4rem; border: 1px solid var(--border);
+}
+.alloc-bar > i {
+  display: block; height: 100%; min-width: 0;
+}
+.alloc-bar .btc { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.alloc-bar .alt { background: linear-gradient(90deg, #10b981, #34d399); }
+.alloc-bar .cash { background: #334155; }
+.alloc-legend {
+  display: flex; flex-wrap: wrap; gap: .35rem .7rem;
+  font-size: .72rem; color: var(--muted);
+}
+.alloc-legend b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+.alloc-dot {
+  display: inline-block; width: .45rem; height: .45rem; border-radius: 99px;
+  margin-right: .28rem; vertical-align: middle;
+}
+.alloc-dot.btc { background: #fbbf24; }
+.alloc-dot.alt { background: #34d399; }
+.alloc-dot.cash { background: #64748b; }
+.bag-grid {
+  display: grid; gap: .55rem;
+  grid-template-columns: 1fr;
+  margin-top: .15rem;
+}
+@media (min-width: 640px) {
+  .bag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.bag-card {
+  padding: .85rem .9rem; border-radius: .9rem;
+  border: 1px solid var(--border);
+  background: rgba(15,23,42,.88);
+  display: grid; gap: .35rem;
+}
+.bag-card .bag-top {
+  display: flex; justify-content: space-between; align-items: baseline; gap: .5rem;
+}
+.bag-card .bag-base {
+  font-family: var(--display); font-weight: 800; font-size: 1.2rem;
+  letter-spacing: -.03em;
+}
+.bag-card .bag-role {
+  font-size: .62rem; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700;
+}
+.bag-card .bag-net {
+  font-family: var(--display); font-weight: 750; font-size: 1.15rem;
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+}
+.bag-card .bag-meta {
+  display: flex; justify-content: space-between; gap: .4rem;
+  font-family: var(--mono); font-size: .72rem; color: var(--muted);
+}
+.bag-card .bag-bar {
+  height: 4px; border-radius: 99px; background: #1e293b; overflow: hidden;
+}
+.bag-card .bag-bar > i {
+  display: block; height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+.bag-card form { margin: .2rem 0 0; }
+.sat-strip {
+  display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+  margin-top: .7rem; padding: .55rem .75rem;
+  border: 1px solid var(--border); border-radius: .85rem;
+  background: rgba(15,23,42,.75);
+}
+.sat-strip strong { font-family: var(--display); font-size: .88rem; }
+.sat-strip .sat-eq { font-family: var(--mono); font-size: .8rem; margin-left: auto; }
+.sat-strip .mix-open { margin: 0; }
+.masthead.visual {
+  padding: .85rem .9rem .7rem; gap: .55rem; margin-bottom: .7rem;
+}
+.masthead.visual .brand { font-size: clamp(1.35rem, 5.5vw, 1.7rem); }
+.masthead.visual .brand-sub { display: none; }
+.masthead.visual .earn-label { display: none; }
+.masthead.visual .earn-tile .meta { display: none; }
+.masthead.visual .earn-foot span:last-child { display: none; }
+.masthead.visual .earn-tile { padding: .45rem .15rem .1rem; }
+.masthead.visual .earn-tile .amount {
+  font-size: clamp(1.15rem, 4.4vw, 1.55rem);
+}
+.clip-actions-mini { margin: .55rem 0 0; }
+.clip-actions-mini .btn { min-height: 40px; }
+@media (max-width: 979px) {
+  .eq-hero { padding: .7rem .7rem .55rem; border-radius: .9rem; margin-bottom: .6rem; }
+  .eq-chart { height: 148px; }
+  .eq-val { font-size: clamp(1.55rem, 8vw, 2.05rem); }
+  .bag-card { padding: .7rem .75rem; }
+  .bag-card .bag-base { font-size: 1.08rem; }
+  .sat-strip { padding: .45rem .55rem; }
+  .masthead.visual { padding: .7rem .65rem .55rem; }
+  .masthead.visual .earn-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .masthead.visual .earn-tile { border-top: 0; padding: .35rem .2rem .05rem; }
+  .masthead.visual .earn-tile + .earn-tile { border-left: 1px solid var(--border-soft); }
+  .masthead.visual .earn-foot { display: none; }
+  .mobile-dock { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mobile-dock.with-15m { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 420px) {
+  .eq-chart { height: 132px; }
+  .alloc-legend { font-size: .66rem; gap: .25rem .45rem; }
+}
 """
 
 
@@ -864,41 +1009,17 @@ def _earnings_masthead(
     show_volatile: bool = False,
     show_mix: bool = False,
 ) -> str:
-    """First-viewport composition: live net only. Paper has its own panel."""
+    """Live net only — paper PnL is never rendered on the operator page."""
+    del show_volatile, show_mix, venue
     live = earnings.combined if earnings is not None else _zero_period()
     open_mtm = earnings.open_mtm_eur if earnings is not None else 0.0
-    as_of = earnings.as_of if earnings is not None else "—"
-    if show_mix:
-        week_meta = f"{live.trades_week} trades · live deze week"
-        brand_sub = f"Momentum desk · mix · {venue}. "
-    elif show_volatile:
-        week_meta = (
-            f"{live.trades_week} trades · live "
-            f"{_fmt_eur(live.week_eur)}"
-        )
-        brand_sub = f"Momentum desk · core + volatile · {venue}. "
-    else:
-        week_meta = f"{live.trades_week} trades · live deze week"
-        brand_sub = f"Momentum desk · core · {venue}. "
-    tiles_html = _period_tiles(live, week_meta)
-    paper_html = ""
-    if earnings is not None:
-        paper = earnings.paper
-        paper_on = (
-            show_mix
-            or paper.trades_all_time > 0
-            or abs(paper.all_time_eur) > 0.005
-            or abs(earnings.paper_open_mtm_eur) > 0.005
-        )
-        if paper_on:
-            paper_html = _paper_earnings_panel(earnings)
+    tiles_html = _period_tiles(live, f"{live.trades_week} live")
     return (
-        '<section class="masthead">'
+        '<section class="masthead visual">'
         '<div class="masthead-top">'
         "<div>"
         '<h1 class="brand">Moreney</h1>'
-        f'<p class="brand-sub">{brand_sub}'
-        "Netto = live venue-fills na fees (Europe/Amsterdam). Paper staat apart.</p>"
+        '<p class="brand-sub">Live venue-fills na fees.</p>'
         "</div>"
         f"<div>{pill}</div>"
         "</div>"
@@ -907,11 +1028,9 @@ def _earnings_masthead(
         '<div class="earn-foot">'
         f"<span>Vandaag <strong class='{_cls(live.day_eur)}'>"
         f"{_fmt_eur(live.day_eur)}</strong></span>"
-        f"<span>Open MTM live <strong class='{_cls(open_mtm)}'>"
+        f"<span>Open <strong class='{_cls(open_mtm)}'>"
         f"{_fmt_eur(open_mtm)}</strong></span>"
-        f'<span class="muted">peil {escape(str(as_of)[:19].replace("T", " "))} NL</span>'
         "</div></section>"
-        f"{paper_html}"
     )
 
 
@@ -1725,29 +1844,12 @@ def _core_15m_mix_note(status: Mapping[str, Any] | None) -> str:
 
 
 def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
-    """Live 15m WR-core satellite — €2k Bitvavo cap + OKX leftover."""
+    """Compact live 15m satellite strip — no paper/shadow copy."""
     st = dict(status or {})
     running = bool(st.get("running"))
     dry = bool(st.get("dry_run"))
-    if running and not dry:
-        pill = '<span class="pill on" data-live="core15-pill"><span class="dot"></span>LIVE</span>'
-    elif running:
-        pill = '<span class="pill obs" data-live="core15-pill"><span class="dot"></span>SHADOW</span>'
-    else:
-        pill = '<span class="pill off" data-live="core15-pill"><span class="dot"></span>STOP</span>'
-    cash_by = st.get("cash_by_venue") or {}
-    if cash_by:
-        cash_txt = " · ".join(
-            f"{escape(str(k))} {float(v):,.0f} €" for k, v in cash_by.items()
-        )
-    else:
-        cash_txt = f"cash {_fmt_eur(st.get('cash_eur'), signed=False)}"
-    caps = st.get("venue_cash_caps") or {}
-    cap_txt = (
-        " · ".join(f"{escape(str(k))}≤{float(v):,.0f} €" for k, v in caps.items())
-        if caps
-        else "geen Bitvavo-plafond"
-    )
+    if not (running and not dry):
+        return ""
     pos_bits = []
     for p in st.get("positions") or []:
         if float(p.get("quantity") or 0.0) <= 1e-12:
@@ -1756,58 +1858,220 @@ def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
         hid = escape(str(p.get("holding_id") or p.get("base") or ""))
         pos_bits.append(
             f'<span class="mix-chip" data-holding="{hid}">'
-            f'<span class="muted">{escape(str(p.get("venue") or ""))}</span>'
             f'<strong>{escape(str(p.get("base") or ""))}</strong>'
             f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
         )
     pos_html = (
         f'<div class="mix-open" data-live="core15-open">{"".join(pos_bits)}</div>'
         if pos_bits
-        else '<div class="mix-open" data-live="core15-open"><span class="muted">Geen open 15m-posities — wacht op slot 7/13/16 UTC.</span></div>'
+        else '<div class="mix-open" data-live="core15-open"></div>'
     )
-    n_pos = len(pos_bits)
-    actions = ""
-    if running:
-        bits = [
-            '<form method="get" action="/live/momentum" style="display:inline">'
-            '<input type="hidden" name="simulate" value="1">'
-            '<button type="submit" class="btn">Simuleer</button></form>'
-        ]
-        if n_pos:
-            bits.append(
-                '<form method="get" action="/live/momentum" style="display:inline">'
-                '<input type="hidden" name="sell_all" value="1">'
-                '<button type="submit" class="btn danger">Verkoop 15m</button></form>'
-            )
-        actions = f'<div class="toolbar" style="margin:.4rem 0 0">{"".join(bits)}</div>'
-    risk = st.get("risk") or {}
-    block = ""
-    if not risk.get("entries_allowed", True):
-        block = (
-            f' · geblokkeerd: {escape(str(risk.get("block_reason") or "risk"))}'
+    sell = ""
+    if pos_bits:
+        sell = (
+            '<form method="get" action="/live/momentum" style="margin:0">'
+            '<input type="hidden" name="sell_all" value="1">'
+            '<button type="submit" class="btn danger">Verkoop 15m</button></form>'
         )
-    eq = st.get("equity_eur") if running else None
-    cash_show = cash_txt if running else "—"
-    cap_show = cap_txt if running else "gestopt"
+    eq = st.get("equity_eur")
     return (
-        f'<section class="panel mix-board side-15m" id="core-15m" data-live="core-15m">'
-        f'<div class="card-head"><h2>15m WR-core</h2>{pill}'
-        f'<span class="pill {"on" if running and not dry else "off"}">'
-        f'<span class="dot"></span>€2k-satelliet</span></div>'
-        f'<p class="mix-why" data-live="core15-caption">Satelliet naast de BTC+RS-clip: '
-        f"Bitvavo-plafond €2k, OKX-rest mag mee. Hours 7/13/16 UTC{block}.</p>"
-        f'<div class="clip-kpis">'
-        f'<div><span>Equity</span><strong data-k="core15-eq">{_fmt_eur(eq, signed=False)}</strong></div>'
-        f'<div><span>Open</span><strong data-k="core15-open-pnl" class="{_cls(st.get("unrealized_net_eur") if running else None)}">'
-        f'{_fmt_eur(st.get("unrealized_net_eur") if running else None)}</strong></div>'
-        f'<div><span>Gerealiseerd</span><strong data-k="core15-real" class="{_cls(st.get("realized_total_eur") if running else None)}">'
-        f'{_fmt_eur(st.get("realized_total_eur") if running else None)}</strong></div>'
-        f'<div><span>Cash</span><strong data-k="core15-cash">{escape(cash_show)}</strong></div>'
+        f'<section class="sat-strip" id="core-15m" data-live="core-15m">'
+        f'<span class="pill on" data-live="core15-pill"><span class="dot"></span>LIVE</span>'
+        f"<strong>15m</strong>"
+        f'<span class="sat-eq" data-k="core15-eq">{_fmt_eur(eq, signed=False)}</span>'
+        f"{pos_html}{sell}</section>"
+    )
+
+
+def _equity_chart_svg(
+    points: Sequence[Any] | None,
+    *,
+    equity: float | None = None,
+) -> str:
+    """Compact SVG area chart. Scales to the host box; no axis clutter."""
+    pts: list[tuple[float, float]] = []
+    for row in points or []:
+        if not isinstance(row, (list, tuple)) or len(row) < 2:
+            continue
+        try:
+            pts.append((float(row[0]), float(row[1])))
+        except (TypeError, ValueError):
+            continue
+    now_ms = time.time() * 1000.0
+    if equity is not None:
+        if not pts or abs(pts[-1][1] - float(equity)) > 0.009:
+            pts.append((now_ms, float(equity)))
+        else:
+            pts[-1] = (now_ms, float(equity))
+    if not pts:
+        y = float(equity or 0.0)
+        pts = [(now_ms - 1_000.0, y), (now_ms, y)]
+    elif len(pts) == 1:
+        pts = [(pts[0][0] - 1_000.0, pts[0][1]), pts[0]]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_y = max_y - min_y
+    pad = max(abs(max_y) * 0.008, 8.0) if span_y < 1e-9 else span_y * 0.14
+    min_y -= pad
+    max_y += pad
+    span_y = max_y - min_y
+    span_x = max_x - min_x or 1.0
+    w, h = 640.0, 180.0
+
+    def sx(x: float) -> float:
+        return (x - min_x) / span_x * w
+
+    def sy(y: float) -> float:
+        return h - (y - min_y) / span_y * h
+
+    line = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
+    up = ys[-1] >= ys[0]
+    stroke = "#34D399" if up else "#F87171"
+    fill_id = "eqUp" if up else "eqDown"
+    c0 = "rgba(52,211,153,.32)" if up else "rgba(248,113,113,.30)"
+    c1 = "rgba(52,211,153,0)" if up else "rgba(248,113,113,0)"
+    last_x, last_y = sx(pts[-1][0]), sy(pts[-1][1])
+    hi = _fmt_eur(max(ys), signed=False)
+    lo = _fmt_eur(min(ys), signed=False)
+    payload = json.dumps([[round(x, 1), round(y, 2)] for x, y in pts], separators=(",", ":"))
+    return (
+        f'<div class="eq-chart" data-live="eq-chart" data-eq-points="{escape(payload)}">'
+        f'<svg viewBox="0 0 {w:.0f} {h:.0f}" preserveAspectRatio="none" aria-hidden="true">'
+        f"<defs><linearGradient id='{fill_id}' x1='0' y1='0' x2='0' y2='1'>"
+        f"<stop offset='0%' stop-color='{c0}'/>"
+        f"<stop offset='100%' stop-color='{c1}'/></linearGradient></defs>"
+        f'<polygon fill="url(#{fill_id})" points="0,{h:.0f} {line} {w:.0f},{h:.0f}"></polygon>'
+        f'<polyline fill="none" stroke="{stroke}" stroke-width="2.4" '
+        f'stroke-linejoin="round" stroke-linecap="round" points="{line}"></polyline>'
+        f'<circle cx="{last_x:.2f}" cy="{last_y:.2f}" r="4.2" fill="{stroke}"></circle>'
+        f"</svg>"
+        f'<div class="eq-range"><span>{hi}</span><span>{lo}</span></div></div>'
+    )
+
+
+def _alloc_visual(status: Mapping[str, Any]) -> str:
+    cash = max(0.0, float(status.get("cash_eur") or 0.0))
+    btc_n = 0.0
+    alt_n = 0.0
+    alt_name = ""
+    for p in status.get("positions") or []:
+        if float(p.get("quantity") or p.get("notional_eur") or 0.0) <= 1e-12:
+            continue
+        mark = float(p.get("mark") or p.get("entry_price") or 0.0)
+        qty = float(p.get("quantity") or 0.0)
+        notion = float(p.get("notional_eur") or 0.0)
+        val = qty * mark if mark > 0 and qty > 0 else notion
+        role = str(p.get("role") or "").lower()
+        if role == "btc":
+            btc_n += val
+        else:
+            alt_n += val
+            alt_name = str(p.get("base") or "").upper() or alt_name
+    total = btc_n + alt_n + cash
+    if total <= 1e-9:
+        total = max(float(status.get("equity_eur") or status.get("book_eur") or 1.0), 1.0)
+        cash = total
+    def pct(v: float) -> float:
+        return max(0.0, 100.0 * v / total)
+
+    btc_p, alt_p, cash_p = pct(btc_n), pct(alt_n), pct(cash)
+    alt_lbl = alt_name or "alt"
+    return (
+        f'<div class="alloc-bar" data-live="alloc-bar" aria-hidden="true">'
+        f'<i class="btc" style="width:{btc_p:.2f}%"></i>'
+        f'<i class="alt" style="width:{alt_p:.2f}%"></i>'
+        f'<i class="cash" style="width:{cash_p:.2f}%"></i></div>'
+        f'<div class="alloc-legend">'
+        f'<span><i class="alloc-dot btc"></i>BTC <b>{btc_p:.0f}%</b></span>'
+        f'<span><i class="alloc-dot alt"></i>{escape(alt_lbl)} <b>{alt_p:.0f}%</b></span>'
+        f'<span><i class="alloc-dot cash"></i>cash <b>{cash_p:.0f}%</b></span>'
         f"</div>"
-        f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
-        f'<span data-k="core15-caps">{escape(cap_show)}</span> · next '
-        f'<strong data-live="core15-next">{_ts(st.get("next_decision") if running else None)}</strong></p>'
-        f"{pos_html}{actions}</section>"
+    )
+
+
+def _clip_bag_cards(status: Mapping[str, Any]) -> str:
+    equity = float(status.get("equity_eur") or 0.0)
+    cards = []
+    for p in status.get("positions") or []:
+        if float(p.get("quantity") or p.get("notional_eur") or 0.0) <= 1e-12:
+            continue
+        hid = escape(str(p.get("holding_id") or p.get("base") or ""))
+        base = escape(str(p.get("base") or ""))
+        role = str(p.get("role") or "long")
+        net = p.get("unrealized_net_eur")
+        mark = float(p.get("mark") or p.get("entry_price") or 0.0)
+        qty = float(p.get("quantity") or 0.0)
+        notion = qty * mark if mark > 0 and qty > 0 else float(p.get("notional_eur") or 0.0)
+        share = (100.0 * notion / equity) if equity > 0 else 0.0
+        ret = p.get("gross_return")
+        cards.append(
+            f'<article class="bag-card" data-holding="{hid}">'
+            f'<div class="bag-top"><div><div class="bag-role">{escape(role)}</div>'
+            f'<div class="bag-base">{base}</div></div>'
+            f'<div class="bag-net {_cls(net)}" data-k="net">{_fmt_eur(net)}</div></div>'
+            f'<div class="bag-bar"><i style="width:{min(100.0, max(0.0, share)):.1f}%"></i></div>'
+            f'<div class="bag-meta"><span>{share:.0f}%</span>'
+            f'<span class="{_cls(ret)}" data-k="gross">{_fmt_pct(ret)}</span></div>'
+            f'<form method="post" action="/live/momentum/btc-rs-clip/sell">'
+            f'<input type="hidden" name="holding_id" value="{hid}">'
+            f'<input type="hidden" name="redirect" value="1">'
+            f'<button type="submit" class="btn danger block">Verkoop</button></form>'
+            f"</article>"
+        )
+    if not cards:
+        return (
+            '<div class="mix-open" data-live="clip-open" id="open-pos">'
+            '<span class="muted">Geen bags</span></div>'
+        )
+    actions = (
+        '<div class="clip-actions-mini" data-live="clip-actions">'
+        '<form method="post" action="/live/momentum/btc-rs-clip/sell-all" '
+        'onsubmit="return confirm(\'Clip op Bitvavo verkopen?\');">'
+        '<input type="hidden" name="redirect" value="1">'
+        '<button type="submit" class="btn danger">Verkoop clip</button></form></div>'
+    )
+    return (
+        f'<div class="bag-grid" data-live="clip-open" id="open-pos">{"".join(cards)}</div>'
+        f"{actions}"
+    )
+
+
+def _clip_visual_desk(status: Mapping[str, Any] | None) -> str:
+    st = dict(status or {})
+    running = bool(st.get("running"))
+    dry = bool(st.get("dry_run", True))
+    allow_live = st.get("allow_live")
+    live = running and not dry and allow_live is not False
+    if live:
+        pill = '<span class="pill on" data-live="clip-pill"><span class="dot"></span>LIVE</span>'
+        title = "BTC + RS"
+    elif running:
+        pill = '<span class="pill off" data-live="clip-pill"><span class="dot"></span>STOP</span>'
+        title = "BTC + RS"
+    else:
+        pill = '<span class="pill off" data-live="clip-pill"><span class="dot"></span>STOP</span>'
+        title = "BTC + RS"
+    risk_on = bool(st.get("risk_on"))
+    gate = "SMA50" if risk_on else "flat"
+    eq = st.get("equity_eur")
+    open_pnl = st.get("unrealized_net_eur")
+    curve = st.get("equity_curve") or []
+    return (
+        f'<section class="eq-hero" id="clip" data-live="clip">'
+        f'<div class="eq-top"><div>'
+        f'<p class="eq-k" data-live="clip-title">{escape(title)}</p>'
+        f'<p class="eq-val" data-live="equity">{_fmt_eur(eq, signed=False)}</p></div>'
+        f"<div>{pill}"
+        f'<span class="pill {"on" if risk_on else "off"}" data-live="clip-gate">'
+        f'<span class="dot"></span>{gate}</span>'
+        f'<p class="eq-open {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</p>'
+        f"</div></div>"
+        f"{_equity_chart_svg(curve, equity=float(eq or 0.0))}"
+        f"{_alloc_visual(st)}"
+        f"{_clip_bag_cards(st)}"
+        f"</section>"
     )
 
 
@@ -2809,10 +3073,7 @@ _LIVE_MARKS_JS = r"""
   window.__moreneyMarksPoll = true;
   const PULSE_URL = "/live/momentum/pulse";
   const STATUS_URL = "/live/momentum/status";
-  const SHORT_STATUS_URL = "/live/momentum/short-weakest/status";
-  const MIX_STATUS_URL = "/live/momentum/allocator/status";
-    const DONCHIAN_STATUS_URL = "/live/momentum/donchian/status";
-    const CLIP_STATUS_URL = "/live/momentum/btc-rs-clip/status";
+  const CLIP_STATUS_URL = "/live/momentum/btc-rs-clip/status";
   const INTERVAL_MS = 1000;
 
   function fmtPct(v) {
@@ -2820,11 +3081,14 @@ _LIVE_MARKS_JS = r"""
     const n = Number(v) * 100;
     return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
   }
-  function fmtEur(v) {
+  function fmtEur(v, signed) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
     const n = Number(v);
-    const sign = n > 0 ? "+" : "";
-    return sign + n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+    const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (signed === false) return abs + " €";
+    if (n > 0) return "+" + abs + " €";
+    if (n < 0) return "-" + abs + " €";
+    return "+0.00 €";
   }
   function fmtPx(v) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
@@ -2843,6 +3107,11 @@ _LIVE_MARKS_JS = r"""
         if (className) el.classList.add(className);
       }
     });
+  }
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => (
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+    ));
   }
   function patchHolding(pos, trail, tightAfter, tight) {
     const id = String(pos.holding_id || pos.base || "");
@@ -2874,12 +3143,6 @@ _LIVE_MARKS_JS = r"""
     }
     nodes.forEach((root) => {
       setText(root, "mark", fmtPx(mark));
-      if (pos.mark_source != null || pos.mark_age_sec != null) {
-        const meta = [pos.mark_source || "—"]
-          .concat(pos.mark_age_sec != null ? [`${Number(pos.mark_age_sec).toFixed(0)}s`] : [])
-          .join(" · ");
-        setText(root, "mark-meta", meta);
-      }
       setText(root, "gross", fmtPct(gross), cls(gross));
       setText(root, "peak", fmtPct(livePeak));
       setText(root, "trail", trailTxt);
@@ -2889,38 +3152,29 @@ _LIVE_MARKS_JS = r"""
   }
   function patchHeroes(status) {
     const open = status.unrealized_net_eur;
-    const el = document.querySelector('[data-live="open-pnl"]');
-    if (el) {
+    document.querySelectorAll('[data-live="open-pnl"]').forEach((el) => {
       el.textContent = fmtEur(open);
       el.classList.remove("good", "bad");
       const c = cls(open);
       if (c) el.classList.add(c);
-    }
-    const eq = document.querySelector('[data-live="equity"]');
-    if (eq && status.equity_eur != null) eq.textContent = fmtEur(status.equity_eur).replace(/^\+/, "");
+    });
+    document.querySelectorAll('[data-live="equity"]').forEach((el) => {
+      if (status.equity_eur != null) el.textContent = fmtEur(status.equity_eur, false);
+    });
     stampMarks(status);
-    const next = document.querySelector('[data-live="next-decision"]');
-    if (next && status.next_decision) {
-      const d = new Date(status.next_decision);
-      if (!Number.isNaN(d.getTime())) {
-        const dd = String(d.getUTCDate()).padStart(2, "0");
-        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-        const hh = String(d.getUTCHours()).padStart(2, "0");
-        const mi = String(d.getUTCMinutes()).padStart(2, "0");
-        next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
-      }
-    }
   }
   function stampMarks(status) {
     const stamp = document.querySelector('[data-live="marks-age"]');
     if (!stamp || !status) return;
     const age = (status.positions || []).map((p) => p.mark_age_sec).filter((v) => v != null);
-    if (age.length) stamp.textContent = `marks ${Math.max(...age).toFixed(0)}s geleden`;
-    else stamp.textContent = "marks live";
+    if (age.length) stamp.textContent = `${Math.max(...age).toFixed(0)}s`;
+    else stamp.textContent = "live";
   }
-  function livePositionIds() {
+  function livePositionIds(scope) {
     const ids = new Set();
-    document.querySelectorAll("[data-holding]").forEach((el) => {
+    const root = scope ? document.querySelector(scope) : document;
+    if (!root) return ids;
+    root.querySelectorAll("[data-holding]").forEach((el) => {
       const id = el.getAttribute("data-holding");
       if (id) ids.add(id);
     });
@@ -2929,579 +3183,295 @@ _LIVE_MARKS_JS = r"""
   function statusPositionIds(status) {
     const ids = new Set();
     (status.positions || []).forEach((p) => {
-      if (Number(p.quantity || 0) <= 1e-12) return;
+      if (Number(p.quantity || p.notional_eur || 0) <= 1e-12) return;
       const id = String(p.holding_id || p.base || "");
       if (id) ids.add(id);
     });
     return ids;
   }
-  function positionsChanged(status) {
-    const live = livePositionIds();
+  function positionsChanged(status, scope) {
+    const live = livePositionIds(scope);
     const next = statusPositionIds(status);
     if (live.size !== next.size) return true;
-    for (const id of next) {
-      if (!live.has(id)) return true;
-    }
-    for (const id of live) {
-      if (!next.has(id)) return true;
-    }
+    for (const id of next) if (!live.has(id)) return true;
+    for (const id of live) if (!next.has(id)) return true;
     return false;
   }
   function trailKnobs(status) {
     const cfg = status.config || {};
-    // Live research defaults: fixed 5% (tight_after=0 disables ratchet).
     const trail = Number(cfg.trail_pct != null ? cfg.trail_pct : 0.05);
     const tightAfter = Number(cfg.trail_tight_after != null ? cfg.trail_tight_after : 0.0);
     const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
-    document.querySelectorAll("table.desk[data-trail]").forEach((table) => {
-      if (table.closest("#dc-open-pos") || table.getAttribute("data-mode") === "donchian") return;
-      table.dataset.trail = String(trail);
-      table.dataset.tightAfter = String(tightAfter);
-      table.dataset.tight = String(tight);
-    });
     return { trail, tightAfter, tight };
   }
-  function patchRules(status) {
-    const html = status.ui && status.ui.rules_html;
-    const node = document.querySelector('[data-live="rules"]');
-    if (html && node) node.outerHTML = html;
+  const eqSpark = [];
+  const EQ_SPARK_MAX = 900;
+  function rememberEquity(eq) {
+    if (eq == null || !Number.isFinite(Number(eq))) return;
+    const now = Date.now();
+    const v = Number(eq);
+    if (eqSpark.length && (now - eqSpark[eqSpark.length - 1][0]) < 800) {
+      eqSpark[eqSpark.length - 1] = [now, v];
+    } else {
+      eqSpark.push([now, v]);
+    }
+    if (eqSpark.length > EQ_SPARK_MAX) eqSpark.splice(0, eqSpark.length - EQ_SPARK_MAX);
   }
-  function patchShortSleeve(status) {
-    const bear = status.bear || {};
-    const fmtBtc = (v) => {
-      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
-      return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
-    };
-    const roots = [
-      document.querySelector('[data-live="sw-sleeve"]'),
-      document.querySelector('[data-live="sw-decision"]'),
-      document.querySelector('[data-live="sw-bear"]'),
-    ].filter(Boolean);
-    const apply = (key, text, className) => {
-      roots.forEach((root) => setText(root, key, text, className));
-      // also global data-k under sw panels
-      document.querySelectorAll(`[data-k="${key}"]`).forEach((el) => {
-        if (!roots.some((r) => r.contains(el))) {
-          el.textContent = text;
-          if (className !== undefined) {
-            el.classList.remove("good", "bad");
-            if (className) el.classList.add(className);
-          }
-        }
-      });
-    };
-    apply("sw-btc", fmtBtc(bear.btc));
-    apply("sw-sma", fmtBtc(bear.sma != null ? bear.sma : bear.sma200));
-    apply("sw-gap", fmtPct(bear.gap_pct), cls(bear.gap_pct));
-    apply("sw-equity", fmtEur(status.equity_eur).replace(/^\+/, ""));
-    apply("sw-realized", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
-    apply("sw-open", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
-    apply("sw-npos", String((status.positions || []).length));
-    document.querySelectorAll('[data-live="sw-gate"]').forEach((gate) => {
-      const on = !!bear.bear_ok;
-      const smaN = bear.sma_days || (status.pack && status.pack.sma_days) || 20;
-      const label = on ? "BEAR ON" : `STANDBY (BTC>SMA${smaN})`;
-      if (gate.classList.contains("pill")) {
-        gate.innerHTML = `<span class="dot"></span>${label}`;
-        gate.classList.remove("on", "off");
-        gate.classList.add(on ? "on" : "off");
-      } else {
-        gate.innerHTML = on
-          ? "<strong>BEAR ON</strong>"
-          : `<strong>STANDBY (BTC&gt;SMA${smaN})</strong>`;
-        gate.classList.toggle("good", on);
-        gate.classList.toggle("muted", !on);
+  function mergedCurve(server, equity) {
+    rememberEquity(equity);
+    const pts = [];
+    (Array.isArray(server) ? server : []).forEach((p) => {
+      if (Array.isArray(p) && p.length >= 2 && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
+        pts.push([Number(p[0]), Number(p[1])]);
       }
     });
-    apply("sw-book", fmtEur(status.book_eur).replace(/^\+/, ""));
-    const cap = document.querySelector('[data-live="sw-caption"]');
-    if (cap && status.live_caption) cap.textContent = status.live_caption;
-    const swOpen = document.querySelector('[data-live="paper-sw"] [data-live="sw-open"]');
-    if (swOpen && Array.isArray(status.positions)) {
-      const pos = status.positions.filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
-      if (!pos.length) {
-        swOpen.innerHTML = '<span class="muted">Geen open paper-shorts — standby tot BTC &lt; SMA20.</span>';
-      } else {
-        swOpen.innerHTML = pos.map((p) => {
-          const net = p.unrealized_net_eur;
-          const hid = esc(p.holding_id || p.base || "");
-          return `<span class="mix-chip" data-holding="${hid}"><span class="muted">short</span><strong>${esc(p.base || "")}</strong><span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
-        }).join("");
-      }
-    }
-    const decision = document.querySelector('[data-live="sw-decision"]');
-    if (decision) {
-      const pill = decision.querySelector(".pill");
-      if (pill) {
-        const on = !!bear.bear_ok;
-        pill.className = on ? "pill on" : "pill off";
-        pill.innerHTML = on
-          ? '<span class="dot"></span>BEAR ON'
-          : '<span class="dot"></span>STANDBY';
-      }
-    }
-    const role = document.querySelector('[data-live="sw-role"]');
-    if (role && status.role) role.textContent = status.role;
-    const next = document.querySelector('[data-live="sw-next"]');
-    if (next && status.next_decision) {
-      const d = new Date(status.next_decision);
-      if (!Number.isNaN(d.getTime())) {
-        const dd = String(d.getUTCDate()).padStart(2, "0");
-        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-        const hh = String(d.getUTCHours()).padStart(2, "0");
-        const mi = String(d.getUTCMinutes()).padStart(2, "0");
-        next.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
-      }
-    }
-    const posList = document.querySelector('[data-live="sw-poslist"]');
-    if (posList && Array.isArray(status.positions)) {
-      if (!status.positions.length) {
-        posList.innerHTML = "<li class='muted'>Geen open paper-shorts</li>";
-      } else {
-        posList.innerHTML = status.positions.slice(0, 4).map((p) => {
-          const net = p.unrealized_net_eur;
-          const c = cls(net);
-          return `<li><strong>${p.base || ""}</strong> · <span class="${c}">${fmtEur(net)}</span></li>`;
-        }).join("");
-      }
-    }
-  }
-  function shortPositionsChanged(status) {
-    const live = new Set();
-    document.querySelectorAll("#sw-open-pos [data-holding]").forEach((el) => {
-      const id = el.getAttribute("data-holding");
-      if (id) live.add(id);
+    eqSpark.forEach((p) => pts.push(p));
+    pts.sort((a, b) => a[0] - b[0]);
+    const out = [];
+    pts.forEach((p) => {
+      if (!out.length || p[0] > out[out.length - 1][0]) out.push(p);
+      else out[out.length - 1] = p;
     });
-    const empty = document.querySelector("#sw-open-pos [data-live='positions-empty']");
-    const next = statusPositionIds(status);
-    if (empty && next.size > 0) return true;
-    if (!empty && next.size === 0 && document.querySelector("#sw-open-pos")) return true;
-    if (live.size !== next.size) return true;
-    for (const id of next) if (!live.has(id)) return true;
-    for (const id of live) if (!next.has(id)) return true;
-    return false;
+    return out;
   }
-  function esc(s) {
-    return String(s ?? "").replace(/[&<>"']/g, (c) => (
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
-    ));
-  }
-  function patchMixOpen(mix) {
-    const root = document.querySelector('[data-live="mix-open"]');
-    if (!root || !Array.isArray(mix.positions)) return;
-    const pos = mix.positions.filter((p) => Number(p.quantity || 1) > 1e-12);
-    if (!pos.length) {
-      root.innerHTML = '<span class="muted">Geen open mix-posities.</span>';
+  function drawEqChart(points, equity) {
+    const host = document.querySelector('[data-live="eq-chart"]');
+    if (!host) return;
+    let pts = mergedCurve(points, equity);
+    if (!pts.length) {
+      const y = Number(equity || 0);
+      const now = Date.now();
+      pts = [[now - 1000, y], [now, y]];
+    } else if (pts.length === 1) {
+      pts = [[pts[0][0] - 1000, pts[0][1]], pts[0]];
+    }
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    let minY = Math.min(...ys), maxY = Math.max(...ys);
+    const span0 = maxY - minY;
+    const pad = span0 < 1e-9 ? Math.max(Math.abs(maxY) * 0.008, 8) : span0 * 0.14;
+    minY -= pad; maxY += pad;
+    const w = 640, h = 180;
+    const sx = (x) => (x - minX) / ((maxX - minX) || 1) * w;
+    const sy = (y) => h - (y - minY) / ((maxY - minY) || 1) * h;
+    const line = pts.map((p) => `${sx(p[0]).toFixed(2)},${sy(p[1]).toFixed(2)}`).join(" ");
+    const up = ys[ys.length - 1] >= ys[0];
+    const stroke = up ? "#34D399" : "#F87171";
+    const fillId = "eqFill";
+    const c0 = up ? "rgba(52,211,153,.32)" : "rgba(248,113,113,.30)";
+    const c1 = up ? "rgba(52,211,153,0)" : "rgba(248,113,113,0)";
+    const last = pts[pts.length - 1];
+    const hi = fmtEur(Math.max(...ys), false);
+    const lo = fmtEur(Math.min(...ys), false);
+    let svg = host.querySelector("svg");
+    if (!svg) {
+      host.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`
+        + `<defs><linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">`
+        + `<stop offset="0%" stop-color="${c0}"/><stop offset="100%" stop-color="${c1}"/></linearGradient></defs>`
+        + `<polygon fill="url(#${fillId})" points="0,${h} ${line} ${w},${h}"></polygon>`
+        + `<polyline fill="none" stroke="${stroke}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" points="${line}"></polyline>`
+        + `<circle cx="${sx(last[0]).toFixed(2)}" cy="${sy(last[1]).toFixed(2)}" r="4.2" fill="${stroke}"></circle>`
+        + `</svg><div class="eq-range"><span>${hi}</span><span>${lo}</span></div>`;
       return;
     }
-    root.innerHTML = pos.map((p) => {
-      const net = p.unrealized_net_eur;
-      const hid = String(p.holding_id || p.base || "");
-      return `<span class="mix-chip" data-mix-pos="${esc(hid)}">`
-        + `<span class="muted">${esc(p.sleeve || "donch")}</span>`
-        + `<strong>${esc(p.base || "")}</strong>`
-        + `<span class="${cls(net)}">${fmtEur(net)}</span></span>`;
-    }).join("");
-  }
-  function patchMix(mix) {
-    const board = document.querySelector('[data-live="mix-board"]');
-    if (!board || !mix) return;
-    const reg = mix.regime || {};
-    const label = mix.label || reg.label || "";
-    if (label) {
-      board.classList.remove("risk_on", "risk_off", "mid");
-      board.classList.add(label);
-      board.setAttribute("data-mix-label", label);
+    const grad = svg.querySelector("linearGradient");
+    if (grad) {
+      const stops = grad.querySelectorAll("stop");
+      if (stops[0]) stops[0].setAttribute("stop-color", c0);
+      if (stops[1]) stops[1].setAttribute("stop-color", c1);
     }
-    const pillTxt = label === "risk_on" ? "RISK ON" : label === "risk_off" ? "RISK OFF" : label === "mid" ? "MID · CASH" : label;
-    const nt = mix.now_trading || {};
-    const fmtBtc = (v) => {
-      if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
-      return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
-    };
-    board.querySelectorAll('[data-k="mix-label"]').forEach((el) => { el.textContent = pillTxt; });
-    board.querySelectorAll('[data-k="mix-now"]').forEach((el) => { el.textContent = nt.headline || el.textContent; });
-    board.querySelectorAll('[data-k="mix-stance"]').forEach((el) => { el.textContent = nt.stance || ""; });
-    board.querySelectorAll('[data-k="mix-why"]').forEach((el) => { el.textContent = mix.why || reg.why || ""; });
-    board.querySelectorAll('[data-k="mix-btc"]').forEach((el) => { el.textContent = fmtBtc(reg.btc); });
-    board.querySelectorAll('[data-k="mix-sma20"]').forEach((el) => { el.textContent = fmtBtc(reg.sma20); });
-    board.querySelectorAll('[data-k="mix-sma50"]').forEach((el) => { el.textContent = fmtBtc(reg.sma50); });
-    board.querySelectorAll('[data-k="mix-gap50"]').forEach((el) => {
-      el.textContent = fmtPct(reg.gap_vs_sma50_pct);
-      el.classList.remove("good", "bad");
-      const c = cls(reg.gap_vs_sma50_pct);
-      if (c) el.classList.add(c);
-    });
-    board.querySelectorAll('[data-k="mix-gap20"]').forEach((el) => { el.textContent = fmtPct(reg.gap_vs_sma20_pct); });
-    const pill = board.querySelector('[data-live="mix-pill"]');
-    if (pill) {
-      pill.classList.remove("on", "off", "obs");
-      pill.classList.add(label === "risk_on" ? "on" : label === "risk_off" ? "obs" : "off");
+    const poly = svg.querySelector("polygon");
+    const pline = svg.querySelector("polyline");
+    const dot = svg.querySelector("circle");
+    if (poly) poly.setAttribute("points", `0,${h} ${line} ${w},${h}`);
+    if (pline) {
+      pline.setAttribute("points", line);
+      pline.setAttribute("stroke", stroke);
     }
-    document.querySelectorAll('[data-k="mix-label-top"]').forEach((el) => { el.textContent = pillTxt; });
-    (mix.sleeves || []).forEach((sl) => {
-      const card = board.querySelector(`[data-mix-sleeve="${sl.id}"]`);
-      if (!card) return;
-      card.classList.toggle("on", !!sl.active);
-      card.classList.toggle("off", !sl.active);
-      const eur = card.querySelector('[data-k="mix-eur"]');
-      if (eur) eur.textContent = fmtEur(sl.target_eur).replace(/^\+/, "");
-      const live = (mix.sleeves_live || []).find((x) => x.id === sl.id) || {};
-      const whyTxt = live.live_caption || "";
-      const why = card.querySelector('[data-k="mix-why-s"]');
-      if (why && whyTxt) why.textContent = whyTxt;
-      const st = card.querySelector(".pill");
-      if (st) {
-        st.textContent = sl.active ? "AAN" : "UIT";
-        st.classList.toggle("on", !!sl.active);
-        st.classList.toggle("off", !sl.active);
-      }
-      const box = card.querySelector('[data-k="mix-pos"]');
-      if (box) {
-        const livePos = Array.isArray(live.positions)
-          ? live.positions
-          : (mix.positions || []).filter((p) => String(p.sleeve || "") === sl.id);
-        box.innerHTML = livePos.map((p) => {
-          const net = p.unrealized_net_eur;
-          return `<span class="mix-chip"><strong>${esc(p.base || "")}</strong>`
-            + `<span class="${cls(net)}">${fmtEur(net)}</span></span>`;
-        }).join("");
-      }
-    });
-    const engine = document.querySelector('[data-live="mix-engine-pill"]');
-    if (engine && pillTxt) {
-      engine.classList.remove("on", "off", "obs");
-      engine.classList.add(label === "risk_on" ? "on" : label === "risk_off" ? "obs" : "off");
-      engine.innerHTML = `<span class="dot"></span>MIX · ${esc(pillTxt)}`;
+    if (dot) {
+      dot.setAttribute("cx", sx(last[0]).toFixed(2));
+      dot.setAttribute("cy", sy(last[1]).toFixed(2));
+      dot.setAttribute("fill", stroke);
     }
-    patchMixOpen(mix);
+    const range = host.querySelector(".eq-range");
+    if (range) range.innerHTML = `<span>${hi}</span><span>${lo}</span>`;
   }
-  function mixHeroesLive() {
-    return !!document.querySelector("#dc-open-pos");
-  }
-  function dcPositionIds(don) {
-    const ids = new Set();
-    (don.positions || []).forEach((p) => {
-      if (Number(p.quantity || 0) <= 1e-12) return;
-      const id = String(p.holding_id || p.base || "");
-      if (id) ids.add(id);
-    });
-    return ids;
-  }
-  function donchianSetChanged(don) {
-    const root = document.querySelector("#dc-open-pos");
-    if (!root) return false;
-    const live = new Set();
-    root.querySelectorAll("[data-holding]").forEach((el) => {
-      const id = el.getAttribute("data-holding");
-      if (id) live.add(id);
-    });
-    const next = dcPositionIds(don);
-    const empty = root.querySelector("[data-live='positions-empty']");
-    if (empty && next.size > 0) return true;
-    if (!empty && next.size === 0) return true;
-    if (live.size !== next.size) return true;
-    for (const id of next) if (!live.has(id)) return true;
-    for (const id of live) if (!next.has(id)) return true;
-    return false;
-  }
-  function renderDonchianOpen(don) {
-    const root = document.querySelector("#dc-open-pos");
-    if (!root) return;
-    const pos = (don.positions || []).filter((p) => Number(p.quantity || 0) > 1e-12);
-    const head = root.querySelector(".panel-head");
-    const headHtml = head ? head.outerHTML : '<div class="panel-head"><h2>Donchian · live longs</h2></div>';
-    if (!pos.length) {
-      root.innerHTML = headHtml
-        + '<p class="pos-empty muted" data-live="positions-empty">'
-        + "Geen open Donchian-longs — wacht op 10d-breakout na UTC-dagclose.</p>";
-      return;
-    }
-    const rows = pos.map((p) => {
-      const hid = esc(p.holding_id || p.base || "");
-      const entry = Number(p.entry_price || 0);
-      const mark = p.mark == null ? null : Number(p.mark);
+  function patchAlloc(st) {
+    const bar = document.querySelector('[data-live="alloc-bar"]');
+    if (!bar) return;
+    let cash = Math.max(0, Number(st.cash_eur || 0));
+    let btc = 0, alt = 0, altName = "alt";
+    (st.positions || []).forEach((p) => {
+      if (Number(p.quantity || p.notional_eur || 0) <= 1e-12) return;
+      const mark = Number(p.mark || p.entry_price || 0);
       const qty = Number(p.quantity || 0);
-      const qtyS = qty.toLocaleString("en-US", { maximumFractionDigits: 4 });
-      const notional = p.notional_eur == null ? "—" : fmtEur(p.notional_eur).replace(/^\+/, "");
-      const markS = mark == null ? "—" : fmtPx(mark);
-      const age = p.age_h == null ? "—" : `${Number(p.age_h).toFixed(1)}h`;
-      const net = p.unrealized_net_eur;
-      const reason = esc(p.entry_reason || "");
-      const sleeve = esc(p.sleeve || "donch");
-      const venue = esc(p.venue || "");
-      return `<tr data-holding="${hid}" data-entry="${entry}" data-side="long">`
-        + `<td><strong>${esc(p.base || "")}</strong> <span class="muted" style="font-size:.7rem">${venue}</span>`
-        + `<div class="muted" style="font-size:.7rem">${reason}</div></td>`
-        + `<td class="muted">${sleeve}</td>`
-        + `<td class="mono" data-k="qty">${qtyS}</td>`
-        + `<td class="mono">${fmtPx(entry)}</td>`
-        + `<td class="mono" data-k="mark">${markS}</td>`
-        + `<td class="${cls(p.gross_return)}" data-k="gross">${fmtPct(p.gross_return)}</td>`
-        + `<td class="mono">${notional}</td>`
-        + `<td class="${cls(net)}" data-k="net">${fmtEur(net)}</td>`
-        + `<td data-k="age">${age}</td>`
-        + `<td><form method="post" action="/live/momentum/donchian/sell" style="display:inline">`
-        + `<input type="hidden" name="holding_id" value="${hid}">`
-        + `<input type="hidden" name="redirect" value="1">`
-        + `<button type="submit" class="btn danger" style="font-size:.78rem;padding:.4rem .7rem;min-height:40px">Verkoop</button></form></td></tr>`;
-    }).join("");
-    const cards = pos.map((p) => {
-      const hid = esc(p.holding_id || p.base || "");
-      const entry = Number(p.entry_price || 0);
-      const mark = p.mark == null ? null : Number(p.mark);
-      const qty = Number(p.quantity || 0);
-      const qtyS = qty.toLocaleString("en-US", { maximumFractionDigits: 4 });
-      const notional = p.notional_eur == null ? "—" : fmtEur(p.notional_eur).replace(/^\+/, "");
-      const markS = mark == null ? "—" : fmtPx(mark);
-      const age = p.age_h == null ? "—" : `${Number(p.age_h).toFixed(1)}h`;
-      const net = p.unrealized_net_eur;
-      const reason = esc(p.entry_reason || "");
-      const sleeve = esc(p.sleeve || "donch");
-      const venue = esc(p.venue || "");
-      return `<div class="pos-card" data-holding="${hid}" data-entry="${entry}" data-side="long">`
-        + `<div class="row1"><div><strong>${esc(p.base || "")}</strong> `
-        + `<span class="muted">${venue}</span></div>`
-        + `<div class="${cls(net)}" style="font-weight:600" data-k="net">${fmtEur(net)}</div></div>`
-        + `<div class="muted" style="font-size:.7rem;margin-bottom:.35rem">${sleeve} · ${reason}</div>`
-        + `<div class="meta">`
-        + `<div><span>Qty</span><span data-k="qty">${qtyS}</span></div>`
-        + `<div><span>Notional</span>${notional}</div>`
-        + `<div><span>Entry</span>${fmtPx(entry)}</div>`
-        + `<div><span>Mark</span><span data-k="mark">${markS}</span></div>`
-        + `<div><span>Gross</span><span class="${cls(p.gross_return)}" data-k="gross">${fmtPct(p.gross_return)}</span></div>`
-        + `<div><span>Age</span><span data-k="age">${age}</span></div>`
-        + `</div></div>`;
-    }).join("");
-    root.innerHTML = headHtml
-      + '<div class="table-scroll desk-wide" data-live="positions" data-mode="donchian">'
-      + '<table class="desk" data-trail="0" data-tight-after="0" data-tight="0" data-stop="0">'
-      + "<thead><tr><th>Base</th><th>Sleeve</th><th>Qty</th><th>Entry</th><th>Mark</th>"
-      + "<th>Gross</th><th>Notional</th><th>Net</th><th>Age</th><th>Actie</th></tr></thead>"
-      + `<tbody>${rows}</tbody></table></div>`
-      + `<div class="pos-cards" data-live="position-cards" data-mode="donchian">${cards}</div>`
-      + '<form method="post" action="/live/momentum/donchian/sell-all" style="margin:.55rem 0 0">'
-      + '<input type="hidden" name="redirect" value="1">'
-      + '<button type="submit" class="btn danger">Leeg Donchian</button></form>'
-      + "<p class='muted dc-pos-note' style='font-size:.72rem;margin-top:.4rem'>"
-      + "Geen 15m trail of hard-stop. Exit = low van de exit-N dagkaars na UTC-close, "
-      + "of Friday-flat pas na vrijdag UTC-close. Marks elke 1s. "
-      + "Verkoop loopt via de Donchian-sleeve, niet via de 15m-desk.</p>";
+      const notion = mark > 0 && qty > 0 ? qty * mark : Number(p.notional_eur || 0);
+      if (String(p.role || "").toLowerCase() === "btc") btc += notion;
+      else { alt += notion; altName = String(p.base || altName); }
+    });
+    const total = Math.max(btc + alt + cash, Number(st.equity_eur || st.book_eur || 1), 1);
+    const pct = (v) => Math.max(0, 100 * v / total);
+    const segs = bar.querySelectorAll("i");
+    if (segs[0]) segs[0].style.width = pct(btc).toFixed(2) + "%";
+    if (segs[1]) segs[1].style.width = pct(alt).toFixed(2) + "%";
+    if (segs[2]) segs[2].style.width = pct(cash).toFixed(2) + "%";
+    const legend = bar.nextElementSibling;
+    if (legend && legend.classList.contains("alloc-legend")) {
+      legend.innerHTML = `<span><i class="alloc-dot btc"></i>BTC <b>${pct(btc).toFixed(0)}%</b></span>`
+        + `<span><i class="alloc-dot alt"></i>${esc(altName)} <b>${pct(alt).toFixed(0)}%</b></span>`
+        + `<span><i class="alloc-dot cash"></i>cash <b>${pct(cash).toFixed(0)}%</b></span>`;
+    }
   }
-  function patchPaperClip(st) {
-    const root = document.querySelector('[data-live="paper-clip"]');
+  function patchClip(st) {
+    const root = document.querySelector('[data-live="clip"]');
     if (!root || !st) return;
-    setText(root, "clip-eq", fmtEur(st.equity_eur).replace(/^\+/, ""));
-    setText(root, "clip-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
-    setText(root, "clip-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
-    setText(root, "clip-alt", st.want_alt || "—");
-    const cap = document.querySelector('[data-live="clip-caption"]');
-    if (cap && st.live_caption) cap.textContent = st.live_caption;
-    const next = document.querySelector('[data-live="clip-next"]');
-    if (next && st.next_decision) {
-      const d = new Date(st.next_decision);
-      next.textContent = Number.isNaN(d.getTime()) ? String(st.next_decision) : d.toLocaleString("nl-NL");
-    }
+    patchHeroes(st);
+    patchAlloc(st);
+    drawEqChart(st.equity_curve, st.equity_eur);
     const live = !!st.running && !st.dry_run && st.allow_live !== false;
     const pill = root.querySelector('[data-live="clip-pill"]');
     if (pill) {
-      pill.className = !st.running ? "pill off" : (live ? "pill on" : "pill obs");
+      pill.className = !st.running ? "pill off" : (live ? "pill on" : "pill off");
       pill.innerHTML = !st.running
         ? '<span class="dot"></span>STOP'
-        : (live ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>PAPER');
+        : (live ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>STOP');
     }
-    const title = root.querySelector('[data-live="clip-title"]');
-    if (title) {
-      title.textContent = !st.running ? "BTC + RS-clip" : (live ? "Live · BTC + RS-clip" : "Paper · BTC + RS-clip");
+    const gate = root.querySelector('[data-live="clip-gate"]');
+    if (gate) {
+      const on = !!st.risk_on;
+      gate.className = on ? "pill on" : "pill off";
+      gate.innerHTML = `<span class="dot"></span>${on ? "SMA50" : "flat"}`;
     }
-    const foot = root.querySelector('[data-live="clip-foot"]');
-    if (foot) {
-      foot.textContent = live
-        ? "Owner · Bitvavo live · 15m €2k-satelliet gereserveerd."
-        : "geen live orders, geen mix-cash.";
-    }
-    (st.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
-    const open = root.querySelector('[data-live="clip-open"]');
-    if (open) {
-      const pos = (st.positions || []).filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
-      if (!pos.length) {
-        const liveEmpty = !!st.running && !st.dry_run && st.allow_live !== false;
-        open.innerHTML = liveEmpty
-          ? '<span class="muted">Nog geen live-posities — eerste decide koopt 20% BTC + 80% RS-alt.</span>'
-          : '<span class="muted">Nog geen paper-posities — eerste decide na start.</span>';
-      } else {
-        open.innerHTML = pos.map((p) => {
-          const net = p.unrealized_net_eur;
-          const hid = esc(p.holding_id || p.base || "");
-          return `<span class="mix-chip" data-holding="${hid}">`
-            + `<span class="muted">${esc(p.role || p.venue || "")}</span>`
-            + `<strong>${esc(p.base || "")}</strong>`
-            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span>`
-            + (hid ? `<form method="post" action="/live/momentum/btc-rs-clip/sell" style="display:inline">`
-              + `<input type="hidden" name="holding_id" value="${hid}">`
-              + `<input type="hidden" name="redirect" value="1">`
-              + `<button type="submit" class="btn danger" style="font-size:.72rem;padding:.28rem .55rem;min-height:32px">Verkoop</button></form>` : "")
-            + `</span>`;
-        }).join("");
-      }
-      let actions = root.querySelector('[data-live="clip-actions"]');
-      if (!actions) {
-        actions = document.createElement("div");
-        actions.setAttribute("data-live", "clip-actions");
-        actions.className = "toolbar";
-        actions.style.margin = ".45rem 0 0";
-        open.insertAdjacentElement("afterend", actions);
-      }
-      if (!pos.length) {
-        actions.innerHTML = "";
-      } else {
-        actions.innerHTML = '<form method="post" action="/live/momentum/btc-rs-clip/sell-all"'
-          + ' onsubmit="return confirm(\'Clip nu op Bitvavo verkopen? 15m blijft staan. Na 00:05 UTC kan de bot opnieuw instappen.\');">'
-          + '<input type="hidden" name="redirect" value="1">'
-          + '<button type="submit" class="btn danger">Verkoop clip</button></form>'
-          + '<p class="muted" style="font-size:.72rem;margin:.35rem 0 0;max-width:36rem">'
-          + "Taker-sell via de clip-sleeve, niet via Bitvavo-UI. 15m-qty blijft gereserveerd.</p>";
-      }
-    }
-    const btc = st.btc;
-    const sma50 = st.sma50;
-    if (btc != null) {
-      document.querySelectorAll('[data-k="mix-btc"]').forEach((el) => {
-        el.textContent = Number(btc).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    const trail = Number((st.config || {}).trail_pct || 0);
+    if (positionsChanged(st, '[data-live="clip-open"]')) rebuildClipBags(st);
+    const equity = Number(st.equity_eur || 0);
+    (st.positions || []).forEach((p) => {
+      patchHolding(p, trail, 0, 0);
+      const id = String(p.holding_id || p.base || "");
+      document.querySelectorAll(`[data-live="clip-open"] [data-holding="${CSS.escape(id)}"]`).forEach((root) => {
+        const mark = Number(p.mark || p.entry_price || 0);
+        const qty = Number(p.quantity || 0);
+        const notion = mark > 0 && qty > 0 ? qty * mark : Number(p.notional_eur || 0);
+        const share = equity > 0 ? 100 * notion / equity : 0;
+        const bar = root.querySelector(".bag-bar > i");
+        if (bar) bar.style.width = Math.max(0, Math.min(100, share)).toFixed(1) + "%";
+        const shareEl = root.querySelector(".bag-meta span");
+        if (shareEl) shareEl.textContent = share.toFixed(0) + "%";
       });
-    }
-    if (btc != null && sma50) {
-      const gap = Number(btc) / Number(sma50) - 1;
-      document.querySelectorAll('[data-k="mix-gap50"]').forEach((el) => {
-        el.textContent = fmtPct(gap);
-        el.classList.remove("good", "bad");
-        const c = cls(gap);
-        if (c) el.classList.add(c);
-      });
-    }
+    });
     stampMarks(st);
   }
-  function patchDonchian(don) {
-    if (!don) return;
-    if (mixHeroesLive()) patchHeroes(don);
-    if (donchianSetChanged(don)) {
-      renderDonchianOpen(don);
-    } else {
-      (don.positions || []).forEach((p) => patchHolding(p, 0, 0, 0));
+  function rebuildClipBags(st) {
+    const grid = document.querySelector('[data-live="clip-open"]');
+    if (!grid) return;
+    const equity = Number(st.equity_eur || 0);
+    const pos = (st.positions || []).filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
+    if (!pos.length) {
+      grid.className = "mix-open";
+      grid.innerHTML = '<span class="muted">Geen bags</span>';
+      const actions = document.querySelector('[data-live="clip-actions"]');
+      if (actions) actions.innerHTML = "";
+      return;
     }
-    const alloc = don.allocator;
-    if (alloc && (alloc.label || alloc.regime)) {
-      patchMix({
-        ...alloc,
-        sleeves_live: don.sleeves,
-        positions: don.positions || alloc.positions || [],
-      });
+    grid.className = "bag-grid";
+    grid.innerHTML = pos.map((p) => {
+      const hid = esc(p.holding_id || p.base || "");
+      const net = p.unrealized_net_eur;
+      const mark = Number(p.mark || p.entry_price || 0);
+      const qty = Number(p.quantity || 0);
+      const notion = mark > 0 && qty > 0 ? qty * mark : Number(p.notional_eur || 0);
+      const share = equity > 0 ? 100 * notion / equity : 0;
+      return `<article class="bag-card" data-holding="${hid}">`
+        + `<div class="bag-top"><div><div class="bag-role">${esc(p.role || "long")}</div>`
+        + `<div class="bag-base">${esc(p.base || "")}</div></div>`
+        + `<div class="bag-net ${cls(net)}" data-k="net">${fmtEur(net)}</div></div>`
+        + `<div class="bag-bar"><i style="width:${Math.max(0, Math.min(100, share)).toFixed(1)}%"></i></div>`
+        + `<div class="bag-meta"><span>${share.toFixed(0)}%</span>`
+        + `<span class="${cls(p.gross_return)}" data-k="gross">${fmtPct(p.gross_return)}</span></div>`
+        + `<form method="post" action="/live/momentum/btc-rs-clip/sell">`
+        + `<input type="hidden" name="holding_id" value="${hid}">`
+        + `<input type="hidden" name="redirect" value="1">`
+        + `<button type="submit" class="btn danger block">Verkoop</button></form></article>`;
+    }).join("");
+    let actions = document.querySelector('[data-live="clip-actions"]');
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.setAttribute("data-live", "clip-actions");
+      actions.className = "clip-actions-mini";
+      grid.insertAdjacentElement("afterend", actions);
     }
-    stampMarks(don);
+    actions.innerHTML = '<form method="post" action="/live/momentum/btc-rs-clip/sell-all"'
+      + ' onsubmit="return confirm(\'Clip op Bitvavo verkopen?\');">'
+      + '<input type="hidden" name="redirect" value="1">'
+      + '<button type="submit" class="btn danger">Verkoop clip</button></form>';
   }
   function patchCore15m(status) {
     const root = document.querySelector('[data-live="core-15m"]');
     if (!root || !status) return;
-    setText(root, "core15-eq", fmtEur(status.equity_eur).replace(/^\+/, ""));
-    setText(root, "core15-open-pnl", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
-    setText(root, "core15-real", fmtEur(status.realized_total_eur), cls(status.realized_total_eur));
-    const cashBy = status.cash_by_venue || {};
-    const cashKeys = Object.keys(cashBy);
-    if (cashKeys.length) {
-      setText(root, "core15-cash", cashKeys.map((k) => `${k} ${Number(cashBy[k]).toLocaleString("en-US", { maximumFractionDigits: 0 })} €`).join(" · "));
-    }
-    const nextEl = document.querySelector('[data-live="core15-next"]');
-    if (nextEl && status.next_decision) {
-      const d = new Date(status.next_decision);
-      if (!Number.isNaN(d.getTime())) {
-        const dd = String(d.getUTCDate()).padStart(2, "0");
-        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-        const hh = String(d.getUTCHours()).padStart(2, "0");
-        const mi = String(d.getUTCMinutes()).padStart(2, "0");
-        nextEl.textContent = `${dd}-${mm} ${hh}:${mi} UTC`;
-      }
-    }
+    setText(root, "core15-eq", fmtEur(status.equity_eur, false));
     const pill = document.querySelector('[data-live="core15-pill"]');
     if (pill) {
       const on = !!status.running && !status.dry_run;
-      pill.className = on ? "pill on" : (status.running ? "pill obs" : "pill off");
-      pill.innerHTML = on
-        ? '<span class="dot"></span>LIVE'
-        : (status.running ? '<span class="dot"></span>SHADOW' : '<span class="dot"></span>STOP');
+      pill.className = on ? "pill on" : "pill off";
+      pill.innerHTML = on ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>STOP';
     }
     const open = root.querySelector('[data-live="core15-open"]');
     if (open) {
       const pos = (status.positions || []).filter((p) => Number(p.quantity || 0) > 1e-12);
-      if (!pos.length) {
-        open.innerHTML = '<span class="muted">Geen open 15m-posities — wacht op slot 7/13/16 UTC.</span>';
-      } else {
-        open.innerHTML = pos.map((p) => {
-          const net = p.unrealized_net_eur;
-          const hid = esc(p.holding_id || p.base || "");
-          return `<span class="mix-chip" data-holding="${hid}">`
-            + `<span class="muted">${esc(p.venue || "")}</span>`
-            + `<strong>${esc(p.base || "")}</strong>`
-            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
-        }).join("");
-      }
+      open.innerHTML = pos.map((p) => {
+        const net = p.unrealized_net_eur;
+        const hid = esc(p.holding_id || p.base || "");
+        return `<span class="mix-chip" data-holding="${hid}"><strong>${esc(p.base || "")}</strong>`
+          + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+      }).join("");
     }
     const knobs = trailKnobs(status);
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
+  }
+  function applyPulse(core, clip) {
+    const clipRoot = document.querySelector('[data-live="clip"]');
+    if (clipRoot) {
+      if (clip) patchClip(clip);
+      if (core) patchCore15m(core);
+      return;
+    }
+    if (core) {
+      patchHeroes(core);
+      drawEqChart(core.equity_curve, core.equity_eur);
+      patchAlloc(core);
+      const knobs = trailKnobs(core);
+      (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
+      patchCore15m(core);
+    }
   }
   async function fetchJson(url) {
     const sep = url.includes("?") ? "&" : "?";
     const res = await fetch(url + sep + "_=" + Date.now(), {
       cache: "no-store",
+      credentials: "same-origin",
       headers: { "Cache-Control": "no-cache" },
     });
     if (!res.ok) return null;
     return res.json();
   }
-  function applyPulse(core, sw, don, clip) {
-    if (core) {
-      const knobs = trailKnobs(core);
-      (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
-      if (mixHeroesLive()) patchCore15m(core);
-      else patchHeroes(core);
-      patchRules(core);
-    }
-    if (sw && sw.enabled_setting) {
-      const knobs = trailKnobs(sw);
-      (sw.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
-      patchShortSleeve(sw);
-    }
-    if (don) patchDonchian(don);
-    else if (!clip) {
-      /* mix fallback below */
-    }
-    if (clip) patchPaperClip(clip);
-  }
+  let tickBusy = false;
   async function tick() {
-    const pulse = await fetchJson(PULSE_URL).catch(() => null);
-    if (pulse && (pulse.core || pulse.donchian || pulse.clip || pulse.short_weakest)) {
-      applyPulse(pulse.core, pulse.short_weakest, pulse.donchian, pulse.clip);
-      if (!pulse.donchian && !pulse.clip) {
-        try {
-          const mix = await fetchJson(MIX_STATUS_URL);
-          if (mix) patchMix(mix);
-        } catch (err) { /* mix optional */ }
+    if (tickBusy) return;
+    tickBusy = true;
+    try {
+      const pulse = await fetchJson(PULSE_URL).catch(() => null);
+      if (pulse && (pulse.core || pulse.clip)) {
+        applyPulse(pulse.core, pulse.clip);
+        return;
       }
-      return;
-    }
-    const [core, sw, don, clip] = await Promise.all([
-      fetchJson(STATUS_URL).catch(() => null),
-      fetchJson(SHORT_STATUS_URL).catch(() => null),
-      fetchJson(DONCHIAN_STATUS_URL).catch(() => null),
-      fetchJson(CLIP_STATUS_URL).catch(() => null),
-    ]);
-    applyPulse(core, sw, don, clip);
-    if (!don) {
-      try {
-        const mix = await fetchJson(MIX_STATUS_URL);
-        if (mix) patchMix(mix);
-      } catch (err) {
-        /* mix optional */
-      }
+      const [core, clip] = await Promise.all([
+        fetchJson(STATUS_URL).catch(() => null),
+        fetchJson(CLIP_STATUS_URL).catch(() => null),
+      ]);
+      applyPulse(core, clip);
+    } finally {
+      tickBusy = false;
     }
   }
   (async function pollLoop() {
@@ -3540,60 +3510,37 @@ def render_momentum_dashboard(
     btc_rs_clip_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_btc_rs_clip: bool = False,
 ) -> HTMLResponse:
+    del volatile, volatile_ledger_rows, show_volatile
+    del short_weakest, short_weakest_ledger_rows, show_short_weakest
+    del allocator, donchian, donchian_ledger_rows
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
     dry = bool(status.get("dry_run"))
-    mix_label = str((allocator or {}).get("label") or "")
-    mix_on = bool(allocator) and mix_label
-    mix_top_txt = {
-        "risk_on": "RISK ON",
-        "risk_off": "RISK OFF",
-        "mid": "MID · CASH",
-    }.get(mix_label, mix_label or "—")
-    if mix_on:
-        mix_pill_cls = {"risk_on": "on", "risk_off": "obs", "mid": "off"}.get(mix_label, "off")
-        mix_pill_txt = {
-            "risk_on": "MIX · RISK ON",
-            "risk_off": "MIX · RISK OFF",
-            "mid": "MIX · CASH",
-        }.get(mix_label, "MIX")
-        pill = (
-            f'<span class="pill {mix_pill_cls}" data-live="mix-engine-pill">'
-            f'<span class="dot"></span>{escape(mix_pill_txt)}</span>'
-        )
-    elif not running:
-        pill = '<span class="pill off"><span class="dot"></span>GESTOPT</span>'
-    elif dry:
-        pill = '<span class="pill obs"><span class="dot"></span>SHADOW</span>'
-    else:
-        pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
-    risk = status.get("risk") or {}
-    cfg = status.get("config") or {}
-    show_vol = bool(show_volatile)
-    show_sw = bool(show_short_weakest)
-    show_dc = donchian is not None or donchian_ledger_rows is not None
+    core_live = running and not dry
     show_clip = bool(show_btc_rs_clip) or btc_rs_clip is not None
-    show_mix = bool(show_dc or show_sw)
-    book = dict(donchian or {}) if show_dc else dict(status)
-    if show_dc and book.get("cash_eur") is None:
-        book["cash_eur"] = round(
-            sum(float(s.get("cash_eur") or 0) for s in (book.get("sleeves") or [])),
-            2,
-        )
+    clip = dict(btc_rs_clip or {}) if show_clip else {}
+    clip_live = bool(clip.get("running")) and not bool(clip.get("dry_run", True)) and clip.get(
+        "allow_live"
+    ) is not False
+    book = clip if show_clip else dict(status)
+    if clip_live or core_live:
+        pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
+    else:
+        pill = '<span class="pill off"><span class="dot"></span>STOP</span>'
+    cfg = status.get("config") or {}
     n_pos = sum(
         1
         for p in (book.get("positions") or [])
         if float(p.get("quantity") or 0.0) > 1e-12
     )
-    fill_src: list[Mapping[str, Any]] = list(ledger_rows)
-    if show_dc:
-        fill_src = list(donchian_ledger_rows or []) + list(short_weakest_ledger_rows or [])
+    fill_src: list[Mapping[str, Any]] = (
+        list(btc_rs_clip_ledger_rows or []) if show_clip else list(ledger_rows)
+    )
+    if not fill_src:
+        fill_src = list(ledger_rows)
     exits = [r for r in fill_src if r.get("event") == "exit"]
     wins = sum(1 for r in exits if float(r.get("net_eur") or 0) > 0)
     win_rate = f"{100 * wins / len(exits):.0f}%" if exits else "—"
-    fees = sum(
-        float(r.get("fee_eur") or 0) for r in fill_src if r.get("event") in {"entry", "exit"}
-    )
     err = status.get("last_error")
     err_html = f'<div class="hint bad">Laatste fout: {escape(str(err))}</div>' if err else ""
     venue = escape(
@@ -3603,15 +3550,6 @@ def render_momentum_dashboard(
             or [str(status.get("venue") or "")]
         )
     )
-    cash_by_venue = status.get("cash_by_venue") or {}
-    if show_dc:
-        cash_hint = f"cash {_fmt_eur(book.get('cash_eur'), signed=False)}"
-    elif len(cash_by_venue) > 1:
-        cash_hint = " · ".join(
-            f"{escape(str(k))} {float(v):,.0f} €" for k, v in cash_by_venue.items()
-        )
-    else:
-        cash_hint = f"cash {_fmt_eur(status.get('cash_eur'), signed=False)}"
     task_err = status.get("task_error")
     if task_err:
         err_html += f'<div class="hint bad">Loop gestopt: {escape(str(task_err))}</div>'
@@ -3620,25 +3558,23 @@ def render_momentum_dashboard(
     err_html += _commit_notice(commit)
     err_html += _manual_exit_notice(status.get("manual_exit") or {})
     hold_page = bool(preview) or bool(sell) or bool(sell_all) or bool(report)
-    refresh_meta = ""  # marks poll via JS; full reload only on demand
     refresh_note = (
-        "Geen live-update tijdens bevestiging"
+        "wacht"
         if hold_page
-        else 'Marks live elke 1s · <span data-live="marks-age">—</span>'
+        else 'live <span data-live="marks-age">—</span>'
     )
     live_js = "" if hold_page else _LIVE_MARKS_JS
-    if show_mix:
-        toolbar = ""
-        toolbar_mobile = ""
-    else:
+    toolbar = ""
+    toolbar_mobile = ""
+    if core_live and not show_clip:
         toolbar = _toolbar(
-            running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=show_vol
+            running=running, has_positions=n_pos > 0, hold=hold_page, show_volatile=False
         )
         toolbar_mobile = _toolbar(
             running=running,
             has_positions=n_pos > 0,
             hold=hold_page,
-            show_volatile=show_vol,
+            show_volatile=False,
             compact=True,
         )
     sell_html = _sell_confirm_panel(status, sell) if sell else ""
@@ -3650,224 +3586,60 @@ def render_momentum_dashboard(
         if preview
         else ""
     )
-
     earnings_html = _earnings_masthead(
         earnings,
         pill=pill,
         venue=venue,
-        show_volatile=show_vol,
-        show_mix=show_mix,
     )
-
-    dc_day = earnings.donchian.day_eur if (show_dc and earnings) else risk.get("day_realized_eur")
-    open_pnl = (
-        book.get("unrealized_net_eur")
-        if show_dc
-        else (earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur"))
-    )
-    next_iso = book.get("next_decision") if show_dc else status.get("next_decision")
-    max_pos = (book.get("config") or {}).get("max_positions") if show_dc else cfg.get("max_positions")
-    bag_names = [
-        str(p.get("base") or "")
-        for p in (book.get("positions") or [])
-        if float(p.get("quantity") or 0.0) > 1e-12
-    ]
-    bags_hint = (
-        f"{n_pos} bags · {'+'.join(bag_names[:4])}" if bag_names else f"{n_pos} bags"
-    )
-    if show_dc:
-        day_hint = f"Donchian gesloten · win {win_rate} · geen 15m trail"
-        next_hint = "00:00 UTC na dagclose · geen kick-buy buiten window"
-        eq_hint = (
-            f"{cash_hint} · ingezet {_fmt_eur(book.get('deployed_eur') or book.get('exposure_eur'), signed=False)}"
+    open_pnl = book.get("unrealized_net_eur")
+    if open_pnl is None and earnings:
+        open_pnl = earnings.open_mtm_eur
+    equity = float(book.get("equity_eur") or 0)
+    if show_clip:
+        visual = _clip_visual_desk(clip)
+        sat = _core_15m_panel(status) if core_live else ""
+        positions_html = ""
+        decisions_html = ""
+        exec_ledger_html = (
+            '<details class="fold" id="ledger">'
+            '<summary><span class="fold-head">Ledger</span>'
+            '<span class="chev"></span></summary>'
+            f'<div class="fold-body">{_ledger_table(btc_rs_clip_ledger_rows or ledger_rows)}</div>'
+            "</details>"
         )
-        day_label = "Donchian vandaag"
-        next_label = "Volgende dagbesluit"
-    else:
-        day_hint = f"limiet −{float(cfg.get('day_loss_limit_eur') or 0):.0f} € · win {win_rate}"
-        next_hint = (
-            "entries toegestaan"
-            if risk.get("entries_allowed", True)
-            else f"geblokkeerd: {risk.get('block_reason')}"
+        if core_live:
+            exec_ledger_html += (
+                '<details class="fold">'
+                '<summary><span class="fold-head">15m</span>'
+                '<span class="chev"></span></summary>'
+                f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
+            )
+        rules_html = (
+            '<details class="fold">'
+            '<summary><span class="fold-head">Rules</span><span class="chev"></span></summary>'
+            f'<div class="fold-body">{_rules(clip.get("config") or cfg)}</div></details>'
         )
-        eq_hint = f"{cash_hint} · ingezet {_fmt_eur(status.get('exposure_eur'), signed=False)}"
-        day_label = "Core vandaag"
-        next_label = "Volgende beslissing"
-    heroes = "".join(
-        [
-            _hero(
-                "Equity (cash + posities)",
-                _fmt_eur(book.get("equity_eur"), signed=False),
-                hint=eq_hint,
-                value_attr='data-live="equity"',
-            ),
-            _hero(
-                day_label,
-                _fmt_eur(dc_day),
-                cls=_cls(dc_day),
-                hint=day_hint,
-            ),
-            _hero(
-                "Open resultaat",
-                _fmt_eur(open_pnl),
-                cls=_cls(open_pnl),
-                hint=f"{bags_hint} · fees {fees:,.2f} €",
-                value_attr='data-live="open-pnl"',
-            ),
-            _hero(
-                next_label,
-                f"<span class='mono' style='font-size:1rem' data-live='next-decision'>"
-                f"{_ts(next_iso)}</span>",
-                hint=next_hint,
-            ),
-        ]
-    )
-    core_earn = _sleeve_earnings_line(earnings.core if earnings else None)
-    vol_earn = (
-        _sleeve_earnings_line(earnings.volatile if earnings else None) if show_vol else ""
-    )
-    sw_earn = (
-        _sleeve_earnings_line(earnings.short_weakest if earnings else None) if show_sw else ""
-    )
-    dc_earn = (
-        _sleeve_earnings_line(earnings.donchian if earnings else None) if show_dc else ""
-    )
-    clip_earn = (
-        _sleeve_earnings_line(earnings.clip if earnings else None) if show_clip else ""
-    )
-    dc_is_live = sleeve_is_live(donchian or {}, default_live=False)
-    sw_is_live = sleeve_is_live(short_weakest or {}, default_live=False)
-    core_is_live = sleeve_is_live(status, default_live=True)
-    clip_is_live = sleeve_is_live(btc_rs_clip or {}, default_live=False)
-    core_tag = "live" if core_is_live else "paper"
-    dc_tag = "live" if dc_is_live else "paper"
-    sw_tag = "live" if sw_is_live else "paper"
-    clip_tag = "live" if clip_is_live else "paper"
-    sleeves_html = (
-        _sleeves_panel(
-            status,
-            volatile if show_vol else None,
-            short_weakest if show_sw else None,
-        )
-        if (show_vol or show_sw) and not show_dc
-        else ""
-    )
-    if show_vol or show_sw or show_dc:
-        pos_blocks = [
-            '<div><div class="panel-head"><h2>Core · open posities</h2></div>'
-            f"{_positions_table(status)}</div>"
-        ]
-        if show_vol:
-            pos_blocks.append(
-                '<div><div class="panel-head"><h2>Volatile · open posities</h2></div>'
-                f"""{_positions_table(
-                    volatile or {},
-                    sell_all_path=None,
-                    post_sell_action="/live/momentum/volatile/sell",
-                    empty_text="Geen open volatile-posities — soft book staat klaar.",
-                )}</div>"""
-            )
-        if show_sw:
-            pos_blocks.append(
-                '<div id="sw-open-pos"><div class="panel-head"><h2>Short weakest · paper</h2></div>'
-                f"""{_positions_table(
-                    short_weakest or {},
-                    sell_all_path="/live/momentum/short-weakest/sell-all",
-                    post_sell_action="/live/momentum/short-weakest/sell",
-                    empty_text="Geen open paper-shorts — standby tot BTC &lt; SMA20.",
-                )}</div>"""
-            )
-        if show_dc:
-            don_live = bool((donchian or {}).get("running")) and not bool(
-                (donchian or {}).get("dry_run", True)
-            )
-            dc_title = "Donchian · live longs" if don_live else "Donchian · paper longs"
-            pos_blocks[0] = (
-                f'<div id="dc-open-pos"><div class="panel-head"><h2>{escape(dc_title)}</h2></div>'
-                f"{_donchian_positions_table(donchian or {})}</div>"
-            )
-        stack = "three" if show_vol and show_sw else "two"
-        positions_html = (
-            f'<section class="panel" id="open-pos"><div class="stack {stack}">'
-            + "".join(pos_blocks)
-            + "</div></section>"
-        )
-        dec_blocks = [
-            '<div><div class="panel-head"><h2>Core · laatste beslissing</h2>'
-            f"{_simulate_button() if running and not preview else ''}</div>"
-            f"{_decision_panel(status)}</div>"
-        ]
-        if show_vol:
-            dec_blocks.append(
-                '<div><div class="panel-head"><h2>Volatile · laatste beslissing</h2>'
-                f"{_volatile_actions(volatile)}</div>{_decision_panel(volatile or {})}</div>"
-            )
-        if show_sw:
-            dec_blocks.append(
-                '<div><div class="panel-head"><h2>Short weakest · paper live</h2>'
-                f"{_short_weakest_actions(short_weakest)}</div>"
-                f"{_short_weakest_decision_panel(short_weakest or {})}</div>"
-            )
-        if donchian is not None:
-            dec_blocks[0] = (
-                '<div><div class="panel-head"><h2>Donchian · laatste beslissing</h2></div>'
-                f"{_donchian_decision_panel(donchian)}</div>"
-            )
-        decisions_html = (
-            f'<section class="panel"><div class="stack {stack}">'
-            + "".join(dec_blocks)
-            + "</div></section>"
-        )
-        vol_ledger_html = ""
-        if show_vol and volatile_ledger_rows is not None:
-            vol_ledger_html += (
-                f'<details class="fold"><summary><span class="fold-head">Volatile ledger</span>'
-                f'<span class="chev"></span></summary><div class="fold-body">'
-                f"{_ledger_table(volatile_ledger_rows or [])}</div></details>"
-            )
-        if show_sw and short_weakest_ledger_rows is not None:
-            vol_ledger_html += (
-                f'<details class="fold"><summary><span class="fold-head">Short-weakest ledger</span>'
-                f'<span class="chev"></span></summary><div class="fold-body">'
-                f"{_ledger_table(short_weakest_ledger_rows or [])}</div></details>"
-            )
-        if show_clip and btc_rs_clip_ledger_rows is not None:
-            vol_ledger_html += (
-                f'<details class="fold" id="clip-ledger"><summary><span class="fold-head">BTC+RS-clip ledger</span>'
-                f'<span class="chev"></span></summary><div class="fold-body">'
-                f"{_ledger_table(btc_rs_clip_ledger_rows or [])}</div></details>"
-            )
         footer_links = (
-            '<a href="/live/momentum/status">core JSON</a>'
-            + (
-                '<a href="/live/momentum/volatile/status">volatile JSON</a>'
-                if show_vol
-                else ""
-            )
-            + (
-                '<a href="/live/momentum/short-weakest/status">short-weakest JSON</a>'
-                if show_sw
-                else ""
-            )
-            + '<a href="/live/momentum/allocator/status">mix JSON</a>'
-            + (
-                '<a href="/live/momentum/btc-rs-clip/status">paper-clip JSON</a>'
-                if show_clip
-                else ""
-            )
-            + '<a href="/live/momentum/donchian/status">donchian JSON</a>'
-            + '<a href="/live/momentum/donchian/ledger">donchian ledger</a>'
-            + '<a href="/live/momentum/ledger">core ledger</a>'
-            + '<a href="/live/momentum/earnings">earnings</a>'
+            '<a href="/live/momentum/btc-rs-clip/status">clip</a>'
+            '<a href="/live/momentum/earnings">earnings</a>'
         )
+        slots = str(len(clip.get("positions") or []) or n_pos)
+        side_sub = "BTC + RS"
     else:
+        visual = (
+            f'<section class="eq-hero" id="desk" data-live="eq-hero">'
+            f'<div class="eq-top"><div><p class="eq-k">Equity</p>'
+            f'<p class="eq-val" data-live="equity">{_fmt_eur(equity, signed=False)}</p></div>'
+            f'<div><p class="eq-k">Open</p>'
+            f'<p class="eq-open {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</p>'
+            f"</div></div>"
+            f"{_equity_chart_svg(status.get('equity_curve'), equity=equity)}"
+            f"{_alloc_visual(status)}</section>"
+        )
+        sat = ""
         positions_html = (
             '<section class="panel" id="open-pos">'
-            '<div class="panel-head">'
-            '<h2>Open posities</h2>'
-            f'<span class="aside">{n_pos}/{escape(str(cfg.get("max_positions") or "—"))} slots'
-            f' · open {_fmt_eur(earnings.open_mtm_eur if earnings else status.get("unrealized_net_eur"))}'
-            "</span></div>"
+            '<div class="panel-head"><h2>Open posities</h2></div>'
             f"{_positions_table(status)}</section>"
         )
         decisions_html = (
@@ -3875,36 +3647,24 @@ def render_momentum_dashboard(
             f"{_simulate_button() if running and not preview else ''}</div>"
             f"{_decision_panel(status)}</section>"
         )
-        vol_ledger_html = ""
+        exec_ledger_html = (
+            '<details class="fold" open id="ledger">'
+            '<summary><span class="fold-head">Ledger</span>'
+            '<span class="chev"></span></summary>'
+            f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
+        )
+        rules_html = (
+            '<details class="fold">'
+            '<summary><span class="fold-head">Rules</span><span class="chev"></span></summary>'
+            f'<div class="fold-body">{_rules(cfg)}</div></details>'
+        )
         footer_links = (
-            '<a href="/live/momentum/status">status JSON</a>'
+            '<a href="/live/momentum/status">status</a>'
             '<a href="/live/momentum/ledger">ledger</a>'
             '<a href="/live/momentum/earnings">earnings</a>'
         )
-    if show_dc:
-        exec_ledger_html = (
-            '<details class="fold" open id="ledger">'
-            '<summary><span class="fold-head">Execution stream · Donchian ledger</span>'
-            '<span class="chev"></span></summary>'
-            f'<div class="fold-body">{_ledger_table(donchian_ledger_rows or [])}</div></details>'
-            '<details class="fold">'
-            '<summary><span class="fold-head">15m WR-core ledger</span>'
-            '<span class="chev"></span></summary>'
-            f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
-        )
-    else:
-        exec_ledger_html = (
-            '<details class="fold" open id="ledger">'
-            '<summary><span class="fold-head">Execution stream · core ledger</span>'
-            '<span class="chev"></span></summary>'
-            f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
-        )
-    equity = float(book.get("equity_eur") or 0)
-    exposure = float(book.get("deployed_eur") or book.get("exposure_eur") or 0)
-    util_pct = min(100.0, max(0.0, 100.0 * exposure / equity)) if equity > 0 else 0.0
-    slots = escape(str(max_pos if max_pos is not None else "—"))
-    active_cls = "active" if not show_vol else ""
-    vol_cls = "active" if show_vol else ""
+        slots = escape(str(cfg.get("max_positions") or "—"))
+        side_sub = "15m"
     sidebar = f"""
 <aside class="sidebar" aria-label="Workspace">
   <div>
@@ -3912,7 +3672,7 @@ def render_momentum_dashboard(
       <div class="side-logo">M</div>
       <div>
         <strong>Moreney</strong>
-        <span>Loop mix · SMA20/50</span>
+        <span>{escape(side_sub)}</span>
       </div>
     </div>
     <div class="side-status">
@@ -3920,30 +3680,19 @@ def render_momentum_dashboard(
       <div class="meta"><span>{venue}</span><span class="mono">{n_pos}/{slots}</span></div>
     </div>
     <nav class="side-nav">
-      <div class="label">Workspace</div>
-      <a class="active" href="/live/momentum#mix">Actieve mix</a>
-      <a class="{active_cls}" href="/live/momentum">Command Center</a>
-      <a class="{vol_cls}" href="/live/momentum/volatile">Volatile sleeve
-        <span class="badge">{'on' if show_vol else 'off'}</span></a>
-      <a href="/live/momentum#paper-sw">Short weakest paper
-        <span class="badge">{'on' if show_sw else 'off'}</span></a>
-      {('<a href="/live/momentum#paper-clip">BTC+RS clip <span class="badge">'
-        + ('live' if (btc_rs_clip or {}).get('running') and not bool((btc_rs_clip or {}).get('dry_run', True))
-           else 'paper')
-        + '</span></a>' if show_clip else '')}
-      <a href="/live/momentum#core-15m">15m WR-core
-        <span class="badge">{'live' if running and not dry else ('on' if running else 'off')}</span></a>
+      <div class="label">Desk</div>
+      <a class="active" href="/live/momentum#clip">Desk</a>
+      <a href="/live/momentum#open-pos">Bags</a>
+      {('<a href="/live/momentum#core-15m">15m</a>' if core_live else "")}
       <a href="/live/momentum#ledger">Ledger</a>
-      <a href="/live/momentum#dc-open-pos">Donchian longs</a>
-      <a href="/live/momentum/allocator/status">Mix JSON</a>
     </nav>
   </div>
   <div class="side-capital">
-    <div class="cap-label"><span>Allocated capital</span>
+    <div class="cap-label"><span>Equity</span>
       <span class="{_cls(open_pnl)} mono">{_fmt_eur(open_pnl)}</span>
     </div>
     <div class="cap-val" data-live="equity">{_fmt_eur(equity, signed=False)}</div>
-    <div class="bar" title="exposure / equity"><i style="width:{util_pct:.1f}%"></i></div>
+    <div class="bar"><i style="width:100%"></i></div>
   </div>
 </aside>
 """
@@ -3951,37 +3700,28 @@ def render_momentum_dashboard(
 <header class="topbar">
   <div class="topbar-left">
     {pill}
-    <div class="top-metric"><span class="k">Mix</span>
-      <span class="v" data-k="mix-label-top">{escape(mix_top_txt)}</span></div>
     <div class="top-metric"><span class="k">Equity</span>
       <span class="v" data-live="equity">{_fmt_eur(equity, signed=False)}</span></div>
     <div class="top-metric openpnl"><span class="k">Open</span>
-      <span class="v {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</span></div>
-    <div class="top-metric winrate"><span class="k">Win rate</span><span class="v">{escape(win_rate)}</span></div>
+      <span class="v {_cls(open_pnl)}" data-live="open-pnl">{
+        _fmt_eur(open_pnl)
+      }</span></div>
+    <div class="top-metric winrate"><span class="k">Win</span><span class="v">{escape(win_rate)}</span></div>
   </div>
   <div class="topbar-right">{toolbar}</div>
 </header>
 """
-    if show_mix:
-        clip_dock = (
-            '<a href="/live/momentum#paper-clip"><span class="ico">◇</span>Clip</a>'
-            if show_clip
-            else '<a href="/live/momentum/earnings"><span class="ico">€</span>Earn</a>'
-        )
-        mobile_dock = f"""
-<nav class="mobile-dock" aria-label="Mobile workspace">
-  <a class="active" href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
-  <a href="/live/momentum#dc-open-pos"><span class="ico">▣</span>Bags</a>
-  {clip_dock}
-  <a href="/live/momentum#ledger"><span class="ico">☰</span>Ledger</a>
-</nav>
-"""
-    else:
-        mobile_dock = f"""
-<nav class="mobile-dock" aria-label="Mobile workspace">
-  <a href="/live/momentum#mix"><span class="ico">◆</span>Mix</a>
-  <a class="{active_cls}" href="/live/momentum"><span class="ico">◆</span>Desk</a>
-  <a class="{vol_cls}" href="/live/momentum/volatile"><span class="ico">◇</span>Volatile</a>
+    dock_cls = "mobile-dock with-15m" if core_live and show_clip else "mobile-dock"
+    fifteen = (
+        '<a href="/live/momentum#core-15m"><span class="ico">◌</span>15m</a>'
+        if core_live and show_clip
+        else ""
+    )
+    mobile_dock = f"""
+<nav class="{dock_cls}" aria-label="Mobile workspace">
+  <a class="active" href="/live/momentum#clip"><span class="ico">◆</span>Desk</a>
+  <a href="/live/momentum#open-pos"><span class="ico">▣</span>Bags</a>
+  {fifteen}
   <a href="/live/momentum#ledger"><span class="ico">☰</span>Ledger</a>
 </nav>
 """
@@ -3996,40 +3736,26 @@ def render_momentum_dashboard(
 <meta name="theme-color" content="#070B12">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-{refresh_meta}
-<title>Moreney · Momentum Desk</title>
+<title>Moreney</title>
 <style>{_CSS}</style></head>
-<body class="{'mix-live' if show_mix else ''}"><div class="shell">
+<body><div class="shell">
 {sidebar}
 <div class="shell-main">
 {topbar}
 <div class="wrap">
 {earnings_html}
-{_mix_panel(allocator, donchian, short_weakest if show_sw else None, status if show_mix else None)}
-{_core_15m_panel(status) if show_mix else ""}
-{_paper_sw_panel(short_weakest) if show_sw else ""}
-{_paper_clip_panel(btc_rs_clip) if show_clip else ""}
+{visual}
+{sat}
 {positions_html}
 {err_html}
-{'' if show_mix else f'<div class="ops-row">{toolbar}</div>'}
-{sleeves_html}
-{'' if show_mix else (core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core {core_tag} · </div>{core_earn}' or '')}
-{vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile sleeve · </div>{vol_earn}' or ''}
-{dc_earn and f'<div class="muted" style="font-size:.78rem">Donchian {dc_tag} · </div>{dc_earn}' or ''}
-{sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest {sw_tag} · </div>{sw_earn}' or ''}
-{clip_earn and f'<div class="muted" style="font-size:.78rem">BTC+RS-clip {clip_tag} · </div>{clip_earn}' or ''}
-<div class="pulse hero-grid">{heroes}</div>
+{'' if show_clip else f'<div class="ops-row">{toolbar}</div>'}
 {preview_html}
 {report_html}
 {sell_html}
 {sell_all_html}
 {decisions_html}
 {exec_ledger_html}
-{vol_ledger_html}
-<details class="fold">
-<summary><span class="fold-head">{'15m satelliet rules (€2k Bitvavo)' if show_mix else 'Risk rules (core)'}</span><span class="chev"></span></summary>
-<div class="fold-body">{_rules(cfg)}</div>
-</details>
+{rules_html}
 <p class="foot"><span>{refresh_note}</span>{footer_links}</p>
 </div>
 </div>

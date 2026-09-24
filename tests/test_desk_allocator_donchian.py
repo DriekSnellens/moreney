@@ -148,15 +148,13 @@ def test_dashboard_mix_board_renders():
         show_short_weakest=True,
         short_weakest={"enabled_setting": True, "positions": [], "running": True},
     ).body.decode()
-    assert 'id="mix"' in html
-    assert "Nu actief" in html
-    assert "MIX · RISK ON" in html
-    assert "Donchian · paper longs" in html
-    assert "15m WR-core staat idle" in html
+    assert 'id="mix"' not in html
+    assert 'id="paper-sw"' not in html
+    assert "DONCHIAN LIVE" not in html
     assert "location.reload" not in html
-    assert "patchMixOpen" in html
-    assert 'id="core-15m"' in html
-    assert "15m WR-core" in html
+    assert 'data-live="eq-chart"' in html
+    assert "applyPulse" in html
+    assert 'id="core-15m"' not in html
 
 
 def test_dashboard_paper_sw_panel_beside_mix():
@@ -195,13 +193,10 @@ def test_dashboard_paper_sw_panel_beside_mix():
         },
         short_weakest_ledger_rows=[],
     ).body.decode()
-    assert 'id="paper-sw"' in html
-    assert "Paper · Short weakest" in html
-    assert "PAPER" in html
-    assert "geen mix-cash" in html
-    assert "Short-weakest ledger" in html
-    assert "SHORT_STATUS_URL" in html or "short-weakest/status" in html
-    assert "apart paper-boek" in html
+    assert 'id="paper-sw"' not in html
+    assert "Paper · Short weakest" not in html
+    assert "Short-weakest ledger" not in html
+    assert "apart paper-boek" not in html
 
 
 def test_dashboard_live_15m_beside_mix_is_not_idle():
@@ -246,12 +241,11 @@ def test_dashboard_live_15m_beside_mix_is_not_idle():
         show_short_weakest=True,
         short_weakest={"enabled_setting": True, "positions": [], "running": True},
     ).body.decode()
-    assert "€2k Bitvavo-satelliet" in html
-    assert "15m WR-core staat idle" not in html
-    assert 'id="core-15m"' in html
-    assert "bitvavo≤2,000" in html or "bitvavo≤2000" in html
-    assert "NEAR" in html
-    assert "DONCHIAN LIVE" in html
+    assert "DONCHIAN LIVE" not in html
+    assert "NEAR" not in html or 'data-live="clip"' not in html
+    assert 'id="paper-sw"' not in html
+    assert 'data-live="eq-chart"' in html
+    assert "3,900.00" in html
 
 
 def test_dashboard_paper_clip_is_separate_from_mix_equity():
@@ -294,32 +288,41 @@ def test_dashboard_paper_clip_is_separate_from_mix_equity():
         show_btc_rs_clip=True,
         btc_rs_clip={
             "running": True,
+            "dry_run": False,
+            "allow_live": True,
             "equity_eur": 20100.0,
             "book_eur": 20000.0,
+            "cash_eur": 50.0,
             "realized_total_eur": 0.0,
             "unrealized_net_eur": 100.0,
             "want_alt": "LINK",
-            "live_caption": "Paper clip: 75% BTC",
+            "risk_on": True,
+            "equity_curve": [[1.0, 20000.0], [2.0, 20100.0]],
             "positions": [
                 {
                     "holding_id": "clip-btc",
                     "base": "BTC",
                     "role": "btc",
                     "quantity": 0.2,
+                    "mark": 70000.0,
+                    "entry_price": 69000.0,
+                    "notional_eur": 14000.0,
                     "unrealized_net_eur": 80.0,
+                    "gross_return": 0.01,
                 }
             ],
         },
         btc_rs_clip_ledger_rows=[],
     ).body.decode()
-    assert 'id="paper-clip"' in html
-    assert "Paper · BTC + RS-clip" in html
-    assert "19,683.00" in html
+    assert 'id="paper-clip"' not in html
+    assert "Paper · BTC + RS-clip" not in html
+    assert 'id="clip"' in html
+    assert 'data-live="eq-chart"' in html
+    assert "20,100.00" in html
     assert "21,122" not in html
-    assert "Paper · BTC + RS-clip" in html
-    assert "telt niet mee" in html
-    assert "BTC+RS-clip ledger" in html or "paper-clip JSON" in html
-    assert "CLIP_STATUS_URL" in html or "btc-rs-clip/status" in html
+    assert "19,683" not in html
+    assert "clip-btc" in html
+    assert "BTC" in html
 
 
 def test_dashboard_clip_live_pill():
@@ -351,10 +354,12 @@ def test_dashboard_clip_live_pill():
             "allow_live": True,
             "equity_eur": 20100.0,
             "book_eur": 20000.0,
+            "cash_eur": 29.0,
             "realized_total_eur": 0.0,
             "unrealized_net_eur": 100.0,
             "want_alt": "NEAR",
-            "live_caption": "Clip: 75% BTC boven SMA50, 25% NEAR",
+            "risk_on": True,
+            "live_caption": "Clip: 20% BTC boven SMA50, 80% NEAR",
             "positions": [
                 {
                     "holding_id": "clip-btc",
@@ -363,21 +368,31 @@ def test_dashboard_clip_live_pill():
                     "quantity": 0.2,
                     "unrealized_net_eur": 80.0,
                     "venue": "bitvavo",
+                    "mark": 73000,
+                    "entry_price": 72000,
+                    "notional_eur": 14600,
+                    "gross_return": 0.01,
                 }
             ],
         },
         btc_rs_clip_ledger_rows=[],
     ).body.decode()
-    assert 'data-live="clip-title">Live · BTC + RS-clip</h2>' in html
+    assert 'data-live="clip-title"' in html
     assert 'data-live="clip-pill"' in html
     assert ">LIVE</span>" in html
-    assert "15m-plafond blijft gereserveerd" in html or "15m €2k-satelliet gereserveerd" in html
-    assert 'data-live="clip-title">Paper · BTC + RS-clip</h2>' not in html
+    assert 'data-live="clip-title">Paper' not in html
     assert "/live/momentum/btc-rs-clip/sell" in html
     assert "/live/momentum/btc-rs-clip/sell-all" in html
     assert "Verkoop clip" in html
-    assert "Verkoop alles" not in html
     assert "clip-btc" in html
+    assert 'id="paper-earn"' not in html
+    assert 'id="core-15m"' not in html  # 15m dry/shadow hidden
+    assert "location.reload" not in html
+    assert 'credentials: "same-origin"' in html
+    assert "rememberEquity" in html
+    assert "mergedCurve" in html
+    assert "tickBusy" in html
+    assert 'positionsChanged(st, \'[data-live="clip-open"]\')' in html or "clip-open" in html
 
 
 def test_dashboard_shows_donchian_ledger_fills():
@@ -440,16 +455,12 @@ def test_dashboard_shows_donchian_ledger_fills():
         short_weakest={"enabled_setting": True, "positions": [], "running": True},
         short_weakest_ledger_rows=[],
     ).body.decode()
-    assert "Execution stream · Donchian ledger" in html
-    assert "15m WR-core ledger" in html
-    assert "friday_flatten" in html
-    assert "donch_fri10" in html
-    assert "NEAR" in html
-    assert "3.7449" in html
-    assert "+36.86" in html or "+36.87" in html
+    assert "Execution stream · Donchian ledger" not in html
+    assert "Donchian · live longs" not in html
+    assert "friday_flatten" not in html
     assert 'id="ledger"' in html
-    assert "Donchian · live longs" in html
     assert "/live/momentum#ledger" in html
+    assert 'data-live="eq-chart"' in html
 
 
 def test_ledger_table_maps_donchian_entry_exit_price():
@@ -821,32 +832,19 @@ def test_dashboard_mix_equity_and_donchian_table():
         show_short_weakest=True,
         short_weakest={"enabled_setting": True, "positions": [], "running": True},
     ).body.decode()
-    assert "19,683.82" in html
-    assert 'data-live="equity">19,683.82' in html.replace(" ", "") or "19,683.82" in html
-    assert "NEAR" in html
-    assert "AVAX" in html
-    assert "1074.2316" in html.replace(",", "")
-    assert "houdt bags" in html
-    assert "btc_below_sma" not in html.split("Execution stream")[0]
-    donchian_block = html.split("15m WR-core rules")[0]
-    assert "Trail-stop" not in donchian_block
-    assert "Hard-stop" not in donchian_block
-    assert "Verkoop alles" not in html
-    assert "Geen 15m trail" in html
-    assert 'class="mix-live"' in html or "mix-live" in html
-    assert "grid-template-columns: 1fr" in html
-    assert "patchDonchian" in html
+    assert "19,683.82" not in html
+    assert "21,122.60" in html
+    assert "NEAR" not in html
+    assert "AVAX" not in html
+    assert "Donchian · live longs" not in html
+    assert "Leeg Donchian" not in html
+    assert 'id="paper-sw"' not in html
+    assert 'data-live="eq-chart"' in html
     assert "applyPulse" in html
     assert "/live/momentum/pulse" in html
-    assert "mixHeroesLive" in html
-    assert "Donchian · live longs" in html
     assert ">Bags<" in html
-    assert "15m satelliet rules (€2k Bitvavo)" in html
-    assert 'id="core-15m"' in html
-    assert 'name="sell"' not in html
-    assert "Leeg Donchian" in html
-    assert "/live/momentum/donchian/sell" in html
-    assert "/live/momentum/donchian/sell-all" in html
+    assert 'id="core-15m"' not in html
+    assert "/live/momentum/donchian/sell" not in html
 
 
 def test_mix_tape_uptrend_splits_at_sma50_not_chop():
