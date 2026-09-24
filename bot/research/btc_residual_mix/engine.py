@@ -104,6 +104,8 @@ def run_btc_residual(
     flatten: Flatten = "none",
     sma_n: int = 50,
     rebalance_days: int = 7,
+    lookback_days: int = 20,
+    skip_days: int = 1,
     model: FillModel = WET,
     policy: ExitPolicy | None = None,
     keep_curve: bool = False,
@@ -129,7 +131,7 @@ def run_btc_residual(
     n_rotate = 0
     n_overlay = 0
     overlay_reasons: dict[str, int] = {}
-    need = 22
+    need = int(lookback_days) + int(skip_days) + 1
     alt_frac = max(0.0, 1.0 - float(btc_frac))
 
     for date in dates:
@@ -159,7 +161,13 @@ def run_btc_residual(
         risk_on = s50 is not None and last > s50
         due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
         if due and len(btc_c) >= need:
-            pick = pick_residual(ohlc, date, excess_floor=excess_floor)
+            pick = pick_residual(
+                ohlc,
+                date,
+                excess_floor=excess_floor,
+                lookback_days=lookback_days,
+                skip_days=skip_days,
+            )
             winner = str(pick["want"])
             last_reb = now_ms
             px = _px_map(ohlc, date, field=4)
@@ -247,6 +255,10 @@ def run_btc_residual(
         "btc_frac": btc_frac,
         "excess_floor": excess_floor,
         "flatten": flatten,
+        "sma_n": sma_n,
+        "lookback_days": lookback_days,
+        "skip_days": skip_days,
+        "rebalance_days": rebalance_days,
         "n_overlay_exits": n_overlay,
         "overlay_reasons": overlay_reasons,
         "exit_policy": None if policy is None else policy.name,
@@ -412,5 +424,208 @@ def run_exit_scan(
         "btc_frac": btc_frac,
         "flatten": flatten,
         "none": live,
+        "ranked": ranked,
+    }
+
+
+TRAIL10 = ExitPolicy(name="alt_trail_10", alt_trail_pct=0.10)
+TRAIL8 = ExitPolicy(name="alt_trail_8", alt_trail_pct=0.08)
+TRAIL12 = ExitPolicy(name="alt_trail_12", alt_trail_pct=0.12)
+
+
+def owner_pack_specs() -> list[dict[str, Any]]:
+    """Directional €20k owner packs on the residual/clip tape.
+
+    Not a claim of all strategies — HFT/arb/funding/15m/AlphaI stay out.
+    """
+    specs: list[dict[str, Any]] = []
+    for frac in (0.0, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0):
+        for policy in (None, TRAIL10):
+            tag = "none" if policy is None else policy.name
+            specs.append(
+                {
+                    "family": "residual_mix",
+                    "name": f"btc{int(frac * 100)}_flat50_{tag}",
+                    "btc_frac": frac,
+                    "flatten": "all",
+                    "sma_n": 50,
+                    "lookback_days": 20,
+                    "skip_days": 1,
+                    "rebalance_days": 7,
+                    "policy": policy,
+                }
+            )
+    for frac in (0.5, 0.75):
+        for policy in (None, TRAIL10):
+            tag = "none" if policy is None else policy.name
+            specs.append(
+                {
+                    "family": "residual_mix",
+                    "name": f"btc{int(frac * 100)}_neverflat_{tag}",
+                    "btc_frac": frac,
+                    "flatten": "none",
+                    "sma_n": 50,
+                    "lookback_days": 20,
+                    "skip_days": 1,
+                    "rebalance_days": 7,
+                    "policy": policy,
+                }
+            )
+    for sma_n in (20, 100, 200):
+        specs.append(
+            {
+                "family": "residual_mix",
+                "name": f"btc50_flat{sma_n}_alt_trail_10",
+                "btc_frac": 0.5,
+                "flatten": "all",
+                "sma_n": sma_n,
+                "lookback_days": 20,
+                "skip_days": 1,
+                "rebalance_days": 7,
+                "policy": TRAIL10,
+            }
+        )
+    for lb, skip in ((10, 1), (40, 1), (60, 5)):
+        specs.append(
+            {
+                "family": "residual_mix",
+                "name": f"btc50_flat50_lb{lb}_alt_trail_10",
+                "btc_frac": 0.5,
+                "flatten": "all",
+                "sma_n": 50,
+                "lookback_days": lb,
+                "skip_days": skip,
+                "rebalance_days": 7,
+                "policy": TRAIL10,
+            }
+        )
+    for reb in (14, 30):
+        specs.append(
+            {
+                "family": "residual_mix",
+                "name": f"btc50_flat50_reb{reb}_alt_trail_10",
+                "btc_frac": 0.5,
+                "flatten": "all",
+                "sma_n": 50,
+                "lookback_days": 20,
+                "skip_days": 1,
+                "rebalance_days": reb,
+                "policy": TRAIL10,
+            }
+        )
+    for policy in (TRAIL8, TRAIL12):
+        specs.append(
+            {
+                "family": "residual_mix",
+                "name": f"btc50_flat50_{policy.name}",
+                "btc_frac": 0.5,
+                "flatten": "all",
+                "sma_n": 50,
+                "lookback_days": 20,
+                "skip_days": 1,
+                "rebalance_days": 7,
+                "policy": policy,
+            }
+        )
+    specs.append(
+        {
+            "family": "residual_mix",
+            "name": "btc100_flat200_none",
+            "btc_frac": 1.0,
+            "flatten": "all",
+            "sma_n": 200,
+            "lookback_days": 20,
+            "skip_days": 1,
+            "rebalance_days": 7,
+            "policy": None,
+        }
+    )
+    specs.append(
+        {
+            "family": "residual_mix",
+            "name": "btc100_neverflat_none",
+            "btc_frac": 1.0,
+            "flatten": "none",
+            "sma_n": 50,
+            "lookback_days": 20,
+            "skip_days": 1,
+            "rebalance_days": 7,
+            "policy": None,
+        }
+    )
+    return specs
+
+
+def run_owner_grid(
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    *,
+    start: str,
+    end: str,
+    book_eur: float = 20_000.0,
+    model: FillModel = WET,
+    include_clip: bool = True,
+    include_donch: bool = True,
+) -> dict[str, Any]:
+    """Rank directional owner packs by Calmar. Research only — not live."""
+    ranked: list[dict[str, Any]] = []
+    if include_clip:
+        live = ExitPolicy(name="live")
+        clip = run_clip_exits(
+            ohlc, live, start=start, end=end, book_eur=book_eur, model=model
+        )
+        row = _strip(clip)
+        row["family"] = "clip_live"
+        row["name"] = "clip_live_75_25_floor8"
+        ranked.append(row)
+    if include_donch:
+        from bot.live.momentum_donchian import loop_sleeve_configs
+        from bot.research.clip_donch_mix.engine import run_donchian_sleeve
+
+        for cfg in loop_sleeve_configs():
+            don = run_donchian_sleeve(
+                ohlc, cfg, start=start, end=end, book_eur=book_eur, model=model
+            )
+            row = _strip(don)
+            row["family"] = "donchian"
+            row["name"] = f"donch20k_{cfg.name}"
+            ranked.append(row)
+    for spec in owner_pack_specs():
+        row = run_btc_residual(
+            ohlc,
+            start=start,
+            end=end,
+            book_eur=book_eur,
+            btc_frac=float(spec["btc_frac"]),
+            excess_floor=0.0,
+            flatten=spec["flatten"],
+            sma_n=int(spec["sma_n"]),
+            lookback_days=int(spec["lookback_days"]),
+            skip_days=int(spec["skip_days"]),
+            rebalance_days=int(spec["rebalance_days"]),
+            model=model,
+            policy=spec.get("policy"),
+            strategy=str(spec["name"]),
+        )
+        slim = _strip(row)
+        slim["family"] = spec["family"]
+        slim["name"] = spec["name"]
+        ranked.append(slim)
+    ranked.sort(key=lambda r: (-float(r.get("calmar") or 0.0), -float(r.get("pnl_eur") or 0.0)))
+    champ = ranked[0] if ranked else {}
+    for row in ranked:
+        row["delta_calmar_vs_top"] = round(
+            float(row.get("calmar") or 0.0) - float(champ.get("calmar") or 0.0), 3
+        )
+        row["delta_pnl_vs_top"] = round(
+            float(row.get("pnl_eur") or 0.0) - float(champ.get("pnl_eur") or 0.0), 2
+        )
+    return {
+        "start": start,
+        "end": end,
+        "book_eur": book_eur,
+        "model": model.name,
+        "n_packs": len(ranked),
+        "best": champ.get("name"),
+        "best_calmar": champ.get("calmar"),
         "ranked": ranked,
     }

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.live.momentum_desk import DEFAULT_UNIVERSE
-from bot.research.btc_residual_mix.engine import run_exit_scan, run_mix_scan
+from bot.research.btc_residual_mix.engine import run_exit_scan, run_mix_scan, run_owner_grid
 
 WINDOWS = (
     ("fair_2y", "2024-03-16"),
@@ -62,6 +62,11 @@ def main() -> None:
     p.add_argument("--start", default="")
     p.add_argument("--skip-mix", action="store_true")
     p.add_argument("--skip-exits", action="store_true")
+    p.add_argument(
+        "--owner-grid",
+        action="store_true",
+        help="Rank extra directional owner packs by Calmar (research only).",
+    )
     args = p.parse_args()
 
     ohlc = load_cached(Path(args.cache_dir))
@@ -99,6 +104,13 @@ def main() -> None:
                         f"    {w['week']} {w['start']}→{w['end']}  {w['hold']:<22} "
                         f"{w['end_eur']:8.0f} {w['pnl_eur']:+8.0f}"
                     )
+        if args.owner_grid:
+            print(f"  -- owner calmar grid {name} --", flush=True)
+            grid = run_owner_grid(ohlc, start=start, end=last, book_eur=args.book)
+            payload.setdefault("owner_grid", {})[name] = grid
+            print(f"     best {grid.get('best')} calmar {grid.get('best_calmar')}", flush=True)
+            for row in (grid.get("ranked") or [])[:12]:
+                print(_line(str(row.get("name") or row.get("strategy")), row))
         if args.skip_exits or name == "last_90d":
             continue
         print(f"  -- exits 50/50 SMA50 flatten {name} --", flush=True)

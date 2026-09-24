@@ -90,3 +90,32 @@ def test_alt_stop_fires_on_dumped_sleeve() -> None:
         policy=ExitPolicy(name="alt_stop_8", alt_stop_pct=0.08),
     )
     assert row["n_overlay_exits"] >= 1
+
+
+def test_owner_pack_names_are_unique() -> None:
+    from bot.research.btc_residual_mix.engine import owner_pack_specs
+
+    names = [s["name"] for s in owner_pack_specs()]
+    assert names
+    assert len(names) == len(set(names))
+
+
+def test_owner_grid_ranks_calmar_on_up_tape() -> None:
+    from bot.research.btc_residual_mix.engine import run_owner_grid
+
+    btc = _bars(80, 100.0, 0.5)
+    ohlc = {"BTC": btc, "ETH": _bars(80, 10.0, 0.4)}
+    grid = run_owner_grid(
+        ohlc,
+        start="2024-02-20",
+        end="2024-03-20",
+        book_eur=20_000.0,
+        model=DRY,
+        include_clip=False,
+        include_donch=False,
+    )
+    assert grid["n_packs"] == len(grid["ranked"])
+    assert grid["n_packs"] >= 10
+    calmars = [float(r["calmar"]) for r in grid["ranked"]]
+    assert calmars == sorted(calmars, reverse=True)
+    assert grid["best"]
