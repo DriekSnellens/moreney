@@ -464,6 +464,7 @@ def run_clip_exits(
     end: str,
     book_eur: float = 20_000.0,
     model: FillModel = WET,
+    keep_curve: bool = False,
 ) -> dict[str, Any]:
     cfg = ClipConfig(sma_n=policy.sma_n, alt_frac=policy.alt_frac)
     dates = [bar_date(r) for r in (ohlc.get("BTC") or [])]
@@ -573,7 +574,7 @@ def run_clip_exits(
         "year_pnl": year_pnl(eq_dates, equity, book_eur),
         "policy": policy.name,
     }
-    return {
+    out = {
         "strategy": "btc_rs_clip",
         "policy": policy.name,
         "model": model.name,
@@ -587,3 +588,6 @@ def run_clip_exits(
             extra=extra,
         ),
     }
+    if keep_curve:
+        out["curve"] = [[d, round(v, 2)] for d, v in zip(eq_dates, equity, strict=False)]
+    return out
