@@ -334,7 +334,7 @@ def test_dashboard_paper_overview_is_separate_from_live_net(tmp_path: Path) -> N
     assert "+101.22" not in html
     assert "Telt niet mee in netto verdiend" in html
     live_block = html.split('id="paper-earn"')[0]
-    paper_block = html.split('id="paper-earn"')[1]
+    paper_block = html.split('id="paper-earn"')[1].split("</section>")[0]
     assert "+12.34" in live_block
     assert "+88.88" not in live_block
     assert "+88.88" in paper_block
