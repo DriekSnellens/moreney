@@ -22,6 +22,7 @@ from bot.research.clip_exit_lab.engine import (
     Order,
     _adv,
     _apply_orders,
+    _overlay_orders,
     _px_map,
     bar_date,
     metrics,
@@ -104,6 +105,7 @@ def run_btc_residual(
     sma_n: int = 50,
     rebalance_days: int = 7,
     model: FillModel = WET,
+    policy: ExitPolicy | None = None,
     keep_curve: bool = False,
     keep_weeks: bool = False,
     strategy: str = "",
@@ -125,6 +127,8 @@ def run_btc_residual(
     want_btc = ""
     want_alt = ""
     n_rotate = 0
+    n_overlay = 0
+    overlay_reasons: dict[str, int] = {}
     need = 22
     alt_frac = max(0.0, 1.0 - float(btc_frac))
 
@@ -136,6 +140,19 @@ def run_btc_residual(
         if model.delay_next_open and pending:
             trades.extend(_apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms))
             pending = []
+        overlay: list[Order] = []
+        overlay_sold: set[str] = set()
+        if policy is not None:
+            overlay = _overlay_orders(book, ohlc, date, policy, now_ms)
+            overlay_sold = {o.base for o in overlay if o.side == "sell"}
+            n_overlay += sum(1 for o in overlay if o.side == "sell")
+            for o in overlay:
+                if o.reason:
+                    overlay_reasons[o.reason] = overlay_reasons.get(o.reason, 0) + 1
+            if overlay_sold:
+                if want_alt in overlay_sold:
+                    want_alt = ""
+                last_reb = now_ms
         btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
@@ -183,7 +200,7 @@ def run_btc_residual(
                             reason="btc",
                         )
                     )
-                if next_alt and held.get(next_alt) != "alt":
+                if next_alt and held.get(next_alt) != "alt" and next_alt not in overlay_sold:
                     notion = eq if not next_btc else eq * alt_frac
                     orders.append(
                         Order(
@@ -195,17 +212,26 @@ def run_btc_residual(
                             reason="residual",
                         )
                     )
-                if orders:
-                    n_rotate += 1
+                merged = overlay + orders
+                if merged:
+                    n_rotate += int(bool(orders))
                     if model.delay_next_open:
-                        pending = orders
+                        pending = merged
                     else:
                         trades.extend(
-                            _apply_orders(book, orders, ohlc, date, model, opened_ms=now_ms)
+                            _apply_orders(book, merged, ohlc, date, model, opened_ms=now_ms)
                         )
+                    overlay = []
             want_btc, want_alt = next_btc, next_alt
+            if overlay_sold and want_alt in overlay_sold:
+                want_alt = ""
             if not next_btc and not next_alt:
                 last_reb = 0
+        if overlay:
+            if model.delay_next_open:
+                pending = overlay
+            else:
+                trades.extend(_apply_orders(book, overlay, ohlc, date, model, opened_ms=now_ms))
         px = _px_map(ohlc, date, field=4)
         equity.append(book.mark(px))
         eq_dates.append(date)
@@ -221,6 +247,9 @@ def run_btc_residual(
         "btc_frac": btc_frac,
         "excess_floor": excess_floor,
         "flatten": flatten,
+        "n_overlay_exits": n_overlay,
+        "overlay_reasons": overlay_reasons,
+        "exit_policy": None if policy is None else policy.name,
     }
     if keep_weeks:
         extra["weeks"] = _weeks(eq_dates, equity, holds, book_eur)
@@ -316,3 +345,72 @@ def run_mix_scan(
         )
         rows[name] = _strip(row)
     return {"start": start, "end": end, "book_eur": book_eur, "model": model.name, **rows}
+
+
+def MIX_EXIT_POLICIES() -> list[ExitPolicy]:
+    """Overlays on the alt sleeve only. BTC still follows SMA50 / weekly mix."""
+    rows = [
+        ExitPolicy(name="none"),
+        ExitPolicy(name="alt_stop_8", alt_stop_pct=0.08),
+        ExitPolicy(name="alt_stop_12", alt_stop_pct=0.12),
+        ExitPolicy(name="alt_stop_15", alt_stop_pct=0.15),
+        ExitPolicy(name="alt_stop_20", alt_stop_pct=0.20),
+        ExitPolicy(name="alt_trail_8", alt_trail_pct=0.08),
+        ExitPolicy(name="alt_trail_10", alt_trail_pct=0.10),
+        ExitPolicy(name="alt_trail_12", alt_trail_pct=0.12),
+        ExitPolicy(name="alt_trail_15", alt_trail_pct=0.15),
+        ExitPolicy(name="alt_tp_15", alt_tp_pct=0.15),
+        ExitPolicy(name="alt_tp_20", alt_tp_pct=0.20),
+        ExitPolicy(name="alt_tp_30", alt_tp_pct=0.30),
+        ExitPolicy(name="alt_time_14", alt_max_days=14),
+        ExitPolicy(name="alt_donch_10", alt_donch_n=10),
+        ExitPolicy(name="alt_excess_lte_0", alt_min_excess=0.0),
+        ExitPolicy(name="alt_stop8_fold", alt_stop_pct=0.08, fold_alt_to_btc=True),
+        ExitPolicy(name="alt_trail12_fold", alt_trail_pct=0.12, fold_alt_to_btc=True),
+        ExitPolicy(name="alt_partial_tp15", alt_partial_tp_pct=0.15, alt_partial_frac=0.5),
+    ]
+    return rows
+
+
+def run_exit_scan(
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    *,
+    start: str,
+    end: str,
+    book_eur: float = 20_000.0,
+    btc_frac: float = 0.5,
+    flatten: Flatten = "all",
+    model: FillModel = WET,
+) -> dict[str, Any]:
+    live: dict[str, Any] | None = None
+    ranked: list[dict[str, Any]] = []
+    for policy in MIX_EXIT_POLICIES():
+        row = run_btc_residual(
+            ohlc,
+            start=start,
+            end=end,
+            book_eur=book_eur,
+            btc_frac=btc_frac,
+            excess_floor=0.0,
+            flatten=flatten,
+            model=model,
+            policy=policy,
+            strategy=f"btc{int(btc_frac * 100)}_{flatten}_{policy.name}",
+        )
+        slim = _strip(row)
+        if policy.name == "none":
+            live = slim
+        ranked.append(slim)
+    base_pnl = float((live or {}).get("pnl_eur") or 0.0)
+    ranked.sort(key=lambda r: (-float(r["calmar"]), -float(r["pnl_eur"])))
+    for row in ranked:
+        row["delta_vs_none"] = round(float(row["pnl_eur"]) - base_pnl, 2)
+    return {
+        "start": start,
+        "end": end,
+        "book_eur": book_eur,
+        "btc_frac": btc_frac,
+        "flatten": flatten,
+        "none": live,
+        "ranked": ranked,
+    }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from bot.research.btc_residual_mix.engine import _targets, pick_residual, run_btc_residual
 from bot.research.clip_exit_lab.engine import DRY
+from bot.research.clip_exit_lab.policies import ExitPolicy
 
 
 def _bars(n: int, start: float, step: float, vol: float = 200_000.0) -> list[list[float]]:
@@ -68,3 +69,24 @@ def test_residual_100_starts_at_20k() -> None:
     )
     assert row["start_eur"] == 20_000.0
     assert row["n_days"] > 0
+
+
+def test_alt_stop_fires_on_dumped_sleeve() -> None:
+    btc = _bars(70, 100.0, 0.4)
+    eth_up = _bars(50, 10.0, 0.25)
+    t1 = eth_up[-1][0] + 86_400_000
+    eth_dn = _bars(20, eth_up[-1][4], -0.9)
+    for i, r in enumerate(eth_dn):
+        r[0] = t1 + i * 86_400_000
+    ohlc = {"BTC": btc, "ETH": eth_up + eth_dn}
+    row = run_btc_residual(
+        ohlc,
+        start="2024-02-01",
+        end="2024-03-10",
+        book_eur=20_000.0,
+        btc_frac=0.5,
+        flatten="none",
+        model=DRY,
+        policy=ExitPolicy(name="alt_stop_8", alt_stop_pct=0.08),
+    )
+    assert row["n_overlay_exits"] >= 1

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.live.momentum_desk import DEFAULT_UNIVERSE
-from bot.research.btc_residual_mix.engine import run_mix_scan
+from bot.research.btc_residual_mix.engine import run_exit_scan, run_mix_scan
 
 WINDOWS = (
     ("fair_2y", "2024-03-16"),
@@ -60,6 +60,8 @@ def main() -> None:
     p.add_argument("--cache-dir", default="data/residual_wet_candles")
     p.add_argument("--out", default="artifacts/btc_residual_mix.json")
     p.add_argument("--start", default="")
+    p.add_argument("--skip-mix", action="store_true")
+    p.add_argument("--skip-exits", action="store_true")
     args = p.parse_args()
 
     ohlc = load_cached(Path(args.cache_dir))
@@ -76,25 +78,51 @@ def main() -> None:
             "BTC fraction + residual-weekly alt (20d skip-1 excess). "
             "flat = SMA50 sells all. hold = never flatten. "
             "regime = SMA50 up keeps BTC+alt, SMA50 down is 100% residual. "
-            "AlphaI off. Not armed live."
+            "Exit overlays hit the alt sleeve only (stop/trail/TP). AlphaI off. Not armed live."
         ),
         "windows": {},
+        "exits": {},
     }
     for name, start in windows:
         print(f"\n== {name} {start} → {last}  €{args.book:.0f} ==", flush=True)
-        block = run_mix_scan(ohlc, start=start, end=last, book_eur=args.book)
-        payload["windows"][name] = block
-        for key in KEYS:
-            if key in block:
-                print(_line(key, block[key]))
-        if name == "last_90d":
-            mix = block.get("btc50_res50_hold") or {}
-            print("  weeks 50/50 hold", flush=True)
-            for w in mix.get("weeks") or []:
-                print(
-                    f"    {w['week']} {w['start']}→{w['end']}  {w['hold']:<22} "
-                    f"{w['end_eur']:8.0f} {w['pnl_eur']:+8.0f}"
-                )
+        if not args.skip_mix:
+            block = run_mix_scan(ohlc, start=start, end=last, book_eur=args.book)
+            payload["windows"][name] = block
+            for key in KEYS:
+                if key in block:
+                    print(_line(key, block[key]))
+            if name == "last_90d":
+                mix = block.get("btc50_res50_hold") or {}
+                print("  weeks 50/50 hold", flush=True)
+                for w in mix.get("weeks") or []:
+                    print(
+                        f"    {w['week']} {w['start']}→{w['end']}  {w['hold']:<22} "
+                        f"{w['end_eur']:8.0f} {w['pnl_eur']:+8.0f}"
+                    )
+        if args.skip_exits or name == "last_90d":
+            continue
+        print(f"  -- exits 50/50 SMA50 flatten {name} --", flush=True)
+        exits = run_exit_scan(
+            ohlc, start=start, end=last, book_eur=args.book, btc_frac=0.5, flatten="all"
+        )
+        payload["exits"].setdefault(name, {})["flat50"] = exits
+        for row in exits["ranked"][:8]:
+            print(_line(str(row.get("exit_policy") or row["strategy"]), row))
+            print(
+                f"     overlay {row.get('n_overlay_exits', 0):3d}  "
+                f"delta {row.get('delta_vs_none', 0):+.0f}"
+            )
+        print(f"  -- exits 50/50 never-flatten {name} --", flush=True)
+        hold = run_exit_scan(
+            ohlc, start=start, end=last, book_eur=args.book, btc_frac=0.5, flatten="none"
+        )
+        payload["exits"][name]["hold50"] = hold
+        for row in hold["ranked"][:6]:
+            print(_line(str(row.get("exit_policy") or row["strategy"]), row))
+            print(
+                f"     overlay {row.get('n_overlay_exits', 0):3d}  "
+                f"delta {row.get('delta_vs_none', 0):+.0f}"
+            )
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
