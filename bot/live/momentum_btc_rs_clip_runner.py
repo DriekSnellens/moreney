@@ -36,7 +36,7 @@ logger = logging.getLogger("bot.live.momentum_btc_rs_clip_runner")
 _MIN_ORDER_EUR = 5.0
 _TAKER_CROSS = 0.002
 _EQUITY_CURVE_MAX = 2016
-_EQUITY_CURVE_MIN_GAP_SEC = 60.0
+_EQUITY_CURVE_MIN_GAP_SEC = 5.0
 
 
 @dataclass
@@ -233,10 +233,9 @@ class BtcRsClipPaperRunner:
         now_ms = time.time() * 1000.0
         gap_ms = _EQUITY_CURVE_MIN_GAP_SEC * 1000.0
         if self.equity_curve:
-            last_t, last_eq = self.equity_curve[-1]
+            last_t, _last_eq = self.equity_curve[-1]
             if (now_ms - last_t) < gap_ms:
-                if abs(eq - last_eq) >= 0.01:
-                    self.equity_curve[-1] = [round(now_ms), eq]
+                self.equity_curve[-1] = [round(now_ms), eq]
             else:
                 self.equity_curve.append([round(now_ms), eq])
         else:

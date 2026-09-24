@@ -684,11 +684,9 @@ async def live_momentum_status() -> dict[str, Any]:
 
 @app.get("/live/momentum/pulse")
 async def live_momentum_pulse() -> dict[str, Any]:
-    """One round-trip for 1s dashboard marks: all desks, parallel refresh."""
-    core, sw, don, clip = await asyncio.gather(
+    """One round-trip for 1s dashboard marks: live clip + 15m only."""
+    core, clip = await asyncio.gather(
         get_momentum_desk_manager().status_fresh(),
-        get_short_weakest_desk_manager().refresh_live(),
-        get_donchian_desk_manager().status_fresh(),
         get_btc_rs_clip_desk_manager().refresh_live(),
         return_exceptions=True,
     )
@@ -698,9 +696,9 @@ async def live_momentum_pulse() -> dict[str, Any]:
 
     return {
         "core": _ok(core),
-        "short_weakest": _ok(sw),
-        "donchian": _ok(don),
         "clip": _ok(clip),
+        "short_weakest": None,
+        "donchian": None,
         "ts": time.time(),
     }
 

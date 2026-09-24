@@ -387,6 +387,12 @@ def test_dashboard_clip_live_pill():
     assert "clip-btc" in html
     assert 'id="paper-earn"' not in html
     assert 'id="core-15m"' not in html  # 15m dry/shadow hidden
+    assert "location.reload" not in html
+    assert 'credentials: "same-origin"' in html
+    assert "rememberEquity" in html
+    assert "mergedCurve" in html
+    assert "tickBusy" in html
+    assert 'positionsChanged(st, \'[data-live="clip-open"]\')' in html or "clip-open" in html
 
 
 def test_dashboard_shows_donchian_ledger_fills():

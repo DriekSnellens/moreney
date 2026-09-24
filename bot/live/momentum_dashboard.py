@@ -1905,9 +1905,9 @@ def _equity_chart_svg(
             pts[-1] = (now_ms, float(equity))
     if not pts:
         y = float(equity or 0.0)
-        pts = [(now_ms - 3_600_000.0, y), (now_ms, y)]
+        pts = [(now_ms - 1_000.0, y), (now_ms, y)]
     elif len(pts) == 1:
-        pts = [(pts[0][0] - 3_600_000.0, pts[0][1]), pts[0]]
+        pts = [(pts[0][0] - 1_000.0, pts[0][1]), pts[0]]
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     min_x, max_x = min(xs), max(xs)
@@ -3084,8 +3084,11 @@ _LIVE_MARKS_JS = r"""
   function fmtEur(v, signed) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
     const n = Number(v);
-    const sign = signed === false ? "" : (n > 0 ? "+" : "");
-    return sign + n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+    const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (signed === false) return abs + " €";
+    if (n > 0) return "+" + abs + " €";
+    if (n < 0) return "-" + abs + " €";
+    return "+0.00 €";
   }
   function fmtPx(v) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
@@ -3167,9 +3170,11 @@ _LIVE_MARKS_JS = r"""
     if (age.length) stamp.textContent = `${Math.max(...age).toFixed(0)}s`;
     else stamp.textContent = "live";
   }
-  function livePositionIds() {
+  function livePositionIds(scope) {
     const ids = new Set();
-    document.querySelectorAll("[data-holding]").forEach((el) => {
+    const root = scope ? document.querySelector(scope) : document;
+    if (!root) return ids;
+    root.querySelectorAll("[data-holding]").forEach((el) => {
       const id = el.getAttribute("data-holding");
       if (id) ids.add(id);
     });
@@ -3178,14 +3183,14 @@ _LIVE_MARKS_JS = r"""
   function statusPositionIds(status) {
     const ids = new Set();
     (status.positions || []).forEach((p) => {
-      if (Number(p.quantity || 0) <= 1e-12) return;
+      if (Number(p.quantity || p.notional_eur || 0) <= 1e-12) return;
       const id = String(p.holding_id || p.base || "");
       if (id) ids.add(id);
     });
     return ids;
   }
-  function positionsChanged(status) {
-    const live = livePositionIds();
+  function positionsChanged(status, scope) {
+    const live = livePositionIds(scope);
     const next = statusPositionIds(status);
     if (live.size !== next.size) return true;
     for (const id of next) if (!live.has(id)) return true;
@@ -3199,23 +3204,46 @@ _LIVE_MARKS_JS = r"""
     const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
     return { trail, tightAfter, tight };
   }
+  const eqSpark = [];
+  const EQ_SPARK_MAX = 900;
+  function rememberEquity(eq) {
+    if (eq == null || !Number.isFinite(Number(eq))) return;
+    const now = Date.now();
+    const v = Number(eq);
+    if (eqSpark.length && (now - eqSpark[eqSpark.length - 1][0]) < 800) {
+      eqSpark[eqSpark.length - 1] = [now, v];
+    } else {
+      eqSpark.push([now, v]);
+    }
+    if (eqSpark.length > EQ_SPARK_MAX) eqSpark.splice(0, eqSpark.length - EQ_SPARK_MAX);
+  }
+  function mergedCurve(server, equity) {
+    rememberEquity(equity);
+    const pts = [];
+    (Array.isArray(server) ? server : []).forEach((p) => {
+      if (Array.isArray(p) && p.length >= 2 && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
+        pts.push([Number(p[0]), Number(p[1])]);
+      }
+    });
+    eqSpark.forEach((p) => pts.push(p));
+    pts.sort((a, b) => a[0] - b[0]);
+    const out = [];
+    pts.forEach((p) => {
+      if (!out.length || p[0] > out[out.length - 1][0]) out.push(p);
+      else out[out.length - 1] = p;
+    });
+    return out;
+  }
   function drawEqChart(points, equity) {
     const host = document.querySelector('[data-live="eq-chart"]');
     if (!host) return;
-    let pts = Array.isArray(points) ? points.filter((p) => Array.isArray(p) && p.length >= 2).map((p) => [Number(p[0]), Number(p[1])]) : [];
-    const now = Date.now();
-    if (equity != null && Number.isFinite(Number(equity))) {
-      if (!pts.length || Math.abs(pts[pts.length - 1][1] - Number(equity)) > 0.009) {
-        pts.push([now, Number(equity)]);
-      } else {
-        pts[pts.length - 1] = [now, Number(equity)];
-      }
-    }
+    let pts = mergedCurve(points, equity);
     if (!pts.length) {
       const y = Number(equity || 0);
-      pts = [[now - 3600000, y], [now, y]];
+      const now = Date.now();
+      pts = [[now - 1000, y], [now, y]];
     } else if (pts.length === 1) {
-      pts = [[pts[0][0] - 3600000, pts[0][1]], pts[0]];
+      pts = [[pts[0][0] - 1000, pts[0][1]], pts[0]];
     }
     const xs = pts.map((p) => p[0]);
     const ys = pts.map((p) => p[1]);
@@ -3230,18 +3258,44 @@ _LIVE_MARKS_JS = r"""
     const line = pts.map((p) => `${sx(p[0]).toFixed(2)},${sy(p[1]).toFixed(2)}`).join(" ");
     const up = ys[ys.length - 1] >= ys[0];
     const stroke = up ? "#34D399" : "#F87171";
-    const fillId = up ? "eqUp" : "eqDown";
+    const fillId = "eqFill";
     const c0 = up ? "rgba(52,211,153,.32)" : "rgba(248,113,113,.30)";
+    const c1 = up ? "rgba(52,211,153,0)" : "rgba(248,113,113,0)";
     const last = pts[pts.length - 1];
     const hi = fmtEur(Math.max(...ys), false);
     const lo = fmtEur(Math.min(...ys), false);
-    host.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`
-      + `<defs><linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">`
-      + `<stop offset="0%" stop-color="${c0}"/><stop offset="100%" stop-color="${up ? "rgba(52,211,153,0)" : "rgba(248,113,113,0)"}"/></linearGradient></defs>`
-      + `<polygon fill="url(#${fillId})" points="0,${h} ${line} ${w},${h}"></polygon>`
-      + `<polyline fill="none" stroke="${stroke}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" points="${line}"></polyline>`
-      + `<circle cx="${sx(last[0]).toFixed(2)}" cy="${sy(last[1]).toFixed(2)}" r="4.2" fill="${stroke}"></circle>`
-      + `</svg><div class="eq-range"><span>${hi}</span><span>${lo}</span></div>`;
+    let svg = host.querySelector("svg");
+    if (!svg) {
+      host.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`
+        + `<defs><linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">`
+        + `<stop offset="0%" stop-color="${c0}"/><stop offset="100%" stop-color="${c1}"/></linearGradient></defs>`
+        + `<polygon fill="url(#${fillId})" points="0,${h} ${line} ${w},${h}"></polygon>`
+        + `<polyline fill="none" stroke="${stroke}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" points="${line}"></polyline>`
+        + `<circle cx="${sx(last[0]).toFixed(2)}" cy="${sy(last[1]).toFixed(2)}" r="4.2" fill="${stroke}"></circle>`
+        + `</svg><div class="eq-range"><span>${hi}</span><span>${lo}</span></div>`;
+      return;
+    }
+    const grad = svg.querySelector("linearGradient");
+    if (grad) {
+      const stops = grad.querySelectorAll("stop");
+      if (stops[0]) stops[0].setAttribute("stop-color", c0);
+      if (stops[1]) stops[1].setAttribute("stop-color", c1);
+    }
+    const poly = svg.querySelector("polygon");
+    const pline = svg.querySelector("polyline");
+    const dot = svg.querySelector("circle");
+    if (poly) poly.setAttribute("points", `0,${h} ${line} ${w},${h}`);
+    if (pline) {
+      pline.setAttribute("points", line);
+      pline.setAttribute("stroke", stroke);
+    }
+    if (dot) {
+      dot.setAttribute("cx", sx(last[0]).toFixed(2));
+      dot.setAttribute("cy", sy(last[1]).toFixed(2));
+      dot.setAttribute("fill", stroke);
+    }
+    const range = host.querySelector(".eq-range");
+    if (range) range.innerHTML = `<span>${hi}</span><span>${lo}</span>`;
   }
   function patchAlloc(st) {
     const bar = document.querySelector('[data-live="alloc-bar"]');
@@ -3290,8 +3344,22 @@ _LIVE_MARKS_JS = r"""
       gate.innerHTML = `<span class="dot"></span>${on ? "SMA50" : "flat"}`;
     }
     const trail = Number((st.config || {}).trail_pct || 0);
-    if (positionsChanged(st)) rebuildClipBags(st);
-    (st.positions || []).forEach((p) => patchHolding(p, trail, 0, 0));
+    if (positionsChanged(st, '[data-live="clip-open"]')) rebuildClipBags(st);
+    const equity = Number(st.equity_eur || 0);
+    (st.positions || []).forEach((p) => {
+      patchHolding(p, trail, 0, 0);
+      const id = String(p.holding_id || p.base || "");
+      document.querySelectorAll(`[data-live="clip-open"] [data-holding="${CSS.escape(id)}"]`).forEach((root) => {
+        const mark = Number(p.mark || p.entry_price || 0);
+        const qty = Number(p.quantity || 0);
+        const notion = mark > 0 && qty > 0 ? qty * mark : Number(p.notional_eur || 0);
+        const share = equity > 0 ? 100 * notion / equity : 0;
+        const bar = root.querySelector(".bag-bar > i");
+        if (bar) bar.style.width = Math.max(0, Math.min(100, share)).toFixed(1) + "%";
+        const shareEl = root.querySelector(".bag-meta span");
+        if (shareEl) shareEl.textContent = share.toFixed(0) + "%";
+      });
+    });
     stampMarks(st);
   }
   function rebuildClipBags(st) {
@@ -3361,15 +3429,17 @@ _LIVE_MARKS_JS = r"""
     const knobs = trailKnobs(status);
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
   }
-  function applyPulse(core, _sw, _don, clip) {
-    if (clip && document.querySelector('[data-live="clip"]')) {
-      patchClip(clip);
-    } else if (core) {
+  function applyPulse(core, clip) {
+    const clipRoot = document.querySelector('[data-live="clip"]');
+    if (clipRoot) {
+      if (clip) patchClip(clip);
+      if (core) patchCore15m(core);
+      return;
+    }
+    if (core) {
       patchHeroes(core);
       drawEqChart(core.equity_curve, core.equity_eur);
       patchAlloc(core);
-    }
-    if (core) {
       const knobs = trailKnobs(core);
       (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
       patchCore15m(core);
@@ -3379,22 +3449,30 @@ _LIVE_MARKS_JS = r"""
     const sep = url.includes("?") ? "&" : "?";
     const res = await fetch(url + sep + "_=" + Date.now(), {
       cache: "no-store",
+      credentials: "same-origin",
       headers: { "Cache-Control": "no-cache" },
     });
     if (!res.ok) return null;
     return res.json();
   }
+  let tickBusy = false;
   async function tick() {
-    const pulse = await fetchJson(PULSE_URL).catch(() => null);
-    if (pulse && (pulse.core || pulse.clip)) {
-      applyPulse(pulse.core, pulse.short_weakest, pulse.donchian, pulse.clip);
-      return;
+    if (tickBusy) return;
+    tickBusy = true;
+    try {
+      const pulse = await fetchJson(PULSE_URL).catch(() => null);
+      if (pulse && (pulse.core || pulse.clip)) {
+        applyPulse(pulse.core, pulse.clip);
+        return;
+      }
+      const [core, clip] = await Promise.all([
+        fetchJson(STATUS_URL).catch(() => null),
+        fetchJson(CLIP_STATUS_URL).catch(() => null),
+      ]);
+      applyPulse(core, clip);
+    } finally {
+      tickBusy = false;
     }
-    const [core, clip] = await Promise.all([
-      fetchJson(STATUS_URL).catch(() => null),
-      fetchJson(CLIP_STATUS_URL).catch(() => null),
-    ]);
-    applyPulse(core, null, null, clip);
   }
   (async function pollLoop() {
     while (true) {
