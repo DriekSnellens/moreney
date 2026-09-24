@@ -1829,9 +1829,15 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     caption = str(st.get("live_caption") or st.get("last_decision", {}).get("caption") or "")
     if not caption:
         caption = (
-            "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Live €20k-owner, 15m blijft €2k-satelliet."
+            (
+                "20% BTC / 80% RS-alt, SMA50 flatten, 10d floor 4%, alt-trail 10%. "
+                "Live €20k-owner, 15m blijft €2k-satelliet."
+            )
             if live
-            else "75% BTC boven SMA50, max 25% wekelijkse RS-alt. Shadow €20k, geen Bitvavo-orders."
+            else (
+                "20% BTC / 80% RS-alt, SMA50 flatten, 10d floor 4%, alt-trail 10%. "
+                "Shadow €20k, geen Bitvavo-orders."
+            )
         )
     pos_bits = []
     for p in st.get("positions") or []:
@@ -1847,7 +1853,7 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
             f"{_sell_cell(p, disabled=False, post_action='/live/momentum/btc-rs-clip/sell')}</span>"
         )
     empty = (
-        "Nog geen live-posities — eerste decide koopt 75% BTC + RS-alt."
+        "Nog geen live-posities — eerste decide koopt 20% BTC + 80% RS-alt."
         if live
         else "Nog geen paper-posities — eerste decide na start."
     )
@@ -3321,7 +3327,7 @@ _LIVE_MARKS_JS = r"""
       if (!pos.length) {
         const liveEmpty = !!st.running && !st.dry_run && st.allow_live !== false;
         open.innerHTML = liveEmpty
-          ? '<span class="muted">Nog geen live-posities — eerste decide koopt 75% BTC + RS-alt.</span>'
+          ? '<span class="muted">Nog geen live-posities — eerste decide koopt 20% BTC + 80% RS-alt.</span>'
           : '<span class="muted">Nog geen paper-posities — eerste decide na start.</span>';
       } else {
         open.innerHTML = pos.map((p) => {

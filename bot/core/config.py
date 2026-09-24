@@ -717,14 +717,15 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_allow_live: bool = False
     momentum_btc_rs_clip_venues: str = "bitvavo"
     momentum_btc_rs_clip_book_eur: float = Field(default=20_000.0, gt=0)
-    momentum_btc_rs_clip_btc_frac: float = Field(default=0.75, gt=0, le=1.0)
-    momentum_btc_rs_clip_alt_frac: float = Field(default=0.25, gt=0, le=1.0)
-    momentum_btc_rs_clip_excess_floor: float = Field(default=0.08, ge=0.0, le=1.0)
-    momentum_btc_rs_clip_lookback_days: int = Field(default=20, ge=5, le=90)
+    momentum_btc_rs_clip_btc_frac: float = Field(default=0.20, gt=0, le=1.0)
+    momentum_btc_rs_clip_alt_frac: float = Field(default=0.80, gt=0, le=1.0)
+    momentum_btc_rs_clip_excess_floor: float = Field(default=0.04, ge=0.0, le=1.0)
+    momentum_btc_rs_clip_lookback_days: int = Field(default=10, ge=5, le=90)
     momentum_btc_rs_clip_skip_days: int = Field(default=1, ge=0, le=10)
     momentum_btc_rs_clip_rebalance_days: int = Field(default=7, ge=1, le=30)
     momentum_btc_rs_clip_sma_n: int = Field(default=50, ge=10, le=200)
     momentum_btc_rs_clip_min_qvol_eur: float = Field(default=80_000.0, ge=0)
+    momentum_btc_rs_clip_alt_trail_pct: float = Field(default=0.10, ge=0.0, le=1.0)
     momentum_btc_rs_clip_state_path: str = "./data/momentum_btc_rs_clip_state.json"
     momentum_btc_rs_clip_ledger_path: str = "./data/momentum_btc_rs_clip_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

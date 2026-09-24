@@ -90,6 +90,7 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         fee_rt=base.fee_rt,
         slip=base.slip,
         min_notional_eur=base.min_notional_eur,
+        alt_trail_pct=_f("momentum_btc_rs_clip_alt_trail_pct", base.alt_trail_pct),
     )
 
 
@@ -268,6 +269,16 @@ class BtcRsClipPaperRunner:
             if px and px > 0:
                 self.marks[base] = float(px)
                 self.mark_ts[base] = now
+        for pos in self.positions:
+            mark = float(self.marks.get(pos.base) or 0.0)
+            if mark <= 0:
+                continue
+            if pos.peak_px <= 0:
+                # First mark after load: seed from live so we do not trail-stop
+                # a drop that happened before the trail was armed.
+                pos.peak_px = mark
+            else:
+                pos.peak_px = max(float(pos.peak_px), mark)
 
     async def _load_ohlc(self) -> dict[str, list[list[float]]]:
         out: dict[str, list[list[float]]] = {}
@@ -493,6 +504,98 @@ class BtcRsClipPaperRunner:
         )
         return net
 
+    async def _trim_lot(
+        self, pos: ClipPosition, sell_notional: float, reason: str
+    ) -> float | None:
+        """Sell part of a lot. Does not flatten the remainder."""
+        if pos.notional_eur <= 0 or pos.qty <= 0:
+            return None
+        want = min(float(sell_notional), pos.notional_eur * 0.95)
+        if want < self.cfg.min_notional_eur:
+            return None
+        px = float(self.marks.get(pos.base) or pos.entry_price or 0.0)
+        qty = pos.qty * (want / pos.notional_eur)
+        if qty <= 0:
+            return None
+        fill: _Fill | None
+        if pos.is_paper() or self.dry_run:
+            mark = px if px > 0 else pos.entry_price
+            fill = _Fill(
+                qty=qty, avg_price=float(mark), fee_eur=want * (self.cfg.fee_rt / 2)
+            )
+        else:
+            sell_qty = min(qty, await self._sellable_qty(pos))
+            if sell_qty * (px or pos.entry_price) < _MIN_ORDER_EUR:
+                return None
+            fill = await self._fill(pos.base, "sell", qty=sell_qty)
+            if fill is None:
+                return None
+        frac = fill.qty / pos.qty if pos.qty > 0 else 0.0
+        sold_notional = pos.notional_eur * frac
+        mark = fill.avg_price
+        ret = mark / pos.entry_price - 1.0 if pos.entry_price > 0 else 0.0
+        net = sold_notional * ret - fill.fee_eur
+        self.cash_eur += sold_notional + net
+        self.realized_total_eur += net
+        self.day_realized_eur += net
+        pos.qty = max(0.0, pos.qty - fill.qty)
+        pos.notional_eur = max(0.0, pos.notional_eur - sold_notional)
+        self._ledger_append(
+            {
+                "event": "trim",
+                "desk": self._desk(),
+                "base": pos.base,
+                "role": pos.role,
+                "venue": pos.venue,
+                "dry_run": self.dry_run,
+                "notional_eur": round(sold_notional, 2),
+                "quantity": fill.qty,
+                "entry_price": pos.entry_price,
+                "exit_price": mark,
+                "net_eur": round(net, 2),
+                "fee_eur": round(fill.fee_eur, 4),
+                "reason": reason,
+                "holding_id": pos.holding_id,
+            }
+        )
+        return net
+
+    async def manage_alt_trail(self) -> list[dict[str, Any]]:
+        """Intraday 10% trail on the alt sleeve only. Seeds peak from live mark."""
+        trail = float(self.cfg.alt_trail_pct or 0.0)
+        if trail <= 0:
+            return []
+        applied: list[dict[str, Any]] = []
+        for pos in list(self.positions):
+            if pos.role != "alt":
+                continue
+            mark = float(self.marks.get(pos.base) or 0.0)
+            if mark <= 0:
+                continue
+            peak = float(pos.peak_px or 0.0)
+            if peak <= 0:
+                pos.peak_px = mark
+                continue
+            if mark > peak:
+                pos.peak_px = mark
+                continue
+            if mark > peak * (1.0 - trail):
+                continue
+            net = await self._close_lot(pos, mark, "alt_trail")
+            if net is not None:
+                applied.append(
+                    {
+                        "action": "exit",
+                        "base": pos.base,
+                        "net_eur": round(net, 2),
+                        "reason": "alt_trail",
+                    }
+                )
+                self.last_rebalance_ms = int(time.time() * 1000)
+        if applied:
+            self._save_state()
+        return applied
+
     async def _open_lot(
         self, base: str, notional: float, px: float, role: str, reasons: list[str]
     ) -> ClipPosition | None:
@@ -520,6 +623,7 @@ class BtcRsClipPaperRunner:
                 role=role,
                 venue="paper",
                 entry_reason=",".join(reasons),
+                peak_px=px,
             )
             self.positions.append(pos)
             self._ledger_append(
@@ -556,6 +660,7 @@ class BtcRsClipPaperRunner:
             role=role,
             venue=venue,
             entry_reason=",".join(reasons),
+            peak_px=fill.avg_price,
         )
         self.positions.append(pos)
         self.marks[base] = fill.avg_price
@@ -590,6 +695,10 @@ class BtcRsClipPaperRunner:
             self._roll_day(now)
             ohlc = await self._load_ohlc()
             held = {p.base: p.role for p in self.positions}
+            sleeves = {
+                "btc": sum(p.notional_eur for p in self.positions if p.role == "btc"),
+                "alt": sum(p.notional_eur for p in self.positions if p.role == "alt"),
+            }
             cash = await self._decision_cash() if execute else self.cash_eur
             decision = evaluate_clip(
                 ohlc,
@@ -600,6 +709,7 @@ class BtcRsClipPaperRunner:
                 now_ms=int(now.timestamp() * 1000),
                 last_rebalance_ms=self.last_rebalance_ms,
                 now=now,
+                sleeve_eur=sleeves,
             )
             applied: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
@@ -613,6 +723,22 @@ class BtcRsClipPaperRunner:
                             applied.append(
                                 {"action": "exit", "base": ex["base"], "net_eur": round(net, 2)}
                             )
+                for row in decision.get("trims") or []:
+                    pos = next((p for p in self.positions if p.base == row["base"]), None)
+                    if pos is None:
+                        continue
+                    net = await self._trim_lot(
+                        pos, float(row["sell_notional_eur"]), str(row.get("reason") or "trim")
+                    )
+                    if net is not None:
+                        applied.append(
+                            {
+                                "action": "trim",
+                                "base": row["base"],
+                                "net_eur": round(net, 2),
+                                "sold_eur": float(row["sell_notional_eur"]),
+                            }
+                        )
                 for row in decision.get("entries") or []:
                     close = self._last_close(ohlc, row["base"])
                     if not close:
@@ -754,7 +880,7 @@ class BtcRsClipPaperRunner:
                 "sma_n": self.cfg.sma_n,
                 "min_qvol_eur": self.cfg.min_qvol_eur,
                 "book_eur": self.cfg.book_eur,
-                "trail_pct": 0.0,
+                "trail_pct": self.cfg.alt_trail_pct,
                 "hard_stop_pct": 0.0,
             },
         }
@@ -769,6 +895,8 @@ class BtcRsClipPaperRunner:
         while not should_stop():
             try:
                 await self._refresh_marks()
+                async with self._decide_lock:
+                    await self.manage_alt_trail()
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
                 if (
@@ -856,6 +984,9 @@ class BtcRsClipDeskManager:
                         "alt_frac": cfg.alt_frac,
                         "book_eur": cfg.book_eur,
                         "sma_n": cfg.sma_n,
+                        "trail_pct": cfg.alt_trail_pct,
+                        "excess_floor": cfg.excess_floor,
+                        "lookback_days": cfg.lookback_days,
                     },
                 }
             )
