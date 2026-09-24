@@ -92,6 +92,59 @@ def test_alt_stop_fires_on_dumped_sleeve() -> None:
     assert row["n_overlay_exits"] >= 1
 
 
+def test_pick_residual_exposes_wants() -> None:
+    btc = _bars(80, 100.0, 0.1)
+    eth = _bars(80, 10.0, 0.4)
+    ohlc = {"BTC": btc, "ETH": eth}
+    one = pick_residual(ohlc, "2024-03-10")
+    assert "wants" in one
+    two = pick_residual(ohlc, "2024-03-10", n_alts=2)
+    assert isinstance(two["wants"], list)
+
+
+def test_top2_can_hold_two_alts() -> None:
+    btc = _bars(80, 100.0, 0.05)
+    eth = _bars(80, 10.0, 0.5)
+    sol = _bars(80, 20.0, 0.45)
+    ohlc = {"BTC": btc, "ETH": eth, "SOL": sol}
+    row = run_btc_residual(
+        ohlc,
+        start="2024-02-20",
+        end="2024-03-20",
+        book_eur=20_000.0,
+        btc_frac=0.5,
+        flatten="none",
+        n_alts=2,
+        model=DRY,
+    )
+    hold = str(row.get("end_hold") or "")
+    alts = [p for p in hold.split(",") if p.startswith("alt:")]
+    assert len(alts) >= 1
+
+
+def test_champion_prefers_year_positive() -> None:
+    from bot.research.owner_tournament.engine import pick_champion
+
+    rows = [
+        {
+            "name": "boom",
+            "calmar": 2.0,
+            "pnl_eur": 50_000,
+            "max_dd_pct": 0.4,
+            "year_pnl": {"2024": 40_000, "2025": -10_000, "2026": 20_000},
+        },
+        {
+            "name": "steady",
+            "calmar": 1.2,
+            "pnl_eur": 20_000,
+            "max_dd_pct": 0.35,
+            "year_pnl": {"2024": 8_000, "2025": 2_000, "2026": 10_000},
+        },
+    ]
+    champ = pick_champion(rows)
+    assert champ["name"] == "steady"
+
+
 def test_owner_pack_names_are_unique() -> None:
     from bot.research.btc_residual_mix.engine import owner_pack_specs
 

@@ -46,21 +46,33 @@ def pick_residual(
     lookback_days: int = 20,
     skip_days: int = 1,
     excess_floor: float = 0.0,
+    n_alts: int = 1,
+    require_alt_sma: bool = False,
+    sma_n: int = 50,
 ) -> dict[str, Any]:
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
     ranked: list[dict[str, Any]] = []
     for base in universe:
         rows = rows_through(ohlc.get(base) or [], date)
-        xs = rs_excess(closes_of(rows), btc_c, lb=lookback_days, skip=skip_days)
+        cl = closes_of(rows)
+        xs = rs_excess(cl, btc_c, lb=lookback_days, skip=skip_days)
         qv = quote_vol(rows)
         if xs is None or qv < min_qvol_eur:
             continue
+        if require_alt_sma:
+            s = sma(cl, sma_n)
+            last_px = float(cl[-1]) if cl else 0.0
+            if s is None or last_px <= s:
+                continue
         ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
-    want = "BTC"
-    if ranked and float(ranked[0]["excess"]) > excess_floor:
-        want = str(ranked[0]["base"])
-    return {"want": want, "ranked": ranked[:8]}
+    alts = [
+        str(r["base"])
+        for r in ranked
+        if float(r["excess"]) > excess_floor
+    ][: max(1, int(n_alts))]
+    want = alts[0] if alts else "BTC"
+    return {"want": want, "wants": alts, "ranked": ranked[:8]}
 
 
 def _iso_week(date: str) -> str:
@@ -93,6 +105,26 @@ def _targets(
     return "", ""
 
 
+def _targets_multi(
+    *,
+    winners: Sequence[str],
+    risk_on: bool,
+    btc_frac: float,
+    flatten: Flatten,
+) -> tuple[str, tuple[str, ...]]:
+    alts = tuple(w for w in winners if w and w != "BTC")
+    alt_frac = max(0.0, 1.0 - float(btc_frac))
+    if flatten == "all" and not risk_on:
+        return "", ()
+    if flatten in {"regime", "btc"} and not risk_on:
+        return "", alts
+    if alts and alt_frac >= 0.05:
+        return ("BTC" if btc_frac >= 0.05 else ""), alts
+    if flatten == "none" or risk_on:
+        return "BTC", ()
+    return "", ()
+
+
 def run_btc_residual(
     ohlc: Mapping[str, Sequence[Sequence[float]]],
     *,
@@ -106,6 +138,8 @@ def run_btc_residual(
     rebalance_days: int = 7,
     lookback_days: int = 20,
     skip_days: int = 1,
+    n_alts: int = 1,
+    require_alt_sma: bool = False,
     model: FillModel = WET,
     policy: ExitPolicy | None = None,
     keep_curve: bool = False,
@@ -127,7 +161,7 @@ def run_btc_residual(
     trades: list[dict[str, Any]] = []
     last_reb = 0
     want_btc = ""
-    want_alt = ""
+    want_alts: tuple[str, ...] = ()
     n_rotate = 0
     n_overlay = 0
     overlay_reasons: dict[str, int] = {}
@@ -152,8 +186,7 @@ def run_btc_residual(
                 if o.reason:
                     overlay_reasons[o.reason] = overlay_reasons.get(o.reason, 0) + 1
             if overlay_sold:
-                if want_alt in overlay_sold:
-                    want_alt = ""
+                want_alts = tuple(a for a in want_alts if a not in overlay_sold)
                 last_reb = now_ms
         btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
         s50 = sma(btc_c, sma_n)
@@ -167,24 +200,26 @@ def run_btc_residual(
                 excess_floor=excess_floor,
                 lookback_days=lookback_days,
                 skip_days=skip_days,
+                n_alts=n_alts,
+                require_alt_sma=require_alt_sma,
+                sma_n=sma_n,
             )
-            winner = str(pick["want"])
             last_reb = now_ms
             px = _px_map(ohlc, date, field=4)
             eq = book.mark(px)
             held = _held(book)
-            next_btc, next_alt = _targets(
-                winner=winner,
+            next_btc, next_alts = _targets_multi(
+                winners=list(pick.get("wants") or []),
                 risk_on=risk_on,
                 btc_frac=btc_frac,
                 flatten=flatten,
             )
-            changed = (next_btc != want_btc) or (next_alt != want_alt) or not held
-            if changed and (next_btc or next_alt or held):
+            changed = (next_btc != want_btc) or (next_alts != want_alts) or not held
+            if changed and (next_btc or next_alts or held):
                 orders: list[Order] = []
                 for base, role in list(held.items()):
                     keep = (role == "btc" and base == next_btc) or (
-                        role == "alt" and base == next_alt
+                        role == "alt" and base in next_alts
                     )
                     if not keep:
                         orders.append(
@@ -197,7 +232,7 @@ def run_btc_residual(
                             )
                         )
                 if next_btc and held.get("BTC") != "btc":
-                    notion = eq if not next_alt else eq * btc_frac
+                    notion = eq if not next_alts else eq * btc_frac
                     orders.append(
                         Order(
                             side="buy",
@@ -208,14 +243,17 @@ def run_btc_residual(
                             reason="btc",
                         )
                     )
-                if next_alt and held.get(next_alt) != "alt" and next_alt not in overlay_sold:
-                    notion = eq if not next_btc else eq * alt_frac
+                split = max(1, len(next_alts))
+                for alt in next_alts:
+                    if held.get(alt) == "alt" or alt in overlay_sold:
+                        continue
+                    notion = (eq if not next_btc else eq * alt_frac) / split
                     orders.append(
                         Order(
                             side="buy",
-                            base=next_alt,
+                            base=alt,
                             role="alt",
-                            adv=_adv(ohlc, next_alt, date),
+                            adv=_adv(ohlc, alt, date),
                             notional=notion,
                             reason="residual",
                         )
@@ -230,10 +268,10 @@ def run_btc_residual(
                             _apply_orders(book, merged, ohlc, date, model, opened_ms=now_ms)
                         )
                     overlay = []
-            want_btc, want_alt = next_btc, next_alt
-            if overlay_sold and want_alt in overlay_sold:
-                want_alt = ""
-            if not next_btc and not next_alt:
+            want_btc, want_alts = next_btc, next_alts
+            if overlay_sold:
+                want_alts = tuple(a for a in want_alts if a not in overlay_sold)
+            if not next_btc and not next_alts:
                 last_reb = 0
         if overlay:
             if model.delay_next_open:
@@ -259,6 +297,8 @@ def run_btc_residual(
         "lookback_days": lookback_days,
         "skip_days": skip_days,
         "rebalance_days": rebalance_days,
+        "n_alts": int(n_alts),
+        "require_alt_sma": bool(require_alt_sma),
         "n_overlay_exits": n_overlay,
         "overlay_reasons": overlay_reasons,
         "exit_policy": None if policy is None else policy.name,
