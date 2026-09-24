@@ -144,6 +144,7 @@ def run_btc_residual(
     policy: ExitPolicy | None = None,
     keep_curve: bool = False,
     keep_weeks: bool = False,
+    keep_trades: bool = False,
     strategy: str = "",
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
@@ -310,6 +311,7 @@ def run_btc_residual(
         "model": model.name,
         "held": hold,
         "trades_tail": trades[-12:],
+        **({"trades": trades} if keep_trades else {}),
         **metrics(
             equity,
             start_eur=book_eur,
