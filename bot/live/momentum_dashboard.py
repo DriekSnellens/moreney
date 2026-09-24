@@ -12,7 +12,7 @@ from typing import Any
 from fastapi.responses import HTMLResponse
 
 from bot.live.momentum_donchian import sleeve_live_caption
-from bot.live.momentum_period_pnl import DeskEarnings, earnings_as_dict
+from bot.live.momentum_period_pnl import DeskEarnings, PeriodNet, sleeve_is_live
 
 _CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
@@ -350,6 +350,19 @@ body {
   font-size: .8rem; color: var(--muted);
 }
 .earn-foot strong { color: var(--ink); font-weight: 600; font-family: var(--mono); }
+.paper-earn {
+  margin-top: .9rem; padding: .9rem 1.05rem .8rem;
+  border: 1px dashed rgba(245,158,11,.35); border-radius: 1rem;
+  background: rgba(245,158,11,.06);
+  animation: rise-in .55s var(--ease) both;
+}
+.paper-earn .earn-label { color: var(--warn); }
+.paper-earn .earn-grid { border-top-color: rgba(245,158,11,.22); }
+.paper-earn .earn-tile .amount {
+  font-size: clamp(1.15rem, 2.8vw, 1.5rem);
+}
+.paper-earn .earn-foot { border-top-color: rgba(245,158,11,.22); }
+.paper-earn .brand-sub { max-width: 42rem; }
 
 .pill {
   display: inline-flex; align-items: center; gap: .4rem;
@@ -623,6 +636,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
     gap: .3rem .75rem;
     font-size: .72rem;
   }
+  .paper-earn { margin-top: .7rem; padding: .75rem .7rem .65rem; border-radius: .85rem; }
   .panel {
     margin-top: .75rem;
     padding: .75rem .7rem .65rem;
@@ -787,6 +801,61 @@ def _hero(
 
 
 
+def _period_tiles(period: Any, week_meta: str) -> str:
+    tiles = [
+        ("Deze week", period.week_eur, week_meta),
+        ("Deze maand", period.month_eur, f"{period.trades_month} trades deze maand"),
+        (
+            "Vanaf begin",
+            period.all_time_eur,
+            f"{period.trades_all_time} trades all-time · netto gesloten",
+        ),
+    ]
+    return "".join(
+        '<div class="earn-tile">'
+        f'<p class="period">{escape(label)}</p>'
+        f'<p class="amount {_cls(val)}">{_fmt_eur(val)}</p>'
+        f'<p class="meta">{escape(meta)}</p>'
+        "</div>"
+        for label, val, meta in tiles
+    )
+
+
+def _zero_period() -> PeriodNet:
+    return PeriodNet(
+        week_eur=0.0,
+        month_eur=0.0,
+        all_time_eur=0.0,
+        day_eur=0.0,
+        trades_week=0,
+        trades_month=0,
+        trades_all_time=0,
+        trades_day=0,
+    )
+
+
+def _paper_earnings_panel(earnings: DeskEarnings) -> str:
+    """Paper fills only — never mixed into live Netto verdiend."""
+    paper = earnings.paper
+    open_mtm = earnings.paper_open_mtm_eur
+    as_of = earnings.as_of
+    tiles_html = _period_tiles(paper, f"{paper.trades_week} trades · paper deze week")
+    return (
+        '<section class="paper-earn" id="paper-earn" data-live="paper-earn">'
+        '<p class="earn-label">Paper overzicht</p>'
+        '<p class="brand-sub">Shadow / dry-run fills. Telt niet mee in netto verdiend '
+        "en is geen Bitvavo- of OKX-winst.</p>"
+        f'<div class="earn-grid">{tiles_html}</div>'
+        '<div class="earn-foot">'
+        f"<span>Vandaag <strong class='{_cls(paper.day_eur)}'>"
+        f"{_fmt_eur(paper.day_eur)}</strong></span>"
+        f"<span>Open MTM paper <strong class='{_cls(open_mtm)}'>"
+        f"{_fmt_eur(open_mtm)}</strong></span>"
+        f'<span class="muted">peil {escape(str(as_of)[:19].replace("T", " "))} NL</span>'
+        "</div></section>"
+    )
+
+
 def _earnings_masthead(
     earnings: DeskEarnings | None,
     *,
@@ -795,67 +864,54 @@ def _earnings_masthead(
     show_volatile: bool = False,
     show_mix: bool = False,
 ) -> str:
-    """First-viewport composition: brand + week/month/all-time net."""
-    use_combined = bool(show_volatile or show_mix)
-    if earnings is None:
-        c_week = c_month = c_all = 0.0
-        open_mtm = 0.0
-        tw = tm = ta = 0
-        core_w = vol_w = 0.0
-        as_of = "—"
-    else:
-        # Mix / dual-sleeve masthead uses combined (Donchian + shorts + idle core).
-        sleeve = earnings.combined if use_combined else earnings.core
-        c_week, c_month, c_all = sleeve.week_eur, sleeve.month_eur, sleeve.all_time_eur
-        open_mtm = earnings.open_mtm_eur
-        tw, tm, ta = sleeve.trades_week, sleeve.trades_month, sleeve.trades_all_time
-        core_w, vol_w = earnings.core.week_eur, earnings.volatile.week_eur
-        as_of = earnings.as_of
+    """First-viewport composition: live net only. Paper has its own panel."""
+    live = earnings.combined if earnings is not None else _zero_period()
+    open_mtm = earnings.open_mtm_eur if earnings is not None else 0.0
+    as_of = earnings.as_of if earnings is not None else "—"
     if show_mix:
-        week_meta = f"{tw} trades · mix deze week"
+        week_meta = f"{live.trades_week} trades · live deze week"
         brand_sub = f"Momentum desk · mix · {venue}. "
     elif show_volatile:
-        week_meta = f"{tw} trades · core {_fmt_eur(core_w)} · vol {_fmt_eur(vol_w)}"
+        week_meta = (
+            f"{live.trades_week} trades · live "
+            f"{_fmt_eur(live.week_eur)}"
+        )
         brand_sub = f"Momentum desk · core + volatile · {venue}. "
     else:
-        week_meta = f"{tw} trades deze week"
+        week_meta = f"{live.trades_week} trades · live deze week"
         brand_sub = f"Momentum desk · core · {venue}. "
-    tiles = [
-        ("Deze week", c_week, week_meta),
-        ("Deze maand", c_month, f"{tm} trades deze maand"),
-        ("Vanaf begin", c_all, f"{ta} trades all-time · netto gesloten"),
-    ]
-    tiles_html = "".join(
-        '<div class="earn-tile">'
-        f'<p class="period">{escape(label)}</p>'
-        f'<p class="amount {_cls(val)}">{_fmt_eur(val)}</p>'
-        f'<p class="meta">{escape(meta)}</p>'
-        "</div>"
-        for label, val, meta in tiles
-    )
-    day_eur = 0.0
+    tiles_html = _period_tiles(live, week_meta)
+    paper_html = ""
     if earnings is not None:
-        day_eur = (
-            earnings.combined.day_eur if use_combined else earnings.core.day_eur
+        paper = earnings.paper
+        paper_on = (
+            show_mix
+            or paper.trades_all_time > 0
+            or abs(paper.all_time_eur) > 0.005
+            or abs(earnings.paper_open_mtm_eur) > 0.005
         )
+        if paper_on:
+            paper_html = _paper_earnings_panel(earnings)
     return (
         '<section class="masthead">'
         '<div class="masthead-top">'
         "<div>"
         '<h1 class="brand">Moreney</h1>'
         f'<p class="brand-sub">{brand_sub}'
-        "Netto = gesloten trades na fees (Europe/Amsterdam).</p>"
+        "Netto = live venue-fills na fees (Europe/Amsterdam). Paper staat apart.</p>"
         "</div>"
         f"<div>{pill}</div>"
         "</div>"
         '<p class="earn-label">Netto verdiend</p>'
         f'<div class="earn-grid">{tiles_html}</div>'
         '<div class="earn-foot">'
-        f"<span>Vandaag <strong class='{_cls(day_eur)}'>"
-        f"{_fmt_eur(day_eur)}</strong></span>"
-        f"<span>Open MTM <strong class='{_cls(open_mtm)}'>{_fmt_eur(open_mtm)}</strong></span>"
+        f"<span>Vandaag <strong class='{_cls(live.day_eur)}'>"
+        f"{_fmt_eur(live.day_eur)}</strong></span>"
+        f"<span>Open MTM live <strong class='{_cls(open_mtm)}'>"
+        f"{_fmt_eur(open_mtm)}</strong></span>"
         f'<span class="muted">peil {escape(str(as_of)[:19].replace("T", " "))} NL</span>'
         "</div></section>"
+        f"{paper_html}"
     )
 
 
@@ -3670,6 +3726,17 @@ def render_momentum_dashboard(
     dc_earn = (
         _sleeve_earnings_line(earnings.donchian if earnings else None) if show_dc else ""
     )
+    clip_earn = (
+        _sleeve_earnings_line(earnings.clip if earnings else None) if show_clip else ""
+    )
+    dc_is_live = sleeve_is_live(donchian or {}, default_live=False)
+    sw_is_live = sleeve_is_live(short_weakest or {}, default_live=False)
+    core_is_live = sleeve_is_live(status, default_live=True)
+    clip_is_live = sleeve_is_live(btc_rs_clip or {}, default_live=False)
+    core_tag = "live" if core_is_live else "paper"
+    dc_tag = "live" if dc_is_live else "paper"
+    sw_tag = "live" if sw_is_live else "paper"
+    clip_tag = "live" if clip_is_live else "paper"
     sleeves_html = (
         _sleeves_panel(
             status,
@@ -3940,10 +4007,11 @@ def render_momentum_dashboard(
 {err_html}
 {'' if show_mix else f'<div class="ops-row">{toolbar}</div>'}
 {sleeves_html}
-{'' if show_mix else (core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core netto · </div>{core_earn}' or '')}
-{vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile netto · </div>{vol_earn}' or ''}
-{dc_earn and f'<div class="muted" style="font-size:.78rem">Donchian netto · </div>{dc_earn}' or ''}
-{sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest netto · </div>{sw_earn}' or ''}
+{'' if show_mix else (core_earn and f'<div class="muted" style="font-size:.78rem;margin:.4rem 0 0">Core {core_tag} · </div>{core_earn}' or '')}
+{vol_earn and f'<div class="muted" style="font-size:.78rem">Volatile sleeve · </div>{vol_earn}' or ''}
+{dc_earn and f'<div class="muted" style="font-size:.78rem">Donchian {dc_tag} · </div>{dc_earn}' or ''}
+{sw_earn and f'<div class="muted" style="font-size:.78rem">Short-weakest {sw_tag} · </div>{sw_earn}' or ''}
+{clip_earn and f'<div class="muted" style="font-size:.78rem">BTC+RS-clip {clip_tag} · </div>{clip_earn}' or ''}
 <div class="pulse hero-grid">{heroes}</div>
 {preview_html}
 {report_html}

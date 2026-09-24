@@ -1,14 +1,16 @@
 """Period net PnL for the dual-sleeve momentum desk (operator calendar).
 
-Sums closed ``exit.net_eur`` from sleeve JSONL ledgers. Period boundaries use
+Sums closed ``exit.net_eur`` from sleeve JSONL ledgers. ``combined`` is live
+venue fills only; paper/dry-run fills live in ``paper``. Period boundaries use
 Europe/Amsterdam so "deze week / deze maand" match what the operator means.
-Open mark-to-market is tracked separately and never mixed into realized.
+Open mark-to-market is tracked separately (live vs paper) and never mixed
+into realized.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,11 +37,14 @@ class DeskEarnings:
     core: PeriodNet
     volatile: PeriodNet
     combined: PeriodNet
+    paper: PeriodNet
     open_mtm_eur: float
+    paper_open_mtm_eur: float
     as_of: str
     tz: str = "Europe/Amsterdam"
     short_weakest: PeriodNet | None = None
     donchian: PeriodNet | None = None
+    clip: PeriodNet | None = None
 
 
 def _parse_ts(raw: Any) -> datetime | None:
@@ -118,6 +123,8 @@ def load_exit_fills(path: str | Path | None) -> list[dict[str, Any]]:
                 "net_eur": net,
                 "base": row.get("base"),
                 "reason": row.get("reason"),
+                "dry_run": row.get("dry_run"),
+                "venue": row.get("venue"),
             }
         )
     return out
@@ -174,6 +181,19 @@ def sum_period(
     )
 
 
+def _zero() -> PeriodNet:
+    return PeriodNet(
+        week_eur=0.0,
+        month_eur=0.0,
+        all_time_eur=0.0,
+        day_eur=0.0,
+        trades_week=0,
+        trades_month=0,
+        trades_all_time=0,
+        trades_day=0,
+    )
+
+
 def _combine(a: PeriodNet, b: PeriodNet) -> PeriodNet:
     return PeriodNet(
         week_eur=round(a.week_eur + b.week_eur, 2),
@@ -187,6 +207,68 @@ def _combine(a: PeriodNet, b: PeriodNet) -> PeriodNet:
     )
 
 
+def sleeve_is_live(status: Mapping[str, Any] | None, *, default_live: bool = False) -> bool:
+    """True only when the sleeve is placing real venue fills."""
+    st = status or {}
+    if bool(st.get("paper_only")):
+        return False
+    if st.get("allow_live") is False:
+        return False
+    dry = st.get("dry_run")
+    if dry is True:
+        return False
+    if dry is False:
+        return True
+    return bool(default_live)
+
+
+def _row_is_paper(row: Mapping[str, Any], *, sleeve_live: bool) -> bool:
+    """Classify one exit. Explicit live fills stay live even if the sleeve later goes paper."""
+    dry = row.get("dry_run")
+    if dry is True or str(dry).lower() in {"true", "1", "yes"}:
+        return True
+    venue = str(row.get("venue") or "").strip().lower()
+    if venue in {"paper", "synthetic"}:
+        return True
+    if dry is False or str(dry).lower() in {"false", "0", "no"}:
+        return False
+    return not sleeve_live
+
+
+def _partition(
+    exits: Sequence[Mapping[str, Any]], *, sleeve_live: bool
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+    live: list[Mapping[str, Any]] = []
+    paper: list[Mapping[str, Any]] = []
+    for row in exits:
+        if _row_is_paper(row, sleeve_live=sleeve_live):
+            paper.append(row)
+        else:
+            live.append(row)
+    return live, paper
+
+
+def _sum_split(
+    exits: Sequence[Mapping[str, Any]],
+    *,
+    now: datetime,
+    sleeve_live: bool,
+    realized_fallback: float | None,
+) -> tuple[PeriodNet, PeriodNet]:
+    live_rows, paper_rows = _partition(exits, sleeve_live=sleeve_live)
+    live = sum_period(
+        live_rows,
+        now=now,
+        all_time_fallback=realized_fallback if sleeve_live else None,
+    )
+    paper = sum_period(
+        paper_rows,
+        now=now,
+        all_time_fallback=realized_fallback if not sleeve_live else None,
+    )
+    return live, paper
+
+
 def compute_desk_earnings(
     *,
     core_ledger_path: str | Path | None,
@@ -197,59 +279,96 @@ def compute_desk_earnings(
     short_weakest_status: Mapping[str, Any] | None = None,
     donchian_ledger_path: str | Path | None = None,
     donchian_status: Mapping[str, Any] | None = None,
+    clip_ledger_path: str | Path | None = None,
+    clip_status: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> DeskEarnings:
-    """Build operator earnings for core, mix sleeves, and combined."""
+    """Live net vs paper net. ``combined`` is live venue fills only."""
     core_status = core_status or {}
     volatile_status = volatile_status or {}
     short_weakest_status = short_weakest_status or {}
     donchian_status = donchian_status or {}
+    clip_status = clip_status or {}
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
-    core_exits = load_exit_fills(core_ledger_path)
-    vol_exits = load_exit_fills(volatile_ledger_path)
-    sw_exits = load_exit_fills(short_weakest_ledger_path)
-    dc_exits = load_exit_fills(donchian_ledger_path)
+    def _open(status: Mapping[str, Any], live: bool) -> tuple[float, float]:
+        mtm = _as_float(status.get("unrealized_net_eur"))
+        return (mtm, 0.0) if live else (0.0, mtm)
 
-    core = sum_period(
-        core_exits,
+    core_live_flag = sleeve_is_live(core_status, default_live=True)
+    vol_live_flag = sleeve_is_live(volatile_status, default_live=False)
+    sw_live_flag = sleeve_is_live(short_weakest_status, default_live=False)
+    dc_live_flag = sleeve_is_live(donchian_status, default_live=False)
+    clip_live_flag = sleeve_is_live(clip_status, default_live=False)
+
+    core_live, core_paper = _sum_split(
+        load_exit_fills(core_ledger_path),
         now=now_utc,
-        all_time_fallback=_as_float(core_status.get("realized_total_eur")),
+        sleeve_live=core_live_flag,
+        realized_fallback=_as_float(core_status.get("realized_total_eur")),
     )
-    volatile = sum_period(
-        vol_exits,
+    vol_live, vol_paper = _sum_split(
+        load_exit_fills(volatile_ledger_path),
         now=now_utc,
-        all_time_fallback=_as_float(volatile_status.get("realized_total_eur")),
+        sleeve_live=vol_live_flag,
+        realized_fallback=_as_float(volatile_status.get("realized_total_eur")),
     )
-    short_weakest = sum_period(
-        sw_exits,
+    sw_live, sw_paper = _sum_split(
+        load_exit_fills(short_weakest_ledger_path),
         now=now_utc,
-        all_time_fallback=_as_float(short_weakest_status.get("realized_total_eur")),
+        sleeve_live=sw_live_flag,
+        realized_fallback=_as_float(short_weakest_status.get("realized_total_eur")),
     )
-    donchian = sum_period(
-        dc_exits,
+    dc_live, dc_paper = _sum_split(
+        load_exit_fills(donchian_ledger_path),
         now=now_utc,
-        all_time_fallback=_as_float(donchian_status.get("realized_total_eur")),
+        sleeve_live=dc_live_flag,
+        realized_fallback=_as_float(donchian_status.get("realized_total_eur")),
     )
-    combined = _combine(core, volatile)
-    if short_weakest_ledger_path or short_weakest_status:
-        combined = _combine(combined, short_weakest)
-    if donchian_ledger_path or donchian_status:
-        combined = _combine(combined, donchian)
-    open_mtm = (
-        _as_float(core_status.get("unrealized_net_eur"))
-        + _as_float(volatile_status.get("unrealized_net_eur"))
-        + _as_float(short_weakest_status.get("unrealized_net_eur"))
-        + _as_float(donchian_status.get("unrealized_net_eur"))
+    clip_live, clip_paper = _sum_split(
+        load_exit_fills(clip_ledger_path),
+        now=now_utc,
+        sleeve_live=clip_live_flag,
+        realized_fallback=_as_float(clip_status.get("realized_total_eur")),
     )
+
+    core = _combine(core_live, core_paper)
+    volatile = _combine(vol_live, vol_paper)
+    short_weakest = _combine(sw_live, sw_paper)
+    donchian = _combine(dc_live, dc_paper)
+    clip = _combine(clip_live, clip_paper)
+
+    live = _combine(_combine(core_live, vol_live), _combine(sw_live, dc_live))
+    live = _combine(live, clip_live)
+    paper = _combine(_combine(core_paper, vol_paper), _combine(sw_paper, dc_paper))
+    paper = _combine(paper, clip_paper)
+
+    live_open = paper_open = 0.0
+    for st, flag in (
+        (core_status, core_live_flag),
+        (volatile_status, vol_live_flag),
+        (short_weakest_status, sw_live_flag),
+        (donchian_status, dc_live_flag),
+        (clip_status, clip_live_flag),
+    ):
+        lo, po = _open(st, flag)
+        live_open += lo
+        paper_open += po
+
+    has_sw = bool(short_weakest_ledger_path or short_weakest_status)
+    has_dc = bool(donchian_ledger_path or donchian_status)
+    has_clip = bool(clip_ledger_path or clip_status)
     return DeskEarnings(
         core=core,
         volatile=volatile,
-        combined=combined,
-        open_mtm_eur=round(open_mtm, 2),
+        combined=live,
+        paper=paper,
+        open_mtm_eur=round(live_open, 2),
+        paper_open_mtm_eur=round(paper_open, 2),
         as_of=now_utc.astimezone(_OPERATOR_TZ).isoformat(),
-        short_weakest=short_weakest,
-        donchian=donchian,
+        short_weakest=short_weakest if has_sw else None,
+        donchian=donchian if has_dc else None,
+        clip=clip if has_clip else None,
     )
 
 
@@ -277,12 +396,16 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
         "tz": e.tz,
         "as_of": e.as_of,
         "open_mtm_eur": e.open_mtm_eur,
+        "paper_open_mtm_eur": e.paper_open_mtm_eur,
         "core": _p(e.core),
         "volatile": _p(e.volatile),
         "combined": _p(e.combined),
+        "paper": _p(e.paper),
     }
     if e.short_weakest is not None:
         out["short_weakest"] = _p(e.short_weakest)
     if e.donchian is not None:
         out["donchian"] = _p(e.donchian)
+    if e.clip is not None:
+        out["clip"] = _p(e.clip)
     return out

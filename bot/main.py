@@ -1012,10 +1012,6 @@ async def live_momentum_dashboard(
             limit=400,
         )
     if show_clip:
-        try:
-            clip_status = get_btc_rs_clip_desk_manager().status()
-        except Exception:  # noqa: BLE001
-            clip_status = None
         clip_ledger = read_ledger_tail(
             getattr(
                 settings,
@@ -1024,6 +1020,10 @@ async def live_momentum_dashboard(
             ),
             limit=400,
         )
+    try:
+        clip_status = get_btc_rs_clip_desk_manager().status()
+    except Exception:  # noqa: BLE001
+        clip_status = None
     allocator = None
     if donchian_status and isinstance(donchian_status.get("allocator"), dict) and donchian_status["allocator"].get("ok"):
         allocator = donchian_status["allocator"]
@@ -1047,6 +1047,10 @@ async def live_momentum_dashboard(
             settings.momentum_donchian_ledger_path if show_donchian else None
         ),
         donchian_status=donchian_status if show_donchian else None,
+        clip_ledger_path=getattr(
+            settings, "momentum_btc_rs_clip_ledger_path", None
+        ),
+        clip_status=clip_status,
     )
     return render_momentum_dashboard(
         status,
@@ -1098,6 +1102,11 @@ async def live_momentum_earnings() -> dict[str, Any]:
             donchian_status = await get_donchian_desk_manager().status_fresh()
         except Exception:  # noqa: BLE001
             donchian_status = None
+    clip_status = None
+    try:
+        clip_status = get_btc_rs_clip_desk_manager().status()
+    except Exception:  # noqa: BLE001
+        clip_status = None
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
@@ -1113,6 +1122,10 @@ async def live_momentum_earnings() -> dict[str, Any]:
             settings.momentum_donchian_ledger_path if show_donchian else None
         ),
         donchian_status=donchian_status,
+        clip_ledger_path=getattr(
+            settings, "momentum_btc_rs_clip_ledger_path", None
+        ),
+        clip_status=clip_status,
     )
     return earnings_as_dict(earnings)
 
