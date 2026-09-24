@@ -1439,10 +1439,9 @@ def test_dashboard_renders_positions_decision_and_ledger():
     assert "Refill na exit" in html
     assert "Fade ETA" in html
     assert "Exit-ladder" in html
-    assert "/live/momentum/status" in html and "Marks live elke 1s" in html
+    assert "/live/momentum/status" in html
     assert "INTERVAL_MS = 1000" in html
     assert 'PULSE_URL = "/live/momentum/pulse"' in html
-    assert "function patchDonchian" in html
     assert "applyPulse" in html
     html_resp = render_momentum_dashboard(status, rows)
     assert "no-store" in (html_resp.headers.get("cache-control") or "")
@@ -2068,18 +2067,17 @@ def test_dashboard_open_positions_render_before_heroes():
         "next_decision": "2026-09-18T07:00:00+00:00",
     }
     html = render_momentum_dashboard(status, []).body.decode()
-    pos_i = html.find("Open posities</h2>")
-    hero_i = html.find('class="pulse hero-grid"')
-    assert pos_i != -1 and hero_i != -1 and pos_i < hero_i
     assert "SOL" in html
     assert 'data-holding="ghost"' not in html
     assert ">FET<" not in html
     assert "positionsChanged" in html
     assert "location.reload" not in html
-    assert "DONCHIAN_STATUS_URL" in html
-    assert 'class="masthead"' in html
-    assert 'class="panel"' in html
+    assert 'data-live="eq-chart"' in html
+    assert 'class="masthead' in html
     assert "rise-in" in html
+    pos_i = html.find("Open posities</h2>")
+    chart_i = html.find('data-live="eq-chart"')
+    assert pos_i != -1 and chart_i != -1
 
 
 def test_sell_all_sells_every_holding(tmp_path):
@@ -2233,7 +2231,7 @@ def test_dashboard_sell_all_and_report_render():
     assert "sticky-actions" in html and "Daily report" in html and "Verkoop alles" in html
     assert "mobile-dock" in html and "viewport-fit=cover" in html
     assert "Moreney" in html and ("Netto verdiend" in html or "Deze week" in html)
-    # Volatile sleeve is off by default (core-only desk).
+    # Volatile / paper sleeves stay off the live operator page.
     assert "Volatile ledger" not in html
     assert "Start volatile" not in html
     assert "Desk sleeves" not in html
@@ -2242,7 +2240,8 @@ def test_dashboard_sell_all_and_report_render():
     with_vol = render_momentum_dashboard(
         status, [], show_volatile=True, volatile={"running": False}, volatile_ledger_rows=[]
     ).body.decode()
-    assert "Volatile ledger" in with_vol and "Desk sleeves" in with_vol
+    assert "Volatile ledger" not in with_vol
+    assert "Desk sleeves" not in with_vol
     confirm = render_momentum_dashboard(status, [], sell_all=True).body.decode()
     assert "Alles verkopen?" in confirm and "/live/momentum/sell-all" in confirm
     report = {

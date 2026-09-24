@@ -262,8 +262,8 @@ def test_dashboard_shows_period_earnings(tmp_path: Path) -> None:
     assert "Deze week" in html and "Deze maand" in html and "Vanaf begin" in html
     assert "+12.34" in html
     assert "Plus Jakarta Sans" in html  # stitch brand font
-    assert "live venue-fills" in html
-    assert "id=\"paper-earn\"" not in html
+    assert 'id="paper-earn"' not in html
+    assert 'data-live="eq-chart"' in html
 
 
 def test_dashboard_paper_overview_is_separate_from_live_net(tmp_path: Path) -> None:
@@ -327,16 +327,9 @@ def test_dashboard_paper_overview_is_separate_from_live_net(tmp_path: Path) -> N
         allocator={"ok": True, "label": "mid", "why": "test"},
     ).body.decode()
     assert "Netto verdiend" in html
-    assert 'id="paper-earn"' in html
-    assert "Paper overzicht" in html
+    assert 'id="paper-earn"' not in html
+    assert "Paper overzicht" not in html
     assert "+12.34" in html
-    assert "+88.88" in html
+    assert "+88.88" not in html
     assert "+101.22" not in html
-    assert "Telt niet mee in netto verdiend" in html
-    live_block = html.split('id="paper-earn"')[0]
-    paper_block = html.split('id="paper-earn"')[1].split("</section>")[0]
-    assert "+12.34" in live_block
-    assert "+88.88" not in live_block
-    assert "+88.88" in paper_block
-    assert "+12.34" not in paper_block
     assert "21,122" not in html

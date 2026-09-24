@@ -662,3 +662,29 @@ def test_alt_trail_does_not_fire_on_first_live_mark(tmp_path):
     out = asyncio.run(r.manage_alt_trail())
     assert out == []
     assert r.positions and r.positions[0].peak_px == 8.8
+
+
+def test_clip_runner_samples_equity_curve(tmp_path):
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=False,
+    )
+    r._sample_equity()
+    assert len(r.equity_curve) == 1
+    assert r.equity_curve[0][1] == 20_000.0
+    r.cash_eur = 19_500.0
+    r._sample_equity()
+    assert len(r.equity_curve) == 1
+    assert r.equity_curve[0][1] == 19_500.0
+    r.equity_curve[-1][0] = 1.0
+    r.cash_eur = 19_800.0
+    r._sample_equity()
+    assert len(r.equity_curve) == 2
+    st = r.status()
+    assert st["equity_curve"][-1][1] == 19_800.0
+    raw = (tmp_path / "s.json").read_text(encoding="utf-8")
+    assert "equity_curve" in raw
