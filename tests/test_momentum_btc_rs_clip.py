@@ -50,7 +50,7 @@ def test_risk_off_exits_everything():
 def test_risk_on_opens_btc_core():
     btc = _bars(60, 100.0, 2.0)
     ohlc = {"BTC": btc, "ETH": _bars(60, 10.0, 0.0, vol=1.0)}
-    cfg = ClipConfig(universe=("ETH",), min_qvol_eur=80_000.0)
+    cfg = ClipConfig(universe=("ETH",), min_qvol_eur=80_000.0, btc_frac=0.75, alt_frac=0.25)
     out = evaluate_clip(
         ohlc,
         cfg,
@@ -75,7 +75,9 @@ def test_liquid_excess_alt_gets_clip():
     for i, r in enumerate(eth):
         r[0] = t0 + i * 86_400_000
     ohlc = {"BTC": btc, "ETH": eth}
-    cfg = ClipConfig(universe=("ETH",), min_qvol_eur=50_000.0, excess_floor=0.08)
+    cfg = ClipConfig(
+        universe=("ETH",), min_qvol_eur=50_000.0, excess_floor=0.08, alt_frac=0.25, btc_frac=0.75
+    )
     out = evaluate_clip(
         ohlc,
         cfg,
@@ -179,8 +181,11 @@ def test_allow_live_defaults_off():
         momentum_btc_rs_clip_allow_live=False,
     )
     cfg = config_from_settings(s)
-    assert cfg.alt_frac == 0.25
-    assert cfg.btc_frac == 0.75
+    assert cfg.alt_frac == 0.80
+    assert cfg.btc_frac == 0.20
+    assert cfg.excess_floor == 0.04
+    assert cfg.lookback_days == 10
+    assert cfg.alt_trail_pct == 0.10
     text = open("bot/live/momentum_btc_rs_clip_runner.py", encoding="utf-8").read()
     assert "from bot.live.executor" not in text
 
@@ -551,3 +556,109 @@ def test_clip_manager_sell_requires_running():
 
     assert asyncio.run(m.sell("x")) == {"ok": False, "reason": "not_running"}
     assert asyncio.run(m.sell_all()) == {"ok": False, "reason": "not_running"}
+
+
+def test_midweek_does_not_trim_existing_bags():
+    btc = _bars(60, 100.0, 0.05)
+    ohlc = {"BTC": btc, "ETH": _bars(61, 10.0, 0.0, vol=20_000.0)}
+    cfg = ClipConfig(universe=("ETH",), rebalance_days=7, min_qvol_eur=1.0)
+    now_ms = 20 * 86_400_000
+    out = evaluate_clip(
+        ohlc,
+        cfg,
+        held={"BTC": "btc", "ETH": "alt"},
+        cash_eur=4_000.0,
+        deployed_eur=16_000.0,
+        now_ms=now_ms,
+        last_rebalance_ms=now_ms - 2 * 86_400_000,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        sleeve_eur={"btc": 15_000.0, "alt": 5_000.0},
+    )
+    assert out["rebalance_due"] is False
+    assert out["trims"] == []
+    assert not any(e["base"] == "BTC" for e in out["exits"])
+    assert not any(e.get("reasons") and "size_to_frac" in e["reasons"] for e in out["entries"])
+
+
+def test_weekly_due_trims_btc_toward_winner_frac():
+    btc = _bars(60, 100.0, 0.05)
+    eth = _bars(40, 10.0, 0.0)
+    eth += _bars(21, 10.0, 0.8, vol=20_000.0)
+    t0 = 1_700_000_000_000
+    for i, r in enumerate(eth):
+        r[0] = t0 + i * 86_400_000
+    ohlc = {"BTC": btc, "ETH": eth}
+    cfg = ClipConfig(universe=("ETH",), min_qvol_eur=1.0, rebalance_days=7)
+    out = evaluate_clip(
+        ohlc,
+        cfg,
+        held={"BTC": "btc", "ETH": "alt"},
+        cash_eur=30.0,
+        deployed_eur=20_000.0,
+        now_ms=10**12,
+        last_rebalance_ms=0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        sleeve_eur={"btc": 15_000.0, "alt": 5_000.0},
+    )
+    assert out["rebalance_due"] is True
+    assert out["want_alt"] == "ETH"
+    assert any(t["base"] == "BTC" and t["reason"] == "size_to_frac" for t in out["trims"])
+    assert any("size_to_frac" in (e.get("reasons") or []) for e in out["entries"])
+
+
+def test_alt_trail_sells_dumped_sleeve(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0, alt_trail_pct=0.10),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+    )
+    r.positions = [
+        ClipPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=5_000.0,
+            qty=500.0,
+            opened_ms=1,
+            venue="paper",
+            role="alt",
+            peak_px=10.0,
+        )
+    ]
+    r.marks = {"AAA": 8.8}
+    out = asyncio.run(r.manage_alt_trail())
+    assert out and out[0]["reason"] == "alt_trail"
+    assert r.positions == []
+
+
+def test_alt_trail_does_not_fire_on_first_live_mark(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0, alt_trail_pct=0.10),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+    )
+    r.positions = [
+        ClipPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=5_000.0,
+            qty=500.0,
+            opened_ms=1,
+            venue="paper",
+            role="alt",
+            peak_px=0.0,
+        )
+    ]
+    r.marks = {"AAA": 8.8}
+    out = asyncio.run(r.manage_alt_trail())
+    assert out == []
+    assert r.positions and r.positions[0].peak_px == 8.8

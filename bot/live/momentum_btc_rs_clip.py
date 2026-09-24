@@ -1,8 +1,12 @@
-"""BTC-core + 25% weekly RS clip — independent book beside the mix.
+"""BTC-core + weekly RS clip — independent book beside the mix.
 
-75% BTC while close > SMA50; at most 25% in one liquid alt if 20d skip-1
-excess vs BTC ≥ 8%. Weekly rebalance. No per-coin hardcodes.
+20% BTC while close > SMA50; 80% in one liquid alt if 20d-style skip-1
+excess vs BTC > 4% (lookback 10). Weekly rebalance. 10% trailing stop on
+the alt sleeve only. No per-coin hardcodes.
 Paper until ``momentum_btc_rs_clip_allow_live`` arms venue fills.
+
+Existing lots are not resized until ``rebalance_due`` so a live restart
+does not flatten or dump the book.
 """
 
 from __future__ import annotations
@@ -22,10 +26,10 @@ SLIP = 0.001
 @dataclass(frozen=True)
 class ClipConfig:
     book_eur: float = 20_000.0
-    btc_frac: float = 0.75
-    alt_frac: float = 0.25
-    excess_floor: float = 0.08
-    lookback_days: int = 20
+    btc_frac: float = 0.20
+    alt_frac: float = 0.80
+    excess_floor: float = 0.04
+    lookback_days: int = 10
     skip_days: int = 1
     rebalance_days: int = 7
     sma_n: int = 50
@@ -33,6 +37,8 @@ class ClipConfig:
     min_notional_eur: float = 50.0
     fee_rt: float = FEE_RT
     slip: float = SLIP
+    alt_trail_pct: float = 0.10
+    resize_band: float = 0.10
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
@@ -50,6 +56,7 @@ class ClipPosition:
     holding_id: str = ""
     venue: str = "paper"
     entry_reason: str = ""
+    peak_px: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.holding_id:
@@ -82,6 +89,7 @@ class ClipPosition:
             holding_id=str(raw.get("holding_id") or ""),
             venue=str(raw.get("venue") or "paper"),
             entry_reason=str(raw.get("entry_reason") or ""),
+            peak_px=float(raw["peak_px"]) if raw.get("peak_px") not in (None, "") else 0.0,
         )
 
 
@@ -156,6 +164,7 @@ def evaluate_clip(
     now_ms: int,
     last_rebalance_ms: int,
     now: datetime | None = None,
+    sleeve_eur: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Decide clip longs. ``held`` maps base → role (btc|alt)."""
     now = now or datetime.now(UTC)
@@ -177,6 +186,7 @@ def evaluate_clip(
             "caption": "BTC SMA50 nog niet klaar — bags blijven staan.",
             "ranked": [],
             "rebalance_due": False,
+            "trims": [],
         }
     risk_on = last > s50
     equity = max(0.0, float(cash_eur) + float(deployed_eur))
@@ -201,6 +211,7 @@ def evaluate_clip(
             "ranked": [],
             "rebalance_due": False,
             "gap_pct": round(last / s50 - 1.0, 4),
+            "trims": [],
         }
 
     reb_ms = int(cfg.rebalance_days) * 86_400_000
@@ -229,7 +240,7 @@ def evaluate_clip(
         ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want_alt: str | None = None
-    if rebalance_due and ranked and float(ranked[0]["excess"]) >= cfg.excess_floor:
+    if rebalance_due and ranked and float(ranked[0]["excess"]) > cfg.excess_floor:
         want_alt = str(ranked[0]["base"])
     elif not rebalance_due:
         want_alt = held_alt
@@ -269,12 +280,54 @@ def evaluate_clip(
                 }
             )
 
+    trims: list[dict[str, Any]] = []
+    sleeves = {str(k): float(v) for k, v in dict(sleeve_eur or {}).items()}
+    same_names = (
+        rebalance_due
+        and risk_on
+        and held_btc
+        and want_alt
+        and held_alt == want_alt
+        and not any(e.get("base") == "BTC" for e in exits)
+    )
+    if same_names and equity > 0:
+        btc_n = float(sleeves.get("btc") or 0.0)
+        alt_n = float(sleeves.get("alt") or 0.0)
+        if abs(btc_n / equity - float(cfg.btc_frac)) > float(cfg.resize_band):
+            target_btc = equity * float(cfg.btc_frac)
+            sell_btc = btc_n - target_btc
+            if sell_btc >= cfg.min_notional_eur:
+                trims.append(
+                    {
+                        "base": "BTC",
+                        "role": "btc",
+                        "sell_notional_eur": round(sell_btc, 2),
+                        "reason": "size_to_frac",
+                    }
+                )
+            target_alt = equity * float(cfg.alt_frac)
+            buy_alt = target_alt - alt_n
+            if buy_alt >= cfg.min_notional_eur and want_alt:
+                entries.append(
+                    {
+                        "base": want_alt,
+                        "notional_eur": round(buy_alt, 2),
+                        "role": "alt",
+                        "reasons": [
+                            f"excess={float((ranked[0] if ranked else {}).get('excess') or 0):.3f}",
+                            f"frac={cfg.alt_frac:.2f}",
+                            "size_to_frac",
+                        ],
+                    }
+                )
+
     alt_txt = want_alt or "geen alt"
     caption = (
         f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
         f"{int(cfg.alt_frac * 100)}% {alt_txt}"
         + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
-        + ". Telt niet mee in live mix-equity."
+        + (f", alt-trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
+        + f", {cfg.lookback_days}d RS. Telt niet mee in live mix-equity."
     )
     return {
         "ok": True,
@@ -291,4 +344,5 @@ def evaluate_clip(
         "skipped": skipped[:12],
         "rebalance_due": rebalance_due,
         "gap_pct": round(last / s50 - 1.0, 4),
+        "trims": trims,
     }
