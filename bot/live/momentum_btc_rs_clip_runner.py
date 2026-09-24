@@ -644,6 +644,47 @@ class BtcRsClipPaperRunner:
             self._save_state()
             return {"ok": True, "decision": self.last_decision, "status": self.status()}
 
+    async def sell(self, holding_id: str) -> dict[str, Any]:
+        hid = str(holding_id or "").strip()
+        if not hid:
+            return {"ok": False, "reason": "missing_holding_id"}
+        async with self._decide_lock:
+            pos = next((p for p in self.positions if p.holding_id == hid), None)
+            if pos is None:
+                return {"ok": False, "reason": "not_found"}
+            px = float(self.marks.get(pos.base) or pos.entry_price or 0.0)
+            net = await self._close_lot(pos, px, "manual_sell")
+            if net is None:
+                return {"ok": False, "reason": "sell_failed", "base": pos.base}
+            self._save_state()
+            return {
+                "ok": True,
+                "holding_id": hid,
+                "base": pos.base,
+                "net_eur": round(net, 2),
+            }
+
+    async def sell_all(self) -> dict[str, Any]:
+        async with self._decide_lock:
+            closed: list[str] = []
+            failed: list[str] = []
+            for pos in list(self.positions):
+                px = float(self.marks.get(pos.base) or pos.entry_price or 0.0)
+                net = await self._close_lot(pos, px, "manual_sell_all")
+                if net is None:
+                    failed.append(pos.base)
+                else:
+                    closed.append(pos.base)
+            if closed:
+                self.last_rebalance_ms = 0
+            self._save_state()
+            return {
+                "ok": not failed,
+                "closed": len(closed),
+                "bases": closed,
+                "failed": failed,
+            }
+
     def next_decision(self) -> str:
         now = datetime.now(UTC)
         hours = self.cfg.decision_hours_utc or (0,)
@@ -981,6 +1022,16 @@ class BtcRsClipDeskManager:
             )
             return await runner.decide(execute=execute)
         return await self._runner.decide(execute=execute)
+
+    async def sell(self, holding_id: str) -> dict[str, Any]:
+        if self._runner is None:
+            return {"ok": False, "reason": "not_running"}
+        return await self._runner.sell(holding_id)
+
+    async def sell_all(self) -> dict[str, Any]:
+        if self._runner is None:
+            return {"ok": False, "reason": "not_running"}
+        return await self._runner.sell_all()
 
     async def resume_if_flagged(self, settings: Settings | None = None) -> dict[str, Any] | None:
         settings = settings or get_settings()

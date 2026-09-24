@@ -1510,6 +1510,42 @@ async def live_momentum_btc_rs_clip_decide(
     return await get_btc_rs_clip_desk_manager().decide(execute=bool(execute))
 
 
+@app.post("/live/momentum/btc-rs-clip/sell", response_model=None)
+async def live_momentum_btc_rs_clip_sell(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    if not holding_id:
+        result: dict[str, Any] = {"ok": False, "reason": "missing_holding_id"}
+    else:
+        result = await get_btc_rs_clip_desk_manager().sell(holding_id)
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Clip verkoop geweigerd: {result.get('reason')}")
+        return _volatile_redirect(f"Clip {result.get('base') or 'lot'} verkocht")
+    return result
+
+
+@app.post("/live/momentum/btc-rs-clip/sell-all", response_model=None)
+async def live_momentum_btc_rs_clip_sell_all(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    result = await get_btc_rs_clip_desk_manager().sell_all()
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False and not result.get("closed"):
+            return _volatile_redirect(f"Clip leegmaken geweigerd: {result.get('reason')}")
+        failed = result.get("failed") or []
+        notice = f"Clip verkocht ({result.get('closed', 0)} lots)"
+        if failed:
+            notice += f" — mislukt: {', '.join(str(x) for x in failed)}"
+        return _volatile_redirect(notice)
+    return result
+
+
 @app.post("/live/momentum/donchian/start")
 async def live_momentum_donchian_start(
     _: None = Depends(require_dashboard_access),
