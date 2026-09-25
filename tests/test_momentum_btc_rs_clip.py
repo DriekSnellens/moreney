@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from bot.live.momentum_btc_rs_clip import ClipConfig, ClipPosition, completed_ohlc, evaluate_clip
 from bot.live.momentum_btc_rs_clip_runner import config_from_settings
 
@@ -556,6 +558,7 @@ def test_clip_manager_sell_requires_running():
 
     assert asyncio.run(m.sell("x")) == {"ok": False, "reason": "not_running"}
     assert asyncio.run(m.sell_all()) == {"ok": False, "reason": "not_running"}
+    assert asyncio.run(m.reconcile()) == {"ok": False, "reason": "not_running"}
 
 
 def test_midweek_does_not_trim_existing_bags():
@@ -688,3 +691,228 @@ def test_clip_runner_samples_equity_curve(tmp_path):
     assert st["equity_curve"][-1][1] == 19_800.0
     raw = (tmp_path / "s.json").read_text(encoding="utf-8")
     assert "equity_curve" in raw
+
+
+class _Feed:
+    def __init__(self, px: float = 10.0) -> None:
+        self.px = px
+
+    async def last_price(self, base: str) -> float:
+        return self.px
+
+
+class _ReconGw:
+    def __init__(
+        self,
+        *,
+        held: dict[str, float] | None = None,
+        sells: list[dict] | None = None,
+    ) -> None:
+        self.held = {str(k).upper(): float(v) for k, v in (held or {}).items()}
+        self.sells = list(sells or [])
+        self.placed: list[dict] = []
+
+    async def base_held(self, base: str) -> float:
+        return float(self.held.get(str(base).upper(), 0.0))
+
+    async def recent_base_sells(self, base: str, *, since_ms: int, until_ms: int | None = None):
+        want = str(base).upper()
+        return [row for row in self.sells if str(row.get("base") or "").upper() == want]
+
+    async def place_limit(self, symbol, side, qty, price, *, post_only):
+        self.placed.append(
+            {"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only}
+        )
+        raise AssertionError("external reconcile must not place venue orders")
+
+
+def _live_clip(tmp_path, gw: _ReconGw, *, reserved_qty: dict[str, float] | None = None):
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    return BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        feed=_Feed(),
+        dry_run=False,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+        reserved_qty=reserved_qty or {},
+    )
+
+
+def _seed_clip(
+    r,
+    *,
+    base: str,
+    qty: float,
+    px: float,
+    role: str,
+    hid: str,
+    opened_ms: int = 1_000,
+) -> ClipPosition:
+    pos = ClipPosition(
+        base=base,
+        entry_price=px,
+        notional_eur=qty * px,
+        qty=qty,
+        opened_ms=opened_ms,
+        venue="bitvavo",
+        role=role,
+        holding_id=hid,
+    )
+    r.positions.append(pos)
+    r.marks[base] = px
+    return pos
+
+
+def test_reconcile_external_closes_gone_clip_keeps_nothing(tmp_path):
+    """UI-sold clip lots leave the book. No sell orders."""
+    import asyncio
+    import json
+
+    gw = _ReconGw(
+        held={},
+        sells=[{"base": "AAA", "qty": 1333.98, "price": 4.47, "fee_eur": 6.0, "ts_ms": 2_000}],
+    )
+    r = _live_clip(tmp_path, gw)
+    r.cash_eur = 15_000.0
+    _seed_clip(r, base="AAA", qty=1333.98, px=3.7456, role="alt", hid="clip-near")
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert gw.placed == []
+    assert len(closed) == 1
+    assert closed[0]["base"] == "AAA"
+    assert closed[0]["reason"] == "manual_external"
+    assert closed[0]["detail"] == "reconcile_external_delta"
+    assert closed[0]["quantity"] == pytest.approx(1333.98)
+    assert closed[0]["exit_price"] == pytest.approx(4.47)
+    assert r.positions == []
+    led = json.loads("[" + ",".join((tmp_path / "l.jsonl").read_text().splitlines()) + "]")
+    exits = [row for row in led if row.get("event") == "exit"]
+    assert len(exits) == 1
+    assert exits[0]["reason"] == "manual_external"
+    saved = json.loads((tmp_path / "s.json").read_text())
+    assert saved["positions"] == []
+    assert r.cash_eur == pytest.approx(15_000.0 + 1333.98 * 4.47 - 6.0)
+
+
+def test_reconcile_external_skips_dry_run_clip(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    gw = _ReconGw(held={})
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+        venues=("bitvavo",),
+        gateways={"bitvavo": gw},
+    )
+    _seed_clip(r, base="AAA", qty=100.0, px=10.0, role="alt", hid="p")
+    r.positions[0].venue = "bitvavo"
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert closed == []
+    assert len(r.positions) == 1
+    assert gw.placed == []
+
+
+def test_reconcile_external_reserves_15m_qty(tmp_path):
+    """Venue coins that belong to 15m must not be sold or imported as clip."""
+    import asyncio
+
+    gw = _ReconGw(held={"AAA": 50.0, "LINK": 20.0})
+    r = _live_clip(tmp_path, gw, reserved_qty={"LINK": 20.0})
+    r.cash_eur = 0.0
+    _seed_clip(r, base="AAA", qty=100.0, px=10.0, role="alt", hid="clip-a")
+    r._other_desk_qty = (  # type: ignore[method-assign]
+        lambda base: 50.0
+        if str(base).upper() == "AAA"
+        else 20.0
+        if str(base).upper() == "LINK"
+        else 0.0
+    )
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert len(closed) == 1
+    assert closed[0]["base"] == "AAA"
+    assert closed[0]["quantity"] == pytest.approx(100.0)
+    assert r.positions == []
+    assert gw.placed == []
+    assert not any(p.base == "LINK" for p in r.positions)
+
+
+def test_reconcile_external_keeps_still_held_clip(tmp_path):
+    import asyncio
+
+    gw = _ReconGw(held={"AAA": 100.0})
+    r = _live_clip(tmp_path, gw)
+    _seed_clip(r, base="AAA", qty=100.0, px=10.0, role="alt", hid="clip-a")
+    closed = asyncio.run(r.reconcile_external_inventory())
+    assert closed == []
+    assert len(r.positions) == 1
+    assert r.positions[0].qty == pytest.approx(100.0)
+    assert gw.placed == []
+
+
+def test_clip_sell_all_books_gone_lots_without_orders(tmp_path):
+    """Dashboard flatten after a Bitvavo UI sell must not place another sell."""
+    import asyncio
+
+    gw = _ReconGw(
+        held={},
+        sells=[{"base": "AAA", "qty": 500.0, "price": 11.0, "fee_eur": 2.0, "ts_ms": 2_000}],
+    )
+    r = _live_clip(tmp_path, gw)
+    r.cash_eur = 0.0
+    _seed_clip(r, base="AAA", qty=500.0, px=10.0, role="alt", hid="clip-a")
+    r.marks["AAA"] = 11.0
+    out = asyncio.run(r.sell_all())
+    assert out["ok"] is True
+    assert out["closed"] == 1
+    assert r.positions == []
+    assert gw.placed == []
+    led = (tmp_path / "l.jsonl").read_text()
+    assert "manual_external" in led
+
+
+def test_clip_refresh_live_books_external(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipDeskManager
+
+    gw = _ReconGw(held={})
+    r = _live_clip(tmp_path, gw)
+    _seed_clip(r, base="AAA", qty=10.0, px=10.0, role="alt", hid="gone")
+    mgr = BtcRsClipDeskManager()
+    mgr._runner = r
+    st = asyncio.run(mgr.refresh_live())
+    assert st["positions"] == []
+    assert r.positions == []
+    led = (tmp_path / "l.jsonl").read_text()
+    assert "manual_external" in led
+    assert gw.placed == []
+
+
+def test_ledger_table_maps_clip_manual_external():
+    from bot.live.momentum_dashboard import _ledger_table
+
+    html = _ledger_table(
+        [
+            {
+                "ts": "2026-09-25T13:08:00+00:00",
+                "event": "exit",
+                "desk": "btc_rs_clip",
+                "base": "AAA",
+                "venue": "bitvavo",
+                "notional_eur": 5000.0,
+                "exit_price": 4.47,
+                "net_eur": 950.0,
+                "reason": "manual_external",
+                "detail": "reconcile_external_delta",
+            }
+        ]
+    )
+    assert "AAA" in html
+    assert "4.47" in html
+    assert "manual_external" in html

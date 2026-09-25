@@ -1557,6 +1557,14 @@ async def live_momentum_btc_rs_clip_sell_all(
     return result
 
 
+@app.post("/live/momentum/btc-rs-clip/reconcile")
+async def live_momentum_btc_rs_clip_reconcile(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Book clip lots that left Bitvavo outside the desk. No sell orders."""
+    return await get_btc_rs_clip_desk_manager().reconcile()
+
+
 @app.post("/live/momentum/donchian/start")
 async def live_momentum_donchian_start(
     _: None = Depends(require_dashboard_access),

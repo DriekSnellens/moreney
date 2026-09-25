@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -187,6 +187,7 @@ class BtcRsClipPaperRunner:
         self._day_key = ""
         self._decide_lock = asyncio.Lock()
         self._last_curve_save = 0.0
+        self._last_reconcile_mono = 0.0
         self._load_state()
 
     def _desk(self) -> str:
@@ -394,6 +395,189 @@ class BtcRsClipPaperRunner:
             live = 0.0
         return max(injected, live)
 
+    def _pos_qty(self, pos: ClipPosition) -> float:
+        qty = float(pos.qty or 0.0)
+        if qty <= 0 and pos.entry_price > 0:
+            qty = pos.notional_eur / pos.entry_price
+        return max(0.0, qty)
+
+    async def _held_base(self, base: str) -> float | None:
+        gw = self._primary_gw()
+        if gw is None:
+            return None
+        held_fn = getattr(gw, "base_held", None)
+        if held_fn is not None:
+            try:
+                held = await held_fn(base)
+                if held is not None:
+                    return float(held)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("clip held balance %s failed: %s", base, exc)
+        free_fn = getattr(gw, "base_free", None)
+        if free_fn is None:
+            return None
+        try:
+            free = await free_fn(base)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("clip free balance %s failed: %s", base, exc)
+            return None
+        return None if free is None else float(free)
+
+    async def _recent_sells(self, base: str, *, since_ms: int) -> list[dict[str, float]]:
+        gw = self._primary_gw()
+        fetch = getattr(gw, "recent_base_sells", None) if gw is not None else None
+        if fetch is None:
+            return []
+        try:
+            return list(await fetch(base, since_ms=max(0, int(since_ms) - 60_000)))
+        except Exception as exc:  # noqa: BLE001
+            logger.info("clip recent sells for %s failed: %s", base, exc)
+            return []
+
+    @staticmethod
+    def _vwap_for_sold(
+        sells: Sequence[Mapping[str, float]], sold_qty: float
+    ) -> tuple[float, float] | None:
+        if sold_qty <= 0 or not sells:
+            return None
+        need = float(sold_qty)
+        taken_qty = 0.0
+        taken_notional = 0.0
+        taken_fee = 0.0
+        for row in sorted(sells, key=lambda r: float(r.get("ts_ms") or 0), reverse=True):
+            qty = float(row.get("qty") or 0.0)
+            px = float(row.get("price") or 0.0)
+            fee = float(row.get("fee_eur") or 0.0)
+            if qty <= 0 or px <= 0:
+                continue
+            take = min(qty, need - taken_qty)
+            if take <= 0:
+                break
+            frac = take / qty
+            taken_qty += take
+            taken_notional += take * px
+            taken_fee += fee * frac
+            if taken_qty + 1e-12 >= need:
+                break
+        if taken_qty + 1e-8 < need * 0.95:
+            return None
+        return taken_notional / taken_qty, taken_fee
+
+    def _book_external(
+        self,
+        pos: ClipPosition,
+        *,
+        sold_qty: float,
+        price: float,
+        fee_eur: float,
+    ) -> dict[str, Any]:
+        """Ledger a Bitvavo-UI sell. Never places an order."""
+        book_qty = self._pos_qty(pos)
+        entry = float(pos.entry_price or 0.0)
+        px = float(price) if price > 0 else entry
+        close_qty = max(0.0, min(float(sold_qty), book_qty))
+        rem = max(0.0, book_qty - close_qty)
+        fee = max(0.0, float(fee_eur))
+        frac = close_qty / book_qty if book_qty > 0 else 1.0
+        sold_notional = float(pos.notional_eur) * frac
+        net = close_qty * (px - entry) - fee if entry > 0 else sold_notional - fee
+        self.cash_eur += close_qty * px - fee
+        self.realized_total_eur += net
+        self.day_realized_eur += net
+        row: dict[str, Any] = {
+            "event": "exit",
+            "desk": self._desk(),
+            "base": pos.base,
+            "role": pos.role,
+            "venue": pos.venue,
+            "dry_run": self.dry_run,
+            "notional_eur": round(sold_notional, 2),
+            "quantity": close_qty,
+            "entry_price": entry,
+            "exit_price": px,
+            "fee_eur": round(fee, 4),
+            "net_eur": round(net, 2),
+            "reason": "manual_external",
+            "holding_id": pos.holding_id,
+            "detail": "reconcile_external_delta",
+            "remaining_qty": rem,
+        }
+        self._ledger_append(row)
+        if rem * px < _MIN_ORDER_EUR:
+            self.positions = [p for p in self.positions if p is not pos]
+        else:
+            pos.qty = rem
+            pos.notional_eur = max(0.0, float(pos.notional_eur) - sold_notional)
+        logger.info(
+            "clip: booked external sold %s qty=%.8f px=%.4f net=%.2f rem=%.8f",
+            pos.base,
+            close_qty,
+            px,
+            net,
+            rem,
+        )
+        return row
+
+    async def _book_if_already_sold(self, pos: ClipPosition, px: float) -> float | None:
+        """Ledger a lot that already left Bitvavo. Never places an order."""
+        held = await self._held_base(pos.base)
+        if held is None:
+            return None
+        mark = float(px or self.marks.get(pos.base) or pos.entry_price or 0.0)
+        avail = max(0.0, float(held) - self._other_desk_qty(pos.base))
+        book_qty = self._pos_qty(pos)
+        sold = book_qty - avail
+        if sold <= 0 or sold * max(mark, 1e-12) < _MIN_ORDER_EUR:
+            return None
+        vwap = self._vwap_for_sold(
+            await self._recent_sells(pos.base, since_ms=int(pos.opened_ms or 0)),
+            sold,
+        )
+        if vwap is not None:
+            book_px, fee = vwap
+        else:
+            book_px, fee = (mark if mark > 0 else float(pos.entry_price)), 0.0
+        row = self._book_external(pos, sold_qty=sold, price=book_px, fee_eur=fee)
+        return float(row.get("net_eur") or 0.0)
+
+    async def reconcile_external_inventory(self) -> list[dict[str, Any]]:
+        """Drop clip lots that left Bitvavo outside the desk. No sell orders.
+
+        Uses total held minus 15m reserved qty so a UI flatten cannot leave a
+        ghost bag on the dashboard, and 15m coins are not imported as clip.
+        """
+        closed: list[dict[str, Any]] = []
+        if self.dry_run or not self._gws or not self.positions:
+            return closed
+        async with self._decide_lock:
+            for pos in list(self.positions):
+                if pos.is_paper():
+                    continue
+                held = await self._held_base(pos.base)
+                if held is None:
+                    continue
+                mark = float(self.marks.get(pos.base) or pos.entry_price or 0.0)
+                avail = max(0.0, float(held) - self._other_desk_qty(pos.base))
+                book_qty = self._pos_qty(pos)
+                sold = book_qty - avail
+                if sold <= 0 or sold * max(mark, 1e-12) < _MIN_ORDER_EUR:
+                    continue
+                vwap = self._vwap_for_sold(
+                    await self._recent_sells(pos.base, since_ms=int(pos.opened_ms or 0)),
+                    sold,
+                )
+                if vwap is not None:
+                    px, fee = vwap
+                else:
+                    px, fee = (mark if mark > 0 else float(pos.entry_price)), 0.0
+                closed.append(
+                    self._book_external(pos, sold_qty=sold, price=px, fee_eur=fee)
+                )
+            if closed:
+                self._sample_equity()
+                self._save_state()
+        return closed
+
     async def _venue_quote_eur(self) -> float | None:
         gw = self._primary_gw()
         if self.dry_run or gw is None or not hasattr(gw, "quote_balance_eur"):
@@ -511,10 +695,16 @@ class BtcRsClipPaperRunner:
         else:
             sell_qty = await self._sellable_qty(pos)
             if sell_qty * (px or pos.entry_price) < _MIN_ORDER_EUR:
+                booked = await self._book_if_already_sold(pos, px)
+                if booked is not None:
+                    return booked
                 logger.warning("clip live sell skipped %s — would take 15m qty", pos.base)
                 return None
             fill = await self._fill(pos.base, "sell", qty=sell_qty)
             if fill is None:
+                booked = await self._book_if_already_sold(pos, px)
+                if booked is not None:
+                    return booked
                 logger.warning("clip live sell failed %s — keeping lot", pos.base)
                 return None
         mark = fill.avg_price
@@ -930,23 +1120,32 @@ class BtcRsClipPaperRunner:
 
     async def run(self, should_stop) -> None:  # noqa: ANN001
         last_hour_fire: set[str] = set()
-        # First loop: take today's completed-bar decision so the book is not idle until 00:05.
+        hours = self.cfg.decision_hours_utc or (0,)
         try:
-            await self.decide(execute=True)
+            await self.reconcile_external_inventory()
+        except Exception:  # noqa: BLE001
+            logger.exception("clip kick reconcile failed")
+        now = datetime.now(UTC)
+        in_window = now.hour in hours and now.minute < 8
+        # Empty-book kick would rebuy immediately; only fill inside the daily window.
+        try:
+            await self.decide(execute=in_window)
         except Exception:  # noqa: BLE001
             logger.exception("clip kick decide failed")
+        if in_window:
+            last_hour_fire.add(f"{now.date()}-{now.hour}")
         while not should_stop():
             try:
                 await self._refresh_marks()
+                try:
+                    await self.reconcile_external_inventory()
+                except Exception:  # noqa: BLE001
+                    logger.exception("clip: external reconcile failed")
                 async with self._decide_lock:
                     await self.manage_alt_trail()
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
-                if (
-                    now.hour in self.cfg.decision_hours_utc
-                    and now.minute < 8
-                    and key not in last_hour_fire
-                ):
+                if now.hour in hours and now.minute < 8 and key not in last_hour_fire:
                     await self.decide(execute=True)
                     last_hour_fire.add(key)
                 if len(last_hour_fire) > 48:
@@ -965,6 +1164,7 @@ class BtcRsClipDeskManager:
         self._runner: BtcRsClipPaperRunner | None = None
         self._stop = False
         self._engine: Any = None
+        self._last_reconcile_mono = 0.0
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -1045,8 +1245,19 @@ class BtcRsClipDeskManager:
         return base
 
     async def refresh_live(self) -> dict[str, Any]:
+        """Fresh marks every poll; venue reconcile is throttled so 1s UI stays light."""
         if self._runner is not None:
-            await self._runner._refresh_marks()
+            try:
+                await self._runner._refresh_marks()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: mark refresh for status failed")
+            now = time.monotonic()
+            if now - self._last_reconcile_mono >= 5.0:
+                self._last_reconcile_mono = now
+                try:
+                    await self._runner.reconcile_external_inventory()
+                except Exception:  # noqa: BLE001
+                    logger.exception("clip: reconcile for status failed")
         return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:
@@ -1215,6 +1426,17 @@ class BtcRsClipDeskManager:
         if self._runner is None:
             return {"ok": False, "reason": "not_running"}
         return await self._runner.sell_all()
+
+    async def reconcile(self) -> dict[str, Any]:
+        if self._runner is None:
+            return {"ok": False, "reason": "not_running"}
+        closed = await self._runner.reconcile_external_inventory()
+        return {
+            "ok": True,
+            "closed": len(closed),
+            "rows": closed,
+            "status": self.status(),
+        }
 
     async def resume_if_flagged(self, settings: Settings | None = None) -> dict[str, Any] | None:
         settings = settings or get_settings()
