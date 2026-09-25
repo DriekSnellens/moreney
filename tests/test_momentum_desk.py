@@ -893,7 +893,14 @@ def _stats(base: str, ret: float):
 
 
 def test_simulate_enters_leader_and_exits_on_trail():
-    cfg = DeskConfig(universe=("SOL", "LINK"), min_volume_eur=0.0, clip_eur=500.0, **FLAT_SIZING)
+    cfg = DeskConfig(
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+        # 4% giveback is designed to print a trail exit; do not inherit the live 8%.
+        trail_pct=0.03,
+        **FLAT_SIZING,
+    )
     n = 5 * BARS_PER_DAY
     candles = {
         "BTC": _series(T0 - 2 * DAY_MS, n, 100.0, 0.0),
@@ -1073,6 +1080,8 @@ def _runner(tmp_path: Path, gw, clock, feed=None, opt_kwargs=None, **cfg_kwargs)
         state_path=str(tmp_path / "state.json"),
         ledger_path=str(tmp_path / "ledger.jsonl"),
         alphai_recommendations_path=None,
+        alphai_pick_outcomes_path=None,
+        outcome_learning_path=str(tmp_path / "outcomes.json"),
         buy_rest_sec=60.0,
         repeg_sec=20.0,
         poll_sec=5.0,
@@ -1215,7 +1224,8 @@ def test_tick_exits_on_closed_bar_and_persists_ledger(tmp_path):
     assert r.holdings == []
     assert r.trade_count == 1 and r.realized_total_eur < -15
     ledger = [line for line in (tmp_path / "ledger.jsonl").read_text().splitlines()]
-    assert '"event": "exit"' in ledger[-1] and '"reason": "hard_stop"' in ledger[-1]
+    exit_rows = [line for line in ledger if '"event": "exit"' in line]
+    assert exit_rows and '"reason": "hard_stop"' in exit_rows[-1]
     assert r.ledger.day_realized_eur == pytest.approx(r.realized_total_eur)
     # Restart restores the risk ledger from disk.
     r2 = _runner(tmp_path, gw, clock, **cfg_kwargs)
@@ -1587,6 +1597,8 @@ def _multi_runner(tmp_path, clock, bitvavo_cash, okx_cash, feed=None, **cfg_kwar
         state_path=str(tmp_path / "state.json"),
         ledger_path=str(tmp_path / "ledger.jsonl"),
         alphai_recommendations_path=None,
+        alphai_pick_outcomes_path=None,
+        outcome_learning_path=str(tmp_path / "outcomes.json"),
         buy_rest_sec=60.0,
         repeg_sec=20.0,
         poll_sec=5.0,
