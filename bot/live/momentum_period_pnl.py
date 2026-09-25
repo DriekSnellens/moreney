@@ -222,8 +222,18 @@ def sleeve_is_live(status: Mapping[str, Any] | None, *, default_live: bool = Fal
     return bool(default_live)
 
 
-def _row_is_paper(row: Mapping[str, Any], *, sleeve_live: bool) -> bool:
-    """Classify one exit. Explicit live fills stay live even if the sleeve later goes paper."""
+def _row_is_paper(
+    row: Mapping[str, Any], *, sleeve_live: bool, paper_only: bool = False
+) -> bool:
+    """Classify one exit.
+
+    A ``paper_only`` sleeve is always paper, even if a row was tagged
+    ``dry_run=false`` / a live venue (Donchian paper used to leak into
+    Netto verdiend that way). Explicit live fills still stay live when a
+    previously-live sleeve later goes dry-run without ``paper_only``.
+    """
+    if paper_only:
+        return True
     dry = row.get("dry_run")
     if dry is True or str(dry).lower() in {"true", "1", "yes"}:
         return True
@@ -236,12 +246,12 @@ def _row_is_paper(row: Mapping[str, Any], *, sleeve_live: bool) -> bool:
 
 
 def _partition(
-    exits: Sequence[Mapping[str, Any]], *, sleeve_live: bool
+    exits: Sequence[Mapping[str, Any]], *, sleeve_live: bool, paper_only: bool = False
 ) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
     live: list[Mapping[str, Any]] = []
     paper: list[Mapping[str, Any]] = []
     for row in exits:
-        if _row_is_paper(row, sleeve_live=sleeve_live):
+        if _row_is_paper(row, sleeve_live=sleeve_live, paper_only=paper_only):
             paper.append(row)
         else:
             live.append(row)
@@ -254,8 +264,11 @@ def _sum_split(
     now: datetime,
     sleeve_live: bool,
     realized_fallback: float | None,
+    paper_only: bool = False,
 ) -> tuple[PeriodNet, PeriodNet]:
-    live_rows, paper_rows = _partition(exits, sleeve_live=sleeve_live)
+    live_rows, paper_rows = _partition(
+        exits, sleeve_live=sleeve_live, paper_only=paper_only
+    )
     live = sum_period(
         live_rows,
         now=now,
@@ -301,35 +314,43 @@ def compute_desk_earnings(
     dc_live_flag = sleeve_is_live(donchian_status, default_live=False)
     clip_live_flag = sleeve_is_live(clip_status, default_live=False)
 
+    def _paper_only(status: Mapping[str, Any]) -> bool:
+        return bool(status.get("paper_only"))
+
     core_live, core_paper = _sum_split(
         load_exit_fills(core_ledger_path),
         now=now_utc,
         sleeve_live=core_live_flag,
         realized_fallback=_as_float(core_status.get("realized_total_eur")),
+        paper_only=_paper_only(core_status),
     )
     vol_live, vol_paper = _sum_split(
         load_exit_fills(volatile_ledger_path),
         now=now_utc,
         sleeve_live=vol_live_flag,
         realized_fallback=_as_float(volatile_status.get("realized_total_eur")),
+        paper_only=_paper_only(volatile_status),
     )
     sw_live, sw_paper = _sum_split(
         load_exit_fills(short_weakest_ledger_path),
         now=now_utc,
         sleeve_live=sw_live_flag,
         realized_fallback=_as_float(short_weakest_status.get("realized_total_eur")),
+        paper_only=_paper_only(short_weakest_status),
     )
     dc_live, dc_paper = _sum_split(
         load_exit_fills(donchian_ledger_path),
         now=now_utc,
         sleeve_live=dc_live_flag,
         realized_fallback=_as_float(donchian_status.get("realized_total_eur")),
+        paper_only=_paper_only(donchian_status),
     )
     clip_live, clip_paper = _sum_split(
         load_exit_fills(clip_ledger_path),
         now=now_utc,
         sleeve_live=clip_live_flag,
         realized_fallback=_as_float(clip_status.get("realized_total_eur")),
+        paper_only=_paper_only(clip_status),
     )
 
     core = _combine(core_live, core_paper)

@@ -192,7 +192,7 @@ def test_live_clip_fills_fold_into_combined(tmp_path: Path) -> None:
     assert payload["paper_open_mtm_eur"] == 0.0
 
 
-def test_explicit_live_fill_stays_live_after_sleeve_goes_paper(tmp_path: Path) -> None:
+def test_explicit_live_fill_stays_live_after_sleeve_goes_dry(tmp_path: Path) -> None:
     clip = tmp_path / "clip.jsonl"
     _write_ledger(
         clip,
@@ -218,11 +218,61 @@ def test_explicit_live_fill_stays_live_after_sleeve_goes_paper(tmp_path: Path) -
     earn = compute_desk_earnings(
         core_ledger_path=None,
         clip_ledger_path=clip,
-        clip_status={"dry_run": True, "paper_only": True, "allow_live": False},
+        clip_status={"dry_run": True, "allow_live": False},
         now=datetime(2026, 9, 22, 12, 0, tzinfo=UTC),
     )
     assert earn.combined.all_time_eur == 25.0
     assert earn.paper.all_time_eur == 3.0
+
+
+def test_paper_only_donchian_with_false_live_tags_stays_out_of_combined(tmp_path: Path) -> None:
+    """Donchian paper used to tag exits dry_run=false / venue=bitvavo."""
+    dc = tmp_path / "donch.jsonl"
+    _write_ledger(
+        dc,
+        [
+            {
+                "ts": "2026-09-23T08:33:47+00:00",
+                "event": "exit",
+                "base": "NEAR",
+                "sleeve": "donch10",
+                "net_eur": 172.55,
+                "dry_run": False,
+                "venue": "bitvavo",
+                "reason": "manual_external",
+            },
+            {
+                "ts": "2026-09-23T08:33:48+00:00",
+                "event": "exit",
+                "base": "ARB",
+                "sleeve": "donch_fri10",
+                "net_eur": 202.93,
+                "dry_run": False,
+                "venue": "bitvavo",
+                "reason": "manual_external",
+            },
+        ],
+    )
+    earn = compute_desk_earnings(
+        core_ledger_path=None,
+        donchian_ledger_path=dc,
+        donchian_status={
+            "dry_run": True,
+            "paper_only": True,
+            "allow_live": False,
+            "realized_total_eur": 375.48,
+            "unrealized_net_eur": 12.0,
+        },
+        now=datetime(2026, 9, 25, 12, 0, tzinfo=UTC),
+    )
+    assert earn.combined.all_time_eur == 0.0
+    assert earn.combined.week_eur == 0.0
+    assert earn.paper.all_time_eur == 375.48
+    assert earn.donchian is not None
+    assert earn.donchian.all_time_eur == 375.48
+    assert earn.donchian.trades_all_time == 2
+    assert earn.open_mtm_eur == 0.0
+    assert earn.paper_open_mtm_eur == 12.0
 
 
 def test_dashboard_shows_period_earnings(tmp_path: Path) -> None:
