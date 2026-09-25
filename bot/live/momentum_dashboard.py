@@ -499,6 +499,33 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 
 .pos-empty { padding: .85rem .2rem; }
 .pos-cards { display: none; gap: .75rem; }
+.ledger-cards { display: none; gap: .55rem; margin-top: .55rem; }
+.ledger-card {
+  border: 1px solid var(--border); border-radius: .8rem;
+  background: rgba(15,23,42,.9); padding: .75rem .8rem;
+  display: grid; gap: .35rem;
+}
+.ledger-card .lc-top {
+  display: flex; justify-content: space-between; align-items: baseline; gap: .5rem;
+}
+.ledger-card .lc-base {
+  font-family: var(--display); font-weight: 800; font-size: 1.02rem;
+  letter-spacing: -.02em;
+}
+.ledger-card .lc-ev { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.ledger-card .lc-net {
+  font-family: var(--display); font-weight: 750; font-size: 1.05rem;
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums; text-align: right;
+}
+.ledger-card .lc-meta {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .35rem .6rem;
+  font-size: .78rem; font-variant-numeric: tabular-nums;
+}
+.ledger-card .lc-meta span {
+  color: var(--muted-2); display: block; font-size: .6rem;
+  letter-spacing: .05em; text-transform: uppercase; margin-bottom: .08rem; font-weight: 600;
+}
+.ledger-card .lc-reason { font-size: .74rem; color: var(--muted); line-height: 1.35; overflow-wrap: anywhere; }
 .pos-card {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: rgba(15,23,42,.9); padding: .9rem 1rem;
@@ -663,6 +690,8 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
   }
   .desk-wide { display: none; }
   .pos-cards { display: grid; }
+  .ledger-wide { display: none; }
+  .ledger-cards { display: grid; margin-top: 0; }
   .pos-card { padding: .75rem .8rem; }
   .pos-card .meta, .pos-card .grid {
     grid-template-columns: 1fr 1fr;
@@ -854,6 +883,11 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 .sat-strip strong { font-family: var(--display); font-size: .88rem; }
 .sat-strip .sat-eq { font-family: var(--mono); font-size: .8rem; margin-left: auto; }
 .sat-strip .mix-open { margin: 0; }
+.sat-hero { margin-top: .7rem; }
+.sat-hero .eq-val { font-size: clamp(1.25rem, 5.5vw, 1.75rem); }
+.sat-hero .eq-chart { height: 128px; }
+.sat-hero .mix-open { margin: .5rem 0 0; }
+.sat-hero .clip-actions-mini { margin: .45rem 0 0; }
 .masthead.visual {
   padding: .85rem .9rem .7rem; gap: .55rem; margin-bottom: .7rem;
 }
@@ -885,6 +919,7 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 }
 @media (max-width: 420px) {
   .eq-chart { height: 132px; }
+  .sat-hero .eq-chart { height: 112px; }
   .alloc-legend { font-size: .66rem; gap: .25rem .45rem; }
 }
 """
@@ -1844,7 +1879,7 @@ def _core_15m_mix_note(status: Mapping[str, Any] | None) -> str:
 
 
 def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
-    """Compact live 15m satellite strip — no paper/shadow copy."""
+    """Live 15m satellite: equity sparkline + open bags, no paper copy."""
     st = dict(status or {})
     running = bool(st.get("running"))
     dry = bool(st.get("dry_run"))
@@ -1869,16 +1904,24 @@ def _core_15m_panel(status: Mapping[str, Any] | None) -> str:
     sell = ""
     if pos_bits:
         sell = (
+            '<div class="clip-actions-mini">'
             '<form method="get" action="/live/momentum" style="margin:0">'
             '<input type="hidden" name="sell_all" value="1">'
-            '<button type="submit" class="btn danger">Verkoop 15m</button></form>'
+            '<button type="submit" class="btn danger">Verkoop 15m</button></form></div>'
         )
     eq = st.get("equity_eur")
+    open_pnl = st.get("unrealized_net_eur")
+    curve = st.get("equity_curve") or []
     return (
-        f'<section class="sat-strip" id="core-15m" data-live="core-15m">'
+        f'<section class="eq-hero sat-hero" id="core-15m" data-live="core-15m">'
+        f'<div class="eq-top"><div>'
+        f'<p class="eq-k">15m WR-core</p>'
+        f'<p class="eq-val" data-k="core15-eq">{_fmt_eur(eq, signed=False)}</p></div>'
+        f"<div>"
         f'<span class="pill on" data-live="core15-pill"><span class="dot"></span>LIVE</span>'
-        f"<strong>15m</strong>"
-        f'<span class="sat-eq" data-k="core15-eq">{_fmt_eur(eq, signed=False)}</span>'
+        f'<p class="eq-open {_cls(open_pnl)}" data-k="core15-open">{_fmt_eur(open_pnl)}</p>'
+        f"</div></div>"
+        f"{_equity_chart_svg(curve, equity=float(eq or 0.0), desk='core15')}"
         f"{pos_html}{sell}</section>"
     )
 
@@ -1887,6 +1930,7 @@ def _equity_chart_svg(
     points: Sequence[Any] | None,
     *,
     equity: float | None = None,
+    desk: str = "clip",
 ) -> str:
     """Compact SVG area chart. Scales to the host box; no axis clutter."""
     pts: list[tuple[float, float]] = []
@@ -1929,7 +1973,8 @@ def _equity_chart_svg(
     line = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
     up = ys[-1] >= ys[0]
     stroke = "#34D399" if up else "#F87171"
-    fill_id = "eqUp" if up else "eqDown"
+    desk_id = "".join(ch for ch in str(desk or "clip") if ch.isalnum()) or "clip"
+    fill_id = f"eqFill-{desk_id}"
     c0 = "rgba(52,211,153,.32)" if up else "rgba(248,113,113,.30)"
     c1 = "rgba(52,211,153,0)" if up else "rgba(248,113,113,0)"
     last_x, last_y = sx(pts[-1][0]), sy(pts[-1][1])
@@ -1937,7 +1982,8 @@ def _equity_chart_svg(
     lo = _fmt_eur(min(ys), signed=False)
     payload = json.dumps([[round(x, 1), round(y, 2)] for x, y in pts], separators=(",", ":"))
     return (
-        f'<div class="eq-chart" data-live="eq-chart" data-eq-points="{escape(payload)}">'
+        f'<div class="eq-chart" data-live="eq-chart" data-eq-desk="{escape(desk_id)}" '
+        f'data-eq-points="{escape(payload)}">'
         f'<svg viewBox="0 0 {w:.0f} {h:.0f}" preserveAspectRatio="none" aria-hidden="true">'
         f"<defs><linearGradient id='{fill_id}' x1='0' y1='0' x2='0' y2='1'>"
         f"<stop offset='0%' stop-color='{c0}'/>"
@@ -2068,7 +2114,7 @@ def _clip_visual_desk(status: Mapping[str, Any] | None) -> str:
         f'<span class="dot"></span>{gate}</span>'
         f'<p class="eq-open {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</p>'
         f"</div></div>"
-        f"{_equity_chart_svg(curve, equity=float(eq or 0.0))}"
+        f"{_equity_chart_svg(curve, equity=float(eq or 0.0), desk='clip')}"
         f"{_alloc_visual(st)}"
         f"{_clip_bag_cards(st)}"
         f"</section>"
@@ -2637,10 +2683,13 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
     fills = [r for r in rows if r.get("event") in {"entry", "exit", "entry_failed", "exit_failed"}]
     if not fills:
         return '<p class="muted">Nog geen fills.</p>'
-    out = [
-        '<table class="desk"><thead><tr><th>Tijd</th><th>Event</th><th>Base</th><th>Prijs</th>'
-        "<th>Notional</th><th>Fee</th><th>Gross</th><th>Peak</th><th>Net</th><th>Reden</th></tr></thead><tbody>"
+    table = [
+        '<div class="table-scroll ledger-wide"><table class="desk ledger"><thead><tr>'
+        "<th>Tijd</th><th>Event</th><th>Base</th><th>Prijs</th>"
+        "<th>Notional</th><th>Fee</th><th>Gross</th><th>Peak</th><th>Net</th><th>Reden</th>"
+        "</tr></thead><tbody>"
     ]
+    cards = ['<div class="ledger-cards">']
     for r in reversed(fills[-40:]):
         ev = str(r.get("event"))
         ev_cls = "good" if ev == "entry" else ("bad" if ev.endswith("failed") else "")
@@ -2649,25 +2698,50 @@ def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
             px_txt = f"{float(px):,.4f}" if px not in (None, "") else "—"
         except (TypeError, ValueError):
             px_txt = "—"
-        out.append(
+        ev_label = escape(ev) + (" (taker)" if r.get("taker") else "")
+        base = escape(str(r.get("base") or ""))
+        venue = escape(str(r.get("venue") or ""))
+        reason = escape(_ledger_reason(r))
+        net = r.get("net_eur")
+        table.append(
             "<tr>"
             f"<td>{_ts(r.get('ts'))}</td>"
-            f"<td class='{ev_cls}'>{escape(ev)}{' (taker)' if r.get('taker') else ''}</td>"
-            f"<td><strong>{escape(str(r.get('base') or ''))}</strong>"
-            f" <span class='muted' style='font-size:.7rem'>{escape(str(r.get('venue') or ''))}"
-            "</span></td>"
+            f"<td class='{ev_cls}'>{ev_label}</td>"
+            f"<td><strong>{base}</strong>"
+            f" <span class='muted' style='font-size:.7rem'>{venue}</span></td>"
             f"<td class='mono'>{px_txt}</td>"
             f"<td>{_fmt_eur(r.get('notional_eur'), signed=False)}</td>"
             f"<td>{_fmt_eur(r.get('fee_eur'), signed=False)}</td>"
             f"<td class='{_cls(r.get('gross_return'))}'>{_fmt_pct(r.get('gross_return'))}</td>"
             f"<td>{_fmt_pct(r.get('peak_return'))}</td>"
-            f"<td class='{_cls(r.get('net_eur'))}'>{_fmt_eur(r.get('net_eur'))}</td>"
+            f"<td class='{_cls(net)}'>{_fmt_eur(net)}</td>"
             f"<td class='muted' style='text-align:left;max-width:220px;overflow:hidden;"
-            f"text-overflow:ellipsis'>{escape(_ledger_reason(r))}</td>"
+            f"text-overflow:ellipsis'>{reason}</td>"
             "</tr>"
         )
-    out.append("</tbody></table>")
-    return "".join(out)
+        reason_html = f'<div class="lc-reason">{reason}</div>' if reason else ""
+        cards.append(
+            f'<article class="ledger-card">'
+            f'<div class="lc-top"><div>'
+            f'<div class="lc-base">{base}'
+            f' <span class="muted" style="font-size:.7rem;font-weight:500">{venue}</span></div>'
+            f'<div class="lc-ev {ev_cls}">{ev_label}</div></div>'
+            f'<div class="lc-net {_cls(net)}">{_fmt_eur(net)}</div></div>'
+            f'<div class="lc-meta">'
+            f"<div><span>Tijd</span>{_ts(r.get('ts'))}</div>"
+            f"<div><span>Prijs</span>{px_txt}</div>"
+            f"<div><span>Notional</span>{_fmt_eur(r.get('notional_eur'), signed=False)}</div>"
+            f"<div><span>Fee</span>{_fmt_eur(r.get('fee_eur'), signed=False)}</div>"
+            f"<div><span>Gross</span><b class='{_cls(r.get('gross_return'))}'>"
+            f"{_fmt_pct(r.get('gross_return'))}</b></div>"
+            f"<div><span>Peak</span>{_fmt_pct(r.get('peak_return'))}</div>"
+            f"</div>"
+            f"{reason_html}"
+            f"</article>"
+        )
+    table.append("</tbody></table></div>")
+    cards.append("</div>")
+    return "".join(table + cards)
 
 
 def _rules(cfg: Mapping[str, Any]) -> str:
@@ -3204,28 +3278,31 @@ _LIVE_MARKS_JS = r"""
     const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
     return { trail, tightAfter, tight };
   }
-  const eqSpark = [];
+  const eqSparks = {};
   const EQ_SPARK_MAX = 900;
-  function rememberEquity(eq) {
+  function rememberEquity(desk, eq) {
     if (eq == null || !Number.isFinite(Number(eq))) return;
+    const key = desk || "clip";
+    if (!eqSparks[key]) eqSparks[key] = [];
+    const spark = eqSparks[key];
     const now = Date.now();
     const v = Number(eq);
-    if (eqSpark.length && (now - eqSpark[eqSpark.length - 1][0]) < 800) {
-      eqSpark[eqSpark.length - 1] = [now, v];
+    if (spark.length && (now - spark[spark.length - 1][0]) < 800) {
+      spark[spark.length - 1] = [now, v];
     } else {
-      eqSpark.push([now, v]);
+      spark.push([now, v]);
     }
-    if (eqSpark.length > EQ_SPARK_MAX) eqSpark.splice(0, eqSpark.length - EQ_SPARK_MAX);
+    if (spark.length > EQ_SPARK_MAX) spark.splice(0, spark.length - EQ_SPARK_MAX);
   }
-  function mergedCurve(server, equity) {
-    rememberEquity(equity);
+  function mergedCurve(desk, server, equity) {
+    rememberEquity(desk, equity);
     const pts = [];
     (Array.isArray(server) ? server : []).forEach((p) => {
       if (Array.isArray(p) && p.length >= 2 && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
         pts.push([Number(p[0]), Number(p[1])]);
       }
     });
-    eqSpark.forEach((p) => pts.push(p));
+    (eqSparks[desk] || []).forEach((p) => pts.push(p));
     pts.sort((a, b) => a[0] - b[0]);
     const out = [];
     pts.forEach((p) => {
@@ -3234,10 +3311,10 @@ _LIVE_MARKS_JS = r"""
     });
     return out;
   }
-  function drawEqChart(points, equity) {
-    const host = document.querySelector('[data-live="eq-chart"]');
+  function drawEqChart(host, points, equity) {
     if (!host) return;
-    let pts = mergedCurve(points, equity);
+    const desk = host.getAttribute("data-eq-desk") || "clip";
+    let pts = mergedCurve(desk, points, equity);
     if (!pts.length) {
       const y = Number(equity || 0);
       const now = Date.now();
@@ -3258,7 +3335,7 @@ _LIVE_MARKS_JS = r"""
     const line = pts.map((p) => `${sx(p[0]).toFixed(2)},${sy(p[1]).toFixed(2)}`).join(" ");
     const up = ys[ys.length - 1] >= ys[0];
     const stroke = up ? "#34D399" : "#F87171";
-    const fillId = "eqFill";
+    const fillId = "eqFill-" + desk;
     const c0 = up ? "rgba(52,211,153,.32)" : "rgba(248,113,113,.30)";
     const c1 = up ? "rgba(52,211,153,0)" : "rgba(248,113,113,0)";
     const last = pts[pts.length - 1];
@@ -3328,7 +3405,7 @@ _LIVE_MARKS_JS = r"""
     if (!root || !st) return;
     patchHeroes(st);
     patchAlloc(st);
-    drawEqChart(st.equity_curve, st.equity_eur);
+    drawEqChart(root.querySelector('[data-eq-desk="clip"]'), st.equity_curve, st.equity_eur);
     const live = !!st.running && !st.dry_run && st.allow_live !== false;
     const pill = root.querySelector('[data-live="clip-pill"]');
     if (pill) {
@@ -3410,6 +3487,7 @@ _LIVE_MARKS_JS = r"""
     const root = document.querySelector('[data-live="core-15m"]');
     if (!root || !status) return;
     setText(root, "core15-eq", fmtEur(status.equity_eur, false));
+    setText(root, "core15-open", fmtEur(status.unrealized_net_eur), cls(status.unrealized_net_eur));
     const pill = document.querySelector('[data-live="core15-pill"]');
     if (pill) {
       const on = !!status.running && !status.dry_run;
@@ -3426,6 +3504,7 @@ _LIVE_MARKS_JS = r"""
           + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
       }).join("");
     }
+    drawEqChart(root.querySelector('[data-eq-desk="core15"]'), status.equity_curve, status.equity_eur);
     const knobs = trailKnobs(status);
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
   }
@@ -3438,7 +3517,11 @@ _LIVE_MARKS_JS = r"""
     }
     if (core) {
       patchHeroes(core);
-      drawEqChart(core.equity_curve, core.equity_eur);
+      drawEqChart(
+        document.querySelector('[data-eq-desk="core15"]') || document.querySelector('[data-live="eq-chart"]'),
+        core.equity_curve,
+        core.equity_eur
+      );
       patchAlloc(core);
       const knobs = trailKnobs(core);
       (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
@@ -3609,8 +3692,8 @@ def render_momentum_dashboard(
         )
         if core_live:
             exec_ledger_html += (
-                '<details class="fold">'
-                '<summary><span class="fold-head">15m</span>'
+                '<details class="fold" id="ledger-15m">'
+                '<summary><span class="fold-head">15m ledger</span>'
                 '<span class="chev"></span></summary>'
                 f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
             )
@@ -3633,7 +3716,7 @@ def render_momentum_dashboard(
             f'<div><p class="eq-k">Open</p>'
             f'<p class="eq-open {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</p>'
             f"</div></div>"
-            f"{_equity_chart_svg(status.get('equity_curve'), equity=equity)}"
+            f"{_equity_chart_svg(status.get('equity_curve'), equity=equity, desk='core15')}"
             f"{_alloc_visual(status)}</section>"
         )
         sat = ""

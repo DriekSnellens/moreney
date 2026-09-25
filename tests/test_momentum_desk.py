@@ -1053,6 +1053,31 @@ def _runner(tmp_path: Path, gw, clock, feed=None, opt_kwargs=None, **cfg_kwargs)
     )
 
 
+def test_momentum_runner_samples_equity_curve(tmp_path):
+    gw = FakeGateway()
+    clock = FakeClock(T0 / 1000)
+    r = _runner(tmp_path, gw, clock)
+    r.cash_by_venue = {"bitvavo": 2000.0}
+    r._sample_equity()
+    assert len(r.equity_curve) == 1
+    assert r.equity_curve[0][1] == 2000.0
+    r.cash_by_venue = {"bitvavo": 1900.0}
+    r._sample_equity()
+    assert len(r.equity_curve) == 1
+    assert r.equity_curve[0][1] == 1900.0
+    r.equity_curve[-1][0] = 1.0
+    clock.t += 6.0
+    r.cash_by_venue = {"bitvavo": 1950.0}
+    r._sample_equity()
+    assert len(r.equity_curve) == 2
+    st = r.status()
+    assert st["equity_curve"][-1][1] == 1950.0
+    raw = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert raw["equity_curve"][-1][1] == 1950.0
+    r.reset_operator_numbers()
+    assert r.equity_curve == []
+
+
 def test_buy_rests_as_maker_then_falls_back_to_taker(tmp_path):
     gw = FakeGateway()
     clock = FakeClock(T0 / 1000)
