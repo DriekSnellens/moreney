@@ -351,19 +351,23 @@ body {
   font-size: .8rem; color: var(--muted);
 }
 .earn-foot strong { color: var(--ink); font-weight: 600; font-family: var(--mono); }
+.paper-fold { margin-top: .75rem; opacity: .78; }
+.paper-fold > summary { color: var(--muted); }
+.paper-fold .paper-irrel {
+  font-size: .68rem; font-weight: 600; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--muted-2); margin-left: auto;
+}
+.paper-fold .earn-grid { margin-top: .35rem; border-top: 0; }
+.paper-fold .earn-tile { padding: .35rem 0; }
+.paper-fold .earn-tile .amount {
+  font-size: 1rem; font-weight: 600; color: var(--muted);
+}
+.paper-fold .earn-tile .meta { color: var(--muted-2); }
 .paper-earn {
   margin-top: .9rem; padding: .9rem 1.05rem .8rem;
-  border: 1px dashed rgba(245,158,11,.35); border-radius: 1rem;
-  background: rgba(245,158,11,.06);
-  animation: rise-in .55s var(--ease) both;
+  border: 1px dashed var(--border); border-radius: 1rem;
+  background: rgba(15,23,42,.55);
 }
-.paper-earn .earn-label { color: var(--warn); }
-.paper-earn .earn-grid { border-top-color: rgba(245,158,11,.22); }
-.paper-earn .earn-tile .amount {
-  font-size: clamp(1.15rem, 2.8vw, 1.5rem);
-}
-.paper-earn .earn-foot { border-top-color: rgba(245,158,11,.22); }
-.paper-earn .brand-sub { max-width: 42rem; }
 
 .pill {
   display: inline-flex; align-items: center; gap: .4rem;
@@ -981,7 +985,7 @@ def _hero(
 
 
 
-def _period_tiles(period: Any, week_meta: str) -> str:
+def _period_tiles(period: Any, week_meta: str, *, muted: bool = False) -> str:
     tiles = [
         ("Deze week", period.week_eur, week_meta),
         ("Deze maand", period.month_eur, f"{period.trades_month} trades deze maand"),
@@ -994,7 +998,7 @@ def _period_tiles(period: Any, week_meta: str) -> str:
     return "".join(
         '<div class="earn-tile">'
         f'<p class="period">{escape(label)}</p>'
-        f'<p class="amount {_cls(val)}">{_fmt_eur(val)}</p>'
+        f'<p class="amount {("muted" if muted else _cls(val))}">{_fmt_eur(val)}</p>'
         f'<p class="meta">{escape(meta)}</p>'
         "</div>"
         for label, val, meta in tiles
@@ -1014,25 +1018,35 @@ def _zero_period() -> PeriodNet:
     )
 
 
-def _paper_earnings_panel(earnings: DeskEarnings) -> str:
-    """Paper fills only — never mixed into live Netto verdiend."""
+def _paper_earnings_panel(earnings: DeskEarnings | None) -> str:
+    """Collapsed paper PnL — never mixed into live Netto verdiend."""
+    if earnings is None:
+        return ""
     paper = earnings.paper
     open_mtm = earnings.paper_open_mtm_eur
-    as_of = earnings.as_of
-    tiles_html = _period_tiles(paper, f"{paper.trades_week} trades · paper deze week")
+    if (
+        paper.trades_all_time <= 0
+        and abs(paper.all_time_eur) < 0.005
+        and abs(paper.week_eur) < 0.005
+        and abs(paper.day_eur) < 0.005
+        and abs(open_mtm) < 0.005
+    ):
+        return ""
+    tiles_html = _period_tiles(
+        paper, f"{paper.trades_week} paper", muted=True
+    )
     return (
-        '<section class="paper-earn" id="paper-earn" data-live="paper-earn">'
-        '<p class="earn-label">Paper overzicht</p>'
-        '<p class="brand-sub">Shadow / dry-run fills. Telt niet mee in netto verdiend '
-        "en is geen Bitvavo- of OKX-winst.</p>"
+        '<details class="fold paper-fold" id="paper-earn">'
+        '<summary><span class="fold-head">Paper winst</span>'
+        '<span class="paper-irrel">niet relevant · telt niet mee</span>'
+        '<span class="chev"></span></summary>'
+        '<div class="fold-body">'
+        '<p class="muted">Shadow / dry-run. Geen Bitvavo- of OKX-winst en geen netto verdiend.</p>'
         f'<div class="earn-grid">{tiles_html}</div>'
         '<div class="earn-foot">'
-        f"<span>Vandaag <strong class='{_cls(paper.day_eur)}'>"
-        f"{_fmt_eur(paper.day_eur)}</strong></span>"
-        f"<span>Open MTM paper <strong class='{_cls(open_mtm)}'>"
-        f"{_fmt_eur(open_mtm)}</strong></span>"
-        f'<span class="muted">peil {escape(str(as_of)[:19].replace("T", " "))} NL</span>'
-        "</div></section>"
+        f"<span>Vandaag <strong>{_fmt_eur(paper.day_eur)}</strong></span>"
+        f"<span>Open MTM paper <strong>{_fmt_eur(open_mtm)}</strong></span>"
+        "</div></div></details>"
     )
 
 
@@ -1044,7 +1058,7 @@ def _earnings_masthead(
     show_volatile: bool = False,
     show_mix: bool = False,
 ) -> str:
-    """Live net only — paper PnL is never rendered on the operator page."""
+    """Live net only. Paper PnL is a collapsed footnote, never in these tiles."""
     del show_volatile, show_mix, venue
     live = earnings.combined if earnings is not None else _zero_period()
     open_mtm = earnings.open_mtm_eur if earnings is not None else 0.0
@@ -3674,6 +3688,7 @@ def render_momentum_dashboard(
         pill=pill,
         venue=venue,
     )
+    paper_html = _paper_earnings_panel(earnings)
     open_pnl = book.get("unrealized_net_eur")
     if open_pnl is None and earnings:
         open_pnl = earnings.open_mtm_eur
@@ -3839,6 +3854,7 @@ def render_momentum_dashboard(
 {decisions_html}
 {exec_ledger_html}
 {rules_html}
+{paper_html}
 <p class="foot"><span>{refresh_note}</span>{footer_links}</p>
 </div>
 </div>
