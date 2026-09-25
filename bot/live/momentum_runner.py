@@ -606,6 +606,10 @@ class RunnerOptions:
     venue_cash_caps: dict[str, float] = field(default_factory=dict)
 
 
+_EQUITY_CURVE_MAX = 2016
+_EQUITY_CURVE_MIN_GAP_SEC = 5.0
+
+
 class MomentumDeskRunner:
     def __init__(
         self,
@@ -644,6 +648,8 @@ class MomentumDeskRunner:
         # Set when an exit frees a slot; consumed by ``_maybe_refill``.
         self._refill_pending: bool = False
         self._lock = asyncio.Lock()
+        self.equity_curve: list[list[float]] = []
+        self._last_curve_save = 0.0
         self.started_at = datetime.now(UTC).isoformat()
         self.outcomes = MomentumTradeOutcomeStore.load(
             self.opt.outcome_learning_path,
@@ -708,6 +714,15 @@ class MomentumDeskRunner:
         self.realized_total_eur = float(data.get("realized_total_eur") or 0.0)
         self.trade_count = int(data.get("trade_count") or 0)
         self.last_regime = dict(data.get("last_regime") or {})
+        curve: list[list[float]] = []
+        for row in data.get("equity_curve") or []:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                continue
+            try:
+                curve.append([float(row[0]), float(row[1])])
+            except (TypeError, ValueError):
+                continue
+        self.equity_curve = curve[-_EQUITY_CURVE_MAX:]
 
     def _save_state(self) -> None:
         path = Path(self.opt.state_path)
@@ -720,10 +735,47 @@ class MomentumDeskRunner:
             "realized_total_eur": round(self.realized_total_eur, 4),
             "trade_count": self.trade_count,
             "last_regime": self.last_regime,
+            "equity_curve": [
+                [round(float(t), 1), round(float(eq), 2)]
+                for t, eq in self.equity_curve[-_EQUITY_CURVE_MAX:]
+            ],
         }
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
         tmp.replace(path)
+
+    def _equity_now(self) -> float | None:
+        cash = self.cash_eur
+        if cash is None:
+            return None
+        exposure = sum(
+            float(h.pos.quantity or 0.0) * float(self.marks.get(h.pos.base) or h.pos.entry_price or 0.0)
+            for h in self.holdings
+            if float(h.pos.quantity or 0.0) > 1e-12
+        )
+        return float(cash) + float(exposure)
+
+    def _sample_equity(self, *, persist: bool = False) -> None:
+        eq_raw = self._equity_now()
+        if eq_raw is None:
+            return
+        eq = round(eq_raw, 2)
+        now_ms = float(self._clock()) * 1000.0
+        gap_ms = _EQUITY_CURVE_MIN_GAP_SEC * 1000.0
+        if self.equity_curve:
+            last_t, _last_eq = self.equity_curve[-1]
+            if (now_ms - last_t) < gap_ms:
+                self.equity_curve[-1] = [round(now_ms), eq]
+            else:
+                self.equity_curve.append([round(now_ms), eq])
+        else:
+            self.equity_curve.append([round(now_ms), eq])
+        if len(self.equity_curve) > _EQUITY_CURVE_MAX:
+            self.equity_curve = self.equity_curve[-_EQUITY_CURVE_MAX:]
+        now = float(self._clock())
+        if persist or (now - self._last_curve_save) >= _EQUITY_CURVE_MIN_GAP_SEC:
+            self._save_state()
+            self._last_curve_save = now
 
     def _ledger_append(self, row: Mapping[str, Any]) -> None:
         path = Path(self.opt.ledger_path)
@@ -752,6 +804,7 @@ class MomentumDeskRunner:
         self.trade_count = 0
         self.last_regime = {}
         self.last_error = None
+        self.equity_curve = []
         self.ledger = RiskLedger.from_dict(self.cfg, None)
         self.ledger.roll(now_ms)
         self._save_state()
@@ -859,6 +912,9 @@ class MomentumDeskRunner:
                 if self.marks_updated_at
                 else None
             ),
+            "equity_curve": [
+                [round(float(t), 1), round(float(eq), 2)] for t, eq in self.equity_curve
+            ],
         }
 
     def _regime_pnl_summary(self) -> dict[str, Any]:
@@ -930,6 +986,7 @@ class MomentumDeskRunner:
             await self._manage_exits(now_ms)
             # Cash first: the venue router needs fresh balances at the decision hour.
             await self._refresh_cash()
+            self._sample_equity()
             # Refill freed slots immediately (WR hours stay sparse; don't wait).
             await self._maybe_refill(now_ms)
             await self._maybe_decide(now_ms)
@@ -2526,6 +2583,10 @@ class MomentumDeskManager:
                     await self._runner._refresh_cash(force=True)  # noqa: SLF001
                 except Exception:  # noqa: BLE001
                     logger.exception("momentum desk: cash refresh for status failed")
+            try:
+                self._runner._sample_equity()  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: equity sample for status failed")
         return self.status()
 
     async def start(

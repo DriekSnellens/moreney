@@ -245,6 +245,7 @@ def test_dashboard_live_15m_beside_mix_is_not_idle():
     assert "NEAR" not in html or 'data-live="clip"' not in html
     assert 'id="paper-sw"' not in html
     assert 'data-live="eq-chart"' in html
+    assert 'data-eq-desk="core15"' in html
     assert "3,900.00" in html
 
 
@@ -318,11 +319,99 @@ def test_dashboard_paper_clip_is_separate_from_mix_equity():
     assert "Paper · BTC + RS-clip" not in html
     assert 'id="clip"' in html
     assert 'data-live="eq-chart"' in html
+    assert 'data-eq-desk="clip"' in html
     assert "20,100.00" in html
     assert "21,122" not in html
     assert "19,683" not in html
     assert "clip-btc" in html
     assert "BTC" in html
+
+
+def test_dashboard_live_15m_has_equity_chart_beside_clip():
+    from bot.live.momentum_dashboard import render_momentum_dashboard
+
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 2, "clip_eur": 2000, "trail_pct": 0.04},
+            "positions": [
+                {
+                    "holding_id": "m-1",
+                    "base": "FET",
+                    "quantity": 10,
+                    "unrealized_net_eur": 12.0,
+                }
+            ],
+            "risk": {"day_realized_eur": 0, "entries_allowed": True},
+            "cash_eur": 1500,
+            "equity_eur": 2100.0,
+            "realized_total_eur": 10,
+            "trade_count": 1,
+            "unrealized_net_eur": 12.0,
+            "equity_curve": [[1.0, 2000.0], [2.0, 2100.0]],
+        },
+        [
+            {
+                "ts": "2026-09-23T08:20:00+00:00",
+                "event": "exit",
+                "base": "FET",
+                "venue": "bitvavo",
+                "price": 1.23,
+                "notional_eur": 400.0,
+                "fee_eur": 1.0,
+                "gross_return": 0.04,
+                "peak_return": 0.06,
+                "net_eur": 12.5,
+                "reason": "trail",
+            }
+        ],
+        show_btc_rs_clip=True,
+        btc_rs_clip={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "equity_eur": 20448.0,
+            "book_eur": 20000.0,
+            "cash_eur": 20448.0,
+            "realized_total_eur": 448.0,
+            "unrealized_net_eur": 0.0,
+            "want_alt": "NEAR",
+            "risk_on": True,
+            "equity_curve": [[1.0, 20000.0], [2.0, 20448.0]],
+            "positions": [],
+        },
+        btc_rs_clip_ledger_rows=[
+            {
+                "ts": "2026-09-25T13:08:00+00:00",
+                "event": "exit",
+                "base": "BTC",
+                "venue": "bitvavo",
+                "price": 95000.0,
+                "notional_eur": 4000.0,
+                "net_eur": 72.09,
+                "reason": "manual_sell_all",
+            }
+        ],
+    ).body.decode()
+    assert 'id="clip"' in html
+    assert 'id="core-15m"' in html
+    assert 'data-eq-desk="clip"' in html
+    assert 'data-eq-desk="core15"' in html
+    assert 'data-live="eq-chart"' in html
+    assert "eqFill-clip" in html
+    assert "eqFill-core15" in html
+    assert "15m WR-core" in html
+    assert 'id="ledger-15m"' in html
+    assert "15m ledger" in html
+    assert "ledger-cards" in html
+    assert "ledger-wide" in html
+    assert "ledger-card" in html
+    assert "patchCore15m" in html
+    assert '[data-eq-desk="core15"]' in html
+    assert "FET" in html
+    assert "trail" in html
 
 
 def test_dashboard_clip_live_pill():
@@ -509,6 +598,12 @@ def test_ledger_table_maps_manual_external():
     assert "AAA" in html
     assert "3.65" in html
     assert "donch_fri10 · manual_external" in html
+    assert "ledger-cards" in html
+    assert "ledger-card" in html
+    assert "ledger-wide" in html
+    assert "Gross" in html
+    assert "Peak" in html
+    assert "−80.50" in html or "-80.50" in html
 
 
 class _ReconGw:
