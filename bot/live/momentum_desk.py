@@ -102,13 +102,14 @@ class DeskConfig:
     min_volume_eur: float = 1_000_000.0
     btc_min_ret: float = -0.01
     min_breadth: float = 0.5
-    # Live research winner (12w €20k×1 + rolling): fixed 5% trail.
-    trail_pct: float = 0.05
+    # Live trail: 8% from peak. The 12w search preferred 5%, but 15m alts
+    # routinely print 5–7% noise off the high and the 5% pack clipped runners.
+    trail_pct: float = 0.08
     # Ratchet: once the peak gain reaches ``trail_tight_after`` the trail
     # narrows to ``trail_tight_pct`` (0 ``trail_tight_after`` disables).
-    # Fixed5 beat the prior 3% / 4%→2% pack on PnL and max DD.
+    # Keep the ratchet off; AlphaI-avoid still uses ``trail_tight_pct``.
     trail_tight_after: float = 0.0
-    trail_tight_pct: float = 0.02
+    trail_tight_pct: float = 0.04
     hard_stop_pct: float = 0.03
     # Absolute hard stop in EUR of gross loss (0 = use ``hard_stop_pct`` only).
     # Live preference: fixed −€300 so large clips are not allowed −3% bleed.
@@ -157,8 +158,10 @@ class DeskConfig:
     # Under macro caution + reduce: optional AlphaI-only gate. Default off —
     # empty picks + strong tape caused live deadlocks (e.g. NEAR 07:00 miss).
     macro_caution_requires_alphai_pick: bool = False
-    # Always require an AlphaI pick for new entries (any regime). Off by default;
-    # when on, empty/stale pick lists idle the desk instead of taking tape-only names.
+    # Always require an AlphaI pick for new entries (any regime). Research
+    # default is off (backtests have no AlphaI tape). Live Settings default is
+    # on so 15m entries are pick-gated; empty/stale lists idle instead of
+    # taking tape-only names.
     requires_alphai_pick: bool = False
     # Soft regime: weak BTC/breadth no longer hard-blocks. Instead the
     # desk stays open for AlphaI picks at a reduced clip so early legs
@@ -198,7 +201,8 @@ class DeskConfig:
     skip_weekend_entries: bool = True
     # Exit side of AlphaI: a bearish headline on a held base does not dump the
     # position (that was fee churn in the old desk) but narrows the trail to
-    # ``trail_tight_pct`` so the winner is protected while the news is fresh.
+    # ``trail_tight_pct`` (4%, not 2%) so the winner is protected without
+    # stopping out on ordinary 15m noise while the news is fresh.
     alphai_avoid_tightens_trail: bool = True
     # Research knobs (backtest only): decide on every 15m bar instead of the
     # decision hours, and trigger stops on the bar's low (proxy for minute-level

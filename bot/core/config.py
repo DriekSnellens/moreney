@@ -597,10 +597,10 @@ class Settings(BaseSettings):
     momentum_desk_skip_weekend_entries: bool = True
     # €20k util search: 3 slots + larger clips beat 4× smaller proportional clips.
     momentum_desk_max_positions: int = Field(default=3, ge=1, le=10)
-    # Live research winner: fixed 5% trail (tight_after=0 disables ratchet).
-    momentum_desk_trail_pct: float = Field(default=0.05, gt=0, le=0.2)
+    # Live 15m trail: 8% from peak (5% was clipping 15m noise). Ratchet off.
+    momentum_desk_trail_pct: float = Field(default=0.08, gt=0, le=0.2)
     momentum_desk_trail_tight_after: float = Field(default=0.0, ge=0, le=0.5)
-    momentum_desk_trail_tight_pct: float = Field(default=0.02, gt=0, le=0.2)
+    momentum_desk_trail_tight_pct: float = Field(default=0.04, gt=0, le=0.2)
     momentum_desk_hard_stop_pct: float = Field(default=0.03, gt=0, le=0.2)
     # Absolute gross-loss hard stop (0 = percentage only). Live: −€300.
     momentum_desk_hard_stop_eur: float = Field(default=0.0, ge=0.0, le=50_000.0)
@@ -641,8 +641,9 @@ class Settings(BaseSettings):
     momentum_desk_soft_regime_idle_on_macro_caution: bool = True
     # Under macro reduce: do not require AlphaI picks (empty-pick deadlock).
     momentum_desk_macro_caution_requires_alphai_pick: bool = False
-    # Always require AlphaI pick for new entries (operator preference; idle if none).
-    momentum_desk_requires_alphai_pick: bool = False
+    # Live 15m entries require an AlphaI pick (RS still ranks among picks).
+    # Empty/stale pick lists idle the desk instead of taking tape-only names.
+    momentum_desk_requires_alphai_pick: bool = True
     momentum_desk_soft_regime_fee_buffer_mult: float = Field(default=6.0, ge=0.0, le=20.0)
     # AlphaI size overlay: binary = flat alphai_clip_mult; conviction = score/rank
     # + headline conflict + price-confirm/reliability (no harder entry gates).

@@ -1060,7 +1060,7 @@ def _positions_table(
     if not rows:
         return f'<p class="pos-empty muted" data-live="positions-empty">{escape(empty_text)}</p>'
     # Preserve explicit 0.0 (paper bear-harvest disables trail/hard-stop).
-    trail = float(cfg["trail_pct"]) if cfg.get("trail_pct") is not None else 0.05
+    trail = float(cfg["trail_pct"]) if cfg.get("trail_pct") is not None else 0.08
     tight_after = (
         float(cfg["trail_tight_after"]) if cfg.get("trail_tight_after") is not None else 0.0
     )
@@ -2490,11 +2490,11 @@ def _preview_panel(
             f"</strong></td><td></td><td></td>{total_cells}</tr></tbody></table>"
         )
         trail_note = (
-            f"trail vast {100 * float(planned[0].get('trail_pct') or 0.05):.0f}% onder de piek"
+            f"trail vast {100 * float(planned[0].get('trail_pct') or 0.08):.0f}% onder de piek"
             if float(planned[0].get("trail_tight_after") or 0.0) <= 0.0
             else (
-                f"trail {100 * float(planned[0].get('trail_pct') or 0.05):.0f}% onder de piek "
-                f"({100 * float(planned[0].get('trail_tight_pct') or 0.02):.1f}% zodra "
+                f"trail {100 * float(planned[0].get('trail_pct') or 0.08):.0f}% onder de piek "
+                f"({100 * float(planned[0].get('trail_tight_pct') or 0.04):.1f}% zodra "
                 f"+{100 * float(planned[0].get('trail_tight_after') or 0.0):.0f}% piek)"
             )
         )
@@ -3199,9 +3199,9 @@ _LIVE_MARKS_JS = r"""
   }
   function trailKnobs(status) {
     const cfg = status.config || {};
-    const trail = Number(cfg.trail_pct != null ? cfg.trail_pct : 0.05);
+    const trail = Number(cfg.trail_pct != null ? cfg.trail_pct : 0.08);
     const tightAfter = Number(cfg.trail_tight_after != null ? cfg.trail_tight_after : 0.0);
-    const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.02);
+    const tight = Number(cfg.trail_tight_pct != null ? cfg.trail_tight_pct : 0.04);
     return { trail, tightAfter, tight };
   }
   const eqSpark = [];
