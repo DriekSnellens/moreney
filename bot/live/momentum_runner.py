@@ -2319,9 +2319,9 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
         clip_eur=float(getattr(settings, "momentum_desk_clip_eur", 500.0)),
         max_positions=int(getattr(settings, "momentum_desk_max_positions", 3)),
         # WR-pack getattr defaults (must match Settings / live-micro.env).
-        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.05)),
+        trail_pct=float(getattr(settings, "momentum_desk_trail_pct", 0.08)),
         trail_tight_after=float(getattr(settings, "momentum_desk_trail_tight_after", 0.0)),
-        trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.02)),
+        trail_tight_pct=float(getattr(settings, "momentum_desk_trail_tight_pct", 0.04)),
         hard_stop_pct=float(getattr(settings, "momentum_desk_hard_stop_pct", 0.03)),
         hard_stop_eur=float(getattr(settings, "momentum_desk_hard_stop_eur", 0.0)),
         early_stop_pct=float(getattr(settings, "momentum_desk_early_stop_pct", 0.0)),
@@ -2339,7 +2339,7 @@ def desk_config_from_settings(settings: Settings) -> DeskConfig:
             getattr(settings, "momentum_desk_macro_caution_requires_alphai_pick", False)
         ),
         requires_alphai_pick=bool(
-            getattr(settings, "momentum_desk_requires_alphai_pick", False)
+            getattr(settings, "momentum_desk_requires_alphai_pick", True)
         ),
         strong_clip_mult=float(getattr(settings, "momentum_desk_strong_clip_mult", 1.3)),
         weak_clip_mult=float(getattr(settings, "momentum_desk_weak_clip_mult", 0.7)),

@@ -301,6 +301,11 @@ def test_desk_config_from_settings_wires_requires_alphai_pick():
         )
     )
     assert cfg_off.requires_alphai_pick is False
+    # Live default: 15m entries are AlphaI pick-gated. DeskConfig() stays off
+    # so AlphaI-free research backtests still take tape names.
+    live = desk_config_from_settings(Settings(_env_file=None))  # type: ignore[call-arg]
+    assert live.requires_alphai_pick is True
+    assert DeskConfig().requires_alphai_pick is False
 
 
 def test_desk_config_from_settings_wires_chase_gate():
@@ -354,6 +359,13 @@ def test_desk_config_from_settings_wires_trail_and_early_stop():
     from bot.core.config import Settings
     from bot.live.momentum_runner import desk_config_from_settings
 
+    live = desk_config_from_settings(Settings(_env_file=None))  # type: ignore[call-arg]
+    assert live.trail_pct == pytest.approx(0.08)
+    assert live.trail_tight_after == 0.0
+    assert live.trail_tight_pct == pytest.approx(0.04)
+    assert DeskConfig().trail_pct == pytest.approx(0.08)
+    assert DeskConfig().trail_tight_pct == pytest.approx(0.04)
+
     cfg = desk_config_from_settings(
         Settings(
             _env_file=None,  # type: ignore[call-arg]
@@ -378,6 +390,24 @@ def test_desk_config_from_settings_wires_trail_and_early_stop():
     )
     assert cfg_on.early_stop_pct == 0.02
     assert cfg_on.early_stop_until_peak == 0.015
+
+
+def test_eight_pct_trail_holds_five_pct_peak_pullback():
+    """5% off the peak used to trail-stop; 8% lets 15m noise breathe."""
+    cfg = DeskConfig()
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 110.0)
+    # −5% from peak 110 → 104.5: inside 8% trail, would have been 5% trail-exit.
+    assert evaluate_exit(pos, [T0, 106.0, 110.0, 104.0, 104.5, 1], cfg) is None
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 110.0)
+    d = evaluate_exit(pos, [T0, 106.0, 110.0, 100.5, 100.98, 1], cfg)
+    assert d is not None and d.reason == "trail"
+    # AlphaI-avoid still tightens (8% → 4%), but not down to 2%.
+    bearish = AlphaIView(avoid=frozenset({"SOL"}))
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 110.0)
+    assert evaluate_exit(pos, [T0, 106.0, 110.0, 106.5, 106.7, 1], cfg, alphai=bearish) is None
+    pos = Position("SOL", 100.0, 5.0, 500.0, T0, 110.0)
+    d = evaluate_exit(pos, [T0, 106.0, 110.0, 104.0, 104.5, 1], cfg, alphai=bearish)
+    assert d is not None and d.reason == "trail_alphai"
 
 
 def test_desk_config_from_settings_wires_be_arm_and_partial():
@@ -863,7 +893,14 @@ def _stats(base: str, ret: float):
 
 
 def test_simulate_enters_leader_and_exits_on_trail():
-    cfg = DeskConfig(universe=("SOL", "LINK"), min_volume_eur=0.0, clip_eur=500.0, **FLAT_SIZING)
+    cfg = DeskConfig(
+        universe=("SOL", "LINK"),
+        min_volume_eur=0.0,
+        clip_eur=500.0,
+        # 4% giveback is designed to print a trail exit; do not inherit the live 8%.
+        trail_pct=0.03,
+        **FLAT_SIZING,
+    )
     n = 5 * BARS_PER_DAY
     candles = {
         "BTC": _series(T0 - 2 * DAY_MS, n, 100.0, 0.0),
@@ -1043,6 +1080,8 @@ def _runner(tmp_path: Path, gw, clock, feed=None, opt_kwargs=None, **cfg_kwargs)
         state_path=str(tmp_path / "state.json"),
         ledger_path=str(tmp_path / "ledger.jsonl"),
         alphai_recommendations_path=None,
+        alphai_pick_outcomes_path=None,
+        outcome_learning_path=str(tmp_path / "outcomes.json"),
         buy_rest_sec=60.0,
         repeg_sec=20.0,
         poll_sec=5.0,
@@ -1185,7 +1224,8 @@ def test_tick_exits_on_closed_bar_and_persists_ledger(tmp_path):
     assert r.holdings == []
     assert r.trade_count == 1 and r.realized_total_eur < -15
     ledger = [line for line in (tmp_path / "ledger.jsonl").read_text().splitlines()]
-    assert '"event": "exit"' in ledger[-1] and '"reason": "hard_stop"' in ledger[-1]
+    exit_rows = [line for line in ledger if '"event": "exit"' in line]
+    assert exit_rows and '"reason": "hard_stop"' in exit_rows[-1]
     assert r.ledger.day_realized_eur == pytest.approx(r.realized_total_eur)
     # Restart restores the risk ledger from disk.
     r2 = _runner(tmp_path, gw, clock, **cfg_kwargs)
@@ -1557,6 +1597,8 @@ def _multi_runner(tmp_path, clock, bitvavo_cash, okx_cash, feed=None, **cfg_kwar
         state_path=str(tmp_path / "state.json"),
         ledger_path=str(tmp_path / "ledger.jsonl"),
         alphai_recommendations_path=None,
+        alphai_pick_outcomes_path=None,
+        outcome_learning_path=str(tmp_path / "outcomes.json"),
         buy_rest_sec=60.0,
         repeg_sec=20.0,
         poll_sec=5.0,
