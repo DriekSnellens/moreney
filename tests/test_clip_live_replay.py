@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from bot.live.momentum_btc_rs_clip import ClipConfig
-from bot.research.btc_residual_mix.engine import run_btc_residual
+from bot.research.btc_residual_mix.engine import apply_alt_allow, run_btc_residual
 from bot.research.clip_exit_lab.engine import DRY
 from bot.research.clip_live_replay.engine import live_pack_knobs, run_live_pack
 
@@ -18,6 +18,22 @@ def _bars(n: int, start: float, step: float, vol: float = 200_000.0) -> list[lis
         rows.append([t0 + i * 86_400_000, px, hi, lo, px, vol])
         px = max(0.01, px + step)
     return rows
+
+
+def test_alt_allow_gate_and_intersect() -> None:
+    pick = {
+        "wants": ["NEAR"],
+        "ranked": [
+            {"base": "NEAR", "excess": 0.40},
+            {"base": "UNI", "excess": 0.12},
+            {"base": "LTC", "excess": 0.05},
+        ],
+    }
+    assert apply_alt_allow(pick, None) == ["NEAR"]
+    assert apply_alt_allow(pick, {"UNI", "LTC"}, mode="gate") == []
+    assert apply_alt_allow(pick, {"NEAR", "UNI"}, mode="gate") == ["NEAR"]
+    assert apply_alt_allow(pick, {"UNI", "LTC"}, mode="intersect", excess_floor=0.04) == ["UNI"]
+    assert apply_alt_allow(pick, {"SOL"}, mode="intersect", excess_floor=0.04) == []
 
 
 def test_live_pack_knobs_match_clip_config() -> None:

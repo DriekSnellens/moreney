@@ -42,6 +42,9 @@ def run_live_pack(
     book_eur: float,
     model: FillModel = WET,
     cfg: ClipConfig | None = None,
+    alt_allow: Mapping[str, set[str]] | None = None,
+    alt_allow_mode: str = "gate",
+    cash_when_no_alt: bool = False,
 ) -> dict[str, Any]:
     knobs = live_pack_knobs(cfg)
     policy = knobs.pop("policy")
@@ -57,6 +60,9 @@ def run_live_pack(
         keep_weeks=True,
         keep_trades=True,
         strategy="live_clip_pack",
+        alt_allow=alt_allow,
+        alt_allow_mode=alt_allow_mode,
+        cash_when_no_alt=cash_when_no_alt,
         **knobs,
     )
     row["trail_pct"] = trail_pct

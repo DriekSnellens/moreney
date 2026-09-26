@@ -75,6 +75,37 @@ def pick_residual(
     return {"want": want, "wants": alts, "ranked": ranked[:8]}
 
 
+def apply_alt_allow(
+    pick: Mapping[str, Any],
+    allowed: set[str] | None,
+    *,
+    mode: str = "gate",
+    excess_floor: float = 0.0,
+    n_alts: int = 1,
+) -> list[str]:
+    """Keep residual rank. ``allowed is None`` leaves the pick unchanged.
+
+    ``gate`` takes the residual winner only when that name is allowed.
+    ``intersect`` takes the strongest residual names that are allowed and
+    still clear the excess floor.
+    """
+    wants = [str(b) for b in (pick.get("wants") or []) if b and b != "BTC"]
+    if allowed is None:
+        return wants[: max(1, int(n_alts))]
+    if mode == "intersect":
+        ranked = pick.get("ranked") or []
+        out = [
+            str(row["base"])
+            for row in ranked
+            if str(row.get("base") or "") in allowed
+            and float(row.get("excess") or 0.0) > excess_floor
+        ]
+        return out[: max(1, int(n_alts))]
+    if wants and wants[0] in allowed:
+        return wants[:1]
+    return []
+
+
 def _iso_week(date: str) -> str:
     now = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=UTC)
     iso = now.isocalendar()
@@ -146,6 +177,9 @@ def run_btc_residual(
     keep_weeks: bool = False,
     keep_trades: bool = False,
     strategy: str = "",
+    alt_allow: Mapping[str, set[str]] | None = None,
+    alt_allow_mode: str = "gate",
+    cash_when_no_alt: bool = False,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -205,6 +239,15 @@ def run_btc_residual(
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
             )
+            if alt_allow is not None and date in alt_allow:
+                pick = dict(pick)
+                pick["wants"] = apply_alt_allow(
+                    pick,
+                    set(alt_allow[date]),
+                    mode=alt_allow_mode,
+                    excess_floor=excess_floor,
+                    n_alts=n_alts,
+                )
             last_reb = now_ms
             px = _px_map(ohlc, date, field=4)
             eq = book.mark(px)
@@ -233,7 +276,8 @@ def run_btc_residual(
                             )
                         )
                 if next_btc and held.get("BTC") != "btc":
-                    notion = eq if not next_alts else eq * btc_frac
+                    full_btc = not next_alts and not cash_when_no_alt
+                    notion = eq if full_btc else eq * btc_frac
                     orders.append(
                         Order(
                             side="buy",
