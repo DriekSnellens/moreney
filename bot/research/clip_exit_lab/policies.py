@@ -22,6 +22,22 @@ class ExitPolicy:
     alt_donch_n: int = 0
     alt_partial_tp_pct: float = 0.0
     alt_partial_frac: float = 0.0
+    # Once the alt peaks this far above entry, sell if close falls back to
+    # entry * (1 + floor). Floor 0 is breakeven. Does nothing until armed.
+    alt_lock_arm_pct: float = 0.0
+    alt_lock_floor_pct: float = 0.0
+    # Shallow spike: while the peak gain is still inside [arm, max), a
+    # giveback from that peak sells. Above max the 10% trail is left in charge.
+    alt_spike_arm_pct: float = 0.0
+    alt_spike_max_pct: float = 0.0
+    alt_spike_giveback_pct: float = 0.0
+    alt_spike_frac: float = 1.0
+    # Only the session that prints the high. Later drifts stay on the trail.
+    alt_spike_same_day: bool = False
+    # After a full spike sell, buy the sleeve back if a later close reclaims
+    # that day's high and the name is still the residual winner. 0 disables.
+    # The new lot is left to the trail.
+    alt_spike_reclaim_days: int = 0
     fold_alt_to_btc: bool = False
 
 

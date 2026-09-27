@@ -10,7 +10,7 @@ Wet = next-open Bitvavo taker. Not armed live. No per-coin branches.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from bot.live.momentum_btc_rs_clip import closes_of, quote_vol, rs_excess, sma
@@ -156,6 +156,95 @@ def _targets_multi(
     return "", ()
 
 
+def _spike_reclaim_orders(
+    book: Book,
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    date: str,
+    policy: ExitPolicy,
+    watches: list[dict[str, Any]],
+    overlay: Sequence[Order],
+    *,
+    risk_on: bool,
+    alt_frac: float,
+    excess_floor: float,
+    lookback_days: int,
+    skip_days: int,
+    n_alts: int,
+    require_alt_sma: bool,
+    sma_n: int,
+) -> list[Order]:
+    """Buy a spiked alt back if price reclaims that day's high within the window."""
+    days = int(policy.alt_spike_reclaim_days or 0)
+    if days <= 0:
+        return []
+    highs = _px_map(ohlc, date, field=2)
+    for order in overlay:
+        if order.side != "sell" or order.reason != "alt_spike":
+            continue
+        high = float(highs.get(order.base) or 0.0)
+        if high <= 0:
+            continue
+        deadline = (
+            datetime.strptime(date, "%Y-%m-%d") + timedelta(days=days)
+        ).strftime("%Y-%m-%d")
+        watches[:] = [w for w in watches if w["base"] != order.base]
+        watches.append(
+            {
+                "base": order.base,
+                "high": high,
+                "signal_date": date,
+                "deadline": deadline,
+            }
+        )
+    if not risk_on:
+        # A one-day SMA dip must not erase the watch. Buy only while risk is on.
+        watches[:] = [w for w in watches if date <= str(w["deadline"])]
+        return []
+    closes = _px_map(ohlc, date, field=4)
+    held_alt = next((lot.base for lot in book.lots.values() if lot.role == "alt"), None)
+    still: list[dict[str, Any]] = []
+    buys: list[Order] = []
+    for watch in watches:
+        base = str(watch["base"])
+        if date <= str(watch["signal_date"]):
+            still.append(watch)
+            continue
+        if date > str(watch["deadline"]) or held_alt not in (None, base):
+            continue
+        if base in book.lots:
+            continue
+        close = float(closes.get(base) or 0.0)
+        if close < float(watch["high"]):
+            still.append(watch)
+            continue
+        pick = pick_residual(
+            ohlc,
+            date,
+            excess_floor=excess_floor,
+            lookback_days=lookback_days,
+            skip_days=skip_days,
+            n_alts=n_alts,
+            require_alt_sma=require_alt_sma,
+            sma_n=sma_n,
+        )
+        if base not in (pick.get("wants") or []):
+            still.append(watch)
+            continue
+        eq = book.mark(closes)
+        buys.append(
+            Order(
+                side="buy",
+                base=base,
+                role="alt",
+                adv=_adv(ohlc, base, date),
+                notional=eq * alt_frac,
+                reason="alt_reclaim",
+            )
+        )
+    watches[:] = still
+    return buys
+
+
 def run_btc_residual(
     ohlc: Mapping[str, Sequence[Sequence[float]]],
     *,
@@ -200,6 +289,7 @@ def run_btc_residual(
     n_rotate = 0
     n_overlay = 0
     overlay_reasons: dict[str, int] = {}
+    reclaim_watches: list[dict[str, Any]] = []
     need = int(lookback_days) + int(skip_days) + 1
     alt_frac = max(0.0, 1.0 - float(btc_frac))
 
@@ -209,7 +299,13 @@ def run_btc_residual(
         now = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=UTC)
         now_ms = int(now.timestamp() * 1000)
         if model.delay_next_open and pending:
-            trades.extend(_apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms))
+            fills = _apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms)
+            trades.extend(fills)
+            for fill in fills:
+                if fill.get("reason") == "alt_reclaim":
+                    lot = book.lots.get(str(fill["base"]))
+                    if lot is not None:
+                        lot.spike_done = True
             pending = []
         overlay: list[Order] = []
         overlay_sold: set[str] = set()
@@ -323,6 +419,36 @@ def run_btc_residual(
                 pending = overlay
             else:
                 trades.extend(_apply_orders(book, overlay, ohlc, date, model, opened_ms=now_ms))
+        if policy is not None and int(policy.alt_spike_reclaim_days or 0) > 0:
+            reclaim = _spike_reclaim_orders(
+                book,
+                ohlc,
+                date,
+                policy,
+                reclaim_watches,
+                overlay,
+                risk_on=risk_on,
+                alt_frac=alt_frac,
+                excess_floor=excess_floor,
+                lookback_days=lookback_days,
+                skip_days=skip_days,
+                n_alts=n_alts,
+                require_alt_sma=require_alt_sma,
+                sma_n=sma_n,
+            )
+            for order in reclaim:
+                overlay_reasons[order.reason] = overlay_reasons.get(order.reason, 0) + 1
+            if reclaim:
+                if model.delay_next_open:
+                    pending = list(pending) + reclaim
+                else:
+                    fills = _apply_orders(book, reclaim, ohlc, date, model, opened_ms=now_ms)
+                    trades.extend(fills)
+                    for fill in fills:
+                        if fill.get("reason") == "alt_reclaim":
+                            lot = book.lots.get(str(fill["base"]))
+                            if lot is not None:
+                                lot.spike_done = True
         px = _px_map(ohlc, date, field=4)
         equity.append(book.mark(px))
         eq_dates.append(date)
