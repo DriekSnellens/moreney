@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.research.clip_exit_lab.engine import DRY, run_clip_exits
+from bot.research.clip_exit_lab.engine import DRY, Book, Lot, _overlay_orders, run_clip_exits
 from bot.research.clip_exit_lab.policies import POLICIES, ExitPolicy
 
 
@@ -36,6 +36,32 @@ def test_policy_grid_unique_names() -> None:
     names = [p.name for p in POLICIES()]
     assert "live" in names
     assert len(names) == len(set(names))
+
+
+def test_profit_lock_sells_when_close_falls_back_to_entry() -> None:
+    ts = 1_704_067_200_000
+    date = "2024-01-01"
+    book = Book(0.0)
+    book.lots["ETH"] = Lot(
+        base="ETH", qty=10.0, role="alt", entry_px=10.0, peak_px=10.0, opened_ms=ts
+    )
+    ohlc = {
+        "ETH": [[ts, 11.0, 12.0, 9.5, 10.0, 1_000_000.0]],
+        "BTC": [[ts, 100.0, 101.0, 99.0, 100.0, 1_000_000.0]],
+    }
+    policy = ExitPolicy(name="lock", alt_lock_arm_pct=0.10, alt_lock_floor_pct=0.0)
+    orders = _overlay_orders(book, ohlc, date, policy, ts)
+    assert any(o.side == "sell" and o.reason == "alt_lock" for o in orders)
+
+    quiet = Book(0.0)
+    quiet.lots["ETH"] = Lot(
+        base="ETH", qty=10.0, role="alt", entry_px=10.0, peak_px=10.0, opened_ms=ts
+    )
+    shallow = {
+        "ETH": [[ts, 10.2, 10.5, 9.0, 9.2, 1_000_000.0]],
+        "BTC": [[ts, 100.0, 101.0, 99.0, 100.0, 1_000_000.0]],
+    }
+    assert _overlay_orders(quiet, shallow, date, policy, ts) == []
 
 
 def test_live_beats_nothing_on_up_tape() -> None:

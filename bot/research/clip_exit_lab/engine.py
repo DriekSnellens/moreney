@@ -384,9 +384,17 @@ def _overlay_orders(
         high = float(high_px.get(lot.base) or close)
         lot.peak_px = max(lot.peak_px, high, close)
         ret = close / lot.entry_px - 1.0 if lot.entry_px > 0 else 0.0
+        peak_ret = lot.peak_px / lot.entry_px - 1.0 if lot.entry_px > 0 else 0.0
         peak_dd = 1.0 - close / lot.peak_px if lot.peak_px > 0 else 0.0
         rows = rows_through(ohlc.get(lot.base) or [], date)
         reasons: list[str] = []
+        if (
+            policy.alt_lock_arm_pct > 0
+            and peak_ret >= policy.alt_lock_arm_pct
+            and lot.entry_px > 0
+            and close <= lot.entry_px * (1.0 + policy.alt_lock_floor_pct)
+        ):
+            reasons.append("alt_lock")
         if policy.alt_tp_pct > 0 and ret >= policy.alt_tp_pct:
             reasons.append("alt_tp")
         if policy.alt_stop_pct > 0 and ret <= -policy.alt_stop_pct:

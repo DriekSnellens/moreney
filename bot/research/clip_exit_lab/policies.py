@@ -22,6 +22,10 @@ class ExitPolicy:
     alt_donch_n: int = 0
     alt_partial_tp_pct: float = 0.0
     alt_partial_frac: float = 0.0
+    # Once the alt peaks this far above entry, sell if close falls back to
+    # entry * (1 + floor). Floor 0 is breakeven. Does nothing until armed.
+    alt_lock_arm_pct: float = 0.0
+    alt_lock_floor_pct: float = 0.0
     fold_alt_to_btc: bool = False
 
 
