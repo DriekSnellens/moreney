@@ -111,6 +111,20 @@ def test_shallow_spike_sells_and_ignores_a_big_winner() -> None:
         o.side == "sell" and "alt_spike" in o.reason
         for o in _overlay_orders(stale, fade, date, policy, ts)
     )
+    done = Book(0.0)
+    done.lots["ETH"] = Lot(
+        base="ETH",
+        qty=10.0,
+        role="alt",
+        entry_px=10.0,
+        peak_px=10.0,
+        opened_ms=ts,
+        spike_done=True,
+    )
+    assert _overlay_orders(done, {
+        "ETH": [[ts, 10.0, 11.0, 10.4, 10.5, 1_000_000.0]],
+        "BTC": [[ts, 100.0, 101.0, 99.0, 100.0, 1_000_000.0]],
+    }, date, policy, ts) == []
     btc = _bars(80, 100.0, 0.5)
     ohlc = {"BTC": btc, "ETH": _bars(80, 10.0, 0.0, vol=1.0)}
     live = run_clip_exits(

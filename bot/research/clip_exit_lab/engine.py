@@ -442,7 +442,7 @@ def _overlay_orders(
             )
             lot.spike_done = True
             continue
-        if spike and policy.alt_spike_frac >= 0.999:
+        if spike and policy.alt_spike_frac >= 0.999 and not lot.spike_done:
             reasons.append("alt_spike")
         if (
             policy.alt_partial_tp_pct > 0

@@ -34,6 +34,10 @@ class ExitPolicy:
     alt_spike_frac: float = 1.0
     # Only the session that prints the high. Later drifts stay on the trail.
     alt_spike_same_day: bool = False
+    # After a full spike sell, buy the sleeve back if a later close reclaims
+    # that day's high and the name is still the residual winner. 0 disables.
+    # The new lot is left to the trail.
+    alt_spike_reclaim_days: int = 0
     fold_alt_to_btc: bool = False
 
 
