@@ -26,6 +26,14 @@ class ExitPolicy:
     # entry * (1 + floor). Floor 0 is breakeven. Does nothing until armed.
     alt_lock_arm_pct: float = 0.0
     alt_lock_floor_pct: float = 0.0
+    # Shallow spike: while the peak gain is still inside [arm, max), a
+    # giveback from that peak sells. Above max the 10% trail is left in charge.
+    alt_spike_arm_pct: float = 0.0
+    alt_spike_max_pct: float = 0.0
+    alt_spike_giveback_pct: float = 0.0
+    alt_spike_frac: float = 1.0
+    # Only the session that prints the high. Later drifts stay on the trail.
+    alt_spike_same_day: bool = False
     fold_alt_to_btc: bool = False
 
 

@@ -68,6 +68,7 @@ class Lot:
     opened_ms: int = 0
     peak_px: float = 0.0
     partial_done: bool = False
+    spike_done: bool = False
 
 
 @dataclass
@@ -382,7 +383,9 @@ def _overlay_orders(
         if close <= 0:
             continue
         high = float(high_px.get(lot.base) or close)
+        prev_peak = lot.peak_px
         lot.peak_px = max(lot.peak_px, high, close)
+        fresh_high = high > 0 and high + 1e-12 >= prev_peak
         ret = close / lot.entry_px - 1.0 if lot.entry_px > 0 else 0.0
         peak_ret = lot.peak_px / lot.entry_px - 1.0 if lot.entry_px > 0 else 0.0
         peak_dd = 1.0 - close / lot.peak_px if lot.peak_px > 0 else 0.0
@@ -417,6 +420,30 @@ def _overlay_orders(
             floor = _donch_low(rows[:-1] if len(rows) > 1 else rows, policy.alt_donch_n)
             if floor is not None and close < floor:
                 reasons.append("alt_donch")
+        spike = (
+            policy.alt_spike_arm_pct > 0
+            and policy.alt_spike_giveback_pct > 0
+            and peak_ret >= policy.alt_spike_arm_pct
+            and (policy.alt_spike_max_pct <= 0 or peak_ret < policy.alt_spike_max_pct)
+            and peak_dd >= policy.alt_spike_giveback_pct
+            and (not policy.alt_spike_same_day or fresh_high)
+        )
+        if spike and policy.alt_spike_frac < 0.999 and not lot.spike_done:
+            take = lot.qty * policy.alt_spike_frac
+            orders.append(
+                Order(
+                    side="sell",
+                    base=lot.base,
+                    role="alt",
+                    adv=_adv(ohlc, lot.base, date),
+                    qty=take,
+                    reason="alt_spike",
+                )
+            )
+            lot.spike_done = True
+            continue
+        if spike and policy.alt_spike_frac >= 0.999:
+            reasons.append("alt_spike")
         if (
             policy.alt_partial_tp_pct > 0
             and not lot.partial_done
