@@ -21,6 +21,7 @@ from bot.live.momentum_btc_rs_clip import (
     default_config,
     evaluate_clip,
     fill_px,
+    residual_full_config,
 )
 from bot.live.momentum_runner import (
     CandleFeed,
@@ -165,8 +166,11 @@ class BtcRsClipPaperRunner:
         gateways: Mapping[str, Any] | None = None,
         reserved_quote_eur: float = 0.0,
         reserved_qty: Mapping[str, float] | None = None,
+        pending_pack: str = "",
     ) -> None:
         self.cfg = cfg
+        self.pending_pack = str(pending_pack or "")
+        self.pack_mode = "clip_20_80"
         self.state_path = state_path
         self.ledger_path = ledger_path
         self._feed = feed or CandleFeed()
@@ -214,6 +218,12 @@ class BtcRsClipPaperRunner:
         self.realized_total_eur = float(raw.get("realized_total_eur") or 0.0)
         self.day_realized_eur = float(raw.get("day_realized_eur") or 0.0)
         self.last_rebalance_ms = int(raw.get("last_rebalance_ms") or 0)
+        if raw.get("pending_pack"):
+            self.pending_pack = str(raw.get("pending_pack") or "")
+        self.pack_mode = str(raw.get("pack_mode") or self.pack_mode)
+        if self.pack_mode == "residual_full":
+            self.cfg = residual_full_config(self.cfg)
+            self.pending_pack = ""
         self.positions = [ClipPosition.from_dict(row) for row in (raw.get("positions") or [])]
         self.last_decision = dict(raw.get("last_decision") or {})
         curve: list[list[float]] = []
@@ -257,6 +267,8 @@ class BtcRsClipPaperRunner:
                     "realized_total_eur": self.realized_total_eur,
                     "day_realized_eur": self.day_realized_eur,
                     "last_rebalance_ms": self.last_rebalance_ms,
+                    "pack_mode": self.pack_mode,
+                    "pending_pack": self.pending_pack,
                     "positions": [p.to_dict() for p in self.positions],
                     "last_decision": self.last_decision,
                     "equity_curve": [
@@ -714,6 +726,8 @@ class BtcRsClipPaperRunner:
         self.realized_total_eur += net
         self.day_realized_eur += net
         self.positions = [p for p in self.positions if p is not pos]
+        if pos.role in {"btc", "alt"}:
+            self._arm_residual_pack(f"sold_{pos.role}")
         self._ledger_append(
             {
                 "event": "exit",
@@ -913,6 +927,36 @@ class BtcRsClipPaperRunner:
         )
         return pos
 
+    def _rebalance_due(self, now_ms: int) -> bool:
+        reb_ms = int(self.cfg.rebalance_days) * 86_400_000
+        return (
+            self.last_rebalance_ms <= 0
+            or (now_ms - self.last_rebalance_ms) >= reb_ms
+            or not self.positions
+        )
+
+    def _arm_residual_pack(self, reason: str) -> None:
+        """Switch to the full residual pack after a sale or the weekly clock."""
+        if self.pack_mode == "residual_full" or self.pending_pack != "residual_full":
+            return
+        self.cfg = residual_full_config(self.cfg)
+        self.pack_mode = "residual_full"
+        self.pending_pack = ""
+        self._ledger_append(
+            {
+                "event": "pack_arm",
+                "desk": self._desk(),
+                "pack": "residual_full",
+                "reason": reason,
+                "btc_frac": self.cfg.btc_frac,
+                "alt_frac": self.cfg.alt_frac,
+                "excess_floor": self.cfg.excess_floor,
+                "require_alt_sma": self.cfg.require_alt_sma,
+                "cash_when_no_alt": self.cfg.cash_when_no_alt,
+            }
+        )
+        self._save_state()
+
     def _last_close(self, ohlc: dict[str, list[list[float]]], base: str) -> float | None:
         rows = completed_ohlc(ohlc.get(base) or [])
         if not rows:
@@ -923,6 +967,9 @@ class BtcRsClipPaperRunner:
         async with self._decide_lock:
             now = datetime.now(UTC)
             self._roll_day(now)
+            due = self._rebalance_due(int(now.timestamp() * 1000))
+            if self.pending_pack == "residual_full" and due:
+                self._arm_residual_pack("weekly_clock")
             ohlc = await self._load_ohlc()
             held = {p.base: p.role for p in self.positions}
             sleeves = {
@@ -1115,6 +1162,10 @@ class BtcRsClipPaperRunner:
                 "book_eur": self.cfg.book_eur,
                 "trail_pct": self.cfg.alt_trail_pct,
                 "hard_stop_pct": 0.0,
+                "require_alt_sma": self.cfg.require_alt_sma,
+                "cash_when_no_alt": self.cfg.cash_when_no_alt,
+                "pack_mode": self.pack_mode,
+                "pending_pack": self.pending_pack,
             },
         }
 
@@ -1348,6 +1399,7 @@ class BtcRsClipDeskManager:
             gateways=gateways,
             reserved_quote_eur=reserved_quote,
             reserved_qty=reserved_qty,
+            pending_pack=str(getattr(settings, "momentum_btc_rs_clip_pending_pack", "") or ""),
         )
         if not dry_run:
             dropped = self._runner.discard_paper_positions()
@@ -1413,6 +1465,7 @@ class BtcRsClipDeskManager:
                         "./data/momentum_btc_rs_clip_ledger.jsonl",
                     )
                 ),
+                pending_pack=str(getattr(settings, "momentum_btc_rs_clip_pending_pack", "") or ""),
             )
             return await runner.decide(execute=execute)
         return await self._runner.decide(execute=execute)
