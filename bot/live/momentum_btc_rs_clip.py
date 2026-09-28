@@ -235,7 +235,9 @@ def evaluate_clip(
         }
 
     reb_ms = int(cfg.rebalance_days) * 86_400_000
-    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms or not held
+    # A fresh book (no clock yet) may enter. After a trail or weekly check the
+    # clock blocks the next buy, including when the book is already flat.
+    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
 
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []

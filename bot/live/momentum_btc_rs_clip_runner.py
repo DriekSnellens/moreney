@@ -929,11 +929,7 @@ class BtcRsClipPaperRunner:
 
     def _rebalance_due(self, now_ms: int) -> bool:
         reb_ms = int(self.cfg.rebalance_days) * 86_400_000
-        return (
-            self.last_rebalance_ms <= 0
-            or (now_ms - self.last_rebalance_ms) >= reb_ms
-            or not self.positions
-        )
+        return self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
 
     def _arm_residual_pack(self, reason: str) -> None:
         """Switch to the full residual pack after a sale or the weekly clock."""

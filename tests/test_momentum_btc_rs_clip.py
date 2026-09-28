@@ -675,6 +675,25 @@ def test_residual_full_weekly_drops_btc_and_tops_up_the_alt():
     assert not any(e["base"] == "BTC" for e in out["entries"])
 
 
+def test_flat_book_waits_for_the_weekly_clock_after_a_sale():
+    ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
+    cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0))
+    now_ms = 20 * 86_400_000
+    out = evaluate_clip(
+        ohlc,
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=now_ms - 2 * 86_400_000,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["rebalance_due"] is False
+    assert out["entries"] == []
+    assert out["exits"] == []
+
+
 def test_residual_full_midweek_keeps_both_bags():
     ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
     cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0))
