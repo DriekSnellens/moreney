@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -39,10 +39,30 @@ class ClipConfig:
     slip: float = SLIP
     alt_trail_pct: float = 0.10
     resize_band: float = 0.10
+    # Alt must also close above its own SMA. Off on the armed 20/80 clip.
+    require_alt_sma: bool = False
+    # With no qualifying alt, do not open a BTC sleeve. Paired with btc_frac 0.
+    cash_when_no_alt: bool = False
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
     ohlc_days: int = 120
+
+
+def residual_full_config(cfg: ClipConfig) -> ClipConfig:
+    """PnL pack: 100% one residual alt, own SMA50, cash when none qualify.
+
+    Same 10d skip-1 week clock, SMA50 flatten and 10% alt trail as the clip.
+    Excess floor 3.5% sits in the flat 3.2–3.6% band from the wet replay.
+    """
+    return replace(
+        cfg,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        excess_floor=0.035,
+        require_alt_sma=True,
+        cash_when_no_alt=True,
+    )
 
 
 @dataclass
@@ -215,7 +235,9 @@ def evaluate_clip(
         }
 
     reb_ms = int(cfg.rebalance_days) * 86_400_000
-    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms or not held
+    # A fresh book (no clock yet) may enter. After a trail or weekly check the
+    # clock blocks the next buy, including when the book is already flat.
+    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
 
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -237,6 +259,18 @@ def evaluate_clip(
                 }
             )
             continue
+        if cfg.require_alt_sma:
+            s_alt = sma(cl, cfg.sma_n)
+            last_alt = float(cl[-1]) if cl else 0.0
+            if s_alt is None or last_alt <= s_alt:
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "below_sma",
+                        "excess": round(xs, 4),
+                    }
+                )
+                continue
         ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want_alt: str | None = None
@@ -251,8 +285,36 @@ def evaluate_clip(
         )
 
     cash_left = float(cash_eur)
+    # btc_frac 0 is the full residual book: drop the BTC sleeve on the weekly check.
+    if rebalance_due and held_btc and float(cfg.btc_frac) <= 0:
+        exits.append({"base": held_btc, "reason": "btc_sleeve_off", "role": "btc"})
+        if want_alt and held_alt == want_alt:
+            alt_n = float((sleeve_eur or {}).get("alt") or 0.0)
+            buy_alt = equity * float(cfg.alt_frac) - alt_n
+            if buy_alt >= cfg.min_notional_eur:
+                top = ranked[0] if ranked and ranked[0]["base"] == want_alt else {"excess": 0.0}
+                entries.append(
+                    {
+                        "base": want_alt,
+                        "notional_eur": round(buy_alt, 2),
+                        "role": "alt",
+                        "reasons": [
+                            f"excess={float(top.get('excess') or 0):.3f}",
+                            f"frac={cfg.alt_frac:.2f}",
+                            "btc_sleeve_off",
+                        ],
+                    }
+                )
+    elif (
+        rebalance_due
+        and held_btc
+        and cfg.cash_when_no_alt
+        and not want_alt
+    ):
+        exits.append({"base": held_btc, "reason": "cash_no_alt", "role": "btc"})
     # Conservative: assume exits free cash after they fill; entries size from equity.
-    if not held_btc:
+    skip_btc_buy = cfg.cash_when_no_alt and not want_alt
+    if not held_btc and float(cfg.btc_frac) > 0 and not skip_btc_buy:
         n_btc = min(cash_left * 0.98, equity * float(cfg.btc_frac))
         if n_btc >= cfg.min_notional_eur:
             entries.append(

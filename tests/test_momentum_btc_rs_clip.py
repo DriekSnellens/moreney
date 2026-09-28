@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
 
-from bot.live.momentum_btc_rs_clip import ClipConfig, ClipPosition, completed_ohlc, evaluate_clip
+from bot.live.momentum_btc_rs_clip import (
+    ClipConfig,
+    ClipPosition,
+    completed_ohlc,
+    evaluate_clip,
+    residual_full_config,
+)
 from bot.live.momentum_btc_rs_clip_runner import config_from_settings
 
 
@@ -607,6 +614,197 @@ def test_weekly_due_trims_btc_toward_winner_frac():
     assert out["want_alt"] == "ETH"
     assert any(t["base"] == "BTC" and t["reason"] == "size_to_frac" for t in out["trims"])
     assert any("size_to_frac" in (e.get("reasons") or []) for e in out["entries"])
+
+
+def _rising_alt() -> list[list[float]]:
+    eth = _bars(40, 10.0, 0.0)
+    eth += _bars(21, 10.0, 0.8, vol=20_000.0)
+    t0 = 1_700_000_000_000
+    for i, row in enumerate(eth):
+        row[0] = t0 + i * 86_400_000
+    return eth
+
+
+def test_require_alt_sma_skips_a_bounce_under_its_average():
+    btc = _bars(60, 100.0, 0.2)
+    alt = _bars(30, 100.0, 0.0, vol=20_000.0)
+    alt += _bars(15, 20.0, 0.0, vol=20_000.0)
+    alt += _bars(10, 20.0, 2.0, vol=20_000.0)
+    t0 = 1_700_000_000_000
+    for i, row in enumerate(alt):
+        row[0] = t0 + i * 86_400_000
+    ohlc = {"BTC": btc, "ETH": alt}
+    kwargs = dict(
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=10**12,
+        last_rebalance_ms=0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    plain = evaluate_clip(ohlc, ClipConfig(universe=("ETH",), min_qvol_eur=1.0), **kwargs)
+    gated = evaluate_clip(
+        ohlc,
+        ClipConfig(universe=("ETH",), min_qvol_eur=1.0, require_alt_sma=True),
+        **kwargs,
+    )
+    assert plain["want_alt"] == "ETH"
+    assert gated["want_alt"] is None
+    assert any(row["reason"] == "below_sma" for row in gated["skipped"])
+
+
+def test_residual_full_weekly_drops_btc_and_tops_up_the_alt():
+    ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
+    cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0))
+    out = evaluate_clip(
+        ohlc,
+        cfg,
+        held={"BTC": "btc", "ETH": "alt"},
+        cash_eur=30.0,
+        deployed_eur=20_000.0,
+        now_ms=10**12,
+        last_rebalance_ms=0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        sleeve_eur={"btc": 4_000.0, "alt": 16_000.0},
+    )
+    assert out["rebalance_due"] is True
+    assert out["want_alt"] == "ETH"
+    assert any(e["base"] == "BTC" and e["reason"] == "btc_sleeve_off" for e in out["exits"])
+    topup = next(e for e in out["entries"] if e["base"] == "ETH")
+    assert topup["notional_eur"] == 4_030.0
+    assert not any(e["base"] == "BTC" for e in out["entries"])
+
+
+def test_flat_book_waits_for_the_weekly_clock_after_a_sale():
+    ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
+    cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0))
+    now_ms = 20 * 86_400_000
+    out = evaluate_clip(
+        ohlc,
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=now_ms - 2 * 86_400_000,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["rebalance_due"] is False
+    assert out["entries"] == []
+    assert out["exits"] == []
+
+
+def test_residual_full_midweek_keeps_both_bags():
+    ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
+    cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0))
+    now_ms = 20 * 86_400_000
+    out = evaluate_clip(
+        ohlc,
+        cfg,
+        held={"BTC": "btc", "ETH": "alt"},
+        cash_eur=30.0,
+        deployed_eur=20_000.0,
+        now_ms=now_ms,
+        last_rebalance_ms=now_ms - 2 * 86_400_000,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        sleeve_eur={"btc": 4_000.0, "alt": 16_000.0},
+    )
+    assert out["rebalance_due"] is False
+    assert out["exits"] == []
+    assert out["trims"] == []
+    assert out["entries"] == []
+
+
+def test_pending_pack_arms_when_the_alt_is_sold(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0, alt_trail_pct=0.10),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+        pending_pack="residual_full",
+    )
+    r.last_rebalance_ms = 10**13
+    r.positions = [
+        ClipPosition(
+            base="BTC",
+            entry_price=100.0,
+            notional_eur=4_000.0,
+            qty=40.0,
+            opened_ms=1,
+            venue="paper",
+            role="btc",
+            peak_px=100.0,
+        ),
+        ClipPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=16_000.0,
+            qty=1_600.0,
+            opened_ms=1,
+            venue="paper",
+            role="alt",
+            peak_px=10.0,
+        ),
+    ]
+    assert r._rebalance_due(r.last_rebalance_ms + 2 * 86_400_000) is False
+    r.marks = {"AAA": 8.8, "BTC": 100.0}
+    asyncio.run(r.manage_alt_trail())
+    assert [p.base for p in r.positions] == ["BTC"]
+    assert r.pack_mode == "residual_full"
+    assert r.pending_pack == ""
+    assert r.cfg.btc_frac == 0.0
+    assert r.cfg.alt_frac == 1.0
+    assert r.cfg.excess_floor == 0.035
+    assert r.cfg.require_alt_sma is True
+    assert r.cfg.cash_when_no_alt is True
+    raw = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+    assert raw["pack_mode"] == "residual_full"
+
+
+def test_empty_live_restart_keeps_the_weekly_clock(tmp_path):
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=False,
+    )
+    r.last_rebalance_ms = 1_790_588_675_335
+    r.positions = []
+    r.discard_paper_positions()
+    assert r.last_rebalance_ms == 1_790_588_675_335
+
+
+def test_pending_pack_stays_idle_until_the_clock_or_a_sale(tmp_path):
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+        pending_pack="residual_full",
+    )
+    r.last_rebalance_ms = 10**13
+    r.positions = [
+        ClipPosition(
+            base="BTC",
+            entry_price=100.0,
+            notional_eur=4_000.0,
+            qty=40.0,
+            opened_ms=1,
+            venue="paper",
+            role="btc",
+        )
+    ]
+    assert r._rebalance_due(r.last_rebalance_ms + 2 * 86_400_000) is False
+    assert r.pack_mode == "clip_20_80"
+    assert r.cfg.btc_frac == 0.20
 
 
 def test_alt_trail_sells_dumped_sleeve(tmp_path):
