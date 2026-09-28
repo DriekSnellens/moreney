@@ -381,7 +381,6 @@ class BtcRsClipPaperRunner:
             self._save_state()
         elif not keep:
             self.cash_eur = float(self.cfg.book_eur)
-            self.last_rebalance_ms = 0
         return n
 
     def _other_desk_qty(self, base: str) -> float:

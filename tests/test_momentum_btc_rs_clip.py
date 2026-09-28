@@ -765,6 +765,21 @@ def test_pending_pack_arms_when_the_alt_is_sold(tmp_path):
     assert raw["pack_mode"] == "residual_full"
 
 
+def test_empty_live_restart_keeps_the_weekly_clock(tmp_path):
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=False,
+    )
+    r.last_rebalance_ms = 1_790_588_675_335
+    r.positions = []
+    r.discard_paper_positions()
+    assert r.last_rebalance_ms == 1_790_588_675_335
+
+
 def test_pending_pack_stays_idle_until_the_clock_or_a_sale(tmp_path):
     from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
 
