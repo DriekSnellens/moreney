@@ -279,6 +279,12 @@ class Settings(BaseSettings):
     dashboard_basic_auth_username: str = "moreney"
     dashboard_basic_auth_password: SecretStr | None = None
     dashboard_session_secret: SecretStr | None = None
+    # Web Push on the existing PWA. Empty until the operator sets VAPID keys.
+    web_push_vapid_public_key: str = ""
+    web_push_vapid_private_key: SecretStr | None = None
+    web_push_vapid_subject: str = ""
+    web_push_subscriptions_path: str = "./data/web_push_subscriptions.json"
+    web_push_notified_path: str = "./data/profit_push_notified.json"
 
     # --- Global opportunity engine (multi-market architecture) ---
     global_opportunity_engine_enabled: bool = True

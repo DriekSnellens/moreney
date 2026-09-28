@@ -24,6 +24,7 @@ from bot.core.enums import EntryQualityRecommendation, OpportunitySide, OrderSid
 from bot.core.models import ExecutionResult, OrderRequest, ProfitabilityResult, TradeOpportunity
 from bot.execution.paper_executor import PaperExecutor
 from bot.live.micro_engine import LiveMicroEngine
+from bot.live.profit_push import RealizedProfitNotifier
 from bot.portfolio.models import Fill, Order
 from bot.portfolio.portfolio import PaperPortfolio
 from bot.portfolio.venue_ledger import infer_base_asset
@@ -193,6 +194,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         self.session_live_transaction_count = 0
         self.backfill_mirrored_count = 0
         self.realized_trade_pnl_eur = _ZERO  # closed-trade PnL after fees
+        self._profit_push = RealizedProfitNotifier()
         self._persist_path = Path(
             str(
                 getattr(
@@ -1446,6 +1448,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             return
         self._persist_dirty = False
         self._last_persist_mono = now
+        written = False
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(path.suffix + ".tmp")
@@ -1454,10 +1457,14 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 encoding="utf-8",
             )
             tmp.replace(path)
+            written = True
             if hasattr(self, "_intelligence"):
                 self._intelligence.save(self._intelligence_path)
         except Exception as exc:  # noqa: BLE001
             logger.warning("micro bridge persist failed path=%s err=%s", path, exc)
+        pusher = getattr(self, "_profit_push", None)
+        if pusher is not None:
+            pusher.flush(persisted=written)
 
     def flush_runtime_state(self) -> None:
         """Force-write debounced bridge state (session shutdown / after fills)."""
@@ -4888,6 +4895,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 fee=fee_quote,
                 venue=venue,
                 fee_currency=fee_cur,
+                event_id=mirror_key,
             )
         except TypeError:
             self._record_realized_fill(
@@ -4897,6 +4905,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
                 price=px,
                 fee=fee_quote,
                 venue=venue,
+                event_id=mirror_key,
             )
         self._note_live_fill_event(
             venue=venue,
@@ -5010,6 +5019,23 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         return {"ok": True, "venue": venue, "mirrored": mirrored}
 
 
+    def _queue_realized_profit_push(
+        self, *, event_id: str, realized_pnl: Decimal, asset: str
+    ) -> None:
+        """Queue a profit push. Delivery waits until persist_runtime_state succeeds."""
+        pusher = getattr(self, "_profit_push", None)
+        if pusher is None:
+            return
+        try:
+            pusher.note(
+                event_id=event_id,
+                realized_pnl=realized_pnl,
+                asset=asset,
+                closed=True,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("profit push queue failed event=%s", event_id)
+
     def _record_realized_fill(
         self,
         *,
@@ -5021,6 +5047,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
         venue: str = "",
         fee_currency: str | None = None,
         fill_meta: dict[str, Any] | None = None,
+        event_id: str | None = None,
     ) -> None:
         """Update FIFO lots / realized PnL for a live mirrored fill."""
         if qty <= 0 or price <= 0:
@@ -5102,6 +5129,12 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             cost += remaining * price
         trade_pnl = proceeds - cost
         self.realized_trade_pnl_eur += trade_pnl
+        self._queue_realized_profit_push(
+            event_id=event_id
+            or f"micro:{venue}:{symbol}:{qty}:{price}:{trade_pnl}",
+            realized_pnl=trade_pnl,
+            asset=base,
+        )
         if self._mfe_analytics_enabled:
             trail_st = self._trail.get(lot_key) or {}
             entry_px = Decimal(str(trail_st.get("entry_price") or cost or price))
@@ -11050,6 +11083,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             logger.exception("micro_bridge venue ledger sync failed")
         self._portfolio.set_mark_price(order.symbol, average_price)
         self._invalidate_bal_cache()
+        fill_event = exchange_order_id or order.id
         self._record_realized_fill(
             side=side,
             symbol=order.symbol,
@@ -11058,6 +11092,7 @@ class MicroBudgetLiveExecutor(PaperExecutor):
             fee=fee,
             venue=venue,
             fill_meta=dict(order_request.metadata or {}),
+            event_id=f"live:{venue}:{fill_event}:{filled_qty}:{average_price}",
         )
         self._note_live_fill_event(
             venue=venue,

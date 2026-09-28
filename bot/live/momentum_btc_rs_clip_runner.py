@@ -31,6 +31,7 @@ from bot.live.momentum_runner import (
     venue_cash_caps_from_settings,
 )
 from bot.live.momentum_short_weakest import fetch_daily_ohlc
+from bot.live.profit_push import RealizedProfitNotifier, note_ledger_close
 
 logger = logging.getLogger("bot.live.momentum_btc_rs_clip_runner")
 
@@ -192,6 +193,7 @@ class BtcRsClipPaperRunner:
         self._decide_lock = asyncio.Lock()
         self._last_curve_save = 0.0
         self._last_reconcile_mono = 0.0
+        self._profit_push = RealizedProfitNotifier()
         self._load_state()
 
     def _desk(self) -> str:
@@ -259,35 +261,38 @@ class BtcRsClipPaperRunner:
             self._last_curve_save = now
 
     def _save_state(self) -> None:
-        Path(self.state_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(self.state_path).write_text(
-            json.dumps(
-                {
-                    "cash_eur": self.cash_eur,
-                    "realized_total_eur": self.realized_total_eur,
-                    "day_realized_eur": self.day_realized_eur,
-                    "last_rebalance_ms": self.last_rebalance_ms,
-                    "pack_mode": self.pack_mode,
-                    "pending_pack": self.pending_pack,
-                    "positions": [p.to_dict() for p in self.positions],
-                    "last_decision": self.last_decision,
-                    "equity_curve": [
-                        [round(float(t), 1), round(float(eq), 2)]
-                        for t, eq in self.equity_curve[-_EQUITY_CURVE_MAX:]
-                    ],
-                    "paper_only": self.dry_run,
-                    "allow_live": not self.dry_run,
-                    "updated_at": datetime.now(UTC).isoformat(),
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        path = Path(self.state_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "cash_eur": self.cash_eur,
+            "realized_total_eur": self.realized_total_eur,
+            "day_realized_eur": self.day_realized_eur,
+            "last_rebalance_ms": self.last_rebalance_ms,
+            "pack_mode": self.pack_mode,
+            "pending_pack": self.pending_pack,
+            "positions": [p.to_dict() for p in self.positions],
+            "last_decision": self.last_decision,
+            "equity_curve": [
+                [round(float(t), 1), round(float(eq), 2)]
+                for t, eq in self.equity_curve[-_EQUITY_CURVE_MAX:]
+            ],
+            "paper_only": self.dry_run,
+            "allow_live": not self.dry_run,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        try:
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            logger.warning("clip desk: state save failed", exc_info=True)
+            self._profit_push.flush(persisted=False)
+            raise
+        self._profit_push.flush(persisted=True)
 
     def _ledger_append(self, row: Mapping[str, Any]) -> None:
         Path(self.ledger_path).parent.mkdir(parents=True, exist_ok=True)
         with Path(self.ledger_path).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"ts": datetime.now(UTC).isoformat(), **dict(row)}) + "\n")
+        note_ledger_close(self._profit_push, "clip", row)
 
     def _roll_day(self, now: datetime) -> None:
         day = now.strftime("%Y-%m-%d")

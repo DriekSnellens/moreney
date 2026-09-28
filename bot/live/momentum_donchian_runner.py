@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.live.profit_push import RealizedProfitNotifier, note_ledger_close
 from bot.live.desk_allocator import BOOK_EUR, cached_snapshot, target_book
 from bot.live.momentum_donchian import (
     DonchianConfig,
@@ -117,6 +118,7 @@ class DonchianBundleRunner:
         self._alloc: dict[str, Any] = {}
         self._dailies_ts: float = 0.0
         self._decide_lock = asyncio.Lock()
+        self._profit_push = RealizedProfitNotifier()
         self._load_state()
 
     def _load_state(self) -> None:
@@ -153,12 +155,19 @@ class DonchianBundleRunner:
                 for name, sl in self.sleeves.items()
             },
         }
-        Path(self.state_path).write_text(json.dumps(payload), encoding="utf-8")
+        try:
+            Path(self.state_path).write_text(json.dumps(payload), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            logger.warning("donchian desk: state save failed", exc_info=True)
+            self._profit_push.flush(persisted=False)
+            raise
+        self._profit_push.flush(persisted=True)
 
     def _ledger_append(self, row: Mapping[str, Any]) -> None:
         Path(self.ledger_path).parent.mkdir(parents=True, exist_ok=True)
         with Path(self.ledger_path).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"ts": datetime.now(UTC).isoformat(), **row}) + "\n")
+        note_ledger_close(self._profit_push, "donchian", row)
 
     async def _refresh_marks(self) -> None:
         bases = {"BTC"}

@@ -47,6 +47,31 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  const title = data.title || '💰 Winst gerealiseerd';
+  const body = data.body || '';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: body,
+      icon: '/live/icon.svg',
+      badge: '/live/icon.svg',
+      data: { url: data.url || '/live/dashboard' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/live/dashboard';
+  event.waitUntil(self.clients.openWindow(url));
+});
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;

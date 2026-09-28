@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 
 from bot.live.momentum_donchian import sleeve_live_caption
 from bot.live.momentum_period_pnl import DeskEarnings, PeriodNet
+from bot.live.profit_push import pwa_client_script
 
 _CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
@@ -3834,6 +3835,8 @@ def render_momentum_dashboard(
 <meta name="theme-color" content="#070B12">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/live/manifest.webmanifest"/>
+<link rel="icon" href="/live/icon.svg" type="image/svg+xml"/>
 <title>Moreney</title>
 <style>{_CSS}</style></head>
 <body><div class="shell">
@@ -3862,6 +3865,7 @@ def render_momentum_dashboard(
 {sticky}
 {mobile_dock}
 {live_js}
+{pwa_client_script()}
 </body></html>"""
     return HTMLResponse(
         html,

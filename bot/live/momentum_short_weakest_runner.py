@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.live.profit_push import RealizedProfitNotifier, note_ledger_close
 from bot.live.desk_allocator import BOOK_EUR, live_snapshot, target_book
 from bot.live.momentum_runner import CandleFeed
 from bot.live.momentum_short_weakest import (
@@ -172,6 +173,7 @@ class ShortWeakestPaperRunner:
         self._btc_closes: list[float] = []
         self._bear_refresh_ms = 0
         self._alloc_book = float(cfg.book_eur)
+        self._profit_push = RealizedProfitNotifier()
         self._load_state()
         # Seed bear gate from last decide if present.
         bear = (self.last_regime or {}).get("bear")
@@ -208,7 +210,13 @@ class ShortWeakestPaperRunner:
             "last_regime": self.last_regime,
             "updated_at": datetime.now(UTC).isoformat(),
         }
-        Path(self.state_path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            Path(self.state_path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            logger.warning("short desk: state save failed", exc_info=True)
+            self._profit_push.flush(persisted=False)
+            raise
+        self._profit_push.flush(persisted=True)
 
     def _ledger_append(self, row: Mapping[str, Any]) -> None:
         Path(self.ledger_path).parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +226,7 @@ class ShortWeakestPaperRunner:
         }
         with Path(self.ledger_path).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event) + "\n")
+        note_ledger_close(self._profit_push, "short", row)
 
     def _roll_risk_windows(self, now: datetime) -> None:
         day = now.strftime("%Y-%m-%d")
