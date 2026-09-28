@@ -49,6 +49,7 @@ from bot.live.dashboard_history import (
     record_snapshot,
 )
 from bot.live.dashboard import render_live_dashboard
+from bot.live.profit_push import public_push_config, store_push_subscription
 from bot.live.pwa_assets import ICON_SVG, MANIFEST_JSON, SERVICE_WORKER_JS
 from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
 from bot.market_data.research.retention import prune_research_marketdata
@@ -1759,6 +1760,30 @@ async def live_service_worker() -> Response:
 @app.get("/live/icon.svg")
 async def live_pwa_icon() -> Response:
     return Response(content=ICON_SVG, media_type="image/svg+xml")
+
+
+@app.get("/live/push/config")
+async def live_push_config(_: None = Depends(require_dashboard_access)) -> dict[str, Any]:
+    """Public VAPID key for the existing PWA. Empty until Web Push is configured."""
+    return public_push_config()
+
+
+@app.post("/live/push/subscribe")
+async def live_push_subscribe(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    """Store one browser PushSubscription. Does not send a notification."""
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid subscription") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid subscription")
+    try:
+        return store_push_subscription(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/fleet", response_class=HTMLResponse)

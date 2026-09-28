@@ -25,6 +25,7 @@ from bot.live.dashboard_v2 import (
     render_daily_picks_panel,
     render_operator_panel,
 )
+from bot.live.profit_push import pwa_client_js
 
 
 def _esc(value: Any) -> str:
@@ -1478,9 +1479,7 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
       setInterval(refreshCharts, 60000);
     }});
 
-    if ('serviceWorker' in navigator) {{
-      navigator.serviceWorker.register('/live/sw.js').catch(() => {{}});
-    }}
+    {pwa_client_js()}
 
     let deferredPrompt = null;
     const banner = document.getElementById('install-banner');

@@ -62,6 +62,7 @@ from bot.live.momentum_desk import (
     update_fade_state,
 )
 from bot.live.momentum_trade_outcomes import MomentumTradeOutcomeStore
+from bot.live.profit_push import RealizedProfitNotifier, note_ledger_close
 
 logger = logging.getLogger(__name__)
 
@@ -651,6 +652,7 @@ class MomentumDeskRunner:
         self.equity_curve: list[list[float]] = []
         self._last_curve_save = 0.0
         self.started_at = datetime.now(UTC).isoformat()
+        self._profit_push = RealizedProfitNotifier()
         self.outcomes = MomentumTradeOutcomeStore.load(
             self.opt.outcome_learning_path,
             enabled=bool(self.opt.outcome_learning_enabled),
@@ -741,8 +743,14 @@ class MomentumDeskRunner:
             ],
         }
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
-        tmp.replace(path)
+        try:
+            tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+            tmp.replace(path)
+        except Exception:  # noqa: BLE001
+            logger.warning("momentum desk: state save failed", exc_info=True)
+            self._profit_push.flush(persisted=False)
+            raise
+        self._profit_push.flush(persisted=True)
 
     def _equity_now(self) -> float | None:
         cash = self.cash_eur
@@ -782,6 +790,7 @@ class MomentumDeskRunner:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"ts": datetime.now(UTC).isoformat(), **row}) + "\n")
+        note_ledger_close(self._profit_push, "momentum", row)
 
     def reset_operator_numbers(self) -> dict[str, Any]:
         """Zero dashboard PnL counters and archive the closed-trade ledger.
