@@ -419,6 +419,56 @@ def test_decision_cash_leaves_15m_bitvavo_cap(tmp_path):
     r.cash_eur = 20_000.0
     cash = asyncio.run(r._decision_cash())
     assert cash == 16_000.0
+    assert r.cash_eur == 16_000.0
+
+
+def test_decision_cash_live_uses_full_venue_not_book(tmp_path):
+    """Live clip deploys Bitvavo free EUR, even when the paper book is smaller."""
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    class Gw:
+        async def quote_balance_eur(self):
+            return 17_976.95
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=10_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=False,
+        venues=("bitvavo",),
+        gateways={"bitvavo": Gw()},
+        reserved_quote_eur=0.0,
+    )
+    r.cash_eur = 10_000.0
+    cash = asyncio.run(r._decision_cash())
+    assert cash == 17_976.95
+    assert r.cash_eur == 17_976.95
+
+
+def test_decision_cash_paper_still_caps_to_ledger(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    class Gw:
+        async def quote_balance_eur(self):
+            return 18_000.0
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+        venues=("bitvavo",),
+        gateways={"bitvavo": Gw()},
+        reserved_quote_eur=0.0,
+    )
+    r.cash_eur = 12_000.0
+    # dry_run short-circuits venue fetch → synthetic ledger wins
+    cash = asyncio.run(r._decision_cash())
+    assert cash == 12_000.0
 
 
 def test_reserved_quote_uses_15m_cap():
