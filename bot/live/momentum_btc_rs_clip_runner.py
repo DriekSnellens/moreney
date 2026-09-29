@@ -603,11 +603,21 @@ class BtcRsClipPaperRunner:
         return max(0.0, float(raw))
 
     async def _decision_cash(self) -> float:
+        """EUR available for clip sizing.
+
+        Live: Bitvavo free quote minus any 15m reserved sleeve is the book —
+        not the configured ``book_eur`` paper ledger. Paper keeps the
+        synthetic cash counter (optionally capped by a mocked venue).
+        """
         cash = float(self.cash_eur)
         venue_eur = await self._venue_quote_eur()
         if venue_eur is None:
             return cash
         left = max(0.0, venue_eur - self._reserved_quote_eur)
+        if not self.dry_run:
+            # Venue inventory is truth; keep the operator ledger aligned.
+            self.cash_eur = left
+            return left
         return min(cash, left)
 
     async def _fill(
@@ -971,7 +981,9 @@ class BtcRsClipPaperRunner:
                 "btc": sum(p.notional_eur for p in self.positions if p.role == "btc"),
                 "alt": sum(p.notional_eur for p in self.positions if p.role == "alt"),
             }
-            cash = await self._decision_cash() if execute else self.cash_eur
+            # Always sync live cash from Bitvavo so sizing/status follow free EUR
+            # even outside the daily execute window.
+            cash = await self._decision_cash()
             decision = evaluate_clip(
                 ohlc,
                 self.cfg,
@@ -1118,6 +1130,9 @@ class BtcRsClipPaperRunner:
         equity = self._equity_now()
         last = self.last_decision or {}
         live = not self.dry_run
+        # Live sizing follows Bitvavo free EUR; surface that as the book so the
+        # operator page does not keep advertising the paper BOOK_EUR constant.
+        book_shown = round(equity, 2) if live else float(self.cfg.book_eur)
         return {
             "desk": self._desk(),
             "mode": "btc_rs_clip_live" if live else "btc_rs_clip_paper",
@@ -1126,7 +1141,7 @@ class BtcRsClipPaperRunner:
             "dry_run": self.dry_run,
             "venues": list(self.venues),
             "reserved_quote_eur": round(self._reserved_quote_eur, 2),
-            "book_eur": self.cfg.book_eur,
+            "book_eur": book_shown,
             "cash_eur": round(self.cash_eur, 2),
             "deployed_eur": round(self._deployed(), 2),
             "equity_eur": round(equity, 2),
@@ -1183,6 +1198,10 @@ class BtcRsClipPaperRunner:
         while not should_stop():
             try:
                 await self._refresh_marks()
+                try:
+                    await self._decision_cash()
+                except Exception:  # noqa: BLE001
+                    logger.exception("clip: venue cash sync failed")
                 try:
                     await self.reconcile_external_inventory()
                 except Exception:  # noqa: BLE001
