@@ -1,0 +1,17 @@
+export const NAV = [
+  { href: "/", label: "Dashboard" },
+  { href: "/discover", label: "Discover" },
+  { href: "/niches", label: "Niches" },
+  { href: "/products", label: "Products" },
+  { href: "/opportunities", label: "Opportunities" },
+  { href: "/tests", label: "Tests" },
+  { href: "/brands", label: "Brands" },
+  { href: "/stores", label: "Stores" },
+  { href: "/creatives", label: "Creatives" },
+  { href: "/videos", label: "AI Videos" },
+  { href: "/ads", label: "Ads" },
+  { href: "/orders", label: "Orders" },
+  { href: "/profit", label: "Profit" },
+  { href: "/analytics", label: "Analytics" },
+  { href: "/settings", label: "Settings" },
+] as const;
