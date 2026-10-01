@@ -1658,6 +1658,35 @@ async def live_momentum_ignition_stop(
     return await get_ignition_desk_manager().stop()
 
 
+@app.post("/live/momentum/ignition/buy", response_model=None)
+async def live_momentum_ignition_buy(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Manual paper entry (never venue orders). Body: base, optional notional_eur/reason."""
+    body = await _volatile_request_body(request)
+    base = str(body.get("base") or "").strip().upper()
+    if not base:
+        result: dict[str, Any] = {"ok": False, "reason": "missing_base"}
+    else:
+        raw_n = body.get("notional_eur")
+        notional = None
+        if raw_n not in (None, ""):
+            try:
+                notional = float(raw_n)
+            except (TypeError, ValueError):
+                notional = None
+        reason = str(body.get("reason") or "operator_paper").strip() or "operator_paper"
+        result = await get_ignition_desk_manager().buy(
+            base, notional_eur=notional, reason=reason
+        )
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Ignition paper-koop geweigerd: {result.get('reason')}")
+        return _volatile_redirect(f"Ignition paper gekocht: {result.get('base')}")
+    return result
+
+
 @app.post("/live/momentum/ignition/sell", response_model=None)
 async def live_momentum_ignition_sell(
     request: Request,

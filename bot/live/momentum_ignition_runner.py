@@ -352,6 +352,64 @@ class IgnitionPaperRunner:
             self._save_state()
         return applied
 
+    async def buy(
+        self,
+        base: str,
+        *,
+        notional_eur: float | None = None,
+        reason: str = "operator_paper",
+    ) -> dict[str, Any]:
+        """Manual paper open — no venue orders. Generic base, never coin-hardcoded."""
+        base_u = str(base or "").strip().upper()
+        if not base_u:
+            return {"ok": False, "reason": "missing_base"}
+        if any(p.base == base_u for p in self.positions):
+            return {"ok": False, "reason": "already_held", "base": base_u}
+        if len(self.positions) >= int(self.cfg.max_positions):
+            return {"ok": False, "reason": "slots_full", "base": base_u}
+        try:
+            px_raw = await self._feed.last_price(base_u)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"mark_failed:{exc}", "base": base_u}
+        if not px_raw or float(px_raw) <= 0:
+            return {"ok": False, "reason": "no_mark", "base": base_u}
+        mark = float(px_raw)
+        self.marks[base_u] = mark
+        self.mark_ts[base_u] = time.time()
+        px = fill_px(mark, "buy", slip=self.cfg.slip)
+        notion = float(notional_eur) if notional_eur is not None else (
+            min(float(self.cash_eur), float(self.cfg.book_eur)) * float(self.cfg.deploy_frac)
+        )
+        reasons = [str(reason or "operator_paper"), "manual"]
+        pos = self._open_lot(base_u, notion, px, reasons, points=0)
+        if pos is None:
+            return {"ok": False, "reason": "open_failed", "base": base_u}
+        self.last_decision = {
+            **(self.last_decision or {}),
+            "want": base_u,
+            "caption": (
+                f"Ignition PAPER: handmatige paper-entry {base_u} "
+                f"({pos.notional_eur:.0f} EUR @ {px:.6g})."
+            ),
+            "manual_entry": {
+                "base": base_u,
+                "notional_eur": pos.notional_eur,
+                "entry_price": pos.entry_price,
+                "reason": ",".join(reasons),
+            },
+            "at": datetime.now(UTC).isoformat(),
+        }
+        self._save_state()
+        return {
+            "ok": True,
+            "base": base_u,
+            "holding_id": pos.holding_id,
+            "notional_eur": round(pos.notional_eur, 2),
+            "entry_price": pos.entry_price,
+            "paper_only": True,
+            "status": self.status(),
+        }
+
     async def sell(self, holding_id: str) -> dict[str, Any]:
         """Manual paper close — no venue orders."""
         hid = str(holding_id or "").strip()
@@ -671,6 +729,19 @@ class IgnitionDeskManager:
         if self._runner is None:
             return {"ok": False, "reason": "not_running"}
         return await self._runner.decide(execute=execute)
+
+    async def buy(
+        self,
+        base: str,
+        *,
+        notional_eur: float | None = None,
+        reason: str = "operator_paper",
+    ) -> dict[str, Any]:
+        if self._runner is None:
+            return {"ok": False, "reason": "not_running"}
+        return await self._runner.buy(
+            base, notional_eur=notional_eur, reason=reason
+        )
 
     async def sell(self, holding_id: str) -> dict[str, Any]:
         if self._runner is None:
