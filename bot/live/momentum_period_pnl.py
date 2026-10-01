@@ -45,6 +45,7 @@ class DeskEarnings:
     short_weakest: PeriodNet | None = None
     donchian: PeriodNet | None = None
     clip: PeriodNet | None = None
+    ignition: PeriodNet | None = None
 
 
 def _parse_ts(raw: Any) -> datetime | None:
@@ -294,6 +295,8 @@ def compute_desk_earnings(
     donchian_status: Mapping[str, Any] | None = None,
     clip_ledger_path: str | Path | None = None,
     clip_status: Mapping[str, Any] | None = None,
+    ignition_ledger_path: str | Path | None = None,
+    ignition_status: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> DeskEarnings:
     """Live net vs paper net. ``combined`` is live venue fills only."""
@@ -302,6 +305,7 @@ def compute_desk_earnings(
     short_weakest_status = short_weakest_status or {}
     donchian_status = donchian_status or {}
     clip_status = clip_status or {}
+    ignition_status = ignition_status or {}
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
     def _open(status: Mapping[str, Any], live: bool) -> tuple[float, float]:
@@ -313,6 +317,7 @@ def compute_desk_earnings(
     sw_live_flag = sleeve_is_live(short_weakest_status, default_live=False)
     dc_live_flag = sleeve_is_live(donchian_status, default_live=False)
     clip_live_flag = sleeve_is_live(clip_status, default_live=False)
+    ign_live_flag = sleeve_is_live(ignition_status, default_live=False)
 
     def _paper_only(status: Mapping[str, Any]) -> bool:
         return bool(status.get("paper_only"))
@@ -352,17 +357,26 @@ def compute_desk_earnings(
         realized_fallback=_as_float(clip_status.get("realized_total_eur")),
         paper_only=_paper_only(clip_status),
     )
+    ign_live, ign_paper = _sum_split(
+        load_exit_fills(ignition_ledger_path),
+        now=now_utc,
+        sleeve_live=ign_live_flag,
+        realized_fallback=_as_float(ignition_status.get("realized_total_eur")),
+        paper_only=_paper_only(ignition_status) or True,
+    )
 
     core = _combine(core_live, core_paper)
     volatile = _combine(vol_live, vol_paper)
     short_weakest = _combine(sw_live, sw_paper)
     donchian = _combine(dc_live, dc_paper)
     clip = _combine(clip_live, clip_paper)
+    ignition = _combine(ign_live, ign_paper)
 
     live = _combine(_combine(core_live, vol_live), _combine(sw_live, dc_live))
     live = _combine(live, clip_live)
     paper = _combine(_combine(core_paper, vol_paper), _combine(sw_paper, dc_paper))
     paper = _combine(paper, clip_paper)
+    paper = _combine(paper, ign_paper)
 
     live_open = paper_open = 0.0
     for st, flag in (
@@ -371,6 +385,7 @@ def compute_desk_earnings(
         (short_weakest_status, sw_live_flag),
         (donchian_status, dc_live_flag),
         (clip_status, clip_live_flag),
+        (ignition_status, False),
     ):
         lo, po = _open(st, flag)
         live_open += lo
@@ -379,6 +394,7 @@ def compute_desk_earnings(
     has_sw = bool(short_weakest_ledger_path or short_weakest_status)
     has_dc = bool(donchian_ledger_path or donchian_status)
     has_clip = bool(clip_ledger_path or clip_status)
+    has_ign = bool(ignition_ledger_path or ignition_status)
     return DeskEarnings(
         core=core,
         volatile=volatile,
@@ -390,6 +406,7 @@ def compute_desk_earnings(
         short_weakest=short_weakest if has_sw else None,
         donchian=donchian if has_dc else None,
         clip=clip if has_clip else None,
+        ignition=ignition if has_ign else None,
     )
 
 
@@ -429,4 +446,6 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
         out["donchian"] = _p(e.donchian)
     if e.clip is not None:
         out["clip"] = _p(e.clip)
+    if e.ignition is not None:
+        out["ignition"] = _p(e.ignition)
     return out

@@ -731,6 +731,22 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_pending_pack: str = ""
     momentum_btc_rs_clip_state_path: str = "./data/momentum_btc_rs_clip_state.json"
     momentum_btc_rs_clip_ledger_path: str = "./data/momentum_btc_rs_clip_ledger.jsonl"
+    # Paper ignition sleeve: desk-universe early-signal + trail (never live).
+    momentum_ignition_enabled: bool = False
+    momentum_ignition_book_eur: float = Field(default=2_000.0, gt=0)
+    momentum_ignition_max_positions: int = Field(default=1, ge=1, le=3)
+    momentum_ignition_deploy_frac: float = Field(default=1.0, gt=0, le=1.0)
+    momentum_ignition_trail_pct: float = Field(default=0.15, ge=0.0, le=1.0)
+    momentum_ignition_quiet_max: float = Field(default=0.12, ge=0.0, le=1.0)
+    momentum_ignition_day_ret_min: float = Field(default=0.06, ge=0.0, le=1.0)
+    momentum_ignition_vol_mult_min: float = Field(default=2.0, ge=1.0, le=20.0)
+    momentum_ignition_min_median_qvol_eur: float = Field(default=100_000.0, ge=0)
+    momentum_ignition_min_day_qvol_eur: float = Field(default=50_000.0, ge=0)
+    momentum_ignition_require_btc_sma: bool = True
+    momentum_ignition_min_points: int = Field(default=3, ge=1, le=12)
+    momentum_ignition_tick_sec: float = Field(default=30.0, ge=5.0, le=300.0)
+    momentum_ignition_state_path: str = "./data/momentum_ignition_state.json"
+    momentum_ignition_ledger_path: str = "./data/momentum_ignition_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"

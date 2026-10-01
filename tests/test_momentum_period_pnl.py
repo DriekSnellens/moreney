@@ -390,3 +390,45 @@ def test_dashboard_paper_overview_is_separate_from_live_net(tmp_path: Path) -> N
     assert "+101.22" not in html
     assert "21,122" not in html
     assert "Paper overzicht" not in html
+
+
+def test_paper_ignition_stays_out_of_live_net(tmp_path: Path) -> None:
+    core = tmp_path / "core.jsonl"
+    ign = tmp_path / "ign.jsonl"
+    _write_ledger(core, [])
+    _write_ledger(
+        ign,
+        [
+            {
+                "ts": "2026-09-28T10:00:00+00:00",
+                "event": "exit",
+                "base": "NEAR",
+                "desk": "ignition_paper",
+                "net_eur": 55.0,
+                "dry_run": True,
+                "venue": "paper",
+            }
+        ],
+    )
+    earn = compute_desk_earnings(
+        core_ledger_path=core,
+        ignition_ledger_path=ign,
+        ignition_status={
+            "unrealized_net_eur": 7.5,
+            "realized_total_eur": 55.0,
+            "dry_run": True,
+            "paper_only": True,
+            "allow_live": False,
+        },
+        now=datetime(2026, 9, 28, 12, 0, tzinfo=UTC),
+    )
+    assert earn.ignition is not None
+    assert earn.ignition.week_eur == 55.0
+    assert earn.combined.week_eur == 0.0
+    assert earn.paper.week_eur == 55.0
+    assert earn.open_mtm_eur == 0.0
+    assert earn.paper_open_mtm_eur == 7.5
+    payload = earnings_as_dict(earn)
+    assert payload["ignition"]["week_eur"] == 55.0
+    assert payload["paper"]["week_eur"] == 55.0
+    assert payload["combined"]["week_eur"] == 0.0

@@ -135,15 +135,15 @@ body {
 .paper-clip .mix-chip { align-items: center; }
 .paper-clip .mix-chip form { margin: 0; }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
-.paper-clip, .paper-sw, .side-15m { margin-top: .85rem; }
-.paper-clip, .paper-sw { border-style: dashed; }
-.paper-clip h2, .paper-sw h2, .side-15m h2 { font-size: .95rem; }
-.paper-clip .clip-kpis, .paper-sw .clip-kpis, .side-15m .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
-.paper-clip .clip-kpis div, .paper-sw .clip-kpis div, .side-15m .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
-.paper-clip .clip-kpis span, .paper-sw .clip-kpis span, .side-15m .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.paper-clip .clip-kpis strong, .paper-sw .clip-kpis strong, .side-15m .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
+.paper-clip, .paper-sw, .paper-ign, .side-15m { margin-top: .85rem; }
+.paper-clip, .paper-sw, .paper-ign { border-style: dashed; }
+.paper-clip h2, .paper-sw h2, .paper-ign h2, .side-15m h2 { font-size: .95rem; }
+.paper-clip .clip-kpis, .paper-sw .clip-kpis, .paper-ign .clip-kpis, .side-15m .clip-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; margin: .55rem 0 .4rem; }
+.paper-clip .clip-kpis div, .paper-sw .clip-kpis div, .paper-ign .clip-kpis div, .side-15m .clip-kpis div { padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,.55); }
+.paper-clip .clip-kpis span, .paper-sw .clip-kpis span, .paper-ign .clip-kpis span, .side-15m .clip-kpis span { display: block; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.paper-clip .clip-kpis strong, .paper-sw .clip-kpis strong, .paper-ign .clip-kpis strong, .side-15m .clip-kpis strong { font-family: var(--mono); font-size: .95rem; }
 @media (max-width: 720px) {
-  .paper-clip .clip-kpis, .paper-sw .clip-kpis, .side-15m .clip-kpis { grid-template-columns: 1fr 1fr; }
+  .paper-clip .clip-kpis, .paper-sw .clip-kpis, .paper-ign .clip-kpis, .side-15m .clip-kpis { grid-template-columns: 1fr 1fr; }
 }
 .mix-dc-dec { display: grid; gap: .55rem; }
 .mix-dc-dec > div { padding: .45rem 0; border-bottom: 1px solid var(--border-soft); }
@@ -2229,6 +2229,76 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     )
 
 
+def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
+    """Paper-only early-signal sleeve (desk universe + 15% trail)."""
+    st = status or {}
+    running = bool(st.get("running"))
+    pill = (
+        '<span class="pill obs"><span class="dot"></span>PAPER</span>'
+        if running
+        else '<span class="pill off"><span class="dot"></span>STOP</span>'
+    )
+    cfg = st.get("config") or {}
+    trail = cfg.get("trail_pct")
+    trail_s = f"{float(trail):.0%}" if trail is not None else "15%"
+    risk_on = bool(st.get("risk_on"))
+    gate = "BTC &gt; SMA50" if risk_on else "standby"
+    caption = str(st.get("live_caption") or "")
+    if not caption:
+        caption = (
+            f"Paper ignition: quiet + brk20 + day≥6% + vol≥2× op desk-universe, "
+            f"trail {trail_s}. Geen Bitvavo-orders."
+        )
+    pos_bits = []
+    for p in st.get("positions") or []:
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(
+            f'<span class="mix-chip" data-holding="{escape(str(p.get("holding_id") or p.get("base") or ""))}">'
+            f'<span class="muted">long</span>'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span>'
+            f"{_sell_cell(p, disabled=False, post_action='/live/momentum/ignition/sell')}</span>"
+        )
+    pos_html = (
+        f'<div class="mix-open" data-live="ign-open">{"".join(pos_bits)}</div>'
+        if pos_bits
+        else (
+            '<div class="mix-open" data-live="ign-open">'
+            '<span class="muted">Geen open ignition — wacht op early-signal.</span></div>'
+        )
+    )
+    actions = ""
+    if pos_bits:
+        actions = (
+            '<div class="toolbar" style="margin:.45rem 0 0" data-live="ign-actions">'
+            '<form method="post" action="/live/momentum/ignition/sell-all" '
+            'onsubmit="return confirm(\'Ignition paper-positie sluiten?\');">'
+            '<input type="hidden" name="redirect" value="1">'
+            '<button type="submit" class="btn danger">Sluit paper</button></form></div>'
+        )
+    return (
+        f'<section class="panel mix-board paper-ign" id="paper-ign" data-live="paper-ign">'
+        f'<div class="card-head"><h2>Paper · Ignition</h2>{pill}'
+        f'<span class="pill {"on" if risk_on else "off"}" data-live="ign-gate">'
+        f'<span class="dot"></span>{gate}</span></div>'
+        f'<p class="mix-why" data-live="ign-caption">{escape(caption)}</p>'
+        f'<div class="clip-kpis">'
+        f'<div><span>Equity</span><strong data-k="ign-eq">{_fmt_eur(st.get("equity_eur"), signed=False)}</strong></div>'
+        f'<div><span>Open</span><strong data-k="ign-open" class="{_cls(st.get("unrealized_net_eur"))}">'
+        f'{_fmt_eur(st.get("unrealized_net_eur"))}</strong></div>'
+        f'<div><span>Gerealiseerd</span><strong data-k="ign-real" class="{_cls(st.get("realized_total_eur"))}">'
+        f'{_fmt_eur(st.get("realized_total_eur"))}</strong></div>'
+        f'<div><span>Boek</span><strong data-k="ign-book">{_fmt_eur(st.get("book_eur") or cfg.get("book_eur"), signed=False)}</strong></div>'
+        f"</div>"
+        f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
+        f'Want <strong data-k="ign-want">{escape(str(st.get("want") or "—"))}</strong> · '
+        f'trail {escape(trail_s)} · '
+        f'next <strong data-live="ign-next">{_ts(st.get("next_decision"))}</strong> · '
+        f"geen live orders.</p>"
+        f"{pos_html}{actions}</section>"
+    )
+
+
 def _paper_sw_panel(status: Mapping[str, Any] | None) -> str:
     """Independent paper short-weakest book beside the live Donchian mix."""
     st = status or {}
@@ -3606,15 +3676,21 @@ def render_momentum_dashboard(
     btc_rs_clip: Mapping[str, Any] | None = None,
     btc_rs_clip_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_btc_rs_clip: bool = False,
+    ignition: Mapping[str, Any] | None = None,
+    ignition_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    show_ignition: bool = False,
 ) -> HTMLResponse:
     del volatile, volatile_ledger_rows, show_volatile
     del short_weakest, short_weakest_ledger_rows, show_short_weakest
     del allocator, donchian, donchian_ledger_rows
+    del ignition_ledger_rows
     running = bool(status.get("running"))
     commit = status.get("commit") or {}
     dry = bool(status.get("dry_run"))
     core_live = running and not dry
     show_clip = bool(show_btc_rs_clip) or btc_rs_clip is not None
+    show_ign = bool(show_ignition) or ignition is not None
+    ign_panel = _paper_ignition_panel(ignition) if show_ign else ""
     clip = dict(btc_rs_clip or {}) if show_clip else {}
     clip_live = bool(clip.get("running")) and not bool(clip.get("dry_run", True)) and clip.get(
         "allow_live"
@@ -3854,6 +3930,7 @@ def render_momentum_dashboard(
 {decisions_html}
 {exec_ledger_html}
 {rules_html}
+{ign_panel}
 {paper_html}
 <p class="foot"><span>{refresh_note}</span>{footer_links}</p>
 </div>
