@@ -71,6 +71,19 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         raw = getattr(settings, name, default)
         return bool(default if raw is None else raw)
 
+    hours_raw = str(
+        getattr(settings, "momentum_ignition_decision_hours_utc", "0") or "0"
+    )
+    hours = tuple(
+        sorted(
+            {
+                int(x.strip())
+                for x in hours_raw.split(",")
+                if x.strip().isdigit() and 0 <= int(x.strip()) <= 23
+            }
+        )
+    ) or (0,)
+
     return replace(
         base,
         book_eur=_f("momentum_ignition_book_eur", base.book_eur),
@@ -87,6 +100,10 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         require_btc_sma=_b("momentum_ignition_require_btc_sma", base.require_btc_sma),
         min_points=_i("momentum_ignition_min_points", base.min_points),
         tick_sec=_f("momentum_ignition_tick_sec", base.tick_sec),
+        decision_interval_sec=_f(
+            "momentum_ignition_decision_interval_sec", base.decision_interval_sec
+        ),
+        decision_hours_utc=hours,
     )
 
 
@@ -651,16 +668,40 @@ class IgnitionPaperRunner:
             return {"ok": True, "decision": self.last_decision, "status": self.status()}
 
     def next_decision(self) -> str:
+        from datetime import timedelta
+
         now = datetime.now(UTC)
+        interval = float(self.cfg.decision_interval_sec or 0.0)
+        if interval > 0.0:
+            slot = max(1, int(interval))
+            # Next aligned UTC slot boundary.
+            epoch = int(now.timestamp())
+            nxt_ts = ((epoch // slot) + 1) * slot
+            return datetime.fromtimestamp(nxt_ts, tz=UTC).isoformat()
         hours = sorted(int(h) for h in self.cfg.decision_hours_utc)
         for h in hours:
             if now.hour < h or (now.hour == h and now.minute < 5):
                 return now.replace(hour=h, minute=5, second=0, microsecond=0).isoformat()
-        # next day first hour
         nxt = now.replace(hour=hours[0], minute=5, second=0, microsecond=0)
-        from datetime import timedelta
-
         return (nxt + timedelta(days=1)).isoformat()
+
+    def _decision_slot_due(self, now: datetime, last_slot: int | None) -> int | None:
+        """Return a new decision slot id when a scan is due, else None."""
+        interval = float(self.cfg.decision_interval_sec or 0.0)
+        if interval > 0.0:
+            slot = max(1, int(interval))
+            cur = int(now.timestamp()) // slot * slot
+            if last_slot is not None and cur <= int(last_slot):
+                return None
+            return cur
+        hours = set(int(h) for h in self.cfg.decision_hours_utc)
+        if now.hour not in hours or now.minute >= 8:
+            return None
+        # One fire per calendar hour in the sparse schedule.
+        cur = int(now.timestamp()) // 3600 * 3600
+        if last_slot is not None and cur <= int(last_slot):
+            return None
+        return cur
 
     def status(self) -> dict[str, Any]:
         now = time.time()
@@ -749,33 +790,33 @@ class IgnitionPaperRunner:
                 "venues": list(self.venues),
                 "target_venue": venue,
                 "allow_live": False,
+                "decision_interval_sec": float(self.cfg.decision_interval_sec or 0.0),
+                "decision_hours_utc": list(self.cfg.decision_hours_utc),
             },
         }
 
     async def run(self, should_stop) -> None:  # noqa: ANN001
-        hours = set(int(h) for h in self.cfg.decision_hours_utc)
-        last_hour_fire: set[str] = set()
+        last_slot: int | None = None
         await self._refresh_marks()
         now = datetime.now(UTC)
-        in_window = now.hour in hours and now.minute < 8
+        kick_slot = self._decision_slot_due(now, last_slot=None)
         try:
-            await self.decide(execute=in_window)
+            # Always evaluate on start; only execute buys when a slot is due.
+            await self.decide(execute=kick_slot is not None)
         except Exception:  # noqa: BLE001
             logger.exception("ignition kick decide failed")
-        if in_window:
-            last_hour_fire.add(f"{now.date()}-{now.hour}")
+        if kick_slot is not None:
+            last_slot = kick_slot
         while not should_stop():
             try:
                 await self._refresh_marks()
                 async with self._decide_lock:
                     await self.manage_trail()
                 now = datetime.now(UTC)
-                key = f"{now.date()}-{now.hour}"
-                if now.hour in hours and now.minute < 8 and key not in last_hour_fire:
+                slot = self._decision_slot_due(now, last_slot=last_slot)
+                if slot is not None:
                     await self.decide(execute=True)
-                    last_hour_fire.add(key)
-                if len(last_hour_fire) > 48:
-                    last_hour_fire = {key}
+                    last_slot = slot
             except Exception:  # noqa: BLE001
                 logger.exception("ignition tick failed")
             await asyncio.sleep(float(self.cfg.tick_sec))

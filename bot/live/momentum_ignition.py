@@ -48,7 +48,11 @@ class IgnitionConfig:
     slip: float = SLIP
     min_notional_eur: float = 50.0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
+    # Sparse hour slots when ``decision_interval_sec`` is 0.
     decision_hours_utc: tuple[int, ...] = (0,)
+    # When > 0, scan for entries this often (UTC), not only at decision hours.
+    # Daily OHLC early-signals evolve through the day — 15m catches breakouts.
+    decision_interval_sec: float = 900.0
     tick_sec: float = 30.0
     ohlc_days: int = 120
 

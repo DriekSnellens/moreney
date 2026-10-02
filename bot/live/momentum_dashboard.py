@@ -2271,10 +2271,16 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
     gate = "BTC &gt; SMA50" if risk_on else "standby"
     caption = str(st.get("live_caption") or "")
     venue = str(st.get("target_venue") or st.get("venue") or (cfg.get("target_venue")) or "okx")
+    interval = (st.get("config") or {}).get("decision_interval_sec")
+    try:
+        interval_m = max(1, int(round(float(interval) / 60.0))) if interval else 0
+    except (TypeError, ValueError):
+        interval_m = 0
+    cadence = f"scan elke {interval_m}m" if interval_m > 0 else "scan op decision-hours"
     if not caption:
         caption = (
             f"Paper ignition → {venue.upper()}: quiet + brk20 + day≥6% + vol≥2× "
-            f"op desk-universe, trail {trail_s}. Nog geen live orders."
+            f"op desk-universe, trail {trail_s}, {cadence}. Nog geen live orders."
         )
     pos_bits = []
     for p in st.get("positions") or []:

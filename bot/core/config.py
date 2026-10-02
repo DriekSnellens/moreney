@@ -749,6 +749,11 @@ class Settings(BaseSettings):
     momentum_ignition_require_btc_sma: bool = True
     momentum_ignition_min_points: int = Field(default=3, ge=1, le=12)
     momentum_ignition_tick_sec: float = Field(default=30.0, ge=5.0, le=300.0)
+    # 0 = only decision_hours_utc; >0 = scan this often (default 15m).
+    momentum_ignition_decision_interval_sec: float = Field(
+        default=900.0, ge=0.0, le=86_400.0
+    )
+    momentum_ignition_decision_hours_utc: str = "0"
     momentum_ignition_state_path: str = "./data/momentum_ignition_state.json"
     momentum_ignition_ledger_path: str = "./data/momentum_ignition_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

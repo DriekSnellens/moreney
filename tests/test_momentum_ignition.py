@@ -185,6 +185,7 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert venues == ("okx",)
     assert Settings().momentum_ignition_allow_live is False
     cfg = config_from_settings(Settings())
+    assert cfg.decision_interval_sec == 900.0
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-test-state.json",
@@ -199,6 +200,28 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert st["target_venue"] == "okx"
     assert st["venues"] == ["okx"]
     assert st["allow_live"] is False
+    assert st["config"]["decision_interval_sec"] == 900.0
+
+
+def test_ignition_decision_slot_fires_on_interval() -> None:
+    from bot.live.momentum_ignition import IgnitionConfig
+    from bot.live.momentum_ignition_runner import IgnitionPaperRunner
+
+    cfg = IgnitionConfig(decision_interval_sec=900.0, decision_hours_utc=(0,))
+    runner = IgnitionPaperRunner(
+        cfg,
+        state_path="/tmp/ign-slot-state.json",
+        ledger_path="/tmp/ign-slot-ledger.jsonl",
+        venues=("okx",),
+    )
+    t0 = datetime(2026, 10, 2, 9, 10, tzinfo=UTC)
+    slot = runner._decision_slot_due(t0, last_slot=None)
+    assert slot is not None
+    assert runner._decision_slot_due(t0, last_slot=slot) is None
+    later = datetime(2026, 10, 2, 9, 30, tzinfo=UTC)
+    nxt = runner._decision_slot_due(later, last_slot=slot)
+    assert nxt is not None
+    assert nxt > slot
 
 
 def test_no_per_coin_hardcodes_in_ignition_modules() -> None:
