@@ -1,0 +1,549 @@
+{
+  "asof": "2026-10-02T12:35:52.380214+00:00",
+  "end": "2026-10-02",
+  "exit": "trail12_ratchet30to10",
+  "top_liquid_n": 80,
+  "windows": {
+    "full": {
+      "desk": {
+        "label": "desk16",
+        "universe_n": 16,
+        "pnl_eur": 2658.29,
+        "end_eur": 4658.29,
+        "max_dd": 0.256,
+        "n_trades": 9,
+        "win": 0.556,
+        "avg_trade": 295.4,
+        "n_outside_trades": 0,
+        "outside_pnl": 0,
+        "outside_bases": [],
+        "trades_tail": [
+          {
+            "base": "UNI",
+            "net": -252.1,
+            "in_desk": true
+          },
+          {
+            "base": "SOL",
+            "net": 442.5,
+            "in_desk": true
+          },
+          {
+            "base": "LTC",
+            "net": -28.6,
+            "in_desk": true
+          },
+          {
+            "base": "LTC",
+            "net": 19.2,
+            "in_desk": true
+          },
+          {
+            "base": "AVAX",
+            "net": 355.5,
+            "in_desk": true
+          },
+          {
+            "base": "DOGE",
+            "net": -141.0,
+            "in_desk": true
+          },
+          {
+            "base": "NEAR",
+            "net": 1354.1,
+            "in_desk": true
+          },
+          {
+            "base": "SOL",
+            "net": 963.1,
+            "in_desk": true
+          }
+        ],
+        "picks_tail": [
+          {
+            "entry_date": "2024-10-11",
+            "base": "UNI",
+            "points": 6,
+            "day_ret": 0.117,
+            "vol_x": 30.193,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2024-11-07",
+            "base": "SOL",
+            "points": 7,
+            "day_ret": 0.1366,
+            "vol_x": 5.271,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2025-01-16",
+            "base": "LTC",
+            "points": 6,
+            "day_ret": 0.1416,
+            "vol_x": 3.29,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2025-05-07",
+            "base": "LTC",
+            "points": 6,
+            "day_ret": 0.0965,
+            "vol_x": 4.178,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2025-07-10",
+            "base": "AVAX",
+            "points": 5,
+            "day_ret": 0.0605,
+            "vol_x": 2.301,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-01-03",
+            "base": "DOGE",
+            "points": 7,
+            "day_ret": 0.1231,
+            "vol_x": 7.533,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-05-07",
+            "base": "NEAR",
+            "points": 7,
+            "day_ret": 0.148,
+            "vol_x": 7.992,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-08-20",
+            "base": "SOL",
+            "points": 6,
+            "day_ret": 0.098,
+            "vol_x": 5.073,
+            "in_desk": true
+          }
+        ]
+      },
+      "expanded": {
+        "label": "desk+top80_liquid",
+        "universe_n": 82,
+        "pnl_eur": -316.92,
+        "end_eur": 1683.08,
+        "max_dd": 0.546,
+        "n_trades": 15,
+        "win": 0.4,
+        "avg_trade": -21.1,
+        "n_outside_trades": 10,
+        "outside_pnl": -1105.6,
+        "outside_bases": [
+          "ALGO",
+          "BCH",
+          "CRV",
+          "JASMY",
+          "JUP",
+          "KAS",
+          "MOVR",
+          "ONDO",
+          "SEI",
+          "STX"
+        ],
+        "trades_tail": [
+          {
+            "base": "CRV",
+            "net": 22.5,
+            "in_desk": false
+          },
+          {
+            "base": "BCH",
+            "net": -175.8,
+            "in_desk": false
+          },
+          {
+            "base": "AVAX",
+            "net": 179.3,
+            "in_desk": true
+          },
+          {
+            "base": "DOGE",
+            "net": -83.7,
+            "in_desk": true
+          },
+          {
+            "base": "ALGO",
+            "net": -113.5,
+            "in_desk": false
+          },
+          {
+            "base": "JUP",
+            "net": 183.4,
+            "in_desk": false
+          },
+          {
+            "base": "ONDO",
+            "net": -37.8,
+            "in_desk": false
+          },
+          {
+            "base": "SOL",
+            "net": 547.0,
+            "in_desk": true
+          }
+        ],
+        "picks_tail": [
+          {
+            "entry_date": "2025-04-23",
+            "base": "CRV",
+            "points": 5,
+            "day_ret": 0.1843,
+            "vol_x": 2.1,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2025-05-23",
+            "base": "BCH",
+            "points": 6,
+            "day_ret": 0.0929,
+            "vol_x": 3.75,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2025-07-10",
+            "base": "AVAX",
+            "points": 5,
+            "day_ret": 0.0605,
+            "vol_x": 2.301,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-01-03",
+            "base": "DOGE",
+            "points": 7,
+            "day_ret": 0.1231,
+            "vol_x": 7.533,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-03-14",
+            "base": "ALGO",
+            "points": 6,
+            "day_ret": 0.0617,
+            "vol_x": 5.959,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-04-28",
+            "base": "JUP",
+            "points": 6,
+            "day_ret": 0.0629,
+            "vol_x": 6.238,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-07-16",
+            "base": "ONDO",
+            "points": 6,
+            "day_ret": 0.1543,
+            "vol_x": 7.105,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-08-20",
+            "base": "SOL",
+            "points": 6,
+            "day_ret": 0.098,
+            "vol_x": 5.073,
+            "in_desk": true
+          }
+        ]
+      },
+      "delta_pnl": -2975.21
+    },
+    "y2026": {
+      "desk": {
+        "label": "desk16",
+        "universe_n": 16,
+        "pnl_eur": 2080.74,
+        "end_eur": 4080.74,
+        "max_dd": 0.148,
+        "n_trades": 3,
+        "win": 0.667,
+        "avg_trade": 693.6,
+        "n_outside_trades": 0,
+        "outside_pnl": 0,
+        "outside_bases": [],
+        "trades_tail": [
+          {
+            "base": "DOGE",
+            "net": -141.0,
+            "in_desk": true
+          },
+          {
+            "base": "NEAR",
+            "net": 1258.7,
+            "in_desk": true
+          },
+          {
+            "base": "SOL",
+            "net": 963.1,
+            "in_desk": true
+          }
+        ],
+        "picks_tail": [
+          {
+            "entry_date": "2026-01-03",
+            "base": "DOGE",
+            "points": 7,
+            "day_ret": 0.1231,
+            "vol_x": 7.533,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-05-07",
+            "base": "NEAR",
+            "points": 7,
+            "day_ret": 0.148,
+            "vol_x": 7.992,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-08-20",
+            "base": "SOL",
+            "points": 6,
+            "day_ret": 0.098,
+            "vol_x": 5.073,
+            "in_desk": true
+          }
+        ]
+      },
+      "expanded": {
+        "label": "desk+top80_liquid",
+        "universe_n": 82,
+        "pnl_eur": 834.2,
+        "end_eur": 2834.2,
+        "max_dd": 0.285,
+        "n_trades": 5,
+        "win": 0.4,
+        "avg_trade": 166.8,
+        "n_outside_trades": 3,
+        "outside_pnl": 54.0,
+        "outside_bases": [
+          "ALGO",
+          "JUP",
+          "ONDO"
+        ],
+        "trades_tail": [
+          {
+            "base": "DOGE",
+            "net": -141.0,
+            "in_desk": true
+          },
+          {
+            "base": "ALGO",
+            "net": -191.1,
+            "in_desk": false
+          },
+          {
+            "base": "JUP",
+            "net": 308.8,
+            "in_desk": false
+          },
+          {
+            "base": "ONDO",
+            "net": -63.7,
+            "in_desk": false
+          },
+          {
+            "base": "SOL",
+            "net": 921.2,
+            "in_desk": true
+          }
+        ],
+        "picks_tail": [
+          {
+            "entry_date": "2026-01-03",
+            "base": "DOGE",
+            "points": 7,
+            "day_ret": 0.1231,
+            "vol_x": 7.533,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-03-14",
+            "base": "ALGO",
+            "points": 6,
+            "day_ret": 0.0617,
+            "vol_x": 5.959,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-04-28",
+            "base": "JUP",
+            "points": 6,
+            "day_ret": 0.0629,
+            "vol_x": 6.238,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-07-16",
+            "base": "ONDO",
+            "points": 6,
+            "day_ret": 0.1543,
+            "vol_x": 7.105,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-08-20",
+            "base": "SOL",
+            "points": 6,
+            "day_ret": 0.098,
+            "vol_x": 5.073,
+            "in_desk": true
+          }
+        ]
+      },
+      "delta_pnl": -1246.54
+    },
+    "last_180d": {
+      "desk": {
+        "label": "desk16",
+        "universe_n": 16,
+        "pnl_eur": 2317.18,
+        "end_eur": 4317.18,
+        "max_dd": 0.103,
+        "n_trades": 2,
+        "win": 1.0,
+        "avg_trade": 1158.6,
+        "n_outside_trades": 0,
+        "outside_pnl": 0,
+        "outside_bases": [],
+        "trades_tail": [
+          {
+            "base": "NEAR",
+            "net": 1354.1,
+            "in_desk": true
+          },
+          {
+            "base": "SOL",
+            "net": 963.1,
+            "in_desk": true
+          }
+        ],
+        "picks_tail": [
+          {
+            "entry_date": "2026-05-07",
+            "base": "NEAR",
+            "points": 7,
+            "day_ret": 0.148,
+            "vol_x": 7.992,
+            "in_desk": true
+          },
+          {
+            "entry_date": "2026-08-20",
+            "base": "SOL",
+            "points": 6,
+            "day_ret": 0.098,
+            "vol_x": 5.073,
+            "in_desk": true
+          }
+        ]
+      },
+      "expanded": {
+        "label": "desk+top80_liquid",
+        "universe_n": 82,
+        "pnl_eur": 1268.91,
+        "end_eur": 3268.91,
+        "max_dd": 0.168,
+        "n_trades": 3,
+        "win": 0.667,
+        "avg_trade": 423.0,
+        "n_outside_trades": 2,
+        "outside_pnl": 305.85,
+        "outside_bases": [
+          "JUP",
+          "ONDO"
+        ],
+        "trades_tail": [
+          {
+            "base": "JUP",
+            "net": 370.3,
+            "in_desk": false
+          },
+          {
+            "base": "ONDO",
+            "net": -64.4,
+            "in_desk": false
+          },
+          {
+            "base": "SOL",
+            "net": 963.1,
+            "in_desk": true
+          }
+        ],
+        "picks_tail": [
+          {
+            "entry_date": "2026-04-28",
+            "base": "JUP",
+            "points": 6,
+            "day_ret": 0.0629,
+            "vol_x": 6.238,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-07-16",
+            "base": "ONDO",
+            "points": 6,
+            "day_ret": 0.1543,
+            "vol_x": 7.105,
+            "in_desk": false
+          },
+          {
+            "entry_date": "2026-08-20",
+            "base": "SOL",
+            "points": 6,
+            "day_ret": 0.098,
+            "vol_x": 5.073,
+            "in_desk": true
+          }
+        ]
+      },
+      "delta_pnl": -1048.27
+    }
+  },
+  "now": {
+    "desk_want": null,
+    "desk_ranked": [],
+    "desk_near": [],
+    "desk_caption": "Ignition: desk-universe early-signal + trail 12% (\u219210% na +30%). Geen early-signal vandaag.",
+    "exp_want": null,
+    "exp_ranked": [],
+    "exp_near": [
+      {
+        "base": "MOVR",
+        "missing": "quiet",
+        "day_ret": 0.3497,
+        "vol_x": 57.184,
+        "brk20": true,
+        "points": 9
+      },
+      {
+        "base": "MON",
+        "missing": "quiet",
+        "day_ret": 0.0692,
+        "vol_x": 10.004,
+        "brk20": true,
+        "points": 9
+      },
+      {
+        "base": "SUPER",
+        "missing": "quiet",
+        "day_ret": 0.1596,
+        "vol_x": 3.47,
+        "brk20": true,
+        "points": 9
+      }
+    ],
+    "exp_caption": "Ignition: desk-universe early-signal + trail 12% (\u219210% na +30%). Geen early-signal; dichtbij MOVR (mist quiet)."
+  }
+}
