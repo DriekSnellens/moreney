@@ -1,0 +1,245 @@
+{
+  "asof": "2026-10-02",
+  "rows": [
+    {
+      "name": "rs_clip_20_80",
+      "book": 10000.0,
+      "window": "full",
+      "pnl": 87098.9,
+      "dd": 0.264,
+      "trades": 99,
+      "end": 97098.9
+    },
+    {
+      "name": "rs_residual_full",
+      "book": 10000.0,
+      "window": "full",
+      "pnl": 169981.2,
+      "dd": 0.321,
+      "trades": 86,
+      "end": 179981.2
+    },
+    {
+      "name": "ignition_s2_compound",
+      "book": 10000.0,
+      "window": "full",
+      "pnl": 11822.2,
+      "dd": 0.618,
+      "trades": 23,
+      "end": 21822.2,
+      "real_max_week": 14266.5,
+      "weeks_ge_2k": 8
+    },
+    {
+      "name": "ignition_s1_compound",
+      "book": 10000.0,
+      "window": "full",
+      "pnl": 20103.7,
+      "dd": 0.611,
+      "trades": 9,
+      "end": 30103.7,
+      "real_max_week": 28533.0,
+      "weeks_ge_2k": 4
+    },
+    {
+      "name": "rs_clip_20_80",
+      "book": 10000.0,
+      "window": "y2026",
+      "pnl": 11960.9,
+      "dd": 0.195,
+      "trades": 29,
+      "end": 21960.9
+    },
+    {
+      "name": "rs_residual_full",
+      "book": 10000.0,
+      "window": "y2026",
+      "pnl": 21111.2,
+      "dd": 0.263,
+      "trades": 32,
+      "end": 31111.2
+    },
+    {
+      "name": "ignition_s2_compound",
+      "book": 10000.0,
+      "window": "y2026",
+      "pnl": -905.3,
+      "dd": 0.473,
+      "trades": 8,
+      "end": 9094.7,
+      "real_max_week": 2170.9,
+      "weeks_ge_2k": 1
+    },
+    {
+      "name": "ignition_s1_compound",
+      "book": 10000.0,
+      "window": "y2026",
+      "pnl": -1384.6,
+      "dd": 0.471,
+      "trades": 4,
+      "end": 8615.4,
+      "real_max_week": 2767.2,
+      "weeks_ge_2k": 1
+    },
+    {
+      "name": "rs_clip_20_80",
+      "book": 10000.0,
+      "window": "last_180d",
+      "pnl": 12038.4,
+      "dd": 0.172,
+      "trades": 17,
+      "end": 22038.3
+    },
+    {
+      "name": "rs_residual_full",
+      "book": 10000.0,
+      "window": "last_180d",
+      "pnl": 20692.3,
+      "dd": 0.263,
+      "trades": 24,
+      "end": 30692.3
+    },
+    {
+      "name": "ignition_s2_compound",
+      "book": 10000.0,
+      "window": "last_180d",
+      "pnl": 9148.3,
+      "dd": 0.176,
+      "trades": 6,
+      "end": 19148.3,
+      "real_max_week": 4570.6,
+      "weeks_ge_2k": 3
+    },
+    {
+      "name": "ignition_s1_compound",
+      "book": 10000.0,
+      "window": "last_180d",
+      "pnl": 1784.8,
+      "dd": 0.324,
+      "trades": 2,
+      "end": 11784.8,
+      "real_max_week": 3785.2,
+      "weeks_ge_2k": 1
+    },
+    {
+      "name": "rs_clip_20_80",
+      "book": 20000.0,
+      "window": "full",
+      "pnl": 164398.9,
+      "dd": 0.265,
+      "trades": 99,
+      "end": 184398.9
+    },
+    {
+      "name": "rs_residual_full",
+      "book": 20000.0,
+      "window": "full",
+      "pnl": 305155.6,
+      "dd": 0.323,
+      "trades": 86,
+      "end": 325155.6
+    },
+    {
+      "name": "ignition_s2_compound",
+      "book": 20000.0,
+      "window": "full",
+      "pnl": 23644.3,
+      "dd": 0.618,
+      "trades": 23,
+      "end": 43644.3,
+      "real_max_week": 28533.0,
+      "weeks_ge_2k": 10
+    },
+    {
+      "name": "ignition_s1_compound",
+      "book": 20000.0,
+      "window": "full",
+      "pnl": 40207.3,
+      "dd": 0.611,
+      "trades": 9,
+      "end": 60207.3,
+      "real_max_week": 57066.0,
+      "weeks_ge_2k": 4
+    },
+    {
+      "name": "rs_clip_20_80",
+      "book": 20000.0,
+      "window": "y2026",
+      "pnl": 23455.4,
+      "dd": 0.199,
+      "trades": 29,
+      "end": 43455.4
+    },
+    {
+      "name": "rs_residual_full",
+      "book": 20000.0,
+      "window": "y2026",
+      "pnl": 40703.1,
+      "dd": 0.267,
+      "trades": 32,
+      "end": 60703.1
+    },
+    {
+      "name": "ignition_s2_compound",
+      "book": 20000.0,
+      "window": "y2026",
+      "pnl": -1810.6,
+      "dd": 0.473,
+      "trades": 8,
+      "end": 18189.4,
+      "real_max_week": 4341.7,
+      "weeks_ge_2k": 2
+    },
+    {
+      "name": "ignition_s1_compound",
+      "book": 20000.0,
+      "window": "y2026",
+      "pnl": -2769.2,
+      "dd": 0.471,
+      "trades": 4,
+      "end": 17230.8,
+      "real_max_week": 5534.5,
+      "weeks_ge_2k": 1
+    },
+    {
+      "name": "rs_clip_20_80",
+      "book": 20000.0,
+      "window": "last_180d",
+      "pnl": 23791.8,
+      "dd": 0.175,
+      "trades": 17,
+      "end": 43791.8
+    },
+    {
+      "name": "rs_residual_full",
+      "book": 20000.0,
+      "window": "last_180d",
+      "pnl": 40233.8,
+      "dd": 0.267,
+      "trades": 24,
+      "end": 60233.8
+    },
+    {
+      "name": "ignition_s2_compound",
+      "book": 20000.0,
+      "window": "last_180d",
+      "pnl": 18296.6,
+      "dd": 0.176,
+      "trades": 6,
+      "end": 38296.6,
+      "real_max_week": 9141.2,
+      "weeks_ge_2k": 3
+    },
+    {
+      "name": "ignition_s1_compound",
+      "book": 20000.0,
+      "window": "last_180d",
+      "pnl": 3569.6,
+      "dd": 0.324,
+      "trades": 2,
+      "end": 23569.6,
+      "real_max_week": 7570.5,
+      "weeks_ge_2k": 1
+    }
+  ]
+}
