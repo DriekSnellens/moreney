@@ -748,7 +748,18 @@ class Settings(BaseSettings):
     # Tighten trail once peak gain ≥ arm (0 arm disables). Desk ablation winner.
     momentum_ignition_trail_ratchet_arm_pct: float = Field(default=0.30, ge=0.0, le=2.0)
     momentum_ignition_trail_ratchet_pct: float = Field(default=0.10, ge=0.0, le=1.0)
-    momentum_ignition_quiet_max: float = Field(default=0.12, ge=0.0, le=1.0)
+    # Sniper (ex-desk) wet winner; desk-only classic preferred 0.12 historically.
+    momentum_ignition_quiet_max: float = Field(default=0.15, ge=0.0, le=1.0)
+    # ex_desk = liquid outside RS desk (default); desk | expanded | custom.
+    momentum_ignition_universe_mode: str = "ex_desk"
+    momentum_ignition_liquid_top_n: int = Field(default=80, ge=8, le=200)
+    # Comma bases always excluded from sniper pool (empty = RS desk defaults).
+    momentum_ignition_exclude_bases: str = ""
+    # Optional override list; empty = dynamic/fallback sniper pool.
+    momentum_ignition_universe: str = ""
+    momentum_ignition_universe_refresh_sec: float = Field(
+        default=3_600.0, ge=0.0, le=86_400.0
+    )
     momentum_ignition_day_ret_min: float = Field(default=0.06, ge=0.0, le=1.0)
     momentum_ignition_vol_mult_min: float = Field(default=2.0, ge=1.0, le=20.0)
     # Coil hybrid: earlier compress→brk5 path (wider trail). Prefer classic when both fire.

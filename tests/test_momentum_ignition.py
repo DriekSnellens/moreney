@@ -435,6 +435,10 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert cfg.book_eur == 10_000.0
     assert cfg.max_positions == 2
     assert cfg.compound_sizing is True
+    assert cfg.universe_mode == "ex_desk"
+    assert cfg.quiet_max == 0.15
+    assert "ETH" not in cfg.universe
+    assert "FET" not in cfg.universe
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-test-state.json",
@@ -451,6 +455,36 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert st["venues"] == ["okx"]
     assert st["allow_live"] is False
     assert st["config"]["decision_interval_sec"] == 900.0
+    assert st["config"]["universe_mode"] == "ex_desk"
+
+
+def test_sniper_universe_excludes_rs_desk() -> None:
+    from bot.live.momentum_ignition import (
+        RS_DESK_BASES,
+        build_sniper_universe,
+        resolve_universe,
+    )
+
+    vols = {b: 1_000_000.0 for b in RS_DESK_BASES}
+    vols.update(
+        {
+            "GRASS": 5_000_000.0,
+            "ONDO": 4_000_000.0,
+            "SEI": 3_000_000.0,
+            "PEPE": 2_000_000.0,
+        }
+    )
+    sniper = build_sniper_universe(vols, top_n=10, exclude=RS_DESK_BASES)
+    assert sniper[0] == "GRASS"
+    assert "ETH" not in sniper
+    assert "SOL" not in sniper
+    assert "FET" not in sniper
+    cfg = IgnitionConfig(universe_mode="ex_desk", liquid_top_n=3)
+    resolved = resolve_universe(cfg, volume_by_base=vols)
+    assert resolved == ("GRASS", "ONDO", "SEI")
+    desk = resolve_universe(IgnitionConfig(universe_mode="desk"), volume_by_base=vols)
+    assert desk[0] == "ETH"
+    assert "GRASS" not in desk
 
 
 def test_ignition_live_arms_when_gateway_present(tmp_path: Path) -> None:

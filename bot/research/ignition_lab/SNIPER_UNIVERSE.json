@@ -1,0 +1,138 @@
+{
+  "asof": "2026-10-02",
+  "book": 10000,
+  "slots": 2,
+  "compound": true,
+  "note": "ex_desk fishes outside RS desk",
+  "rows": [
+    {
+      "name": "desk",
+      "quiet_max": 0.12,
+      "universe_n": 16,
+      "windows": {
+        "full": {
+          "pnl_eur": 11822.18,
+          "max_dd": 0.618,
+          "n_trades": 23,
+          "realized_max_week": 14266.5,
+          "realized_weeks_ge_2k": 8,
+          "realized_weeks_ge_3k": 4,
+          "path_pnl": {
+            "classic": 2013.75,
+            "coil": 9808.42
+          }
+        },
+        "y2026": {
+          "pnl_eur": -905.29,
+          "max_dd": 0.473,
+          "n_trades": 8,
+          "realized_max_week": 2170.9,
+          "realized_weeks_ge_2k": 1,
+          "realized_weeks_ge_3k": 0,
+          "path_pnl": {
+            "classic": -352.47,
+            "coil": -552.81
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 9148.3,
+          "max_dd": 0.176,
+          "n_trades": 6,
+          "realized_max_week": 4570.6,
+          "realized_weeks_ge_2k": 3,
+          "realized_weeks_ge_3k": 1,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 9148.3
+          }
+        }
+      }
+    },
+    {
+      "name": "expanded",
+      "quiet_max": 0.15,
+      "universe_n": 82,
+      "windows": {
+        "full": {
+          "pnl_eur": 9997.39,
+          "max_dd": 0.57,
+          "n_trades": 35,
+          "realized_max_week": 15002.2,
+          "realized_weeks_ge_2k": 6,
+          "realized_weeks_ge_3k": 3,
+          "path_pnl": {
+            "classic": 5388.81,
+            "coil": 4608.57
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1008.6,
+          "max_dd": 0.429,
+          "n_trades": 10,
+          "realized_max_week": 2681.6,
+          "realized_weeks_ge_2k": 1,
+          "realized_weeks_ge_3k": 0,
+          "path_pnl": {
+            "classic": -1283.92,
+            "coil": 2292.53
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 5310.1,
+          "max_dd": 0.186,
+          "n_trades": 8,
+          "realized_max_week": 3729.3,
+          "realized_weeks_ge_2k": 1,
+          "realized_weeks_ge_3k": 1,
+          "path_pnl": {
+            "classic": 254.55,
+            "coil": 5055.53
+          }
+        }
+      }
+    },
+    {
+      "name": "ex_desk",
+      "quiet_max": 0.15,
+      "universe_n": 66,
+      "windows": {
+        "full": {
+          "pnl_eur": 11981.82,
+          "max_dd": 0.574,
+          "n_trades": 38,
+          "realized_max_week": 8381.2,
+          "realized_weeks_ge_2k": 5,
+          "realized_weeks_ge_3k": 1,
+          "path_pnl": {
+            "classic": -197.48,
+            "coil": 12179.27
+          }
+        },
+        "y2026": {
+          "pnl_eur": 9671.89,
+          "max_dd": 0.37,
+          "n_trades": 15,
+          "realized_max_week": 7500.5,
+          "realized_weeks_ge_2k": 2,
+          "realized_weeks_ge_3k": 1,
+          "path_pnl": {
+            "classic": -124.85,
+            "coil": 9796.73
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 9602.69,
+          "max_dd": 0.177,
+          "n_trades": 10,
+          "realized_max_week": 7474.1,
+          "realized_weeks_ge_2k": 2,
+          "realized_weeks_ge_3k": 1,
+          "path_pnl": {
+            "classic": 902.41,
+            "coil": 8700.28
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,12 +1,13 @@
-"""Ignition sleeve — desk classic + coil hybrid + trailing exit.
+"""Ignition sleeve — ex-desk sniper + classic|coil hybrid + trail.
 
-Research (``artifacts/early_signal_book.json``, ``ignition_lab/HYBRID_ENTRY``):
-**Classic** — quiet + 20d breakout + day ≥+6% + volume ≥2× on liquid desk
-names. Looser classic gates add trades but destroy PnL.
-**Coil** — compress + 5d breakout + milder day/vol/quiet/close_loc, with a
-wider path trail (25%). Catches explosive legs that miss classic same-day.
-Classic ranks above coil when both fire. Exit: path trail from peak,
-tightening to 10% once the lot is ≥+30% above entry (ratchet).
+Fishes **outside** the RS desk universe (ETH/SOL/…/FET). Wet scan: liquid
+ex-desk + quiet15 + coil hybrid beats desk on 2026/180d while RS keeps the
+desk residual book.
+
+**Classic** — quiet + 20d breakout + day ≥+6% + volume ≥2× (quiet_max 0.15
+on sniper waters). **Coil** — compress + 5d breakout + milder day/vol, 25%
+path trail. Classic ranks above coil when both fire. Exit: path trail +
+ratchet 30%→10%.
 
 Live OKX when armed; paper otherwise. No per-coin hardcodes.
 """
@@ -25,12 +26,84 @@ from bot.live.momentum_desk import DEFAULT_UNIVERSE
 FEE_RT = 0.003
 SLIP = 0.001
 
+# RS desk waters — ignition excludes these by default (complementary sleeve).
+RS_DESK_BASES: tuple[str, ...] = DEFAULT_UNIVERSE
+
+# Offline/bootstrap pool: liquid EUR names outside the RS desk (config universe,
+# not one-off ticker logic). Live runner re-ranks from Bitvavo 24h volume.
+FALLBACK_SNIPER_UNIVERSE: tuple[str, ...] = (
+    "AAVE",
+    "ALGO",
+    "ALICE",
+    "ARK",
+    "BCH",
+    "BNB",
+    "CAP",
+    "COTI",
+    "CRV",
+    "CT",
+    "CVX",
+    "DATAIP",
+    "EIGEN",
+    "ENA",
+    "ENJ",
+    "FARTCOIN",
+    "GLMR",
+    "GRASS",
+    "GTC",
+    "HBAR",
+    "HYPE",
+    "ICP",
+    "INJ",
+    "JASMY",
+    "JUP",
+    "KAS",
+    "LPT",
+    "LSK",
+    "MAGIC",
+    "MANA",
+    "MEGA",
+    "MON",
+    "MOVR",
+    "NOM",
+    "NPC",
+    "ONDO",
+    "PENGU",
+    "PEPE",
+    "PHA",
+    "PLUME",
+    "PUMP",
+    "QNT",
+    "RAY",
+    "RENDER",
+    "SAND",
+    "SCR",
+    "SEI",
+    "SHIB",
+    "SKY",
+    "STX",
+    "SUPER",
+    "SWEAT",
+    "SYN",
+    "TAO",
+    "TIA",
+    "TRX",
+    "USELESS",
+    "VET",
+    "VIRTUAL",
+    "VVV",
+    "WIF",
+    "WLD",
+    "XDP",
+    "XLM",
+    "XPL",
+    "ZRO",
+)
+
 
 @dataclass(frozen=True)
 class IgnitionConfig:
-    # Seed sleeve. Ambition target is banking ~€2–3k in spike weeks (not every
-    # quiet week). Wet scan: €10k desk coil + compound ≈ 4× more €2k bank-weeks
-    # than a fixed €2k book; most calendar weeks still stay near zero.
+    # Seed sleeve. Ambition: bank ~€2–3k in spike weeks (not every quiet week).
     book_eur: float = 10_000.0
     max_positions: int = 2
     deploy_frac: float = 1.0
@@ -43,8 +116,8 @@ class IgnitionConfig:
     # Once peak gain ≥ arm, use the tighter trail (0 disables ratchet).
     trail_ratchet_arm_pct: float = 0.30
     trail_ratchet_pct: float = 0.10
-    # Early-signal gates (desk-only winner from early_signal_book).
-    quiet_max: float = 0.12
+    # Classic gates. Sniper (ex-desk) wet winner uses quiet_max=0.15.
+    quiet_max: float = 0.15
     day_ret_min: float = 0.06
     vol_mult_min: float = 2.0
     breakout_days: int = 20
@@ -58,8 +131,6 @@ class IgnitionConfig:
     # Score atoms for ranking / diagnostics (entry still needs early_signal).
     min_points: int = 3
     # Coil path: catch compression→breakouts earlier than classic early_signal.
-    # Wet desk ablation: classic|coil hybrid + 25% coil trail ≈ +€6.8k vs +€2.7k
-    # classic-only on €2k (full window); desk +80% leg catch ~21% vs ~2%.
     coil_entry_enabled: bool = True
     coil_breakout_days: int = 5
     coil_day_ret_min: float = 0.025
@@ -71,7 +142,12 @@ class IgnitionConfig:
     fee_rt: float = FEE_RT
     slip: float = SLIP
     min_notional_eur: float = 50.0
-    universe: tuple[str, ...] = DEFAULT_UNIVERSE
+    # ex_desk = liquid names outside RS desk; desk = RS waters; expanded = both;
+    # custom = use ``universe`` as-is.
+    universe_mode: str = "ex_desk"
+    liquid_top_n: int = 80
+    exclude_bases: tuple[str, ...] = RS_DESK_BASES
+    universe: tuple[str, ...] = FALLBACK_SNIPER_UNIVERSE
     # Sparse hour slots when ``decision_interval_sec`` is 0.
     decision_hours_utc: tuple[int, ...] = (0,)
     # When > 0, scan for entries this often (UTC), not only at decision hours.
@@ -79,6 +155,67 @@ class IgnitionConfig:
     decision_interval_sec: float = 900.0
     tick_sec: float = 30.0
     ohlc_days: int = 120
+    # Re-rank sniper universe from Bitvavo 24h volume this often (0 = once).
+    universe_refresh_sec: float = 3_600.0
+
+
+def build_sniper_universe(
+    volume_by_base: Mapping[str, float],
+    *,
+    top_n: int = 80,
+    exclude: Sequence[str] = RS_DESK_BASES,
+    min_volume_eur: float = 50_000.0,
+    fallback: Sequence[str] = FALLBACK_SNIPER_UNIVERSE,
+) -> tuple[str, ...]:
+    """Top liquid EUR bases by 24h quote volume, excluding RS-desk waters."""
+    excl = {str(b).upper() for b in exclude} | {"BTC", "EUR"}
+    ranked = sorted(
+        (
+            (str(b).upper(), float(v))
+            for b, v in volume_by_base.items()
+            if str(b).upper() not in excl and float(v) >= float(min_volume_eur)
+        ),
+        key=lambda kv: -kv[1],
+    )
+    out = tuple(b for b, _ in ranked[: max(1, int(top_n))])
+    if out:
+        return out
+    fb = [str(b).upper() for b in fallback if str(b).upper() not in excl]
+    return tuple(fb[: max(1, int(top_n))])
+
+
+def resolve_universe(
+    cfg: IgnitionConfig,
+    volume_by_base: Mapping[str, float] | None = None,
+) -> tuple[str, ...]:
+    """Resolve deploy universe from mode + optional live volume map."""
+    mode = str(cfg.universe_mode or "ex_desk").strip().lower()
+    if mode == "custom":
+        return tuple(str(b).upper() for b in cfg.universe if str(b).strip())
+    if mode == "desk":
+        return tuple(str(b).upper() for b in RS_DESK_BASES)
+    vols = dict(volume_by_base or {})
+    if mode == "expanded":
+        # Desk + liquid outsiders (top_n applies to outsiders only).
+        sniper = build_sniper_universe(
+            vols,
+            top_n=int(cfg.liquid_top_n),
+            exclude=(),
+            min_volume_eur=float(cfg.min_day_qvol_eur or 50_000.0),
+            fallback=(*RS_DESK_BASES, *FALLBACK_SNIPER_UNIVERSE),
+        )
+        # Keep desk first for stable ordering, then non-desk liquid.
+        desk = list(RS_DESK_BASES)
+        rest = [b for b in sniper if b not in RS_DESK_BASES]
+        return tuple(dict.fromkeys([*desk, *rest]))
+    # Default: ex_desk sniper.
+    return build_sniper_universe(
+        vols,
+        top_n=int(cfg.liquid_top_n),
+        exclude=cfg.exclude_bases or RS_DESK_BASES,
+        min_volume_eur=float(cfg.min_day_qvol_eur or 50_000.0),
+        fallback=cfg.universe or FALLBACK_SNIPER_UNIVERSE,
+    )
 
 
 @dataclass
@@ -412,9 +549,17 @@ def evaluate_ignition(
         if cfg.compound_sizing
         else f"fixed €{cfg.book_eur:,.0f}"
     )
+    mode = str(cfg.universe_mode or "ex_desk")
+    waters = {
+        "ex_desk": "ex-desk sniper",
+        "desk": "desk",
+        "expanded": "desk+liquid",
+        "custom": "custom univ",
+    }.get(mode, mode)
     caption = (
-        f"Ignition: desk classic+coil + {trail_txt}; {size_txt}, "
-        f"{cfg.max_positions} slot(s). Spike-week target €2–3k. "
+        f"Ignition: {waters} classic+coil + {trail_txt}; {size_txt}, "
+        f"{cfg.max_positions} slot(s), univ n={len(cfg.universe)}. "
+        f"Spike-week target €2–3k. "
         + body
         + (f" Block: {risk_block}." if risk_block else "")
     )
@@ -440,6 +585,8 @@ def evaluate_ignition(
         "compound_sizing": cfg.compound_sizing,
         "book_eur": cfg.book_eur,
         "max_positions": cfg.max_positions,
+        "universe_mode": cfg.universe_mode,
+        "universe_n": len(cfg.universe),
         "ambition_week_eur": [2_000.0, 3_000.0],
     }
 
@@ -530,12 +677,16 @@ def trail_exit(
 
 
 __all__ = [
+    "FALLBACK_SNIPER_UNIVERSE",
     "IgnitionConfig",
     "IgnitionPosition",
+    "RS_DESK_BASES",
+    "build_sniper_universe",
     "default_config",
     "effective_trail_pct",
     "evaluate_ignition",
     "fill_px",
+    "resolve_universe",
     "score_ignition_day",
     "trail_exit",
     "replace",

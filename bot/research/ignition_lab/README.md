@@ -28,6 +28,21 @@ Classic wins rank when both fire. Coil lots use `coil_trail_pct=0.25` (then shar
 
 Artifacts: `EARLY_ENTRY_GRID.json`, `HYBRID_ENTRY.json`, `EXPLOSIVE_CAPTURE.json`.
 
+## Sniper waters (ex-desk, complementary to RS)
+
+RS residual owns the desk-16 book. Ignition defaults to **`universe_mode=ex_desk`**:
+top liquid EUR names **excluding** the RS desk, `quiet_max=0.15`, coil hybrid.
+
+Wet €10k · 2 slots · compound (2024-03→2026-10):
+
+| Universe | full | 2026 YTD | last 180d |
+|---|---:|---:|---:|
+| desk quiet12 | +€11.8k | **−€0.9k** | +€9.1k |
+| expanded quiet15 | +€10.0k | +€1.0k | +€5.3k |
+| **ex_desk quiet15** | **+€12.0k** | **+€9.7k** | **+€9.6k** |
+
+Ex-desk PnL is almost all **coil**. Live re-ranks the pool hourly from Bitvavo 24h volume.
+
 ## Weekly ambition (€2–3k banked)
 
 Mentality: ignition is a **spike engine** — quiet most weeks, then bank thousands when an explosive leg is caught.

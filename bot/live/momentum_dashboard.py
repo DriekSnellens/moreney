@@ -2308,9 +2308,18 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         compound = bool(cfg.get("compound_sizing", True))
         size_s = f"compound {book_s}" if compound else f"fixed {book_s}"
         slots = cfg.get("max_positions") or 2
+        umode = str(cfg.get("universe_mode") or "ex_desk")
+        waters = {
+            "ex_desk": "ex-desk sniper (buiten RS-desk)",
+            "desk": "desk-universe",
+            "expanded": "desk+liquid",
+            "custom": "custom universe",
+        }.get(umode, umode)
+        univ_n = cfg.get("universe_n")
+        univ_s = f", n={univ_n}" if univ_n is not None else ""
         caption = (
             f"{mode} ignition → {venue.upper()}: {signal} "
-            f"op desk-universe, trail {trail_s}{coil_s}, {size_s}, "
+            f"op {waters}{univ_s}, trail {trail_s}{coil_s}, {size_s}, "
             f"{slots} slot(s), spike-week target €2–3k, {cadence}. {live_note}"
         )
     pos_bits = []

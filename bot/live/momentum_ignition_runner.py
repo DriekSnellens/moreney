@@ -16,12 +16,15 @@ from typing import Any
 
 from bot.core.config import Settings, get_settings
 from bot.live.momentum_ignition import (
+    FALLBACK_SNIPER_UNIVERSE,
     IgnitionConfig,
     IgnitionPosition,
+    RS_DESK_BASES,
     default_config,
     effective_trail_pct,
     evaluate_ignition,
     fill_px,
+    resolve_universe,
     trail_exit,
 )
 from bot.live.momentum_runner import CandleFeed, LiveGateway, engine_settings_for_desk, parse_venues
@@ -95,6 +98,27 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         )
     ) or (0,)
 
+    mode = str(
+        getattr(settings, "momentum_ignition_universe_mode", base.universe_mode)
+        or base.universe_mode
+    ).strip().lower()
+    excl_raw = str(getattr(settings, "momentum_ignition_exclude_bases", "") or "")
+    if excl_raw.strip():
+        exclude = tuple(
+            x.strip().upper() for x in excl_raw.split(",") if x.strip()
+        )
+    else:
+        exclude = RS_DESK_BASES
+    univ_raw = str(getattr(settings, "momentum_ignition_universe", "") or "")
+    if univ_raw.strip():
+        universe = tuple(
+            x.strip().upper() for x in univ_raw.split(",") if x.strip()
+        )
+        if mode != "custom":
+            mode = "custom"
+    else:
+        universe = FALLBACK_SNIPER_UNIVERSE
+
     return replace(
         base,
         book_eur=_f("momentum_ignition_book_eur", base.book_eur),
@@ -140,6 +164,13 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
             "momentum_ignition_coil_compress_ratio", base.coil_compress_ratio
         ),
         coil_trail_pct=_f("momentum_ignition_coil_trail_pct", base.coil_trail_pct),
+        universe_mode=mode,
+        liquid_top_n=_i("momentum_ignition_liquid_top_n", base.liquid_top_n),
+        exclude_bases=exclude,
+        universe=universe,
+        universe_refresh_sec=_f(
+            "momentum_ignition_universe_refresh_sec", base.universe_refresh_sec
+        ),
         tick_sec=_f("momentum_ignition_tick_sec", base.tick_sec),
         decision_interval_sec=_f(
             "momentum_ignition_decision_interval_sec", base.decision_interval_sec
@@ -186,7 +217,12 @@ class IgnitionPaperRunner:
         # Last read of target-venue free quote vs crypto MTM (not paper equity).
         self._venue_truth: dict[str, Any] = {}
         self._venue_truth_ts = 0.0
+        self._universe_refreshed_at = 0.0
         self._load_state()
+        # Resolve sniper universe once at construct (network refresh in decide).
+        self.cfg = replace(
+            self.cfg, universe=resolve_universe(self.cfg, volume_by_base=None)
+        )
 
     def _desk(self) -> str:
         return "ignition" if self.allow_live else "ignition_paper"
@@ -540,7 +576,44 @@ class IgnitionPaperRunner:
         net_qty = max(0.0, filled - fee_base) if side == "buy" else filled
         return _Fill(qty=net_qty, avg_price=float(avg), fee_eur=fee)
 
+    def _fetch_volume_map(self) -> dict[str, float]:
+        """Bitvavo 24h EUR quote volume for all markets (sniper ranking)."""
+        from bot.live.tape_confirm import fetch_bitvavo_24h
+
+        try:
+            rows = fetch_bitvavo_24h(())  # empty → all EUR markets
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ignition 24h volume fetch failed: %s", exc)
+            return {}
+        return {str(b).upper(): float(r.volume_eur) for b, r in rows.items()}
+
+    def _refresh_universe(self, *, force: bool = False) -> tuple[str, ...]:
+        mode = str(self.cfg.universe_mode or "ex_desk").lower()
+        if mode == "custom":
+            return self.cfg.universe
+        interval = float(self.cfg.universe_refresh_sec or 0.0)
+        now = time.time()
+        due = force or self._universe_refreshed_at <= 0
+        if not due and interval > 0 and (now - self._universe_refreshed_at) >= interval:
+            due = True
+        if not due and interval <= 0 and self._universe_refreshed_at > 0:
+            return self.cfg.universe
+        if not due:
+            return self.cfg.universe
+        vols = self._fetch_volume_map()
+        univ = resolve_universe(self.cfg, volume_by_base=vols or None)
+        self.cfg = replace(self.cfg, universe=univ)
+        self._universe_refreshed_at = now
+        logger.info(
+            "ignition universe mode=%s n=%s sample=%s",
+            mode,
+            len(univ),
+            ",".join(univ[:8]),
+        )
+        return univ
+
     async def _load_ohlc(self) -> dict[str, list[list[float]]]:
+        self._refresh_universe()
         bases = ("BTC", *self.cfg.universe)
         loop = asyncio.get_running_loop()
 
@@ -1037,7 +1110,10 @@ class IgnitionPaperRunner:
                 "max_book_eur": self.cfg.max_book_eur,
                 "ambition_week_eur": [2_000.0, 3_000.0],
                 "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
+                "universe_mode": self.cfg.universe_mode,
                 "universe_n": len(self.cfg.universe),
+                "exclude_n": len(self.cfg.exclude_bases),
+                "liquid_top_n": self.cfg.liquid_top_n,
                 "venues": list(self.venues),
                 "target_venue": venue,
                 "allow_live": self.allow_live,
