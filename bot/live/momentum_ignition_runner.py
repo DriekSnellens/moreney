@@ -1,4 +1,4 @@
-"""Paper runner/manager for the ignition early-signal sleeve (never live orders)."""
+"""Runner/manager for the ignition early-signal sleeve (paper or live OKX)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import logging
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from contextlib import suppress
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,14 +23,23 @@ from bot.live.momentum_ignition import (
     fill_px,
     trail_exit,
 )
-from bot.live.momentum_runner import CandleFeed, parse_venues
+from bot.live.momentum_runner import CandleFeed, LiveGateway, engine_settings_for_desk, parse_venues
 from bot.live.momentum_short_weakest import fetch_daily_ohlc
 
 logger = logging.getLogger("bot.live.momentum_ignition_runner")
 
 _EQUITY_CURVE_MAX = 2016
 _EQUITY_CURVE_MIN_GAP_SEC = 5.0
+_MIN_ORDER_EUR = 5.0
+_TAKER_CROSS = 0.002
 _OHLC_POOL = ThreadPoolExecutor(max_workers=6, thread_name_prefix="ign-ohlc")
+
+
+@dataclass(frozen=True)
+class _Fill:
+    qty: float
+    avg_price: float
+    fee_eur: float
 
 
 def _flag_path(state_path: str) -> Path:
@@ -108,11 +118,7 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
 
 
 class IgnitionPaperRunner:
-    """Paper long book targeting OKX for future live fills.
-
-    Marks come from the public ticker today. Orders stay synthetic until
-    ``momentum_ignition_allow_live`` is armed and an OKX gateway is wired.
-    """
+    """Ignition long book on OKX — paper fills, or live when gateways are armed."""
 
     def __init__(
         self,
@@ -122,16 +128,18 @@ class IgnitionPaperRunner:
         ledger_path: str,
         venues: tuple[str, ...] = ("okx",),
         allow_live: bool = False,
+        gateways: Mapping[str, Any] | None = None,
     ) -> None:
         self.cfg = cfg
         self.state_path = state_path
         self.ledger_path = ledger_path
         self.venues = parse_venues(venues) or ("okx",)
-        # Live OKX path is not wired yet — always paper regardless of flag.
-        self.allow_live = False
+        self._gws: dict[str, Any] = dict(gateways or {})
         self._allow_live_requested = bool(allow_live)
-        self.dry_run = True
-        self.paper_only = True
+        live = bool(allow_live) and bool(self._gws)
+        self.allow_live = live
+        self.dry_run = not live
+        self.paper_only = not live
         self.cash_eur = float(cfg.book_eur)
         self.realized_total_eur = 0.0
         self.day_realized_eur = 0.0
@@ -150,10 +158,28 @@ class IgnitionPaperRunner:
         self._load_state()
 
     def _desk(self) -> str:
-        return "ignition_paper"
+        return "ignition" if self.allow_live else "ignition_paper"
 
     def _primary_venue(self) -> str:
         return self.venues[0] if self.venues else "okx"
+
+    def _primary_gw(self) -> Any | None:
+        for v in self.venues:
+            if v in self._gws:
+                return self._gws[v]
+        return next(iter(self._gws.values()), None)
+
+    def discard_paper_positions(self) -> int:
+        """Drop synthetic lots before arming live venue orders."""
+        n = len(self.positions)
+        self.positions = []
+        return n
+
+    def _rebase_equity_curve(self) -> None:
+        eq = round(self._equity_now(), 2)
+        now_ms = time.time() * 1000.0
+        self.equity_curve = [[round(now_ms), eq]]
+        self._last_curve_save = 0.0
 
     def _load_state(self) -> None:
         p = Path(self.state_path)
@@ -194,8 +220,8 @@ class IgnitionPaperRunner:
                         [round(float(t), 1), round(float(eq), 2)]
                         for t, eq in self.equity_curve[-_EQUITY_CURVE_MAX:]
                     ],
-                    "paper_only": True,
-                    "allow_live": False,
+                    "paper_only": self.paper_only,
+                    "allow_live": self.allow_live,
                     "updated_at": datetime.now(UTC).isoformat(),
                 },
                 indent=2,
@@ -308,9 +334,10 @@ class IgnitionPaperRunner:
                 min_clip = max(25.0, float(self.cfg.min_notional_eur or 25.0))
                 if free_q >= min_clip:
                     advice = "powder_ready"
+                    mode = "LIVE" if self.allow_live else "paper"
                     advice_nl = (
                         f"{venue.upper()} heeft €{free_q:,.0f} vrije quote — "
-                        "genoeg dry powder voor ignition (als live pad aanstaat)."
+                        f"dry powder klaar voor ignition ({mode})."
                     )
                 elif inv >= min_clip:
                     top_asset = str((top[0] or {}).get("asset") or "alt") if top else "alt"
@@ -320,8 +347,7 @@ class IgnitionPaperRunner:
                         f"{venue.upper()} free quote is slechts €{free_q:.2f}; "
                         f"~€{inv:,.0f} zit in inventory (o.a. {top_asset} ~€{top_val:,.0f}). "
                         "Voor ignition-engine: verkopen naar EUR geeft deployable powder; "
-                        "aanhouden past alleen als residual/RS-sleeve die bag bewust houdt. "
-                        "Ignition plaatst nog geen live orders — geen auto-sell."
+                        "aanhouden past alleen als residual/RS-sleeve die bag bewust houdt."
                     )
                 else:
                     advice = "thin_venue"
@@ -353,12 +379,13 @@ class IgnitionPaperRunner:
     def _venue_caption_suffix(self) -> str:
         truth = self._venue_truth or {}
         venue = str(truth.get("venue") or self._primary_venue()).upper()
+        mode = "LIVE" if self.allow_live else "paper"
         if not truth.get("online"):
-            return f" Target {venue} (paper)."
+            return f" Target {venue} ({mode})."
         free_q = truth.get("free_quote_eur")
         inv = truth.get("inventory_mtm_eur")
         advice = str(truth.get("inventory_advice") or "")
-        bits = [f"Target {venue} (paper)"]
+        bits = [f"Target {venue} ({mode})"]
         if free_q is not None:
             bits.append(f"live vrij €{float(free_q):.2f}")
         if inv is not None:
@@ -368,6 +395,119 @@ class IgnitionPaperRunner:
         elif advice == "powder_ready":
             bits.append("live powder ok")
         return ". " + " · ".join(bits) + "."
+
+    async def _venue_quote_eur(self) -> float | None:
+        gw = self._primary_gw()
+        if self.dry_run or gw is None or not hasattr(gw, "quote_balance_eur"):
+            truth = self._venue_truth or {}
+            if truth.get("free_quote_eur") is not None:
+                return float(truth["free_quote_eur"])
+            return None
+        try:
+            raw = await gw.quote_balance_eur()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ignition quote balance failed: %s", exc)
+            return None
+        if raw is None:
+            return None
+        return max(0.0, float(raw))
+
+    async def _sync_cash_from_venue(self) -> float | None:
+        """Align book cash with free venue EUR when live."""
+        if self.dry_run:
+            return None
+        venue_eur = await self._venue_quote_eur()
+        if venue_eur is None:
+            await self._refresh_venue_truth(force=True)
+            venue_eur = await self._venue_quote_eur()
+        if venue_eur is None:
+            return None
+        prev = float(self.cash_eur)
+        synced = max(0.0, float(venue_eur))
+        if abs(prev - synced) >= 0.01:
+            logger.info("ignition cash sync book %.2f -> venue %.2f", prev, synced)
+            self.cash_eur = synced
+            if abs(prev - synced) >= 500.0:
+                self._rebase_equity_curve()
+        return synced
+
+    async def _decision_cash(self) -> float:
+        await self._sync_cash_from_venue()
+        cash = float(self.cash_eur)
+        if self.dry_run:
+            return cash
+        venue_eur = await self._venue_quote_eur()
+        if venue_eur is None:
+            return cash
+        left = max(0.0, float(venue_eur))
+        if left > 0:
+            buffer = max(15.0, left * float(self.cfg.fee_rt or 0.003))
+            left = max(0.0, left - buffer)
+        return min(cash, left)
+
+    async def _fill(
+        self,
+        base: str,
+        side: str,
+        *,
+        qty: float | None = None,
+        notional_eur: float | None = None,
+    ) -> _Fill | None:
+        symbol = f"{base}EUR"
+        gw = self._primary_gw()
+        if self.dry_run or gw is None:
+            px = float(self.marks.get(base) or 0.0)
+            if px <= 0:
+                last = await self._feed.last_price(base)
+                px = float(last or 0.0)
+            if px <= 0:
+                return None
+            q = float(qty) if qty is not None else float(notional_eur or 0.0) / px
+            if q <= 0:
+                return None
+            return _Fill(qty=q, avg_price=px, fee_eur=q * px * (self.cfg.fee_rt / 2))
+        try:
+            bid, ask = await gw.best_bid_ask(symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ignition book %s failed: %s", symbol, exc)
+            return None
+        price = (
+            float(ask) * (1.0 + _TAKER_CROSS)
+            if side == "buy"
+            else float(bid) * (1.0 - _TAKER_CROSS)
+        )
+        if price <= 0:
+            return None
+        q = float(qty) if qty is not None else float(notional_eur or 0.0) / price
+        if q * price < _MIN_ORDER_EUR:
+            return None
+        try:
+            state = await gw.place_limit(symbol, side, q, price, post_only=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ignition %s %s rejected: %s", side, symbol, exc)
+            return None
+        deadline = time.time() + 20.0
+        while getattr(state, "status", "") == "open" and time.time() < deadline:
+            await asyncio.sleep(1.0)
+            try:
+                state = await gw.fetch_order(state.order_id, symbol)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ignition fetch_order %s: %s", symbol, exc)
+                break
+        if getattr(state, "status", "") == "open":
+            with suppress(Exception):
+                await gw.cancel_order(state.order_id, symbol)
+            await asyncio.sleep(0.4)
+            with suppress(Exception):
+                state = await gw.fetch_order(state.order_id, symbol)
+        filled = float(getattr(state, "filled_qty", 0.0) or 0.0)
+        avg = getattr(state, "avg_price", None)
+        if filled <= 0 or not avg:
+            return None
+        fee = float(getattr(state, "fee_eur", 0.0) or 0.0)
+        fee_base = float(getattr(state, "fee_base_qty", 0.0) or 0.0)
+        net_qty = max(0.0, filled - fee_base) if side == "buy" else filled
+        return _Fill(qty=net_qty, avg_price=float(avg), fee_eur=fee)
 
     async def _load_ohlc(self) -> dict[str, list[list[float]]]:
         bases = ("BTC", *self.cfg.universe)
@@ -385,34 +525,35 @@ class IgnitionPaperRunner:
         )
         return {b: rows for b, rows in pairs}
 
-    def _open_lot(
+    async def _open_lot(
         self, base: str, notional: float, px: float, reasons: list[str], *, points: int
     ) -> IgnitionPosition | None:
         if notional < self.cfg.min_notional_eur or px <= 0:
             return None
-        fee = notional * (self.cfg.fee_rt / 2)
-        cost = notional + fee
-        if cost > self.cash_eur:
-            notional = max(0.0, (self.cash_eur / (1.0 + self.cfg.fee_rt / 2)) * 0.995)
-            fee = notional * (self.cfg.fee_rt / 2)
-            cost = notional + fee
-        if notional < self.cfg.min_notional_eur:
+        spend = min(float(notional), await self._decision_cash())
+        if spend < self.cfg.min_notional_eur:
             return None
-        self.cash_eur -= cost
+        fill = await self._fill(base, "buy", notional_eur=spend)
+        if fill is None or fill.qty <= 0 or fill.avg_price <= 0:
+            return None
+        cost = fill.qty * fill.avg_price + float(fill.fee_eur or 0.0)
+        if cost > self.cash_eur + 1.0 and self.dry_run:
+            return None
+        self.cash_eur = max(0.0, self.cash_eur - cost)
         venue = self._primary_venue()
         pos = IgnitionPosition(
             base=base,
-            entry_price=px,
-            notional_eur=notional,
-            qty=notional / px,
+            entry_price=float(fill.avg_price),
+            notional_eur=float(fill.qty) * float(fill.avg_price),
+            qty=float(fill.qty),
             opened_ms=int(time.time() * 1000),
             venue=venue,
             entry_reason=",".join(reasons),
-            peak_px=px,
+            peak_px=float(fill.avg_price),
             points=points,
         )
         self.positions.append(pos)
-        self.marks[base] = px
+        self.marks[base] = float(fill.avg_price)
         self.mark_ts[base] = time.time()
         self._ledger_append(
             {
@@ -421,31 +562,44 @@ class IgnitionPaperRunner:
                 "side": "long",
                 "base": base,
                 "venue": venue,
-                "dry_run": True,
-                "paper_only": True,
+                "dry_run": self.dry_run,
+                "paper_only": self.paper_only,
+                "allow_live": self.allow_live,
                 "target_venue": venue,
-                "notional_eur": round(notional, 2),
+                "notional_eur": round(pos.notional_eur, 2),
                 "quantity": pos.qty,
-                "entry_price": px,
-                "fee_eur": round(fee, 4),
+                "entry_price": pos.entry_price,
+                "fee_eur": round(float(fill.fee_eur or 0.0), 4),
                 "reason": pos.entry_reason,
                 "holding_id": pos.holding_id,
                 "points": points,
             }
         )
+        if self.allow_live:
+            await self._sync_cash_from_venue()
         return pos
 
     async def _close_lot(self, pos: IgnitionPosition, px: float, reason: str) -> float | None:
-        if px <= 0:
-            return None
         qty = float(pos.qty or 0.0)
         if qty <= 0 and pos.entry_price > 0:
             qty = pos.notional_eur / pos.entry_price
         if qty <= 0:
             return None
-        fee = qty * px * (self.cfg.fee_rt / 2)
-        proceeds = qty * px - fee
-        gross = pos.gross_return(px)
+        if self.dry_run:
+            mark = px if px > 0 else float(self.marks.get(pos.base) or pos.entry_price or 0.0)
+            if mark <= 0:
+                return None
+            fill = _Fill(
+                qty=qty,
+                avg_price=mark,
+                fee_eur=qty * mark * (self.cfg.fee_rt / 2),
+            )
+        else:
+            fill = await self._fill(pos.base, "sell", qty=qty)
+            if fill is None:
+                return None
+        proceeds = fill.qty * fill.avg_price - float(fill.fee_eur or 0.0)
+        gross = pos.gross_return(fill.avg_price)
         net = proceeds - pos.notional_eur
         self.cash_eur += proceeds
         self.realized_total_eur += net
@@ -458,14 +612,15 @@ class IgnitionPaperRunner:
                 "side": "long",
                 "base": pos.base,
                 "venue": pos.venue or self._primary_venue(),
-                "dry_run": True,
-                "paper_only": True,
+                "dry_run": self.dry_run,
+                "paper_only": self.paper_only,
+                "allow_live": self.allow_live,
                 "target_venue": self._primary_venue(),
                 "notional_eur": round(pos.notional_eur, 2),
-                "quantity": qty,
+                "quantity": fill.qty,
                 "entry_price": pos.entry_price,
-                "exit_price": px,
-                "fee_eur": round(fee, 4),
+                "exit_price": fill.avg_price,
+                "fee_eur": round(float(fill.fee_eur or 0.0), 4),
                 "net_eur": round(net, 2),
                 "gross_return": round(gross, 4),
                 "reason": reason,
@@ -473,6 +628,8 @@ class IgnitionPaperRunner:
                 "points": pos.points,
             }
         )
+        if self.allow_live:
+            await self._sync_cash_from_venue()
         return net
 
     async def manage_trail(self) -> list[dict[str, Any]]:
@@ -504,8 +661,9 @@ class IgnitionPaperRunner:
                 cap = str(ld.get("caption") or "")
                 cap = cap.replace(" Block: slots_full.", "").replace("Block: slots_full.", "")
                 if "trail" in ",".join(a.get("reason", "") for a in applied):
+                    mode = "LIVE" if self.allow_live else "PAPER"
                     ld["caption"] = (
-                        f"Ignition PAPER: desk-universe early-signal + trail "
+                        f"Ignition {mode}: desk-universe early-signal + trail "
                         f"{self.cfg.trail_pct:.0%}. Slot vrij na exit."
                     )
                 elif cap:
@@ -519,9 +677,9 @@ class IgnitionPaperRunner:
         base: str,
         *,
         notional_eur: float | None = None,
-        reason: str = "operator_paper",
+        reason: str = "operator_manual",
     ) -> dict[str, Any]:
-        """Manual paper open — no venue orders. Generic base, never coin-hardcoded."""
+        """Manual open (paper or live OKX). Generic base, never coin-hardcoded."""
         base_u = str(base or "").strip().upper()
         if not base_u:
             return {"ok": False, "reason": "missing_base"}
@@ -539,19 +697,21 @@ class IgnitionPaperRunner:
         self.marks[base_u] = mark
         self.mark_ts[base_u] = time.time()
         px = fill_px(mark, "buy", slip=self.cfg.slip)
+        cash = await self._decision_cash()
         notion = float(notional_eur) if notional_eur is not None else (
-            min(float(self.cash_eur), float(self.cfg.book_eur)) * float(self.cfg.deploy_frac)
+            min(cash, float(self.cfg.book_eur)) * float(self.cfg.deploy_frac)
         )
-        reasons = [str(reason or "operator_paper"), "manual"]
-        pos = self._open_lot(base_u, notion, px, reasons, points=0)
+        reasons = [str(reason or "operator_manual"), "manual"]
+        pos = await self._open_lot(base_u, notion, px, reasons, points=0)
         if pos is None:
             return {"ok": False, "reason": "open_failed", "base": base_u}
+        mode = "LIVE" if self.allow_live else "PAPER"
         self.last_decision = {
             **(self.last_decision or {}),
             "want": base_u,
             "caption": (
-                f"Ignition PAPER: handmatige paper-entry {base_u} "
-                f"({pos.notional_eur:.0f} EUR @ {px:.6g})."
+                f"Ignition {mode}: handmatige entry {base_u} "
+                f"({pos.notional_eur:.0f} EUR @ {pos.entry_price:.6g})."
             ),
             "manual_entry": {
                 "base": base_u,
@@ -568,12 +728,13 @@ class IgnitionPaperRunner:
             "holding_id": pos.holding_id,
             "notional_eur": round(pos.notional_eur, 2),
             "entry_price": pos.entry_price,
-            "paper_only": True,
+            "paper_only": self.paper_only,
+            "allow_live": self.allow_live,
             "status": self.status(),
         }
 
     async def sell(self, holding_id: str) -> dict[str, Any]:
-        """Manual paper close — no venue orders."""
+        """Manual close (paper or live OKX)."""
         hid = str(holding_id or "").strip()
         pos = next((p for p in self.positions if p.holding_id == hid), None)
         if pos is None:
@@ -590,6 +751,7 @@ class IgnitionPaperRunner:
             "base": pos.base,
             "holding_id": hid,
             "net_eur": round(net, 2),
+            "allow_live": self.allow_live,
             "status": self.status(),
         }
 
@@ -618,13 +780,14 @@ class IgnitionPaperRunner:
         async with self._decide_lock:
             now = datetime.now(UTC)
             self._roll_day(now)
+            cash = await self._decision_cash()
             ohlc = await self._load_ohlc()
             held = [p.base for p in self.positions]
             decision = evaluate_ignition(
                 ohlc,
                 self.cfg,
                 held=held,
-                cash_eur=self.cash_eur,
+                cash_eur=cash,
                 now=now,
             )
             applied: list[dict[str, Any]] = []
@@ -641,7 +804,7 @@ class IgnitionPaperRunner:
                     px_src = mark if mark > 0 else close
                     px = fill_px(px_src, "buy", slip=self.cfg.slip)
                     score = row.get("score") or {}
-                    pos = self._open_lot(
+                    pos = await self._open_lot(
                         base,
                         float(row["notional_eur"]),
                         px,
@@ -745,11 +908,11 @@ class IgnitionPaperRunner:
             caption = caption.rstrip(".") + " — " + str(truth["inventory_advice_nl"])
         return {
             "desk": self._desk(),
-            "mode": "ignition_paper",
-            "paper_only": True,
-            "allow_live": False,
+            "mode": "ignition_live" if self.allow_live else "ignition_paper",
+            "paper_only": self.paper_only,
+            "allow_live": self.allow_live,
             "allow_live_requested": bool(self._allow_live_requested),
-            "dry_run": True,
+            "dry_run": self.dry_run,
             "venues": list(self.venues),
             "venue": venue,
             "target_venue": venue,
@@ -789,7 +952,7 @@ class IgnitionPaperRunner:
                 "universe_n": len(self.cfg.universe),
                 "venues": list(self.venues),
                 "target_venue": venue,
-                "allow_live": False,
+                "allow_live": self.allow_live,
                 "decision_interval_sec": float(self.cfg.decision_interval_sec or 0.0),
                 "decision_hours_utc": list(self.cfg.decision_hours_utc),
             },
@@ -824,12 +987,13 @@ class IgnitionPaperRunner:
 
 
 class IgnitionDeskManager:
-    """Paper-only singleton for the ignition sleeve."""
+    """Singleton for the ignition sleeve (paper or live OKX)."""
 
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
         self._runner: IgnitionPaperRunner | None = None
         self._stop = False
+        self._engine: Any = None
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -841,14 +1005,15 @@ class IgnitionDeskManager:
             getattr(settings, "momentum_ignition_venues", "okx") or "okx"
         ) or ("okx",)
         allow_req = bool(getattr(settings, "momentum_ignition_allow_live", False))
+        live_now = bool(self._runner and self._runner.allow_live)
         base: dict[str, Any] = {
             "running": self.running(),
             "enabled_setting": enabled,
-            "desk": "ignition_paper",
-            "mode": "ignition_paper",
-            "dry_run": True,
-            "paper_only": True,
-            "allow_live": False,
+            "desk": "ignition" if live_now else "ignition_paper",
+            "mode": "ignition_live" if live_now else "ignition_paper",
+            "dry_run": not live_now,
+            "paper_only": not live_now,
+            "allow_live": live_now,
             "allow_live_requested": allow_req,
             "venues": list(venues),
             "venue": venues[0],
@@ -878,9 +1043,10 @@ class IgnitionDeskManager:
                 last = dict(raw.get("last_decision") or {})
             except Exception:  # noqa: BLE001
                 pass
+            mode = "LIVE" if allow_req else "paper"
             caption = str(last.get("caption") or "")
             if caption and "OKX" not in caption.upper():
-                caption = caption.rstrip(".") + f". Target {venues[0].upper()} (paper)."
+                caption = caption.rstrip(".") + f". Target {venues[0].upper()} ({mode})."
             base.update(
                 {
                     "book_eur": cfg.book_eur,
@@ -899,7 +1065,7 @@ class IgnitionDeskManager:
                         "book_eur": cfg.book_eur,
                         "venues": list(venues),
                         "target_venue": venues[0],
-                        "allow_live": False,
+                        "allow_live": allow_req,
                     },
                 }
             )
@@ -908,7 +1074,17 @@ class IgnitionDeskManager:
     async def start(self, settings: Settings | None = None) -> dict[str, Any]:
         settings = settings or get_settings()
         if self.running():
-            return {"ok": True, "started": False, "reason": "already_running", "status": self.status()}
+            # Hot-upgrade paper → live without requiring a full process restart.
+            allow_live = bool(getattr(settings, "momentum_ignition_allow_live", False))
+            if allow_live and self._runner and self._runner.dry_run:
+                await self.stop()
+            else:
+                return {
+                    "ok": True,
+                    "started": False,
+                    "reason": "already_running",
+                    "status": self.status(),
+                }
         if not bool(getattr(settings, "momentum_ignition_enabled", False)):
             return {
                 "ok": False,
@@ -920,13 +1096,6 @@ class IgnitionDeskManager:
         venues = parse_venues(
             getattr(settings, "momentum_ignition_venues", "okx") or "okx"
         ) or ("okx",)
-        if allow_live:
-            # Refuse live until an OKX gateway fill path exists — stay paper.
-            logger.warning(
-                "ignition allow_live requested on %s but live OKX path is not wired; "
-                "starting paper-only",
-                ",".join(venues),
-            )
         cfg = config_from_settings(settings)
         state_path = str(
             getattr(settings, "momentum_ignition_state_path", "./data/momentum_ignition_state.json")
@@ -936,31 +1105,69 @@ class IgnitionDeskManager:
                 settings, "momentum_ignition_ledger_path", "./data/momentum_ignition_ledger.jsonl"
             )
         )
+        gateways: dict[str, Any] = {}
+        dry_run = not allow_live
+        if allow_live:
+            from bot.live.micro_engine import LiveMicroEngine
+            from bot.live.momentum_desk import DeskConfig
+
+            book = float(cfg.book_eur)
+            desk_cfg = DeskConfig(
+                clip_eur=max(book, 500.0),
+                max_positions=int(cfg.max_positions),
+                day_loss_limit_eur=max(book * 0.2, 400.0),
+            )
+            engine = LiveMicroEngine(engine_settings_for_desk(settings, desk_cfg, venues))
+            armed = engine.arm()
+            if not armed.get("armed"):
+                logger.error("ignition live arm failed: %s", armed)
+                return {"ok": False, "started": False, "reason": "arm_failed", "detail": armed}
+            for v in venues:
+                if engine._registry.get_client(v, enable_trading=True) is None:  # noqa: SLF001
+                    logger.warning("ignition: no trading credentials for %s; skipped", v)
+                    continue
+                gateways[v] = LiveGateway(engine, v)
+            if not gateways:
+                return {
+                    "ok": False,
+                    "started": False,
+                    "reason": "no_venue_credentials",
+                    "venues": list(venues),
+                }
+            venues = tuple(v for v in venues if v in gateways)
+            dry_run = False
+            self._engine = engine
         self._stop = False
         self._runner = IgnitionPaperRunner(
             cfg,
             state_path=state_path,
             ledger_path=ledger_path,
             venues=venues,
-            allow_live=allow_live,
+            allow_live=not dry_run,
+            gateways=gateways,
         )
+        if not dry_run:
+            dropped = self._runner.discard_paper_positions()
+            logger.info("ignition live: dropped %s paper lots before venue orders", dropped)
+            synced = await self._runner._sync_cash_from_venue()  # noqa: SLF001
+            logger.info("ignition live: venue cash sync -> %s", synced)
         self._task = asyncio.create_task(
             self._runner.run(lambda: self._stop), name="momentum-ignition"
         )
         _write_flag(
             state_path,
             running=True,
-            dry_run=True,
-            paper_only=True,
-            allow_live=False,
+            dry_run=dry_run,
+            paper_only=dry_run,
+            allow_live=not dry_run,
             venues=list(venues),
             target_venue=venues[0],
         )
         return {
             "ok": True,
             "started": True,
-            "paper_only": True,
-            "allow_live": False,
+            "paper_only": dry_run,
+            "allow_live": not dry_run,
             "venues": list(venues),
             "target_venue": venues[0],
             "status": self.status(),
@@ -980,10 +1187,12 @@ class IgnitionDeskManager:
                 "./data/momentum_ignition_state.json",
             )
         )
-        _write_flag(path, running=False, dry_run=True, paper_only=True)
+        dry = True if self._runner is None else self._runner.dry_run
+        _write_flag(path, running=False, dry_run=dry, paper_only=dry, allow_live=not dry)
         self._task = None
         st = self.status()
         self._runner = None
+        self._engine = None
         return {"ok": True, "stopped": True, "status": st}
 
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:

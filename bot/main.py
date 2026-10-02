@@ -318,13 +318,16 @@ async def lifespan(_app: FastAPI):
             if bool(getattr(get_settings(), "momentum_ignition_enabled", False)):
                 ign = await get_ignition_desk_manager().resume_if_flagged()
                 if ign and ign.get("started"):
-                    logger.info("auto-resumed ignition PAPER sleeve")
+                    logger.info(
+                        "auto-resumed ignition sleeve allow_live=%s",
+                        bool(getattr(get_settings(), "momentum_ignition_allow_live", False)),
+                    )
                 elif ign:
-                    logger.warning("ignition paper auto-resume did not start: %s", ign)
+                    logger.warning("ignition auto-resume did not start: %s", ign)
             else:
-                logger.info("ignition paper sleeve disabled — skip auto-resume")
+                logger.info("ignition sleeve disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
-            logger.exception("failed to auto-resume ignition paper sleeve")
+            logger.exception("failed to auto-resume ignition sleeve")
     yield
     if paper_runner is not None:
         try:

@@ -2256,14 +2256,16 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
 
 
 def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
-    """Paper-only early-signal sleeve (desk universe + 15% trail)."""
+    """Ignition early-signal sleeve (desk universe + 15% trail; paper or live OKX)."""
     st = status or {}
     running = bool(st.get("running"))
-    pill = (
-        '<span class="pill obs"><span class="dot"></span>PAPER</span>'
-        if running
-        else '<span class="pill off"><span class="dot"></span>STOP</span>'
-    )
+    live = bool(st.get("allow_live")) and not bool(st.get("paper_only"))
+    if not running:
+        pill = '<span class="pill off"><span class="dot"></span>STOP</span>'
+    elif live:
+        pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
+    else:
+        pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
     cfg = st.get("config") or {}
     trail = cfg.get("trail_pct")
     trail_s = f"{float(trail):.0%}" if trail is not None else "15%"
@@ -2278,9 +2280,11 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         interval_m = 0
     cadence = f"scan elke {interval_m}m" if interval_m > 0 else "scan op decision-hours"
     if not caption:
+        mode = "LIVE" if live else "Paper"
+        live_note = "OKX fills armed." if live else "Nog geen live orders."
         caption = (
-            f"Paper ignition → {venue.upper()}: quiet + brk20 + day≥6% + vol≥2× "
-            f"op desk-universe, trail {trail_s}, {cadence}. Nog geen live orders."
+            f"{mode} ignition → {venue.upper()}: quiet + brk20 + day≥6% + vol≥2× "
+            f"op desk-universe, trail {trail_s}, {cadence}. {live_note}"
         )
     pos_bits = []
     for p in st.get("positions") or []:
@@ -2315,7 +2319,7 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
     powder_label = "OKX vrij" if venue.lower() == "okx" else f"{venue.upper()} vrij"
     return (
         f'<section class="panel mix-board paper-ign" id="paper-ign" data-live="paper-ign">'
-        f'<div class="card-head"><h2>Paper · Ignition</h2>{pill}'
+        f'<div class="card-head"><h2>{"Live" if live else "Paper"} · Ignition</h2>{pill}'
         f'<span class="pill {"on" if risk_on else "off"}" data-live="ign-gate">'
         f'<span class="dot"></span>{gate}</span></div>'
         f'<p class="mix-why" data-live="ign-caption">{escape(caption)}</p>'
@@ -2334,7 +2338,7 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         f'target <strong data-k="ign-venue">{escape(venue.upper())}</strong> · '
         f'advice <strong data-k="ign-advice">{escape(advice or "—")}</strong> · '
         f'next <strong data-live="ign-next">{_ts(st.get("next_decision"))}</strong> · '
-        f"paper (geen live orders).</p>"
+        f'{"LIVE OKX orders" if live else "paper (geen live orders)"}.</p>'
         f"{pos_html}{actions}</section>"
     )
 

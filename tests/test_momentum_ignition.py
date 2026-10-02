@@ -194,6 +194,7 @@ def test_ignition_defaults_to_okx_venue() -> None:
         allow_live=True,  # requested, but runner must stay paper
     )
     assert runner._primary_venue() == "okx"
+    # Without gateways, allow_live request stays paper.
     assert runner.paper_only is True
     assert runner.allow_live is False
     st = runner.status()
@@ -201,6 +202,29 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert st["venues"] == ["okx"]
     assert st["allow_live"] is False
     assert st["config"]["decision_interval_sec"] == 900.0
+
+
+def test_ignition_live_arms_when_gateway_present(tmp_path: Path) -> None:
+    from bot.live.momentum_ignition import IgnitionConfig
+    from bot.live.momentum_ignition_runner import IgnitionPaperRunner
+
+    class FakeGw:
+        pass
+
+    cfg = IgnitionConfig()
+    runner = IgnitionPaperRunner(
+        cfg,
+        state_path=str(tmp_path / "ign.json"),
+        ledger_path=str(tmp_path / "ign.jsonl"),
+        venues=("okx",),
+        allow_live=True,
+        gateways={"okx": FakeGw()},
+    )
+    assert runner.allow_live is True
+    assert runner.dry_run is False
+    assert runner.paper_only is False
+    assert runner._desk() == "ignition"
+    assert runner.status()["mode"] == "ignition_live"
 
 
 def test_ignition_decision_slot_fires_on_interval() -> None:
