@@ -30,7 +30,7 @@ from bot.live.momentum_runner import (
     parse_venues,
     venue_cash_caps_from_settings,
 )
-from bot.live.momentum_short_weakest import fetch_daily_ohlc
+from bot.live.momentum_short_weakest import fetch_daily_ohlc, load_alphai_view
 
 logger = logging.getLogger("bot.live.momentum_btc_rs_clip_runner")
 
@@ -76,6 +76,14 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         raw = getattr(settings, name, default)
         return int(default if raw is None else raw)
 
+    def _b(name: str, default: bool) -> bool:
+        raw = getattr(settings, name, default)
+        if raw is None:
+            return default
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(raw)
+
     return ClipConfig(
         book_eur=_f("momentum_btc_rs_clip_book_eur", base.book_eur),
         btc_frac=_f("momentum_btc_rs_clip_btc_frac", base.btc_frac),
@@ -94,6 +102,12 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         slip=base.slip,
         min_notional_eur=base.min_notional_eur,
         alt_trail_pct=_f("momentum_btc_rs_clip_alt_trail_pct", base.alt_trail_pct),
+        requires_alphai_pick=_b(
+            "momentum_btc_rs_clip_requires_alphai_pick", base.requires_alphai_pick
+        ),
+        block_alphai_avoid=_b(
+            "momentum_btc_rs_clip_block_alphai_avoid", base.block_alphai_avoid
+        ),
     )
 
 
@@ -167,12 +181,14 @@ class BtcRsClipPaperRunner:
         reserved_quote_eur: float = 0.0,
         reserved_qty: Mapping[str, float] | None = None,
         pending_pack: str = "",
+        alphai_path: str = "./data/alphai/daily_recommendations.json",
     ) -> None:
         self.cfg = cfg
         self.pending_pack = str(pending_pack or "")
         self.pack_mode = "clip_20_80"
         self.state_path = state_path
         self.ledger_path = ledger_path
+        self.alphai_path = str(alphai_path or "")
         self._feed = feed or CandleFeed()
         self.dry_run = bool(dry_run)
         self.venues = tuple(venues) or ("bitvavo",)
@@ -1025,6 +1041,7 @@ class BtcRsClipPaperRunner:
             # even outside the daily execute window.
             cash = await self._decision_cash()
             cooled = self._active_cooldown_bases(now_ms)
+            alphai, alphai_meta = load_alphai_view(self.alphai_path)
             decision = evaluate_clip(
                 ohlc,
                 self.cfg,
@@ -1036,7 +1053,19 @@ class BtcRsClipPaperRunner:
                 now=now,
                 sleeve_eur=sleeves,
                 cooldown_bases=cooled,
+                alphai_picks=tuple(alphai.picks),
+                alphai_avoid=tuple(alphai.avoid),
             )
+            decision = {
+                **decision,
+                "alphai": {
+                    "ok": alphai_meta.get("ok"),
+                    "macro_caution": alphai.macro_caution,
+                    "picks": sorted(alphai.picks),
+                    "avoid": sorted(alphai.avoid),
+                    "path": alphai_meta.get("path"),
+                },
+            }
             applied: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
                 for ex in decision.get("exits") or []:
@@ -1223,6 +1252,8 @@ class BtcRsClipPaperRunner:
                 "hard_stop_pct": 0.0,
                 "require_alt_sma": self.cfg.require_alt_sma,
                 "cash_when_no_alt": self.cfg.cash_when_no_alt,
+                "requires_alphai_pick": self.cfg.requires_alphai_pick,
+                "block_alphai_avoid": self.cfg.block_alphai_avoid,
                 "pack_mode": self.pack_mode,
                 "pending_pack": self.pending_pack,
             },
@@ -1469,6 +1500,10 @@ class BtcRsClipDeskManager:
             reserved_quote_eur=reserved_quote,
             reserved_qty=reserved_qty,
             pending_pack=str(getattr(settings, "momentum_btc_rs_clip_pending_pack", "") or ""),
+            alphai_path=str(
+                getattr(settings, "alphai_daily_recommendations_path", None)
+                or "./data/alphai/daily_recommendations.json"
+            ),
         )
         if not dry_run:
             dropped = self._runner.discard_paper_positions()
@@ -1535,6 +1570,10 @@ class BtcRsClipDeskManager:
                     )
                 ),
                 pending_pack=str(getattr(settings, "momentum_btc_rs_clip_pending_pack", "") or ""),
+                alphai_path=str(
+                    getattr(settings, "alphai_daily_recommendations_path", None)
+                    or "./data/alphai/daily_recommendations.json"
+                ),
             )
             return await runner.decide(execute=execute)
         return await self._runner.decide(execute=execute)

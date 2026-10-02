@@ -96,11 +96,13 @@ def test_liquid_excess_alt_gets_clip():
         now_ms=10**12,
         last_rebalance_ms=0,
         now=datetime(2026, 6, 1, tzinfo=UTC),
+        alphai_picks=("ETH",),
     )
     assert out["risk_on"] is True
     alts = [e for e in out["entries"] if e["role"] == "alt"]
     assert alts and alts[0]["base"] == "ETH"
     assert alts[0]["notional_eur"] == 5000.0
+    assert "alphai_pick" in alts[0]["reasons"]
 
 
 def test_thin_volume_skips_alt():
@@ -659,6 +661,7 @@ def test_weekly_due_trims_btc_toward_winner_frac():
         last_rebalance_ms=0,
         now=datetime(2026, 6, 1, tzinfo=UTC),
         sleeve_eur={"btc": 15_000.0, "alt": 5_000.0},
+        alphai_picks=("ETH",),
     )
     assert out["rebalance_due"] is True
     assert out["want_alt"] == "ETH"
@@ -691,6 +694,7 @@ def test_require_alt_sma_skips_a_bounce_under_its_average():
         now_ms=10**12,
         last_rebalance_ms=0,
         now=datetime(2026, 6, 1, tzinfo=UTC),
+        alphai_picks=("ETH",),
     )
     plain = evaluate_clip(ohlc, ClipConfig(universe=("ETH",), min_qvol_eur=1.0), **kwargs)
     gated = evaluate_clip(
@@ -716,6 +720,7 @@ def test_residual_full_weekly_drops_btc_and_tops_up_the_alt():
         last_rebalance_ms=0,
         now=datetime(2026, 6, 1, tzinfo=UTC),
         sleeve_eur={"btc": 4_000.0, "alt": 16_000.0},
+        alphai_picks=("ETH",),
     )
     assert out["rebalance_due"] is True
     assert out["want_alt"] == "ETH"
@@ -739,6 +744,7 @@ def test_flat_book_hunts_best_entry_after_a_sale():
         now_ms=now_ms,
         last_rebalance_ms=now_ms - 2 * 86_400_000,
         now=datetime(2026, 6, 1, tzinfo=UTC),
+        alphai_picks=("ETH",),
     )
     assert out["rebalance_due"] is True
     assert out["flat_hunt"] is True
@@ -746,6 +752,30 @@ def test_flat_book_hunts_best_entry_after_a_sale():
     assert out["entries"]
     assert out["entries"][0]["base"] == "ETH"
     assert "flat_rs" in out["entries"][0]["reasons"]
+    assert "alphai_pick" in out["entries"][0]["reasons"]
+
+
+def test_alphai_pick_gate_blocks_raw_rs_leader():
+    btc = _bars(60, 100.0, 0.05)
+    hot = _bars(61, 10.0, 0.08, vol=20_000.0)
+    pick = _bars(61, 10.0, 0.05, vol=20_000.0)
+    cfg = residual_full_config(
+        ClipConfig(universe=("HOT", "PICK"), min_qvol_eur=1.0, require_alt_sma=False)
+    )
+    out = evaluate_clip(
+        {"BTC": btc, "HOT": hot, "PICK": pick},
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=10**12,
+        last_rebalance_ms=0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        alphai_picks=("PICK",),
+    )
+    assert out["ranked"][0]["base"] == "HOT"
+    assert out["want_alt"] == "PICK"
+    assert any(s.get("reason") == "alphai_pick_required" for s in out["skipped"])
 
 
 def test_flat_hunt_skips_cooled_base_and_picks_next():
@@ -767,6 +797,7 @@ def test_flat_hunt_skips_cooled_base_and_picks_next():
         last_rebalance_ms=now_ms - 2 * 86_400_000,
         now=datetime(2026, 6, 1, tzinfo=UTC),
         cooldown_bases=("AAA",),
+        alphai_picks=("AAA", "BBB"),
     )
     assert out["flat_hunt"] is True
     assert out["want_alt"] == "BBB"
