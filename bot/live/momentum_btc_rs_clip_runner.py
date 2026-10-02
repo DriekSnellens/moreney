@@ -30,7 +30,7 @@ from bot.live.momentum_runner import (
     parse_venues,
     venue_cash_caps_from_settings,
 )
-from bot.live.momentum_short_weakest import fetch_daily_ohlc
+from bot.live.momentum_short_weakest import fetch_daily_ohlc, load_alphai_view
 
 logger = logging.getLogger("bot.live.momentum_btc_rs_clip_runner")
 
@@ -76,6 +76,14 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         raw = getattr(settings, name, default)
         return int(default if raw is None else raw)
 
+    def _b(name: str, default: bool) -> bool:
+        raw = getattr(settings, name, default)
+        if raw is None:
+            return default
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(raw)
+
     return ClipConfig(
         book_eur=_f("momentum_btc_rs_clip_book_eur", base.book_eur),
         btc_frac=_f("momentum_btc_rs_clip_btc_frac", base.btc_frac),
@@ -94,6 +102,12 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         slip=base.slip,
         min_notional_eur=base.min_notional_eur,
         alt_trail_pct=_f("momentum_btc_rs_clip_alt_trail_pct", base.alt_trail_pct),
+        requires_alphai_pick=_b(
+            "momentum_btc_rs_clip_requires_alphai_pick", base.requires_alphai_pick
+        ),
+        block_alphai_avoid=_b(
+            "momentum_btc_rs_clip_block_alphai_avoid", base.block_alphai_avoid
+        ),
     )
 
 
@@ -167,12 +181,14 @@ class BtcRsClipPaperRunner:
         reserved_quote_eur: float = 0.0,
         reserved_qty: Mapping[str, float] | None = None,
         pending_pack: str = "",
+        alphai_path: str = "./data/alphai/daily_recommendations.json",
     ) -> None:
         self.cfg = cfg
         self.pending_pack = str(pending_pack or "")
         self.pack_mode = "clip_20_80"
         self.state_path = state_path
         self.ledger_path = ledger_path
+        self.alphai_path = str(alphai_path or "")
         self._feed = feed or CandleFeed()
         self.dry_run = bool(dry_run)
         self.venues = tuple(venues) or ("bitvavo",)
@@ -184,6 +200,9 @@ class BtcRsClipPaperRunner:
         self.realized_total_eur = 0.0
         self.day_realized_eur = 0.0
         self.last_rebalance_ms = 0
+        # After trail/sell: skip rebating the same alt for one weekly window.
+        self.cooldown_alt = ""
+        self.cooldown_until_ms = 0
         self.last_decision: dict[str, Any] = {}
         self.marks: dict[str, float] = {}
         self.mark_ts: dict[str, float] = {}
@@ -218,6 +237,8 @@ class BtcRsClipPaperRunner:
         self.realized_total_eur = float(raw.get("realized_total_eur") or 0.0)
         self.day_realized_eur = float(raw.get("day_realized_eur") or 0.0)
         self.last_rebalance_ms = int(raw.get("last_rebalance_ms") or 0)
+        self.cooldown_alt = str(raw.get("cooldown_alt") or "").upper()
+        self.cooldown_until_ms = int(raw.get("cooldown_until_ms") or 0)
         if raw.get("pending_pack"):
             self.pending_pack = str(raw.get("pending_pack") or "")
         self.pack_mode = str(raw.get("pack_mode") or self.pack_mode)
@@ -267,6 +288,8 @@ class BtcRsClipPaperRunner:
                     "realized_total_eur": self.realized_total_eur,
                     "day_realized_eur": self.day_realized_eur,
                     "last_rebalance_ms": self.last_rebalance_ms,
+                    "cooldown_alt": self.cooldown_alt,
+                    "cooldown_until_ms": self.cooldown_until_ms,
                     "pack_mode": self.pack_mode,
                     "pending_pack": self.pending_pack,
                     "positions": [p.to_dict() for p in self.positions],
@@ -737,6 +760,8 @@ class BtcRsClipPaperRunner:
         self.positions = [p for p in self.positions if p is not pos]
         if pos.role in {"btc", "alt"}:
             self._arm_residual_pack(f"sold_{pos.role}")
+        if pos.role == "alt":
+            self._arm_alt_cooldown(pos.base)
         self._ledger_append(
             {
                 "event": "exit",
@@ -753,6 +778,8 @@ class BtcRsClipPaperRunner:
                 "fee_eur": round(fill.fee_eur, 4),
                 "reason": reason,
                 "holding_id": pos.holding_id,
+                "cooldown_alt": self.cooldown_alt,
+                "cooldown_until_ms": self.cooldown_until_ms,
             }
         )
         return net
@@ -844,6 +871,7 @@ class BtcRsClipPaperRunner:
                         "reason": "alt_trail",
                     }
                 )
+                # Anchor weekly hold clock for the *next* name; flat hunt is immediate.
                 self.last_rebalance_ms = int(time.time() * 1000)
         if applied:
             self._save_state()
@@ -936,9 +964,35 @@ class BtcRsClipPaperRunner:
         )
         return pos
 
-    def _rebalance_due(self, now_ms: int) -> bool:
+    def _rebalance_due(self, now_ms: int, *, held_alt: str | None = None) -> bool:
+        """Weekly clock while holding; flat alt sleeve always hunts."""
+        if held_alt is None:
+            held_alt = next((p.base for p in self.positions if p.role == "alt"), None)
+        if held_alt is None:
+            return True
         reb_ms = int(self.cfg.rebalance_days) * 86_400_000
         return self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
+
+    def _active_cooldown_bases(self, now_ms: int | None = None) -> tuple[str, ...]:
+        now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+        base = str(self.cooldown_alt or "").upper()
+        until = int(self.cooldown_until_ms or 0)
+        if not base or until <= 0 or now_ms >= until:
+            if base and until > 0 and now_ms >= until:
+                self.cooldown_alt = ""
+                self.cooldown_until_ms = 0
+            return ()
+        return (base,)
+
+    def _arm_alt_cooldown(self, base: str, *, now_ms: int | None = None) -> None:
+        """Skip rebating the sold alt for one rebalance window (anti-whipsaw)."""
+        b = str(base or "").upper()
+        if not b:
+            return
+        now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+        reb_ms = int(self.cfg.rebalance_days) * 86_400_000
+        self.cooldown_alt = b
+        self.cooldown_until_ms = now_ms + max(reb_ms, 86_400_000)
 
     def _arm_residual_pack(self, reason: str) -> None:
         """Switch to the full residual pack after a sale or the weekly clock."""
@@ -972,7 +1026,9 @@ class BtcRsClipPaperRunner:
         async with self._decide_lock:
             now = datetime.now(UTC)
             self._roll_day(now)
-            due = self._rebalance_due(int(now.timestamp() * 1000))
+            now_ms = int(now.timestamp() * 1000)
+            held_alt = next((p.base for p in self.positions if p.role == "alt"), None)
+            due = self._rebalance_due(now_ms, held_alt=held_alt)
             if self.pending_pack == "residual_full" and due:
                 self._arm_residual_pack("weekly_clock")
             ohlc = await self._load_ohlc()
@@ -984,17 +1040,32 @@ class BtcRsClipPaperRunner:
             # Always sync live cash from Bitvavo so sizing/status follow free EUR
             # even outside the daily execute window.
             cash = await self._decision_cash()
+            cooled = self._active_cooldown_bases(now_ms)
+            alphai, alphai_meta = load_alphai_view(self.alphai_path)
             decision = evaluate_clip(
                 ohlc,
                 self.cfg,
                 held=held,
                 cash_eur=cash,
                 deployed_eur=self._deployed(),
-                now_ms=int(now.timestamp() * 1000),
+                now_ms=now_ms,
                 last_rebalance_ms=self.last_rebalance_ms,
                 now=now,
                 sleeve_eur=sleeves,
+                cooldown_bases=cooled,
+                alphai_picks=tuple(alphai.picks),
+                alphai_avoid=tuple(alphai.avoid),
             )
+            decision = {
+                **decision,
+                "alphai": {
+                    "ok": alphai_meta.get("ok"),
+                    "macro_caution": alphai.macro_caution,
+                    "picks": sorted(alphai.picks),
+                    "avoid": sorted(alphai.avoid),
+                    "path": alphai_meta.get("path"),
+                },
+            }
             applied: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
                 for ex in decision.get("exits") or []:
@@ -1042,8 +1113,13 @@ class BtcRsClipPaperRunner:
                         applied.append(
                             {"action": "entry", "base": pos.base, "notional_eur": pos.notional_eur}
                         )
-                if decision.get("rebalance_due") or applied:
-                    self.last_rebalance_ms = int(now.timestamp() * 1000)
+                        # Clear cooldown if we entered a different name.
+                        if self.cooldown_alt and pos.base.upper() != self.cooldown_alt:
+                            pass  # keep cooldown on the dumped name
+                # Advance weekly clock on fills, or on a weekly check while still holding.
+                still_alt = next((p.base for p in self.positions if p.role == "alt"), None)
+                if applied or (decision.get("week_due") and still_alt):
+                    self.last_rebalance_ms = now_ms
             self.last_decision = {
                 **decision,
                 "applied": applied,
@@ -1160,6 +1236,8 @@ class BtcRsClipPaperRunner:
             "gap_pct": last.get("gap_pct"),
             "want_alt": last.get("want_alt"),
             "next_decision": self.next_decision(),
+            "cooldown_alt": self.cooldown_alt or None,
+            "cooldown_until_ms": self.cooldown_until_ms or None,
             "config": {
                 "btc_frac": self.cfg.btc_frac,
                 "alt_frac": self.cfg.alt_frac,
@@ -1174,6 +1252,8 @@ class BtcRsClipPaperRunner:
                 "hard_stop_pct": 0.0,
                 "require_alt_sma": self.cfg.require_alt_sma,
                 "cash_when_no_alt": self.cfg.cash_when_no_alt,
+                "requires_alphai_pick": self.cfg.requires_alphai_pick,
+                "block_alphai_avoid": self.cfg.block_alphai_avoid,
                 "pack_mode": self.pack_mode,
                 "pending_pack": self.pending_pack,
             },
@@ -1207,7 +1287,13 @@ class BtcRsClipPaperRunner:
                 except Exception:  # noqa: BLE001
                     logger.exception("clip: external reconcile failed")
                 async with self._decide_lock:
-                    await self.manage_alt_trail()
+                    trailed = await self.manage_alt_trail()
+                # After a trail flatten: hunt the next RS alt immediately (no cash week).
+                if trailed:
+                    try:
+                        await self.decide(execute=True)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("clip post-trail decide failed")
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
                 if now.hour in hours and now.minute < 8 and key not in last_hour_fire:
@@ -1414,6 +1500,10 @@ class BtcRsClipDeskManager:
             reserved_quote_eur=reserved_quote,
             reserved_qty=reserved_qty,
             pending_pack=str(getattr(settings, "momentum_btc_rs_clip_pending_pack", "") or ""),
+            alphai_path=str(
+                getattr(settings, "alphai_daily_recommendations_path", None)
+                or "./data/alphai/daily_recommendations.json"
+            ),
         )
         if not dry_run:
             dropped = self._runner.discard_paper_positions()
@@ -1480,6 +1570,10 @@ class BtcRsClipDeskManager:
                     )
                 ),
                 pending_pack=str(getattr(settings, "momentum_btc_rs_clip_pending_pack", "") or ""),
+                alphai_path=str(
+                    getattr(settings, "alphai_daily_recommendations_path", None)
+                    or "./data/alphai/daily_recommendations.json"
+                ),
             )
             return await runner.decide(execute=execute)
         return await self._runner.decide(execute=execute)

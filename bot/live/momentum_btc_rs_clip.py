@@ -1,8 +1,10 @@
 """BTC-core + weekly RS clip — independent book beside the mix.
 
 20% BTC while close > SMA50; 80% in one liquid alt if 20d-style skip-1
-excess vs BTC > 4% (lookback 10). Weekly rebalance. 10% trailing stop on
-the alt sleeve only. No per-coin hardcodes.
+excess vs BTC > 4% (lookback 10). Hold an alt ~1 week before rotating;
+when the alt sleeve is flat, hunt the next RS entry immediately (no cash
+week). Trailed/sold names stay on a same-base cooldown for one week.
+10% trailing stop on the alt sleeve only. No per-coin hardcodes.
 Paper until ``momentum_btc_rs_clip_allow_live`` arms venue fills.
 
 Existing lots are not resized until ``rebalance_due`` so a live restart
@@ -43,6 +45,10 @@ class ClipConfig:
     require_alt_sma: bool = False
     # With no qualifying alt, do not open a BTC sleeve. Paired with btc_frac 0.
     cash_when_no_alt: bool = False
+    # New alt entries must be on the AlphaI daily pick list (quality gate).
+    requires_alphai_pick: bool = True
+    # Never open an AlphaI avoid name even if RS ranks it first.
+    block_alphai_avoid: bool = True
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
@@ -54,6 +60,7 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
 
     Same 10d skip-1 week clock, SMA50 flatten and 10% alt trail as the clip.
     Excess floor 3.5% sits in the flat 3.2–3.6% band from the wet replay.
+    AlphaI pick-gate stays on — raw RS alone was letting toxic leaders through.
     """
     return replace(
         cfg,
@@ -62,6 +69,8 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
         excess_floor=0.035,
         require_alt_sma=True,
         cash_when_no_alt=True,
+        requires_alphai_pick=True,
+        block_alphai_avoid=True,
     )
 
 
@@ -185,8 +194,18 @@ def evaluate_clip(
     last_rebalance_ms: int,
     now: datetime | None = None,
     sleeve_eur: Mapping[str, float] | None = None,
+    cooldown_bases: Sequence[str] = (),
+    alphai_picks: Sequence[str] = (),
+    alphai_avoid: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Decide clip longs. ``held`` maps base → role (btc|alt)."""
+    """Decide clip longs. ``held`` maps base → role (btc|alt).
+
+    Weekly clock gates *rotation while an alt is held*. When the alt sleeve
+    is flat, hunt the best qualifying entry immediately (no forced cash week).
+    ``cooldown_bases`` skips names just trailed/sold so the same dump is not
+    rebought until the weekly window elapses.
+    AlphaI pick/avoid gates filter new alt entries when armed on the config.
+    """
     now = now or datetime.now(UTC)
     btc_rows = completed_ohlc(ohlc_by_base.get("BTC") or [], now=now)
     btc_c = closes_of(btc_rows)
@@ -235,9 +254,12 @@ def evaluate_clip(
         }
 
     reb_ms = int(cfg.rebalance_days) * 86_400_000
-    # A fresh book (no clock yet) may enter. After a trail or weekly check the
-    # clock blocks the next buy, including when the book is already flat.
-    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
+    week_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
+    # Hold ~1 week while in an alt; when flat, hunt again immediately.
+    rebalance_due = held_alt is None or week_due
+    cooled = {str(b).upper() for b in cooldown_bases if str(b).strip()}
+    picks = {str(b).upper() for b in alphai_picks if str(b).strip()}
+    avoid = {str(b).upper() for b in alphai_avoid if str(b).strip()}
 
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -271,11 +293,49 @@ def evaluate_clip(
                     }
                 )
                 continue
-        ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
+        if str(base).upper() in cooled:
+            skipped.append(
+                {
+                    "base": base,
+                    "reason": "post_exit_cooldown",
+                    "excess": round(xs, 4),
+                }
+            )
+            continue
+        if cfg.block_alphai_avoid and str(base).upper() in avoid:
+            skipped.append(
+                {
+                    "base": base,
+                    "reason": "alphai_avoid",
+                    "excess": round(xs, 4),
+                }
+            )
+            continue
+        ranked.append(
+            {
+                "base": base,
+                "excess": xs,
+                "qvol": round(qv, 0),
+                "alphai_pick": str(base).upper() in picks,
+            }
+        )
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
+    eligible = list(ranked)
+    if cfg.requires_alphai_pick:
+        gated = [r for r in eligible if r.get("alphai_pick")]
+        for r in eligible:
+            if not r.get("alphai_pick"):
+                skipped.append(
+                    {
+                        "base": r["base"],
+                        "reason": "alphai_pick_required",
+                        "excess": round(float(r["excess"]), 4),
+                    }
+                )
+        eligible = gated
     want_alt: str | None = None
-    if rebalance_due and ranked and float(ranked[0]["excess"]) > cfg.excess_floor:
-        want_alt = str(ranked[0]["base"])
+    if rebalance_due and eligible and float(eligible[0]["excess"]) > cfg.excess_floor:
+        want_alt = str(eligible[0]["base"])
     elif not rebalance_due:
         want_alt = held_alt
 
@@ -329,16 +389,20 @@ def evaluate_clip(
         n_alt = equity * float(cfg.alt_frac)
         if n_alt >= cfg.min_notional_eur:
             top = ranked[0] if ranked and ranked[0]["base"] == want_alt else {"excess": 0.0}
+            path = "flat_rs" if held_alt is None else "weekly_rs"
+            reasons = [
+                f"excess={float(top.get('excess') or 0):.3f}",
+                f"frac={cfg.alt_frac:.2f}",
+                path,
+            ]
+            if top.get("alphai_pick") or want_alt.upper() in picks:
+                reasons.append("alphai_pick")
             entries.append(
                 {
                     "base": want_alt,
                     "notional_eur": round(n_alt, 2),
                     "role": "alt",
-                    "reasons": [
-                        f"excess={float(top.get('excess') or 0):.3f}",
-                        f"frac={cfg.alt_frac:.2f}",
-                        "weekly_rs",
-                    ],
+                    "reasons": reasons,
                 }
             )
 
@@ -384,12 +448,21 @@ def evaluate_clip(
                 )
 
     alt_txt = want_alt or "geen alt"
+    hunt = held_alt is None and rebalance_due
+    want_xs = next(
+        (float(r["excess"]) for r in eligible if r["base"] == want_alt),
+        float(ranked[0]["excess"]) if want_alt and ranked else 0.0,
+    )
     caption = (
         f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
         f"{int(cfg.alt_frac * 100)}% {alt_txt}"
-        + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
+        + (f" (excess {want_xs:+.1%})" if want_alt else "")
         + (f", alt-trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
-        + f", {cfg.lookback_days}d RS. Telt niet mee in live mix-equity."
+        + f", {cfg.lookback_days}d RS"
+        + (" + AlphaI pick" if cfg.requires_alphai_pick else "")
+        + (" — flat hunt" if hunt else "")
+        + (f" (cooldown {','.join(sorted(cooled))})" if cooled and hunt else "")
+        + ". Telt niet mee in live mix-equity."
     )
     return {
         "ok": True,
@@ -403,8 +476,14 @@ def evaluate_clip(
         "want_alt": want_alt,
         "caption": caption,
         "ranked": ranked[:8],
+        "eligible": eligible[:8],
         "skipped": skipped[:12],
         "rebalance_due": rebalance_due,
+        "week_due": week_due,
+        "flat_hunt": hunt,
+        "cooldown_bases": sorted(cooled),
+        "alphai_picks": sorted(picks),
+        "requires_alphai_pick": bool(cfg.requires_alphai_pick),
         "gap_pct": round(last / s50 - 1.0, 4),
         "trims": trims,
     }

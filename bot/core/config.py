@@ -726,6 +726,9 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_sma_n: int = Field(default=50, ge=10, le=200)
     momentum_btc_rs_clip_min_qvol_eur: float = Field(default=80_000.0, ge=0)
     momentum_btc_rs_clip_alt_trail_pct: float = Field(default=0.10, ge=0.0, le=1.0)
+    # New alt entries must be AlphaI daily picks (quality gate on residual/clip).
+    momentum_btc_rs_clip_requires_alphai_pick: bool = True
+    momentum_btc_rs_clip_block_alphai_avoid: bool = True
     # Empty keeps the 20/80 clip. ``residual_full`` waits for a sleeve sale or
     # the weekly clock, then switches without flattening the open book first.
     momentum_btc_rs_clip_pending_pack: str = ""
