@@ -725,7 +725,8 @@ def test_residual_full_weekly_drops_btc_and_tops_up_the_alt():
     assert not any(e["base"] == "BTC" for e in out["entries"])
 
 
-def test_flat_book_waits_for_the_weekly_clock_after_a_sale():
+def test_flat_book_hunts_best_entry_after_a_sale():
+    """Flat sleeve may re-enter immediately; weekly clock only holds while in a name."""
     ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
     cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0))
     now_ms = 20 * 86_400_000
@@ -739,9 +740,37 @@ def test_flat_book_waits_for_the_weekly_clock_after_a_sale():
         last_rebalance_ms=now_ms - 2 * 86_400_000,
         now=datetime(2026, 6, 1, tzinfo=UTC),
     )
-    assert out["rebalance_due"] is False
-    assert out["entries"] == []
-    assert out["exits"] == []
+    assert out["rebalance_due"] is True
+    assert out["flat_hunt"] is True
+    assert out["want_alt"] == "ETH"
+    assert out["entries"]
+    assert out["entries"][0]["base"] == "ETH"
+    assert "flat_rs" in out["entries"][0]["reasons"]
+
+
+def test_flat_hunt_skips_cooled_base_and_picks_next():
+    btc = _bars(60, 100.0, 0.05)
+    # AAA stronger RS, BBB still qualifies — cooldown on AAA → take BBB.
+    aaa = _bars(61, 10.0, 0.08, vol=20_000.0)
+    bbb = _bars(61, 10.0, 0.05, vol=20_000.0)
+    cfg = residual_full_config(
+        ClipConfig(universe=("AAA", "BBB"), min_qvol_eur=1.0, require_alt_sma=False)
+    )
+    now_ms = 20 * 86_400_000
+    out = evaluate_clip(
+        {"BTC": btc, "AAA": aaa, "BBB": bbb},
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=now_ms - 2 * 86_400_000,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        cooldown_bases=("AAA",),
+    )
+    assert out["flat_hunt"] is True
+    assert out["want_alt"] == "BBB"
+    assert any(s.get("reason") == "post_exit_cooldown" for s in out["skipped"])
 
 
 def test_residual_full_midweek_keeps_both_bags():
@@ -830,7 +859,7 @@ def test_empty_live_restart_keeps_the_weekly_clock(tmp_path):
     assert r.last_rebalance_ms == 1_790_588_675_335
 
 
-def test_pending_pack_stays_idle_until_the_clock_or_a_sale(tmp_path):
+def test_pending_pack_stays_idle_while_alt_held_midweek(tmp_path):
     from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
 
     r = BtcRsClipPaperRunner(
@@ -850,15 +879,29 @@ def test_pending_pack_stays_idle_until_the_clock_or_a_sale(tmp_path):
             opened_ms=1,
             venue="paper",
             role="btc",
-        )
+        ),
+        ClipPosition(
+            base="ETH",
+            entry_price=10.0,
+            notional_eur=16_000.0,
+            qty=1_600.0,
+            opened_ms=1,
+            venue="paper",
+            role="alt",
+        ),
     ]
+    # Weekly clock still blocks while an alt is held.
     assert r._rebalance_due(r.last_rebalance_ms + 2 * 86_400_000) is False
     assert r.pack_mode == "clip_20_80"
     assert r.cfg.btc_frac == 0.20
+    # Flat alt sleeve (BTC-only) may hunt / arm pending pack immediately.
+    r.positions = [p for p in r.positions if p.role == "btc"]
+    assert r._rebalance_due(r.last_rebalance_ms + 2 * 86_400_000) is True
 
 
 def test_alt_trail_sells_dumped_sleeve(tmp_path):
     import asyncio
+    import time
 
     from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
 
@@ -884,6 +927,10 @@ def test_alt_trail_sells_dumped_sleeve(tmp_path):
     out = asyncio.run(r.manage_alt_trail())
     assert out and out[0]["reason"] == "alt_trail"
     assert r.positions == []
+    assert r.cooldown_alt == "AAA"
+    assert r.cooldown_until_ms > 0
+    assert r._active_cooldown_bases(r.cooldown_until_ms - 1) == ("AAA",)
+    assert r._rebalance_due(int(time.time() * 1000)) is True
 
 
 def test_alt_trail_does_not_fire_on_first_live_mark(tmp_path):
