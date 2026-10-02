@@ -48,6 +48,17 @@ class IgnitionConfig:
     btc_sma_n: int = 50
     # Score atoms for ranking / diagnostics (entry still needs early_signal).
     min_points: int = 3
+    # Coil path: catch compression→breakouts earlier than classic early_signal.
+    # Wet desk ablation: classic|coil hybrid + 25% coil trail ≈ +€6.8k vs +€2.7k
+    # classic-only on €2k (full window); desk +80% leg catch ~21% vs ~2%.
+    coil_entry_enabled: bool = True
+    coil_breakout_days: int = 5
+    coil_day_ret_min: float = 0.025
+    coil_vol_mult_min: float = 1.2
+    coil_quiet_max: float = 0.10
+    coil_min_close_loc: float = 0.65
+    coil_compress_ratio: float = 0.5
+    coil_trail_pct: float = 0.25
     fee_rt: float = FEE_RT
     slip: float = SLIP
     min_notional_eur: float = 50.0
@@ -73,6 +84,9 @@ class IgnitionPosition:
     entry_reason: str = ""
     peak_px: float = 0.0
     points: int = 0
+    # 0 → use cfg trail_pct; coil entries set a wider path trail.
+    trail_pct: float = 0.0
+    entry_path: str = "classic"
 
     def __post_init__(self) -> None:
         if not self.holding_id:
@@ -105,6 +119,8 @@ class IgnitionPosition:
             entry_reason=str(raw.get("entry_reason") or ""),
             peak_px=float(raw["peak_px"]) if raw.get("peak_px") not in (None, "") else 0.0,
             points=int(raw.get("points") or 0),
+            trail_pct=float(raw.get("trail_pct") or 0.0),
+            entry_path=str(raw.get("entry_path") or "classic"),
         )
 
 
@@ -147,12 +163,16 @@ def score_ignition_day(
     quiet_ret = c / quiet_anchor - 1.0
     highs = [float(r[2]) for r in prior[-cfg.breakout_days :]]
     brk20 = bool(highs) and c >= max(highs)
+    coil_n = max(3, int(cfg.coil_breakout_days))
+    highs_coil = [float(r[2]) for r in prior[-coil_n :]]
+    brk_coil = bool(highs_coil) and c >= max(highs_coil)
     vol_window = [_qvol(r) for r in prior[-cfg.vol_lookback :]]
     med_vol = _median(vol_window)
     day_qvol = _qvol(day)
     vol_x = (day_qvol / med_vol) if med_vol > 0 else 0.0
     liquid = med_vol >= cfg.min_median_qvol_eur and day_qvol >= cfg.min_day_qvol_eur
     quiet = quiet_ret < cfg.quiet_max
+    close_loc = ((c - l) / (h - l)) if h > l else 0.5
 
     # 3d momentum / RS atoms (diagnostics + ranking).
     c3 = float(prior[-3][4]) if len(prior) >= 3 else 0.0
@@ -172,10 +192,23 @@ def score_ignition_day(
     med_rng = _median(ranges)
     day_rng = (h / l - 1.0) if l > 0 else 0.0
     expand = med_rng > 0 and day_rng >= 1.5 * med_rng
+    # Compression: recent 5d range much tighter than 20d range.
+    def _span(rs: Sequence[Sequence[float]]) -> float:
+        hs = [float(r[2]) for r in rs if float(r[2]) > 0]
+        ls = [float(r[3]) for r in rs if float(r[3]) > 0]
+        if not hs or not ls or min(ls) <= 0:
+            return 0.0
+        return max(hs) / min(ls) - 1.0
+
+    span20 = _span(prior[-cfg.vol_lookback :])
+    span5 = _span(prior[-5:])
+    compress = span20 > 0 and span5 < float(cfg.coil_compress_ratio) * span20
 
     atoms: list[str] = []
     if brk20:
         atoms.append("brk20")
+    if brk_coil:
+        atoms.append(f"brk{coil_n}")
     if day_ret >= cfg.day_ret_min:
         atoms.append("r1_6")
     if vol_x >= cfg.vol_mult_min:
@@ -192,6 +225,8 @@ def score_ignition_day(
         atoms.append("trend")
     if expand:
         atoms.append("expand")
+    if compress:
+        atoms.append("compress")
 
     early_signal = (
         quiet
@@ -200,13 +235,33 @@ def score_ignition_day(
         and day_ret >= cfg.day_ret_min
         and vol_x >= cfg.vol_mult_min
     )
+    coil_signal = (
+        bool(cfg.coil_entry_enabled)
+        and liquid
+        and quiet_ret < float(cfg.coil_quiet_max)
+        and compress
+        and brk_coil
+        and day_ret >= float(cfg.coil_day_ret_min)
+        and vol_x >= float(cfg.coil_vol_mult_min)
+        and close_loc >= float(cfg.coil_min_close_loc)
+    )
     points = len(atoms)
+    if early_signal:
+        entry_path = "classic"
+        trail_for_entry = float(cfg.trail_pct)
+    elif coil_signal:
+        entry_path = "coil"
+        trail_for_entry = float(cfg.coil_trail_pct)
+    else:
+        entry_path = ""
+        trail_for_entry = float(cfg.trail_pct)
     return {
         "day_ret": round(day_ret, 4),
         "quiet_ret": round(quiet_ret, 4),
         "quiet": quiet,
         "liquid": liquid,
         "brk20": brk20,
+        "brk_coil": brk_coil,
         "vol_x": round(vol_x, 3),
         "day_qvol": round(day_qvol, 0),
         "med_qvol": round(med_vol, 0),
@@ -214,9 +269,14 @@ def score_ignition_day(
         "xs10": None if xs10 is None else round(xs10, 4),
         "trend": trend,
         "expand": expand,
+        "compress": compress,
+        "close_loc": round(close_loc, 3),
         "atoms": atoms,
         "points": points,
         "early_signal": early_signal,
+        "coil_signal": coil_signal,
+        "entry_path": entry_path,
+        "trail_pct": trail_for_entry,
         "close": c,
     }
 
@@ -246,7 +306,8 @@ def evaluate_ignition(
             rejected.append({"base": base, "reason": "short_history"})
             continue
         row = {"base": base, **scored}
-        if not scored["early_signal"]:
+        path = str(scored.get("entry_path") or "")
+        if not path:
             why = []
             if not scored["quiet"]:
                 why.append("not_quiet")
@@ -258,15 +319,23 @@ def evaluate_ignition(
                 why.append("day_ret")
             if scored["vol_x"] < cfg.vol_mult_min:
                 why.append("vol")
+            if cfg.coil_entry_enabled and not scored.get("coil_signal"):
+                why.append("no_coil")
             rejected.append({"base": base, "reason": ",".join(why) or "no_signal", **scored})
             continue
-        if scored["points"] < cfg.min_points:
+        # Classic keeps min_points; coil is allowed with fewer atoms (compress+brk).
+        if path == "classic" and scored["points"] < cfg.min_points:
             rejected.append({"base": base, "reason": "low_points", **scored})
             continue
         ranked.append(row)
+    # Prefer classic over coil, then points / vol / day ret.
     ranked.sort(
-        key=lambda r: (int(r["points"]), float(r["vol_x"]), float(r["day_ret"])),
-        reverse=True,
+        key=lambda r: (
+            0 if r.get("entry_path") == "classic" else 1,
+            -int(r["points"]),
+            -float(r["vol_x"]),
+            -float(r["day_ret"]),
+        )
     )
 
     held_set = {str(b).upper() for b in held}
@@ -281,12 +350,17 @@ def evaluate_ignition(
         if top["base"] not in held_set:
             notional = min(float(cash_eur), float(cfg.book_eur)) * float(cfg.deploy_frac)
             if notional >= cfg.min_notional_eur:
+                path = str(top.get("entry_path") or "classic")
+                tag = "early_signal" if path == "classic" else "coil_signal"
                 entries.append(
                     {
                         "base": top["base"],
                         "notional_eur": round(notional, 2),
+                        "entry_path": path,
+                        "trail_pct": float(top.get("trail_pct") or cfg.trail_pct),
                         "reasons": [
-                            "early_signal",
+                            tag,
+                            f"path={path}",
                             f"points={top['points']}",
                             f"day={top['day_ret']:+.1%}",
                             f"volx={top['vol_x']:.1f}",
@@ -303,18 +377,21 @@ def evaluate_ignition(
         trail_txt += (
             f" (→{cfg.trail_ratchet_pct:.0%} na +{cfg.trail_ratchet_arm_pct:.0%})"
         )
+    if cfg.coil_entry_enabled:
+        trail_txt += f"; coil-trail {cfg.coil_trail_pct:.0%}"
     if want:
-        body = f"Candidate {want} ({ranked[0]['points']} pts)."
+        path = str(ranked[0].get("entry_path") or "classic")
+        body = f"Candidate {want} [{path}] ({ranked[0]['points']} pts)."
     elif near:
         n0 = near[0]
         body = (
-            f"Geen early-signal; dichtbij {n0['base']} "
+            f"Geen signal; dichtbij {n0['base']} "
             f"(mist {n0['missing']})."
         )
     else:
-        body = "Geen early-signal vandaag."
+        body = "Geen ignition-signal vandaag."
     caption = (
-        f"Ignition: desk-universe early-signal + {trail_txt}. "
+        f"Ignition: desk classic+coil + {trail_txt}. "
         + body
         + (f" Block: {risk_block}." if risk_block else "")
     )
@@ -331,8 +408,10 @@ def evaluate_ignition(
         "near_miss": near,
         "want": want,
         "caption": caption,
-        "signal": "quiet+brk20+r1_6+vol2",
+        "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
         "trail_pct": cfg.trail_pct,
+        "coil_trail_pct": cfg.coil_trail_pct,
+        "coil_entry_enabled": cfg.coil_entry_enabled,
         "trail_ratchet_arm_pct": cfg.trail_ratchet_arm_pct,
         "trail_ratchet_pct": cfg.trail_ratchet_pct,
     }
@@ -383,8 +462,8 @@ def _near_misses(
 
 
 def effective_trail_pct(pos: IgnitionPosition, cfg: IgnitionConfig) -> float:
-    """Base trail, or ratchet trail once peak gain clears the arm."""
-    base = float(cfg.trail_pct or 0.0)
+    """Path trail (coil/classic), then ratchet once peak gain clears the arm."""
+    base = float(pos.trail_pct or 0.0) or float(cfg.trail_pct or 0.0)
     arm = float(cfg.trail_ratchet_arm_pct or 0.0)
     tight = float(cfg.trail_ratchet_pct or 0.0)
     if base <= 0 and tight <= 0:
@@ -408,14 +487,16 @@ def trail_exit(
     trail = effective_trail_pct(pos, cfg)
     if trail <= 0:
         return None
+    path_base = float(pos.trail_pct or 0.0) or float(cfg.trail_pct or trail)
     if mark <= peak * (1.0 - trail):
-        armed = trail < float(cfg.trail_pct or trail) - 1e-12
+        armed = trail < path_base - 1e-12
         return {
             "base": pos.base,
             "reason": "ignition_trail_ratchet" if armed else "ignition_trail",
             "mark": mark,
             "peak": peak,
             "trail_pct": trail,
+            "entry_path": pos.entry_path,
             "gross_return": pos.gross_return(mark),
         }
     return None

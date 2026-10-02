@@ -72,6 +72,121 @@ def test_score_ignition_detects_early_signal() -> None:
     assert scored["brk20"] is True
     assert scored["day_ret"] >= 0.06
     assert scored["vol_x"] >= 2.0
+    assert scored["entry_path"] == "classic"
+    assert scored["trail_pct"] == cfg.trail_pct
+
+
+def _coil_bars() -> list[list[float]]:
+    """Wide history, tight recent range, then a modest 5d breakout day."""
+    rows = _bars(60, 10.0, step=0.0, vol=3_000.0)
+    # Early window: wide high/low span so 20d compress ratio can fire.
+    for r in rows[:25]:
+        mid = float(r[4])
+        r[2] = mid * 1.12
+        r[3] = mid * 0.88
+    # Recent 5 bars before last: tight coil.
+    for r in rows[-6:-1]:
+        mid = float(r[4])
+        r[2] = mid * 1.005
+        r[3] = mid * 0.995
+        r[1] = mid
+    last = rows[-1]
+    close = float(last[4]) * 1.03
+    open_px = close / 1.03
+    last[1] = open_px
+    last[4] = close
+    last[2] = close * 1.002
+    last[3] = open_px * 0.998
+    last[5] = 5_000.0  # ~1.67× median 3k
+    # Prior highs below last close for brk5; keep 20d highs above so classic fails.
+    for r in rows[-6:-1]:
+        r[2] = min(float(r[2]), close * 0.995)
+    for r in rows[:-6]:
+        r[2] = max(float(r[2]), close * 1.05)
+    return rows
+
+
+def test_coil_signal_enters_when_classic_misses() -> None:
+    from bot.live.momentum_ignition import effective_trail_pct
+
+    coil = _coil_bars()
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    cfg = IgnitionConfig(
+        universe=("ALT",),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        quiet_max=0.12,
+        day_ret_min=0.06,
+        vol_mult_min=2.0,
+        coil_entry_enabled=True,
+        coil_trail_pct=0.25,
+        require_btc_sma=True,
+        min_points=3,
+    )
+    scored = score_ignition_day(coil, btc, cfg)
+    assert scored is not None
+    assert scored["early_signal"] is False
+    assert scored["coil_signal"] is True
+    assert scored["entry_path"] == "coil"
+    assert scored["trail_pct"] == 0.25
+    out = evaluate_ignition(
+        {"BTC": btc, "ALT": coil},
+        cfg,
+        held=[],
+        cash_eur=2_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["entries"]
+    assert out["entries"][0]["base"] == "ALT"
+    assert out["entries"][0]["entry_path"] == "coil"
+    assert out["entries"][0]["trail_pct"] == 0.25
+    pos = IgnitionPosition(
+        base="ALT",
+        entry_price=100.0,
+        notional_eur=1000.0,
+        qty=10.0,
+        opened_ms=1,
+        peak_px=110.0,
+        trail_pct=0.25,
+        entry_path="coil",
+    )
+    assert effective_trail_pct(pos, cfg) == 0.25
+    # Wider coil trail: 25% off 110 → 82.5.
+    assert trail_exit(pos, 83.0, cfg) is None
+    hit = trail_exit(pos, 82.5, cfg)
+    assert hit is not None
+    assert hit["entry_path"] == "coil"
+
+
+def test_classic_preferred_over_coil_when_both_fire() -> None:
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    classic = _bars(60, 10.0, step=0.02, vol=3_000.0)
+    close = float(classic[-1][4])
+    classic[-1][1] = close / 1.10
+    classic[-1][5] = 30_000.0
+    for r in classic[:-1]:
+        r[2] = min(float(r[2]), close * 0.99)
+    coil = _coil_bars()
+    cfg = IgnitionConfig(
+        universe=("ETH", "ALT"),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        quiet_max=0.25,
+        min_points=1,
+        coil_entry_enabled=True,
+        require_btc_sma=True,
+    )
+    out = evaluate_ignition(
+        {"BTC": btc, "ETH": classic, "ALT": coil},
+        cfg,
+        held=[],
+        cash_eur=2_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["entries"]
+    assert out["entries"][0]["base"] == "ETH"
+    assert out["entries"][0]["entry_path"] == "classic"
+    assert out["ranked"][0]["entry_path"] == "classic"
 
 
 def test_evaluate_enters_top_signal_when_risk_on() -> None:
@@ -247,6 +362,9 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert cfg.trail_pct == 0.12
     assert cfg.trail_ratchet_arm_pct == 0.30
     assert cfg.trail_ratchet_pct == 0.10
+    assert cfg.coil_entry_enabled is True
+    assert cfg.coil_trail_pct == 0.25
+    assert cfg.coil_day_ret_min == 0.025
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-test-state.json",

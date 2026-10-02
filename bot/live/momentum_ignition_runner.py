@@ -19,6 +19,7 @@ from bot.live.momentum_ignition import (
     IgnitionConfig,
     IgnitionPosition,
     default_config,
+    effective_trail_pct,
     evaluate_ignition,
     fill_px,
     trail_exit,
@@ -115,6 +116,26 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         min_day_qvol_eur=_f("momentum_ignition_min_day_qvol_eur", base.min_day_qvol_eur),
         require_btc_sma=_b("momentum_ignition_require_btc_sma", base.require_btc_sma),
         min_points=_i("momentum_ignition_min_points", base.min_points),
+        coil_entry_enabled=_b(
+            "momentum_ignition_coil_entry_enabled", base.coil_entry_enabled
+        ),
+        coil_breakout_days=_i(
+            "momentum_ignition_coil_breakout_days", base.coil_breakout_days
+        ),
+        coil_day_ret_min=_f(
+            "momentum_ignition_coil_day_ret_min", base.coil_day_ret_min
+        ),
+        coil_vol_mult_min=_f(
+            "momentum_ignition_coil_vol_mult_min", base.coil_vol_mult_min
+        ),
+        coil_quiet_max=_f("momentum_ignition_coil_quiet_max", base.coil_quiet_max),
+        coil_min_close_loc=_f(
+            "momentum_ignition_coil_min_close_loc", base.coil_min_close_loc
+        ),
+        coil_compress_ratio=_f(
+            "momentum_ignition_coil_compress_ratio", base.coil_compress_ratio
+        ),
+        coil_trail_pct=_f("momentum_ignition_coil_trail_pct", base.coil_trail_pct),
         tick_sec=_f("momentum_ignition_tick_sec", base.tick_sec),
         decision_interval_sec=_f(
             "momentum_ignition_decision_interval_sec", base.decision_interval_sec
@@ -532,7 +553,15 @@ class IgnitionPaperRunner:
         return {b: rows for b, rows in pairs}
 
     async def _open_lot(
-        self, base: str, notional: float, px: float, reasons: list[str], *, points: int
+        self,
+        base: str,
+        notional: float,
+        px: float,
+        reasons: list[str],
+        *,
+        points: int,
+        entry_path: str = "classic",
+        trail_pct: float | None = None,
     ) -> IgnitionPosition | None:
         if notional < self.cfg.min_notional_eur or px <= 0:
             return None
@@ -547,6 +576,15 @@ class IgnitionPaperRunner:
             return None
         self.cash_eur = max(0.0, self.cash_eur - cost)
         venue = self._primary_venue()
+        path = str(entry_path or "classic")
+        if trail_pct is None:
+            path_trail = (
+                float(self.cfg.coil_trail_pct)
+                if path == "coil"
+                else float(self.cfg.trail_pct)
+            )
+        else:
+            path_trail = float(trail_pct)
         pos = IgnitionPosition(
             base=base,
             entry_price=float(fill.avg_price),
@@ -557,6 +595,8 @@ class IgnitionPaperRunner:
             entry_reason=",".join(reasons),
             peak_px=float(fill.avg_price),
             points=points,
+            trail_pct=path_trail,
+            entry_path=path,
         )
         self.positions.append(pos)
         self.marks[base] = float(fill.avg_price)
@@ -579,6 +619,8 @@ class IgnitionPaperRunner:
                 "reason": pos.entry_reason,
                 "holding_id": pos.holding_id,
                 "points": points,
+                "entry_path": path,
+                "trail_pct": path_trail,
             }
         )
         if self.allow_live:
@@ -668,9 +710,14 @@ class IgnitionPaperRunner:
                 cap = cap.replace(" Block: slots_full.", "").replace("Block: slots_full.", "")
                 if "trail" in ",".join(a.get("reason", "") for a in applied):
                     mode = "LIVE" if self.allow_live else "PAPER"
+                    coil = (
+                        f"; coil-trail {self.cfg.coil_trail_pct:.0%}"
+                        if self.cfg.coil_entry_enabled
+                        else ""
+                    )
                     ld["caption"] = (
-                        f"Ignition {mode}: desk-universe early-signal + trail "
-                        f"{self.cfg.trail_pct:.0%}. Slot vrij na exit."
+                        f"Ignition {mode}: desk classic+coil + trail "
+                        f"{self.cfg.trail_pct:.0%}{coil}. Slot vrij na exit."
                     )
                 elif cap:
                     ld["caption"] = cap
@@ -810,12 +857,24 @@ class IgnitionPaperRunner:
                     px_src = mark if mark > 0 else close
                     px = fill_px(px_src, "buy", slip=self.cfg.slip)
                     score = row.get("score") or {}
+                    path = str(row.get("entry_path") or "classic")
+                    path_trail = float(
+                        row.get("trail_pct")
+                        if row.get("trail_pct") is not None
+                        else (
+                            self.cfg.coil_trail_pct
+                            if path == "coil"
+                            else self.cfg.trail_pct
+                        )
+                    )
                     pos = await self._open_lot(
                         base,
                         float(row["notional_eur"]),
                         px,
                         list(row.get("reasons") or []),
                         points=int(score.get("points") or 0),
+                        entry_path=path,
+                        trail_pct=path_trail,
                     )
                     if pos:
                         applied.append(
@@ -824,6 +883,8 @@ class IgnitionPaperRunner:
                                 "base": pos.base,
                                 "notional_eur": pos.notional_eur,
                                 "points": pos.points,
+                                "entry_path": pos.entry_path,
+                                "trail_pct": pos.trail_pct,
                             }
                         )
             self.last_decision = {
@@ -890,6 +951,7 @@ class IgnitionPaperRunner:
                     "age_h": round(age_h, 2),
                     "side": "long",
                     "quantity": p.qty,
+                    "effective_trail_pct": effective_trail_pct(p, self.cfg),
                 }
             )
         last = dict(self.last_decision or {})
@@ -956,7 +1018,12 @@ class IgnitionPaperRunner:
                 "min_points": self.cfg.min_points,
                 "max_positions": self.cfg.max_positions,
                 "book_eur": self.cfg.book_eur,
-                "signal": "quiet+brk20+r1_6+vol2",
+                "coil_entry_enabled": self.cfg.coil_entry_enabled,
+                "coil_trail_pct": self.cfg.coil_trail_pct,
+                "coil_day_ret_min": self.cfg.coil_day_ret_min,
+                "coil_vol_mult_min": self.cfg.coil_vol_mult_min,
+                "coil_quiet_max": self.cfg.coil_quiet_max,
+                "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
                 "universe_n": len(self.cfg.universe),
                 "venues": list(self.venues),
                 "target_venue": venue,
@@ -1069,7 +1136,9 @@ class IgnitionDeskManager:
                     "live_caption": caption,
                     "config": {
                         "trail_pct": cfg.trail_pct,
-                        "signal": "quiet+brk20+r1_6+vol2",
+                        "coil_entry_enabled": cfg.coil_entry_enabled,
+                        "coil_trail_pct": cfg.coil_trail_pct,
+                        "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
                         "book_eur": cfg.book_eur,
                         "venues": list(venues),
                         "target_venue": venues[0],
@@ -1162,9 +1231,14 @@ class IgnitionDeskManager:
             ld = dict(self._runner.last_decision or {})
             cap = str(ld.get("caption") or "")
             if "PAPER" in cap.upper() or not cap:
+                coil = (
+                    f"; coil-trail {cfg.coil_trail_pct:.0%}"
+                    if cfg.coil_entry_enabled
+                    else ""
+                )
                 ld["caption"] = (
-                    f"Ignition LIVE: desk-universe early-signal + trail "
-                    f"{cfg.trail_pct:.0%}. OKX fills armed."
+                    f"Ignition LIVE: desk classic+coil + trail "
+                    f"{cfg.trail_pct:.0%}{coil}. OKX fills armed."
                 )
                 self._runner.last_decision = ld
                 self._runner._save_state()  # noqa: SLF001

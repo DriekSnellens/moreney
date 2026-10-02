@@ -2276,6 +2276,12 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
             trail_s = f"{trail_s}→{float(ratchet_pct):.0%}@{float(ratchet_arm):.0%}"
     except (TypeError, ValueError):
         pass
+    coil_on = bool(cfg.get("coil_entry_enabled", True))
+    coil_trail = cfg.get("coil_trail_pct")
+    try:
+        coil_s = f"; coil-trail {float(coil_trail):.0%}" if coil_on and coil_trail is not None else ""
+    except (TypeError, ValueError):
+        coil_s = "; coil" if coil_on else ""
     risk_on = bool(st.get("risk_on"))
     gate = "BTC &gt; SMA50" if risk_on else "standby"
     caption = str(st.get("live_caption") or "")
@@ -2289,9 +2295,14 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
     if not caption:
         mode = "LIVE" if live else "Paper"
         live_note = "OKX fills armed." if live else "Nog geen live orders."
+        signal = (
+            "classic (quiet+brk20+day≥6%+vol≥2×) of coil (compress+brk5)"
+            if coil_on
+            else "quiet + brk20 + day≥6% + vol≥2×"
+        )
         caption = (
-            f"{mode} ignition → {venue.upper()}: quiet + brk20 + day≥6% + vol≥2× "
-            f"op desk-universe, trail {trail_s}, {cadence}. {live_note}"
+            f"{mode} ignition → {venue.upper()}: {signal} "
+            f"op desk-universe, trail {trail_s}{coil_s}, {cadence}. {live_note}"
         )
     pos_bits = []
     for p in st.get("positions") or []:
@@ -2308,7 +2319,7 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         if pos_bits
         else (
             '<div class="mix-open" data-live="ign-open">'
-            '<span class="muted">Geen open ignition — wacht op early-signal.</span></div>'
+            '<span class="muted">Geen open ignition — wacht op classic/coil-signal.</span></div>'
         )
     )
     actions = ""
@@ -3669,7 +3680,7 @@ _LIVE_MARKS_JS = r"""
     if (open) {
       const pos = (st.positions || []).filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
       if (!pos.length) {
-        open.innerHTML = '<span class="muted">Geen open ignition — wacht op early-signal.</span>';
+        open.innerHTML = '<span class="muted">Geen open ignition — wacht op classic/coil-signal.</span>';
       } else {
         open.innerHTML = pos.map((p) => {
           const net = p.unrealized_net_eur;
