@@ -731,8 +731,12 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_pending_pack: str = ""
     momentum_btc_rs_clip_state_path: str = "./data/momentum_btc_rs_clip_state.json"
     momentum_btc_rs_clip_ledger_path: str = "./data/momentum_btc_rs_clip_ledger.jsonl"
-    # Paper ignition sleeve: desk-universe early-signal + trail (never live).
+    # Ignition sleeve: desk-universe early-signal + trail.
+    # Target venue is OKX; live orders stay gated off until allow_live is armed
+    # and the OKX execution path is wired (paper-only by default).
     momentum_ignition_enabled: bool = False
+    momentum_ignition_allow_live: bool = False
+    momentum_ignition_venues: str = "okx"
     momentum_ignition_book_eur: float = Field(default=2_000.0, gt=0)
     momentum_ignition_max_positions: int = Field(default=1, ge=1, le=3)
     momentum_ignition_deploy_frac: float = Field(default=1.0, gt=0, le=1.0)

@@ -172,6 +172,31 @@ def test_trail_exit_fires_after_giveback() -> None:
     assert hit["reason"] == "ignition_trail"
 
 
+def test_ignition_defaults_to_okx_venue() -> None:
+    from bot.core.config import Settings
+    from bot.live.momentum_ignition_runner import IgnitionPaperRunner, config_from_settings
+    from bot.live.momentum_runner import parse_venues
+
+    venues = parse_venues(Settings().momentum_ignition_venues)
+    assert venues == ("okx",)
+    assert Settings().momentum_ignition_allow_live is False
+    cfg = config_from_settings(Settings())
+    runner = IgnitionPaperRunner(
+        cfg,
+        state_path="/tmp/ign-test-state.json",
+        ledger_path="/tmp/ign-test-ledger.jsonl",
+        venues=venues,
+        allow_live=True,  # requested, but runner must stay paper
+    )
+    assert runner._primary_venue() == "okx"
+    assert runner.paper_only is True
+    assert runner.allow_live is False
+    st = runner.status()
+    assert st["target_venue"] == "okx"
+    assert st["venues"] == ["okx"]
+    assert st["allow_live"] is False
+
+
 def test_no_per_coin_hardcodes_in_ignition_modules() -> None:
     from pathlib import Path
 

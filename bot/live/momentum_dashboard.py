@@ -2270,10 +2270,11 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
     risk_on = bool(st.get("risk_on"))
     gate = "BTC &gt; SMA50" if risk_on else "standby"
     caption = str(st.get("live_caption") or "")
+    venue = str(st.get("target_venue") or st.get("venue") or (cfg.get("target_venue")) or "okx")
     if not caption:
         caption = (
-            f"Paper ignition: quiet + brk20 + day≥6% + vol≥2× op desk-universe, "
-            f"trail {trail_s}. Geen Bitvavo-orders."
+            f"Paper ignition → {venue.upper()}: quiet + brk20 + day≥6% + vol≥2× "
+            f"op desk-universe, trail {trail_s}. Nog geen live orders."
         )
     pos_bits = []
     for p in st.get("positions") or []:
@@ -2319,8 +2320,9 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
         f'Want <strong data-k="ign-want">{escape(str(st.get("want") or "—"))}</strong> · '
         f'trail {escape(trail_s)} · '
+        f'target <strong data-k="ign-venue">{escape(venue.upper())}</strong> · '
         f'next <strong data-live="ign-next">{_ts(st.get("next_decision"))}</strong> · '
-        f"geen live orders.</p>"
+        f"paper (geen live orders).</p>"
         f"{pos_html}{actions}</section>"
     )
 

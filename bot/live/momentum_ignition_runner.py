@@ -22,7 +22,7 @@ from bot.live.momentum_ignition import (
     fill_px,
     trail_exit,
 )
-from bot.live.momentum_runner import CandleFeed
+from bot.live.momentum_runner import CandleFeed, parse_venues
 from bot.live.momentum_short_weakest import fetch_daily_ohlc
 
 logger = logging.getLogger("bot.live.momentum_ignition_runner")
@@ -91,7 +91,11 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
 
 
 class IgnitionPaperRunner:
-    """Synthetic long book — marks from public ticker, never venue orders."""
+    """Paper long book targeting OKX for future live fills.
+
+    Marks come from the public ticker today. Orders stay synthetic until
+    ``momentum_ignition_allow_live`` is armed and an OKX gateway is wired.
+    """
 
     def __init__(
         self,
@@ -99,10 +103,18 @@ class IgnitionPaperRunner:
         *,
         state_path: str,
         ledger_path: str,
+        venues: tuple[str, ...] = ("okx",),
+        allow_live: bool = False,
     ) -> None:
         self.cfg = cfg
         self.state_path = state_path
         self.ledger_path = ledger_path
+        self.venues = parse_venues(venues) or ("okx",)
+        # Live OKX path is not wired yet — always paper regardless of flag.
+        self.allow_live = False
+        self._allow_live_requested = bool(allow_live)
+        self.dry_run = True
+        self.paper_only = True
         self.cash_eur = float(cfg.book_eur)
         self.realized_total_eur = 0.0
         self.day_realized_eur = 0.0
@@ -119,6 +131,9 @@ class IgnitionPaperRunner:
 
     def _desk(self) -> str:
         return "ignition_paper"
+
+    def _primary_venue(self) -> str:
+        return self.venues[0] if self.venues else "okx"
 
     def _load_state(self) -> None:
         p = Path(self.state_path)
@@ -256,13 +271,14 @@ class IgnitionPaperRunner:
         if notional < self.cfg.min_notional_eur:
             return None
         self.cash_eur -= cost
+        venue = self._primary_venue()
         pos = IgnitionPosition(
             base=base,
             entry_price=px,
             notional_eur=notional,
             qty=notional / px,
             opened_ms=int(time.time() * 1000),
-            venue="paper",
+            venue=venue,
             entry_reason=",".join(reasons),
             peak_px=px,
             points=points,
@@ -276,8 +292,10 @@ class IgnitionPaperRunner:
                 "desk": self._desk(),
                 "side": "long",
                 "base": base,
-                "venue": "paper",
+                "venue": venue,
                 "dry_run": True,
+                "paper_only": True,
+                "target_venue": venue,
                 "notional_eur": round(notional, 2),
                 "quantity": pos.qty,
                 "entry_price": px,
@@ -311,8 +329,10 @@ class IgnitionPaperRunner:
                 "desk": self._desk(),
                 "side": "long",
                 "base": pos.base,
-                "venue": "paper",
+                "venue": pos.venue or self._primary_venue(),
                 "dry_run": True,
+                "paper_only": True,
+                "target_venue": self._primary_venue(),
                 "notional_eur": round(pos.notional_eur, 2),
                 "quantity": qty,
                 "entry_price": pos.entry_price,
@@ -561,12 +581,20 @@ class IgnitionPaperRunner:
                 .replace("Block: slots_full.", "")
                 .strip()
             )
+        venue = self._primary_venue()
+        caption = str(last.get("caption") or "")
+        if caption and "OKX" not in caption.upper():
+            caption = caption.rstrip(".") + f". Target {venue.upper()} (paper)."
         return {
             "desk": self._desk(),
             "mode": "ignition_paper",
             "paper_only": True,
             "allow_live": False,
+            "allow_live_requested": bool(self._allow_live_requested),
             "dry_run": True,
+            "venues": list(self.venues),
+            "venue": venue,
+            "target_venue": venue,
             "book_eur": float(self.cfg.book_eur),
             "cash_eur": round(self.cash_eur, 2),
             "deployed_eur": round(self._deployed(), 2),
@@ -579,7 +607,7 @@ class IgnitionPaperRunner:
             ],
             "positions": positions,
             "last_decision": last,
-            "live_caption": str(last.get("caption") or ""),
+            "live_caption": caption,
             "risk_on": bool(last.get("risk_on")),
             "want": last.get("want"),
             "next_decision": self.next_decision(),
@@ -593,6 +621,9 @@ class IgnitionPaperRunner:
                 "book_eur": self.cfg.book_eur,
                 "signal": "quiet+brk20+r1_6+vol2",
                 "universe_n": len(self.cfg.universe),
+                "venues": list(self.venues),
+                "target_venue": venue,
+                "allow_live": False,
             },
         }
 
@@ -640,6 +671,10 @@ class IgnitionDeskManager:
     def status(self) -> dict[str, Any]:
         settings = get_settings()
         enabled = bool(getattr(settings, "momentum_ignition_enabled", False))
+        venues = parse_venues(
+            getattr(settings, "momentum_ignition_venues", "okx") or "okx"
+        ) or ("okx",)
+        allow_req = bool(getattr(settings, "momentum_ignition_allow_live", False))
         base: dict[str, Any] = {
             "running": self.running(),
             "enabled_setting": enabled,
@@ -648,6 +683,10 @@ class IgnitionDeskManager:
             "dry_run": True,
             "paper_only": True,
             "allow_live": False,
+            "allow_live_requested": allow_req,
+            "venues": list(venues),
+            "venue": venues[0],
+            "target_venue": venues[0],
         }
         if self._runner is not None:
             base.update(self._runner.status())
@@ -673,6 +712,9 @@ class IgnitionDeskManager:
                 last = dict(raw.get("last_decision") or {})
             except Exception:  # noqa: BLE001
                 pass
+            caption = str(last.get("caption") or "")
+            if caption and "OKX" not in caption.upper():
+                caption = caption.rstrip(".") + f". Target {venues[0].upper()} (paper)."
             base.update(
                 {
                     "book_eur": cfg.book_eur,
@@ -684,11 +726,14 @@ class IgnitionDeskManager:
                     "realized_total_eur": round(realized, 2),
                     "positions": positions,
                     "last_decision": last,
-                    "live_caption": str(last.get("caption") or ""),
+                    "live_caption": caption,
                     "config": {
                         "trail_pct": cfg.trail_pct,
                         "signal": "quiet+brk20+r1_6+vol2",
                         "book_eur": cfg.book_eur,
+                        "venues": list(venues),
+                        "target_venue": venues[0],
+                        "allow_live": False,
                     },
                 }
             )
@@ -705,6 +750,17 @@ class IgnitionDeskManager:
                 "reason": "momentum_ignition_enabled_false",
                 "hint": "Set MOMENTUM_IGNITION_ENABLED=true",
             }
+        allow_live = bool(getattr(settings, "momentum_ignition_allow_live", False))
+        venues = parse_venues(
+            getattr(settings, "momentum_ignition_venues", "okx") or "okx"
+        ) or ("okx",)
+        if allow_live:
+            # Refuse live until an OKX gateway fill path exists — stay paper.
+            logger.warning(
+                "ignition allow_live requested on %s but live OKX path is not wired; "
+                "starting paper-only",
+                ",".join(venues),
+            )
         cfg = config_from_settings(settings)
         state_path = str(
             getattr(settings, "momentum_ignition_state_path", "./data/momentum_ignition_state.json")
@@ -715,16 +771,32 @@ class IgnitionDeskManager:
             )
         )
         self._stop = False
-        self._runner = IgnitionPaperRunner(cfg, state_path=state_path, ledger_path=ledger_path)
+        self._runner = IgnitionPaperRunner(
+            cfg,
+            state_path=state_path,
+            ledger_path=ledger_path,
+            venues=venues,
+            allow_live=allow_live,
+        )
         self._task = asyncio.create_task(
             self._runner.run(lambda: self._stop), name="momentum-ignition"
         )
-        _write_flag(state_path, running=True, dry_run=True, paper_only=True, allow_live=False)
+        _write_flag(
+            state_path,
+            running=True,
+            dry_run=True,
+            paper_only=True,
+            allow_live=False,
+            venues=list(venues),
+            target_venue=venues[0],
+        )
         return {
             "ok": True,
             "started": True,
             "paper_only": True,
             "allow_live": False,
+            "venues": list(venues),
+            "target_venue": venues[0],
             "status": self.status(),
         }
 
