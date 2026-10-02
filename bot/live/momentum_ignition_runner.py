@@ -927,6 +927,46 @@ class IgnitionPaperRunner:
             "status": self.status(),
         }
 
+    def _entry_candidates(
+        self, decision: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Rows to attempt live. top_day walks ranked so venue misses can fall through."""
+        mode = str(
+            decision.get("entry_mode") or self.cfg.entry_mode or "top_day"
+        ).strip().lower()
+        entries = list(decision.get("entries") or [])
+        if mode != "top_day":
+            return entries
+        ranked = list(decision.get("ranked") or [])
+        if not ranked:
+            return entries
+        out: list[dict[str, Any]] = []
+        for top in ranked:
+            base = str(top.get("base") or "").upper()
+            if not base:
+                continue
+            out.append(
+                {
+                    "base": base,
+                    "notional_eur": 0.0,  # sized at open time from remaining powder
+                    "entry_path": "top_day",
+                    "trail_pct": float(
+                        top.get("trail_pct")
+                        if top.get("trail_pct") is not None
+                        else self.cfg.trail_pct
+                    ),
+                    "reasons": [
+                        "top_day",
+                        f"day={float(top.get('day_ret') or 0.0):+.1%}",
+                        f"volx={float(top.get('vol_x') or 0.0):.1f}",
+                        f"trail={self.cfg.trail_pct:.0%}",
+                        f"time≤{self.cfg.time_max_days:g}d",
+                    ],
+                    "score": top,
+                }
+            )
+        return out
+
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:
         async with self._decide_lock:
             now = datetime.now(UTC)
@@ -942,12 +982,21 @@ class IgnitionPaperRunner:
                 now=now,
             )
             applied: list[dict[str, Any]] = []
+            skipped: list[dict[str, Any]] = []
             if execute and decision.get("ok") and not decision.get("risk_block"):
-                for row in decision.get("entries") or []:
-                    base = str(row["base"])
+                held_set = {str(b).upper() for b in held}
+                free = max(0, int(self.cfg.max_positions) - len(held_set))
+                candidates = self._entry_candidates(decision)
+                for row in candidates:
+                    if free <= 0:
+                        break
+                    base = str(row["base"]).upper()
+                    if base in held_set:
+                        continue
                     # Enter at next-open proxy: last completed close * (1+slip).
                     rows = ohlc.get(base) or []
                     if not rows:
+                        skipped.append({"base": base, "reason": "no_ohlc"})
                         continue
                     close = float(rows[-1][4])
                     # Prefer live mark when fresher.
@@ -965,9 +1014,17 @@ class IgnitionPaperRunner:
                             else self.cfg.trail_pct
                         )
                     )
+                    powder = float(await self._decision_cash())
+                    if not self.cfg.compound_sizing:
+                        powder = min(powder, float(self.cfg.book_eur))
+                    if float(self.cfg.max_book_eur or 0.0) > 0:
+                        powder = min(powder, float(self.cfg.max_book_eur))
+                    notional = float(row.get("notional_eur") or 0.0)
+                    if notional <= 0:
+                        notional = (powder * float(self.cfg.deploy_frac)) / free
                     pos = await self._open_lot(
                         base,
-                        float(row["notional_eur"]),
+                        notional,
                         px,
                         list(row.get("reasons") or []),
                         points=int(score.get("points") or 0),
@@ -985,9 +1042,18 @@ class IgnitionPaperRunner:
                                 "trail_pct": pos.trail_pct,
                             }
                         )
+                        held_set.add(base)
+                        free -= 1
+                    else:
+                        skipped.append({"base": base, "reason": "fill_failed"})
+                        logger.info(
+                            "ignition skip %s (venue fill failed); trying next ranked",
+                            base,
+                        )
             self.last_decision = {
                 **decision,
                 "applied": applied,
+                "skipped": skipped,
                 "execute": bool(execute),
                 "at": now.isoformat(),
             }
