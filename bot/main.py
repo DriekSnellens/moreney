@@ -70,6 +70,7 @@ from bot.live.momentum_short_weakest_runner import (
 )
 from bot.live.momentum_donchian_runner import get_donchian_desk_manager
 from bot.live.momentum_btc_rs_clip_runner import get_btc_rs_clip_desk_manager
+from bot.live.momentum_ignition_runner import get_ignition_desk_manager
 from bot.live.desk_allocator import live_snapshot
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
@@ -313,6 +314,17 @@ async def lifespan(_app: FastAPI):
                 logger.info("BTC+RS clip disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume BTC+RS clip")
+        try:
+            if bool(getattr(get_settings(), "momentum_ignition_enabled", False)):
+                ign = await get_ignition_desk_manager().resume_if_flagged()
+                if ign and ign.get("started"):
+                    logger.info("auto-resumed ignition PAPER sleeve")
+                elif ign:
+                    logger.warning("ignition paper auto-resume did not start: %s", ign)
+            else:
+                logger.info("ignition paper sleeve disabled — skip auto-resume")
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume ignition paper sleeve")
     yield
     if paper_runner is not None:
         try:
@@ -687,12 +699,18 @@ async def live_momentum_status() -> dict[str, Any]:
 
 @app.get("/live/momentum/pulse")
 async def live_momentum_pulse() -> dict[str, Any]:
-    """One round-trip for 1s dashboard marks: live clip + 15m only."""
+    """One round-trip for 1s dashboard marks: live clip + 15m + paper ignition."""
     core, clip = await asyncio.gather(
         get_momentum_desk_manager().status_fresh(),
         get_btc_rs_clip_desk_manager().refresh_live(),
         return_exceptions=True,
     )
+    ignition: dict[str, Any] | None = None
+    if bool(getattr(get_settings(), "momentum_ignition_enabled", False)):
+        try:
+            ignition = get_ignition_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            ignition = None
 
     def _ok(payload: object) -> dict[str, Any] | None:
         return payload if isinstance(payload, dict) else None
@@ -700,6 +718,7 @@ async def live_momentum_pulse() -> dict[str, Any]:
     return {
         "core": _ok(core),
         "clip": _ok(clip),
+        "ignition": ignition,
         "short_weakest": None,
         "donchian": None,
         "ts": time.time(),
@@ -967,6 +986,7 @@ async def live_momentum_dashboard(
     settings = get_settings()
     show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
     show_short_weakest = bool(getattr(settings, "momentum_short_weakest_enabled", False))
+    show_ignition = bool(getattr(settings, "momentum_ignition_enabled", False))
     volatile_status: dict[str, Any] | None = None
     volatile_ledger: list[dict[str, Any]] | None = None
     if show_volatile:
@@ -999,6 +1019,8 @@ async def live_momentum_dashboard(
     show_clip = bool(getattr(settings, "momentum_btc_rs_clip_enabled", False))
     clip_status: dict[str, Any] | None = None
     clip_ledger: list[dict[str, Any]] | None = None
+    ignition_status: dict[str, Any] | None = None
+    ignition_ledger: list[dict[str, Any]] | None = None
     if show_donchian:
         try:
             donchian_status = await get_donchian_desk_manager().status_fresh()
@@ -1025,6 +1047,19 @@ async def live_momentum_dashboard(
         clip_status = get_btc_rs_clip_desk_manager().status()
     except Exception:  # noqa: BLE001
         clip_status = None
+    if show_ignition:
+        try:
+            ignition_status = get_ignition_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            ignition_status = None
+        ignition_ledger = read_ledger_tail(
+            getattr(
+                settings,
+                "momentum_ignition_ledger_path",
+                "./data/momentum_ignition_ledger.jsonl",
+            ),
+            limit=400,
+        )
     allocator = None
     if donchian_status and isinstance(donchian_status.get("allocator"), dict) and donchian_status["allocator"].get("ok"):
         allocator = donchian_status["allocator"]
@@ -1052,6 +1087,10 @@ async def live_momentum_dashboard(
             settings, "momentum_btc_rs_clip_ledger_path", None
         ),
         clip_status=clip_status,
+        ignition_ledger_path=(
+            settings.momentum_ignition_ledger_path if show_ignition else None
+        ),
+        ignition_status=ignition_status if show_ignition else None,
     )
     return render_momentum_dashboard(
         status,
@@ -1074,6 +1113,9 @@ async def live_momentum_dashboard(
         btc_rs_clip=clip_status if show_clip else None,
         btc_rs_clip_ledger_rows=clip_ledger if show_clip else None,
         show_btc_rs_clip=show_clip,
+        ignition=ignition_status if show_ignition else None,
+        ignition_ledger_rows=ignition_ledger if show_ignition else None,
+        show_ignition=show_ignition,
     )
 
 
@@ -1084,6 +1126,7 @@ async def live_momentum_earnings() -> dict[str, Any]:
     show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
     show_short_weakest = bool(getattr(settings, "momentum_short_weakest_enabled", False))
     show_donchian = bool(getattr(settings, "momentum_donchian_enabled", False))
+    show_ignition = bool(getattr(settings, "momentum_ignition_enabled", False))
     core = get_momentum_desk_manager().status()
     volatile = None
     if show_volatile:
@@ -1108,6 +1151,12 @@ async def live_momentum_earnings() -> dict[str, Any]:
         clip_status = get_btc_rs_clip_desk_manager().status()
     except Exception:  # noqa: BLE001
         clip_status = None
+    ignition_status = None
+    if show_ignition:
+        try:
+            ignition_status = get_ignition_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            ignition_status = None
     earnings = compute_desk_earnings(
         core_ledger_path=settings.momentum_desk_ledger_path,
         volatile_ledger_path=(
@@ -1127,6 +1176,10 @@ async def live_momentum_earnings() -> dict[str, Any]:
             settings, "momentum_btc_rs_clip_ledger_path", None
         ),
         clip_status=clip_status,
+        ignition_ledger_path=(
+            settings.momentum_ignition_ledger_path if show_ignition else None
+        ),
+        ignition_status=ignition_status,
     )
     return earnings_as_dict(earnings)
 
@@ -1566,6 +1619,111 @@ async def live_momentum_btc_rs_clip_reconcile(
 ) -> dict[str, Any]:
     """Book clip lots that left Bitvavo outside the desk. No sell orders."""
     return await get_btc_rs_clip_desk_manager().reconcile()
+
+
+@app.get("/live/momentum/ignition/status")
+async def live_momentum_ignition_status() -> dict[str, Any]:
+    """Paper ignition sleeve status (never live orders)."""
+    return get_ignition_desk_manager().status()
+
+
+@app.get("/live/momentum/ignition/ledger")
+async def live_momentum_ignition_ledger(limit: int = 200) -> dict[str, Any]:
+    path = get_settings().momentum_ignition_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(
+            sum(float(r.get("net_eur") or 0) for r in exits), 2
+        ),
+        "path": str(path),
+        "paper_only": True,
+    }
+
+
+@app.post("/live/momentum/ignition/start")
+async def live_momentum_ignition_start(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_ignition_desk_manager().start()
+
+
+@app.post("/live/momentum/ignition/decide")
+async def live_momentum_ignition_decide(
+    execute: bool = True,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_ignition_desk_manager().decide(execute=bool(execute))
+
+
+@app.post("/live/momentum/ignition/stop")
+async def live_momentum_ignition_stop(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_ignition_desk_manager().stop()
+
+
+@app.post("/live/momentum/ignition/buy", response_model=None)
+async def live_momentum_ignition_buy(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    """Manual paper entry (never venue orders). Body: base, optional notional_eur/reason."""
+    body = await _volatile_request_body(request)
+    base = str(body.get("base") or "").strip().upper()
+    if not base:
+        result: dict[str, Any] = {"ok": False, "reason": "missing_base"}
+    else:
+        raw_n = body.get("notional_eur")
+        notional = None
+        if raw_n not in (None, ""):
+            try:
+                notional = float(raw_n)
+            except (TypeError, ValueError):
+                notional = None
+        reason = str(body.get("reason") or "operator_paper").strip() or "operator_paper"
+        result = await get_ignition_desk_manager().buy(
+            base, notional_eur=notional, reason=reason
+        )
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Ignition paper-koop geweigerd: {result.get('reason')}")
+        return _volatile_redirect(f"Ignition paper gekocht: {result.get('base')}")
+    return result
+
+
+@app.post("/live/momentum/ignition/sell", response_model=None)
+async def live_momentum_ignition_sell(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    holding_id = str(body.get("holding_id") or body.get("id") or "").strip()
+    if not holding_id:
+        result: dict[str, Any] = {"ok": False, "reason": "missing_holding_id"}
+    else:
+        result = await get_ignition_desk_manager().sell(holding_id)
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False:
+            return _volatile_redirect(f"Ignition verkoop geweigerd: {result.get('reason')}")
+        return _volatile_redirect(f"Ignition {result.get('base') or 'lot'} paper-gesloten")
+    return result
+
+
+@app.post("/live/momentum/ignition/sell-all", response_model=None)
+async def live_momentum_ignition_sell_all(
+    request: Request,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any] | RedirectResponse:
+    body = await _volatile_request_body(request)
+    result = await get_ignition_desk_manager().sell_all()
+    if _volatile_wants_redirect(body, request):
+        if result.get("ok") is False and not result.get("closed"):
+            return _volatile_redirect(f"Ignition leegmaken geweigerd: {result.get('reason')}")
+        return _volatile_redirect(f"Ignition paper geleegd ({result.get('closed', 0)} lots)")
+    return result
 
 
 @app.post("/live/momentum/donchian/start")

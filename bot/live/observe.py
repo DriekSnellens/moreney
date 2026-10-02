@@ -7,7 +7,12 @@ from decimal import Decimal
 from typing import Any
 
 from bot.core.config import Settings
-from bot.funding.multi_venue import fetch_live_venue_balances, parse_venue_list
+from bot.funding.multi_venue import (
+    fetch_live_venue_balances,
+    fetch_public_eur_prices,
+    parse_venue_list,
+    summarize_venue_snapshot,
+)
 from bot.funding.models import VenueBalanceSnapshot
 from bot.live.credentials import credential_report, probe_all_venues
 
@@ -44,11 +49,27 @@ class LiveObserveService:
                 "note": "LIVE_OBSERVE_ENABLED=false",
             }
 
+        quote = (getattr(self._settings, "paper_quote_asset", None) or "EUR").upper()
+        prices = await fetch_public_eur_prices()
         snaps: list[VenueBalanceSnapshot] = await fetch_live_venue_balances(
-            self._settings, venues
+            self._settings, venues, prices_eur=prices or None
         )
         online = sum(1 for s in snaps if s.online)
-        total_eur = sum((s.total_value_eur for s in snaps), Decimal("0"))
+        summaries = [
+            summarize_venue_snapshot(s, quote=quote) for s in snaps if s.online
+        ]
+        total_eur = sum(
+            (Decimal(str(s.get("total_value_eur") or 0)) for s in summaries),
+            Decimal("0"),
+        )
+        free_quote = sum(
+            (Decimal(str(s.get("free_quote_eur") or 0)) for s in summaries),
+            Decimal("0"),
+        )
+        inventory = sum(
+            (Decimal(str(s.get("inventory_mtm_eur") or 0)) for s in summaries),
+            Decimal("0"),
+        )
         payload: dict[str, Any] = {
             "enabled": True,
             "places_orders": False,
@@ -56,13 +77,19 @@ class LiveObserveService:
             "venues_requested": venues,
             "venues_online": online,
             "venues_total": len(snaps),
+            "quote_asset": quote,
             "total_value_eur": str(total_eur),
+            "free_quote_eur": str(free_quote),
+            "inventory_mtm_eur": str(inventory),
+            "prices_eur_count": len(prices),
+            "venue_summaries": summaries,
             "balances": [s.model_dump(mode="json") for s in snaps],
             "credentials": creds,
             "as_of": datetime.now(timezone.utc).isoformat(),
             "note": (
-                "Read-only live balances. No orders placed. "
-                "Configure per-venue API keys (withdraw permission must stay off)."
+                "Read-only live balances with public EUR marks for non-quote inventory. "
+                "No orders placed. free_quote_eur is deployable cash; "
+                "inventory_mtm_eur is crypto marked to EUR."
             ),
             "next_step": (
                 "Add missing venue keys from credentials.missing_venues, "

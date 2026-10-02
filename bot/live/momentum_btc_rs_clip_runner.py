@@ -236,16 +236,40 @@ class BtcRsClipPaperRunner:
                 continue
         self.equity_curve = curve[-_EQUITY_CURVE_MAX:]
 
+    def _mark_value(self) -> float:
+        """Position value at live marks (qty × mark), not entry notional."""
+        total = 0.0
+        for p in self.positions:
+            mark = float(self.marks.get(p.base) or p.entry_price or 0.0)
+            qty = float(p.qty or 0.0)
+            if qty > 0 and mark > 0:
+                total += qty * mark
+            else:
+                total += float(p.notional_eur or 0.0)
+        return total
+
     def _equity_now(self) -> float:
+        # Live: cash + mark-to-market so the hero/chart match Bitvavo bags.
+        if not self.dry_run:
+            return float(self.cash_eur) + self._mark_value()
         return self.cash_eur + self._deployed() + self._unrealized()
+
+    def _rebase_equity_curve(self, eq: float | None = None) -> None:
+        """Drop phantom book history after a venue cash sync / accounting fix."""
+        now_ms = round(time.time() * 1000)
+        level = round(float(self._equity_now() if eq is None else eq), 2)
+        self.equity_curve = [[now_ms, level]]
 
     def _sample_equity(self, *, persist: bool = False) -> None:
         eq = round(self._equity_now(), 2)
         now_ms = time.time() * 1000.0
         gap_ms = _EQUITY_CURVE_MIN_GAP_SEC * 1000.0
         if self.equity_curve:
-            last_t, _last_eq = self.equity_curve[-1]
-            if (now_ms - last_t) < gap_ms:
+            last_t, last_eq = self.equity_curve[-1]
+            # Large discontinuous jump (book→venue sync) — restart the sparkline.
+            if abs(eq - float(last_eq)) >= 500.0 and (now_ms - last_t) < 120_000:
+                self._rebase_equity_curve(eq)
+            elif (now_ms - last_t) < gap_ms:
                 self.equity_curve[-1] = [round(now_ms), eq]
             else:
                 self.equity_curve.append([round(now_ms), eq])
@@ -602,12 +626,39 @@ class BtcRsClipPaperRunner:
             return None
         return max(0.0, float(raw))
 
+    async def _sync_cash_from_venue(self) -> float | None:
+        """Align book cash with free venue EUR so dashboard equity/alloc match Bitvavo."""
+        venue_eur = await self._venue_quote_eur()
+        if venue_eur is None:
+            return None
+        # Clip owns leftover quote after other desks' reserved EUR.
+        synced = max(0.0, float(venue_eur) - float(self._reserved_quote_eur or 0.0))
+        prev = float(self.cash_eur)
+        if abs(prev - synced) >= 0.01:
+            logger.info(
+                "clip cash sync venue=%.2f reserved=%.2f book %.2f -> %.2f",
+                venue_eur,
+                self._reserved_quote_eur,
+                prev,
+                synced,
+            )
+            self.cash_eur = synced
+            if abs(prev - synced) >= 500.0:
+                self._rebase_equity_curve()
+        return synced
+
     async def _decision_cash(self) -> float:
+        await self._sync_cash_from_venue()
         cash = float(self.cash_eur)
         venue_eur = await self._venue_quote_eur()
         if venue_eur is None:
             return cash
         left = max(0.0, venue_eur - self._reserved_quote_eur)
+        # Leave fee/slip/rounding headroom so a full-balance taker buy
+        # does not 216-reject on Bitvavo (insufficient funds).
+        if left > 0:
+            buffer = max(15.0, left * float(self.cfg.fee_rt or 0.003))
+            left = max(0.0, left - buffer)
         return min(cash, left)
 
     async def _fill(
@@ -727,6 +778,8 @@ class BtcRsClipPaperRunner:
         self.positions = [p for p in self.positions if p is not pos]
         if pos.role in {"btc", "alt"}:
             self._arm_residual_pack(f"sold_{pos.role}")
+        if not pos.is_paper() and not self.dry_run:
+            await self._sync_cash_from_venue()
         self._ledger_append(
             {
                 "event": "exit",
@@ -892,7 +945,9 @@ class BtcRsClipPaperRunner:
         cost = fill.notional + fill.fee_eur
         if cost > self.cash_eur + 1.0:
             logger.warning("clip buy over cash %s cost=%.2f cash=%.2f", base, cost, self.cash_eur)
-        self.cash_eur = max(0.0, self.cash_eur - cost)
+        synced = await self._sync_cash_from_venue()
+        if synced is None:
+            self.cash_eur = max(0.0, self.cash_eur - cost)
         venue = self._primary_venue()
         pos = ClipPosition(
             base=base,
@@ -1030,7 +1085,14 @@ class BtcRsClipPaperRunner:
                         applied.append(
                             {"action": "entry", "base": pos.base, "notional_eur": pos.notional_eur}
                         )
-                if decision.get("rebalance_due") or applied:
+                planned = bool(
+                    decision.get("entries")
+                    or decision.get("exits")
+                    or decision.get("trims")
+                )
+                # Advance the weekly clock only after a successful action, or
+                # when due with nothing to do. Keep it due if planned fills failed.
+                if applied or (decision.get("rebalance_due") and not planned):
                     self.last_rebalance_ms = int(now.timestamp() * 1000)
             self.last_decision = {
                 **decision,
@@ -1128,6 +1190,7 @@ class BtcRsClipPaperRunner:
             "reserved_quote_eur": round(self._reserved_quote_eur, 2),
             "book_eur": self.cfg.book_eur,
             "cash_eur": round(self.cash_eur, 2),
+            "venue_cash_eur": round(self.cash_eur, 2) if live else None,
             "deployed_eur": round(self._deployed(), 2),
             "equity_eur": round(equity, 2),
             "unrealized_net_eur": round(self._unrealized(), 2),
@@ -1304,6 +1367,12 @@ class BtcRsClipDeskManager:
                     await self._runner.reconcile_external_inventory()
                 except Exception:  # noqa: BLE001
                     logger.exception("clip: reconcile for status failed")
+                try:
+                    synced = await self._runner._sync_cash_from_venue()
+                    if synced is not None:
+                        self._runner._sample_equity(persist=True)
+                except Exception:  # noqa: BLE001
+                    logger.exception("clip: cash sync for status failed")
         return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:
