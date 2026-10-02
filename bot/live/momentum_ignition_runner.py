@@ -1151,6 +1151,15 @@ class IgnitionDeskManager:
             logger.info("ignition live: dropped %s paper lots before venue orders", dropped)
             synced = await self._runner._sync_cash_from_venue()  # noqa: SLF001
             logger.info("ignition live: venue cash sync -> %s", synced)
+            ld = dict(self._runner.last_decision or {})
+            cap = str(ld.get("caption") or "")
+            if "PAPER" in cap.upper() or not cap:
+                ld["caption"] = (
+                    f"Ignition LIVE: desk-universe early-signal + trail "
+                    f"{cfg.trail_pct:.0%}. OKX fills armed."
+                )
+                self._runner.last_decision = ld
+                self._runner._save_state()  # noqa: SLF001
         self._task = asyncio.create_task(
             self._runner.run(lambda: self._stop), name="momentum-ignition"
         )
