@@ -127,6 +127,9 @@ class IgnitionPaperRunner:
         self._feed = CandleFeed()
         self._decide_lock = asyncio.Lock()
         self._last_curve_save = 0.0
+        # Last read of target-venue free quote vs crypto MTM (not paper equity).
+        self._venue_truth: dict[str, Any] = {}
+        self._venue_truth_ts = 0.0
         self._load_state()
 
     def _desk(self) -> str:
@@ -239,7 +242,115 @@ class IgnitionPaperRunner:
             if px and float(px) > 0:
                 self.marks[base] = float(px)
                 self.mark_ts[base] = time.time()
+        await self._refresh_venue_truth()
         self._sample_equity()
+
+    async def _refresh_venue_truth(self, *, force: bool = False) -> dict[str, Any]:
+        """Mark target-venue balances so paper equity is not confused with live powder."""
+        now = time.time()
+        if not force and self._venue_truth and (now - self._venue_truth_ts) < 20.0:
+            return dict(self._venue_truth)
+        venue = self._primary_venue()
+        truth: dict[str, Any] = {
+            "venue": venue,
+            "online": False,
+            "free_quote_eur": None,
+            "inventory_mtm_eur": None,
+            "total_value_eur": None,
+            "deployable_live_eur": None,
+            "top_inventory": [],
+            "inventory_advice": "unknown",
+            "inventory_advice_nl": "",
+            "error": None,
+        }
+        try:
+            from bot.funding.multi_venue import (
+                fetch_live_venue_balances,
+                fetch_public_eur_prices,
+                summarize_venue_snapshot,
+            )
+
+            settings = get_settings()
+            prices = await fetch_public_eur_prices()
+            snaps = await fetch_live_venue_balances(
+                settings, [venue], prices_eur=prices or None
+            )
+            snap = snaps[0] if snaps else None
+            if snap is None:
+                truth["error"] = "no_snapshot"
+            elif not snap.online:
+                truth["error"] = snap.error or "offline"
+            else:
+                quote = (getattr(settings, "paper_quote_asset", None) or "EUR").upper()
+                summary = summarize_venue_snapshot(snap, quote=quote, top_n=3)
+                free_q = float(summary["free_quote_eur"])
+                inv = float(summary["inventory_mtm_eur"])
+                total = float(summary["total_value_eur"])
+                top = list(summary.get("top_inventory") or [])
+                # Ignition live buys need quote. Inventory MTM is not dry powder.
+                min_clip = max(25.0, float(self.cfg.min_notional_eur or 25.0))
+                if free_q >= min_clip:
+                    advice = "powder_ready"
+                    advice_nl = (
+                        f"{venue.upper()} heeft €{free_q:,.0f} vrije quote — "
+                        "genoeg dry powder voor ignition (als live pad aanstaat)."
+                    )
+                elif inv >= min_clip:
+                    top_asset = str((top[0] or {}).get("asset") or "alt") if top else "alt"
+                    top_val = float((top[0] or {}).get("value_eur") or inv) if top else inv
+                    advice = "sell_inventory_for_powder"
+                    advice_nl = (
+                        f"{venue.upper()} free quote is slechts €{free_q:.2f}; "
+                        f"~€{inv:,.0f} zit in inventory (o.a. {top_asset} ~€{top_val:,.0f}). "
+                        "Voor ignition-engine: verkopen naar EUR geeft deployable powder; "
+                        "aanhouden past alleen als residual/RS-sleeve die bag bewust houdt. "
+                        "Ignition plaatst nog geen live orders — geen auto-sell."
+                    )
+                else:
+                    advice = "thin_venue"
+                    advice_nl = (
+                        f"{venue.upper()} heeft nauwelijks quote én weinig gemarkeerde inventory "
+                        f"(totaal ~€{total:,.0f})."
+                    )
+                truth.update(
+                    {
+                        "online": True,
+                        "free_quote_eur": round(free_q, 2),
+                        "inventory_mtm_eur": round(inv, 2),
+                        "total_value_eur": round(total, 2),
+                        "deployable_live_eur": round(free_q, 2),
+                        "top_inventory": top,
+                        "inventory_advice": advice,
+                        "inventory_advice_nl": advice_nl,
+                        "unmarked_assets": int(summary.get("unmarked_assets") or 0),
+                        "error": None,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ignition venue truth refresh failed: %s", type(exc).__name__)
+            truth["error"] = type(exc).__name__
+        self._venue_truth = truth
+        self._venue_truth_ts = now
+        return dict(truth)
+
+    def _venue_caption_suffix(self) -> str:
+        truth = self._venue_truth or {}
+        venue = str(truth.get("venue") or self._primary_venue()).upper()
+        if not truth.get("online"):
+            return f" Target {venue} (paper)."
+        free_q = truth.get("free_quote_eur")
+        inv = truth.get("inventory_mtm_eur")
+        advice = str(truth.get("inventory_advice") or "")
+        bits = [f"Target {venue} (paper)"]
+        if free_q is not None:
+            bits.append(f"live vrij €{float(free_q):.2f}")
+        if inv is not None:
+            bits.append(f"inventory MTM €{float(inv):,.0f}")
+        if advice == "sell_inventory_for_powder":
+            bits.append("powder=verkopen inventory→EUR")
+        elif advice == "powder_ready":
+            bits.append("live powder ok")
+        return ". " + " · ".join(bits) + "."
 
     async def _load_ohlc(self) -> dict[str, list[list[float]]]:
         bases = ("BTC", *self.cfg.universe)
@@ -582,9 +693,15 @@ class IgnitionPaperRunner:
                 .strip()
             )
         venue = self._primary_venue()
-        caption = str(last.get("caption") or "")
-        if caption and "OKX" not in caption.upper():
-            caption = caption.rstrip(".") + f". Target {venue.upper()} (paper)."
+        truth = dict(self._venue_truth or {})
+        caption = str(last.get("caption") or "Ignition PAPER")
+        # Drop prior venue-truth suffixes so we never stack them.
+        for sep in (" Target ", " — "):
+            if sep in caption:
+                caption = caption.split(sep, 1)[0]
+        caption = caption.rstrip(".") + self._venue_caption_suffix()
+        if truth.get("inventory_advice_nl"):
+            caption = caption.rstrip(".") + " — " + str(truth["inventory_advice_nl"])
         return {
             "desk": self._desk(),
             "mode": "ignition_paper",
@@ -602,6 +719,14 @@ class IgnitionPaperRunner:
             "unrealized_net_eur": round(self._unrealized(), 2),
             "realized_total_eur": round(self.realized_total_eur, 2),
             "day_realized_eur": round(self.day_realized_eur, 2),
+            "venue_cash_eur": truth.get("free_quote_eur"),
+            "venue_inventory_eur": truth.get("inventory_mtm_eur"),
+            "venue_total_eur": truth.get("total_value_eur"),
+            "deployable_live_eur": truth.get("deployable_live_eur"),
+            "venue_online": bool(truth.get("online")),
+            "venue_top_inventory": list(truth.get("top_inventory") or []),
+            "inventory_advice": truth.get("inventory_advice"),
+            "inventory_advice_nl": truth.get("inventory_advice_nl") or "",
             "equity_curve": [
                 [round(float(t), 1), round(float(eq), 2)] for t, eq in self.equity_curve
             ],

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
+import httpx
 from pydantic import SecretStr
 
 from bot.core.config import Settings
@@ -18,6 +19,93 @@ from bot.funding.models import VenueAssetBalance, VenueBalanceSnapshot
 logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
+_BITVAVO_PUBLIC = "https://api.bitvavo.com/v2"
+
+
+async def fetch_public_eur_prices(
+    *,
+    base_url: str = _BITVAVO_PUBLIC,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Decimal]:
+    """Public Bitvavo last prices for *-EUR markets (marks live inventory)."""
+    owns = client is None
+    http = client or httpx.AsyncClient(timeout=8.0)
+    out: dict[str, Decimal] = {}
+    try:
+        resp = await http.get(f"{base_url.rstrip('/')}/ticker/price")
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload if isinstance(payload, list) else [payload]
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            market = str(row.get("market") or "")
+            if not market.endswith("-EUR"):
+                continue
+            try:
+                price = Decimal(str(row.get("price") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+            if price > 0:
+                out[market[:-4].upper()] = price
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("public EUR price fetch failed: %s", type(exc).__name__)
+    finally:
+        if owns:
+            try:
+                await http.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
+def summarize_venue_snapshot(
+    snap: VenueBalanceSnapshot,
+    *,
+    quote: str = "EUR",
+    top_n: int = 5,
+) -> dict[str, Any]:
+    """Split free quote vs marked inventory so dust EUR is not mistaken for bag size."""
+    quote_u = quote.upper()
+    free_quote = _ZERO
+    locked_quote = _ZERO
+    inventory = _ZERO
+    unmarked = 0
+    tops: list[dict[str, Any]] = []
+    for bal in snap.balances or []:
+        asset = str(bal.asset or "").upper()
+        if not asset:
+            continue
+        if asset == quote_u:
+            free_quote += Decimal(str(bal.available or 0))
+            locked_quote += Decimal(str(bal.locked or 0))
+            continue
+        value = bal.value_eur
+        if value is None:
+            if Decimal(str(bal.total or 0)) > 0:
+                unmarked += 1
+            continue
+        inventory += value
+        tops.append(
+            {
+                "asset": asset,
+                "total": str(bal.total),
+                "value_eur": str(value),
+            }
+        )
+    tops.sort(key=lambda r: Decimal(str(r["value_eur"])), reverse=True)
+    total = free_quote + locked_quote + inventory
+    return {
+        "venue": snap.venue,
+        "online": bool(snap.online),
+        "error": snap.error,
+        "free_quote_eur": str(free_quote),
+        "locked_quote_eur": str(locked_quote),
+        "inventory_mtm_eur": str(inventory),
+        "total_value_eur": str(total),
+        "unmarked_assets": unmarked,
+        "top_inventory": tops[: max(0, int(top_n))],
+    }
 
 
 def parse_venue_list(raw: str) -> list[str]:

@@ -17,6 +17,7 @@ from bot.funding.models import (
 )
 from bot.funding.multi_venue import (
     fetch_live_venue_balances,
+    fetch_public_eur_prices,
     is_paper_mode,
     ledger_to_venue_snapshots,
     parse_target_weights,
@@ -153,7 +154,10 @@ class FundingPortfolioService:
             ]
 
         # Live: read-only balance fetch; never enable trading.
-        return await fetch_live_venue_balances(self._settings, venues)
+        prices = await fetch_public_eur_prices()
+        return await fetch_live_venue_balances(
+            self._settings, venues, prices_eur=prices or None
+        )
 
     async def get_balances_for_venue(self, venue: str) -> VenueBalanceSnapshot | None:
         key = venue.strip().lower()

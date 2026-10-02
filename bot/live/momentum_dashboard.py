@@ -2303,6 +2303,10 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
             '<input type="hidden" name="redirect" value="1">'
             '<button type="submit" class="btn danger">Sluit paper</button></form></div>'
         )
+    venue_cash = st.get("venue_cash_eur")
+    venue_inv = st.get("venue_inventory_eur")
+    advice = str(st.get("inventory_advice") or "")
+    powder_label = "OKX vrij" if venue.lower() == "okx" else f"{venue.upper()} vrij"
     return (
         f'<section class="panel mix-board paper-ign" id="paper-ign" data-live="paper-ign">'
         f'<div class="card-head"><h2>Paper · Ignition</h2>{pill}'
@@ -2310,17 +2314,19 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         f'<span class="dot"></span>{gate}</span></div>'
         f'<p class="mix-why" data-live="ign-caption">{escape(caption)}</p>'
         f'<div class="clip-kpis">'
-        f'<div><span>Equity</span><strong data-k="ign-eq">{_fmt_eur(st.get("equity_eur"), signed=False)}</strong></div>'
-        f'<div><span>Open</span><strong data-k="ign-open" class="{_cls(st.get("unrealized_net_eur"))}">'
-        f'{_fmt_eur(st.get("unrealized_net_eur"))}</strong></div>'
+        f'<div><span>Paper equity</span><strong data-k="ign-eq">{_fmt_eur(st.get("equity_eur"), signed=False)}</strong></div>'
+        f'<div><span>{escape(powder_label)}</span><strong data-k="ign-venue-cash">'
+        f'{_fmt_eur(venue_cash, signed=False) if venue_cash is not None else "—"}</strong></div>'
+        f'<div><span>Inventory MTM</span><strong data-k="ign-venue-inv">'
+        f'{_fmt_eur(venue_inv, signed=False) if venue_inv is not None else "—"}</strong></div>'
         f'<div><span>Gerealiseerd</span><strong data-k="ign-real" class="{_cls(st.get("realized_total_eur"))}">'
         f'{_fmt_eur(st.get("realized_total_eur"))}</strong></div>'
-        f'<div><span>Boek</span><strong data-k="ign-book">{_fmt_eur(st.get("book_eur") or cfg.get("book_eur"), signed=False)}</strong></div>'
         f"</div>"
         f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
         f'Want <strong data-k="ign-want">{escape(str(st.get("want") or "—"))}</strong> · '
         f'trail {escape(trail_s)} · '
         f'target <strong data-k="ign-venue">{escape(venue.upper())}</strong> · '
+        f'advice <strong data-k="ign-advice">{escape(advice or "—")}</strong> · '
         f'next <strong data-live="ign-next">{_ts(st.get("next_decision"))}</strong> · '
         f"paper (geen live orders).</p>"
         f"{pos_html}{actions}</section>"
@@ -3625,9 +3631,13 @@ _LIVE_MARKS_JS = r"""
     const root = document.querySelector('[data-live="paper-ign"]');
     if (!root || !st) return;
     setText(root, "ign-eq", fmtEur(st.equity_eur, false));
-    setText(root, "ign-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
     setText(root, "ign-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
-    setText(root, "ign-book", fmtEur(st.book_eur || (st.config || {}).book_eur, false));
+    const vCash = root.querySelector('[data-k="ign-venue-cash"]');
+    if (vCash) vCash.textContent = (st.venue_cash_eur != null) ? fmtEur(st.venue_cash_eur, false) : "—";
+    const vInv = root.querySelector('[data-k="ign-venue-inv"]');
+    if (vInv) vInv.textContent = (st.venue_inventory_eur != null) ? fmtEur(st.venue_inventory_eur, false) : "—";
+    const adviceEl = root.querySelector('[data-k="ign-advice"]');
+    if (adviceEl) adviceEl.textContent = st.inventory_advice || "—";
     const wantEl = root.querySelector('[data-k="ign-want"]');
     if (wantEl) wantEl.textContent = st.want || "—";
     const cap = root.querySelector('[data-live="ign-caption"]');

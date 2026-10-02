@@ -163,6 +163,103 @@ async def test_live_balance_success_path(monkeypatch: pytest.MonkeyPatch) -> Non
     assert eur.total == Decimal("4100")
 
 
+@pytest.mark.asyncio
+async def test_live_balance_marks_non_quote_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bot.funding.multi_venue import summarize_venue_snapshot
+
+    settings = Settings(execution_mode=ExecutionMode.LIVE, funding_venues="okx")
+
+    class OkClient:
+        async def get_balances(self) -> PortfolioSnapshot:
+            return PortfolioSnapshot(
+                balances=[
+                    Balance(asset="EUR", free=Decimal("0.90"), locked=Decimal("0")),
+                    Balance(asset="SUI", free=Decimal("1695"), locked=Decimal("0")),
+                    Balance(asset="FET", free=Decimal("10"), locked=Decimal("0")),
+                ],
+                equity_usd=Decimal("1"),
+            )
+
+        async def close(self) -> None:
+            return None
+
+    def factory(_settings: Settings, *, enable_trading: bool = False) -> OkClient:
+        return OkClient()
+
+    monkeypatch.setenv("OKX_API_KEY", "x")
+    monkeypatch.setenv("OKX_API_SECRET", "y")
+    monkeypatch.setenv("OKX_API_PASSPHRASE", "z")
+    prices = {"SUI": Decimal("1.05"), "FET": Decimal("0.20")}
+    snaps = await fetch_live_venue_balances(
+        settings, ["okx"], client_factory=factory, prices_eur=prices
+    )
+    assert snaps[0].online is True
+    sui = next(b for b in snaps[0].balances if b.asset == "SUI")
+    assert sui.value_eur == Decimal("1695") * Decimal("1.05")
+    summary = summarize_venue_snapshot(snaps[0], quote="EUR")
+    assert Decimal(summary["free_quote_eur"]) == Decimal("0.90")
+    assert Decimal(summary["inventory_mtm_eur"]) == (
+        Decimal("1695") * Decimal("1.05") + Decimal("10") * Decimal("0.20")
+    )
+    assert Decimal(summary["total_value_eur"]) == (
+        Decimal("0.90") + Decimal(summary["inventory_mtm_eur"])
+    )
+    assert summary["top_inventory"][0]["asset"] == "SUI"
+
+
+@pytest.mark.asyncio
+async def test_observe_snapshot_passes_public_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bot.live.observe import LiveObserveService
+
+    settings = Settings(
+        execution_mode=ExecutionMode.LIVE,
+        live_observe_enabled=True,
+        live_observe_venues="okx",
+        funding_venues="okx",
+    )
+    monkeypatch.setenv("OKX_API_KEY", "x")
+    monkeypatch.setenv("OKX_API_SECRET", "y")
+    monkeypatch.setenv("OKX_API_PASSPHRASE", "z")
+
+    class OkClient:
+        async def get_balances(self) -> PortfolioSnapshot:
+            return PortfolioSnapshot(
+                balances=[
+                    Balance(asset="EUR", free=Decimal("1"), locked=Decimal("0")),
+                    Balance(asset="SUI", free=Decimal("100"), locked=Decimal("0")),
+                ],
+                equity_usd=Decimal("1"),
+            )
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_prices() -> dict[str, Decimal]:
+        return {"SUI": Decimal("2")}
+
+    def factory(_settings: Settings, *, enable_trading: bool = False) -> OkClient:
+        return OkClient()
+
+    async def fake_fetch(settings, venues, **kwargs):  # noqa: ANN001
+        return await fetch_live_venue_balances(
+            settings, venues, client_factory=factory, **kwargs
+        )
+
+    monkeypatch.setattr("bot.live.observe.fetch_public_eur_prices", fake_prices)
+    monkeypatch.setattr("bot.live.observe.fetch_live_venue_balances", fake_fetch)
+    svc = LiveObserveService(settings)
+    payload = await svc.snapshot()
+    assert Decimal(payload["free_quote_eur"]) == Decimal("1")
+    assert Decimal(payload["inventory_mtm_eur"]) == Decimal("200")
+    assert Decimal(payload["total_value_eur"]) == Decimal("201")
+    okx = next(v for v in payload["venue_summaries"] if v["venue"] == "okx")
+    assert okx["top_inventory"][0]["asset"] == "SUI"
+
+
 def test_deposit_and_withdrawal_tracking(tmp_path: Path) -> None:
     store = FundingEventStore(tmp_path / "f.json")
     dep = store.record_deposit(venue="bitvavo", amount="5000", external_reference="SEPA-1")

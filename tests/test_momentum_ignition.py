@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
 
 from bot.live.momentum_ignition import (
     IgnitionConfig,
@@ -209,3 +213,56 @@ def test_no_per_coin_hardcodes_in_ignition_modules() -> None:
         text = path.read_text(encoding="utf-8")
         for needle in banned:
             assert needle not in text, f"{path} hardcodes {needle}"
+
+
+@pytest.mark.asyncio
+async def test_ignition_venue_truth_flags_inventory_not_powder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bot.core.config import Settings
+    from bot.core.models import Balance, PortfolioSnapshot
+    from bot.funding.multi_venue import portfolio_snapshot_to_venue
+    from bot.live.momentum_ignition_runner import IgnitionPaperRunner, config_from_settings
+
+    cfg = config_from_settings(Settings())
+    runner = IgnitionPaperRunner(
+        cfg,
+        state_path=str(tmp_path / "ign.json"),
+        ledger_path=str(tmp_path / "ign.jsonl"),
+        venues=("okx",),
+    )
+
+    async def fake_prices() -> dict[str, Decimal]:
+        return {"ALT": Decimal("1.80")}
+
+    async def fake_balances(settings, venues, **kwargs):  # noqa: ANN001
+        prices = kwargs.get("prices_eur") or {}
+        return [
+            portfolio_snapshot_to_venue(
+                venues[0],
+                PortfolioSnapshot(
+                    balances=[
+                        Balance(asset="EUR", free=Decimal("0.90"), locked=Decimal("0")),
+                        Balance(asset="ALT", free=Decimal("1000"), locked=Decimal("0")),
+                    ],
+                    equity_usd=Decimal("1"),
+                ),
+                prices_eur=prices,
+            )
+        ]
+
+    monkeypatch.setattr("bot.funding.multi_venue.fetch_public_eur_prices", fake_prices)
+    monkeypatch.setattr(
+        "bot.funding.multi_venue.fetch_live_venue_balances", fake_balances
+    )
+    truth = await runner._refresh_venue_truth(force=True)
+    assert truth["online"] is True
+    assert truth["free_quote_eur"] == 0.9
+    assert truth["inventory_mtm_eur"] == 1800.0
+    assert truth["inventory_advice"] == "sell_inventory_for_powder"
+    st = runner.status()
+    assert st["venue_cash_eur"] == 0.9
+    assert st["venue_inventory_eur"] == 1800.0
+    assert st["deployable_live_eur"] == 0.9
+    assert "verkopen" in (st.get("inventory_advice_nl") or "").lower()
+    assert "paper" in (st.get("live_caption") or "").lower()
