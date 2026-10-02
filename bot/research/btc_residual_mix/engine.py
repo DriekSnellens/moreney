@@ -9,7 +9,7 @@ Wet = next-open Bitvavo taker. Not armed live. No per-coin branches.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -49,7 +49,22 @@ def pick_residual(
     n_alts: int = 1,
     require_alt_sma: bool = False,
     sma_n: int = 50,
+    # Forward-week setup filters (0 = off). Coin-agnostic.
+    max_close_over_high: float = 0.0,
+    high_lookback: int = 20,
+    min_pullback_from_high: float = 0.0,
+    max_rsi: float = 0.0,
+    rsi_n: int = 14,
+    max_ext_above_sma: float = 0.0,
+    ext_sma_n: int = 20,
+    rank_by: str = "excess",
 ) -> dict[str, Any]:
+    """Rank residual alts for the weekly sleeve.
+
+    Default ranks by trailing RS excess (backward). Optional filters / rank
+    modes bias toward setups that still have room for the *coming* week
+    instead of buying the already-extended winner.
+    """
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
     ranked: list[dict[str, Any]] = []
     for base in universe:
@@ -59,13 +74,51 @@ def pick_residual(
         qv = quote_vol(rows)
         if xs is None or qv < min_qvol_eur:
             continue
+        last_px = float(cl[-1]) if cl else 0.0
         if require_alt_sma:
             s = sma(cl, sma_n)
-            last_px = float(cl[-1]) if cl else 0.0
             if s is None or last_px <= s:
                 continue
-        ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
-    ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
+        hi_n = max(5, int(high_lookback))
+        highs = [float(r[2]) for r in rows[-hi_n:] if float(r[2]) > 0]
+        hh = max(highs) if highs else 0.0
+        close_over_high = (last_px / hh) if hh > 0 and last_px > 0 else 1.0
+        dist_high = 1.0 - close_over_high
+        # e.g. max_close_over_high=0.95 → reject if within 5% of the local high.
+        if max_close_over_high > 0 and close_over_high > float(max_close_over_high):
+            continue
+        if min_pullback_from_high > 0 and dist_high < float(min_pullback_from_high):
+            continue
+        rsi = _rsi(cl, int(rsi_n))
+        if max_rsi > 0 and rsi is not None and rsi > float(max_rsi):
+            continue
+        s_ext = sma(cl, int(ext_sma_n))
+        ext = (last_px / s_ext - 1.0) if s_ext and s_ext > 0 else 0.0
+        if max_ext_above_sma > 0 and ext > float(max_ext_above_sma):
+            continue
+        fresh = 0.0
+        if len(cl) >= lookback_days + skip_days + 1 and len(btc_c) >= lookback_days + skip_days + 1:
+            xs_short = rs_excess(cl, btc_c, lb=min(3, lookback_days), skip=skip_days)
+            if xs_short is not None and abs(xs) > 1e-9:
+                fresh = max(-1.0, min(2.0, float(xs_short) / abs(float(xs))))
+        pull_bonus = dist_high
+        rsi_pen = max(0.0, ((rsi or 50.0) - 55.0) / 45.0)
+        setup = float(xs) + 0.5 * pull_bonus + 0.15 * fresh - 0.25 * rsi_pen
+        ranked.append(
+            {
+                "base": base,
+                "excess": xs,
+                "qvol": round(qv, 0),
+                "dist_high": round(dist_high, 4),
+                "close_over_high": round(close_over_high, 4),
+                "rsi": None if rsi is None else round(float(rsi), 1),
+                "ext_sma": round(ext, 4),
+                "fresh": round(fresh, 3),
+                "setup": round(setup, 4),
+            }
+        )
+    key = "setup" if str(rank_by).lower() == "setup" else "excess"
+    ranked.sort(key=lambda r: float(r.get(key) or 0.0), reverse=True)
     alts = [
         str(r["base"])
         for r in ranked
@@ -73,6 +126,23 @@ def pick_residual(
     ][: max(1, int(n_alts))]
     want = alts[0] if alts else "BTC"
     return {"want": want, "wants": alts, "ranked": ranked[:8]}
+
+
+def _rsi(closes: Sequence[float], n: int = 14) -> float | None:
+    if len(closes) < n + 1:
+        return None
+    gains = 0.0
+    losses = 0.0
+    for i in range(-n, 0):
+        dlt = float(closes[i]) - float(closes[i - 1])
+        if dlt >= 0:
+            gains += dlt
+        else:
+            losses -= dlt
+    if losses <= 0:
+        return 100.0
+    rs = (gains / n) / (losses / n)
+    return 100.0 - 100.0 / (1.0 + rs)
 
 
 def apply_alt_allow(
@@ -269,6 +339,8 @@ def run_btc_residual(
     alt_allow: Mapping[str, set[str]] | None = None,
     alt_allow_mode: str = "gate",
     cash_when_no_alt: bool = False,
+    pick_fn: Callable[..., dict[str, Any]] | None = None,
+    pick_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -276,6 +348,8 @@ def run_btc_residual(
     (SMA50 cash if flatten is all/regime).
     """
     name = strategy or f"btc{int(btc_frac * 100)}_res_f{flatten}"
+    picker = pick_fn or pick_residual
+    pick_kw = dict(pick_kwargs or {})
     dates = [bar_date(r) for r in (ohlc.get("BTC") or [])]
     book = Book(book_eur)
     pending: list[Order] = []
@@ -325,7 +399,7 @@ def run_btc_residual(
         risk_on = s50 is not None and last > s50
         due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
         if due and len(btc_c) >= need:
-            pick = pick_residual(
+            pick = picker(
                 ohlc,
                 date,
                 excess_floor=excess_floor,
@@ -334,6 +408,7 @@ def run_btc_residual(
                 n_alts=n_alts,
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
+                **pick_kw,
             )
             if alt_allow is not None and date in alt_allow:
                 pick = dict(pick)
