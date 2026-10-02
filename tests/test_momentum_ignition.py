@@ -61,7 +61,7 @@ def test_score_ignition_detects_early_signal() -> None:
     for r in base[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     btc = _bars(40, 100.0, step=0.5, vol=50_000.0)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         min_median_qvol_eur=1_000.0,
         min_day_qvol_eur=1_000.0,
@@ -112,7 +112,7 @@ def test_coil_signal_enters_when_classic_misses() -> None:
 
     coil = _coil_bars()
     btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         universe=("ALT",),
         min_median_qvol_eur=100.0,
@@ -170,7 +170,7 @@ def test_classic_preferred_over_coil_when_both_fire() -> None:
     for r in classic[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     coil = _coil_bars()
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         universe=("ETH", "ALT"),
         min_median_qvol_eur=100.0,
@@ -202,7 +202,7 @@ def test_evaluate_enters_top_signal_when_risk_on() -> None:
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     quiet = _bars(60, 5.0, step=0.0, vol=1_000.0)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         universe=("ETH", "ADA"),
         min_median_qvol_eur=500.0,
         min_day_qvol_eur=500.0,
@@ -235,7 +235,7 @@ def test_compound_sizing_uses_cash_above_book() -> None:
     eth[-1][5] = 30_000.0
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         universe=("ETH",),
         min_median_qvol_eur=100.0,
         min_day_qvol_eur=100.0,
@@ -266,7 +266,7 @@ def test_two_slots_split_powder_across_entries() -> None:
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     coil = _coil_bars()
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         universe=("ETH", "ALT"),
         min_median_qvol_eur=100.0,
@@ -301,7 +301,7 @@ def test_btc_below_sma_blocks_entries() -> None:
     eth[-1][1] = close / 1.12
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         coil_entry_enabled=True,
         universe=("ETH",),
@@ -330,7 +330,7 @@ def test_slots_full_blocks_second_entry() -> None:
     eth[-1][1] = close / 1.10
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         coil_entry_enabled=True,
         universe=("ETH",),
@@ -369,6 +369,7 @@ def test_top_day_picks_strongest_liquid_day_ret() -> None:
         time_max_days=2.0,
         require_btc_sma=True,
         min_points=1,
+        requires_alphai_pick=True,
     )
     out = evaluate_ignition(
         {"BTC": btc, "WEAK": weak, "STRONG": strong},
@@ -376,13 +377,46 @@ def test_top_day_picks_strongest_liquid_day_ret() -> None:
         held=[],
         cash_eur=2_000.0,
         now=datetime(2026, 6, 1, tzinfo=UTC),
+        alphai_picks=("WEAK", "STRONG"),
     )
     assert out["entry_mode"] == "top_day"
     assert out["entries"]
     assert out["entries"][0]["base"] == "STRONG"
     assert out["entries"][0]["entry_path"] == "top_day"
     assert out["entries"][0]["trail_pct"] == 0.08
+    assert "alphai_pick" in out["entries"][0]["reasons"]
     assert out["want"] == "STRONG"
+
+
+def test_top_day_alphai_gate_skips_raw_day_ret_leader() -> None:
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    hot = _bars(60, 10.0, step=0.02, vol=3_000.0)
+    pick = _bars(60, 5.0, step=0.01, vol=3_000.0)
+    for rows, boost in ((hot, 0.20), (pick, 0.08)):
+        close = float(rows[-1][4])
+        rows[-1][1] = close / (1.0 + boost)
+        rows[-1][5] = 30_000.0
+    cfg = IgnitionConfig(
+        entry_mode="top_day",
+        universe=("HOT", "PICK"),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        requires_alphai_pick=True,
+        require_btc_sma=True,
+        min_points=1,
+    )
+    out = evaluate_ignition(
+        {"BTC": btc, "HOT": hot, "PICK": pick},
+        cfg,
+        held=[],
+        cash_eur=2_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+        alphai_picks=("PICK",),
+    )
+    assert out["ranked"][0]["base"] == "HOT"
+    assert out["want"] == "PICK"
+    assert out["entries"][0]["base"] == "PICK"
+    assert any(r.get("reason") == "alphai_pick_required" for r in out["rejected"])
 
 
 def test_time_exit_fires_after_max_days() -> None:
@@ -397,7 +431,7 @@ def test_time_exit_fires_after_max_days() -> None:
         entry_path="top_day",
         trail_pct=0.08,
     )
-    cfg = IgnitionConfig(trail_pct=0.08, time_max_days=2.0, trail_ratchet_arm_pct=0.0)
+    cfg = IgnitionConfig(requires_alphai_pick=False, trail_pct=0.08, time_max_days=2.0, trail_ratchet_arm_pct=0.0)
     # Still inside window → no time exit (mark above trail).
     early = trail_exit(
         pos, 108.0, cfg, now=datetime(2026, 6, 2, 12, tzinfo=UTC)
@@ -420,7 +454,7 @@ def test_trail_exit_fires_after_giveback() -> None:
         opened_ms=1,
         peak_px=120.0,
     )
-    cfg = IgnitionConfig(trail_pct=0.12, trail_ratchet_arm_pct=0.0, time_max_days=0.0)
+    cfg = IgnitionConfig(requires_alphai_pick=False, trail_pct=0.12, trail_ratchet_arm_pct=0.0, time_max_days=0.0)
     # 12% off peak 120 → stop at 105.6.
     assert trail_exit(pos, 106.0, cfg) is None
     hit = trail_exit(pos, 105.6, cfg)
@@ -439,7 +473,7 @@ def test_trail_ratchet_tightens_after_big_runner() -> None:
         opened_ms=1,
         peak_px=140.0,  # +40% ≥ 30% arm
     )
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         trail_pct=0.12,
         trail_ratchet_arm_pct=0.30,
         trail_ratchet_pct=0.10,
@@ -463,7 +497,7 @@ def test_near_miss_surfaces_single_gate_failures() -> None:
     eth[-1][5] = 4_000.0  # only ~1.3× median
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
-    cfg = IgnitionConfig(
+    cfg = IgnitionConfig(requires_alphai_pick=False, 
         entry_mode="sniper",
         coil_entry_enabled=True,
         universe=("ETH",),
@@ -502,6 +536,8 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert cfg.time_max_days == 2.0
     assert cfg.trail_ratchet_arm_pct == 0.0
     assert cfg.coil_entry_enabled is False
+    assert cfg.requires_alphai_pick is True
+    assert cfg.block_alphai_avoid is True
     assert cfg.book_eur == 2_000.0
     assert cfg.max_positions == 1
     assert cfg.compound_sizing is True
@@ -527,6 +563,7 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert st["config"]["decision_interval_sec"] == 900.0
     assert st["config"]["universe_mode"] == "ex_desk"
     assert st["config"]["entry_mode"] == "top_day"
+    assert st["config"]["requires_alphai_pick"] is True
 
 
 def test_sniper_universe_excludes_rs_desk() -> None:
@@ -550,10 +587,10 @@ def test_sniper_universe_excludes_rs_desk() -> None:
     assert "ETH" not in sniper
     assert "SOL" not in sniper
     assert "FET" not in sniper
-    cfg = IgnitionConfig(universe_mode="ex_desk", liquid_top_n=3)
+    cfg = IgnitionConfig(requires_alphai_pick=False, universe_mode="ex_desk", liquid_top_n=3)
     resolved = resolve_universe(cfg, volume_by_base=vols)
     assert resolved == ("GRASS", "ONDO", "SEI")
-    desk = resolve_universe(IgnitionConfig(universe_mode="desk"), volume_by_base=vols)
+    desk = resolve_universe(IgnitionConfig(requires_alphai_pick=False, universe_mode="desk"), volume_by_base=vols)
     assert desk[0] == "ETH"
     assert "GRASS" not in desk
 
@@ -565,7 +602,7 @@ def test_ignition_live_arms_when_gateway_present(tmp_path: Path) -> None:
     class FakeGw:
         pass
 
-    cfg = IgnitionConfig()
+    cfg = IgnitionConfig(requires_alphai_pick=False, )
     runner = IgnitionPaperRunner(
         cfg,
         state_path=str(tmp_path / "ign.json"),
@@ -585,7 +622,7 @@ def test_ignition_decision_slot_fires_on_interval() -> None:
     from bot.live.momentum_ignition import IgnitionConfig
     from bot.live.momentum_ignition_runner import IgnitionPaperRunner
 
-    cfg = IgnitionConfig(decision_interval_sec=900.0, decision_hours_utc=(0,))
+    cfg = IgnitionConfig(requires_alphai_pick=False, decision_interval_sec=900.0, decision_hours_utc=(0,))
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-slot-state.json",

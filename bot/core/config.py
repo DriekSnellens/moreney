@@ -785,6 +785,9 @@ class Settings(BaseSettings):
         default=900.0, ge=0.0, le=86_400.0
     )
     momentum_ignition_decision_hours_utc: str = "0"
+    # Top-day/sniper entries must clear AlphaI daily+volatile picks.
+    momentum_ignition_requires_alphai_pick: bool = True
+    momentum_ignition_block_alphai_avoid: bool = True
     momentum_ignition_state_path: str = "./data/momentum_ignition_state.json"
     momentum_ignition_ledger_path: str = "./data/momentum_ignition_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

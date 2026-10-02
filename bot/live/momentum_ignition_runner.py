@@ -28,7 +28,7 @@ from bot.live.momentum_ignition import (
     trail_exit,
 )
 from bot.live.momentum_runner import CandleFeed, LiveGateway, engine_settings_for_desk, parse_venues
-from bot.live.momentum_short_weakest import fetch_daily_ohlc
+from bot.live.momentum_short_weakest import fetch_daily_ohlc, load_alphai_view
 
 logger = logging.getLogger("bot.live.momentum_ignition_runner")
 
@@ -183,6 +183,12 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
             "momentum_ignition_decision_interval_sec", base.decision_interval_sec
         ),
         decision_hours_utc=hours,
+        requires_alphai_pick=_b(
+            "momentum_ignition_requires_alphai_pick", base.requires_alphai_pick
+        ),
+        block_alphai_avoid=_b(
+            "momentum_ignition_block_alphai_avoid", base.block_alphai_avoid
+        ),
     )
 
 
@@ -198,10 +204,14 @@ class IgnitionPaperRunner:
         venues: tuple[str, ...] = ("okx",),
         allow_live: bool = False,
         gateways: Mapping[str, Any] | None = None,
+        alphai_path: str = "./data/alphai/daily_recommendations.json",
+        alphai_volatile_path: str = "./data/alphai/volatile_recommendations.json",
     ) -> None:
         self.cfg = cfg
         self.state_path = state_path
         self.ledger_path = ledger_path
+        self.alphai_path = str(alphai_path or "")
+        self.alphai_volatile_path = str(alphai_volatile_path or "")
         self.venues = parse_venues(venues) or ("okx",)
         self._gws: dict[str, Any] = dict(gateways or {})
         self._allow_live_requested = bool(allow_live)
@@ -927,24 +937,49 @@ class IgnitionPaperRunner:
             "status": self.status(),
         }
 
+    def _load_alphai_gate(self) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, Any]]:
+        """Union daily + volatile AlphaI picks (ex-desk midcaps live in volatile)."""
+        daily, daily_meta = load_alphai_view(self.alphai_path)
+        volatile, vol_meta = load_alphai_view(self.alphai_volatile_path)
+        picks = tuple(sorted(set(daily.picks) | set(volatile.picks)))
+        avoid = tuple(sorted(set(daily.avoid) | set(volatile.avoid)))
+        meta = {
+            "daily_ok": daily_meta.get("ok"),
+            "volatile_ok": vol_meta.get("ok"),
+            "picks": list(picks),
+            "avoid": list(avoid),
+            "macro_caution": bool(daily.macro_caution or volatile.macro_caution),
+        }
+        return picks, avoid, meta
+
     def _entry_candidates(
         self, decision: Mapping[str, Any]
     ) -> list[dict[str, Any]]:
-        """Rows to attempt live. top_day walks ranked so venue misses can fall through."""
+        """Rows to attempt live. top_day walks eligible so venue misses can fall through."""
         mode = str(
             decision.get("entry_mode") or self.cfg.entry_mode or "top_day"
         ).strip().lower()
         entries = list(decision.get("entries") or [])
         if mode != "top_day":
             return entries
-        ranked = list(decision.get("ranked") or [])
-        if not ranked:
+        # Walk AlphaI-eligible only (never raw ranked — that bypasses the pick gate).
+        pool = list(decision.get("eligible") or [])
+        if not pool:
             return entries
         out: list[dict[str, Any]] = []
-        for top in ranked:
+        for top in pool:
             base = str(top.get("base") or "").upper()
             if not base:
                 continue
+            reasons = [
+                "top_day",
+                f"day={float(top.get('day_ret') or 0.0):+.1%}",
+                f"volx={float(top.get('vol_x') or 0.0):.1f}",
+                f"trail={self.cfg.trail_pct:.0%}",
+                f"time≤{self.cfg.time_max_days:g}d",
+            ]
+            if top.get("alphai_pick"):
+                reasons.append("alphai_pick")
             out.append(
                 {
                     "base": base,
@@ -955,13 +990,7 @@ class IgnitionPaperRunner:
                         if top.get("trail_pct") is not None
                         else self.cfg.trail_pct
                     ),
-                    "reasons": [
-                        "top_day",
-                        f"day={float(top.get('day_ret') or 0.0):+.1%}",
-                        f"volx={float(top.get('vol_x') or 0.0):.1f}",
-                        f"trail={self.cfg.trail_pct:.0%}",
-                        f"time≤{self.cfg.time_max_days:g}d",
-                    ],
+                    "reasons": reasons,
                     "score": top,
                 }
             )
@@ -974,13 +1003,17 @@ class IgnitionPaperRunner:
             cash = await self._decision_cash()
             ohlc = await self._load_ohlc()
             held = [p.base for p in self.positions]
+            picks, avoid, alphai_meta = self._load_alphai_gate()
             decision = evaluate_ignition(
                 ohlc,
                 self.cfg,
                 held=held,
                 cash_eur=cash,
                 now=now,
+                alphai_picks=picks,
+                alphai_avoid=avoid,
             )
+            decision = {**decision, "alphai": alphai_meta}
             applied: list[dict[str, Any]] = []
             skipped: list[dict[str, Any]] = []
             if execute and decision.get("ok") and not decision.get("risk_block"):
@@ -1191,8 +1224,10 @@ class IgnitionPaperRunner:
                 "max_book_eur": self.cfg.max_book_eur,
                 "entry_mode": self.cfg.entry_mode,
                 "time_max_days": self.cfg.time_max_days,
+                "requires_alphai_pick": self.cfg.requires_alphai_pick,
+                "block_alphai_avoid": self.cfg.block_alphai_avoid,
                 "signal": (
-                    "top_day(liquid day_ret)"
+                    "top_day(liquid day_ret+alphai)"
                     if str(self.cfg.entry_mode) == "top_day"
                     else "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)"
                 ),
@@ -1397,6 +1432,14 @@ class IgnitionDeskManager:
             venues=venues,
             allow_live=not dry_run,
             gateways=gateways,
+            alphai_path=str(
+                getattr(settings, "alphai_daily_recommendations_path", None)
+                or "./data/alphai/daily_recommendations.json"
+            ),
+            alphai_volatile_path=str(
+                getattr(settings, "alphai_volatile_recommendations_path", None)
+                or "./data/alphai/volatile_recommendations.json"
+            ),
         )
         if not dry_run:
             dropped = self._runner.discard_paper_positions()

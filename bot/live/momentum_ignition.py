@@ -1,10 +1,12 @@
 """Ignition / OKX sleeve — live default is the daily top-day pack.
 
 Fishes **outside** the RS desk universe. Live default ``entry_mode=top_day``:
-when BTC > SMA50, buy the liquid ex-desk name with the strongest day return;
-exit on trail 8% or after 2 days (wet winner from ``DAILY_SLEEVE``).
+when BTC > SMA50, buy the liquid ex-desk name with the strongest day return
+that also clears the AlphaI pick gate (daily + volatile picks); exit on trail
+8% or after 2 days (wet winner from ``DAILY_SLEEVE``).
 
-Legacy ``entry_mode=sniper`` keeps classic|coil hybrid (quiet15 + compress/brk5).
+Legacy ``entry_mode=sniper`` keeps classic|coil hybrid (quiet15 + compress/brk5),
+with the same AlphaI pick/avoid gate when armed.
 
 Live OKX when armed; paper otherwise. No per-coin hardcodes.
 """
@@ -157,6 +159,9 @@ class IgnitionConfig:
     ohlc_days: int = 120
     # Re-rank sniper universe from Bitvavo 24h volume this often (0 = once).
     universe_refresh_sec: float = 3_600.0
+    # AlphaI quality gate on new entries (daily + volatile picks for ex-desk).
+    requires_alphai_pick: bool = True
+    block_alphai_avoid: bool = True
 
 
 def build_sniper_universe(
@@ -434,15 +439,62 @@ def evaluate_ignition(
     held: Sequence[str],
     cash_eur: float,
     now: datetime | None = None,
+    alphai_picks: Sequence[str] = (),
+    alphai_avoid: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Decide entries; exits are trail/time-managed live."""
     now = now or datetime.now(UTC)
     entry_mode = str(cfg.entry_mode or "top_day").strip().lower()
     if entry_mode == "top_day":
         return _evaluate_top_day(
-            ohlc_by_base, cfg, held=held, cash_eur=cash_eur, now=now
+            ohlc_by_base,
+            cfg,
+            held=held,
+            cash_eur=cash_eur,
+            now=now,
+            alphai_picks=alphai_picks,
+            alphai_avoid=alphai_avoid,
         )
-    return _evaluate_sniper(ohlc_by_base, cfg, held=held, cash_eur=cash_eur, now=now)
+    return _evaluate_sniper(
+        ohlc_by_base,
+        cfg,
+        held=held,
+        cash_eur=cash_eur,
+        now=now,
+        alphai_picks=alphai_picks,
+        alphai_avoid=alphai_avoid,
+    )
+
+
+def _alphai_sets(
+    alphai_picks: Sequence[str], alphai_avoid: Sequence[str]
+) -> tuple[set[str], set[str]]:
+    picks = {str(b).upper() for b in alphai_picks if str(b).strip()}
+    avoid = {str(b).upper() for b in alphai_avoid if str(b).strip()}
+    return picks, avoid
+
+
+def _filter_alphai_eligible(
+    ranked: Sequence[Mapping[str, Any]],
+    cfg: IgnitionConfig,
+    *,
+    picks: set[str],
+    avoid: set[str],
+    rejected: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Apply AlphaI pick/avoid gates; keep ranking order."""
+    eligible: list[dict[str, Any]] = []
+    for row in ranked:
+        base = str(row.get("base") or "").upper()
+        tagged = {**dict(row), "alphai_pick": base in picks}
+        if cfg.block_alphai_avoid and base in avoid:
+            rejected.append({**tagged, "reason": "alphai_avoid"})
+            continue
+        if cfg.requires_alphai_pick and base not in picks:
+            rejected.append({**tagged, "reason": "alphai_pick_required"})
+            continue
+        eligible.append(tagged)
+    return eligible
 
 
 def _evaluate_top_day(
@@ -452,6 +504,8 @@ def _evaluate_top_day(
     held: Sequence[str],
     cash_eur: float,
     now: datetime,
+    alphai_picks: Sequence[str] = (),
+    alphai_avoid: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Daily pack: strongest liquid day-return name when BTC > SMA50."""
     btc = completed_ohlc(ohlc_by_base.get("BTC") or [], now=now)
@@ -459,6 +513,7 @@ def _evaluate_top_day(
     s50 = sma(btc_c, cfg.btc_sma_n)
     last_btc = float(btc_c[-1]) if btc_c else 0.0
     risk_on = (not cfg.require_btc_sma) or (s50 is not None and last_btc > s50)
+    picks, avoid = _alphai_sets(alphai_picks, alphai_avoid)
 
     ranked: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -473,6 +528,7 @@ def _evaluate_top_day(
             **scored,
             "entry_path": "top_day",
             "trail_pct": float(cfg.trail_pct),
+            "alphai_pick": str(base).upper() in picks,
         }
         if not scored.get("liquid"):
             rejected.append({"base": base, "reason": "thin", **row})
@@ -480,6 +536,9 @@ def _evaluate_top_day(
         ranked.append(row)
     ranked.sort(
         key=lambda r: (-float(r["day_ret"]), -float(r["vol_x"]), -int(r["points"]))
+    )
+    eligible = _filter_alphai_eligible(
+        ranked, cfg, picks=picks, avoid=avoid, rejected=rejected
     )
 
     held_set = {str(b).upper() for b in held}
@@ -489,9 +548,9 @@ def _evaluate_top_day(
         risk_block = "btc_below_sma50"
     elif len(held_set) >= int(cfg.max_positions):
         risk_block = "slots_full"
-    elif ranked:
+    elif eligible:
         free = max(0, int(cfg.max_positions) - len(held_set))
-        take = [r for r in ranked if r["base"] not in held_set][:free]
+        take = [r for r in eligible if r["base"] not in held_set][:free]
         if take:
             powder = float(cash_eur)
             if not cfg.compound_sizing:
@@ -502,24 +561,28 @@ def _evaluate_top_day(
             for top in take:
                 if per < cfg.min_notional_eur:
                     break
+                reasons = [
+                    "top_day",
+                    f"day={top['day_ret']:+.1%}",
+                    f"volx={top['vol_x']:.1f}",
+                    f"trail={cfg.trail_pct:.0%}",
+                    f"time≤{cfg.time_max_days:g}d",
+                ]
+                if top.get("alphai_pick"):
+                    reasons.append("alphai_pick")
                 entries.append(
                     {
                         "base": top["base"],
                         "notional_eur": round(per, 2),
                         "entry_path": "top_day",
                         "trail_pct": float(cfg.trail_pct),
-                        "reasons": [
-                            "top_day",
-                            f"day={top['day_ret']:+.1%}",
-                            f"volx={top['vol_x']:.1f}",
-                            f"trail={cfg.trail_pct:.0%}",
-                            f"time≤{cfg.time_max_days:g}d",
-                        ],
+                        "reasons": reasons,
                         "score": top,
                     }
                 )
 
-    want = ranked[0]["base"] if ranked else None
+    want = eligible[0]["base"] if eligible else None
+    want_row = eligible[0] if eligible else None
     near = [
         {
             "base": r["base"],
@@ -534,10 +597,15 @@ def _evaluate_top_day(
     trail_txt = f"trail {cfg.trail_pct:.0%}"
     if float(cfg.time_max_days or 0) > 0:
         trail_txt += f" / time {cfg.time_max_days:g}d"
-    if want:
+    if want and want_row:
         body = (
             f"Candidate {want} [top_day] "
-            f"day {ranked[0]['day_ret']:+.1%} volx {ranked[0]['vol_x']:.1f}."
+            f"day {want_row['day_ret']:+.1%} volx {want_row['vol_x']:.1f}."
+        )
+    elif ranked and cfg.requires_alphai_pick:
+        body = (
+            f"Geen AlphaI-pick in liquid top-day "
+            f"(raw leader {ranked[0]['base']} day {ranked[0]['day_ret']:+.1%})."
         )
     else:
         body = "Geen liquid top-day kandidaat."
@@ -547,7 +615,9 @@ def _evaluate_top_day(
         else f"fixed €{cfg.book_eur:,.0f}"
     )
     caption = (
-        f"OKX top-day: ex-desk strongest day-ret + {trail_txt}; {size_txt}, "
+        f"OKX top-day: ex-desk strongest day-ret + {trail_txt}"
+        + (" + AlphaI pick" if cfg.requires_alphai_pick else "")
+        + f"; {size_txt}, "
         f"{cfg.max_positions} slot(s), univ n={len(cfg.universe)}. "
         + body
         + (f" Block: {risk_block}." if risk_block else "")
@@ -561,11 +631,14 @@ def _evaluate_top_day(
         "entries": entries,
         "exits": [],
         "ranked": ranked[:8],
+        "eligible": eligible[:8],
         "rejected": rejected[:12],
         "near_miss": near,
         "want": want,
         "caption": caption,
-        "signal": "top_day(liquid day_ret)",
+        "signal": "top_day(liquid day_ret+alphai)"
+        if cfg.requires_alphai_pick
+        else "top_day(liquid day_ret)",
         "entry_mode": "top_day",
         "trail_pct": cfg.trail_pct,
         "time_max_days": cfg.time_max_days,
@@ -578,6 +651,8 @@ def _evaluate_top_day(
         "max_positions": cfg.max_positions,
         "universe_mode": cfg.universe_mode,
         "universe_n": len(cfg.universe),
+        "requires_alphai_pick": bool(cfg.requires_alphai_pick),
+        "alphai_picks": sorted(picks),
     }
 
 
@@ -588,6 +663,8 @@ def _evaluate_sniper(
     held: Sequence[str],
     cash_eur: float,
     now: datetime,
+    alphai_picks: Sequence[str] = (),
+    alphai_avoid: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Legacy classic|coil sniper path."""
     btc = completed_ohlc(ohlc_by_base.get("BTC") or [], now=now)
@@ -595,6 +672,7 @@ def _evaluate_sniper(
     s50 = sma(btc_c, cfg.btc_sma_n)
     last_btc = float(btc_c[-1]) if btc_c else 0.0
     risk_on = (not cfg.require_btc_sma) or (s50 is not None and last_btc > s50)
+    picks, avoid = _alphai_sets(alphai_picks, alphai_avoid)
 
     ranked: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -604,7 +682,7 @@ def _evaluate_sniper(
         if scored is None:
             rejected.append({"base": base, "reason": "short_history"})
             continue
-        row = {"base": base, **scored}
+        row = {"base": base, **scored, "alphai_pick": str(base).upper() in picks}
         path = str(scored.get("entry_path") or "")
         if not path:
             why = []
@@ -634,6 +712,9 @@ def _evaluate_sniper(
             -float(r["day_ret"]),
         )
     )
+    eligible = _filter_alphai_eligible(
+        ranked, cfg, picks=picks, avoid=avoid, rejected=rejected
+    )
 
     held_set = {str(b).upper() for b in held}
     entries: list[dict[str, Any]] = []
@@ -642,9 +723,9 @@ def _evaluate_sniper(
         risk_block = "btc_below_sma50"
     elif len(held_set) >= int(cfg.max_positions):
         risk_block = "slots_full"
-    elif ranked:
+    elif eligible:
         free = max(0, int(cfg.max_positions) - len(held_set))
-        take = [r for r in ranked if r["base"] not in held_set][:free]
+        take = [r for r in eligible if r["base"] not in held_set][:free]
         if take:
             powder = float(cash_eur)
             if not cfg.compound_sizing:
@@ -657,25 +738,29 @@ def _evaluate_sniper(
                     break
                 path = str(top.get("entry_path") or "classic")
                 tag = "early_signal" if path == "classic" else "coil_signal"
+                reasons = [
+                    tag,
+                    f"path={path}",
+                    f"points={top['points']}",
+                    f"day={top['day_ret']:+.1%}",
+                    f"volx={top['vol_x']:.1f}",
+                    *list(top["atoms"]),
+                ]
+                if top.get("alphai_pick"):
+                    reasons.append("alphai_pick")
                 entries.append(
                     {
                         "base": top["base"],
                         "notional_eur": round(per, 2),
                         "entry_path": path,
                         "trail_pct": float(top.get("trail_pct") or cfg.trail_pct),
-                        "reasons": [
-                            tag,
-                            f"path={path}",
-                            f"points={top['points']}",
-                            f"day={top['day_ret']:+.1%}",
-                            f"volx={top['vol_x']:.1f}",
-                            *list(top["atoms"]),
-                        ],
+                        "reasons": reasons,
                         "score": top,
                     }
                 )
 
-    want = ranked[0]["base"] if ranked else None
+    want = eligible[0]["base"] if eligible else None
+    want_row = eligible[0] if eligible else None
     near = _near_misses(rejected, cfg, limit=3)
     trail_txt = f"trail {cfg.trail_pct:.0%}"
     if cfg.trail_ratchet_arm_pct > 0 and cfg.trail_ratchet_pct > 0:
@@ -684,9 +769,9 @@ def _evaluate_sniper(
         )
     if cfg.coil_entry_enabled:
         trail_txt += f"; coil-trail {cfg.coil_trail_pct:.0%}"
-    if want:
-        path = str(ranked[0].get("entry_path") or "classic")
-        body = f"Candidate {want} [{path}] ({ranked[0]['points']} pts)."
+    if want and want_row:
+        path = str(want_row.get("entry_path") or "classic")
+        body = f"Candidate {want} [{path}] ({want_row['points']} pts)."
     elif near:
         n0 = near[0]
         body = (
@@ -701,7 +786,9 @@ def _evaluate_sniper(
         else f"fixed €{cfg.book_eur:,.0f}"
     )
     caption = (
-        f"Ignition sniper: ex-desk classic+coil + {trail_txt}; {size_txt}, "
+        f"Ignition sniper: ex-desk classic+coil + {trail_txt}"
+        + (" + AlphaI pick" if cfg.requires_alphai_pick else "")
+        + f"; {size_txt}, "
         f"{cfg.max_positions} slot(s), univ n={len(cfg.universe)}. "
         + body
         + (f" Block: {risk_block}." if risk_block else "")
@@ -715,6 +802,7 @@ def _evaluate_sniper(
         "entries": entries,
         "exits": [],
         "ranked": ranked[:8],
+        "eligible": eligible[:8],
         "rejected": rejected[:12],
         "near_miss": near,
         "want": want,
@@ -732,6 +820,8 @@ def _evaluate_sniper(
         "max_positions": cfg.max_positions,
         "universe_mode": cfg.universe_mode,
         "universe_n": len(cfg.universe),
+        "requires_alphai_pick": bool(cfg.requires_alphai_pick),
+        "alphai_picks": sorted(picks),
     }
 
 
