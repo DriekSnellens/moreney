@@ -1,0 +1,2947 @@
+{
+  "asof": "2026-10-02T13:07:54.202467+00:00",
+  "end": "2026-10-02",
+  "desk_n": 16,
+  "expanded_n": 82,
+  "baselines_desk": {
+    "full": {
+      "pnl_eur": 2658.29,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.556,
+      "avg_trade": 295.4,
+      "outside_n": 0,
+      "outside_pnl": 0,
+      "outside_bases": []
+    },
+    "y2026": {
+      "pnl_eur": 2080.74,
+      "max_dd": 0.148,
+      "n_trades": 3,
+      "win": 0.667,
+      "avg_trade": 693.6,
+      "outside_n": 0,
+      "outside_pnl": 0,
+      "outside_bases": []
+    },
+    "last_180d": {
+      "pnl_eur": 2317.18,
+      "max_dd": 0.103,
+      "n_trades": 2,
+      "win": 1.0,
+      "avg_trade": 1158.6,
+      "outside_n": 0,
+      "outside_pnl": 0,
+      "outside_bases": []
+    }
+  },
+  "n_combos": 220,
+  "n_beat_desk_full": 6,
+  "n_beat_desk_all_windows": 0,
+  "top": [
+    {
+      "name": "quiet15__t12_r30_time14",
+      "entry": "quiet15",
+      "exit": "t12_r30_time14",
+      "score": 6609.58,
+      "delta_full_vs_desk": 2415.57,
+      "delta_y2026_vs_desk": -259.37,
+      "delta_180d_vs_desk": 182.96,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 5073.86,
+          "max_dd": 0.224,
+          "n_trades": 22,
+          "win": 0.545,
+          "avg_trade": 230.6,
+          "outside_n": 14,
+          "outside_pnl": 2369.09,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "CRV",
+            "GRASS",
+            "KAS",
+            "ONDO",
+            "QNT",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1821.37,
+          "max_dd": 0.366,
+          "n_trades": 11,
+          "win": 0.545,
+          "avg_trade": 165.6,
+          "outside_n": 7,
+          "outside_pnl": 397.91,
+          "outside_bases": [
+            "ALGO",
+            "CRV",
+            "GRASS",
+            "ONDO",
+            "QNT",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 2500.14,
+          "max_dd": 0.151,
+          "n_trades": 8,
+          "win": 0.75,
+          "avg_trade": 312.5,
+          "outside_n": 5,
+          "outside_pnl": 885.01,
+          "outside_bases": [
+            "CRV",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t08",
+      "entry": "quiet15",
+      "exit": "t08",
+      "score": 5209.08,
+      "delta_full_vs_desk": 1384.38,
+      "delta_y2026_vs_desk": -697.66,
+      "delta_180d_vs_desk": -417.69,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 4042.67,
+          "max_dd": 0.265,
+          "n_trades": 24,
+          "win": 0.458,
+          "avg_trade": 168.4,
+          "outside_n": 15,
+          "outside_pnl": 927.61,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1383.08,
+          "max_dd": 0.37,
+          "n_trades": 12,
+          "win": 0.417,
+          "avg_trade": 115.3,
+          "outside_n": 7,
+          "outside_pnl": -434.9,
+          "outside_bases": [
+            "ALGO",
+            "LPT",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1899.49,
+          "max_dd": 0.187,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 211.1,
+          "outside_n": 6,
+          "outside_pnl": -374.51,
+          "outside_bases": [
+            "LPT",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r30_time21",
+      "entry": "quiet15",
+      "exit": "t12_r30_time21",
+      "score": 4812.9,
+      "delta_full_vs_desk": 892.92,
+      "delta_y2026_vs_desk": -549.32,
+      "delta_180d_vs_desk": -333.28,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3551.21,
+          "max_dd": 0.366,
+          "n_trades": 20,
+          "win": 0.45,
+          "avg_trade": 177.6,
+          "outside_n": 12,
+          "outside_pnl": 2067.92,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1531.42,
+          "max_dd": 0.287,
+          "n_trades": 10,
+          "win": 0.4,
+          "avg_trade": 153.1,
+          "outside_n": 6,
+          "outside_pnl": 860.13,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1983.9,
+          "max_dd": 0.159,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 248.0,
+          "outside_n": 5,
+          "outside_pnl": 1171.63,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r25_8",
+      "entry": "quiet15",
+      "exit": "t12_r25_8",
+      "score": 4713.97,
+      "delta_full_vs_desk": 783.24,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3441.53,
+          "max_dd": 0.357,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 191.2,
+          "outside_n": 11,
+          "outside_pnl": 1849.13,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r30",
+      "entry": "quiet15",
+      "exit": "t12_r30",
+      "score": 4436.23,
+      "delta_full_vs_desk": 505.5,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3163.79,
+          "max_dd": 0.376,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 175.8,
+          "outside_n": 11,
+          "outside_pnl": 1680.5,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r40_10",
+      "entry": "quiet15",
+      "exit": "t12_r40_10",
+      "score": 4304.97,
+      "delta_full_vs_desk": 374.24,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3032.53,
+          "max_dd": 0.376,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 168.5,
+          "outside_n": 11,
+          "outside_pnl": 1680.5,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12",
+      "entry": "quiet15",
+      "exit": "t12",
+      "score": 3825.41,
+      "delta_full_vs_desk": -40.5,
+      "delta_y2026_vs_desk": -605.9,
+      "delta_180d_vs_desk": -436.36,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 2617.79,
+          "max_dd": 0.404,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 145.4,
+          "outside_n": 11,
+          "outside_pnl": 1412.78,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1474.84,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 184.4,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1880.82,
+          "max_dd": 0.169,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 313.5,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t10",
+      "entry": "quiet15",
+      "exit": "t10",
+      "score": 3775.41,
+      "delta_full_vs_desk": -21.21,
+      "delta_y2026_vs_desk": -689.58,
+      "delta_180d_vs_desk": -546.17,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 2637.08,
+          "max_dd": 0.383,
+          "n_trades": 21,
+          "win": 0.476,
+          "avg_trade": 125.6,
+          "outside_n": 14,
+          "outside_pnl": 1121.98,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "GRASS",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1391.16,
+          "max_dd": 0.279,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 154.6,
+          "outside_n": 6,
+          "outside_pnl": 481.27,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1771.01,
+          "max_dd": 0.163,
+          "n_trades": 7,
+          "win": 0.714,
+          "avg_trade": 253.0,
+          "outside_n": 5,
+          "outside_pnl": 720.12,
+          "outside_bases": [
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live+r3__t08",
+      "entry": "live+r3",
+      "exit": "t08",
+      "score": 2901.26,
+      "delta_full_vs_desk": -999.03,
+      "delta_y2026_vs_desk": -454.19,
+      "delta_180d_vs_desk": -602.3,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1659.26,
+          "max_dd": 0.308,
+          "n_trades": 12,
+          "win": 0.5,
+          "avg_trade": 138.3,
+          "outside_n": 8,
+          "outside_pnl": -438.1,
+          "outside_bases": [
+            "CRV",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1626.55,
+          "max_dd": 0.121,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 325.3,
+          "outside_n": 3,
+          "outside_pnl": 360.76,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1714.88,
+          "max_dd": 0.118,
+          "n_trades": 4,
+          "win": 0.75,
+          "avg_trade": 428.7,
+          "outside_n": 3,
+          "outside_pnl": 360.76,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08_vol3__t12_r30_time14",
+      "entry": "quiet08_vol3",
+      "exit": "t12_r30_time14",
+      "score": 2435.6,
+      "delta_full_vs_desk": -778.17,
+      "delta_y2026_vs_desk": -1340.1,
+      "delta_180d_vs_desk": -1576.54,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1880.12,
+          "max_dd": 0.196,
+          "n_trades": 9,
+          "win": 0.667,
+          "avg_trade": 208.9,
+          "outside_n": 5,
+          "outside_pnl": 974.26,
+          "outside_bases": [
+            "BCH",
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 740.64,
+          "max_dd": 0.219,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 246.9,
+          "outside_n": 3,
+          "outside_pnl": 740.64,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 740.64,
+          "max_dd": 0.219,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 246.9,
+          "outside_n": 3,
+          "outside_pnl": 740.64,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t15",
+      "entry": "quiet15",
+      "exit": "t15",
+      "score": 2372.18,
+      "delta_full_vs_desk": -814.41,
+      "delta_y2026_vs_desk": -1623.03,
+      "delta_180d_vs_desk": -1119.42,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1843.88,
+          "max_dd": 0.334,
+          "n_trades": 17,
+          "win": 0.471,
+          "avg_trade": 108.5,
+          "outside_n": 10,
+          "outside_pnl": 1450.05,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "LPT",
+            "ONDO",
+            "SEI",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 457.71,
+          "max_dd": 0.369,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 57.2,
+          "outside_n": 5,
+          "outside_pnl": 243.7,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1197.76,
+          "max_dd": 0.258,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 199.6,
+          "outside_n": 4,
+          "outside_pnl": 588.93,
+          "outside_bases": [
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t20",
+      "entry": "quiet15",
+      "exit": "t20",
+      "score": 2328.25,
+      "delta_full_vs_desk": -1134.81,
+      "delta_y2026_vs_desk": -1265.66,
+      "delta_180d_vs_desk": -728.26,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1523.48,
+          "max_dd": 0.438,
+          "n_trades": 13,
+          "win": 0.538,
+          "avg_trade": 117.2,
+          "outside_n": 9,
+          "outside_pnl": 586.81,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "KAS",
+            "LPT",
+            "ONDO",
+            "SEI",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 815.08,
+          "max_dd": 0.359,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 163.0,
+          "outside_n": 3,
+          "outside_pnl": 137.86,
+          "outside_bases": [
+            "ALGO",
+            "LPT",
+            "ONDO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1588.92,
+          "max_dd": 0.333,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 317.8,
+          "outside_n": 4,
+          "outside_pnl": 257.6,
+          "outside_bases": [
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08_vol3__t08",
+      "entry": "quiet08_vol3",
+      "exit": "t08",
+      "score": 2188.0,
+      "delta_full_vs_desk": -1147.5,
+      "delta_y2026_vs_desk": -1177.79,
+      "delta_180d_vs_desk": -1414.23,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1510.79,
+          "max_dd": 0.207,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 167.9,
+          "outside_n": 4,
+          "outside_pnl": -513.9,
+          "outside_bases": [
+            "BCH",
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 902.95,
+          "max_dd": 0.172,
+          "n_trades": 4,
+          "win": 0.5,
+          "avg_trade": 225.7,
+          "outside_n": 3,
+          "outside_pnl": -332.08,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 902.95,
+          "max_dd": 0.172,
+          "n_trades": 4,
+          "win": 0.5,
+          "avg_trade": 225.7,
+          "outside_n": 3,
+          "outside_pnl": -332.08,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live_gates__t12_r30_time14",
+      "entry": "live_gates",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    },
+    {
+      "name": "minpts4__t12_r30_time14",
+      "entry": "minpts4",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    },
+    {
+      "name": "minpts5__t12_r30_time14",
+      "entry": "minpts5",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live+trend__t12_r30_time14",
+      "entry": "live+trend",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live+expand__t12_r30_time14",
+      "entry": "live+expand",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08_vol3__t15",
+      "entry": "quiet08_vol3",
+      "exit": "t15",
+      "score": 1939.45,
+      "delta_full_vs_desk": -1090.49,
+      "delta_y2026_vs_desk": -1585.21,
+      "delta_180d_vs_desk": -1821.65,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1567.8,
+          "max_dd": 0.272,
+          "n_trades": 6,
+          "win": 0.5,
+          "avg_trade": 261.3,
+          "outside_n": 3,
+          "outside_pnl": 519.74,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 495.53,
+          "max_dd": 0.292,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 165.2,
+          "outside_n": 3,
+          "outside_pnl": 495.53,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 495.53,
+          "max_dd": 0.292,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 165.2,
+          "outside_n": 3,
+          "outside_pnl": 495.53,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "day5_vol2__t12_r30_time14",
+      "entry": "day5_vol2",
+      "exit": "t12_r30_time14",
+      "score": 1784.61,
+      "delta_full_vs_desk": -1476.23,
+      "delta_y2026_vs_desk": -1374.84,
+      "delta_180d_vs_desk": -1318.79,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1182.06,
+          "max_dd": 0.398,
+          "n_trades": 20,
+          "win": 0.55,
+          "avg_trade": 59.1,
+          "outside_n": 13,
+          "outside_pnl": -254.38,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX",
+            "TRX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 705.9,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.714,
+          "avg_trade": 100.8,
+          "outside_n": 4,
+          "outside_pnl": 398.58,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 998.39,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 1.0,
+          "avg_trade": 199.7,
+          "outside_n": 3,
+          "outside_pnl": 645.16,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08__t12_r30_time14",
+      "entry": "quiet08",
+      "exit": "t12_r30_time14",
+      "score": 1738.02,
+      "delta_full_vs_desk": -1297.11,
+      "delta_y2026_vs_desk": -1697.39,
+      "delta_180d_vs_desk": -1576.54,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1361.18,
+          "max_dd": 0.245,
+          "n_trades": 13,
+          "win": 0.538,
+          "avg_trade": 104.7,
+          "outside_n": 8,
+          "outside_pnl": 588.41,
+          "outside_bases": [
+            "BCH",
+            "ICP",
+            "JUP",
+            "ONDO",
+            "TAO",
+            "VET"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 383.35,
+          "max_dd": 0.232,
+          "n_trades": 4,
+          "win": 0.5,
+          "avg_trade": 95.8,
+          "outside_n": 3,
+          "outside_pnl": 637.03,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 740.64,
+          "max_dd": 0.219,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 246.9,
+          "outside_n": 3,
+          "outside_pnl": 740.64,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08__t08",
+      "entry": "quiet08",
+      "exit": "t08",
+      "score": 1720.09,
+      "delta_full_vs_desk": -1421.4,
+      "delta_y2026_vs_desk": -1565.81,
+      "delta_180d_vs_desk": -1414.23,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1236.89,
+          "max_dd": 0.263,
+          "n_trades": 13,
+          "win": 0.462,
+          "avg_trade": 95.1,
+          "outside_n": 7,
+          "outside_pnl": -757.32,
+          "outside_bases": [
+            "BCH",
+            "ICP",
+            "JUP",
+            "ONDO",
+            "TAO",
+            "VET"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 514.93,
+          "max_dd": 0.227,
+          "n_trades": 5,
+          "win": 0.4,
+          "avg_trade": 103.0,
+          "outside_n": 3,
+          "outside_pnl": -309.78,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 902.95,
+          "max_dd": 0.172,
+          "n_trades": 4,
+          "win": 0.5,
+          "avg_trade": 225.7,
+          "outside_n": 3,
+          "outside_pnl": -332.08,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live+r3__t12_r25_8",
+      "entry": "live+r3",
+      "exit": "t12_r25_8",
+      "score": 1705.35,
+      "delta_full_vs_desk": -2120.88,
+      "delta_y2026_vs_desk": -602.31,
+      "delta_180d_vs_desk": -602.3,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 537.41,
+          "max_dd": 0.437,
+          "n_trades": 12,
+          "win": 0.417,
+          "avg_trade": 44.8,
+          "outside_n": 8,
+          "outside_pnl": -886.15,
+          "outside_bases": [
+            "CRV",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1478.43,
+          "max_dd": 0.148,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 295.7,
+          "outside_n": 3,
+          "outside_pnl": 360.76,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1714.88,
+          "max_dd": 0.118,
+          "n_trades": 4,
+          "win": 0.75,
+          "avg_trade": 428.7,
+          "outside_n": 3,
+          "outside_pnl": 360.76,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        }
+      }
+    },
+    {
+      "name": "day8_vol2__t12_r30_time14",
+      "entry": "day8_vol2",
+      "exit": "t12_r30_time14",
+      "score": 1696.17,
+      "delta_full_vs_desk": -1749.01,
+      "delta_y2026_vs_desk": -1143.97,
+      "delta_180d_vs_desk": -1043.15,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 909.28,
+          "max_dd": 0.4,
+          "n_trades": 17,
+          "win": 0.412,
+          "avg_trade": 53.5,
+          "outside_n": 11,
+          "outside_pnl": -749.29,
+          "outside_bases": [
+            "BCH",
+            "CRV",
+            "EIGEN",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "ONDO",
+            "SEI",
+            "TAO"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 936.77,
+          "max_dd": 0.203,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 133.8,
+          "outside_n": 4,
+          "outside_pnl": 30.5,
+          "outside_bases": [
+            "EIGEN",
+            "LPT",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1274.03,
+          "max_dd": 0.114,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 254.8,
+          "outside_n": 3,
+          "outside_pnl": 244.49,
+          "outside_bases": [
+            "LPT",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live+r3__t10",
+      "entry": "live+r3",
+      "exit": "t10",
+      "score": 1684.43,
+      "delta_full_vs_desk": -2128.22,
+      "delta_y2026_vs_desk": -620.41,
+      "delta_180d_vs_desk": -620.41,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 530.07,
+          "max_dd": 0.434,
+          "n_trades": 12,
+          "win": 0.417,
+          "avg_trade": 44.2,
+          "outside_n": 8,
+          "outside_pnl": -866.33,
+          "outside_bases": [
+            "CRV",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1460.33,
+          "max_dd": 0.148,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 292.1,
+          "outside_n": 3,
+          "outside_pnl": 342.66,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1696.77,
+          "max_dd": 0.122,
+          "n_trades": 4,
+          "win": 0.75,
+          "avg_trade": 424.2,
+          "outside_n": 3,
+          "outside_pnl": 342.66,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        }
+      }
+    }
+  ],
+  "best_beat_desk_full": [
+    {
+      "name": "quiet15__t12_r30_time14",
+      "entry": "quiet15",
+      "exit": "t12_r30_time14",
+      "score": 6609.58,
+      "delta_full_vs_desk": 2415.57,
+      "delta_y2026_vs_desk": -259.37,
+      "delta_180d_vs_desk": 182.96,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 5073.86,
+          "max_dd": 0.224,
+          "n_trades": 22,
+          "win": 0.545,
+          "avg_trade": 230.6,
+          "outside_n": 14,
+          "outside_pnl": 2369.09,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "CRV",
+            "GRASS",
+            "KAS",
+            "ONDO",
+            "QNT",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1821.37,
+          "max_dd": 0.366,
+          "n_trades": 11,
+          "win": 0.545,
+          "avg_trade": 165.6,
+          "outside_n": 7,
+          "outside_pnl": 397.91,
+          "outside_bases": [
+            "ALGO",
+            "CRV",
+            "GRASS",
+            "ONDO",
+            "QNT",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 2500.14,
+          "max_dd": 0.151,
+          "n_trades": 8,
+          "win": 0.75,
+          "avg_trade": 312.5,
+          "outside_n": 5,
+          "outside_pnl": 885.01,
+          "outside_bases": [
+            "CRV",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t08",
+      "entry": "quiet15",
+      "exit": "t08",
+      "score": 5209.08,
+      "delta_full_vs_desk": 1384.38,
+      "delta_y2026_vs_desk": -697.66,
+      "delta_180d_vs_desk": -417.69,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 4042.67,
+          "max_dd": 0.265,
+          "n_trades": 24,
+          "win": 0.458,
+          "avg_trade": 168.4,
+          "outside_n": 15,
+          "outside_pnl": 927.61,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1383.08,
+          "max_dd": 0.37,
+          "n_trades": 12,
+          "win": 0.417,
+          "avg_trade": 115.3,
+          "outside_n": 7,
+          "outside_pnl": -434.9,
+          "outside_bases": [
+            "ALGO",
+            "LPT",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1899.49,
+          "max_dd": 0.187,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 211.1,
+          "outside_n": 6,
+          "outside_pnl": -374.51,
+          "outside_bases": [
+            "LPT",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r30_time21",
+      "entry": "quiet15",
+      "exit": "t12_r30_time21",
+      "score": 4812.9,
+      "delta_full_vs_desk": 892.92,
+      "delta_y2026_vs_desk": -549.32,
+      "delta_180d_vs_desk": -333.28,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3551.21,
+          "max_dd": 0.366,
+          "n_trades": 20,
+          "win": 0.45,
+          "avg_trade": 177.6,
+          "outside_n": 12,
+          "outside_pnl": 2067.92,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1531.42,
+          "max_dd": 0.287,
+          "n_trades": 10,
+          "win": 0.4,
+          "avg_trade": 153.1,
+          "outside_n": 6,
+          "outside_pnl": 860.13,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1983.9,
+          "max_dd": 0.159,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 248.0,
+          "outside_n": 5,
+          "outside_pnl": 1171.63,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r25_8",
+      "entry": "quiet15",
+      "exit": "t12_r25_8",
+      "score": 4713.97,
+      "delta_full_vs_desk": 783.24,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3441.53,
+          "max_dd": 0.357,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 191.2,
+          "outside_n": 11,
+          "outside_pnl": 1849.13,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r30",
+      "entry": "quiet15",
+      "exit": "t12_r30",
+      "score": 4436.23,
+      "delta_full_vs_desk": 505.5,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3163.79,
+          "max_dd": 0.376,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 175.8,
+          "outside_n": 11,
+          "outside_pnl": 1680.5,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r40_10",
+      "entry": "quiet15",
+      "exit": "t12_r40_10",
+      "score": 4304.97,
+      "delta_full_vs_desk": 374.24,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3032.53,
+          "max_dd": 0.376,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 168.5,
+          "outside_n": 11,
+          "outside_pnl": 1680.5,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    }
+  ],
+  "best_beat_desk_all": [],
+  "best_expanded_even_if_below_desk": [
+    {
+      "name": "quiet15__t12_r30_time14",
+      "entry": "quiet15",
+      "exit": "t12_r30_time14",
+      "score": 6609.58,
+      "delta_full_vs_desk": 2415.57,
+      "delta_y2026_vs_desk": -259.37,
+      "delta_180d_vs_desk": 182.96,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 5073.86,
+          "max_dd": 0.224,
+          "n_trades": 22,
+          "win": 0.545,
+          "avg_trade": 230.6,
+          "outside_n": 14,
+          "outside_pnl": 2369.09,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "CRV",
+            "GRASS",
+            "KAS",
+            "ONDO",
+            "QNT",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1821.37,
+          "max_dd": 0.366,
+          "n_trades": 11,
+          "win": 0.545,
+          "avg_trade": 165.6,
+          "outside_n": 7,
+          "outside_pnl": 397.91,
+          "outside_bases": [
+            "ALGO",
+            "CRV",
+            "GRASS",
+            "ONDO",
+            "QNT",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 2500.14,
+          "max_dd": 0.151,
+          "n_trades": 8,
+          "win": 0.75,
+          "avg_trade": 312.5,
+          "outside_n": 5,
+          "outside_pnl": 885.01,
+          "outside_bases": [
+            "CRV",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t08",
+      "entry": "quiet15",
+      "exit": "t08",
+      "score": 5209.08,
+      "delta_full_vs_desk": 1384.38,
+      "delta_y2026_vs_desk": -697.66,
+      "delta_180d_vs_desk": -417.69,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 4042.67,
+          "max_dd": 0.265,
+          "n_trades": 24,
+          "win": 0.458,
+          "avg_trade": 168.4,
+          "outside_n": 15,
+          "outside_pnl": 927.61,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1383.08,
+          "max_dd": 0.37,
+          "n_trades": 12,
+          "win": 0.417,
+          "avg_trade": 115.3,
+          "outside_n": 7,
+          "outside_pnl": -434.9,
+          "outside_bases": [
+            "ALGO",
+            "LPT",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1899.49,
+          "max_dd": 0.187,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 211.1,
+          "outside_n": 6,
+          "outside_pnl": -374.51,
+          "outside_bases": [
+            "LPT",
+            "ONDO",
+            "PEPE",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r30_time21",
+      "entry": "quiet15",
+      "exit": "t12_r30_time21",
+      "score": 4812.9,
+      "delta_full_vs_desk": 892.92,
+      "delta_y2026_vs_desk": -549.32,
+      "delta_180d_vs_desk": -333.28,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3551.21,
+          "max_dd": 0.366,
+          "n_trades": 20,
+          "win": 0.45,
+          "avg_trade": 177.6,
+          "outside_n": 12,
+          "outside_pnl": 2067.92,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1531.42,
+          "max_dd": 0.287,
+          "n_trades": 10,
+          "win": 0.4,
+          "avg_trade": 153.1,
+          "outside_n": 6,
+          "outside_pnl": 860.13,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1983.9,
+          "max_dd": 0.159,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 248.0,
+          "outside_n": 5,
+          "outside_pnl": 1171.63,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "STX",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r25_8",
+      "entry": "quiet15",
+      "exit": "t12_r25_8",
+      "score": 4713.97,
+      "delta_full_vs_desk": 783.24,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3441.53,
+          "max_dd": 0.357,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 191.2,
+          "outside_n": 11,
+          "outside_pnl": 1849.13,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r30",
+      "entry": "quiet15",
+      "exit": "t12_r30",
+      "score": 4436.23,
+      "delta_full_vs_desk": 505.5,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3163.79,
+          "max_dd": 0.376,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 175.8,
+          "outside_n": 11,
+          "outside_pnl": 1680.5,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12_r40_10",
+      "entry": "quiet15",
+      "exit": "t12_r40_10",
+      "score": 4304.97,
+      "delta_full_vs_desk": 374.24,
+      "delta_y2026_vs_desk": -519.48,
+      "delta_180d_vs_desk": -349.94,
+      "beats_desk_full": true,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 3032.53,
+          "max_dd": 0.376,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 168.5,
+          "outside_n": 11,
+          "outside_pnl": 1680.5,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1561.26,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 195.2,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1967.24,
+          "max_dd": 0.163,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 327.9,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t12",
+      "entry": "quiet15",
+      "exit": "t12",
+      "score": 3825.41,
+      "delta_full_vs_desk": -40.5,
+      "delta_y2026_vs_desk": -605.9,
+      "delta_180d_vs_desk": -436.36,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 2617.79,
+          "max_dd": 0.404,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 145.4,
+          "outside_n": 11,
+          "outside_pnl": 1412.78,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1474.84,
+          "max_dd": 0.287,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 184.4,
+          "outside_n": 5,
+          "outside_pnl": 651.36,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1880.82,
+          "max_dd": 0.169,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 313.5,
+          "outside_n": 4,
+          "outside_pnl": 916.35,
+          "outside_bases": [
+            "GRASS",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t10",
+      "entry": "quiet15",
+      "exit": "t10",
+      "score": 3775.41,
+      "delta_full_vs_desk": -21.21,
+      "delta_y2026_vs_desk": -689.58,
+      "delta_180d_vs_desk": -546.17,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 2637.08,
+          "max_dd": 0.383,
+          "n_trades": 21,
+          "win": 0.476,
+          "avg_trade": 125.6,
+          "outside_n": 14,
+          "outside_pnl": 1121.98,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "GRASS",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "SEI",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1391.16,
+          "max_dd": 0.279,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 154.6,
+          "outside_n": 6,
+          "outside_pnl": 481.27,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1771.01,
+          "max_dd": 0.163,
+          "n_trades": 7,
+          "win": 0.714,
+          "avg_trade": 253.0,
+          "outside_n": 5,
+          "outside_pnl": 720.12,
+          "outside_bases": [
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VET",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live+r3__t08",
+      "entry": "live+r3",
+      "exit": "t08",
+      "score": 2901.26,
+      "delta_full_vs_desk": -999.03,
+      "delta_y2026_vs_desk": -454.19,
+      "delta_180d_vs_desk": -602.3,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1659.26,
+          "max_dd": 0.308,
+          "n_trades": 12,
+          "win": 0.5,
+          "avg_trade": 138.3,
+          "outside_n": 8,
+          "outside_pnl": -438.1,
+          "outside_bases": [
+            "CRV",
+            "JASMY",
+            "KAS",
+            "LPT",
+            "MOVR",
+            "ONDO",
+            "PEPE",
+            "SEI"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 1626.55,
+          "max_dd": 0.121,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 325.3,
+          "outside_n": 3,
+          "outside_pnl": 360.76,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1714.88,
+          "max_dd": 0.118,
+          "n_trades": 4,
+          "win": 0.75,
+          "avg_trade": 428.7,
+          "outside_n": 3,
+          "outside_pnl": 360.76,
+          "outside_bases": [
+            "CRV",
+            "LPT",
+            "PEPE"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08_vol3__t12_r30_time14",
+      "entry": "quiet08_vol3",
+      "exit": "t12_r30_time14",
+      "score": 2435.6,
+      "delta_full_vs_desk": -778.17,
+      "delta_y2026_vs_desk": -1340.1,
+      "delta_180d_vs_desk": -1576.54,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1880.12,
+          "max_dd": 0.196,
+          "n_trades": 9,
+          "win": 0.667,
+          "avg_trade": 208.9,
+          "outside_n": 5,
+          "outside_pnl": 974.26,
+          "outside_bases": [
+            "BCH",
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 740.64,
+          "max_dd": 0.219,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 246.9,
+          "outside_n": 3,
+          "outside_pnl": 740.64,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 740.64,
+          "max_dd": 0.219,
+          "n_trades": 3,
+          "win": 0.667,
+          "avg_trade": 246.9,
+          "outside_n": 3,
+          "outside_pnl": 740.64,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t15",
+      "entry": "quiet15",
+      "exit": "t15",
+      "score": 2372.18,
+      "delta_full_vs_desk": -814.41,
+      "delta_y2026_vs_desk": -1623.03,
+      "delta_180d_vs_desk": -1119.42,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1843.88,
+          "max_dd": 0.334,
+          "n_trades": 17,
+          "win": 0.471,
+          "avg_trade": 108.5,
+          "outside_n": 10,
+          "outside_pnl": 1450.05,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "KAS",
+            "LPT",
+            "ONDO",
+            "SEI",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 457.71,
+          "max_dd": 0.369,
+          "n_trades": 8,
+          "win": 0.5,
+          "avg_trade": 57.2,
+          "outside_n": 5,
+          "outside_pnl": 243.7,
+          "outside_bases": [
+            "ALGO",
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VIRTUAL"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1197.76,
+          "max_dd": 0.258,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 199.6,
+          "outside_n": 4,
+          "outside_pnl": 588.93,
+          "outside_bases": [
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet15__t20",
+      "entry": "quiet15",
+      "exit": "t20",
+      "score": 2328.25,
+      "delta_full_vs_desk": -1134.81,
+      "delta_y2026_vs_desk": -1265.66,
+      "delta_180d_vs_desk": -728.26,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1523.48,
+          "max_dd": 0.438,
+          "n_trades": 13,
+          "win": 0.538,
+          "avg_trade": 117.2,
+          "outside_n": 9,
+          "outside_pnl": 586.81,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "KAS",
+            "LPT",
+            "ONDO",
+            "SEI",
+            "VIRTUAL"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 815.08,
+          "max_dd": 0.359,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 163.0,
+          "outside_n": 3,
+          "outside_pnl": 137.86,
+          "outside_bases": [
+            "ALGO",
+            "LPT",
+            "ONDO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1588.92,
+          "max_dd": 0.333,
+          "n_trades": 5,
+          "win": 0.6,
+          "avg_trade": 317.8,
+          "outside_n": 4,
+          "outside_pnl": 257.6,
+          "outside_bases": [
+            "GRASS",
+            "LPT",
+            "ONDO",
+            "VIRTUAL"
+          ]
+        }
+      }
+    },
+    {
+      "name": "quiet08_vol3__t08",
+      "entry": "quiet08_vol3",
+      "exit": "t08",
+      "score": 2188.0,
+      "delta_full_vs_desk": -1147.5,
+      "delta_y2026_vs_desk": -1177.79,
+      "delta_180d_vs_desk": -1414.23,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1510.79,
+          "max_dd": 0.207,
+          "n_trades": 9,
+          "win": 0.556,
+          "avg_trade": 167.9,
+          "outside_n": 4,
+          "outside_pnl": -513.9,
+          "outside_bases": [
+            "BCH",
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 902.95,
+          "max_dd": 0.172,
+          "n_trades": 4,
+          "win": 0.5,
+          "avg_trade": 225.7,
+          "outside_n": 3,
+          "outside_pnl": -332.08,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 902.95,
+          "max_dd": 0.172,
+          "n_trades": 4,
+          "win": 0.5,
+          "avg_trade": 225.7,
+          "outside_n": 3,
+          "outside_pnl": -332.08,
+          "outside_bases": [
+            "JUP",
+            "ONDO",
+            "TAO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "live_gates__t12_r30_time14",
+      "entry": "live_gates",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    },
+    {
+      "name": "minpts4__t12_r30_time14",
+      "entry": "minpts4",
+      "exit": "t12_r30_time14",
+      "score": 2140.66,
+      "delta_full_vs_desk": -1167.32,
+      "delta_y2026_vs_desk": -1311.99,
+      "delta_180d_vs_desk": -1255.94,
+      "beats_desk_full": false,
+      "beats_desk_all": false,
+      "windows": {
+        "full": {
+          "pnl_eur": 1490.97,
+          "max_dd": 0.323,
+          "n_trades": 18,
+          "win": 0.5,
+          "avg_trade": 82.8,
+          "outside_n": 12,
+          "outside_pnl": -131.71,
+          "outside_bases": [
+            "ALGO",
+            "BCH",
+            "BNB",
+            "CRV",
+            "JASMY",
+            "JUP",
+            "KAS",
+            "ONDO",
+            "SEI",
+            "STX"
+          ]
+        },
+        "y2026": {
+          "pnl_eur": 768.75,
+          "max_dd": 0.249,
+          "n_trades": 7,
+          "win": 0.571,
+          "avg_trade": 109.8,
+          "outside_n": 5,
+          "outside_pnl": 380.34,
+          "outside_bases": [
+            "ALGO",
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        },
+        "last_180d": {
+          "pnl_eur": 1061.24,
+          "max_dd": 0.168,
+          "n_trades": 5,
+          "win": 0.8,
+          "avg_trade": 212.2,
+          "outside_n": 4,
+          "outside_pnl": 626.91,
+          "outside_bases": [
+            "BNB",
+            "JUP",
+            "ONDO",
+            "STX"
+          ]
+        }
+      }
+    }
+  ]
+}
