@@ -160,6 +160,8 @@ def test_slots_full_blocks_second_entry() -> None:
 
 
 def test_trail_exit_fires_after_giveback() -> None:
+    from bot.live.momentum_ignition import effective_trail_pct
+
     pos = IgnitionPosition(
         base="ETH",
         entry_price=100.0,
@@ -168,12 +170,68 @@ def test_trail_exit_fires_after_giveback() -> None:
         opened_ms=1,
         peak_px=120.0,
     )
-    cfg = IgnitionConfig(trail_pct=0.15)
-    # 15% off peak 120 → stop at 102.
-    assert trail_exit(pos, 103.0, cfg) is None
-    hit = trail_exit(pos, 102.0, cfg)
+    cfg = IgnitionConfig(trail_pct=0.12, trail_ratchet_arm_pct=0.0)
+    # 12% off peak 120 → stop at 105.6.
+    assert trail_exit(pos, 106.0, cfg) is None
+    hit = trail_exit(pos, 105.6, cfg)
     assert hit is not None
     assert hit["reason"] == "ignition_trail"
+
+
+def test_trail_ratchet_tightens_after_big_runner() -> None:
+    from bot.live.momentum_ignition import effective_trail_pct
+
+    pos = IgnitionPosition(
+        base="ETH",
+        entry_price=100.0,
+        notional_eur=1000.0,
+        qty=10.0,
+        opened_ms=1,
+        peak_px=140.0,  # +40% ≥ 30% arm
+    )
+    cfg = IgnitionConfig(
+        trail_pct=0.12,
+        trail_ratchet_arm_pct=0.30,
+        trail_ratchet_pct=0.10,
+    )
+    assert effective_trail_pct(pos, cfg) == 0.10
+    # 10% off 140 → 126.
+    assert trail_exit(pos, 127.0, cfg) is None
+    hit = trail_exit(pos, 126.0, cfg)
+    assert hit is not None
+    assert hit["reason"] == "ignition_trail_ratchet"
+    assert hit["trail_pct"] == 0.10
+
+
+def test_near_miss_surfaces_single_gate_failures() -> None:
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    # Strong day + breakout but volume not 2×.
+    eth = _bars(60, 10.0, step=0.02, vol=3_000.0)
+    close = float(eth[-1][4])
+    eth[-1][1] = close / 1.10
+    eth[-1][5] = 4_000.0  # only ~1.3× median
+    for r in eth[:-1]:
+        r[2] = min(float(r[2]), close * 0.99)
+    cfg = IgnitionConfig(
+        universe=("ETH",),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        quiet_max=0.5,
+        min_points=1,
+        vol_mult_min=2.0,
+    )
+    out = evaluate_ignition(
+        {"BTC": btc, "ETH": eth},
+        cfg,
+        held=[],
+        cash_eur=2_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["entries"] == []
+    assert out["near_miss"]
+    assert out["near_miss"][0]["base"] == "ETH"
+    assert out["near_miss"][0]["missing"] == "vol"
+    assert "dichtbij ETH" in out["caption"]
 
 
 def test_ignition_defaults_to_okx_venue() -> None:
@@ -186,6 +244,9 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert Settings().momentum_ignition_allow_live is False
     cfg = config_from_settings(Settings())
     assert cfg.decision_interval_sec == 900.0
+    assert cfg.trail_pct == 0.12
+    assert cfg.trail_ratchet_arm_pct == 0.30
+    assert cfg.trail_ratchet_pct == 0.10
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-test-state.json",

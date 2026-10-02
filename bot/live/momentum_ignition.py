@@ -1,12 +1,12 @@
-"""Paper ignition sleeve — desk-universe early-signal + 15% trail.
+"""Ignition sleeve — desk-universe early-signal + trailing exit.
 
-Research (``artifacts/early_signal_book.json``, ``explosive_factor_scan.json``):
-quiet + 20d breakout + day ≥+6% + volume ≥2× on liquid desk names, with a
-15% trail, was the only early-signal book that stayed profitable when
-restricted to the desk universe. Pure "days before" quiet/SMA filters had
-zero out-of-sample lift.
+Research (``artifacts/early_signal_book.json``, wet desk ablation):
+quiet + 20d breakout + day ≥+6% + volume ≥2× on liquid desk names is the
+entry that stays profitable when restricted to the desk universe. Looser
+gates add trades but destroy PnL. Exit: 12% trail from peak, tightening
+to 10% once the lot is ≥+30% above entry (ratchet).
 
-Paper-only. No per-coin hardcodes.
+Live OKX when armed; paper otherwise. No per-coin hardcodes.
 """
 
 from __future__ import annotations
@@ -29,7 +29,11 @@ class IgnitionConfig:
     book_eur: float = 2_000.0
     max_positions: int = 1
     deploy_frac: float = 1.0
-    trail_pct: float = 0.15
+    # Base trail from peak. Ablation: 12% beats 15% on desk-only tape.
+    trail_pct: float = 0.12
+    # Once peak gain ≥ arm, use the tighter trail (0 disables ratchet).
+    trail_ratchet_arm_pct: float = 0.30
+    trail_ratchet_pct: float = 0.10
     # Early-signal gates (desk-only winner from early_signal_book).
     quiet_max: float = 0.12
     day_ret_min: float = 0.06
@@ -293,13 +297,25 @@ def evaluate_ignition(
                 )
 
     want = ranked[0]["base"] if ranked else None
-    caption = (
-        f"Ignition: desk-universe early-signal + trail {cfg.trail_pct:.0%}. "
-        + (
-            f"Candidate {want} ({ranked[0]['points']} pts)."
-            if want
-            else "Geen early-signal vandaag."
+    near = _near_misses(rejected, cfg, limit=3)
+    trail_txt = f"trail {cfg.trail_pct:.0%}"
+    if cfg.trail_ratchet_arm_pct > 0 and cfg.trail_ratchet_pct > 0:
+        trail_txt += (
+            f" (→{cfg.trail_ratchet_pct:.0%} na +{cfg.trail_ratchet_arm_pct:.0%})"
         )
+    if want:
+        body = f"Candidate {want} ({ranked[0]['points']} pts)."
+    elif near:
+        n0 = near[0]
+        body = (
+            f"Geen early-signal; dichtbij {n0['base']} "
+            f"(mist {n0['missing']})."
+        )
+    else:
+        body = "Geen early-signal vandaag."
+    caption = (
+        f"Ignition: desk-universe early-signal + {trail_txt}. "
+        + body
         + (f" Block: {risk_block}." if risk_block else "")
     )
     return {
@@ -312,11 +328,73 @@ def evaluate_ignition(
         "exits": [],
         "ranked": ranked[:8],
         "rejected": rejected[:12],
+        "near_miss": near,
         "want": want,
         "caption": caption,
         "signal": "quiet+brk20+r1_6+vol2",
         "trail_pct": cfg.trail_pct,
+        "trail_ratchet_arm_pct": cfg.trail_ratchet_arm_pct,
+        "trail_ratchet_pct": cfg.trail_ratchet_pct,
     }
+
+
+def _near_misses(
+    rejected: Sequence[Mapping[str, Any]],
+    cfg: IgnitionConfig,
+    *,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Names that fail exactly one early-signal gate (operator watchlist)."""
+    out: list[dict[str, Any]] = []
+    for row in rejected:
+        if "day_ret" not in row:
+            continue
+        missing: list[str] = []
+        if not row.get("quiet"):
+            missing.append("quiet")
+        if not row.get("liquid"):
+            missing.append("liquid")
+        if not row.get("brk20"):
+            missing.append("brk20")
+        if float(row.get("day_ret") or 0.0) < cfg.day_ret_min:
+            missing.append("day_ret")
+        if float(row.get("vol_x") or 0.0) < cfg.vol_mult_min:
+            missing.append("vol")
+        if len(missing) != 1:
+            continue
+        out.append(
+            {
+                "base": row["base"],
+                "missing": missing[0],
+                "day_ret": row.get("day_ret"),
+                "vol_x": row.get("vol_x"),
+                "brk20": row.get("brk20"),
+                "points": row.get("points"),
+            }
+        )
+    out.sort(
+        key=lambda r: (
+            -int(r.get("points") or 0),
+            -float(r.get("vol_x") or 0.0),
+            -float(r.get("day_ret") or 0.0),
+        )
+    )
+    return out[:limit]
+
+
+def effective_trail_pct(pos: IgnitionPosition, cfg: IgnitionConfig) -> float:
+    """Base trail, or ratchet trail once peak gain clears the arm."""
+    base = float(cfg.trail_pct or 0.0)
+    arm = float(cfg.trail_ratchet_arm_pct or 0.0)
+    tight = float(cfg.trail_ratchet_pct or 0.0)
+    if base <= 0 and tight <= 0:
+        return 0.0
+    if arm <= 0 or tight <= 0 or pos.entry_price <= 0:
+        return base
+    peak = max(float(pos.peak_px or pos.entry_price), float(pos.entry_price))
+    if (peak / float(pos.entry_price) - 1.0) >= arm:
+        return tight if base <= 0 else min(base, tight)
+    return base
 
 
 def trail_exit(
@@ -327,15 +405,17 @@ def trail_exit(
     if mark <= 0 or pos.entry_price <= 0:
         return None
     peak = max(float(pos.peak_px or pos.entry_price), mark)
-    trail = float(cfg.trail_pct)
+    trail = effective_trail_pct(pos, cfg)
     if trail <= 0:
         return None
     if mark <= peak * (1.0 - trail):
+        armed = trail < float(cfg.trail_pct or trail) - 1e-12
         return {
             "base": pos.base,
-            "reason": "ignition_trail",
+            "reason": "ignition_trail_ratchet" if armed else "ignition_trail",
             "mark": mark,
             "peak": peak,
+            "trail_pct": trail,
             "gross_return": pos.gross_return(mark),
         }
     return None
@@ -345,6 +425,7 @@ __all__ = [
     "IgnitionConfig",
     "IgnitionPosition",
     "default_config",
+    "effective_trail_pct",
     "evaluate_ignition",
     "fill_px",
     "score_ignition_day",

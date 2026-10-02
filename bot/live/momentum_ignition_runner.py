@@ -100,6 +100,12 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         max_positions=_i("momentum_ignition_max_positions", base.max_positions),
         deploy_frac=_f("momentum_ignition_deploy_frac", base.deploy_frac),
         trail_pct=_f("momentum_ignition_trail_pct", base.trail_pct),
+        trail_ratchet_arm_pct=_f(
+            "momentum_ignition_trail_ratchet_arm_pct", base.trail_ratchet_arm_pct
+        ),
+        trail_ratchet_pct=_f(
+            "momentum_ignition_trail_ratchet_pct", base.trail_ratchet_pct
+        ),
         quiet_max=_f("momentum_ignition_quiet_max", base.quiet_max),
         day_ret_min=_f("momentum_ignition_day_ret_min", base.day_ret_min),
         vol_mult_min=_f("momentum_ignition_vol_mult_min", base.vol_mult_min),
@@ -942,6 +948,8 @@ class IgnitionPaperRunner:
             "next_decision": self.next_decision(),
             "config": {
                 "trail_pct": self.cfg.trail_pct,
+                "trail_ratchet_arm_pct": self.cfg.trail_ratchet_arm_pct,
+                "trail_ratchet_pct": self.cfg.trail_ratchet_pct,
                 "quiet_max": self.cfg.quiet_max,
                 "day_ret_min": self.cfg.day_ret_min,
                 "vol_mult_min": self.cfg.vol_mult_min,
