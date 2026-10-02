@@ -236,16 +236,40 @@ class BtcRsClipPaperRunner:
                 continue
         self.equity_curve = curve[-_EQUITY_CURVE_MAX:]
 
+    def _mark_value(self) -> float:
+        """Position value at live marks (qty × mark), not entry notional."""
+        total = 0.0
+        for p in self.positions:
+            mark = float(self.marks.get(p.base) or p.entry_price or 0.0)
+            qty = float(p.qty or 0.0)
+            if qty > 0 and mark > 0:
+                total += qty * mark
+            else:
+                total += float(p.notional_eur or 0.0)
+        return total
+
     def _equity_now(self) -> float:
+        # Live: cash + mark-to-market so the hero/chart match Bitvavo bags.
+        if not self.dry_run:
+            return float(self.cash_eur) + self._mark_value()
         return self.cash_eur + self._deployed() + self._unrealized()
+
+    def _rebase_equity_curve(self, eq: float | None = None) -> None:
+        """Drop phantom book history after a venue cash sync / accounting fix."""
+        now_ms = round(time.time() * 1000)
+        level = round(float(self._equity_now() if eq is None else eq), 2)
+        self.equity_curve = [[now_ms, level]]
 
     def _sample_equity(self, *, persist: bool = False) -> None:
         eq = round(self._equity_now(), 2)
         now_ms = time.time() * 1000.0
         gap_ms = _EQUITY_CURVE_MIN_GAP_SEC * 1000.0
         if self.equity_curve:
-            last_t, _last_eq = self.equity_curve[-1]
-            if (now_ms - last_t) < gap_ms:
+            last_t, last_eq = self.equity_curve[-1]
+            # Large discontinuous jump (book→venue sync) — restart the sparkline.
+            if abs(eq - float(last_eq)) >= 500.0 and (now_ms - last_t) < 120_000:
+                self._rebase_equity_curve(eq)
+            elif (now_ms - last_t) < gap_ms:
                 self.equity_curve[-1] = [round(now_ms), eq]
             else:
                 self.equity_curve.append([round(now_ms), eq])
@@ -619,6 +643,8 @@ class BtcRsClipPaperRunner:
                 synced,
             )
             self.cash_eur = synced
+            if abs(prev - synced) >= 500.0:
+                self._rebase_equity_curve()
         return synced
 
     async def _decision_cash(self) -> float:
