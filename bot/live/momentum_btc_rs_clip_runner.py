@@ -602,7 +602,27 @@ class BtcRsClipPaperRunner:
             return None
         return max(0.0, float(raw))
 
+    async def _sync_cash_from_venue(self) -> float | None:
+        """Align book cash with free venue EUR so dashboard equity/alloc match Bitvavo."""
+        venue_eur = await self._venue_quote_eur()
+        if venue_eur is None:
+            return None
+        # Clip owns leftover quote after other desks' reserved EUR.
+        synced = max(0.0, float(venue_eur) - float(self._reserved_quote_eur or 0.0))
+        prev = float(self.cash_eur)
+        if abs(prev - synced) >= 0.01:
+            logger.info(
+                "clip cash sync venue=%.2f reserved=%.2f book %.2f -> %.2f",
+                venue_eur,
+                self._reserved_quote_eur,
+                prev,
+                synced,
+            )
+            self.cash_eur = synced
+        return synced
+
     async def _decision_cash(self) -> float:
+        await self._sync_cash_from_venue()
         cash = float(self.cash_eur)
         venue_eur = await self._venue_quote_eur()
         if venue_eur is None:
@@ -732,6 +752,8 @@ class BtcRsClipPaperRunner:
         self.positions = [p for p in self.positions if p is not pos]
         if pos.role in {"btc", "alt"}:
             self._arm_residual_pack(f"sold_{pos.role}")
+        if not pos.is_paper() and not self.dry_run:
+            await self._sync_cash_from_venue()
         self._ledger_append(
             {
                 "event": "exit",
@@ -897,7 +919,9 @@ class BtcRsClipPaperRunner:
         cost = fill.notional + fill.fee_eur
         if cost > self.cash_eur + 1.0:
             logger.warning("clip buy over cash %s cost=%.2f cash=%.2f", base, cost, self.cash_eur)
-        self.cash_eur = max(0.0, self.cash_eur - cost)
+        synced = await self._sync_cash_from_venue()
+        if synced is None:
+            self.cash_eur = max(0.0, self.cash_eur - cost)
         venue = self._primary_venue()
         pos = ClipPosition(
             base=base,
@@ -1140,6 +1164,7 @@ class BtcRsClipPaperRunner:
             "reserved_quote_eur": round(self._reserved_quote_eur, 2),
             "book_eur": self.cfg.book_eur,
             "cash_eur": round(self.cash_eur, 2),
+            "venue_cash_eur": round(self.cash_eur, 2) if live else None,
             "deployed_eur": round(self._deployed(), 2),
             "equity_eur": round(equity, 2),
             "unrealized_net_eur": round(self._unrealized(), 2),
@@ -1316,6 +1341,12 @@ class BtcRsClipDeskManager:
                     await self._runner.reconcile_external_inventory()
                 except Exception:  # noqa: BLE001
                     logger.exception("clip: reconcile for status failed")
+                try:
+                    synced = await self._runner._sync_cash_from_venue()
+                    if synced is not None:
+                        self._runner._sample_equity(persist=True)
+                except Exception:  # noqa: BLE001
+                    logger.exception("clip: cash sync for status failed")
         return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:

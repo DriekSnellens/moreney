@@ -699,12 +699,18 @@ async def live_momentum_status() -> dict[str, Any]:
 
 @app.get("/live/momentum/pulse")
 async def live_momentum_pulse() -> dict[str, Any]:
-    """One round-trip for 1s dashboard marks: live clip + 15m only."""
+    """One round-trip for 1s dashboard marks: live clip + 15m + paper ignition."""
     core, clip = await asyncio.gather(
         get_momentum_desk_manager().status_fresh(),
         get_btc_rs_clip_desk_manager().refresh_live(),
         return_exceptions=True,
     )
+    ignition: dict[str, Any] | None = None
+    if bool(getattr(get_settings(), "momentum_ignition_enabled", False)):
+        try:
+            ignition = get_ignition_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            ignition = None
 
     def _ok(payload: object) -> dict[str, Any] | None:
         return payload if isinstance(payload, dict) else None
@@ -712,6 +718,7 @@ async def live_momentum_pulse() -> dict[str, Any]:
     return {
         "core": _ok(core),
         "clip": _ok(clip),
+        "ignition": ignition,
         "short_weakest": None,
         "donchian": None,
         "ts": time.time(),

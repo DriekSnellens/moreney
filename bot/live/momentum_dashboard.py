@@ -1035,6 +1035,27 @@ def _paper_earnings_panel(earnings: DeskEarnings | None) -> str:
     tiles_html = _period_tiles(
         paper, f"{paper.trades_week} paper", muted=True
     )
+    bits: list[str] = []
+    if earnings.ignition is not None:
+        bits.append(
+            f"ignition week {_fmt_eur(earnings.ignition.week_eur)} · "
+            f"all {_fmt_eur(earnings.ignition.all_time_eur)}"
+        )
+    if earnings.donchian is not None:
+        bits.append(
+            f"donchian week {_fmt_eur(earnings.donchian.week_eur)} · "
+            f"all {_fmt_eur(earnings.donchian.all_time_eur)}"
+        )
+    if earnings.short_weakest is not None:
+        bits.append(
+            f"short-weakest week {_fmt_eur(earnings.short_weakest.week_eur)}"
+        )
+    split = (
+        f'<p class="muted" style="font-size:.72rem;margin:.35rem 0 0">'
+        f'{" · ".join(bits)}</p>'
+        if bits
+        else ""
+    )
     return (
         '<details class="fold paper-fold" id="paper-earn">'
         '<summary><span class="fold-head">Paper winst</span>'
@@ -1043,6 +1064,7 @@ def _paper_earnings_panel(earnings: DeskEarnings | None) -> str:
         '<div class="fold-body">'
         '<p class="muted">Shadow / dry-run. Geen Bitvavo- of OKX-winst en geen netto verdiend.</p>'
         f'<div class="earn-grid">{tiles_html}</div>'
+        f"{split}"
         '<div class="earn-foot">'
         f"<span>Vandaag <strong>{_fmt_eur(paper.day_eur)}</strong></span>"
         f"<span>Open MTM paper <strong>{_fmt_eur(open_mtm)}</strong></span>"
@@ -2012,7 +2034,11 @@ def _equity_chart_svg(
 
 
 def _alloc_visual(status: Mapping[str, Any]) -> str:
-    cash = max(0.0, float(status.get("cash_eur") or 0.0))
+    # Prefer venue-synced cash when live so the bar matches Bitvavo, not a phantom book remainder.
+    raw_cash = status.get("venue_cash_eur")
+    if raw_cash is None:
+        raw_cash = status.get("cash_eur")
+    cash = max(0.0, float(raw_cash or 0.0))
     btc_n = 0.0
     alt_n = 0.0
     alt_name = ""
@@ -3461,7 +3487,8 @@ _LIVE_MARKS_JS = r"""
   function patchAlloc(st) {
     const bar = document.querySelector('[data-live="alloc-bar"]');
     if (!bar) return;
-    let cash = Math.max(0, Number(st.cash_eur || 0));
+    const cashRaw = (st.venue_cash_eur != null) ? st.venue_cash_eur : st.cash_eur;
+    let cash = Math.max(0, Number(cashRaw || 0));
     let btc = 0, alt = 0, altName = "alt";
     (st.positions || []).forEach((p) => {
       if (Number(p.quantity || p.notional_eur || 0) <= 1e-12) return;
@@ -3592,11 +3619,45 @@ _LIVE_MARKS_JS = r"""
     const knobs = trailKnobs(status);
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
   }
-  function applyPulse(core, clip) {
+  function patchIgnition(st) {
+    const root = document.querySelector('[data-live="paper-ign"]');
+    if (!root || !st) return;
+    setText(root, "ign-eq", fmtEur(st.equity_eur, false));
+    setText(root, "ign-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
+    setText(root, "ign-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
+    setText(root, "ign-book", fmtEur(st.book_eur || (st.config || {}).book_eur, false));
+    const wantEl = root.querySelector('[data-k="ign-want"]');
+    if (wantEl) wantEl.textContent = st.want || "—";
+    const cap = root.querySelector('[data-live="ign-caption"]');
+    if (cap && st.live_caption) cap.textContent = st.live_caption;
+    const gate = root.querySelector('[data-live="ign-gate"]');
+    if (gate) {
+      const on = !!st.risk_on;
+      gate.className = on ? "pill on" : "pill off";
+      gate.innerHTML = `<span class="dot"></span>${on ? "BTC > SMA50" : "standby"}`;
+    }
+    const open = root.querySelector('[data-live="ign-open"]');
+    if (open) {
+      const pos = (st.positions || []).filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
+      if (!pos.length) {
+        open.innerHTML = '<span class="muted">Geen open ignition — wacht op early-signal.</span>';
+      } else {
+        open.innerHTML = pos.map((p) => {
+          const net = p.unrealized_net_eur;
+          const hid = esc(p.holding_id || p.base || "");
+          return `<span class="mix-chip" data-holding="${hid}"><span class="muted">long</span>`
+            + `<strong>${esc(p.base || "")}</strong>`
+            + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+        }).join("");
+      }
+    }
+  }
+  function applyPulse(core, clip, ignition) {
     const clipRoot = document.querySelector('[data-live="clip"]');
     if (clipRoot) {
       if (clip) patchClip(clip);
       if (core) patchCore15m(core);
+      if (ignition) patchIgnition(ignition);
       return;
     }
     if (core) {
@@ -3611,6 +3672,7 @@ _LIVE_MARKS_JS = r"""
       (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
       patchCore15m(core);
     }
+    if (ignition) patchIgnition(ignition);
   }
   async function fetchJson(url) {
     const sep = url.includes("?") ? "&" : "?";
@@ -3628,15 +3690,15 @@ _LIVE_MARKS_JS = r"""
     tickBusy = true;
     try {
       const pulse = await fetchJson(PULSE_URL).catch(() => null);
-      if (pulse && (pulse.core || pulse.clip)) {
-        applyPulse(pulse.core, pulse.clip);
+      if (pulse && (pulse.core || pulse.clip || pulse.ignition)) {
+        applyPulse(pulse.core, pulse.clip, pulse.ignition);
         return;
       }
       const [core, clip] = await Promise.all([
         fetchJson(STATUS_URL).catch(() => null),
         fetchJson(CLIP_STATUS_URL).catch(() => null),
       ]);
-      applyPulse(core, clip);
+      applyPulse(core, clip, null);
     } finally {
       tickBusy = false;
     }
@@ -3862,8 +3924,8 @@ def render_momentum_dashboard(
     </nav>
   </div>
   <div class="side-capital">
-    <div class="cap-label"><span>Equity</span>
-      <span class="{_cls(open_pnl)} mono">{_fmt_eur(open_pnl)}</span>
+    <div class="cap-label"><span>Open</span>
+      <span class="{_cls(open_pnl)} mono" data-live="open-pnl">{_fmt_eur(open_pnl)}</span>
     </div>
     <div class="cap-val" data-live="equity">{_fmt_eur(equity, signed=False)}</div>
     <div class="bar"><i style="width:100%"></i></div>

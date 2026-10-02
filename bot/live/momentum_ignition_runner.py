@@ -349,6 +349,20 @@ class IgnitionPaperRunner:
                     }
                 )
         if applied:
+            if not self.positions:
+                ld = dict(self.last_decision or {})
+                if ld.get("risk_block") == "slots_full":
+                    ld["risk_block"] = ""
+                cap = str(ld.get("caption") or "")
+                cap = cap.replace(" Block: slots_full.", "").replace("Block: slots_full.", "")
+                if "trail" in ",".join(a.get("reason", "") for a in applied):
+                    ld["caption"] = (
+                        f"Ignition PAPER: desk-universe early-signal + trail "
+                        f"{self.cfg.trail_pct:.0%}. Slot vrij na exit."
+                    )
+                elif cap:
+                    ld["caption"] = cap
+                self.last_decision = ld
             self._save_state()
         return applied
 
@@ -537,7 +551,16 @@ class IgnitionPaperRunner:
                     "quantity": p.qty,
                 }
             )
-        last = self.last_decision or {}
+        last = dict(self.last_decision or {})
+        # Stale decide while a lot was open can leave slots_full after exit.
+        if not positions and last.get("risk_block") == "slots_full":
+            last["risk_block"] = ""
+            cap = str(last.get("caption") or "")
+            last["caption"] = (
+                cap.replace(" Block: slots_full.", "")
+                .replace("Block: slots_full.", "")
+                .strip()
+            )
         return {
             "desk": self._desk(),
             "mode": "ignition_paper",
