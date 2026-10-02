@@ -1,0 +1,554 @@
+{
+  "book_eur": 20000.0,
+  "last_bar": "2026-10-02",
+  "windows": {
+    "fair_2y": {
+      "start": "2024-03-16",
+      "end": "2026-10-02",
+      "ranked_by_pnl": [
+        {
+          "name": "LIVE_rs_residual_full",
+          "pnl_eur": 410891.21,
+          "end_eur": 430891.21,
+          "calmar": 7.546,
+          "max_dd_pct": 0.3094,
+          "ann_pct": 2.335,
+          "n_trades": 92,
+          "end_hold": "cash"
+        },
+        {
+          "name": "LIVE_clip20_80_rs",
+          "pnl_eur": 170815.37,
+          "end_eur": 190815.37,
+          "calmar": 4.226,
+          "max_dd_pct": 0.3367,
+          "ann_pct": 1.4228,
+          "n_trades": 113,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_setup_score__res100_sma_trail10",
+          "pnl_eur": 53344.52,
+          "end_eur": 73344.52,
+          "calmar": 1.446,
+          "max_dd_pct": 0.4599,
+          "ann_pct": 0.6649,
+          "n_trades": 101,
+          "end_hold": "alt:SUI"
+        },
+        {
+          "name": "FWD_setup_score__res100_trail10",
+          "pnl_eur": -6009.94,
+          "end_eur": 13990.06,
+          "calmar": -0.166,
+          "max_dd_pct": 0.7877,
+          "ann_pct": -0.1308,
+          "n_trades": 170,
+          "end_hold": "cash"
+        },
+        {
+          "name": "RS_chase_res100_trail10",
+          "pnl_eur": -8094.12,
+          "end_eur": 11905.88,
+          "calmar": -0.209,
+          "max_dd_pct": 0.8802,
+          "ann_pct": -0.1841,
+          "n_trades": 160,
+          "end_hold": "cash"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_trail10",
+          "pnl_eur": -11657.45,
+          "end_eur": 8342.55,
+          "calmar": -0.367,
+          "max_dd_pct": 0.7905,
+          "ann_pct": -0.2904,
+          "n_trades": 177,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_rsi_70__res100_sma_trail10",
+          "pnl_eur": -11751.66,
+          "end_eur": 8248.34,
+          "calmar": -0.394,
+          "max_dd_pct": 0.7455,
+          "ann_pct": -0.2935,
+          "n_trades": 83,
+          "end_hold": "alt:DOGE"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_sma_trail10",
+          "pnl_eur": -12783.03,
+          "end_eur": 7216.97,
+          "calmar": -0.497,
+          "max_dd_pct": 0.6638,
+          "ann_pct": -0.3296,
+          "n_trades": 45,
+          "end_hold": "alt:DOT"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_trail10",
+          "pnl_eur": -14554.9,
+          "end_eur": 5445.1,
+          "calmar": -0.449,
+          "max_dd_pct": 0.8911,
+          "ann_pct": -0.3998,
+          "n_trades": 181,
+          "end_hold": "alt:ETH"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_sma_trail10",
+          "pnl_eur": -14767.79,
+          "end_eur": 5232.21,
+          "calmar": -0.542,
+          "max_dd_pct": 0.7552,
+          "ann_pct": -0.4091,
+          "n_trades": 57,
+          "end_hold": "alt:DOGE"
+        },
+        {
+          "name": "FWD_rsi_70__res100_trail10",
+          "pnl_eur": -15952.64,
+          "end_eur": 4047.36,
+          "calmar": -0.522,
+          "max_dd_pct": 0.8922,
+          "ann_pct": -0.4657,
+          "n_trades": 179,
+          "end_hold": "alt:UNI"
+        }
+      ],
+      "live_rs": {
+        "name": "LIVE_rs_residual_full",
+        "pnl_eur": 410891.21,
+        "end_eur": 430891.21,
+        "calmar": 7.546,
+        "max_dd_pct": 0.3094,
+        "ann_pct": 2.335,
+        "n_trades": 92,
+        "end_hold": "cash"
+      },
+      "best_forward": {
+        "name": "FWD_setup_score__res100_sma_trail10",
+        "pnl_eur": 53344.52,
+        "end_eur": 73344.52,
+        "calmar": 1.446,
+        "max_dd_pct": 0.4599,
+        "ann_pct": 0.6649,
+        "n_trades": 101,
+        "end_hold": "alt:SUI"
+      },
+      "delta_best_fwd_vs_live": -357546.69
+    },
+    "last_12w": {
+      "start": "2026-07-10",
+      "end": "2026-10-02",
+      "ranked_by_pnl": [
+        {
+          "name": "LIVE_rs_residual_full",
+          "pnl_eur": 25416.75,
+          "end_eur": 45416.75,
+          "calmar": 305.893,
+          "max_dd_pct": 0.1076,
+          "ann_pct": 32.9276,
+          "n_trades": 14,
+          "end_hold": "cash"
+        },
+        {
+          "name": "LIVE_clip20_80_rs",
+          "pnl_eur": 21809.31,
+          "end_eur": 41809.31,
+          "calmar": 237.152,
+          "max_dd_pct": 0.096,
+          "ann_pct": 22.774,
+          "n_trades": 15,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_trail10",
+          "pnl_eur": 20818.25,
+          "end_eur": 40818.25,
+          "calmar": 171.642,
+          "max_dd_pct": 0.1191,
+          "ann_pct": 20.4454,
+          "n_trades": 21,
+          "end_hold": "alt:ETH"
+        },
+        {
+          "name": "FWD_setup_score__res100_trail10",
+          "pnl_eur": 16146.36,
+          "end_eur": 36146.36,
+          "calmar": 61.943,
+          "max_dd_pct": 0.1892,
+          "ann_pct": 11.7202,
+          "n_trades": 18,
+          "end_hold": "cash"
+        },
+        {
+          "name": "FWD_setup_score__res100_sma_trail10",
+          "pnl_eur": 12934.19,
+          "end_eur": 32934.19,
+          "calmar": 41.651,
+          "max_dd_pct": 0.1807,
+          "ann_pct": 7.5274,
+          "n_trades": 15,
+          "end_hold": "alt:SUI"
+        },
+        {
+          "name": "FWD_rsi_70__res100_trail10",
+          "pnl_eur": 9634.44,
+          "end_eur": 29634.44,
+          "calmar": 37.085,
+          "max_dd_pct": 0.1191,
+          "ann_pct": 4.4174,
+          "n_trades": 19,
+          "end_hold": "alt:UNI"
+        },
+        {
+          "name": "RS_chase_res100_trail10",
+          "pnl_eur": 7706.24,
+          "end_eur": 27706.24,
+          "calmar": 13.564,
+          "max_dd_pct": 0.2254,
+          "ann_pct": 3.0573,
+          "n_trades": 16,
+          "end_hold": "cash"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_trail10",
+          "pnl_eur": 6395.62,
+          "end_eur": 26395.62,
+          "calmar": 13.326,
+          "max_dd_pct": 0.1722,
+          "ann_pct": 2.2946,
+          "n_trades": 19,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_rsi_70__res100_sma_trail10",
+          "pnl_eur": 3236.65,
+          "end_eur": 23236.65,
+          "calmar": 9.385,
+          "max_dd_pct": 0.0964,
+          "ann_pct": 0.9051,
+          "n_trades": 11,
+          "end_hold": "alt:DOGE"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_sma_trail10",
+          "pnl_eur": -2510.68,
+          "end_eur": 17489.32,
+          "calmar": -2.388,
+          "max_dd_pct": 0.1835,
+          "ann_pct": -0.4381,
+          "n_trades": 5,
+          "end_hold": "alt:DOT"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_sma_trail10",
+          "pnl_eur": -3520.08,
+          "end_eur": 16479.92,
+          "calmar": -2.708,
+          "max_dd_pct": 0.2086,
+          "ann_pct": -0.5648,
+          "n_trades": 7,
+          "end_hold": "alt:DOGE"
+        }
+      ],
+      "live_rs": {
+        "name": "LIVE_rs_residual_full",
+        "pnl_eur": 25416.75,
+        "end_eur": 45416.75,
+        "calmar": 305.893,
+        "max_dd_pct": 0.1076,
+        "ann_pct": 32.9276,
+        "n_trades": 14,
+        "end_hold": "cash"
+      },
+      "best_forward": {
+        "name": "FWD_ext_sma_8__res100_trail10",
+        "pnl_eur": 20818.25,
+        "end_eur": 40818.25,
+        "calmar": 171.642,
+        "max_dd_pct": 0.1191,
+        "ann_pct": 20.4454,
+        "n_trades": 21,
+        "end_hold": "alt:ETH"
+      },
+      "delta_best_fwd_vs_live": -4598.5
+    },
+    "last_90d": {
+      "start": "2026-07-04",
+      "end": "2026-10-02",
+      "ranked_by_pnl": [
+        {
+          "name": "LIVE_rs_residual_full",
+          "pnl_eur": 25416.75,
+          "end_eur": 45416.75,
+          "calmar": 240.542,
+          "max_dd_pct": 0.1076,
+          "ann_pct": 25.8929,
+          "n_trades": 14,
+          "end_hold": "cash"
+        },
+        {
+          "name": "LIVE_clip20_80_rs",
+          "pnl_eur": 21809.31,
+          "end_eur": 41809.31,
+          "calmar": 190.477,
+          "max_dd_pct": 0.096,
+          "ann_pct": 18.2917,
+          "n_trades": 15,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_setup_score__res100_trail10",
+          "pnl_eur": 19630.14,
+          "end_eur": 39630.14,
+          "calmar": 76.807,
+          "max_dd_pct": 0.1896,
+          "ann_pct": 14.5619,
+          "n_trades": 20,
+          "end_hold": "cash"
+        },
+        {
+          "name": "RS_chase_res100_trail10",
+          "pnl_eur": 17299.89,
+          "end_eur": 37299.89,
+          "calmar": 49.512,
+          "max_dd_pct": 0.2262,
+          "ann_pct": 11.2019,
+          "n_trades": 12,
+          "end_hold": "cash"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_trail10",
+          "pnl_eur": 14513.73,
+          "end_eur": 34513.73,
+          "calmar": 41.846,
+          "max_dd_pct": 0.1896,
+          "ann_pct": 7.9352,
+          "n_trades": 21,
+          "end_hold": "alt:ETH"
+        },
+        {
+          "name": "FWD_setup_score__res100_sma_trail10",
+          "pnl_eur": 12934.19,
+          "end_eur": 32934.19,
+          "calmar": 35.433,
+          "max_dd_pct": 0.1807,
+          "ann_pct": 6.4036,
+          "n_trades": 15,
+          "end_hold": "alt:SUI"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_trail10",
+          "pnl_eur": 9719.99,
+          "end_eur": 29719.99,
+          "calmar": 21.0,
+          "max_dd_pct": 0.1858,
+          "ann_pct": 3.9027,
+          "n_trades": 23,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_rsi_70__res100_trail10",
+          "pnl_eur": 5060.43,
+          "end_eur": 25060.43,
+          "calmar": 7.767,
+          "max_dd_pct": 0.1896,
+          "ann_pct": 1.4727,
+          "n_trades": 19,
+          "end_hold": "alt:UNI"
+        },
+        {
+          "name": "FWD_rsi_70__res100_sma_trail10",
+          "pnl_eur": 3236.65,
+          "end_eur": 23236.65,
+          "calmar": 8.563,
+          "max_dd_pct": 0.0964,
+          "ann_pct": 0.8259,
+          "n_trades": 11,
+          "end_hold": "alt:DOGE"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_sma_trail10",
+          "pnl_eur": -2510.68,
+          "end_eur": 17489.32,
+          "calmar": -2.269,
+          "max_dd_pct": 0.1835,
+          "ann_pct": -0.4163,
+          "n_trades": 5,
+          "end_hold": "alt:DOT"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_sma_trail10",
+          "pnl_eur": -3520.08,
+          "end_eur": 16479.92,
+          "calmar": -2.59,
+          "max_dd_pct": 0.2086,
+          "ann_pct": -0.5402,
+          "n_trades": 7,
+          "end_hold": "alt:DOGE"
+        }
+      ],
+      "live_rs": {
+        "name": "LIVE_rs_residual_full",
+        "pnl_eur": 25416.75,
+        "end_eur": 45416.75,
+        "calmar": 240.542,
+        "max_dd_pct": 0.1076,
+        "ann_pct": 25.8929,
+        "n_trades": 14,
+        "end_hold": "cash"
+      },
+      "best_forward": {
+        "name": "FWD_setup_score__res100_trail10",
+        "pnl_eur": 19630.14,
+        "end_eur": 39630.14,
+        "calmar": 76.807,
+        "max_dd_pct": 0.1896,
+        "ann_pct": 14.5619,
+        "n_trades": 20,
+        "end_hold": "cash"
+      },
+      "delta_best_fwd_vs_live": -5786.61
+    },
+    "since_clip_live": {
+      "start": "2026-08-24",
+      "end": "2026-10-02",
+      "ranked_by_pnl": [
+        {
+          "name": "LIVE_rs_residual_full",
+          "pnl_eur": 21865.12,
+          "end_eur": 41865.12,
+          "calmar": 7892.399,
+          "max_dd_pct": 0.1076,
+          "ann_pct": 849.176,
+          "n_trades": 6,
+          "end_hold": "cash"
+        },
+        {
+          "name": "LIVE_clip20_80_rs",
+          "pnl_eur": 17939.61,
+          "end_eur": 37939.61,
+          "calmar": 3570.769,
+          "max_dd_pct": 0.0966,
+          "ann_pct": 344.9881,
+          "n_trades": 7,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_rsi_70__res100_trail10",
+          "pnl_eur": 15881.47,
+          "end_eur": 35881.47,
+          "calmar": 1737.389,
+          "max_dd_pct": 0.1191,
+          "ann_pct": 206.9116,
+          "n_trades": 7,
+          "end_hold": "alt:DOT"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_trail10",
+          "pnl_eur": 15741.67,
+          "end_eur": 35741.67,
+          "calmar": 2314.935,
+          "max_dd_pct": 0.0862,
+          "ann_pct": 199.6308,
+          "n_trades": 9,
+          "end_hold": "alt:ETH"
+        },
+        {
+          "name": "RS_chase_res100_trail10",
+          "pnl_eur": 15087.5,
+          "end_eur": 35087.5,
+          "calmar": 1567.449,
+          "max_dd_pct": 0.1075,
+          "ann_pct": 168.4897,
+          "n_trades": 8,
+          "end_hold": "cash"
+        },
+        {
+          "name": "FWD_setup_score__res100_trail10",
+          "pnl_eur": 14466.62,
+          "end_eur": 34466.62,
+          "calmar": 1190.21,
+          "max_dd_pct": 0.1201,
+          "ann_pct": 142.9933,
+          "n_trades": 8,
+          "end_hold": "cash"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_trail10",
+          "pnl_eur": 12342.48,
+          "end_eur": 32342.48,
+          "calmar": 934.381,
+          "max_dd_pct": 0.0851,
+          "ann_pct": 79.554,
+          "n_trades": 7,
+          "end_hold": "btc:BTC"
+        },
+        {
+          "name": "FWD_setup_score__res100_sma_trail10",
+          "pnl_eur": 10103.91,
+          "end_eur": 30103.91,
+          "calmar": 226.322,
+          "max_dd_pct": 0.1805,
+          "ann_pct": 40.8451,
+          "n_trades": 7,
+          "end_hold": "alt:SUI"
+        },
+        {
+          "name": "FWD_rsi_70__res100_sma_trail10",
+          "pnl_eur": 4260.72,
+          "end_eur": 24260.72,
+          "calmar": 50.055,
+          "max_dd_pct": 0.0965,
+          "ann_pct": 4.8327,
+          "n_trades": 7,
+          "end_hold": "alt:DOGE"
+        },
+        {
+          "name": "FWD_pb8_rsi65_ext10__res100_sma_trail10",
+          "pnl_eur": -1828.79,
+          "end_eur": 18171.21,
+          "calmar": -5.038,
+          "max_dd_pct": 0.1158,
+          "ann_pct": -0.5834,
+          "n_trades": 3,
+          "end_hold": "alt:DOT"
+        },
+        {
+          "name": "FWD_ext_sma_8__res100_sma_trail10",
+          "pnl_eur": -1873.39,
+          "end_eur": 18126.61,
+          "calmar": -5.118,
+          "max_dd_pct": 0.1158,
+          "ann_pct": -0.5926,
+          "n_trades": 3,
+          "end_hold": "alt:DOGE"
+        }
+      ],
+      "live_rs": {
+        "name": "LIVE_rs_residual_full",
+        "pnl_eur": 21865.12,
+        "end_eur": 41865.12,
+        "calmar": 7892.399,
+        "max_dd_pct": 0.1076,
+        "ann_pct": 849.176,
+        "n_trades": 6,
+        "end_hold": "cash"
+      },
+      "best_forward": {
+        "name": "FWD_rsi_70__res100_trail10",
+        "pnl_eur": 15881.47,
+        "end_eur": 35881.47,
+        "calmar": 1737.389,
+        "max_dd_pct": 0.1191,
+        "ann_pct": 206.9116,
+        "n_trades": 7,
+        "end_hold": "alt:DOT"
+      },
+      "delta_best_fwd_vs_live": -5983.65
+    }
+  }
+}
