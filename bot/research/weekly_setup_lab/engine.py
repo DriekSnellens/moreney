@@ -260,8 +260,10 @@ def run_weekly_setup_grid(
             "calmar": rows[0].get("calmar"),
             "max_dd_pct": rows[0].get("max_dd_pct"),
             "ann_pct": rows[0].get("ann_pct"),
+            "n_trades": rows[0].get("n_trades"),
             "entry": rows[0].get("entry"),
             "book": rows[0].get("book"),
+            "end_hold": rows[0].get("end_hold"),
         }
         for mode, rows in by_alphai.items()
         if rows
