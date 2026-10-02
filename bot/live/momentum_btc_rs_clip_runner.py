@@ -608,6 +608,11 @@ class BtcRsClipPaperRunner:
         if venue_eur is None:
             return cash
         left = max(0.0, venue_eur - self._reserved_quote_eur)
+        # Leave fee/slip/rounding headroom so a full-balance taker buy
+        # does not 216-reject on Bitvavo (insufficient funds).
+        if left > 0:
+            buffer = max(15.0, left * float(self.cfg.fee_rt or 0.003))
+            left = max(0.0, left - buffer)
         return min(cash, left)
 
     async def _fill(
@@ -1030,7 +1035,14 @@ class BtcRsClipPaperRunner:
                         applied.append(
                             {"action": "entry", "base": pos.base, "notional_eur": pos.notional_eur}
                         )
-                if decision.get("rebalance_due") or applied:
+                planned = bool(
+                    decision.get("entries")
+                    or decision.get("exits")
+                    or decision.get("trims")
+                )
+                # Advance the weekly clock only after a successful action, or
+                # when due with nothing to do. Keep it due if planned fills failed.
+                if applied or (decision.get("rebalance_due") and not planned):
                     self.last_rebalance_ms = int(now.timestamp() * 1000)
             self.last_decision = {
                 **decision,
