@@ -1,0 +1,2332 @@
+{
+  "asof": "2026-10-02T18:02:42.416801+00:00",
+  "book_eur": 2000.0,
+  "universe": "ex_desk",
+  "universe_n": 66,
+  "note": "Daily OKX sleeve grid. entry_day_pct = % of calendar days with a new entry. live_sniper is sparse baseline; top_day_always \u2248 guaranteed risk-on activity.",
+  "n_combos": 100,
+  "top_score": [
+    {
+      "name": "top_day_always__t08_time2",
+      "entry": "top_day_always",
+      "exit": "t08_time2",
+      "pick_mode": "top_day_always",
+      "score": 16167.5,
+      "windows": {
+        "full": {
+          "pnl_eur": 10130.1,
+          "max_dd": 0.536,
+          "n_trades": 168,
+          "win": 0.423,
+          "avg_trade": 60.3,
+          "days_in": 900,
+          "days_entered": 168,
+          "entry_day_pct": 18.7,
+          "best_trade": 4333.07,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 10130.1
+          }
+        },
+        "y2026": {
+          "pnl_eur": 9180.74,
+          "max_dd": 0.624,
+          "n_trades": 60,
+          "win": 0.4,
+          "avg_trade": 153.0,
+          "days_in": 275,
+          "days_entered": 60,
+          "entry_day_pct": 21.8,
+          "best_trade": 4333.07,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 9180.74
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 8954.13,
+          "max_dd": 0.645,
+          "n_trades": 47,
+          "win": 0.404,
+          "avg_trade": 190.5,
+          "days_in": 181,
+          "days_entered": 47,
+          "entry_day_pct": 26.0,
+          "best_trade": 4333.07,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 8954.13
+          }
+        }
+      }
+    },
+    {
+      "name": "top_day_always__time2",
+      "entry": "top_day_always",
+      "exit": "time2",
+      "pick_mode": "top_day_always",
+      "score": 9964.11,
+      "windows": {
+        "full": {
+          "pnl_eur": 7330.18,
+          "max_dd": 0.409,
+          "n_trades": 152,
+          "win": 0.461,
+          "avg_trade": 48.2,
+          "days_in": 900,
+          "days_entered": 152,
+          "entry_day_pct": 16.9,
+          "best_trade": 2674.58,
+          "worst_trade": -721.17,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 7330.18
+          }
+        },
+        "y2026": {
+          "pnl_eur": 4102.5,
+          "max_dd": 0.531,
+          "n_trades": 53,
+          "win": 0.434,
+          "avg_trade": 77.4,
+          "days_in": 275,
+          "days_entered": 53,
+          "entry_day_pct": 19.3,
+          "best_trade": 2674.58,
+          "worst_trade": -721.17,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 4102.5
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 4588.71,
+          "max_dd": 0.341,
+          "n_trades": 41,
+          "win": 0.463,
+          "avg_trade": 111.9,
+          "days_in": 181,
+          "days_entered": 41,
+          "entry_day_pct": 22.7,
+          "best_trade": 2674.58,
+          "worst_trade": -721.17,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 4588.71
+          }
+        }
+      }
+    },
+    {
+      "name": "ignition_loose_q25__t12_r30",
+      "entry": "ignition_loose_q25",
+      "exit": "t12_r30",
+      "pick_mode": "ignition",
+      "score": 6651.61,
+      "windows": {
+        "full": {
+          "pnl_eur": 5358.85,
+          "max_dd": 0.606,
+          "n_trades": 22,
+          "win": 0.318,
+          "avg_trade": 243.6,
+          "days_in": 900,
+          "days_entered": 22,
+          "entry_day_pct": 2.4,
+          "best_trade": 3937.92,
+          "worst_trade": -526.53,
+          "path_pnl": {
+            "classic": 1623.16,
+            "coil": 3735.68,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 2949.16,
+          "max_dd": 0.378,
+          "n_trades": 6,
+          "win": 0.333,
+          "avg_trade": 491.5,
+          "days_in": 275,
+          "days_entered": 6,
+          "entry_day_pct": 2.2,
+          "best_trade": 2983.45,
+          "worst_trade": -198.68,
+          "path_pnl": {
+            "classic": 133.95,
+            "coil": 2815.21,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 3976.71,
+          "max_dd": 0.312,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 662.8,
+          "days_in": 181,
+          "days_entered": 6,
+          "entry_day_pct": 3.3,
+          "best_trade": 3664.9,
+          "worst_trade": -517.97,
+          "path_pnl": {
+            "classic": 829.78,
+            "coil": 3146.93,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_noquiet_d2__t05",
+      "entry": "day_mom_noquiet_d2",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 6395.96,
+      "windows": {
+        "full": {
+          "pnl_eur": 2447.38,
+          "max_dd": 0.867,
+          "n_trades": 117,
+          "win": 0.325,
+          "avg_trade": 20.9,
+          "days_in": 900,
+          "days_entered": 117,
+          "entry_day_pct": 13.0,
+          "best_trade": 2511.53,
+          "worst_trade": -330.35,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 2447.38,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 8577.65,
+          "max_dd": 0.624,
+          "n_trades": 43,
+          "win": 0.326,
+          "avg_trade": 199.5,
+          "days_in": 275,
+          "days_entered": 43,
+          "entry_day_pct": 15.6,
+          "best_trade": 4331.73,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 8577.65,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 4795.01,
+          "max_dd": 0.755,
+          "n_trades": 33,
+          "win": 0.303,
+          "avg_trade": 145.3,
+          "days_in": 181,
+          "days_entered": 33,
+          "entry_day_pct": 18.2,
+          "best_trade": 3088.57,
+          "worst_trade": -326.12,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 4795.01,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "top_day_always__t05_time1",
+      "entry": "top_day_always",
+      "exit": "t05_time1",
+      "pick_mode": "top_day_always",
+      "score": 5763.19,
+      "windows": {
+        "full": {
+          "pnl_eur": 264.54,
+          "max_dd": 0.968,
+          "n_trades": 258,
+          "win": 0.399,
+          "avg_trade": 1.0,
+          "days_in": 900,
+          "days_entered": 258,
+          "entry_day_pct": 28.7,
+          "best_trade": 1608.05,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 264.54
+          }
+        },
+        "y2026": {
+          "pnl_eur": 9516.41,
+          "max_dd": 0.361,
+          "n_trades": 91,
+          "win": 0.451,
+          "avg_trade": 104.6,
+          "days_in": 275,
+          "days_entered": 91,
+          "entry_day_pct": 33.1,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 9516.41
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 8983.77,
+          "max_dd": 0.408,
+          "n_trades": 70,
+          "win": 0.457,
+          "avg_trade": 128.3,
+          "days_in": 181,
+          "days_entered": 70,
+          "entry_day_pct": 38.7,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 8983.77
+          }
+        }
+      }
+    },
+    {
+      "name": "top_day_always__t08_time1",
+      "entry": "top_day_always",
+      "exit": "t08_time1",
+      "pick_mode": "top_day_always",
+      "score": 5504.05,
+      "windows": {
+        "full": {
+          "pnl_eur": 323.68,
+          "max_dd": 0.953,
+          "n_trades": 240,
+          "win": 0.421,
+          "avg_trade": 1.3,
+          "days_in": 900,
+          "days_entered": 240,
+          "entry_day_pct": 26.7,
+          "best_trade": 1641.89,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 323.68
+          }
+        },
+        "y2026": {
+          "pnl_eur": 8850.88,
+          "max_dd": 0.353,
+          "n_trades": 86,
+          "win": 0.453,
+          "avg_trade": 102.9,
+          "days_in": 275,
+          "days_entered": 86,
+          "entry_day_pct": 31.3,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 8850.88
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 9041.71,
+          "max_dd": 0.337,
+          "n_trades": 68,
+          "win": 0.471,
+          "avg_trade": 133.0,
+          "days_in": 181,
+          "days_entered": 68,
+          "entry_day_pct": 37.6,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 9041.71
+          }
+        }
+      }
+    },
+    {
+      "name": "ignition_loose_q25__t08",
+      "entry": "ignition_loose_q25",
+      "exit": "t08",
+      "pick_mode": "ignition",
+      "score": 5231.39,
+      "windows": {
+        "full": {
+          "pnl_eur": 5352.39,
+          "max_dd": 0.44,
+          "n_trades": 21,
+          "win": 0.381,
+          "avg_trade": 254.9,
+          "days_in": 900,
+          "days_entered": 21,
+          "entry_day_pct": 2.3,
+          "best_trade": 3278.84,
+          "worst_trade": -507.91,
+          "path_pnl": {
+            "classic": 1481.31,
+            "coil": 3871.09,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1328.01,
+          "max_dd": 0.534,
+          "n_trades": 10,
+          "win": 0.4,
+          "avg_trade": 132.8,
+          "days_in": 275,
+          "days_entered": 10,
+          "entry_day_pct": 3.6,
+          "best_trade": 2098.06,
+          "worst_trade": -435.17,
+          "path_pnl": {
+            "classic": -153.42,
+            "coil": 1481.43,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 241.97,
+          "max_dd": 0.601,
+          "n_trades": 8,
+          "win": 0.25,
+          "avg_trade": 30.2,
+          "days_in": 181,
+          "days_entered": 8,
+          "entry_day_pct": 4.4,
+          "best_trade": 1423.49,
+          "worst_trade": -517.97,
+          "path_pnl": {
+            "classic": -143.33,
+            "coil": 385.3,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_noquiet_d2__t05_time1",
+      "entry": "day_mom_noquiet_d2",
+      "exit": "t05_time1",
+      "pick_mode": "day_mom",
+      "score": 4318.66,
+      "windows": {
+        "full": {
+          "pnl_eur": 197.25,
+          "max_dd": 0.939,
+          "n_trades": 234,
+          "win": 0.402,
+          "avg_trade": 0.8,
+          "days_in": 900,
+          "days_entered": 234,
+          "entry_day_pct": 26.0,
+          "best_trade": 1323.61,
+          "worst_trade": -291.13,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 197.25,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 7473.39,
+          "max_dd": 0.492,
+          "n_trades": 85,
+          "win": 0.447,
+          "avg_trade": 87.9,
+          "days_in": 275,
+          "days_entered": 85,
+          "entry_day_pct": 30.9,
+          "best_trade": 2676.06,
+          "worst_trade": -434.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 7473.39,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 7490.84,
+          "max_dd": 0.49,
+          "n_trades": 67,
+          "win": 0.463,
+          "avg_trade": 111.8,
+          "days_in": 181,
+          "days_entered": 67,
+          "entry_day_pct": 37.0,
+          "best_trade": 2676.06,
+          "worst_trade": -434.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 7490.84,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ignition_loose_q25__t05",
+      "entry": "ignition_loose_q25",
+      "exit": "t05",
+      "pick_mode": "ignition",
+      "score": 3322.93,
+      "windows": {
+        "full": {
+          "pnl_eur": 4051.57,
+          "max_dd": 0.422,
+          "n_trades": 15,
+          "win": 0.467,
+          "avg_trade": 270.1,
+          "days_in": 900,
+          "days_entered": 15,
+          "entry_day_pct": 1.7,
+          "best_trade": 2896.25,
+          "worst_trade": -507.91,
+          "path_pnl": {
+            "classic": 2397.75,
+            "coil": 1653.82,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 642.0,
+          "max_dd": 0.177,
+          "n_trades": 3,
+          "win": 1.0,
+          "avg_trade": 214.0,
+          "days_in": 275,
+          "days_entered": 3,
+          "entry_day_pct": 1.1,
+          "best_trade": 339.94,
+          "worst_trade": 95.29,
+          "path_pnl": {
+            "classic": 435.23,
+            "coil": 206.77,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": -924.57,
+          "max_dd": 0.583,
+          "n_trades": 8,
+          "win": 0.25,
+          "avg_trade": -115.6,
+          "days_in": 181,
+          "days_entered": 8,
+          "entry_day_pct": 4.4,
+          "best_trade": 144.65,
+          "worst_trade": -517.97,
+          "path_pnl": {
+            "classic": -26.28,
+            "coil": -898.29,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "live_sniper__t08_time2",
+      "entry": "live_sniper",
+      "exit": "t08_time2",
+      "pick_mode": "ignition",
+      "score": 3276.07,
+      "windows": {
+        "full": {
+          "pnl_eur": 2745.59,
+          "max_dd": 0.386,
+          "n_trades": 67,
+          "win": 0.463,
+          "avg_trade": 41.0,
+          "days_in": 900,
+          "days_entered": 67,
+          "entry_day_pct": 7.4,
+          "best_trade": 885.98,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 925.22,
+            "coil": 1820.37,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1828.87,
+          "max_dd": 0.232,
+          "n_trades": 30,
+          "win": 0.467,
+          "avg_trade": 61.0,
+          "days_in": 275,
+          "days_entered": 30,
+          "entry_day_pct": 10.9,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 76.21,
+            "coil": 1752.66,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 1108.17,
+          "max_dd": 0.278,
+          "n_trades": 22,
+          "win": 0.455,
+          "avg_trade": 50.4,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 278.35,
+            "coil": 829.82,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "live_sniper__time2",
+      "entry": "live_sniper",
+      "exit": "time2",
+      "pick_mode": "ignition",
+      "score": 3195.2,
+      "windows": {
+        "full": {
+          "pnl_eur": 2685.67,
+          "max_dd": 0.388,
+          "n_trades": 67,
+          "win": 0.463,
+          "avg_trade": 40.1,
+          "days_in": 900,
+          "days_entered": 67,
+          "entry_day_pct": 7.4,
+          "best_trade": 885.98,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 865.29,
+            "coil": 1820.37,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1794.97,
+          "max_dd": 0.234,
+          "n_trades": 30,
+          "win": 0.467,
+          "avg_trade": 59.8,
+          "days_in": 275,
+          "days_entered": 30,
+          "entry_day_pct": 10.9,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 42.31,
+            "coil": 1752.66,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 1108.17,
+          "max_dd": 0.278,
+          "n_trades": 22,
+          "win": 0.455,
+          "avg_trade": 50.4,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 278.35,
+            "coil": 829.82,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q20_d3_v12__t12_r30",
+      "entry": "day_mom_q20_d3_v12",
+      "exit": "t12_r30",
+      "pick_mode": "day_mom",
+      "score": 3162.9,
+      "windows": {
+        "full": {
+          "pnl_eur": 983.33,
+          "max_dd": 0.759,
+          "n_trades": 45,
+          "win": 0.333,
+          "avg_trade": 21.9,
+          "days_in": 900,
+          "days_entered": 45,
+          "entry_day_pct": 5.0,
+          "best_trade": 1961.06,
+          "worst_trade": -406.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 983.33,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 4734.6,
+          "max_dd": 0.361,
+          "n_trades": 14,
+          "win": 0.5,
+          "avg_trade": 338.2,
+          "days_in": 275,
+          "days_entered": 14,
+          "entry_day_pct": 5.1,
+          "best_trade": 3937.92,
+          "worst_trade": -263.48,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 4734.6,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 5021.09,
+          "max_dd": 0.269,
+          "n_trades": 7,
+          "win": 0.714,
+          "avg_trade": 717.3,
+          "days_in": 181,
+          "days_entered": 7,
+          "entry_day_pct": 3.9,
+          "best_trade": 3937.92,
+          "worst_trade": -263.48,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 5021.09,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "live_sniper__eod",
+      "entry": "live_sniper",
+      "exit": "eod",
+      "pick_mode": "ignition",
+      "score": 2693.3,
+      "windows": {
+        "full": {
+          "pnl_eur": 2605.41,
+          "max_dd": 0.246,
+          "n_trades": 114,
+          "win": 0.474,
+          "avg_trade": 22.9,
+          "days_in": 900,
+          "days_entered": 114,
+          "entry_day_pct": 12.7,
+          "best_trade": 1892.13,
+          "worst_trade": -355.9,
+          "path_pnl": {
+            "classic": 837.94,
+            "coil": 1767.48,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 559.42,
+          "max_dd": 0.24,
+          "n_trades": 52,
+          "win": 0.462,
+          "avg_trade": 10.8,
+          "days_in": 275,
+          "days_entered": 52,
+          "entry_day_pct": 18.9,
+          "best_trade": 548.09,
+          "worst_trade": -355.9,
+          "path_pnl": {
+            "classic": 280.1,
+            "coil": 279.32,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 438.7,
+          "max_dd": 0.248,
+          "n_trades": 40,
+          "win": 0.45,
+          "avg_trade": 11.0,
+          "days_in": 181,
+          "days_entered": 40,
+          "entry_day_pct": 22.1,
+          "best_trade": 521.89,
+          "worst_trade": -355.9,
+          "path_pnl": {
+            "classic": 262.53,
+            "coil": 176.17,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q15_d2_v1__t05",
+      "entry": "day_mom_q15_d2_v1",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 2547.04,
+      "windows": {
+        "full": {
+          "pnl_eur": 3019.5,
+          "max_dd": 0.555,
+          "n_trades": 99,
+          "win": 0.303,
+          "avg_trade": 30.5,
+          "days_in": 900,
+          "days_entered": 99,
+          "entry_day_pct": 11.0,
+          "best_trade": 2337.53,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 3019.5,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 781.89,
+          "max_dd": 0.514,
+          "n_trades": 35,
+          "win": 0.314,
+          "avg_trade": 22.3,
+          "days_in": 275,
+          "days_entered": 35,
+          "entry_day_pct": 12.7,
+          "best_trade": 678.87,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 781.89,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 326.36,
+          "max_dd": 0.541,
+          "n_trades": 25,
+          "win": 0.32,
+          "avg_trade": 13.1,
+          "days_in": 181,
+          "days_entered": 25,
+          "entry_day_pct": 13.8,
+          "best_trade": 558.93,
+          "worst_trade": -327.51,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 326.36,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_noquiet_d2__t08_time1",
+      "entry": "day_mom_noquiet_d2",
+      "exit": "t08_time1",
+      "pick_mode": "day_mom",
+      "score": 2501.6,
+      "windows": {
+        "full": {
+          "pnl_eur": -578.58,
+          "max_dd": 0.925,
+          "n_trades": 221,
+          "win": 0.394,
+          "avg_trade": -2.6,
+          "days_in": 900,
+          "days_entered": 221,
+          "entry_day_pct": 24.6,
+          "best_trade": 863.36,
+          "worst_trade": -327.02,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": -578.58,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 5946.32,
+          "max_dd": 0.528,
+          "n_trades": 81,
+          "win": 0.395,
+          "avg_trade": 73.4,
+          "days_in": 275,
+          "days_entered": 81,
+          "entry_day_pct": 29.5,
+          "best_trade": 2676.06,
+          "worst_trade": -434.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 5946.32,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 6352.1,
+          "max_dd": 0.486,
+          "n_trades": 64,
+          "win": 0.406,
+          "avg_trade": 99.3,
+          "days_in": 181,
+          "days_entered": 64,
+          "entry_day_pct": 35.4,
+          "best_trade": 2676.06,
+          "worst_trade": -434.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 6352.1,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q20_d3_v12__t05",
+      "entry": "day_mom_q20_d3_v12",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 2493.66,
+      "windows": {
+        "full": {
+          "pnl_eur": 2510.51,
+          "max_dd": 0.437,
+          "n_trades": 93,
+          "win": 0.301,
+          "avg_trade": 27.0,
+          "days_in": 900,
+          "days_entered": 93,
+          "entry_day_pct": 10.3,
+          "best_trade": 2334.91,
+          "worst_trade": -313.28,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 2510.51,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 977.59,
+          "max_dd": 0.335,
+          "n_trades": 32,
+          "win": 0.375,
+          "avg_trade": 30.5,
+          "days_in": 275,
+          "days_entered": 32,
+          "entry_day_pct": 11.6,
+          "best_trade": 743.05,
+          "worst_trade": -288.01,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 977.59,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 855.43,
+          "max_dd": 0.348,
+          "n_trades": 22,
+          "win": 0.409,
+          "avg_trade": 38.9,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 743.05,
+          "worst_trade": -288.01,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 855.43,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "coil_or_day_q25__t05",
+      "entry": "coil_or_day_q25",
+      "exit": "t05",
+      "pick_mode": "coil_or_day",
+      "score": 2042.69,
+      "windows": {
+        "full": {
+          "pnl_eur": 1497.11,
+          "max_dd": 0.591,
+          "n_trades": 44,
+          "win": 0.295,
+          "avg_trade": 34.0,
+          "days_in": 900,
+          "days_entered": 44,
+          "entry_day_pct": 4.9,
+          "best_trade": 2122.34,
+          "worst_trade": -291.13,
+          "path_pnl": {
+            "classic": 619.39,
+            "coil": 2091.57,
+            "day_mom": -1213.85,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1611.69,
+          "max_dd": 0.437,
+          "n_trades": 12,
+          "win": 0.25,
+          "avg_trade": 134.3,
+          "days_in": 275,
+          "days_entered": 12,
+          "entry_day_pct": 4.4,
+          "best_trade": 2191.87,
+          "worst_trade": -194.25,
+          "path_pnl": {
+            "classic": -144.81,
+            "coil": 2175.93,
+            "day_mom": -419.43,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 3392.95,
+          "max_dd": 0.225,
+          "n_trades": 11,
+          "win": 0.364,
+          "avg_trade": 308.4,
+          "days_in": 181,
+          "days_entered": 11,
+          "entry_day_pct": 6.1,
+          "best_trade": 3087.55,
+          "worst_trade": -279.99,
+          "path_pnl": {
+            "classic": -357.0,
+            "coil": 3087.55,
+            "day_mom": 662.39,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q25_d2_v1__t05",
+      "entry": "day_mom_q25_d2_v1",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 1921.41,
+      "windows": {
+        "full": {
+          "pnl_eur": 407.37,
+          "max_dd": 0.761,
+          "n_trades": 99,
+          "win": 0.293,
+          "avg_trade": 4.1,
+          "days_in": 900,
+          "days_entered": 99,
+          "entry_day_pct": 11.0,
+          "best_trade": 1380.65,
+          "worst_trade": -291.13,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 407.37,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 4090.96,
+          "max_dd": 0.419,
+          "n_trades": 35,
+          "win": 0.343,
+          "avg_trade": 116.9,
+          "days_in": 275,
+          "days_entered": 35,
+          "entry_day_pct": 12.7,
+          "best_trade": 3088.57,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 4090.96,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 3302.25,
+          "max_dd": 0.474,
+          "n_trades": 25,
+          "win": 0.32,
+          "avg_trade": 132.1,
+          "days_in": 181,
+          "days_entered": 25,
+          "entry_day_pct": 13.8,
+          "best_trade": 3088.57,
+          "worst_trade": -279.99,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 3302.25,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "top_day_always__t08",
+      "entry": "top_day_always",
+      "exit": "t08",
+      "pick_mode": "top_day_always",
+      "score": 1863.48,
+      "windows": {
+        "full": {
+          "pnl_eur": 565.36,
+          "max_dd": 0.757,
+          "n_trades": 81,
+          "win": 0.333,
+          "avg_trade": 7.0,
+          "days_in": 900,
+          "days_entered": 81,
+          "entry_day_pct": 9.0,
+          "best_trade": 1829.29,
+          "worst_trade": -525.74,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 565.36
+          }
+        },
+        "y2026": {
+          "pnl_eur": 4202.59,
+          "max_dd": 0.536,
+          "n_trades": 35,
+          "win": 0.371,
+          "avg_trade": 120.1,
+          "days_in": 275,
+          "days_entered": 35,
+          "entry_day_pct": 12.7,
+          "best_trade": 3365.14,
+          "worst_trade": -614.78,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 4202.59
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 2303.31,
+          "max_dd": 0.673,
+          "n_trades": 30,
+          "win": 0.367,
+          "avg_trade": 76.8,
+          "days_in": 181,
+          "days_entered": 30,
+          "entry_day_pct": 16.6,
+          "best_trade": 1921.69,
+          "worst_trade": -614.78,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 2303.31
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q30_d15_v1__t05",
+      "entry": "day_mom_q30_d15_v1",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 1557.66,
+      "windows": {
+        "full": {
+          "pnl_eur": 2267.03,
+          "max_dd": 0.56,
+          "n_trades": 99,
+          "win": 0.323,
+          "avg_trade": 22.9,
+          "days_in": 900,
+          "days_entered": 99,
+          "entry_day_pct": 11.0,
+          "best_trade": 2337.53,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 2267.03,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 572.89,
+          "max_dd": 0.419,
+          "n_trades": 32,
+          "win": 0.312,
+          "avg_trade": 17.9,
+          "days_in": 275,
+          "days_entered": 32,
+          "entry_day_pct": 11.6,
+          "best_trade": 689.84,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 572.89,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": -163.25,
+          "max_dd": 0.474,
+          "n_trades": 22,
+          "win": 0.273,
+          "avg_trade": -7.4,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 491.09,
+          "worst_trade": -279.99,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": -163.25,
+            "force": 0
+          }
+        }
+      }
+    }
+  ],
+  "best_pnl_overall": [
+    {
+      "name": "top_day_always__t08_time2",
+      "entry": "top_day_always",
+      "exit": "t08_time2",
+      "pick_mode": "top_day_always",
+      "score": 16167.5,
+      "windows": {
+        "full": {
+          "pnl_eur": 10130.1,
+          "max_dd": 0.536,
+          "n_trades": 168,
+          "win": 0.423,
+          "avg_trade": 60.3,
+          "days_in": 900,
+          "days_entered": 168,
+          "entry_day_pct": 18.7,
+          "best_trade": 4333.07,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 10130.1
+          }
+        },
+        "y2026": {
+          "pnl_eur": 9180.74,
+          "max_dd": 0.624,
+          "n_trades": 60,
+          "win": 0.4,
+          "avg_trade": 153.0,
+          "days_in": 275,
+          "days_entered": 60,
+          "entry_day_pct": 21.8,
+          "best_trade": 4333.07,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 9180.74
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 8954.13,
+          "max_dd": 0.645,
+          "n_trades": 47,
+          "win": 0.404,
+          "avg_trade": 190.5,
+          "days_in": 181,
+          "days_entered": 47,
+          "entry_day_pct": 26.0,
+          "best_trade": 4333.07,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 8954.13
+          }
+        }
+      }
+    },
+    {
+      "name": "top_day_always__time2",
+      "entry": "top_day_always",
+      "exit": "time2",
+      "pick_mode": "top_day_always",
+      "score": 9964.11,
+      "windows": {
+        "full": {
+          "pnl_eur": 7330.18,
+          "max_dd": 0.409,
+          "n_trades": 152,
+          "win": 0.461,
+          "avg_trade": 48.2,
+          "days_in": 900,
+          "days_entered": 152,
+          "entry_day_pct": 16.9,
+          "best_trade": 2674.58,
+          "worst_trade": -721.17,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 7330.18
+          }
+        },
+        "y2026": {
+          "pnl_eur": 4102.5,
+          "max_dd": 0.531,
+          "n_trades": 53,
+          "win": 0.434,
+          "avg_trade": 77.4,
+          "days_in": 275,
+          "days_entered": 53,
+          "entry_day_pct": 19.3,
+          "best_trade": 2674.58,
+          "worst_trade": -721.17,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 4102.5
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 4588.71,
+          "max_dd": 0.341,
+          "n_trades": 41,
+          "win": 0.463,
+          "avg_trade": 111.9,
+          "days_in": 181,
+          "days_entered": 41,
+          "entry_day_pct": 22.7,
+          "best_trade": 2674.58,
+          "worst_trade": -721.17,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 4588.71
+          }
+        }
+      }
+    },
+    {
+      "name": "ignition_loose_q25__t12_r30",
+      "entry": "ignition_loose_q25",
+      "exit": "t12_r30",
+      "pick_mode": "ignition",
+      "score": 6651.61,
+      "windows": {
+        "full": {
+          "pnl_eur": 5358.85,
+          "max_dd": 0.606,
+          "n_trades": 22,
+          "win": 0.318,
+          "avg_trade": 243.6,
+          "days_in": 900,
+          "days_entered": 22,
+          "entry_day_pct": 2.4,
+          "best_trade": 3937.92,
+          "worst_trade": -526.53,
+          "path_pnl": {
+            "classic": 1623.16,
+            "coil": 3735.68,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 2949.16,
+          "max_dd": 0.378,
+          "n_trades": 6,
+          "win": 0.333,
+          "avg_trade": 491.5,
+          "days_in": 275,
+          "days_entered": 6,
+          "entry_day_pct": 2.2,
+          "best_trade": 2983.45,
+          "worst_trade": -198.68,
+          "path_pnl": {
+            "classic": 133.95,
+            "coil": 2815.21,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 3976.71,
+          "max_dd": 0.312,
+          "n_trades": 6,
+          "win": 0.667,
+          "avg_trade": 662.8,
+          "days_in": 181,
+          "days_entered": 6,
+          "entry_day_pct": 3.3,
+          "best_trade": 3664.9,
+          "worst_trade": -517.97,
+          "path_pnl": {
+            "classic": 829.78,
+            "coil": 3146.93,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ignition_loose_q25__t08",
+      "entry": "ignition_loose_q25",
+      "exit": "t08",
+      "pick_mode": "ignition",
+      "score": 5231.39,
+      "windows": {
+        "full": {
+          "pnl_eur": 5352.39,
+          "max_dd": 0.44,
+          "n_trades": 21,
+          "win": 0.381,
+          "avg_trade": 254.9,
+          "days_in": 900,
+          "days_entered": 21,
+          "entry_day_pct": 2.3,
+          "best_trade": 3278.84,
+          "worst_trade": -507.91,
+          "path_pnl": {
+            "classic": 1481.31,
+            "coil": 3871.09,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1328.01,
+          "max_dd": 0.534,
+          "n_trades": 10,
+          "win": 0.4,
+          "avg_trade": 132.8,
+          "days_in": 275,
+          "days_entered": 10,
+          "entry_day_pct": 3.6,
+          "best_trade": 2098.06,
+          "worst_trade": -435.17,
+          "path_pnl": {
+            "classic": -153.42,
+            "coil": 1481.43,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 241.97,
+          "max_dd": 0.601,
+          "n_trades": 8,
+          "win": 0.25,
+          "avg_trade": 30.2,
+          "days_in": 181,
+          "days_entered": 8,
+          "entry_day_pct": 4.4,
+          "best_trade": 1423.49,
+          "worst_trade": -517.97,
+          "path_pnl": {
+            "classic": -143.33,
+            "coil": 385.3,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ignition_loose_q25__t05",
+      "entry": "ignition_loose_q25",
+      "exit": "t05",
+      "pick_mode": "ignition",
+      "score": 3322.93,
+      "windows": {
+        "full": {
+          "pnl_eur": 4051.57,
+          "max_dd": 0.422,
+          "n_trades": 15,
+          "win": 0.467,
+          "avg_trade": 270.1,
+          "days_in": 900,
+          "days_entered": 15,
+          "entry_day_pct": 1.7,
+          "best_trade": 2896.25,
+          "worst_trade": -507.91,
+          "path_pnl": {
+            "classic": 2397.75,
+            "coil": 1653.82,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 642.0,
+          "max_dd": 0.177,
+          "n_trades": 3,
+          "win": 1.0,
+          "avg_trade": 214.0,
+          "days_in": 275,
+          "days_entered": 3,
+          "entry_day_pct": 1.1,
+          "best_trade": 339.94,
+          "worst_trade": 95.29,
+          "path_pnl": {
+            "classic": 435.23,
+            "coil": 206.77,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": -924.57,
+          "max_dd": 0.583,
+          "n_trades": 8,
+          "win": 0.25,
+          "avg_trade": -115.6,
+          "days_in": 181,
+          "days_entered": 8,
+          "entry_day_pct": 4.4,
+          "best_trade": 144.65,
+          "worst_trade": -517.97,
+          "path_pnl": {
+            "classic": -26.28,
+            "coil": -898.29,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q15_d2_v1__t05",
+      "entry": "day_mom_q15_d2_v1",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 2547.04,
+      "windows": {
+        "full": {
+          "pnl_eur": 3019.5,
+          "max_dd": 0.555,
+          "n_trades": 99,
+          "win": 0.303,
+          "avg_trade": 30.5,
+          "days_in": 900,
+          "days_entered": 99,
+          "entry_day_pct": 11.0,
+          "best_trade": 2337.53,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 3019.5,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 781.89,
+          "max_dd": 0.514,
+          "n_trades": 35,
+          "win": 0.314,
+          "avg_trade": 22.3,
+          "days_in": 275,
+          "days_entered": 35,
+          "entry_day_pct": 12.7,
+          "best_trade": 678.87,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 781.89,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 326.36,
+          "max_dd": 0.541,
+          "n_trades": 25,
+          "win": 0.32,
+          "avg_trade": 13.1,
+          "days_in": 181,
+          "days_entered": 25,
+          "entry_day_pct": 13.8,
+          "best_trade": 558.93,
+          "worst_trade": -327.51,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 326.36,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "live_sniper__t08_time2",
+      "entry": "live_sniper",
+      "exit": "t08_time2",
+      "pick_mode": "ignition",
+      "score": 3276.07,
+      "windows": {
+        "full": {
+          "pnl_eur": 2745.59,
+          "max_dd": 0.386,
+          "n_trades": 67,
+          "win": 0.463,
+          "avg_trade": 41.0,
+          "days_in": 900,
+          "days_entered": 67,
+          "entry_day_pct": 7.4,
+          "best_trade": 885.98,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 925.22,
+            "coil": 1820.37,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1828.87,
+          "max_dd": 0.232,
+          "n_trades": 30,
+          "win": 0.467,
+          "avg_trade": 61.0,
+          "days_in": 275,
+          "days_entered": 30,
+          "entry_day_pct": 10.9,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 76.21,
+            "coil": 1752.66,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 1108.17,
+          "max_dd": 0.278,
+          "n_trades": 22,
+          "win": 0.455,
+          "avg_trade": 50.4,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 278.35,
+            "coil": 829.82,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "live_sniper__time2",
+      "entry": "live_sniper",
+      "exit": "time2",
+      "pick_mode": "ignition",
+      "score": 3195.2,
+      "windows": {
+        "full": {
+          "pnl_eur": 2685.67,
+          "max_dd": 0.388,
+          "n_trades": 67,
+          "win": 0.463,
+          "avg_trade": 40.1,
+          "days_in": 900,
+          "days_entered": 67,
+          "entry_day_pct": 7.4,
+          "best_trade": 885.98,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 865.29,
+            "coil": 1820.37,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 1794.97,
+          "max_dd": 0.234,
+          "n_trades": 30,
+          "win": 0.467,
+          "avg_trade": 59.8,
+          "days_in": 275,
+          "days_entered": 30,
+          "entry_day_pct": 10.9,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 42.31,
+            "coil": 1752.66,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 1108.17,
+          "max_dd": 0.278,
+          "n_trades": 22,
+          "win": 0.455,
+          "avg_trade": 50.4,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 690.0,
+          "worst_trade": -507.51,
+          "path_pnl": {
+            "classic": 278.35,
+            "coil": 829.82,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "live_sniper__eod",
+      "entry": "live_sniper",
+      "exit": "eod",
+      "pick_mode": "ignition",
+      "score": 2693.3,
+      "windows": {
+        "full": {
+          "pnl_eur": 2605.41,
+          "max_dd": 0.246,
+          "n_trades": 114,
+          "win": 0.474,
+          "avg_trade": 22.9,
+          "days_in": 900,
+          "days_entered": 114,
+          "entry_day_pct": 12.7,
+          "best_trade": 1892.13,
+          "worst_trade": -355.9,
+          "path_pnl": {
+            "classic": 837.94,
+            "coil": 1767.48,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 559.42,
+          "max_dd": 0.24,
+          "n_trades": 52,
+          "win": 0.462,
+          "avg_trade": 10.8,
+          "days_in": 275,
+          "days_entered": 52,
+          "entry_day_pct": 18.9,
+          "best_trade": 548.09,
+          "worst_trade": -355.9,
+          "path_pnl": {
+            "classic": 280.1,
+            "coil": 279.32,
+            "day_mom": 0,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 438.7,
+          "max_dd": 0.248,
+          "n_trades": 40,
+          "win": 0.45,
+          "avg_trade": 11.0,
+          "days_in": 181,
+          "days_entered": 40,
+          "entry_day_pct": 22.1,
+          "best_trade": 521.89,
+          "worst_trade": -355.9,
+          "path_pnl": {
+            "classic": 262.53,
+            "coil": 176.17,
+            "day_mom": 0,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q20_d3_v12__t05",
+      "entry": "day_mom_q20_d3_v12",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 2493.66,
+      "windows": {
+        "full": {
+          "pnl_eur": 2510.51,
+          "max_dd": 0.437,
+          "n_trades": 93,
+          "win": 0.301,
+          "avg_trade": 27.0,
+          "days_in": 900,
+          "days_entered": 93,
+          "entry_day_pct": 10.3,
+          "best_trade": 2334.91,
+          "worst_trade": -313.28,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 2510.51,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 977.59,
+          "max_dd": 0.335,
+          "n_trades": 32,
+          "win": 0.375,
+          "avg_trade": 30.5,
+          "days_in": 275,
+          "days_entered": 32,
+          "entry_day_pct": 11.6,
+          "best_trade": 743.05,
+          "worst_trade": -288.01,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 977.59,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 855.43,
+          "max_dd": 0.348,
+          "n_trades": 22,
+          "win": 0.409,
+          "avg_trade": 38.9,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 743.05,
+          "worst_trade": -288.01,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 855.43,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_noquiet_d2__t05",
+      "entry": "day_mom_noquiet_d2",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 6395.96,
+      "windows": {
+        "full": {
+          "pnl_eur": 2447.38,
+          "max_dd": 0.867,
+          "n_trades": 117,
+          "win": 0.325,
+          "avg_trade": 20.9,
+          "days_in": 900,
+          "days_entered": 117,
+          "entry_day_pct": 13.0,
+          "best_trade": 2511.53,
+          "worst_trade": -330.35,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 2447.38,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 8577.65,
+          "max_dd": 0.624,
+          "n_trades": 43,
+          "win": 0.326,
+          "avg_trade": 199.5,
+          "days_in": 275,
+          "days_entered": 43,
+          "entry_day_pct": 15.6,
+          "best_trade": 4331.73,
+          "worst_trade": -461.23,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 8577.65,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 4795.01,
+          "max_dd": 0.755,
+          "n_trades": 33,
+          "win": 0.303,
+          "avg_trade": 145.3,
+          "days_in": 181,
+          "days_entered": 33,
+          "entry_day_pct": 18.2,
+          "best_trade": 3088.57,
+          "worst_trade": -326.12,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 4795.01,
+            "force": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_q30_d15_v1__t05",
+      "entry": "day_mom_q30_d15_v1",
+      "exit": "t05",
+      "pick_mode": "day_mom",
+      "score": 1557.66,
+      "windows": {
+        "full": {
+          "pnl_eur": 2267.03,
+          "max_dd": 0.56,
+          "n_trades": 99,
+          "win": 0.323,
+          "avg_trade": 22.9,
+          "days_in": 900,
+          "days_entered": 99,
+          "entry_day_pct": 11.0,
+          "best_trade": 2337.53,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 2267.03,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 572.89,
+          "max_dd": 0.419,
+          "n_trades": 32,
+          "win": 0.312,
+          "avg_trade": 17.9,
+          "days_in": 275,
+          "days_entered": 32,
+          "entry_day_pct": 11.6,
+          "best_trade": 689.84,
+          "worst_trade": -332.34,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 572.89,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": -163.25,
+          "max_dd": 0.474,
+          "n_trades": 22,
+          "win": 0.273,
+          "avg_trade": -7.4,
+          "days_in": 181,
+          "days_entered": 22,
+          "entry_day_pct": 12.2,
+          "best_trade": 491.09,
+          "worst_trade": -279.99,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": -163.25,
+            "force": 0
+          }
+        }
+      }
+    }
+  ],
+  "best_entry_ge_20pct_pnl_pos": [
+    {
+      "name": "top_day_always__t05_time1",
+      "entry": "top_day_always",
+      "exit": "t05_time1",
+      "pick_mode": "top_day_always",
+      "score": 5763.19,
+      "windows": {
+        "full": {
+          "pnl_eur": 264.54,
+          "max_dd": 0.968,
+          "n_trades": 258,
+          "win": 0.399,
+          "avg_trade": 1.0,
+          "days_in": 900,
+          "days_entered": 258,
+          "entry_day_pct": 28.7,
+          "best_trade": 1608.05,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 264.54
+          }
+        },
+        "y2026": {
+          "pnl_eur": 9516.41,
+          "max_dd": 0.361,
+          "n_trades": 91,
+          "win": 0.451,
+          "avg_trade": 104.6,
+          "days_in": 275,
+          "days_entered": 91,
+          "entry_day_pct": 33.1,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 9516.41
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 8983.77,
+          "max_dd": 0.408,
+          "n_trades": 70,
+          "win": 0.457,
+          "avg_trade": 128.3,
+          "days_in": 181,
+          "days_entered": 70,
+          "entry_day_pct": 38.7,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 8983.77
+          }
+        }
+      }
+    },
+    {
+      "name": "top_day_always__t08_time1",
+      "entry": "top_day_always",
+      "exit": "t08_time1",
+      "pick_mode": "top_day_always",
+      "score": 5504.05,
+      "windows": {
+        "full": {
+          "pnl_eur": 323.68,
+          "max_dd": 0.953,
+          "n_trades": 240,
+          "win": 0.421,
+          "avg_trade": 1.3,
+          "days_in": 900,
+          "days_entered": 240,
+          "entry_day_pct": 26.7,
+          "best_trade": 1641.89,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 323.68
+          }
+        },
+        "y2026": {
+          "pnl_eur": 8850.88,
+          "max_dd": 0.353,
+          "n_trades": 86,
+          "win": 0.453,
+          "avg_trade": 102.9,
+          "days_in": 275,
+          "days_entered": 86,
+          "entry_day_pct": 31.3,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 8850.88
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 9041.71,
+          "max_dd": 0.337,
+          "n_trades": 68,
+          "win": 0.471,
+          "avg_trade": 133.0,
+          "days_in": 181,
+          "days_entered": 68,
+          "entry_day_pct": 37.6,
+          "best_trade": 2676.06,
+          "worst_trade": -545.31,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 0,
+            "force": 9041.71
+          }
+        }
+      }
+    },
+    {
+      "name": "day_mom_noquiet_d2__t05_time1",
+      "entry": "day_mom_noquiet_d2",
+      "exit": "t05_time1",
+      "pick_mode": "day_mom",
+      "score": 4318.66,
+      "windows": {
+        "full": {
+          "pnl_eur": 197.25,
+          "max_dd": 0.939,
+          "n_trades": 234,
+          "win": 0.402,
+          "avg_trade": 0.8,
+          "days_in": 900,
+          "days_entered": 234,
+          "entry_day_pct": 26.0,
+          "best_trade": 1323.61,
+          "worst_trade": -291.13,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 197.25,
+            "force": 0
+          }
+        },
+        "y2026": {
+          "pnl_eur": 7473.39,
+          "max_dd": 0.492,
+          "n_trades": 85,
+          "win": 0.447,
+          "avg_trade": 87.9,
+          "days_in": 275,
+          "days_entered": 85,
+          "entry_day_pct": 30.9,
+          "best_trade": 2676.06,
+          "worst_trade": -434.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 7473.39,
+            "force": 0
+          }
+        },
+        "last_180d": {
+          "pnl_eur": 7490.84,
+          "max_dd": 0.49,
+          "n_trades": 67,
+          "win": 0.463,
+          "avg_trade": 111.8,
+          "days_in": 181,
+          "days_entered": 67,
+          "entry_day_pct": 37.0,
+          "best_trade": 2676.06,
+          "worst_trade": -434.54,
+          "path_pnl": {
+            "classic": 0,
+            "coil": 0,
+            "day_mom": 7490.84,
+            "force": 0
+          }
+        }
+      }
+    }
+  ],
+  "best_entry_ge_40pct_pnl_pos": [],
+  "best_entry_ge_60pct_pnl_pos": [],
+  "live_sniper_baseline": {
+    "name": "live_sniper__t12_r30",
+    "entry": "live_sniper",
+    "exit": "t12_r30",
+    "pick_mode": "ignition",
+    "score": -708.82,
+    "windows": {
+      "full": {
+        "pnl_eur": 367.09,
+        "max_dd": 0.589,
+        "n_trades": 21,
+        "win": 0.429,
+        "avg_trade": 17.5,
+        "days_in": 900,
+        "days_entered": 21,
+        "entry_day_pct": 2.3,
+        "best_trade": 1433.1,
+        "worst_trade": -556.62,
+        "path_pnl": {
+          "classic": 626.6,
+          "coil": -259.5,
+          "day_mom": 0,
+          "force": 0
+        }
+      },
+      "y2026": {
+        "pnl_eur": -58.11,
+        "max_dd": 0.434,
+        "n_trades": 7,
+        "win": 0.429,
+        "avg_trade": -8.3,
+        "days_in": 275,
+        "days_entered": 7,
+        "entry_day_pct": 2.5,
+        "best_trade": 221.61,
+        "worst_trade": -197.11,
+        "path_pnl": {
+          "classic": -221.96,
+          "coil": 163.85,
+          "day_mom": 0,
+          "force": 0
+        }
+      },
+      "last_180d": {
+        "pnl_eur": 386.6,
+        "max_dd": 0.312,
+        "n_trades": 7,
+        "win": 0.714,
+        "avg_trade": 55.2,
+        "days_in": 181,
+        "days_entered": 7,
+        "entry_day_pct": 3.9,
+        "best_trade": 380.91,
+        "worst_trade": -517.97,
+        "path_pnl": {
+          "classic": 405.59,
+          "coil": -18.99,
+          "day_mom": 0,
+          "force": 0
+        }
+      }
+    }
+  },
+  "recommendation": {
+    "summary": "Best daily-ish OKX pack on ex-desk \u20ac2k: buy strongest liquid day-return name when BTC>SMA50; exit trail 8% or after 2 days (t08_time2). Not every calendar day \u2014 risk-off + holding block coverage. True EOD-every-day loses on the full window.",
+    "best_balanced": {
+      "name": "top_day_always__t08_time2",
+      "pick": "top liquid ex-desk name by day_ret (risk-on only)",
+      "exit": "trail 8% OR time-stop 2 days",
+      "require_btc_sma": true,
+      "book_eur": 2000,
+      "universe": "ex_desk",
+      "full": {
+        "pnl": 10130,
+        "entry_day_pct": 18.7,
+        "n": 168,
+        "win": 0.42,
+        "dd": 0.54
+      },
+      "y2026": {
+        "pnl": 9181
+      },
+      "last_180d": {
+        "pnl": 8954
+      }
+    },
+    "max_activity_higher_dd": {
+      "name": "top_day_always__t08_time2_no_btc_sma",
+      "require_btc_sma": false,
+      "full": {
+        "pnl": 12039,
+        "entry_day_pct": 35.3,
+        "n": 318,
+        "win": 0.44,
+        "dd": 0.88
+      },
+      "note": "More entries, much worse drawdown \u2014 not recommended live."
+    },
+    "avoid": [
+      "eod every risk-on day (full window negative / ~98% DD)",
+      "guaranteed calendar-daily entries (conflicts with BTC regime + edge)",
+      "keeping sparse ignition gates if the goal is daily activity"
+    ],
+    "vs_live_sniper": {
+      "live_sniper_t12_r30_daily_runner": {
+        "pnl": 367,
+        "entry_day_pct": 2.3
+      },
+      "note": "Live sniper is better as sparse spike sleeve; daily pack is a different engine."
+    }
+  }
+}

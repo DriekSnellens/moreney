@@ -28,6 +28,25 @@ Classic wins rank when both fire. Coil lots use `coil_trail_pct=0.25` (then shar
 
 Artifacts: `EARLY_ENTRY_GRID.json`, `HYBRID_ENTRY.json`, `EXPLOSIVE_CAPTURE.json`.
 
+## Daily OKX sleeve (activity pack)
+
+Separate goal from sparse sniper: **trade often** on OKX / ex-desk with short holds.
+Grid: `daily_sleeve.py` → `DAILY_SLEEVE.json` (€2k, wet next-open, 100 entry×exit combos).
+
+**Winner (balanced):** `top_day_always` + **trail 8% or time-stop 2d**, BTC > SMA50
+
+| | full | 2026 | 180d | entry-days | maxDD |
+|---|---:|---:|---:|---:|---:|
+| **top_day + t08/time2 + SMA50** | **+€10.1k** | **+€9.2k** | **+€9.0k** | **18.7%** | 54% |
+| same, no BTC SMA | +€12.0k | +€11.4k | +€11.2k | 35% | **88%** |
+| live sniper t12/r30 (same runner) | +€0.4k | −€0.1k | +€0.4k | 2.3% | 59% |
+| EOD every risk-on day | −€1.5k | +€5.5k | +€5.5k | 48% | 98% |
+
+Rules: each risk-on day pick the liquid ex-desk name with the strongest **day return**; enter next open; exit on 8% peak trail or after 2 sessions.  
+**Not every calendar day** — BTC regime + open lot block coverage. True daily EOD is not +EV on the full window.
+
+Live ignition stays the sparse sniper unless this pack is explicitly armed as a separate mode.
+
 ## Sniper waters (ex-desk, complementary to RS)
 
 RS residual owns the desk-16 book. Ignition defaults to **`universe_mode=ex_desk`**:
