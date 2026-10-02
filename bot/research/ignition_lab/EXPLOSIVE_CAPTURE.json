@@ -1,0 +1,241 @@
+{
+  "legs_50pct_20d": {
+    "n": 667,
+    "caught_live": 0,
+    "caught_q15": 0,
+    "top": [
+      {
+        "base": "SYN",
+        "signal_date": "2026-06-10",
+        "run": 25.005,
+        "in_desk": false
+      },
+      {
+        "base": "LSK",
+        "signal_date": "2026-08-25",
+        "run": 22.852,
+        "in_desk": false
+      },
+      {
+        "base": "LSK",
+        "signal_date": "2026-09-02",
+        "run": 20.875,
+        "in_desk": false
+      },
+      {
+        "base": "SWEAT",
+        "signal_date": "2026-05-06",
+        "run": 20.824,
+        "in_desk": false
+      },
+      {
+        "base": "SWEAT",
+        "signal_date": "2026-04-29",
+        "run": 19.798,
+        "in_desk": false
+      },
+      {
+        "base": "USELESS",
+        "signal_date": "2026-08-18",
+        "run": 7.375,
+        "in_desk": false
+      },
+      {
+        "base": "XLM",
+        "signal_date": "2024-11-04",
+        "run": 6.255,
+        "in_desk": false
+      },
+      {
+        "base": "HBAR",
+        "signal_date": "2024-11-13",
+        "run": 5.646,
+        "in_desk": false
+      },
+      {
+        "base": "NOM",
+        "signal_date": "2026-03-27",
+        "run": 5.633,
+        "in_desk": false
+      },
+      {
+        "base": "QNT",
+        "signal_date": "2026-09-15",
+        "run": 4.988,
+        "in_desk": false
+      },
+      {
+        "base": "ENJ",
+        "signal_date": "2026-04-07",
+        "run": 4.174,
+        "in_desk": false
+      },
+      {
+        "base": "ENJ",
+        "signal_date": "2026-03-28",
+        "run": 4.128,
+        "in_desk": false
+      },
+      {
+        "base": "PHA",
+        "signal_date": "2024-12-22",
+        "run": 4.109,
+        "in_desk": false
+      },
+      {
+        "base": "MOVR",
+        "signal_date": "2026-09-11",
+        "run": 3.774,
+        "in_desk": false
+      },
+      {
+        "base": "SYN",
+        "signal_date": "2026-05-31",
+        "run": 3.497,
+        "in_desk": false
+      },
+      {
+        "base": "NPC",
+        "signal_date": "2026-08-16",
+        "run": 3.485,
+        "in_desk": false
+      },
+      {
+        "base": "CRV",
+        "signal_date": "2024-11-14",
+        "run": 3.368,
+        "in_desk": false
+      },
+      {
+        "base": "MOVR",
+        "signal_date": "2026-03-29",
+        "run": 3.27,
+        "in_desk": false
+      },
+      {
+        "base": "XRP",
+        "signal_date": "2024-11-13",
+        "run": 3.258,
+        "in_desk": true
+      },
+      {
+        "base": "ALGO",
+        "signal_date": "2024-11-13",
+        "run": 3.239,
+        "in_desk": false
+      }
+    ]
+  },
+  "packs": [
+    {
+      "name": "desk_live_t12r30",
+      "pnl": 2658.0,
+      "n": 9,
+      "best_ret": 0.68,
+      "best_mfe": 0.869,
+      "med_capture": 0.081,
+      "avg_mfe": 0.294,
+      "trades_ge50mfe": 1,
+      "pnl_from_ge50": 1354.0
+    },
+    {
+      "name": "exp_live_t12r30",
+      "pnl": -317.0,
+      "n": 15,
+      "best_ret": 0.485,
+      "best_mfe": 0.486,
+      "med_capture": -0.226,
+      "avg_mfe": 0.159,
+      "trades_ge50mfe": 0,
+      "pnl_from_ge50": 0
+    },
+    {
+      "name": "exp_q15_t12r30",
+      "pnl": 3164.0,
+      "n": 18,
+      "best_ret": 0.974,
+      "best_mfe": 1.342,
+      "med_capture": -0.024,
+      "avg_mfe": 0.272,
+      "trades_ge50mfe": 2,
+      "pnl_from_ge50": 2651.0
+    },
+    {
+      "name": "exp_q15_t12r30_t14",
+      "pnl": 5074.0,
+      "n": 22,
+      "best_ret": 0.974,
+      "best_mfe": 1.342,
+      "med_capture": 0.565,
+      "avg_mfe": 0.236,
+      "trades_ge50mfe": 2,
+      "pnl_from_ge50": 3032.0
+    },
+    {
+      "name": "exp_q15_trail25",
+      "pnl": 1832.0,
+      "n": 9,
+      "best_ret": 1.34,
+      "best_mfe": 2.227,
+      "med_capture": 0.004,
+      "avg_mfe": 0.574,
+      "trades_ge50mfe": 4,
+      "pnl_from_ge50": 3328.0
+    },
+    {
+      "name": "exp_q15_trail30",
+      "pnl": 1440.0,
+      "n": 8,
+      "best_ret": 1.163,
+      "best_mfe": 2.227,
+      "med_capture": 0.018,
+      "avg_mfe": 0.636,
+      "trades_ge50mfe": 4,
+      "pnl_from_ge50": 2747.0
+    },
+    {
+      "name": "exp_q15_trail40",
+      "pnl": 303.0,
+      "n": 8,
+      "best_ret": 1.372,
+      "best_mfe": 2.227,
+      "med_capture": -0.221,
+      "avg_mfe": 0.818,
+      "trades_ge50mfe": 4,
+      "pnl_from_ge50": 2635.0
+    },
+    {
+      "name": "desk_trail30",
+      "pnl": 1245.0,
+      "n": 6,
+      "best_ret": 0.485,
+      "best_mfe": 1.138,
+      "med_capture": 0.092,
+      "avg_mfe": 0.525,
+      "trades_ge50mfe": 2,
+      "pnl_from_ge50": 1407.0
+    },
+    {
+      "name": "desk_trail40",
+      "pnl": -50.0,
+      "n": 5,
+      "best_ret": 0.485,
+      "best_mfe": 1.138,
+      "med_capture": 0.11,
+      "avg_mfe": 0.596,
+      "trades_ge50mfe": 2,
+      "pnl_from_ge50": 402.0
+    },
+    {
+      "name": "exp_q15_trail30_book20k",
+      "pnl": 14401.0,
+      "n": 8,
+      "best_ret": 1.163,
+      "best_mfe": 2.227,
+      "med_capture": 0.018,
+      "avg_mfe": 0.636,
+      "trades_ge50mfe": 4,
+      "pnl_from_ge50": 27468.0
+    }
+  ]
+}
