@@ -1,10 +1,12 @@
-"""Ignition sleeve — desk-universe early-signal + trailing exit.
+"""Ignition sleeve — desk classic + coil hybrid + trailing exit.
 
-Research (``artifacts/early_signal_book.json``, wet desk ablation):
-quiet + 20d breakout + day ≥+6% + volume ≥2× on liquid desk names is the
-entry that stays profitable when restricted to the desk universe. Looser
-gates add trades but destroy PnL. Exit: 12% trail from peak, tightening
-to 10% once the lot is ≥+30% above entry (ratchet).
+Research (``artifacts/early_signal_book.json``, ``ignition_lab/HYBRID_ENTRY``):
+**Classic** — quiet + 20d breakout + day ≥+6% + volume ≥2× on liquid desk
+names. Looser classic gates add trades but destroy PnL.
+**Coil** — compress + 5d breakout + milder day/vol/quiet/close_loc, with a
+wider path trail (25%). Catches explosive legs that miss classic same-day.
+Classic ranks above coil when both fire. Exit: path trail from peak,
+tightening to 10% once the lot is ≥+30% above entry (ratchet).
 
 Live OKX when armed; paper otherwise. No per-coin hardcodes.
 """
