@@ -2256,7 +2256,7 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
 
 
 def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
-    """Ignition early-signal sleeve (desk universe + 15% trail; paper or live OKX)."""
+    """Ignition early-signal sleeve (desk universe + trail/ratchet; paper or live OKX)."""
     st = status or {}
     running = bool(st.get("running"))
     live = bool(st.get("allow_live")) and not bool(st.get("paper_only"))
@@ -2268,7 +2268,14 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
         pill = '<span class="pill obs"><span class="dot"></span>PAPER</span>'
     cfg = st.get("config") or {}
     trail = cfg.get("trail_pct")
-    trail_s = f"{float(trail):.0%}" if trail is not None else "15%"
+    trail_s = f"{float(trail):.0%}" if trail is not None else "12%"
+    ratchet_arm = cfg.get("trail_ratchet_arm_pct")
+    ratchet_pct = cfg.get("trail_ratchet_pct")
+    try:
+        if ratchet_arm is not None and ratchet_pct is not None and float(ratchet_arm) > 0:
+            trail_s = f"{trail_s}→{float(ratchet_pct):.0%}@{float(ratchet_arm):.0%}"
+    except (TypeError, ValueError):
+        pass
     risk_on = bool(st.get("risk_on"))
     gate = "BTC &gt; SMA50" if risk_on else "standby"
     caption = str(st.get("live_caption") or "")
