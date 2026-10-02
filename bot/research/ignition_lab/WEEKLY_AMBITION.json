@@ -1,0 +1,4296 @@
+{
+  "asof": "2026-10-02T13:51:06.842446+00:00",
+  "target_week_eur": [
+    2000.0,
+    3000.0
+  ],
+  "start": "2024-03-16",
+  "end": "2026-10-02",
+  "baseline_live_like": {
+    "name": "desk|coil|s1|b2000|fix",
+    "score": 57922.6,
+    "book": 2000,
+    "slots": 1,
+    "compound": false,
+    "univ": "desk",
+    "coil": true,
+    "pnl_eur": 5659.79,
+    "final_eur": 7659.79,
+    "max_dd": 0.256,
+    "n_trades": 9,
+    "win": 0.444,
+    "best_trade": 5706.6,
+    "best_trades": [
+      {
+        "date": "2024-12-04",
+        "base": "XRP",
+        "net": 5706.6,
+        "path": "coil",
+        "ret": 2.8563
+      },
+      {
+        "date": "2026-10-02",
+        "base": "ETH",
+        "net": 946.37,
+        "path": "coil",
+        "ret": 0.4762
+      },
+      {
+        "date": "2025-06-12",
+        "base": "UNI",
+        "net": 442.97,
+        "path": "coil",
+        "ret": 0.2245
+      },
+      {
+        "date": "2025-07-31",
+        "base": "AVAX",
+        "net": 355.52,
+        "path": "classic",
+        "ret": 0.1808
+      },
+      {
+        "date": "2026-01-18",
+        "base": "DOGE",
+        "net": -140.99,
+        "path": "classic",
+        "ret": -0.0675
+      },
+      {
+        "date": "2025-02-04",
+        "base": "LTC",
+        "net": -379.0,
+        "path": "coil",
+        "ret": -0.1865
+      },
+      {
+        "date": "2026-06-05",
+        "base": "LINK",
+        "net": -400.09,
+        "path": "coil",
+        "ret": -0.197
+      },
+      {
+        "date": "2026-03-28",
+        "base": "OP",
+        "net": -427.0,
+        "path": "coil",
+        "ret": -0.2105
+      }
+    ],
+    "n_weeks": 129,
+    "avg_week": 43.9,
+    "med_week": 0.0,
+    "p75_week": 25.2,
+    "p90_week": 186.5,
+    "max_week": 2790.9,
+    "weeks_ge_2k": 1,
+    "weeks_ge_3k": 0,
+    "pct_weeks_ge_2k": 0.8,
+    "pct_weeks_ge_3k": 0.0,
+    "realized_avg_week": 43.9,
+    "realized_max_week": 5706.6,
+    "realized_weeks_ge_2k": 1,
+    "realized_weeks_ge_3k": 1,
+    "realized_pct_weeks_ge_2k": 0.8,
+    "realized_pct_weeks_ge_3k": 0.8,
+    "path_pnl": {
+      "classic": 214.53,
+      "coil": 5445.26
+    }
+  },
+  "n_specs": 116,
+  "top_ambition": [
+    {
+      "name": "desk|coil|s1|b50000|fix",
+      "score": 1431164.95,
+      "book": 50000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 141494.7,
+      "final_eur": 191494.7,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 142664.99,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 142664.99,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 23659.14,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 11074.21,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 8887.96,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -3524.67,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -9474.89,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -10002.25,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -10674.93,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 1098.6,
+      "med_week": 0.0,
+      "p75_week": 631.0,
+      "p90_week": 4663.6,
+      "max_week": 69772.4,
+      "weeks_ge_2k": 25,
+      "weeks_ge_3k": 17,
+      "pct_weeks_ge_2k": 19.4,
+      "pct_weeks_ge_3k": 13.2,
+      "realized_avg_week": 1096.9,
+      "realized_max_week": 142665.0,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 5363.29,
+        "coil": 136131.41
+      }
+    },
+    {
+      "name": "desk|coil|s1|b50000|eq",
+      "score": 1430755.18,
+      "book": 50000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 100518.23,
+      "final_eur": 150518.23,
+      "max_dd": 0.611,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 142664.99,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 142664.99,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 48346.1,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 34585.96,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 33906.04,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -12315.83,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -25550.23,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -34670.71,
+          "path": "coil",
+          "ret": -0.2105
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -36509.61,
+          "path": "coil",
+          "ret": -0.1865
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 782.8,
+      "med_week": 0.0,
+      "p75_week": 929.5,
+      "p90_week": 10337.2,
+      "max_week": 69772.4,
+      "weeks_ge_2k": 30,
+      "weeks_ge_3k": 28,
+      "pct_weeks_ge_2k": 23.3,
+      "pct_weeks_ge_3k": 21.7,
+      "realized_avg_week": 779.2,
+      "realized_max_week": 142665.0,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 21590.21,
+        "coil": 78928.02
+      }
+    },
+    {
+      "name": "top80|coil|s1|b50000|fix",
+      "score": 1230149.3,
+      "book": 50000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 133029.64,
+      "final_eur": 183029.64,
+      "max_dd": 0.354,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 122491.93,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 122491.93,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 48551.52,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 23659.14,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 9773.53,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 8155.11,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 479.97,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -3524.67,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-01-19",
+          "base": "KAS",
+          "net": -4738.59,
+          "path": "classic",
+          "ret": -0.0918
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 1033.0,
+      "med_week": 0.0,
+      "p75_week": 1614.9,
+      "p90_week": 5058.7,
+      "max_week": 59906.5,
+      "weeks_ge_2k": 28,
+      "weeks_ge_3k": 20,
+      "pct_weeks_ge_2k": 21.7,
+      "pct_weeks_ge_3k": 15.5,
+      "realized_avg_week": 1031.2,
+      "realized_max_week": 122491.9,
+      "realized_weeks_ge_2k": 5,
+      "realized_weeks_ge_3k": 5,
+      "realized_pct_weeks_ge_2k": 3.9,
+      "realized_pct_weeks_ge_3k": 3.9,
+      "path_pnl": {
+        "classic": 23482.3,
+        "coil": 109547.33
+      }
+    },
+    {
+      "name": "top80|coil|s1|b50000|eq",
+      "score": 1229634.35,
+      "book": 50000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 81535.0,
+      "final_eur": 131535.0,
+      "max_dd": 0.617,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 122491.93,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 122491.93,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 74137.76,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 42248.73,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 19387.03,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 17883.75,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 1444.6,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2024-07-30",
+          "base": "SEI",
+          "net": -7070.08,
+          "path": "classic",
+          "ret": -0.1384
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -8358.29,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 635.2,
+      "med_week": 0.0,
+      "p75_week": 2000.3,
+      "p90_week": 9384.7,
+      "max_week": 59906.5,
+      "weeks_ge_2k": 33,
+      "weeks_ge_3k": 30,
+      "pct_weeks_ge_2k": 25.6,
+      "pct_weeks_ge_3k": 23.3,
+      "realized_avg_week": 632.1,
+      "realized_max_week": 122491.9,
+      "realized_weeks_ge_2k": 5,
+      "realized_weeks_ge_3k": 5,
+      "realized_pct_weeks_ge_2k": 3.9,
+      "realized_pct_weeks_ge_3k": 3.9,
+      "path_pnl": {
+        "classic": 21653.89,
+        "coil": 59881.1
+      }
+    },
+    {
+      "name": "top80|coil|s2|b50000|eq",
+      "score": 759112.87,
+      "book": 50000,
+      "slots": 2,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 49986.93,
+      "final_eur": 99986.93,
+      "max_dd": 0.57,
+      "n_trades": 35,
+      "win": 0.429,
+      "best_trade": 63207.92,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 63207.92,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 37188.66,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 15009.06,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 13987.47,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 12192.66,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 11803.34,
+          "path": "coil",
+          "ret": 0.4903
+        },
+        {
+          "date": "2025-05-23",
+          "base": "SUI",
+          "net": 10567.05,
+          "path": "classic",
+          "ret": 0.2841
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 9131.48,
+          "path": "coil",
+          "ret": 0.1985
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 390.1,
+      "med_week": 0.0,
+      "p75_week": 1032.2,
+      "p90_week": 10920.9,
+      "max_week": 28493.9,
+      "weeks_ge_2k": 31,
+      "weeks_ge_3k": 25,
+      "pct_weeks_ge_2k": 24.0,
+      "pct_weeks_ge_3k": 19.4,
+      "realized_avg_week": 387.5,
+      "realized_max_week": 75011.3,
+      "realized_weeks_ge_2k": 11,
+      "realized_weeks_ge_3k": 11,
+      "realized_pct_weeks_ge_2k": 8.5,
+      "realized_pct_weeks_ge_3k": 8.5,
+      "path_pnl": {
+        "classic": 26944.1,
+        "coil": 23042.82
+      }
+    },
+    {
+      "name": "top80|coil|s2|b50000|fix",
+      "score": 741230.63,
+      "book": 50000,
+      "slots": 2,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 76263.26,
+      "final_eur": 126263.26,
+      "max_dd": 0.294,
+      "n_trades": 35,
+      "win": 0.429,
+      "best_trade": 61245.97,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 61245.97,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 24275.76,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 11950.84,
+          "path": "coil",
+          "ret": 0.4903
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 11829.57,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 9609.8,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-05-23",
+          "base": "SUI",
+          "net": 7028.08,
+          "path": "classic",
+          "ret": 0.2841
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 6682.62,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-09-28",
+          "base": "ARB",
+          "net": 5137.1,
+          "path": "coil",
+          "ret": 0.2085
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 592.8,
+      "med_week": 0.0,
+      "p75_week": 926.3,
+      "p90_week": 6423.6,
+      "max_week": 27504.2,
+      "weeks_ge_2k": 25,
+      "weeks_ge_3k": 21,
+      "pct_weeks_ge_2k": 19.4,
+      "pct_weeks_ge_3k": 16.3,
+      "realized_avg_week": 591.2,
+      "realized_max_week": 73196.8,
+      "realized_weeks_ge_2k": 11,
+      "realized_weeks_ge_3k": 11,
+      "realized_pct_weeks_ge_2k": 8.5,
+      "realized_pct_weeks_ge_3k": 8.5,
+      "path_pnl": {
+        "classic": 16286.19,
+        "coil": 59977.08
+      }
+    },
+    {
+      "name": "desk|coil|s2|b50000|fix",
+      "score": 722017.86,
+      "book": 50000,
+      "slots": 2,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 89286.15,
+      "final_eur": 139286.15,
+      "max_dd": 0.292,
+      "n_trades": 23,
+      "win": 0.478,
+      "best_trade": 71332.5,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 71332.5,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2024-10-03",
+          "base": "SUI",
+          "net": 16419.62,
+          "path": "coil",
+          "ret": 0.6598
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 11829.57,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 9609.8,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-01-09",
+          "base": "SUI",
+          "net": 7637.86,
+          "path": "coil",
+          "ret": 0.3085
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 6682.62,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 6532.33,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 5537.11,
+          "path": "coil",
+          "ret": 0.2245
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 693.0,
+      "med_week": 0.0,
+      "p75_week": 735.2,
+      "p90_week": 6081.7,
+      "max_week": 31737.5,
+      "weeks_ge_2k": 26,
+      "weeks_ge_3k": 22,
+      "pct_weeks_ge_2k": 20.2,
+      "pct_weeks_ge_3k": 17.1,
+      "realized_avg_week": 692.1,
+      "realized_max_week": 71332.5,
+      "realized_weeks_ge_2k": 10,
+      "realized_weeks_ge_3k": 10,
+      "realized_pct_weeks_ge_2k": 7.8,
+      "realized_pct_weeks_ge_3k": 7.8,
+      "path_pnl": {
+        "classic": 5974.55,
+        "coil": 83311.6
+      }
+    },
+    {
+      "name": "desk|coil|s2|b50000|eq",
+      "score": 721716.11,
+      "book": 50000,
+      "slots": 2,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 59110.89,
+      "final_eur": 109110.89,
+      "max_dd": 0.618,
+      "n_trades": 23,
+      "win": 0.478,
+      "best_trade": 71332.5,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 71332.5,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 18649.87,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 16484.61,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2024-10-03",
+          "base": "SUI",
+          "net": 15936.75,
+          "path": "coil",
+          "ret": 0.6598
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 14355.2,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-01-09",
+          "base": "SUI",
+          "net": 13634.21,
+          "path": "coil",
+          "ret": 0.3085
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 13391.33,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 10607.01,
+          "path": "classic",
+          "ret": 0.1808
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 459.4,
+      "med_week": 0.0,
+      "p75_week": 1148.6,
+      "p90_week": 11206.1,
+      "max_week": 35563.4,
+      "weeks_ge_2k": 31,
+      "weeks_ge_3k": 30,
+      "pct_weeks_ge_2k": 24.0,
+      "pct_weeks_ge_3k": 23.3,
+      "realized_avg_week": 458.2,
+      "realized_max_week": 71332.5,
+      "realized_weeks_ge_2k": 10,
+      "realized_weeks_ge_3k": 10,
+      "realized_pct_weeks_ge_2k": 7.8,
+      "realized_pct_weeks_ge_3k": 7.8,
+      "path_pnl": {
+        "classic": 10068.76,
+        "coil": 49042.15
+      }
+    },
+    {
+      "name": "desk|coil|s1|b20000|fix",
+      "score": 574325.98,
+      "book": 20000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 56597.88,
+      "final_eur": 76597.88,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 57066.0,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 57066.0,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 9463.66,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 4429.68,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 3555.18,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -1409.87,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -3789.96,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -4000.9,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -4269.97,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 439.4,
+      "med_week": 0.0,
+      "p75_week": 252.4,
+      "p90_week": 1865.4,
+      "max_week": 27909.0,
+      "weeks_ge_2k": 13,
+      "weeks_ge_3k": 8,
+      "pct_weeks_ge_2k": 10.1,
+      "pct_weeks_ge_3k": 6.2,
+      "realized_avg_week": 438.7,
+      "realized_max_week": 57066.0,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 2145.31,
+        "coil": 54452.57
+      }
+    },
+    {
+      "name": "desk|coil|s1|b20000|eq",
+      "score": 574162.07,
+      "book": 20000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 40207.29,
+      "final_eur": 60207.29,
+      "max_dd": 0.611,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 57066.0,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 57066.0,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 19338.44,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 13834.38,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 13562.41,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -4926.33,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -10220.09,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -13868.28,
+          "path": "coil",
+          "ret": -0.2105
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -14603.84,
+          "path": "coil",
+          "ret": -0.1865
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 313.1,
+      "med_week": 0.0,
+      "p75_week": 371.8,
+      "p90_week": 4134.9,
+      "max_week": 27909.0,
+      "weeks_ge_2k": 20,
+      "weeks_ge_3k": 15,
+      "pct_weeks_ge_2k": 15.5,
+      "pct_weeks_ge_3k": 11.6,
+      "realized_avg_week": 311.7,
+      "realized_max_week": 57066.0,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 8636.08,
+        "coil": 31571.22
+      }
+    },
+    {
+      "name": "top80|coil|s3|b50000|eq",
+      "score": 527960.83,
+      "book": 50000,
+      "slots": 3,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 50183.28,
+      "final_eur": 100183.28,
+      "max_dd": 0.507,
+      "n_trades": 51,
+      "win": 0.431,
+      "best_trade": 43885.76,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 43885.76,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 18925.25,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2025-10-10",
+          "base": "BNB",
+          "net": 18133.62,
+          "path": "coil",
+          "ret": 0.6201
+        },
+        {
+          "date": "2026-10-02",
+          "base": "SUI",
+          "net": 12229.48,
+          "path": "coil",
+          "ret": 0.5787
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 10082.03,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 9377.3,
+          "path": "coil",
+          "ret": 0.4609
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 8214.45,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 7700.16,
+          "path": "coil",
+          "ret": 0.4903
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 391.5,
+      "med_week": 0.0,
+      "p75_week": 1143.3,
+      "p90_week": 8899.3,
+      "max_week": 22269.0,
+      "weeks_ge_2k": 28,
+      "weeks_ge_3k": 24,
+      "pct_weeks_ge_2k": 21.7,
+      "pct_weeks_ge_3k": 18.6,
+      "realized_avg_week": 389.0,
+      "realized_max_week": 51585.9,
+      "realized_weeks_ge_2k": 15,
+      "realized_weeks_ge_3k": 13,
+      "realized_pct_weeks_ge_2k": 11.6,
+      "realized_pct_weeks_ge_3k": 10.1,
+      "path_pnl": {
+        "classic": 7554.48,
+        "coil": 42628.82
+      }
+    },
+    {
+      "name": "top80|coil|s3|b50000|fix",
+      "score": 501715.26,
+      "book": 50000,
+      "slots": 3,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 59726.06,
+      "final_eur": 109726.06,
+      "max_dd": 0.331,
+      "n_trades": 51,
+      "win": 0.431,
+      "best_trade": 40830.64,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 40830.64,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 16183.84,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2025-10-10",
+          "base": "BNB",
+          "net": 10285.7,
+          "path": "coil",
+          "ret": 0.6201
+        },
+        {
+          "date": "2026-10-02",
+          "base": "SUI",
+          "net": 9594.61,
+          "path": "coil",
+          "ret": 0.5787
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 8121.18,
+          "path": "coil",
+          "ret": 0.4903
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 7886.38,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 7632.14,
+          "path": "coil",
+          "ret": 0.4609
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 6406.53,
+          "path": "coil",
+          "ret": 0.3874
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 464.7,
+      "med_week": 0.0,
+      "p75_week": 875.5,
+      "p90_week": 6955.6,
+      "max_week": 19757.0,
+      "weeks_ge_2k": 25,
+      "weeks_ge_3k": 23,
+      "pct_weeks_ge_2k": 19.4,
+      "pct_weeks_ge_3k": 17.8,
+      "realized_avg_week": 463.0,
+      "realized_max_week": 48951.8,
+      "realized_weeks_ge_2k": 15,
+      "realized_weeks_ge_3k": 11,
+      "realized_pct_weeks_ge_2k": 11.6,
+      "realized_pct_weeks_ge_3k": 8.5,
+      "path_pnl": {
+        "classic": 8620.12,
+        "coil": 51105.94
+      }
+    },
+    {
+      "name": "top80|coil|s1|b20000|fix",
+      "score": 494400.12,
+      "book": 20000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 53211.86,
+      "final_eur": 73211.86,
+      "max_dd": 0.354,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 48996.77,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 48996.77,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 19420.61,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 9463.66,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 3909.41,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 3262.05,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 191.99,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -1409.87,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-01-19",
+          "base": "KAS",
+          "net": -1895.43,
+          "path": "classic",
+          "ret": -0.0918
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 413.2,
+      "med_week": 0.0,
+      "p75_week": 646.0,
+      "p90_week": 2023.5,
+      "max_week": 23962.6,
+      "weeks_ge_2k": 14,
+      "weeks_ge_3k": 8,
+      "pct_weeks_ge_2k": 10.9,
+      "pct_weeks_ge_3k": 6.2,
+      "realized_avg_week": 412.5,
+      "realized_max_week": 48996.8,
+      "realized_weeks_ge_2k": 5,
+      "realized_weeks_ge_3k": 5,
+      "realized_pct_weeks_ge_2k": 3.9,
+      "realized_pct_weeks_ge_3k": 3.9,
+      "path_pnl": {
+        "classic": 9392.93,
+        "coil": 43818.95
+      }
+    },
+    {
+      "name": "top80|coil|s1|b20000|eq",
+      "score": 494194.14,
+      "book": 20000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 32614.0,
+      "final_eur": 52614.0,
+      "max_dd": 0.617,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 48996.77,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 48996.77,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 29655.1,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 16899.49,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 7754.81,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 7153.5,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 577.84,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2024-07-30",
+          "base": "SEI",
+          "net": -2828.03,
+          "path": "classic",
+          "ret": -0.1384
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -3343.32,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 254.1,
+      "med_week": 0.0,
+      "p75_week": 800.1,
+      "p90_week": 3753.9,
+      "max_week": 23962.6,
+      "weeks_ge_2k": 23,
+      "weeks_ge_3k": 15,
+      "pct_weeks_ge_2k": 17.8,
+      "pct_weeks_ge_3k": 11.6,
+      "realized_avg_week": 252.8,
+      "realized_max_week": 48996.8,
+      "realized_weeks_ge_2k": 5,
+      "realized_weeks_ge_3k": 5,
+      "realized_pct_weeks_ge_2k": 3.9,
+      "realized_pct_weeks_ge_3k": 3.9,
+      "path_pnl": {
+        "classic": 8661.56,
+        "coil": 23952.44
+      }
+    },
+    {
+      "name": "desk|coil|s3|b50000|fix",
+      "score": 486382.28,
+      "book": 50000,
+      "slots": 3,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 73228.25,
+      "final_eur": 123228.25,
+      "max_dd": 0.278,
+      "n_trades": 34,
+      "win": 0.5,
+      "best_trade": 47555.0,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 47555.0,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2024-10-03",
+          "base": "SUI",
+          "net": 10946.42,
+          "path": "coil",
+          "ret": 0.6598
+        },
+        {
+          "date": "2026-10-02",
+          "base": "SUI",
+          "net": 9594.61,
+          "path": "coil",
+          "ret": 0.5787
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 7886.38,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 7632.14,
+          "path": "coil",
+          "ret": 0.4609
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 6406.53,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-07-23",
+          "base": "XRP",
+          "net": 5241.46,
+          "path": "coil",
+          "ret": 0.3175
+        },
+        {
+          "date": "2025-01-09",
+          "base": "SUI",
+          "net": 5091.9,
+          "path": "coil",
+          "ret": 0.3085
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 568.8,
+      "med_week": 0.0,
+      "p75_week": 642.5,
+      "p90_week": 6341.8,
+      "max_week": 22768.4,
+      "weeks_ge_2k": 24,
+      "weeks_ge_3k": 20,
+      "pct_weeks_ge_2k": 18.6,
+      "pct_weeks_ge_3k": 15.5,
+      "realized_avg_week": 567.7,
+      "realized_max_week": 47555.0,
+      "realized_weeks_ge_2k": 13,
+      "realized_weeks_ge_3k": 9,
+      "realized_pct_weeks_ge_2k": 10.1,
+      "realized_pct_weeks_ge_3k": 7.0,
+      "path_pnl": {
+        "classic": 3983.03,
+        "coil": 69245.23
+      }
+    },
+    {
+      "name": "desk|coil|s3|b50000|eq",
+      "score": 486322.44,
+      "book": 50000,
+      "slots": 3,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 67243.54,
+      "final_eur": 117243.54,
+      "max_dd": 0.507,
+      "n_trades": 34,
+      "win": 0.5,
+      "best_trade": 47555.0,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 47555.0,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "SUI",
+          "net": 14373.36,
+          "path": "coil",
+          "ret": 0.5787
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 11849.44,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 11416.25,
+          "path": "coil",
+          "ret": 0.4609
+        },
+        {
+          "date": "2024-10-03",
+          "base": "SUI",
+          "net": 10731.8,
+          "path": "coil",
+          "ret": 0.6598
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 9934.08,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 9654.47,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-07-23",
+          "base": "XRP",
+          "net": 9373.62,
+          "path": "coil",
+          "ret": 0.3175
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 523.0,
+      "med_week": 0.0,
+      "p75_week": 776.6,
+      "p90_week": 9116.6,
+      "max_week": 28600.5,
+      "weeks_ge_2k": 29,
+      "weeks_ge_3k": 25,
+      "pct_weeks_ge_2k": 22.5,
+      "pct_weeks_ge_3k": 19.4,
+      "realized_avg_week": 521.3,
+      "realized_max_week": 47555.0,
+      "realized_weeks_ge_2k": 13,
+      "realized_weeks_ge_3k": 13,
+      "realized_pct_weeks_ge_2k": 10.1,
+      "realized_pct_weeks_ge_3k": 10.1,
+      "path_pnl": {
+        "classic": 5472.36,
+        "coil": 61771.16
+      }
+    },
+    {
+      "name": "desk|classic|s1|b50000|eq",
+      "score": 473846.44,
+      "book": 50000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": false,
+      "pnl_eur": 94543.74,
+      "final_eur": 144543.74,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.556,
+      "best_trade": 46980.13,
+      "best_trades": [
+        {
+          "date": "2026-10-02",
+          "base": "SOL",
+          "net": 46980.13,
+          "path": "classic",
+          "ret": 0.4845
+        },
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 39388.1,
+          "path": "classic",
+          "ret": 0.6801
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 11062.48,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 9446.34,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 505.28,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2025-01-19",
+          "base": "LTC",
+          "net": -764.04,
+          "path": "classic",
+          "ret": -0.0113
+        },
+        {
+          "date": "2024-10-01",
+          "base": "AVAX",
+          "net": -1359.91,
+          "path": "classic",
+          "ret": -0.0242
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -4412.01,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 736.3,
+      "med_week": 0.0,
+      "p75_week": 0.0,
+      "p90_week": 3395.6,
+      "max_week": 34553.2,
+      "weeks_ge_2k": 17,
+      "weeks_ge_3k": 15,
+      "pct_weeks_ge_2k": 13.2,
+      "pct_weeks_ge_3k": 11.6,
+      "realized_avg_week": 732.9,
+      "realized_max_week": 46980.1,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 94543.74,
+        "coil": 0
+      }
+    },
+    {
+      "name": "top80|classic|s1|b50000|eq",
+      "score": 443919.91,
+      "book": 50000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": false,
+      "pnl_eur": 91591.17,
+      "final_eur": 141591.17,
+      "max_dd": 0.407,
+      "n_trades": 18,
+      "win": 0.5,
+      "best_trade": 43760.38,
+      "best_trades": [
+        {
+          "date": "2026-09-07",
+          "base": "ARB",
+          "net": 43760.38,
+          "path": "classic",
+          "ret": 0.5481
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 30594.05,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "VET",
+          "net": 17553.98,
+          "path": "classic",
+          "ret": 0.1445
+        },
+        {
+          "date": "2026-05-26",
+          "base": "GRASS",
+          "net": 16757.8,
+          "path": "classic",
+          "ret": 0.25
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 11144.97,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 9209.95,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2026-05-12",
+          "base": "VIRTUAL",
+          "net": 6275.73,
+          "path": "classic",
+          "ret": 0.1049
+        },
+        {
+          "date": "2024-10-01",
+          "base": "STX",
+          "net": 795.88,
+          "path": "classic",
+          "ret": 0.023
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 714.0,
+      "med_week": 0.0,
+      "p75_week": 0.0,
+      "p90_week": 4326.8,
+      "max_week": 58696.0,
+      "weeks_ge_2k": 20,
+      "weeks_ge_3k": 18,
+      "pct_weeks_ge_2k": 15.5,
+      "pct_weeks_ge_3k": 14.0,
+      "realized_avg_week": 710.0,
+      "realized_max_week": 43760.4,
+      "realized_weeks_ge_2k": 7,
+      "realized_weeks_ge_3k": 7,
+      "realized_pct_weeks_ge_2k": 5.4,
+      "realized_pct_weeks_ge_3k": 5.4,
+      "path_pnl": {
+        "classic": 91591.19,
+        "coil": 0
+      }
+    },
+    {
+      "name": "desk|classic|s1|b50000|fix",
+      "score": 342292.57,
+      "book": 50000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": false,
+      "pnl_eur": 66457.3,
+      "final_eur": 116457.3,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.556,
+      "best_trade": 33852.82,
+      "best_trades": [
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 33852.82,
+          "path": "classic",
+          "ret": 0.6801
+        },
+        {
+          "date": "2026-10-02",
+          "base": "SOL",
+          "net": 24076.66,
+          "path": "classic",
+          "ret": 0.4845
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 11062.48,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 8887.96,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 479.97,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2025-01-19",
+          "base": "LTC",
+          "net": -715.39,
+          "path": "classic",
+          "ret": -0.0113
+        },
+        {
+          "date": "2024-10-01",
+          "base": "AVAX",
+          "net": -1359.91,
+          "path": "classic",
+          "ret": -0.0242
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -3524.67,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 516.9,
+      "med_week": 0.0,
+      "p75_week": 0.0,
+      "p90_week": 2712.7,
+      "max_week": 29697.4,
+      "weeks_ge_2k": 16,
+      "weeks_ge_3k": 13,
+      "pct_weeks_ge_2k": 12.4,
+      "pct_weeks_ge_3k": 10.1,
+      "realized_avg_week": 515.2,
+      "realized_max_week": 33852.8,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 66457.29,
+        "coil": 0
+      }
+    },
+    {
+      "name": "top80|classic|s1|b50000|fix",
+      "score": 311959.85,
+      "book": 50000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": false,
+      "pnl_eur": 61984.89,
+      "final_eur": 111984.89,
+      "max_dd": 0.407,
+      "n_trades": 18,
+      "win": 0.5,
+      "best_trade": 30594.05,
+      "best_trades": [
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 30594.05,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-09-07",
+          "base": "ARB",
+          "net": 27255.93,
+          "path": "classic",
+          "ret": 0.5481
+        },
+        {
+          "date": "2026-05-26",
+          "base": "GRASS",
+          "net": 12348.01,
+          "path": "classic",
+          "ret": 0.25
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 9209.95,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 8887.96,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-10-02",
+          "base": "VET",
+          "net": 7076.1,
+          "path": "classic",
+          "ret": 0.1445
+        },
+        {
+          "date": "2026-05-12",
+          "base": "VIRTUAL",
+          "net": 5095.54,
+          "path": "classic",
+          "ret": 0.1049
+        },
+        {
+          "date": "2024-10-01",
+          "base": "STX",
+          "net": 795.88,
+          "path": "classic",
+          "ret": 0.023
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 482.1,
+      "med_week": 0.0,
+      "p75_week": 0.0,
+      "p90_week": 4270.1,
+      "max_week": 36558.5,
+      "weeks_ge_2k": 19,
+      "weeks_ge_3k": 15,
+      "pct_weeks_ge_2k": 14.7,
+      "pct_weeks_ge_3k": 11.6,
+      "realized_avg_week": 480.5,
+      "realized_max_week": 30594.0,
+      "realized_weeks_ge_2k": 7,
+      "realized_weeks_ge_3k": 7,
+      "realized_pct_weeks_ge_2k": 5.4,
+      "realized_pct_weeks_ge_3k": 5.4,
+      "path_pnl": {
+        "classic": 61984.89,
+        "coil": 0
+      }
+    }
+  ],
+  "smallest_book_hit_2k": [
+    {
+      "name": "top80|coil|s1|b2000|eq",
+      "score": 50629.61,
+      "book": 2000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 3261.4,
+      "final_eur": 5261.4,
+      "max_dd": 0.617,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 4899.68,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 4899.68,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 2965.51,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 1689.95,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 775.48,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 715.35,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 57.78,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2024-07-30",
+          "base": "SEI",
+          "net": -282.8,
+          "path": "classic",
+          "ret": -0.1384
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -334.33,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 25.4,
+      "med_week": 0.0,
+      "p75_week": 80.0,
+      "p90_week": 375.4,
+      "max_week": 2396.3,
+      "weeks_ge_2k": 2,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 1.6,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 25.3,
+      "realized_max_week": 4899.7,
+      "realized_weeks_ge_2k": 2,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 1.6,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 866.15,
+        "coil": 2395.25
+      }
+    },
+    {
+      "name": "desk|coil|s1|b2000|fix",
+      "score": 57922.6,
+      "book": 2000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 5659.79,
+      "final_eur": 7659.79,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 5706.6,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 5706.6,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 946.37,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 442.97,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 355.52,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -140.99,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -379.0,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -400.09,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -427.0,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 43.9,
+      "med_week": 0.0,
+      "p75_week": 25.2,
+      "p90_week": 186.5,
+      "max_week": 2790.9,
+      "weeks_ge_2k": 1,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.8,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 43.9,
+      "realized_max_week": 5706.6,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 214.53,
+        "coil": 5445.26
+      }
+    },
+    {
+      "name": "top80|coil|s1|b2000|fix",
+      "score": 49850.21,
+      "book": 2000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 5321.19,
+      "final_eur": 7321.19,
+      "max_dd": 0.354,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 4899.68,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 4899.68,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 1942.06,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 946.37,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 390.94,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 326.2,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 19.2,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -140.99,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-01-19",
+          "base": "KAS",
+          "net": -189.54,
+          "path": "classic",
+          "ret": -0.0918
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 41.3,
+      "med_week": 0.0,
+      "p75_week": 64.6,
+      "p90_week": 202.3,
+      "max_week": 2396.3,
+      "weeks_ge_2k": 1,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.8,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 41.2,
+      "realized_max_week": 4899.7,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 939.29,
+        "coil": 4381.91
+      }
+    },
+    {
+      "name": "desk|coil|s1|b2000|eq",
+      "score": 57906.21,
+      "book": 2000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 4020.73,
+      "final_eur": 6020.73,
+      "max_dd": 0.611,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 5706.6,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 5706.6,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 1933.84,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 1383.44,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 1356.24,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -492.63,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -1022.01,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -1386.83,
+          "path": "coil",
+          "ret": -0.2105
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -1460.38,
+          "path": "coil",
+          "ret": -0.1865
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 31.3,
+      "med_week": 0.0,
+      "p75_week": 37.2,
+      "p90_week": 413.5,
+      "max_week": 2790.9,
+      "weeks_ge_2k": 2,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 1.6,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 31.2,
+      "realized_max_week": 5706.6,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 863.61,
+        "coil": 3157.12
+      }
+    },
+    {
+      "name": "desk|coil|s2|b2000|fix",
+      "score": 29368.71,
+      "book": 2000,
+      "slots": 2,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 3571.45,
+      "final_eur": 5571.45,
+      "max_dd": 0.292,
+      "n_trades": 23,
+      "win": 0.478,
+      "best_trade": 2853.3,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 2853.3,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2024-10-03",
+          "base": "SUI",
+          "net": 656.78,
+          "path": "coil",
+          "ret": 0.6598
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 473.18,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 384.39,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-01-09",
+          "base": "SUI",
+          "net": 305.51,
+          "path": "coil",
+          "ret": 0.3085
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 267.3,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 261.29,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 221.48,
+          "path": "coil",
+          "ret": 0.2245
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 27.7,
+      "med_week": 0.0,
+      "p75_week": 29.4,
+      "p90_week": 243.3,
+      "max_week": 1269.5,
+      "weeks_ge_2k": 0,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.0,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 27.7,
+      "realized_max_week": 2853.3,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 0,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.0,
+      "path_pnl": {
+        "classic": 238.98,
+        "coil": 3332.44
+      }
+    },
+    {
+      "name": "top80|coil|s2|b2000|fix",
+      "score": 30109.51,
+      "book": 2000,
+      "slots": 2,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 3050.53,
+      "final_eur": 5050.53,
+      "max_dd": 0.294,
+      "n_trades": 35,
+      "win": 0.429,
+      "best_trade": 2449.84,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 2449.84,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 971.03,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 478.03,
+          "path": "coil",
+          "ret": 0.4903
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 473.18,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 384.39,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-05-23",
+          "base": "SUI",
+          "net": 281.12,
+          "path": "classic",
+          "ret": 0.2841
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 267.3,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-09-28",
+          "base": "ARB",
+          "net": 205.48,
+          "path": "coil",
+          "ret": 0.2085
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 23.7,
+      "med_week": 0.0,
+      "p75_week": 37.1,
+      "p90_week": 256.9,
+      "max_week": 1100.2,
+      "weeks_ge_2k": 0,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.0,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 23.6,
+      "realized_max_week": 2927.9,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 0,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.0,
+      "path_pnl": {
+        "classic": 651.47,
+        "coil": 2399.05
+      }
+    },
+    {
+      "name": "desk|coil|s2|b2000|eq",
+      "score": 29356.64,
+      "book": 2000,
+      "slots": 2,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 2364.44,
+      "final_eur": 4364.44,
+      "max_dd": 0.618,
+      "n_trades": 23,
+      "win": 0.478,
+      "best_trade": 2853.3,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 2853.3,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 745.99,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 659.38,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2024-10-03",
+          "base": "SUI",
+          "net": 637.47,
+          "path": "coil",
+          "ret": 0.6598
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 574.21,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-01-09",
+          "base": "SUI",
+          "net": 545.37,
+          "path": "coil",
+          "ret": 0.3085
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 535.65,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 424.28,
+          "path": "classic",
+          "ret": 0.1808
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 18.4,
+      "med_week": 0.0,
+      "p75_week": 45.9,
+      "p90_week": 448.2,
+      "max_week": 1422.5,
+      "weeks_ge_2k": 0,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.0,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 18.3,
+      "realized_max_week": 2853.3,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 0,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.0,
+      "path_pnl": {
+        "classic": 402.76,
+        "coil": 1961.68
+      }
+    },
+    {
+      "name": "top80|coil|s2|b2000|eq",
+      "score": 30824.99,
+      "book": 2000,
+      "slots": 2,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 1999.48,
+      "final_eur": 3999.48,
+      "max_dd": 0.57,
+      "n_trades": 35,
+      "win": 0.429,
+      "best_trade": 2528.32,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 2528.32,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 1487.55,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 600.36,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 559.5,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 487.71,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 472.13,
+          "path": "coil",
+          "ret": 0.4903
+        },
+        {
+          "date": "2025-05-23",
+          "base": "SUI",
+          "net": 422.68,
+          "path": "classic",
+          "ret": 0.2841
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 365.26,
+          "path": "coil",
+          "ret": 0.1985
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 15.6,
+      "med_week": 0.0,
+      "p75_week": 41.3,
+      "p90_week": 436.8,
+      "max_week": 1139.8,
+      "weeks_ge_2k": 0,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.0,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 15.5,
+      "realized_max_week": 3000.5,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 1077.77,
+        "coil": 921.72
+      }
+    },
+    {
+      "name": "desk|coil|s1|b5000|eq",
+      "score": 145865.52,
+      "book": 5000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 10051.82,
+      "final_eur": 15051.82,
+      "max_dd": 0.611,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 14266.5,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 14266.5,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 4834.61,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 3458.6,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 3390.6,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -1231.58,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -2555.02,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -3467.07,
+          "path": "coil",
+          "ret": -0.2105
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -3650.96,
+          "path": "coil",
+          "ret": -0.1865
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 78.3,
+      "med_week": 0.0,
+      "p75_week": 92.9,
+      "p90_week": 1033.7,
+      "max_week": 6977.2,
+      "weeks_ge_2k": 11,
+      "weeks_ge_3k": 6,
+      "pct_weeks_ge_2k": 8.5,
+      "pct_weeks_ge_3k": 4.7,
+      "realized_avg_week": 77.9,
+      "realized_max_week": 14266.5,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 2159.02,
+        "coil": 7892.81
+      }
+    },
+    {
+      "name": "top80|coil|s1|b5000|fix",
+      "score": 124925.03,
+      "book": 5000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 13302.96,
+      "final_eur": 18302.96,
+      "max_dd": 0.354,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 12249.19,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 12249.19,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 4855.15,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 2365.91,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 977.35,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 815.51,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 48.0,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -352.47,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-01-19",
+          "base": "KAS",
+          "net": -473.86,
+          "path": "classic",
+          "ret": -0.0918
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 103.3,
+      "med_week": 0.0,
+      "p75_week": 161.5,
+      "p90_week": 505.9,
+      "max_week": 5990.6,
+      "weeks_ge_2k": 5,
+      "weeks_ge_3k": 3,
+      "pct_weeks_ge_2k": 3.9,
+      "pct_weeks_ge_3k": 2.3,
+      "realized_avg_week": 103.1,
+      "realized_max_week": 12249.2,
+      "realized_weeks_ge_2k": 3,
+      "realized_weeks_ge_3k": 2,
+      "realized_pct_weeks_ge_2k": 2.3,
+      "realized_pct_weeks_ge_3k": 1.6,
+      "path_pnl": {
+        "classic": 2348.23,
+        "coil": 10954.72
+      }
+    }
+  ],
+  "smallest_book_hit_3k": [
+    {
+      "name": "desk|coil|s1|b2000|fix",
+      "score": 57922.6,
+      "book": 2000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 5659.79,
+      "final_eur": 7659.79,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 5706.6,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 5706.6,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 946.37,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 442.97,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 355.52,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -140.99,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -379.0,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -400.09,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -427.0,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 43.9,
+      "med_week": 0.0,
+      "p75_week": 25.2,
+      "p90_week": 186.5,
+      "max_week": 2790.9,
+      "weeks_ge_2k": 1,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.8,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 43.9,
+      "realized_max_week": 5706.6,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 214.53,
+        "coil": 5445.26
+      }
+    },
+    {
+      "name": "top80|coil|s1|b2000|fix",
+      "score": 49850.21,
+      "book": 2000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 5321.19,
+      "final_eur": 7321.19,
+      "max_dd": 0.354,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 4899.68,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 4899.68,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 1942.06,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 946.37,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 390.94,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 326.2,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 19.2,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -140.99,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-01-19",
+          "base": "KAS",
+          "net": -189.54,
+          "path": "classic",
+          "ret": -0.0918
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 41.3,
+      "med_week": 0.0,
+      "p75_week": 64.6,
+      "p90_week": 202.3,
+      "max_week": 2396.3,
+      "weeks_ge_2k": 1,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.8,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 41.2,
+      "realized_max_week": 4899.7,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 939.29,
+        "coil": 4381.91
+      }
+    },
+    {
+      "name": "desk|coil|s1|b2000|eq",
+      "score": 57906.21,
+      "book": 2000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 4020.73,
+      "final_eur": 6020.73,
+      "max_dd": 0.611,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 5706.6,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 5706.6,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 1933.84,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 1383.44,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 1356.24,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -492.63,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -1022.01,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -1386.83,
+          "path": "coil",
+          "ret": -0.2105
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -1460.38,
+          "path": "coil",
+          "ret": -0.1865
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 31.3,
+      "med_week": 0.0,
+      "p75_week": 37.2,
+      "p90_week": 413.5,
+      "max_week": 2790.9,
+      "weeks_ge_2k": 2,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 1.6,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 31.2,
+      "realized_max_week": 5706.6,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 863.61,
+        "coil": 3157.12
+      }
+    },
+    {
+      "name": "top80|coil|s1|b2000|eq",
+      "score": 50629.61,
+      "book": 2000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 3261.4,
+      "final_eur": 5261.4,
+      "max_dd": 0.617,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 4899.68,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 4899.68,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 2965.51,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 1689.95,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 775.48,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 715.35,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 57.78,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2024-07-30",
+          "base": "SEI",
+          "net": -282.8,
+          "path": "classic",
+          "ret": -0.1384
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -334.33,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 25.4,
+      "med_week": 0.0,
+      "p75_week": 80.0,
+      "p90_week": 375.4,
+      "max_week": 2396.3,
+      "weeks_ge_2k": 2,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 1.6,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 25.3,
+      "realized_max_week": 4899.7,
+      "realized_weeks_ge_2k": 2,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 1.6,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 866.15,
+        "coil": 2395.25
+      }
+    },
+    {
+      "name": "top80|coil|s2|b2000|eq",
+      "score": 30824.99,
+      "book": 2000,
+      "slots": 2,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 1999.48,
+      "final_eur": 3999.48,
+      "max_dd": 0.57,
+      "n_trades": 35,
+      "win": 0.429,
+      "best_trade": 2528.32,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 2528.32,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 1487.55,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 600.36,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-08-25",
+          "base": "LINK",
+          "net": 559.5,
+          "path": "coil",
+          "ret": 0.2703
+        },
+        {
+          "date": "2026-09-09",
+          "base": "LINK",
+          "net": 487.71,
+          "path": "coil",
+          "ret": 0.3874
+        },
+        {
+          "date": "2024-12-04",
+          "base": "TRX",
+          "net": 472.13,
+          "path": "coil",
+          "ret": 0.4903
+        },
+        {
+          "date": "2025-05-23",
+          "base": "SUI",
+          "net": 422.68,
+          "path": "classic",
+          "ret": 0.2841
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 365.26,
+          "path": "coil",
+          "ret": 0.1985
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 15.6,
+      "med_week": 0.0,
+      "p75_week": 41.3,
+      "p90_week": 436.8,
+      "max_week": 1139.8,
+      "weeks_ge_2k": 0,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.0,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 15.5,
+      "realized_max_week": 3000.5,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 1077.77,
+        "coil": 921.72
+      }
+    },
+    {
+      "name": "desk|coil|s1|b5000|eq",
+      "score": 145865.52,
+      "book": 5000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 10051.82,
+      "final_eur": 15051.82,
+      "max_dd": 0.611,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 14266.5,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 14266.5,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 4834.61,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 3458.6,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 3390.6,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -1231.58,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -2555.02,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -3467.07,
+          "path": "coil",
+          "ret": -0.2105
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -3650.96,
+          "path": "coil",
+          "ret": -0.1865
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 78.3,
+      "med_week": 0.0,
+      "p75_week": 92.9,
+      "p90_week": 1033.7,
+      "max_week": 6977.2,
+      "weeks_ge_2k": 11,
+      "weeks_ge_3k": 6,
+      "pct_weeks_ge_2k": 8.5,
+      "pct_weeks_ge_3k": 4.7,
+      "realized_avg_week": 77.9,
+      "realized_max_week": 14266.5,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 2159.02,
+        "coil": 7892.81
+      }
+    },
+    {
+      "name": "top80|coil|s1|b5000|eq",
+      "score": 124873.54,
+      "book": 5000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 8153.5,
+      "final_eur": 13153.5,
+      "max_dd": 0.617,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 12249.19,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 12249.19,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 7413.78,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 4224.87,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 1938.7,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 1788.37,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 144.46,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2024-07-30",
+          "base": "SEI",
+          "net": -707.01,
+          "path": "classic",
+          "ret": -0.1384
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -835.83,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 63.5,
+      "med_week": 0.0,
+      "p75_week": 200.0,
+      "p90_week": 938.5,
+      "max_week": 5990.6,
+      "weeks_ge_2k": 6,
+      "weeks_ge_3k": 4,
+      "pct_weeks_ge_2k": 4.7,
+      "pct_weeks_ge_3k": 3.1,
+      "realized_avg_week": 63.2,
+      "realized_max_week": 12249.2,
+      "realized_weeks_ge_2k": 3,
+      "realized_weeks_ge_3k": 3,
+      "realized_pct_weeks_ge_2k": 2.3,
+      "realized_pct_weeks_ge_3k": 2.3,
+      "path_pnl": {
+        "classic": 2165.39,
+        "coil": 5988.09
+      }
+    },
+    {
+      "name": "top80|coil|s1|b5000|fix",
+      "score": 124925.03,
+      "book": 5000,
+      "slots": 1,
+      "compound": false,
+      "univ": "top80",
+      "coil": true,
+      "pnl_eur": 13302.96,
+      "final_eur": 18302.96,
+      "max_dd": 0.354,
+      "n_trades": 16,
+      "win": 0.375,
+      "best_trade": 12249.19,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 12249.19,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 4855.15,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 2365.91,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-11-14",
+          "base": "NPC",
+          "net": 977.35,
+          "path": "coil",
+          "ret": 0.1985
+        },
+        {
+          "date": "2025-07-23",
+          "base": "TIA",
+          "net": 815.51,
+          "path": "coil",
+          "ret": 0.1661
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 48.0,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -352.47,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-01-19",
+          "base": "KAS",
+          "net": -473.86,
+          "path": "classic",
+          "ret": -0.0918
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 103.3,
+      "med_week": 0.0,
+      "p75_week": 161.5,
+      "p90_week": 505.9,
+      "max_week": 5990.6,
+      "weeks_ge_2k": 5,
+      "weeks_ge_3k": 3,
+      "pct_weeks_ge_2k": 3.9,
+      "pct_weeks_ge_3k": 2.3,
+      "realized_avg_week": 103.1,
+      "realized_max_week": 12249.2,
+      "realized_weeks_ge_2k": 3,
+      "realized_weeks_ge_3k": 2,
+      "realized_pct_weeks_ge_2k": 2.3,
+      "realized_pct_weeks_ge_3k": 1.6,
+      "path_pnl": {
+        "classic": 2348.23,
+        "coil": 10954.72
+      }
+    },
+    {
+      "name": "desk|classic|s1|b5000|eq",
+      "score": 48674.54,
+      "book": 5000,
+      "slots": 1,
+      "compound": true,
+      "univ": "desk",
+      "coil": false,
+      "pnl_eur": 9454.37,
+      "final_eur": 14454.37,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.556,
+      "best_trade": 4698.01,
+      "best_trades": [
+        {
+          "date": "2026-10-02",
+          "base": "SOL",
+          "net": 4698.01,
+          "path": "classic",
+          "ret": 0.4845
+        },
+        {
+          "date": "2026-05-27",
+          "base": "NEAR",
+          "net": 3938.81,
+          "path": "classic",
+          "ret": 0.6801
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 1106.25,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 944.63,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2025-05-29",
+          "base": "LTC",
+          "net": 50.53,
+          "path": "classic",
+          "ret": 0.0126
+        },
+        {
+          "date": "2025-01-19",
+          "base": "LTC",
+          "net": -76.4,
+          "path": "classic",
+          "ret": -0.0113
+        },
+        {
+          "date": "2024-10-01",
+          "base": "AVAX",
+          "net": -135.99,
+          "path": "classic",
+          "ret": -0.0242
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -441.2,
+          "path": "classic",
+          "ret": -0.0675
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 73.6,
+      "med_week": 0.0,
+      "p75_week": 0.0,
+      "p90_week": 339.6,
+      "max_week": 3455.3,
+      "weeks_ge_2k": 1,
+      "weeks_ge_3k": 1,
+      "pct_weeks_ge_2k": 0.8,
+      "pct_weeks_ge_3k": 0.8,
+      "realized_avg_week": 73.3,
+      "realized_max_week": 4698.0,
+      "realized_weeks_ge_2k": 2,
+      "realized_weeks_ge_3k": 2,
+      "realized_pct_weeks_ge_2k": 1.6,
+      "realized_pct_weeks_ge_3k": 1.6,
+      "path_pnl": {
+        "classic": 9454.38,
+        "coil": 0
+      }
+    },
+    {
+      "name": "top80|classic|s1|b5000|eq",
+      "score": 45451.59,
+      "book": 5000,
+      "slots": 1,
+      "compound": true,
+      "univ": "top80",
+      "coil": false,
+      "pnl_eur": 9159.12,
+      "final_eur": 14159.12,
+      "max_dd": 0.407,
+      "n_trades": 18,
+      "win": 0.5,
+      "best_trade": 4376.04,
+      "best_trades": [
+        {
+          "date": "2026-09-07",
+          "base": "ARB",
+          "net": 4376.04,
+          "path": "classic",
+          "ret": 0.5481
+        },
+        {
+          "date": "2025-05-06",
+          "base": "VIRTUAL",
+          "net": 3059.41,
+          "path": "classic",
+          "ret": 0.974
+        },
+        {
+          "date": "2026-10-02",
+          "base": "VET",
+          "net": 1755.4,
+          "path": "classic",
+          "ret": 0.1445
+        },
+        {
+          "date": "2026-05-26",
+          "base": "GRASS",
+          "net": 1675.78,
+          "path": "classic",
+          "ret": 0.25
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 1114.5,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2024-11-26",
+          "base": "SOL",
+          "net": 920.99,
+          "path": "classic",
+          "ret": 0.2643
+        },
+        {
+          "date": "2026-05-12",
+          "base": "VIRTUAL",
+          "net": 627.57,
+          "path": "classic",
+          "ret": 0.1049
+        },
+        {
+          "date": "2024-10-01",
+          "base": "STX",
+          "net": 79.59,
+          "path": "classic",
+          "ret": 0.023
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 71.4,
+      "med_week": 0.0,
+      "p75_week": 0.0,
+      "p90_week": 432.7,
+      "max_week": 5869.6,
+      "weeks_ge_2k": 2,
+      "weeks_ge_3k": 1,
+      "pct_weeks_ge_2k": 1.6,
+      "pct_weeks_ge_3k": 0.8,
+      "realized_avg_week": 71.0,
+      "realized_max_week": 4376.0,
+      "realized_weeks_ge_2k": 2,
+      "realized_weeks_ge_3k": 2,
+      "realized_pct_weeks_ge_2k": 1.6,
+      "realized_pct_weeks_ge_3k": 1.6,
+      "path_pnl": {
+        "classic": 9159.11,
+        "coil": 0
+      }
+    }
+  ],
+  "desk_coil_by_book": [
+    {
+      "name": "desk|coil|s1|b50000|fix",
+      "score": 1431164.95,
+      "book": 50000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 141494.7,
+      "final_eur": 191494.7,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 142664.99,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 142664.99,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 23659.14,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 11074.21,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 8887.96,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -3524.67,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -9474.89,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -10002.25,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -10674.93,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 1098.6,
+      "med_week": 0.0,
+      "p75_week": 631.0,
+      "p90_week": 4663.6,
+      "max_week": 69772.4,
+      "weeks_ge_2k": 25,
+      "weeks_ge_3k": 17,
+      "pct_weeks_ge_2k": 19.4,
+      "pct_weeks_ge_3k": 13.2,
+      "realized_avg_week": 1096.9,
+      "realized_max_week": 142665.0,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 5363.29,
+        "coil": 136131.41
+      }
+    },
+    {
+      "name": "desk|coil|s1|b20000|fix",
+      "score": 574325.98,
+      "book": 20000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 56597.88,
+      "final_eur": 76597.88,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 57066.0,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 57066.0,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 9463.66,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 4429.68,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 3555.18,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -1409.87,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -3789.96,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -4000.9,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -4269.97,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 439.4,
+      "med_week": 0.0,
+      "p75_week": 252.4,
+      "p90_week": 1865.4,
+      "max_week": 27909.0,
+      "weeks_ge_2k": 13,
+      "weeks_ge_3k": 8,
+      "pct_weeks_ge_2k": 10.1,
+      "pct_weeks_ge_3k": 6.2,
+      "realized_avg_week": 438.7,
+      "realized_max_week": 57066.0,
+      "realized_weeks_ge_2k": 4,
+      "realized_weeks_ge_3k": 4,
+      "realized_pct_weeks_ge_2k": 3.1,
+      "realized_pct_weeks_ge_3k": 3.1,
+      "path_pnl": {
+        "classic": 2145.31,
+        "coil": 54452.57
+      }
+    },
+    {
+      "name": "desk|coil|s1|b10000|fix",
+      "score": 287912.99,
+      "book": 10000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 28298.94,
+      "final_eur": 38298.94,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 28533.0,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 28533.0,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 4731.83,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 2214.84,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 1777.59,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -704.93,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -1894.98,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -2000.45,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -2134.99,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 219.7,
+      "med_week": 0.0,
+      "p75_week": 126.2,
+      "p90_week": 932.7,
+      "max_week": 13954.5,
+      "weeks_ge_2k": 6,
+      "weeks_ge_3k": 4,
+      "pct_weeks_ge_2k": 4.7,
+      "pct_weeks_ge_3k": 3.1,
+      "realized_avg_week": 219.4,
+      "realized_max_week": 28533.0,
+      "realized_weeks_ge_2k": 3,
+      "realized_weeks_ge_3k": 2,
+      "realized_pct_weeks_ge_2k": 2.3,
+      "realized_pct_weeks_ge_3k": 1.6,
+      "path_pnl": {
+        "classic": 1072.66,
+        "coil": 27226.28
+      }
+    },
+    {
+      "name": "desk|coil|s1|b5000|fix",
+      "score": 144406.49,
+      "book": 5000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 14149.47,
+      "final_eur": 19149.47,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 14266.5,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 14266.5,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 2365.91,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 1107.42,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 888.8,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -352.47,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -947.49,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -1000.23,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -1067.49,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 109.9,
+      "med_week": 0.0,
+      "p75_week": 63.1,
+      "p90_week": 466.4,
+      "max_week": 6977.2,
+      "weeks_ge_2k": 3,
+      "weeks_ge_3k": 3,
+      "pct_weeks_ge_2k": 2.3,
+      "pct_weeks_ge_3k": 2.3,
+      "realized_avg_week": 109.7,
+      "realized_max_week": 14266.5,
+      "realized_weeks_ge_2k": 2,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 1.6,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 536.33,
+        "coil": 13613.13
+      }
+    },
+    {
+      "name": "desk|coil|s1|b2000|fix",
+      "score": 57922.6,
+      "book": 2000,
+      "slots": 1,
+      "compound": false,
+      "univ": "desk",
+      "coil": true,
+      "pnl_eur": 5659.79,
+      "final_eur": 7659.79,
+      "max_dd": 0.256,
+      "n_trades": 9,
+      "win": 0.444,
+      "best_trade": 5706.6,
+      "best_trades": [
+        {
+          "date": "2024-12-04",
+          "base": "XRP",
+          "net": 5706.6,
+          "path": "coil",
+          "ret": 2.8563
+        },
+        {
+          "date": "2026-10-02",
+          "base": "ETH",
+          "net": 946.37,
+          "path": "coil",
+          "ret": 0.4762
+        },
+        {
+          "date": "2025-06-12",
+          "base": "UNI",
+          "net": 442.97,
+          "path": "coil",
+          "ret": 0.2245
+        },
+        {
+          "date": "2025-07-31",
+          "base": "AVAX",
+          "net": 355.52,
+          "path": "classic",
+          "ret": 0.1808
+        },
+        {
+          "date": "2026-01-18",
+          "base": "DOGE",
+          "net": -140.99,
+          "path": "classic",
+          "ret": -0.0675
+        },
+        {
+          "date": "2025-02-04",
+          "base": "LTC",
+          "net": -379.0,
+          "path": "coil",
+          "ret": -0.1865
+        },
+        {
+          "date": "2026-06-05",
+          "base": "LINK",
+          "net": -400.09,
+          "path": "coil",
+          "ret": -0.197
+        },
+        {
+          "date": "2026-03-28",
+          "base": "OP",
+          "net": -427.0,
+          "path": "coil",
+          "ret": -0.2105
+        }
+      ],
+      "n_weeks": 129,
+      "avg_week": 43.9,
+      "med_week": 0.0,
+      "p75_week": 25.2,
+      "p90_week": 186.5,
+      "max_week": 2790.9,
+      "weeks_ge_2k": 1,
+      "weeks_ge_3k": 0,
+      "pct_weeks_ge_2k": 0.8,
+      "pct_weeks_ge_3k": 0.0,
+      "realized_avg_week": 43.9,
+      "realized_max_week": 5706.6,
+      "realized_weeks_ge_2k": 1,
+      "realized_weeks_ge_3k": 1,
+      "realized_pct_weeks_ge_2k": 0.8,
+      "realized_pct_weeks_ge_3k": 0.8,
+      "path_pnl": {
+        "classic": 214.53,
+        "coil": 5445.26
+      }
+    }
+  ]
+}

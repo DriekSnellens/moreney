@@ -205,6 +205,8 @@ def test_evaluate_enters_top_signal_when_risk_on() -> None:
         quiet_max=0.25,
         min_points=1,
         book_eur=2_000.0,
+        max_positions=1,
+        compound_sizing=False,
         require_btc_sma=True,
     )
     out = evaluate_ignition(
@@ -219,6 +221,71 @@ def test_evaluate_enters_top_signal_when_risk_on() -> None:
     assert out["entries"]
     assert out["entries"][0]["base"] == "ETH"
     assert out["entries"][0]["notional_eur"] == 2000.0
+
+
+def test_compound_sizing_uses_cash_above_book() -> None:
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    eth = _bars(60, 10.0, step=0.02, vol=3_000.0)
+    close = float(eth[-1][4])
+    eth[-1][1] = close / 1.10
+    eth[-1][5] = 30_000.0
+    for r in eth[:-1]:
+        r[2] = min(float(r[2]), close * 0.99)
+    cfg = IgnitionConfig(
+        universe=("ETH",),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        quiet_max=0.25,
+        min_points=1,
+        book_eur=2_000.0,
+        max_positions=1,
+        compound_sizing=True,
+        require_btc_sma=True,
+    )
+    out = evaluate_ignition(
+        {"BTC": btc, "ETH": eth},
+        cfg,
+        held=[],
+        cash_eur=8_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["entries"]
+    assert out["entries"][0]["notional_eur"] == 8000.0
+
+
+def test_two_slots_split_powder_across_entries() -> None:
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    eth = _bars(60, 10.0, step=0.02, vol=3_000.0)
+    close = float(eth[-1][4])
+    eth[-1][1] = close / 1.10
+    eth[-1][5] = 30_000.0
+    for r in eth[:-1]:
+        r[2] = min(float(r[2]), close * 0.99)
+    coil = _coil_bars()
+    cfg = IgnitionConfig(
+        universe=("ETH", "ALT"),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        quiet_max=0.25,
+        min_points=1,
+        book_eur=10_000.0,
+        max_positions=2,
+        compound_sizing=True,
+        require_btc_sma=True,
+    )
+    out = evaluate_ignition(
+        {"BTC": btc, "ETH": eth, "ALT": coil},
+        cfg,
+        held=[],
+        cash_eur=10_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert len(out["entries"]) == 2
+    assert out["entries"][0]["base"] == "ETH"
+    assert out["entries"][0]["entry_path"] == "classic"
+    assert out["entries"][1]["entry_path"] == "coil"
+    assert out["entries"][0]["notional_eur"] == 5000.0
+    assert out["entries"][1]["notional_eur"] == 5000.0
 
 
 def test_btc_below_sma_blocks_entries() -> None:
@@ -365,6 +432,9 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert cfg.coil_entry_enabled is True
     assert cfg.coil_trail_pct == 0.25
     assert cfg.coil_day_ret_min == 0.025
+    assert cfg.book_eur == 10_000.0
+    assert cfg.max_positions == 2
+    assert cfg.compound_sizing is True
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-test-state.json",

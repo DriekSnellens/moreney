@@ -27,3 +27,23 @@ Coil gates (generic, no coin hardcodes): liquid + quieter + compress (5d span &l
 Classic wins rank when both fire. Coil lots use `coil_trail_pct=0.25` (then shared ratchet).
 
 Artifacts: `EARLY_ENTRY_GRID.json`, `HYBRID_ENTRY.json`, `EXPLOSIVE_CAPTURE.json`.
+
+## Weekly ambition (€2–3k banked)
+
+Mentality: ignition is a **spike engine** — quiet most weeks, then bank thousands when an explosive leg is caught.
+
+Wet weekly scan (`WEEKLY_AMBITION.json`, desk coil hybrid, 2024-03→2026-10):
+
+| Config | total PnL | realized max week | weeks ≥€2k | weeks ≥€3k |
+|---|---:|---:|---:|---:|
+| €2k · 1 slot · fixed (old) | +€5.7k | +€5.7k | 1 | 1 |
+| **€10k · 1 slot · compound** | +€20k | +€28.5k | **4** | **4** |
+| **€10k · 2 slots · compound** | +€11.8k | +€14.3k | **8** | **4** |
+| €20k · 2 slots · compound | +€23.6k | +€28.5k | 10 | 10 |
+
+Oracle ceiling on this tape: only ~27% of weeks even have a signal with forward ≥+50%. **€2–3k every calendar week is not in the data** — the shipped ambition stack maximizes spike-week banking instead:
+
+- `book_eur=10000` seed, `max_positions=2`, `compound_sizing=true` (winners grow firepower)
+- classic|coil hybrid + path trails
+
+Re-run: `.venv/bin/python -m bot.research.ignition_lab.weekly_ambition`

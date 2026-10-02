@@ -28,9 +28,16 @@ SLIP = 0.001
 
 @dataclass(frozen=True)
 class IgnitionConfig:
-    book_eur: float = 2_000.0
-    max_positions: int = 1
+    # Seed sleeve. Ambition target is banking ~€2–3k in spike weeks (not every
+    # quiet week). Wet scan: €10k desk coil + compound ≈ 4× more €2k bank-weeks
+    # than a fixed €2k book; most calendar weeks still stay near zero.
+    book_eur: float = 10_000.0
+    max_positions: int = 2
     deploy_frac: float = 1.0
+    # When True, size from available cash so winners grow firepower (book_eur
+    # is the seed, not a permanent clip ceiling). max_book_eur>0 hard-caps.
+    compound_sizing: bool = True
+    max_book_eur: float = 0.0
     # Base trail from peak. Ablation: 12% beats 15% on desk-only tape.
     trail_pct: float = 0.12
     # Once peak gain ≥ arm, use the tighter trail (0 disables ratchet).
@@ -348,16 +355,24 @@ def evaluate_ignition(
     elif len(held_set) >= int(cfg.max_positions):
         risk_block = "slots_full"
     elif ranked:
-        top = ranked[0]
-        if top["base"] not in held_set:
-            notional = min(float(cash_eur), float(cfg.book_eur)) * float(cfg.deploy_frac)
-            if notional >= cfg.min_notional_eur:
+        free = max(0, int(cfg.max_positions) - len(held_set))
+        take = [r for r in ranked if r["base"] not in held_set][:free]
+        if take:
+            powder = float(cash_eur)
+            if not cfg.compound_sizing:
+                powder = min(powder, float(cfg.book_eur))
+            if float(cfg.max_book_eur or 0.0) > 0:
+                powder = min(powder, float(cfg.max_book_eur))
+            per = (powder * float(cfg.deploy_frac)) / len(take)
+            for top in take:
+                if per < cfg.min_notional_eur:
+                    break
                 path = str(top.get("entry_path") or "classic")
                 tag = "early_signal" if path == "classic" else "coil_signal"
                 entries.append(
                     {
                         "base": top["base"],
-                        "notional_eur": round(notional, 2),
+                        "notional_eur": round(per, 2),
                         "entry_path": path,
                         "trail_pct": float(top.get("trail_pct") or cfg.trail_pct),
                         "reasons": [
@@ -392,8 +407,14 @@ def evaluate_ignition(
         )
     else:
         body = "Geen ignition-signal vandaag."
+    size_txt = (
+        f"compound €{cfg.book_eur:,.0f} seed"
+        if cfg.compound_sizing
+        else f"fixed €{cfg.book_eur:,.0f}"
+    )
     caption = (
-        f"Ignition: desk classic+coil + {trail_txt}. "
+        f"Ignition: desk classic+coil + {trail_txt}; {size_txt}, "
+        f"{cfg.max_positions} slot(s). Spike-week target €2–3k. "
         + body
         + (f" Block: {risk_block}." if risk_block else "")
     )
@@ -416,6 +437,10 @@ def evaluate_ignition(
         "coil_entry_enabled": cfg.coil_entry_enabled,
         "trail_ratchet_arm_pct": cfg.trail_ratchet_arm_pct,
         "trail_ratchet_pct": cfg.trail_ratchet_pct,
+        "compound_sizing": cfg.compound_sizing,
+        "book_eur": cfg.book_eur,
+        "max_positions": cfg.max_positions,
+        "ambition_week_eur": [2_000.0, 3_000.0],
     }
 
 

@@ -2300,9 +2300,18 @@ def _paper_ignition_panel(status: Mapping[str, Any] | None) -> str:
             if coil_on
             else "quiet + brk20 + day≥6% + vol≥2×"
         )
+        book = cfg.get("book_eur")
+        try:
+            book_s = f"€{float(book):,.0f} seed" if book is not None else "seed book"
+        except (TypeError, ValueError):
+            book_s = "seed book"
+        compound = bool(cfg.get("compound_sizing", True))
+        size_s = f"compound {book_s}" if compound else f"fixed {book_s}"
+        slots = cfg.get("max_positions") or 2
         caption = (
             f"{mode} ignition → {venue.upper()}: {signal} "
-            f"op desk-universe, trail {trail_s}{coil_s}, {cadence}. {live_note}"
+            f"op desk-universe, trail {trail_s}{coil_s}, {size_s}, "
+            f"{slots} slot(s), spike-week target €2–3k, {cadence}. {live_note}"
         )
     pos_bits = []
     for p in st.get("positions") or []:

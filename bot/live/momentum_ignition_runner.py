@@ -100,6 +100,10 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         book_eur=_f("momentum_ignition_book_eur", base.book_eur),
         max_positions=_i("momentum_ignition_max_positions", base.max_positions),
         deploy_frac=_f("momentum_ignition_deploy_frac", base.deploy_frac),
+        compound_sizing=_b(
+            "momentum_ignition_compound_sizing", base.compound_sizing
+        ),
+        max_book_eur=_f("momentum_ignition_max_book_eur", base.max_book_eur),
         trail_pct=_f("momentum_ignition_trail_pct", base.trail_pct),
         trail_ratchet_arm_pct=_f(
             "momentum_ignition_trail_ratchet_arm_pct", base.trail_ratchet_arm_pct
@@ -751,9 +755,15 @@ class IgnitionPaperRunner:
         self.mark_ts[base_u] = time.time()
         px = fill_px(mark, "buy", slip=self.cfg.slip)
         cash = await self._decision_cash()
-        notion = float(notional_eur) if notional_eur is not None else (
-            min(cash, float(self.cfg.book_eur)) * float(self.cfg.deploy_frac)
-        )
+        if notional_eur is not None:
+            notion = float(notional_eur)
+        else:
+            powder = float(cash)
+            if not self.cfg.compound_sizing:
+                powder = min(powder, float(self.cfg.book_eur))
+            if float(self.cfg.max_book_eur or 0.0) > 0:
+                powder = min(powder, float(self.cfg.max_book_eur))
+            notion = powder * float(self.cfg.deploy_frac)
         reasons = [str(reason or "operator_manual"), "manual"]
         pos = await self._open_lot(base_u, notion, px, reasons, points=0)
         if pos is None:
@@ -1023,6 +1033,9 @@ class IgnitionPaperRunner:
                 "coil_day_ret_min": self.cfg.coil_day_ret_min,
                 "coil_vol_mult_min": self.cfg.coil_vol_mult_min,
                 "coil_quiet_max": self.cfg.coil_quiet_max,
+                "compound_sizing": self.cfg.compound_sizing,
+                "max_book_eur": self.cfg.max_book_eur,
+                "ambition_week_eur": [2_000.0, 3_000.0],
                 "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
                 "universe_n": len(self.cfg.universe),
                 "venues": list(self.venues),

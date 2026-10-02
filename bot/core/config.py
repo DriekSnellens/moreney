@@ -737,9 +737,13 @@ class Settings(BaseSettings):
     momentum_ignition_enabled: bool = False
     momentum_ignition_allow_live: bool = False
     momentum_ignition_venues: str = "okx"
-    momentum_ignition_book_eur: float = Field(default=2_000.0, gt=0)
-    momentum_ignition_max_positions: int = Field(default=1, ge=1, le=3)
+    # Seed sleeve for spike-week ambition (~€2–3k banked on explosive catches).
+    momentum_ignition_book_eur: float = Field(default=10_000.0, gt=0)
+    momentum_ignition_max_positions: int = Field(default=2, ge=1, le=3)
     momentum_ignition_deploy_frac: float = Field(default=1.0, gt=0, le=1.0)
+    # Winners grow firepower (book is seed). 0 max_book = no hard ceiling.
+    momentum_ignition_compound_sizing: bool = True
+    momentum_ignition_max_book_eur: float = Field(default=0.0, ge=0)
     momentum_ignition_trail_pct: float = Field(default=0.12, ge=0.0, le=1.0)
     # Tighten trail once peak gain ≥ arm (0 arm disables). Desk ablation winner.
     momentum_ignition_trail_ratchet_arm_pct: float = Field(default=0.30, ge=0.0, le=2.0)
