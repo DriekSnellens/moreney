@@ -1,13 +1,10 @@
-"""Ignition sleeve — ex-desk sniper + classic|coil hybrid + trail.
+"""Ignition / OKX sleeve — live default is the daily top-day pack.
 
-Fishes **outside** the RS desk universe (ETH/SOL/…/FET). Wet scan: liquid
-ex-desk + quiet15 + coil hybrid beats desk on 2026/180d while RS keeps the
-desk residual book.
+Fishes **outside** the RS desk universe. Live default ``entry_mode=top_day``:
+when BTC > SMA50, buy the liquid ex-desk name with the strongest day return;
+exit on trail 8% or after 2 days (wet winner from ``DAILY_SLEEVE``).
 
-**Classic** — quiet + 20d breakout + day ≥+6% + volume ≥2× (quiet_max 0.15
-on sniper waters). **Coil** — compress + 5d breakout + milder day/vol, 25%
-path trail. Classic ranks above coil when both fire. Exit: path trail +
-ratchet 30%→10%.
+Legacy ``entry_mode=sniper`` keeps classic|coil hybrid (quiet15 + compress/brk5).
 
 Live OKX when armed; paper otherwise. No per-coin hardcodes.
 """
@@ -103,20 +100,24 @@ FALLBACK_SNIPER_UNIVERSE: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class IgnitionConfig:
-    # Seed sleeve. Ambition: bank ~€2–3k in spike weeks (not every quiet week).
-    book_eur: float = 10_000.0
-    max_positions: int = 2
+    # Seed sleeve (€2k matches typical OKX powder; compound grows after wins).
+    book_eur: float = 2_000.0
+    max_positions: int = 1
     deploy_frac: float = 1.0
     # When True, size from available cash so winners grow firepower (book_eur
     # is the seed, not a permanent clip ceiling). max_book_eur>0 hard-caps.
     compound_sizing: bool = True
     max_book_eur: float = 0.0
-    # Base trail from peak. Ablation: 12% beats 15% on desk-only tape.
-    trail_pct: float = 0.12
+    # top_day = strongest liquid day-ret (live default); sniper = classic|coil.
+    entry_mode: str = "top_day"
+    # Base trail from peak. Daily pack winner: 8%. Sniper used 12%+ratchet.
+    trail_pct: float = 0.08
     # Once peak gain ≥ arm, use the tighter trail (0 disables ratchet).
-    trail_ratchet_arm_pct: float = 0.30
+    trail_ratchet_arm_pct: float = 0.0
     trail_ratchet_pct: float = 0.10
-    # Classic gates. Sniper (ex-desk) wet winner uses quiet_max=0.15.
+    # Exit after this many days (≥2 = wet t08_time2). 0 disables.
+    time_max_days: float = 2.0
+    # Classic gates (sniper mode). Ex-desk wet winner uses quiet_max=0.15.
     quiet_max: float = 0.15
     day_ret_min: float = 0.06
     vol_mult_min: float = 2.0
@@ -125,13 +126,13 @@ class IgnitionConfig:
     vol_lookback: int = 20
     min_median_qvol_eur: float = 100_000.0
     min_day_qvol_eur: float = 50_000.0
-    # Optional BTC regime gate (long ignition only in uptrend).
+    # Optional BTC regime gate (long only in uptrend).
     require_btc_sma: bool = True
     btc_sma_n: int = 50
-    # Score atoms for ranking / diagnostics (entry still needs early_signal).
+    # Score atoms for ranking / diagnostics (sniper classic still needs points).
     min_points: int = 3
-    # Coil path: catch compression→breakouts earlier than classic early_signal.
-    coil_entry_enabled: bool = True
+    # Coil path (sniper mode only).
+    coil_entry_enabled: bool = False
     coil_breakout_days: int = 5
     coil_day_ret_min: float = 0.025
     coil_vol_mult_min: float = 1.2
@@ -151,7 +152,6 @@ class IgnitionConfig:
     # Sparse hour slots when ``decision_interval_sec`` is 0.
     decision_hours_utc: tuple[int, ...] = (0,)
     # When > 0, scan for entries this often (UTC), not only at decision hours.
-    # Daily OHLC early-signals evolve through the day — 15m catches breakouts.
     decision_interval_sec: float = 900.0
     tick_sec: float = 30.0
     ohlc_days: int = 120
@@ -435,8 +435,161 @@ def evaluate_ignition(
     cash_eur: float,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Paper decision: enter top early-signal name; exits are trail-managed live."""
+    """Decide entries; exits are trail/time-managed live."""
     now = now or datetime.now(UTC)
+    entry_mode = str(cfg.entry_mode or "top_day").strip().lower()
+    if entry_mode == "top_day":
+        return _evaluate_top_day(
+            ohlc_by_base, cfg, held=held, cash_eur=cash_eur, now=now
+        )
+    return _evaluate_sniper(ohlc_by_base, cfg, held=held, cash_eur=cash_eur, now=now)
+
+
+def _evaluate_top_day(
+    ohlc_by_base: Mapping[str, Sequence[Sequence[float]]],
+    cfg: IgnitionConfig,
+    *,
+    held: Sequence[str],
+    cash_eur: float,
+    now: datetime,
+) -> dict[str, Any]:
+    """Daily pack: strongest liquid day-return name when BTC > SMA50."""
+    btc = completed_ohlc(ohlc_by_base.get("BTC") or [], now=now)
+    btc_c = [float(r[4]) for r in btc if float(r[4]) > 0]
+    s50 = sma(btc_c, cfg.btc_sma_n)
+    last_btc = float(btc_c[-1]) if btc_c else 0.0
+    risk_on = (not cfg.require_btc_sma) or (s50 is not None and last_btc > s50)
+
+    ranked: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for base in cfg.universe:
+        rows = completed_ohlc(ohlc_by_base.get(base) or [], now=now)
+        scored = score_ignition_day(rows, btc, cfg)
+        if scored is None:
+            rejected.append({"base": base, "reason": "short_history"})
+            continue
+        row = {
+            "base": base,
+            **scored,
+            "entry_path": "top_day",
+            "trail_pct": float(cfg.trail_pct),
+        }
+        if not scored.get("liquid"):
+            rejected.append({"base": base, "reason": "thin", **row})
+            continue
+        ranked.append(row)
+    ranked.sort(
+        key=lambda r: (-float(r["day_ret"]), -float(r["vol_x"]), -int(r["points"]))
+    )
+
+    held_set = {str(b).upper() for b in held}
+    entries: list[dict[str, Any]] = []
+    risk_block = ""
+    if not risk_on:
+        risk_block = "btc_below_sma50"
+    elif len(held_set) >= int(cfg.max_positions):
+        risk_block = "slots_full"
+    elif ranked:
+        free = max(0, int(cfg.max_positions) - len(held_set))
+        take = [r for r in ranked if r["base"] not in held_set][:free]
+        if take:
+            powder = float(cash_eur)
+            if not cfg.compound_sizing:
+                powder = min(powder, float(cfg.book_eur))
+            if float(cfg.max_book_eur or 0.0) > 0:
+                powder = min(powder, float(cfg.max_book_eur))
+            per = (powder * float(cfg.deploy_frac)) / len(take)
+            for top in take:
+                if per < cfg.min_notional_eur:
+                    break
+                entries.append(
+                    {
+                        "base": top["base"],
+                        "notional_eur": round(per, 2),
+                        "entry_path": "top_day",
+                        "trail_pct": float(cfg.trail_pct),
+                        "reasons": [
+                            "top_day",
+                            f"day={top['day_ret']:+.1%}",
+                            f"volx={top['vol_x']:.1f}",
+                            f"trail={cfg.trail_pct:.0%}",
+                            f"time≤{cfg.time_max_days:g}d",
+                        ],
+                        "score": top,
+                    }
+                )
+
+    want = ranked[0]["base"] if ranked else None
+    near = [
+        {
+            "base": r["base"],
+            "missing": "liquid",
+            "day_ret": r.get("day_ret"),
+            "vol_x": r.get("vol_x"),
+            "points": r.get("points"),
+        }
+        for r in rejected
+        if r.get("reason") == "thin"
+    ][:3]
+    trail_txt = f"trail {cfg.trail_pct:.0%}"
+    if float(cfg.time_max_days or 0) > 0:
+        trail_txt += f" / time {cfg.time_max_days:g}d"
+    if want:
+        body = (
+            f"Candidate {want} [top_day] "
+            f"day {ranked[0]['day_ret']:+.1%} volx {ranked[0]['vol_x']:.1f}."
+        )
+    else:
+        body = "Geen liquid top-day kandidaat."
+    size_txt = (
+        f"compound €{cfg.book_eur:,.0f} seed"
+        if cfg.compound_sizing
+        else f"fixed €{cfg.book_eur:,.0f}"
+    )
+    caption = (
+        f"OKX top-day: ex-desk strongest day-ret + {trail_txt}; {size_txt}, "
+        f"{cfg.max_positions} slot(s), univ n={len(cfg.universe)}. "
+        + body
+        + (f" Block: {risk_block}." if risk_block else "")
+    )
+    return {
+        "ok": True,
+        "risk_on": risk_on,
+        "risk_block": risk_block,
+        "sma50": s50,
+        "btc": last_btc,
+        "entries": entries,
+        "exits": [],
+        "ranked": ranked[:8],
+        "rejected": rejected[:12],
+        "near_miss": near,
+        "want": want,
+        "caption": caption,
+        "signal": "top_day(liquid day_ret)",
+        "entry_mode": "top_day",
+        "trail_pct": cfg.trail_pct,
+        "time_max_days": cfg.time_max_days,
+        "coil_trail_pct": cfg.coil_trail_pct,
+        "coil_entry_enabled": False,
+        "trail_ratchet_arm_pct": cfg.trail_ratchet_arm_pct,
+        "trail_ratchet_pct": cfg.trail_ratchet_pct,
+        "compound_sizing": cfg.compound_sizing,
+        "book_eur": cfg.book_eur,
+        "max_positions": cfg.max_positions,
+        "universe_mode": cfg.universe_mode,
+        "universe_n": len(cfg.universe),
+    }
+
+
+def _evaluate_sniper(
+    ohlc_by_base: Mapping[str, Sequence[Sequence[float]]],
+    cfg: IgnitionConfig,
+    *,
+    held: Sequence[str],
+    cash_eur: float,
+    now: datetime,
+) -> dict[str, Any]:
+    """Legacy classic|coil sniper path."""
     btc = completed_ohlc(ohlc_by_base.get("BTC") or [], now=now)
     btc_c = [float(r[4]) for r in btc if float(r[4]) > 0]
     s50 = sma(btc_c, cfg.btc_sma_n)
@@ -469,12 +622,10 @@ def evaluate_ignition(
                 why.append("no_coil")
             rejected.append({"base": base, "reason": ",".join(why) or "no_signal", **scored})
             continue
-        # Classic keeps min_points; coil is allowed with fewer atoms (compress+brk).
         if path == "classic" and scored["points"] < cfg.min_points:
             rejected.append({"base": base, "reason": "low_points", **scored})
             continue
         ranked.append(row)
-    # Prefer classic over coil, then points / vol / day ret.
     ranked.sort(
         key=lambda r: (
             0 if r.get("entry_path") == "classic" else 1,
@@ -549,17 +700,9 @@ def evaluate_ignition(
         if cfg.compound_sizing
         else f"fixed €{cfg.book_eur:,.0f}"
     )
-    mode = str(cfg.universe_mode or "ex_desk")
-    waters = {
-        "ex_desk": "ex-desk sniper",
-        "desk": "desk",
-        "expanded": "desk+liquid",
-        "custom": "custom univ",
-    }.get(mode, mode)
     caption = (
-        f"Ignition: {waters} classic+coil + {trail_txt}; {size_txt}, "
+        f"Ignition sniper: ex-desk classic+coil + {trail_txt}; {size_txt}, "
         f"{cfg.max_positions} slot(s), univ n={len(cfg.universe)}. "
-        f"Spike-week target €2–3k. "
         + body
         + (f" Block: {risk_block}." if risk_block else "")
     )
@@ -577,7 +720,9 @@ def evaluate_ignition(
         "want": want,
         "caption": caption,
         "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
+        "entry_mode": "sniper",
         "trail_pct": cfg.trail_pct,
+        "time_max_days": cfg.time_max_days,
         "coil_trail_pct": cfg.coil_trail_pct,
         "coil_entry_enabled": cfg.coil_entry_enabled,
         "trail_ratchet_arm_pct": cfg.trail_ratchet_arm_pct,
@@ -587,7 +732,6 @@ def evaluate_ignition(
         "max_positions": cfg.max_positions,
         "universe_mode": cfg.universe_mode,
         "universe_n": len(cfg.universe),
-        "ambition_week_eur": [2_000.0, 3_000.0],
     }
 
 
@@ -654,9 +798,26 @@ def trail_exit(
     pos: IgnitionPosition,
     mark: float,
     cfg: IgnitionConfig,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any] | None:
     if mark <= 0 or pos.entry_price <= 0:
         return None
+    now = now or datetime.now(UTC)
+    tmax = float(cfg.time_max_days or 0.0)
+    if tmax > 0 and int(pos.opened_ms or 0) > 0:
+        age_d = (now.timestamp() * 1000.0 - float(pos.opened_ms)) / 86_400_000.0
+        if age_d >= tmax:
+            return {
+                "base": pos.base,
+                "reason": "ignition_time",
+                "mark": mark,
+                "peak": max(float(pos.peak_px or pos.entry_price), mark),
+                "trail_pct": effective_trail_pct(pos, cfg),
+                "entry_path": pos.entry_path,
+                "gross_return": pos.gross_return(mark),
+                "age_days": round(age_d, 3),
+            }
     peak = max(float(pos.peak_px or pos.entry_price), mark)
     trail = effective_trail_pct(pos, cfg)
     if trail <= 0:

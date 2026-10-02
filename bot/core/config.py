@@ -737,18 +737,22 @@ class Settings(BaseSettings):
     momentum_ignition_enabled: bool = False
     momentum_ignition_allow_live: bool = False
     momentum_ignition_venues: str = "okx"
-    # Seed sleeve for spike-week ambition (~€2–3k banked on explosive catches).
-    momentum_ignition_book_eur: float = Field(default=10_000.0, gt=0)
-    momentum_ignition_max_positions: int = Field(default=2, ge=1, le=3)
+    # OKX sleeve seed (top_day daily pack by default).
+    momentum_ignition_book_eur: float = Field(default=2_000.0, gt=0)
+    momentum_ignition_max_positions: int = Field(default=1, ge=1, le=3)
     momentum_ignition_deploy_frac: float = Field(default=1.0, gt=0, le=1.0)
     # Winners grow firepower (book is seed). 0 max_book = no hard ceiling.
     momentum_ignition_compound_sizing: bool = True
     momentum_ignition_max_book_eur: float = Field(default=0.0, ge=0)
-    momentum_ignition_trail_pct: float = Field(default=0.12, ge=0.0, le=1.0)
-    # Tighten trail once peak gain ≥ arm (0 arm disables). Desk ablation winner.
-    momentum_ignition_trail_ratchet_arm_pct: float = Field(default=0.30, ge=0.0, le=2.0)
+    # top_day = strongest liquid day-ret; sniper = classic|coil hybrid.
+    momentum_ignition_entry_mode: str = "top_day"
+    momentum_ignition_trail_pct: float = Field(default=0.08, ge=0.0, le=1.0)
+    # Tighten trail once peak gain ≥ arm (0 arm disables). Off for top_day.
+    momentum_ignition_trail_ratchet_arm_pct: float = Field(default=0.0, ge=0.0, le=2.0)
     momentum_ignition_trail_ratchet_pct: float = Field(default=0.10, ge=0.0, le=1.0)
-    # Sniper (ex-desk) wet winner; desk-only classic preferred 0.12 historically.
+    # Exit after N days (top_day wet winner = 2). 0 disables.
+    momentum_ignition_time_max_days: float = Field(default=2.0, ge=0.0, le=30.0)
+    # Sniper gates (entry_mode=sniper).
     momentum_ignition_quiet_max: float = Field(default=0.15, ge=0.0, le=1.0)
     # ex_desk = liquid outside RS desk (default); desk | expanded | custom.
     momentum_ignition_universe_mode: str = "ex_desk"
@@ -763,7 +767,7 @@ class Settings(BaseSettings):
     momentum_ignition_day_ret_min: float = Field(default=0.06, ge=0.0, le=1.0)
     momentum_ignition_vol_mult_min: float = Field(default=2.0, ge=1.0, le=20.0)
     # Coil hybrid: earlier compress→brk5 path (wider trail). Prefer classic when both fire.
-    momentum_ignition_coil_entry_enabled: bool = True
+    momentum_ignition_coil_entry_enabled: bool = False
     momentum_ignition_coil_breakout_days: int = Field(default=5, ge=3, le=20)
     momentum_ignition_coil_day_ret_min: float = Field(default=0.025, ge=0.0, le=1.0)
     momentum_ignition_coil_vol_mult_min: float = Field(default=1.2, ge=1.0, le=20.0)

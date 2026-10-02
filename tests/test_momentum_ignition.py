@@ -62,6 +62,7 @@ def test_score_ignition_detects_early_signal() -> None:
         r[2] = min(float(r[2]), close * 0.99)
     btc = _bars(40, 100.0, step=0.5, vol=50_000.0)
     cfg = IgnitionConfig(
+        entry_mode="sniper",
         min_median_qvol_eur=1_000.0,
         min_day_qvol_eur=1_000.0,
         quiet_max=0.20,
@@ -112,6 +113,7 @@ def test_coil_signal_enters_when_classic_misses() -> None:
     coil = _coil_bars()
     btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
     cfg = IgnitionConfig(
+        entry_mode="sniper",
         universe=("ALT",),
         min_median_qvol_eur=100.0,
         min_day_qvol_eur=100.0,
@@ -120,6 +122,7 @@ def test_coil_signal_enters_when_classic_misses() -> None:
         vol_mult_min=2.0,
         coil_entry_enabled=True,
         coil_trail_pct=0.25,
+        time_max_days=0.0,
         require_btc_sma=True,
         min_points=3,
     )
@@ -168,6 +171,7 @@ def test_classic_preferred_over_coil_when_both_fire() -> None:
         r[2] = min(float(r[2]), close * 0.99)
     coil = _coil_bars()
     cfg = IgnitionConfig(
+        entry_mode="sniper",
         universe=("ETH", "ALT"),
         min_median_qvol_eur=100.0,
         min_day_qvol_eur=100.0,
@@ -263,6 +267,7 @@ def test_two_slots_split_powder_across_entries() -> None:
         r[2] = min(float(r[2]), close * 0.99)
     coil = _coil_bars()
     cfg = IgnitionConfig(
+        entry_mode="sniper",
         universe=("ETH", "ALT"),
         min_median_qvol_eur=100.0,
         min_day_qvol_eur=100.0,
@@ -271,6 +276,7 @@ def test_two_slots_split_powder_across_entries() -> None:
         book_eur=10_000.0,
         max_positions=2,
         compound_sizing=True,
+        coil_entry_enabled=True,
         require_btc_sma=True,
     )
     out = evaluate_ignition(
@@ -296,6 +302,8 @@ def test_btc_below_sma_blocks_entries() -> None:
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     cfg = IgnitionConfig(
+        entry_mode="sniper",
+        coil_entry_enabled=True,
         universe=("ETH",),
         min_median_qvol_eur=100.0,
         min_day_qvol_eur=100.0,
@@ -323,6 +331,8 @@ def test_slots_full_blocks_second_entry() -> None:
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     cfg = IgnitionConfig(
+        entry_mode="sniper",
+        coil_entry_enabled=True,
         universe=("ETH",),
         max_positions=1,
         min_median_qvol_eur=100.0,
@@ -341,6 +351,64 @@ def test_slots_full_blocks_second_entry() -> None:
     assert out["entries"] == []
 
 
+def test_top_day_picks_strongest_liquid_day_ret() -> None:
+    btc = _bars(60, 100.0, step=1.0, vol=80_000.0)
+    weak = _bars(60, 10.0, step=0.02, vol=3_000.0)
+    strong = _bars(60, 5.0, step=0.01, vol=3_000.0)
+    # Weak: +5% day; strong: +12% day — both liquid, no sniper gates.
+    for rows, boost in ((weak, 0.05), (strong, 0.12)):
+        close = float(rows[-1][4])
+        rows[-1][1] = close / (1.0 + boost)
+        rows[-1][5] = 30_000.0
+    cfg = IgnitionConfig(
+        entry_mode="top_day",
+        universe=("WEAK", "STRONG"),
+        min_median_qvol_eur=100.0,
+        min_day_qvol_eur=100.0,
+        trail_pct=0.08,
+        time_max_days=2.0,
+        require_btc_sma=True,
+        min_points=1,
+    )
+    out = evaluate_ignition(
+        {"BTC": btc, "WEAK": weak, "STRONG": strong},
+        cfg,
+        held=[],
+        cash_eur=2_000.0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["entry_mode"] == "top_day"
+    assert out["entries"]
+    assert out["entries"][0]["base"] == "STRONG"
+    assert out["entries"][0]["entry_path"] == "top_day"
+    assert out["entries"][0]["trail_pct"] == 0.08
+    assert out["want"] == "STRONG"
+
+
+def test_time_exit_fires_after_max_days() -> None:
+    opened = int(datetime(2026, 6, 1, tzinfo=UTC).timestamp() * 1000)
+    pos = IgnitionPosition(
+        base="ALT",
+        entry_price=100.0,
+        notional_eur=1000.0,
+        qty=10.0,
+        opened_ms=opened,
+        peak_px=110.0,
+        entry_path="top_day",
+        trail_pct=0.08,
+    )
+    cfg = IgnitionConfig(trail_pct=0.08, time_max_days=2.0, trail_ratchet_arm_pct=0.0)
+    # Still inside window → no time exit (mark above trail).
+    early = trail_exit(
+        pos, 108.0, cfg, now=datetime(2026, 6, 2, 12, tzinfo=UTC)
+    )
+    assert early is None
+    hit = trail_exit(pos, 108.0, cfg, now=datetime(2026, 6, 3, 1, tzinfo=UTC))
+    assert hit is not None
+    assert hit["reason"] == "ignition_time"
+    assert hit["entry_path"] == "top_day"
+
+
 def test_trail_exit_fires_after_giveback() -> None:
     from bot.live.momentum_ignition import effective_trail_pct
 
@@ -352,7 +420,7 @@ def test_trail_exit_fires_after_giveback() -> None:
         opened_ms=1,
         peak_px=120.0,
     )
-    cfg = IgnitionConfig(trail_pct=0.12, trail_ratchet_arm_pct=0.0)
+    cfg = IgnitionConfig(trail_pct=0.12, trail_ratchet_arm_pct=0.0, time_max_days=0.0)
     # 12% off peak 120 → stop at 105.6.
     assert trail_exit(pos, 106.0, cfg) is None
     hit = trail_exit(pos, 105.6, cfg)
@@ -375,6 +443,7 @@ def test_trail_ratchet_tightens_after_big_runner() -> None:
         trail_pct=0.12,
         trail_ratchet_arm_pct=0.30,
         trail_ratchet_pct=0.10,
+        time_max_days=0.0,
     )
     assert effective_trail_pct(pos, cfg) == 0.10
     # 10% off 140 → 126.
@@ -395,6 +464,8 @@ def test_near_miss_surfaces_single_gate_failures() -> None:
     for r in eth[:-1]:
         r[2] = min(float(r[2]), close * 0.99)
     cfg = IgnitionConfig(
+        entry_mode="sniper",
+        coil_entry_enabled=True,
         universe=("ETH",),
         min_median_qvol_eur=100.0,
         min_day_qvol_eur=100.0,
@@ -426,14 +497,13 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert Settings().momentum_ignition_allow_live is False
     cfg = config_from_settings(Settings())
     assert cfg.decision_interval_sec == 900.0
-    assert cfg.trail_pct == 0.12
-    assert cfg.trail_ratchet_arm_pct == 0.30
-    assert cfg.trail_ratchet_pct == 0.10
-    assert cfg.coil_entry_enabled is True
-    assert cfg.coil_trail_pct == 0.25
-    assert cfg.coil_day_ret_min == 0.025
-    assert cfg.book_eur == 10_000.0
-    assert cfg.max_positions == 2
+    assert cfg.entry_mode == "top_day"
+    assert cfg.trail_pct == 0.08
+    assert cfg.time_max_days == 2.0
+    assert cfg.trail_ratchet_arm_pct == 0.0
+    assert cfg.coil_entry_enabled is False
+    assert cfg.book_eur == 2_000.0
+    assert cfg.max_positions == 1
     assert cfg.compound_sizing is True
     assert cfg.universe_mode == "ex_desk"
     assert cfg.quiet_max == 0.15
@@ -456,6 +526,7 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert st["allow_live"] is False
     assert st["config"]["decision_interval_sec"] == 900.0
     assert st["config"]["universe_mode"] == "ex_desk"
+    assert st["config"]["entry_mode"] == "top_day"
 
 
 def test_sniper_universe_excludes_rs_desk() -> None:

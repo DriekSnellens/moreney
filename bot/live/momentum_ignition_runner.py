@@ -128,6 +128,12 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
             "momentum_ignition_compound_sizing", base.compound_sizing
         ),
         max_book_eur=_f("momentum_ignition_max_book_eur", base.max_book_eur),
+        entry_mode=str(
+            getattr(settings, "momentum_ignition_entry_mode", base.entry_mode)
+            or base.entry_mode
+        )
+        .strip()
+        .lower(),
         trail_pct=_f("momentum_ignition_trail_pct", base.trail_pct),
         trail_ratchet_arm_pct=_f(
             "momentum_ignition_trail_ratchet_arm_pct", base.trail_ratchet_arm_pct
@@ -135,6 +141,7 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         trail_ratchet_pct=_f(
             "momentum_ignition_trail_ratchet_pct", base.trail_ratchet_pct
         ),
+        time_max_days=_f("momentum_ignition_time_max_days", base.time_max_days),
         quiet_max=_f("momentum_ignition_quiet_max", base.quiet_max),
         day_ret_min=_f("momentum_ignition_day_ret_min", base.day_ret_min),
         vol_mult_min=_f("momentum_ignition_vol_mult_min", base.vol_mult_min),
@@ -785,17 +792,25 @@ class IgnitionPaperRunner:
                     ld["risk_block"] = ""
                 cap = str(ld.get("caption") or "")
                 cap = cap.replace(" Block: slots_full.", "").replace("Block: slots_full.", "")
-                if "trail" in ",".join(a.get("reason", "") for a in applied):
+                reasons = ",".join(a.get("reason", "") for a in applied)
+                if "trail" in reasons or "time" in reasons:
                     mode = "LIVE" if self.allow_live else "PAPER"
-                    coil = (
-                        f"; coil-trail {self.cfg.coil_trail_pct:.0%}"
-                        if self.cfg.coil_entry_enabled
-                        else ""
-                    )
-                    ld["caption"] = (
-                        f"Ignition {mode}: desk classic+coil + trail "
-                        f"{self.cfg.trail_pct:.0%}{coil}. Slot vrij na exit."
-                    )
+                    em = str(self.cfg.entry_mode or "top_day")
+                    if em == "top_day":
+                        ld["caption"] = (
+                            f"OKX top-day {mode}: trail {self.cfg.trail_pct:.0%}"
+                            f" / time {self.cfg.time_max_days:g}d. Slot vrij na exit."
+                        )
+                    else:
+                        coil = (
+                            f"; coil-trail {self.cfg.coil_trail_pct:.0%}"
+                            if self.cfg.coil_entry_enabled
+                            else ""
+                        )
+                        ld["caption"] = (
+                            f"Ignition {mode}: sniper + trail "
+                            f"{self.cfg.trail_pct:.0%}{coil}. Slot vrij na exit."
+                        )
                 elif cap:
                     ld["caption"] = cap
                 self.last_decision = ld
@@ -1108,8 +1123,13 @@ class IgnitionPaperRunner:
                 "coil_quiet_max": self.cfg.coil_quiet_max,
                 "compound_sizing": self.cfg.compound_sizing,
                 "max_book_eur": self.cfg.max_book_eur,
-                "ambition_week_eur": [2_000.0, 3_000.0],
-                "signal": "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)",
+                "entry_mode": self.cfg.entry_mode,
+                "time_max_days": self.cfg.time_max_days,
+                "signal": (
+                    "top_day(liquid day_ret)"
+                    if str(self.cfg.entry_mode) == "top_day"
+                    else "classic(quiet+brk20+r1_6+vol2)|coil(compress+brk5)"
+                ),
                 "universe_mode": self.cfg.universe_mode,
                 "universe_n": len(self.cfg.universe),
                 "exclude_n": len(self.cfg.exclude_bases),
