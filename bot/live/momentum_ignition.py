@@ -294,7 +294,7 @@ def evaluate_ignition(
 
     want = ranked[0]["base"] if ranked else None
     caption = (
-        f"Ignition PAPER: desk-universe early-signal + trail {cfg.trail_pct:.0%}. "
+        f"Ignition: desk-universe early-signal + trail {cfg.trail_pct:.0%}. "
         + (
             f"Candidate {want} ({ranked[0]['points']} pts)."
             if want
