@@ -20,6 +20,11 @@ Wet next-open fills, fee 15 bp/side, slip 10 bp. BTC>SMA50 risk filter. Niet gec
 
 - top_day: pnl **+690** · avg/dag +16.0 · green 44% · in-mkt 77% · DD 70.4%
 
+### Concentratie
+
+Twee trades dragen ~**€12.9k** van de +€13.5k: USELESS (+2979.86) en LSK (+9907.59).  
+Overige 9 roundtrips samen ~**+€0.6k**. Weekpad: W35/W36 = spikeweken; W33–34 vlak/rood; W37–39 stabiel positief (~€280–374/week).
+
 ## Weeks
 
 | Week | PnL |
