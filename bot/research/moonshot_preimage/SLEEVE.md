@@ -44,10 +44,17 @@ MOMENTUM_MOONSHOT_CLIP_BOOK_EUR=1700
 curl -X POST /live/momentum/moonshot-clip/start
 ```
 
-## Laatste 6 weken (wet)
+## Historische wet replays
 
-Zie [`LAST_6W.md`](LAST_6W.md): `2026-08-21` → `2026-10-02` · PnL **+€13.5k** (~+791%) · 49% groen · maxDD 14.9%.  
-Gedreven door USELESS (+€3.0k) en LSK (+€9.9k); zonder die twee trades is het pad veel vlakker.
+| Window | PnL | avg/dag | green% | maxDD | File |
+|---|---:|---:|---:|---:|---|
+| Laatste 6w | **+€13.5k** | +313 | 49% | 14.9% | [`LAST_6W.md`](LAST_6W.md) |
+| Laatste 3m | +€13.4k | +147 | 38% | 28.5% | [`LAST_FULL.md`](LAST_FULL.md) |
+| Laatste 6m | +€12.0k | +66 | 30% | 43.5% | idem |
+| Laatste 1y | +€9.0k | +25 | 21% | 68.3% | idem |
+| Full (~2.3y) | **+€1.3k** | +1.6 | 22% | **93%** | idem |
+
+Recente spikeweken (USELESS/LSK) redden het pad; vóór mid-2026 is coil_day **niet** structureel groen — lange drawdown tot ~−93% op het €1.7k boek.
 
 Reproduce lab:
 
