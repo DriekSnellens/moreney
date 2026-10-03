@@ -1226,3 +1226,39 @@ def test_daily_green_brk20_day_picks_breakout_and_caps_book():
     assert cfg.alt_trail_pct == pytest.approx(0.12)
     assert cfg.universe == ("ETH", "SOL")
     assert len(daily_green_config().universe) == len(EXPAND_LIQUID_UNIVERSE)
+
+
+def test_rebalance_weekday_gate_only_fires_on_target_day():
+    """Age due + weekday pin: Tuesday-only clock."""
+    btc = _bars(60, 100.0, 0.1)
+    eth = _bars(60, 10.0, 0.0, vol=20_000.0)
+    t0 = 1_700_000_000_000
+    for series in (btc, eth):
+        for i, r in enumerate(series):
+            r[0] = t0 + i * 86_400_000
+    now_ms = t0 + 60 * 86_400_000
+    last = now_ms - 8 * 86_400_000  # age > 7d
+    cfg = ClipConfig(universe=("ETH",), rebalance_days=7, rebalance_weekday=1, min_qvol_eur=1.0)
+    # Monday 2026-06-01 is weekday 0
+    mon = evaluate_clip(
+        {"BTC": btc, "ETH": eth},
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=last,
+        now=datetime(2026, 6, 1, tzinfo=UTC),  # Monday
+    )
+    assert mon["rebalance_due"] is False
+    tue = evaluate_clip(
+        {"BTC": btc, "ETH": eth},
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=last,
+        now=datetime(2026, 6, 2, tzinfo=UTC),  # Tuesday
+    )
+    assert tue["rebalance_due"] is True

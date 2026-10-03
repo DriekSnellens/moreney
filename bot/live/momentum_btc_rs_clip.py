@@ -118,6 +118,9 @@ class ClipConfig:
     lookback_days: int = 10
     skip_days: int = 1
     rebalance_days: int = 7
+    # If set (0=Mon … 6=Sun), weekly clock only fires on that weekday
+    # after ``rebalance_days`` have elapsed. None / <0 = any day.
+    rebalance_weekday: int | None = None
     sma_n: int = 50
     min_qvol_eur: float = 80_000.0
     min_notional_eur: float = 50.0
@@ -384,7 +387,12 @@ def evaluate_clip(
     reb_ms = int(cfg.rebalance_days) * 86_400_000
     # A fresh book (no clock yet) may enter. After a trail or weekly check the
     # clock blocks the next buy, including when the book is already flat.
-    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
+    age_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
+    wd = cfg.rebalance_weekday
+    if age_due and wd is not None and int(wd) >= 0:
+        rebalance_due = now.weekday() == int(wd)
+    else:
+        rebalance_due = age_due
 
     mode = str(cfg.entry_mode or "weekly_rs").lower()
     day_modes = {"top_day", "coil_day", "brk20_day"}

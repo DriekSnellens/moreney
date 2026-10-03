@@ -84,6 +84,16 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         lookback_days=_i("momentum_btc_rs_clip_lookback_days", base.lookback_days),
         skip_days=_i("momentum_btc_rs_clip_skip_days", base.skip_days),
         rebalance_days=_i("momentum_btc_rs_clip_rebalance_days", base.rebalance_days),
+        rebalance_weekday=(
+            None
+            if getattr(settings, "momentum_btc_rs_clip_rebalance_weekday", None) is None
+            else _i(
+                "momentum_btc_rs_clip_rebalance_weekday",
+                int(base.rebalance_weekday)
+                if base.rebalance_weekday is not None
+                else 1,
+            )
+        ),
         sma_n=_i("momentum_btc_rs_clip_sma_n", base.sma_n),
         min_qvol_eur=_f("momentum_btc_rs_clip_min_qvol_eur", base.min_qvol_eur),
         universe=base.universe,
@@ -952,7 +962,13 @@ class BtcRsClipPaperRunner:
 
     def _rebalance_due(self, now_ms: int) -> bool:
         reb_ms = int(self.cfg.rebalance_days) * 86_400_000
-        return self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
+        age_due = self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
+        if not age_due:
+            return False
+        wd = self.cfg.rebalance_weekday
+        if wd is None or int(wd) < 0:
+            return True
+        return datetime.now(UTC).weekday() == int(wd)
 
     def _arm_residual_pack(self, reason: str) -> None:
         """Switch to the full residual pack after a sale or the weekly clock."""
@@ -1181,6 +1197,7 @@ class BtcRsClipPaperRunner:
                 "lookback_days": self.cfg.lookback_days,
                 "skip_days": self.cfg.skip_days,
                 "rebalance_days": self.cfg.rebalance_days,
+                "rebalance_weekday": self.cfg.rebalance_weekday,
                 "sma_n": self.cfg.sma_n,
                 "min_qvol_eur": self.cfg.min_qvol_eur,
                 "book_eur": self.cfg.book_eur,
