@@ -117,6 +117,34 @@ def struct_score(row: Mapping[str, Any]) -> float:
     )
 
 
+def _precompute_one(args: tuple[Any, ...]) -> tuple[str, dict[str, str | None]]:
+    ohlc, entry_dict, alphai_by_day, start, end = args
+    e = EntryKey(**entry_dict)
+    by = {b: _by_date(rows) for b, rows in ohlc.items()}
+    dates_by = {b: sorted(m) for b, m in by.items()}
+    btc_dates = dates_by.get("BTC") or []
+    cal = [d for d in btc_dates if start <= d <= end]
+    last_ai: list[str] = []
+    out: dict[str, str | None] = {}
+    for date in cal:
+        if date in alphai_by_day:
+            last_ai = list(alphai_by_day[date])
+        if e.pick in {"alphai1", "alphai_top_day", "rs_in_alphai"} and not last_ai:
+            out[date] = None
+            continue
+        out[date] = _rank_day(
+            by,
+            date,
+            dates_by,
+            mode=e.pick,
+            lookback=max(int(e.lookback), 1),
+            excess_floor=float(e.excess_floor),
+            alphai=last_ai,
+            btc_dates=btc_dates,
+        )
+    return e.key, out
+
+
 def precompute_picks(
     ohlc: Mapping[str, Sequence[Row]],
     entries: Sequence[EntryKey],
@@ -124,31 +152,30 @@ def precompute_picks(
     alphai_by_day: Mapping[str, Sequence[str]],
     start: str,
     end: str,
+    workers: int = 1,
 ) -> dict[str, dict[str, str | None]]:
-    by = {b: _by_date(rows) for b, rows in ohlc.items()}
-    dates_by = {b: sorted(m) for b, m in by.items()}
-    btc_dates = dates_by.get("BTC") or []
-    cal = [d for d in btc_dates if start <= d <= end]
-    last_ai: list[str] = []
-    out: dict[str, dict[str, str | None]] = {e.key: {} for e in entries}
-    for date in cal:
-        if date in alphai_by_day:
-            last_ai = list(alphai_by_day[date])
+    if workers <= 1 or len(entries) <= 1:
+        out: dict[str, dict[str, str | None]] = {}
         for e in entries:
-            if e.pick in {"alphai1", "alphai_top_day", "rs_in_alphai"} and not last_ai:
-                out[e.key][date] = None
-                continue
-            out[e.key][date] = _rank_day(
-                by,
-                date,
-                dates_by,
-                mode=e.pick,
-                lookback=max(int(e.lookback), 1),
-                excess_floor=float(e.excess_floor),
-                alphai=last_ai,
-                btc_dates=btc_dates,
-            )
+            _, m = _precompute_one((ohlc, asdict_entry(e), alphai_by_day, start, end))
+            out[e.key] = m
+        return out
+    tasks = [
+        (ohlc, asdict_entry(e), alphai_by_day, start, end) for e in entries
+    ]
+    out = {}
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for key, m in ex.map(_precompute_one, tasks, chunksize=1):
+            out[key] = m
     return out
+
+
+def asdict_entry(e: EntryKey) -> dict[str, Any]:
+    return {
+        "pick": e.pick,
+        "lookback": e.lookback,
+        "excess_floor": e.excess_floor,
+    }
 
 
 def simulate_fixed(
@@ -450,12 +477,19 @@ def run_optimize(
     alphai = _alphai_daily(Path(alphai_path))
     entries = entry_keys(include_alphai=bool(alphai))
     exits = exit_grid()
+    n_workers = workers if workers is not None else max(1, (os.cpu_count() or 4) - 1)
     print(
-        f"optimize precompute entries={len(entries)} days={full_start}→{full_end}",
+        f"optimize precompute entries={len(entries)} days={full_start}→{full_end} "
+        f"workers={n_workers}",
         flush=True,
     )
     picks = precompute_picks(
-        ohlc, entries, alphai_by_day=alphai, start=full_start, end=full_end
+        ohlc,
+        entries,
+        alphai_by_day=alphai,
+        start=full_start,
+        end=full_end,
+        workers=n_workers,
     )
     jobs: list[dict[str, Any]] = []
     for e in entries:
@@ -472,7 +506,6 @@ def run_optimize(
                     "require_btc_sma": btc,
                 }
             )
-    n_workers = workers if workers is not None else max(1, (os.cpu_count() or 4) - 1)
     print(f"optimize grid jobs={len(jobs)} workers={n_workers}", flush=True)
     rows: list[dict[str, Any]] = []
     if n_workers <= 1:
@@ -559,7 +592,12 @@ def run_optimize(
     if old_ek.key not in picks:
         picks.update(
             precompute_picks(
-                ohlc, [old_ek], alphai_by_day=alphai, start=full_start, end=full_end
+                ohlc,
+                [old_ek],
+                alphai_by_day=alphai,
+                start=full_start,
+                end=full_end,
+                workers=1,
             )
         )
     old_full = simulate_fixed(
