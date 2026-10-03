@@ -1,38 +1,44 @@
-# Moonshot sleeve — vast €1.700 boek
+# €1.700 daily-green sleeve
 
-Apart van de owner residual/clip. Alleen de lab-gate:
+Vaste small book naast de owner residual/clip. **Doel:** elke risk-on dag actief, zo structureel mogelijk groen.
 
-`r3 ≥ 15%` + `RS excess ≥ 25%` + `close > SMA20 > SMA50`
+## Lab verdict (`daily_green_lab`, 640 packs)
 
-Cash zonder setup · trail 10% · sizing capped op `book_eur` · rebalance elke 3d.
+| Claim | Resultaat |
+|---|---|
+| Elke dag **+€100** op €1.7k (~5.9%/dag) | **Niet gehaald** — beste avg ~**€45/dag** |
+| Elke dag in de markt + max groen | **top_day** trail **12%**, hold ≤**3d**, BTC>SMA50 |
+| AlphaI als oracle | **Nee** — `alphai1` ~vlak; RS/top_day wint |
 
-## Arm (paper eerst)
+Recent 45d winner family: `top_day` · avg **~€32/dag** · **~50%** groene dagen · **~74%** in-markt · 9/46 dagen ≥€100.
+
+AlphaI-overlap (13d): `top_rs10` iets sterker (~€40/dag, 60% groen); pure AlphaI-picks niet.
+
+## Armed pack (`daily_top_day`)
+
+```
+book_eur        = 1700
+entry_mode      = top_day      # sterkste liquid 1d mover
+rebalance_days  = 1
+alt_trail_pct   = 0.12
+time_max_days   = 3
+btc_frac        = 0
+cash_when_no_alt= true
+size_to_book    = true
+BTC filter      = SMA50 (risk-off → cash)
+```
+
+## Arm
 
 ```bash
-# .env / process env
 MOMENTUM_MOONSHOT_CLIP_ENABLED=true
-MOMENTUM_MOONSHOT_CLIP_ALLOW_LIVE=false   # paper
+MOMENTUM_MOONSHOT_CLIP_ALLOW_LIVE=false
 MOMENTUM_MOONSHOT_CLIP_BOOK_EUR=1700
+curl -X POST /live/momentum/moonshot-clip/start
 ```
 
-Start / status:
+Reproduce lab:
 
 ```bash
-curl -X POST https://<host>/live/momentum/moonshot-clip/start
-curl https://<host>/live/momentum/moonshot-clip/status
+.venv/bin/python -m bot.research.daily_green_lab --book 1700 --days 45
 ```
-
-Live (pas als paper ok is en ~€1.7k Bitvavo-vrij naast de owner-clip):
-
-```bash
-MOMENTUM_MOONSHOT_CLIP_ALLOW_LIVE=true
-```
-
-State: `data/momentum_moonshot_clip_state.json`  
-Ledger: `data/momentum_moonshot_clip_ledger.jsonl`
-
-## Wat dit níet is
-
-- Geen 60–70% moonshot-voorspeller (~16% P50 in de lab).
-- Vervangt **niet** residual_full / btc50 owner.
-- AlphaI hard gate zit er niet op (bewust — mist runners).

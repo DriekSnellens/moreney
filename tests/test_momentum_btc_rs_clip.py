@@ -1166,60 +1166,37 @@ def test_ledger_table_maps_clip_manual_external():
     assert "manual_external" in html
 
 
-def test_moonshot_spike_rejects_weak_r3():
-    from bot.live.momentum_btc_rs_clip import moonshot_spike_config
+def test_daily_green_top_day_picks_strongest_day_and_caps_book():
+    from bot.live.momentum_btc_rs_clip import daily_green_config
 
-    btc = _bars(60, 100.0, 0.05)
-    # Strong 10d excess but flat last 3 days → fail min_r3
-    eth = _bars(50, 10.0, 0.0, vol=20_000.0)
-    eth += _bars(10, 10.0, 0.5, vol=20_000.0)
-    eth += _bars(3, eth[-1][4], 0.0, vol=20_000.0)
+    btc = _bars(80, 100.0, 0.05)
+    # ETH flat, SOL up hard today → top_day should pick SOL
+    eth = _bars(80, 10.0, 0.0, vol=20_000.0)
+    sol = _bars(79, 8.0, 0.0, vol=20_000.0)
+    # Big up-day close ( _bars writes start px before stepping )
+    sol += _bars(1, 12.0, 0.0, vol=20_000.0)
     t0 = 1_700_000_000_000
-    for i, r in enumerate(eth):
-        r[0] = t0 + i * 86_400_000
-    for i, r in enumerate(btc):
-        r[0] = t0 + i * 86_400_000
-    cfg = moonshot_spike_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0, book_eur=1_700.0))
-    out = evaluate_clip(
-        {"BTC": btc, "ETH": eth},
-        cfg,
-        held={},
-        cash_eur=1_700.0,
-        deployed_eur=0.0,
-        now_ms=10**12,
-        last_rebalance_ms=0,
-        now=datetime(2026, 6, 1, tzinfo=UTC),
+    for series in (btc, eth, sol):
+        for i, r in enumerate(series):
+            r[0] = t0 + i * 86_400_000
+    cfg = daily_green_config(
+        ClipConfig(universe=("ETH", "SOL"), min_qvol_eur=1.0, book_eur=1_700.0)
     )
-    assert out["want_alt"] is None
-    assert any(s.get("reason") == "weak_r3" for s in out.get("skipped") or [])
-
-
-def test_moonshot_spike_takes_strong_setup_at_book_size():
-    from bot.live.momentum_btc_rs_clip import moonshot_spike_config
-
-    btc = _bars(80, 100.0, 0.02)
-    # Parabolic alt: clear r3 (>=15%), xs, trend above SMAs
-    eth = _bars(60, 5.0, 0.02, vol=20_000.0)
-    eth += _bars(16, eth[-1][4], 0.5, vol=20_000.0)
-    eth += _bars(4, eth[-1][4], 2.0, vol=20_000.0)  # last 3d return >> 15%
-    t0 = 1_700_000_000_000
-    for i, r in enumerate(eth):
-        r[0] = t0 + i * 86_400_000
-    for i, r in enumerate(btc):
-        r[0] = t0 + i * 86_400_000
-    cfg = moonshot_spike_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0, book_eur=1_700.0))
     out = evaluate_clip(
-        {"BTC": btc, "ETH": eth},
+        {"BTC": btc, "ETH": eth, "SOL": sol},
         cfg,
         held={},
-        cash_eur=5_000.0,  # more cash than book — size_to_book must cap
+        cash_eur=5_000.0,
         deployed_eur=0.0,
         now_ms=10**12,
         last_rebalance_ms=0,
         now=datetime(2026, 6, 1, tzinfo=UTC),
     )
     assert out["risk_on"] is True
+    assert out["want_alt"] == "SOL"
     alts = [e for e in out["entries"] if e["role"] == "alt"]
-    assert alts and alts[0]["base"] == "ETH"
+    assert alts and alts[0]["base"] == "SOL"
     assert alts[0]["notional_eur"] == pytest.approx(1_700.0, abs=0.01)
-    assert "Moonshot sleeve" in out["caption"]
+    assert "Daily sleeve" in out["caption"]
+    assert cfg.entry_mode == "top_day"
+    assert cfg.time_max_days == 3

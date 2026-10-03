@@ -1,8 +1,8 @@
-"""Fixed €1.7k moonshot spike sleeve — separate book beside residual/clip.
+"""Fixed €1.7k daily-green sleeve — separate book beside residual/clip.
 
-Entry gate (coin-agnostic, from moonshot_preimage lab):
-  3d return ≥ 15%, 10d RS excess vs BTC ≥ 25%, close > SMA20 > SMA50.
-Cash when no setup; 10% alt trail; sizing capped at book_eur.
+Pack ``daily_top_day`` (daily_green_lab winner family):
+  each risk-on day long the strongest liquid 1d mover, trail 12%, time≤3d,
+  sizing capped at book_eur. Not a +€100/day guarantee.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 from bot.core.config import Settings, get_settings
 from dataclasses import replace
 
-from bot.live.momentum_btc_rs_clip import moonshot_spike_config
+from bot.live.momentum_btc_rs_clip import daily_green_config
 from bot.live.momentum_btc_rs_clip_runner import (
     BtcRsClipPaperRunner,
     config_from_settings,
@@ -47,7 +47,7 @@ def moonshot_config_from_settings(settings: Settings | None = None):
     settings = settings or get_settings()
     book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 1_700.0) or 1_700.0)
     base = config_from_settings(settings)
-    return moonshot_spike_config(replace(base, book_eur=book))
+    return daily_green_config(replace(base, book_eur=book))
 
 
 class MoonshotClipDeskManager:
@@ -73,14 +73,14 @@ class MoonshotClipDeskManager:
             "dry_run": not allow_live,
             "paper_only": not allow_live,
             "allow_live": allow_live,
-            "pack": "moonshot_spike",
+            "pack": "daily_top_day",
         }
         if self._runner is not None:
             st = self._runner.status()
             st.update(base)
             st["allow_live"] = allow_live and not self._runner.dry_run
             st["paper_only"] = self._runner.dry_run
-            st["pack"] = "moonshot_spike"
+            st["pack"] = "daily_top_day"
             return st
         if enabled:
             cfg = moonshot_config_from_settings(settings)
@@ -219,7 +219,7 @@ class MoonshotClipDeskManager:
             reserved_qty=reserved_qty,
             pending_pack="",
         )
-        self._runner.pack_mode = "moonshot_spike"
+        self._runner.pack_mode = "daily_top_day"
         # Fresh sleeve: seed cash to fixed book if empty state.
         if not self._runner.positions and self._runner.cash_eur <= 0:
             self._runner.cash_eur = float(cfg.book_eur)
@@ -241,7 +241,7 @@ class MoonshotClipDeskManager:
             dry_run=dry_run,
             paper_only=dry_run,
             allow_live=not dry_run,
-            pack="moonshot_spike",
+            pack="daily_top_day",
             book_eur=cfg.book_eur,
         )
         return {"ok": True, "started": True, "status": self.status()}
@@ -264,7 +264,7 @@ class MoonshotClipDeskManager:
                 "./data/momentum_moonshot_clip_state.json",
             )
         )
-        _write_flag(state_path, running=False, pack="moonshot_spike")
+        _write_flag(state_path, running=False, pack="daily_top_day")
         return {"ok": True, "stopped": True, "status": self.status()}
 
     async def resume_if_flagged(self) -> dict[str, Any] | None:

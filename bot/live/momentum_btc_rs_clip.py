@@ -48,6 +48,10 @@ class ClipConfig:
     require_trend: bool = False
     # Cap sizing base at book_eur so a small sleeve stays fixed-size.
     size_to_book: bool = False
+    # weekly_rs (default) | top_day (strongest 1d return) | top_rs (daily RS)
+    entry_mode: str = "weekly_rs"
+    # Exit alt after N calendar days (0 = trail/rotate only).
+    time_max_days: int = 0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
@@ -71,10 +75,16 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
 
 
 def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
-    """Fixed small spike sleeve: r3≥15% + RS≥25% + trend (lab best P50).
+    """Deprecated alias — use ``daily_green_config`` (active top_day sleeve)."""
+    return daily_green_config(cfg)
 
-    Default book €1,700 — separate from the owner residual/clip book.
-    Cash when no setup; 10% alt trail; size capped at book_eur.
+
+def daily_green_config(cfg: ClipConfig | None = None) -> ClipConfig:
+    """Fixed €1.7k daily-active sleeve (daily_green_lab winner family).
+
+    Each risk-on day: long the strongest liquid 1d mover (top_day), trail 12%,
+    time-stop 3d, size capped at book. BTC SMA50 filter on. Not a +€100/day
+    guarantee — lab avg ~€30/day / ~50% green days on the recent tape.
     """
     base = cfg or ClipConfig()
     return replace(
@@ -82,17 +92,19 @@ def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
         book_eur=float(base.book_eur) if float(base.book_eur) > 0 else 1_700.0,
         btc_frac=0.0,
         alt_frac=1.0,
-        excess_floor=0.25,
+        excess_floor=0.0,
         lookback_days=10,
         skip_days=1,
-        rebalance_days=3,
+        rebalance_days=1,
         sma_n=50,
-        require_alt_sma=True,
+        require_alt_sma=False,
         cash_when_no_alt=True,
-        min_r3_pct=0.15,
-        require_trend=True,
+        min_r3_pct=0.0,
+        require_trend=False,
         size_to_book=True,
-        alt_trail_pct=0.10,
+        alt_trail_pct=0.12,
+        entry_mode="top_day",
+        time_max_days=3,
     )
 
 
@@ -337,14 +349,31 @@ def evaluate_clip(
                     }
                 )
                 continue
-        row = {"base": base, "excess": xs, "qvol": round(qv, 0)}
+        day_ret = 0.0
+        if len(cl) >= 2 and cl[-2] > 0:
+            day_ret = cl[-1] / cl[-2] - 1.0
+        row = {
+            "base": base,
+            "excess": xs,
+            "day_ret": day_ret,
+            "qvol": round(qv, 0),
+        }
         if r3 is not None:
             row["r3"] = round(float(r3), 4)
         ranked.append(row)
-    ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
+    mode = str(cfg.entry_mode or "weekly_rs").lower()
+    if mode == "top_day":
+        ranked.sort(key=lambda r: float(r.get("day_ret") or 0.0), reverse=True)
+    else:
+        ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want_alt: str | None = None
-    if rebalance_due and ranked and float(ranked[0]["excess"]) > cfg.excess_floor:
-        want_alt = str(ranked[0]["base"])
+    if rebalance_due and ranked:
+        top = ranked[0]
+        if mode == "top_day":
+            # Always pick the strongest day-mover when risk-on (floor unused).
+            want_alt = str(top["base"])
+        elif float(top["excess"]) > cfg.excess_floor:
+            want_alt = str(top["base"])
     elif not rebalance_due:
         want_alt = held_alt
 
@@ -404,9 +433,13 @@ def evaluate_clip(
                     "notional_eur": round(n_alt, 2),
                     "role": "alt",
                     "reasons": [
-                        f"excess={float(top.get('excess') or 0):.3f}",
+                        (
+                            f"day={float(top.get('day_ret') or 0):.3f}"
+                            if mode == "top_day"
+                            else f"excess={float(top.get('excess') or 0):.3f}"
+                        ),
                         f"frac={cfg.alt_frac:.2f}",
-                        "weekly_rs",
+                        mode if mode != "weekly_rs" else "weekly_rs",
                     ],
                 }
             )
@@ -453,20 +486,29 @@ def evaluate_clip(
                 )
 
     alt_txt = want_alt or "geen alt"
-    if float(cfg.min_r3_pct or 0.0) > 0 or bool(cfg.require_trend):
+    if str(cfg.entry_mode or "").lower() == "top_day" or float(cfg.min_r3_pct or 0.0) > 0:
         detail = ""
         if want_alt and ranked:
             top = ranked[0]
-            detail = f" (xs {float(top['excess']):+.1%}"
-            if top.get("r3") is not None:
-                detail += f", r3 {float(top['r3']):+.1%}"
-            detail += ")"
-        caption = (
-            f"Moonshot sleeve €{cfg.book_eur:,.0f}: {alt_txt}{detail}"
-            f", gate r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
+            if str(cfg.entry_mode or "").lower() == "top_day":
+                detail = f" (day {float(top.get('day_ret') or 0):+.1%})"
+            else:
+                detail = f" (xs {float(top['excess']):+.1%}"
+                if top.get("r3") is not None:
+                    detail += f", r3 {float(top['r3']):+.1%}"
+                detail += ")"
+        gate = (
+            "top_day"
+            if str(cfg.entry_mode or "").lower() == "top_day"
+            else f"r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
             + ("+trend" if cfg.require_trend else "")
+        )
+        caption = (
+            f"Daily sleeve €{cfg.book_eur:,.0f}: {alt_txt}{detail}"
+            f", {gate}"
             + (f", trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
-            + ". Vast boek — cash zonder setup."
+            + (f", time≤{cfg.time_max_days}d" if int(cfg.time_max_days or 0) > 0 else "")
+            + ". Vast boek — elke risk-on dag actief."
         )
     else:
         caption = (
