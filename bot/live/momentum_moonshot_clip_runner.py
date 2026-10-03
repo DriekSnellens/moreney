@@ -1,8 +1,8 @@
 """Fixed €1.7k daily-green sleeve — separate book beside residual/clip.
 
-Pack ``daily_top_day`` (daily_green_lab winner family):
-  each risk-on day long the strongest liquid 1d mover, trail 12%, time≤3d,
-  sizing capped at book_eur. Not a +€100/day guarantee.
+Pack ``daily_coil_day`` (daily_green_lab full-universe winner):
+  coil compression + day thrust on the ~80-name liquid pool, trail 12%,
+  time≤5d, sizing capped at book_eur. Not a +€100/day guarantee.
 """
 
 from __future__ import annotations
@@ -73,14 +73,14 @@ class MoonshotClipDeskManager:
             "dry_run": not allow_live,
             "paper_only": not allow_live,
             "allow_live": allow_live,
-            "pack": "daily_top_day",
+            "pack": "daily_coil_day",
         }
         if self._runner is not None:
             st = self._runner.status()
             st.update(base)
             st["allow_live"] = allow_live and not self._runner.dry_run
             st["paper_only"] = self._runner.dry_run
-            st["pack"] = "daily_top_day"
+            st["pack"] = "daily_coil_day"
             return st
         if enabled:
             cfg = moonshot_config_from_settings(settings)
@@ -219,7 +219,7 @@ class MoonshotClipDeskManager:
             reserved_qty=reserved_qty,
             pending_pack="",
         )
-        self._runner.pack_mode = "daily_top_day"
+        self._runner.pack_mode = "daily_coil_day"
         # Fresh sleeve: seed cash to fixed book if empty state.
         if not self._runner.positions and self._runner.cash_eur <= 0:
             self._runner.cash_eur = float(cfg.book_eur)
@@ -241,7 +241,7 @@ class MoonshotClipDeskManager:
             dry_run=dry_run,
             paper_only=dry_run,
             allow_live=not dry_run,
-            pack="daily_top_day",
+            pack="daily_coil_day",
             book_eur=cfg.book_eur,
         )
         return {"ok": True, "started": True, "status": self.status()}
@@ -264,7 +264,7 @@ class MoonshotClipDeskManager:
                 "./data/momentum_moonshot_clip_state.json",
             )
         )
-        _write_flag(state_path, running=False, pack="daily_top_day")
+        _write_flag(state_path, running=False, pack="daily_coil_day")
         return {"ok": True, "stopped": True, "status": self.status()}
 
     async def resume_if_flagged(self) -> dict[str, Any] | None:

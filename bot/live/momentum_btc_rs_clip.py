@@ -22,6 +22,92 @@ from bot.live.momentum_desk import DEFAULT_UNIVERSE
 FEE_RT = 0.003
 SLIP = 0.001
 
+# Full liquid Bitvavo EUR pool (ignition_expand_candles), not the 16-name desk.
+EXPAND_LIQUID_UNIVERSE: tuple[str, ...] = (
+    "AAVE",
+    "ADA",
+    "ALGO",
+    "ALICE",
+    "ARB",
+    "ARK",
+    "ATOM",
+    "AVAX",
+    "BCH",
+    "BNB",
+    "CAP",
+    "COTI",
+    "CRV",
+    "CT",
+    "CVX",
+    "DATAIP",
+    "DOGE",
+    "DOT",
+    "EIGEN",
+    "ENA",
+    "ENJ",
+    "ETH",
+    "FARTCOIN",
+    "FET",
+    "GLMR",
+    "GRASS",
+    "GTC",
+    "HBAR",
+    "HYPE",
+    "ICP",
+    "INJ",
+    "JASMY",
+    "JUP",
+    "KAS",
+    "LINK",
+    "LPT",
+    "LSK",
+    "LTC",
+    "MAGIC",
+    "MANA",
+    "MEGA",
+    "MON",
+    "MOVR",
+    "NEAR",
+    "NOM",
+    "NPC",
+    "ONDO",
+    "OP",
+    "PENGU",
+    "PEPE",
+    "PHA",
+    "PLUME",
+    "PUMP",
+    "QNT",
+    "RAY",
+    "RENDER",
+    "SAND",
+    "SCR",
+    "SEI",
+    "SHIB",
+    "SKY",
+    "SOL",
+    "STX",
+    "SUI",
+    "SUPER",
+    "SWEAT",
+    "SYN",
+    "TAO",
+    "TIA",
+    "TRX",
+    "UNI",
+    "USELESS",
+    "VET",
+    "VIRTUAL",
+    "VVV",
+    "WIF",
+    "WLD",
+    "XDP",
+    "XLM",
+    "XPL",
+    "XRP",
+    "ZRO",
+)
+
 
 @dataclass(frozen=True)
 class ClipConfig:
@@ -48,7 +134,7 @@ class ClipConfig:
     require_trend: bool = False
     # Cap sizing base at book_eur so a small sleeve stays fixed-size.
     size_to_book: bool = False
-    # weekly_rs (default) | top_day (strongest 1d return) | top_rs (daily RS)
+    # weekly_rs | top_day | coil_day | top_rs
     entry_mode: str = "weekly_rs"
     # Exit alt after N calendar days (0 = trail/rotate only).
     time_max_days: int = 0
@@ -82,29 +168,40 @@ def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
 def daily_green_config(cfg: ClipConfig | None = None) -> ClipConfig:
     """Fixed €1.7k daily-active sleeve (daily_green_lab winner family).
 
-    Each risk-on day: long the strongest liquid 1d mover (top_day), trail 12%,
-    time-stop 3d, size capped at book. BTC SMA50 filter on. Not a +€100/day
-    guarantee — lab avg ~€30/day / ~50% green days on the recent tape.
+    Full liquid universe (~80 names). Risk-on day: coil compression + day
+    thrust (coil_day), trail 12%, time-stop 5d, size capped at book. BTC
+    SMA50 filter on. Lab winner on expand candles — not a +€100/day guarantee;
+    recent tape avg dominated by a few large movers.
     """
     base = cfg or ClipConfig()
+    uni = tuple(base.universe) if base.universe else EXPAND_LIQUID_UNIVERSE
+    if uni == DEFAULT_UNIVERSE:
+        uni = EXPAND_LIQUID_UNIVERSE
+    qvol = float(base.min_qvol_eur or 0.0)
+    if qvol <= 0:
+        qvol = 50_000.0
+    elif qvol > 50_000.0:
+        qvol = 50_000.0
     return replace(
         base,
         book_eur=float(base.book_eur) if float(base.book_eur) > 0 else 1_700.0,
         btc_frac=0.0,
         alt_frac=1.0,
-        excess_floor=0.0,
+        excess_floor=0.02,
         lookback_days=10,
         skip_days=1,
         rebalance_days=1,
         sma_n=50,
+        min_qvol_eur=qvol,
         require_alt_sma=False,
         cash_when_no_alt=True,
         min_r3_pct=0.0,
         require_trend=False,
         size_to_book=True,
         alt_trail_pct=0.12,
-        entry_mode="top_day",
-        time_max_days=3,
+        entry_mode="coil_day",
+        time_max_days=5,
+        universe=uni,
     )
 
 
@@ -287,6 +384,8 @@ def evaluate_clip(
     # clock blocks the next buy, including when the book is already flat.
     rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
 
+    mode = str(cfg.entry_mode or "weekly_rs").lower()
+    day_modes = {"top_day", "coil_day"}
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for base in cfg.universe:
@@ -294,7 +393,10 @@ def evaluate_clip(
         cl = closes_of(rows)
         xs = rs_excess(cl, btc_c, lb=cfg.lookback_days, skip=cfg.skip_days)
         qv = quote_vol(rows)
-        if xs is None:
+        if mode not in day_modes and xs is None:
+            skipped.append({"base": base, "reason": "short_history"})
+            continue
+        if mode in day_modes and len(cl) < 2:
             skipped.append({"base": base, "reason": "short_history"})
             continue
         if qv < cfg.min_qvol_eur:
@@ -303,7 +405,7 @@ def evaluate_clip(
                     "base": base,
                     "reason": "thin_volume",
                     "qvol": round(qv, 0),
-                    "excess": round(xs, 4),
+                    "excess": round(xs, 4) if xs is not None else None,
                 }
             )
             continue
@@ -315,13 +417,19 @@ def evaluate_clip(
                     {
                         "base": base,
                         "reason": "below_sma",
-                        "excess": round(xs, 4),
+                        "excess": round(xs, 4) if xs is not None else None,
                     }
                 )
                 continue
         if float(cfg.min_r3_pct or 0.0) > 0:
             if len(cl) < 4 or cl[-4] <= 0:
-                skipped.append({"base": base, "reason": "short_r3", "excess": round(xs, 4)})
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "short_r3",
+                        "excess": round(xs, 4) if xs is not None else None,
+                    }
+                )
                 continue
             r3 = cl[-1] / cl[-4] - 1.0
             if r3 < float(cfg.min_r3_pct):
@@ -330,7 +438,7 @@ def evaluate_clip(
                         "base": base,
                         "reason": "weak_r3",
                         "r3": round(r3, 4),
-                        "excess": round(xs, 4),
+                        "excess": round(xs, 4) if xs is not None else None,
                     }
                 )
                 continue
@@ -345,24 +453,43 @@ def evaluate_clip(
                     {
                         "base": base,
                         "reason": "no_trend",
-                        "excess": round(xs, 4),
+                        "excess": round(xs, 4) if xs is not None else None,
                     }
                 )
                 continue
         day_ret = 0.0
         if len(cl) >= 2 and cl[-2] > 0:
             day_ret = cl[-1] / cl[-2] - 1.0
+        highs = [float(r[2]) for r in rows if len(r) >= 3 and float(r[2]) > 0]
+        lows = [float(r[3]) for r in rows if len(r) >= 4 and float(r[3]) > 0]
+        coil = False
+        if len(highs) >= 20 and len(lows) >= 20:
+            hi5, lo5 = max(highs[-5:]), min(lows[-5:])
+            hi20, lo20 = max(highs[-20:]), min(lows[-20:])
+            span5 = hi5 / lo5 - 1.0 if lo5 > 0 else 0.0
+            span20 = hi20 / lo20 - 1.0 if lo20 > 0 else 0.0
+            coil = span20 > 1e-9 and span5 / span20 < 0.5
+        if mode == "coil_day":
+            if not coil or day_ret < float(cfg.excess_floor):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "no_coil" if not coil else "weak_day",
+                        "day_ret": round(day_ret, 4),
+                    }
+                )
+                continue
         row = {
             "base": base,
-            "excess": xs,
+            "excess": float(xs) if xs is not None else 0.0,
             "day_ret": day_ret,
             "qvol": round(qv, 0),
+            "coil": coil,
         }
         if r3 is not None:
             row["r3"] = round(float(r3), 4)
         ranked.append(row)
-    mode = str(cfg.entry_mode or "weekly_rs").lower()
-    if mode == "top_day":
+    if mode in day_modes:
         ranked.sort(key=lambda r: float(r.get("day_ret") or 0.0), reverse=True)
     else:
         ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
@@ -371,6 +498,8 @@ def evaluate_clip(
         top = ranked[0]
         if mode == "top_day":
             # Always pick the strongest day-mover when risk-on (floor unused).
+            want_alt = str(top["base"])
+        elif mode == "coil_day":
             want_alt = str(top["base"])
         elif float(top["excess"]) > cfg.excess_floor:
             want_alt = str(top["base"])
@@ -435,7 +564,7 @@ def evaluate_clip(
                     "reasons": [
                         (
                             f"day={float(top.get('day_ret') or 0):.3f}"
-                            if mode == "top_day"
+                            if mode in day_modes
                             else f"excess={float(top.get('excess') or 0):.3f}"
                         ),
                         f"frac={cfg.alt_frac:.2f}",
@@ -486,23 +615,26 @@ def evaluate_clip(
                 )
 
     alt_txt = want_alt or "geen alt"
-    if str(cfg.entry_mode or "").lower() == "top_day" or float(cfg.min_r3_pct or 0.0) > 0:
+    if mode in day_modes or float(cfg.min_r3_pct or 0.0) > 0:
         detail = ""
         if want_alt and ranked:
             top = ranked[0]
-            if str(cfg.entry_mode or "").lower() == "top_day":
+            if mode in day_modes:
                 detail = f" (day {float(top.get('day_ret') or 0):+.1%})"
             else:
                 detail = f" (xs {float(top['excess']):+.1%}"
                 if top.get("r3") is not None:
                     detail += f", r3 {float(top['r3']):+.1%}"
                 detail += ")"
-        gate = (
-            "top_day"
-            if str(cfg.entry_mode or "").lower() == "top_day"
-            else f"r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
-            + ("+trend" if cfg.require_trend else "")
-        )
+        if mode == "coil_day":
+            gate = f"coil_day+day≥{cfg.excess_floor:.0%}"
+        elif mode == "top_day":
+            gate = "top_day"
+        else:
+            gate = (
+                f"r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
+                + ("+trend" if cfg.require_trend else "")
+            )
         caption = (
             f"Daily sleeve €{cfg.book_eur:,.0f}: {alt_txt}{detail}"
             f", {gate}"

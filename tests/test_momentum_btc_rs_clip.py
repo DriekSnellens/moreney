@@ -1166,15 +1166,49 @@ def test_ledger_table_maps_clip_manual_external():
     assert "manual_external" in html
 
 
-def test_daily_green_top_day_picks_strongest_day_and_caps_book():
-    from bot.live.momentum_btc_rs_clip import daily_green_config
+def _coil_then_thrust(
+    n: int, base_px: float, thrust_px: float, vol: float = 20_000.0
+) -> list[list[float]]:
+    """Wide history, tight coil, then a thrust day — coil_day candidate.
+
+    Coil math includes the thrust bar, so the early range must stay large
+    enough that span5/span20 stays < 0.5 after the thrust.
+    """
+    rows: list[list[float]] = []
+    t0 = 1_700_000_000_000
+    day = 86_400_000
+    n_coil = 18
+    n_wide = max(20, n - n_coil - 1)
+    for i in range(n_wide):
+        # Alternate deep lows / high highs so span20 ≫ span5
+        if i % 2 == 0:
+            px, hi, lo = base_px * 1.4, base_px * 1.6, base_px * 1.2
+        else:
+            px, hi, lo = base_px * 0.6, base_px * 0.75, base_px * 0.45
+        rows.append([t0 + i * day, px, hi, lo, px, vol])
+    for i in range(n_wide, n_wide + n_coil):
+        px = base_px
+        rows.append([t0 + i * day, px, px * 1.004, px * 0.996, px, vol])
+    rows.append(
+        [
+            t0 + (n_wide + n_coil) * day,
+            base_px,
+            max(thrust_px, base_px) * 1.002,
+            base_px * 0.998,
+            thrust_px,
+            vol,
+        ]
+    )
+    return rows[:n] if len(rows) > n else rows
+
+
+def test_daily_green_coil_day_picks_coiled_thrust_and_caps_book():
+    from bot.live.momentum_btc_rs_clip import EXPAND_LIQUID_UNIVERSE, daily_green_config
 
     btc = _bars(80, 100.0, 0.05)
-    # ETH flat, SOL up hard today → top_day should pick SOL
+    # ETH flat (no coil); SOL coiled then thrusts
     eth = _bars(80, 10.0, 0.0, vol=20_000.0)
-    sol = _bars(79, 8.0, 0.0, vol=20_000.0)
-    # Big up-day close ( _bars writes start px before stepping )
-    sol += _bars(1, 12.0, 0.0, vol=20_000.0)
+    sol = _coil_then_thrust(80, base_px=8.0, thrust_px=8.5, vol=20_000.0)
     t0 = 1_700_000_000_000
     for series in (btc, eth, sol):
         for i, r in enumerate(series):
@@ -1198,5 +1232,9 @@ def test_daily_green_top_day_picks_strongest_day_and_caps_book():
     assert alts and alts[0]["base"] == "SOL"
     assert alts[0]["notional_eur"] == pytest.approx(1_700.0, abs=0.01)
     assert "Daily sleeve" in out["caption"]
-    assert cfg.entry_mode == "top_day"
-    assert cfg.time_max_days == 3
+    assert "coil_day" in out["caption"]
+    assert cfg.entry_mode == "coil_day"
+    assert cfg.time_max_days == 5
+    assert cfg.universe == ("ETH", "SOL")
+    # Default (no override) expands beyond the 16-name desk
+    assert len(daily_green_config().universe) == len(EXPAND_LIQUID_UNIVERSE)
