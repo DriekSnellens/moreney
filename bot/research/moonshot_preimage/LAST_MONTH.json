@@ -1,0 +1,400 @@
+{
+  "asof": "2026-10-03T14:36:59.994336+00:00",
+  "start": "2026-09-02",
+  "end": "2026-10-03",
+  "book_eur": 1700.0,
+  "pack": "moonshot_spike",
+  "summary": {
+    "pnl_eur": 842.73,
+    "ret_pct": 49.57,
+    "end_equity": 2542.73,
+    "max_dd_pct": 12.46,
+    "n_days": 32,
+    "pct_days_green": 0.2812,
+    "weeks": {
+      "2026-W36": 1064.52,
+      "2026-W37": -260.97,
+      "2026-W38": 178.61,
+      "2026-W39": 33.79,
+      "2026-W40": -173.23
+    },
+    "n_trades": 10
+  },
+  "trades": [
+    {
+      "date": "2026-09-02",
+      "side": "buy",
+      "base": "UNI",
+      "reason": "excess=0.263,frac=1.00,weekly_rs",
+      "pnl": 0,
+      "px": 5.048943899999999,
+      "notion": 1666.0
+    },
+    {
+      "date": "2026-09-05",
+      "side": "sell",
+      "base": "UNI",
+      "reason": "rs_rotate",
+      "pnl": 329.88,
+      "px": 6.0714
+    },
+    {
+      "date": "2026-09-05",
+      "side": "buy",
+      "base": "ARB",
+      "reason": "excess=0.433,frac=1.00,weekly_rs",
+      "pnl": 0,
+      "px": 0.11363351999999999,
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-07",
+      "side": "sell",
+      "base": "ARB",
+      "reason": "alt_trail",
+      "pnl": 473.67,
+      "px": 0.14583
+    },
+    {
+      "date": "2026-09-19",
+      "side": "buy",
+      "base": "NEAR",
+      "reason": "excess=0.402,frac=1.00,weekly_rs",
+      "pnl": 0,
+      "px": 3.2789756999999997,
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-22",
+      "side": "sell",
+      "base": "NEAR",
+      "reason": "rs_rotate",
+      "pnl": 296.63,
+      "px": 3.8657
+    },
+    {
+      "date": "2026-09-22",
+      "side": "buy",
+      "base": "AVAX",
+      "reason": "excess=0.466,frac=1.00,weekly_rs",
+      "pnl": 0,
+      "px": 9.8022925,
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-25",
+      "side": "sell",
+      "base": "AVAX",
+      "reason": "rs_drop",
+      "pnl": -84.23,
+      "px": 9.3547
+    },
+    {
+      "date": "2026-09-28",
+      "side": "buy",
+      "base": "NEAR",
+      "reason": "excess=0.820,frac=1.00,weekly_rs",
+      "pnl": 0,
+      "px": 4.740435699999999,
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-10-01",
+      "side": "sell",
+      "base": "NEAR",
+      "reason": "rs_drop",
+      "pnl": -173.22,
+      "px": 4.2752
+    }
+  ],
+  "daily": [
+    {
+      "date": "2026-09-02",
+      "equity": 1695.18,
+      "day_pnl": -4.82,
+      "cum_pnl": -4.82,
+      "hold": "UNI",
+      "want": "UNI",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-03",
+      "equity": 1827.33,
+      "day_pnl": 132.15,
+      "cum_pnl": 127.33,
+      "hold": "UNI",
+      "want": "UNI",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-04",
+      "equity": 1790.41,
+      "day_pnl": -36.92,
+      "cum_pnl": 90.41,
+      "hold": "UNI",
+      "want": "UNI",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-05",
+      "equity": 2611.48,
+      "day_pnl": 821.07,
+      "cum_pnl": 911.48,
+      "hold": "ARB",
+      "want": "ARB",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-06",
+      "equity": 2764.52,
+      "day_pnl": 153.04,
+      "cum_pnl": 1064.52,
+      "hold": "ARB",
+      "want": "ARB",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-07",
+      "equity": 2503.55,
+      "day_pnl": -260.97,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-08",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-09",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-10",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-11",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-12",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-13",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-14",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-15",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-16",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-17",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-18",
+      "equity": 2503.55,
+      "day_pnl": 0.0,
+      "cum_pnl": 803.55,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-19",
+      "equity": 2420.08,
+      "day_pnl": -83.47,
+      "cum_pnl": 720.08,
+      "hold": "NEAR",
+      "want": "NEAR",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-20",
+      "equity": 2682.16,
+      "day_pnl": 262.08,
+      "cum_pnl": 982.16,
+      "hold": "NEAR",
+      "want": "NEAR",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-21",
+      "equity": 2737.53,
+      "day_pnl": 55.37,
+      "cum_pnl": 1037.53,
+      "hold": "NEAR",
+      "want": "NEAR",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-22",
+      "equity": 2810.38,
+      "day_pnl": 72.85,
+      "cum_pnl": 1110.38,
+      "hold": "AVAX",
+      "want": "AVAX",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-23",
+      "equity": 2662.36,
+      "day_pnl": -148.02,
+      "cum_pnl": 962.36,
+      "hold": "AVAX",
+      "want": "AVAX",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-24",
+      "equity": 2650.79,
+      "day_pnl": -11.57,
+      "cum_pnl": 950.79,
+      "hold": "AVAX",
+      "want": "AVAX",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-25",
+      "equity": 2715.95,
+      "day_pnl": 65.16,
+      "cum_pnl": 1015.95,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-26",
+      "equity": 2715.95,
+      "day_pnl": 0.0,
+      "cum_pnl": 1015.95,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-27",
+      "equity": 2715.95,
+      "day_pnl": 0.0,
+      "cum_pnl": 1015.95,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-28",
+      "equity": 2533.29,
+      "day_pnl": -182.66,
+      "cum_pnl": 833.29,
+      "hold": "NEAR",
+      "want": "NEAR",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-29",
+      "equity": 2557.17,
+      "day_pnl": 23.88,
+      "cum_pnl": 857.17,
+      "hold": "NEAR",
+      "want": "NEAR",
+      "risk_on": true
+    },
+    {
+      "date": "2026-09-30",
+      "equity": 2703.7,
+      "day_pnl": 146.53,
+      "cum_pnl": 1003.7,
+      "hold": "NEAR",
+      "want": "NEAR",
+      "risk_on": true
+    },
+    {
+      "date": "2026-10-01",
+      "equity": 2542.73,
+      "day_pnl": -160.98,
+      "cum_pnl": 842.73,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-10-02",
+      "equity": 2542.73,
+      "day_pnl": 0.0,
+      "cum_pnl": 842.73,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    },
+    {
+      "date": "2026-10-03",
+      "equity": 2542.73,
+      "day_pnl": 0.0,
+      "cum_pnl": 842.73,
+      "hold": "cash",
+      "want": null,
+      "risk_on": true
+    }
+  ]
+}
