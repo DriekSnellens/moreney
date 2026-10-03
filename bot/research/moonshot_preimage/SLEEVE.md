@@ -44,6 +44,11 @@ MOMENTUM_MOONSHOT_CLIP_BOOK_EUR=1700
 curl -X POST /live/momentum/moonshot-clip/start
 ```
 
+## Laatste 6 weken (wet)
+
+Zie [`LAST_6W.md`](LAST_6W.md): `2026-08-21` → `2026-10-02` · PnL **+€13.5k** (~+791%) · 49% groen · maxDD 14.9%.  
+Gedreven door USELESS (+€3.0k) en LSK (+€9.9k); zonder die twee trades is het pad veel vlakker.
+
 Reproduce lab:
 
 ```bash

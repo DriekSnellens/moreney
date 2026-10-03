@@ -1,0 +1,582 @@
+{
+  "asof": "2026-10-03T15:53:15.017969+00:00",
+  "pack": "daily_coil_day",
+  "spec": "coil_day_t12_h5_hs0_btc1_fl0.02",
+  "book_eur": 1700.0,
+  "candle_dir": "data/ignition_expand_candles",
+  "n_bases": 80,
+  "start": "2026-08-21",
+  "end": "2026-10-02",
+  "summary": {
+    "ok": true,
+    "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+    "pick": "coil_day",
+    "trail_pct": 0.12,
+    "time_max_days": 5,
+    "hard_stop_pct": 0.0,
+    "require_btc_sma": true,
+    "excess_floor": 0.02,
+    "pnl_eur": 13452.88,
+    "avg_day_pnl": 312.86,
+    "median_day_pnl": 0.0,
+    "pct_days_green": 0.4884,
+    "n_days_green": 21,
+    "n_days_red": 21,
+    "n_days": 43,
+    "pct_days_in_market": 0.7209,
+    "n_days_hit_100": 13,
+    "pct_days_hit_100": 0.3023,
+    "best_day": 6687.77,
+    "worst_day": -255.44,
+    "max_dd_pct": 0.1493,
+    "n_trades": 22,
+    "score": 1977.5213
+  },
+  "weeks": {
+    "2026-W33": 4.05,
+    "2026-W34": -42.32,
+    "2026-W35": 2969.39,
+    "2026-W36": 9539.39,
+    "2026-W37": 279.04,
+    "2026-W38": 329.48,
+    "2026-W39": 373.83
+  },
+  "daily": [
+    {
+      "date": "2026-08-21",
+      "equity": 1700.0,
+      "day_pnl": 0.0,
+      "cum_pnl": 0.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-22",
+      "equity": 1628.19,
+      "day_pnl": -71.81,
+      "cum_pnl": -71.81,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-23",
+      "equity": 1704.06,
+      "day_pnl": 75.86,
+      "cum_pnl": 4.06,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-24",
+      "equity": 1694.36,
+      "day_pnl": -9.69,
+      "cum_pnl": -5.64,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-25",
+      "equity": 1665.91,
+      "day_pnl": -28.45,
+      "cum_pnl": -34.09,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-26",
+      "equity": 1941.12,
+      "day_pnl": 275.21,
+      "cum_pnl": 241.12,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-27",
+      "equity": 1933.83,
+      "day_pnl": -7.29,
+      "cum_pnl": 233.83,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-28",
+      "equity": 1863.38,
+      "day_pnl": -70.45,
+      "cum_pnl": 163.38,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-29",
+      "equity": 1859.53,
+      "day_pnl": -3.85,
+      "cum_pnl": 159.53,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-30",
+      "equity": 1661.73,
+      "day_pnl": -197.8,
+      "cum_pnl": -38.27,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-31",
+      "equity": 1651.26,
+      "day_pnl": -10.47,
+      "cum_pnl": -48.74,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-01",
+      "equity": 2035.13,
+      "day_pnl": 383.87,
+      "cum_pnl": 335.13,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-02",
+      "equity": 2222.18,
+      "day_pnl": 187.05,
+      "cum_pnl": 522.18,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-03",
+      "equity": 3723.8,
+      "day_pnl": 1501.62,
+      "cum_pnl": 2023.8,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-04",
+      "equity": 4776.42,
+      "day_pnl": 1052.62,
+      "cum_pnl": 3076.42,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-05",
+      "equity": 4663.94,
+      "day_pnl": -112.48,
+      "cum_pnl": 2963.94,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-06",
+      "equity": 4631.12,
+      "day_pnl": -32.82,
+      "cum_pnl": 2931.12,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-07",
+      "equity": 4494.43,
+      "day_pnl": -136.69,
+      "cum_pnl": 2794.43,
+      "hold": "JUP",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-08",
+      "equity": 4409.77,
+      "day_pnl": -84.66,
+      "cum_pnl": 2709.77,
+      "hold": "JUP",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-09",
+      "equity": 4418.86,
+      "day_pnl": 9.09,
+      "cum_pnl": 2718.86,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-10",
+      "equity": 4438.09,
+      "day_pnl": 19.24,
+      "cum_pnl": 2738.09,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-11",
+      "equity": 4770.96,
+      "day_pnl": 332.87,
+      "cum_pnl": 3070.96,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-12",
+      "equity": 7482.74,
+      "day_pnl": 2711.77,
+      "cum_pnl": 5782.74,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-13",
+      "equity": 14170.51,
+      "day_pnl": 6687.77,
+      "cum_pnl": 12470.51,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-14",
+      "equity": 14326.45,
+      "day_pnl": 155.94,
+      "cum_pnl": 12626.45,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-15",
+      "equity": 14085.65,
+      "day_pnl": -240.8,
+      "cum_pnl": 12385.65,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-16",
+      "equity": 14082.55,
+      "day_pnl": -3.1,
+      "cum_pnl": 12382.55,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-17",
+      "equity": 14180.19,
+      "day_pnl": 97.63,
+      "cum_pnl": 12480.19,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-18",
+      "equity": 14530.73,
+      "day_pnl": 350.55,
+      "cum_pnl": 12830.73,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-19",
+      "equity": 14465.32,
+      "day_pnl": -65.41,
+      "cum_pnl": 12765.32,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-20",
+      "equity": 14449.55,
+      "day_pnl": -15.77,
+      "cum_pnl": 12749.55,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-21",
+      "equity": 14582.17,
+      "day_pnl": 132.62,
+      "cum_pnl": 12882.17,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-22",
+      "equity": 14572.75,
+      "day_pnl": -9.42,
+      "cum_pnl": 12872.75,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-23",
+      "equity": 14317.31,
+      "day_pnl": -255.44,
+      "cum_pnl": 12617.31,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-24",
+      "equity": 14336.94,
+      "day_pnl": 19.62,
+      "cum_pnl": 12636.94,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-25",
+      "equity": 14833.33,
+      "day_pnl": 496.39,
+      "cum_pnl": 13133.33,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-26",
+      "equity": 14905.51,
+      "day_pnl": 72.18,
+      "cum_pnl": 13205.51,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-27",
+      "equity": 14779.04,
+      "day_pnl": -126.47,
+      "cum_pnl": 13079.04,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-28",
+      "equity": 14727.42,
+      "day_pnl": -51.62,
+      "cum_pnl": 13027.42,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-29",
+      "equity": 14822.85,
+      "day_pnl": 95.42,
+      "cum_pnl": 13122.85,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-30",
+      "equity": 15119.01,
+      "day_pnl": 296.17,
+      "cum_pnl": 13419.01,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-10-01",
+      "equity": 15157.58,
+      "day_pnl": 38.57,
+      "cum_pnl": 13457.58,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-10-02",
+      "equity": 15152.88,
+      "day_pnl": -4.71,
+      "cum_pnl": 13452.88,
+      "hold": "cash",
+      "in_market": false
+    }
+  ],
+  "trades": [
+    {
+      "date": "2026-08-22",
+      "side": "buy",
+      "base": "LSK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1666.0
+    },
+    {
+      "date": "2026-08-27",
+      "side": "sell",
+      "base": "LSK",
+      "pnl": 233.83,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-08-28",
+      "side": "buy",
+      "base": "ENA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-08-29",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": -74.3,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-08-30",
+      "side": "buy",
+      "base": "PUMP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-08-31",
+      "side": "sell",
+      "base": "PUMP",
+      "pnl": -208.27,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-01",
+      "side": "buy",
+      "base": "USELESS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1618.24
+    },
+    {
+      "date": "2026-09-06",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": 2979.86,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-07",
+      "side": "buy",
+      "base": "JUP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-09",
+      "side": "sell",
+      "base": "JUP",
+      "pnl": -212.26,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-10",
+      "side": "buy",
+      "base": "LSK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-14",
+      "side": "sell",
+      "base": "LSK",
+      "pnl": 9907.59,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-15",
+      "side": "buy",
+      "base": "NPC",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-16",
+      "side": "sell",
+      "base": "NPC",
+      "pnl": -243.89,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-17",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-22",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 490.2,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-09-23",
+      "side": "buy",
+      "base": "USELESS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-24",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": -235.82,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-25",
+      "side": "buy",
+      "base": "ARK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-28",
+      "side": "sell",
+      "base": "ARK",
+      "pnl": 390.49,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-29",
+      "side": "buy",
+      "base": "CAP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-10-02",
+      "side": "sell",
+      "base": "CAP",
+      "pnl": 425.45,
+      "reason": "alt_trail"
+    }
+  ],
+  "compare_top_day": {
+    "ok": true,
+    "name": "top_day_t20_h5_hs0_btc1_fl0.00",
+    "pick": "top_day",
+    "trail_pct": 0.2,
+    "time_max_days": 5,
+    "hard_stop_pct": 0.0,
+    "require_btc_sma": true,
+    "excess_floor": 0.0,
+    "pnl_eur": 689.52,
+    "avg_day_pnl": 16.03,
+    "median_day_pnl": -1.84,
+    "pct_days_green": 0.4419,
+    "n_days_green": 19,
+    "n_days_red": 23,
+    "n_days": 43,
+    "pct_days_in_market": 0.7674,
+    "n_days_hit_100": 5,
+    "pct_days_hit_100": 0.1163,
+    "best_day": 1212.02,
+    "worst_day": -553.64,
+    "max_dd_pct": 0.7042,
+    "n_trades": 20,
+    "score": 1576.6258
+  }
+}
