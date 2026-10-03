@@ -1,0 +1,99 @@
+{
+  "merged_from": [
+    "pick_outcomes.json",
+    ".pick_outcomes.json.jo8h9q92.tmp"
+  ],
+  "n_sessions": 1000,
+  "decision_hour_utc": 7,
+  "days": [
+    "2026-09-19",
+    "2026-09-20",
+    "2026-09-22",
+    "2026-09-23",
+    "2026-09-24",
+    "2026-09-25",
+    "2026-09-26",
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30",
+    "2026-10-01",
+    "2026-10-02",
+    "2026-10-03"
+  ],
+  "picks_by_day": {
+    "2026-09-19": [
+      "ETH",
+      "LINK",
+      "SOL",
+      "XRP"
+    ],
+    "2026-09-20": [
+      "ADA",
+      "AVAX",
+      "ETH",
+      "SOL",
+      "UNI",
+      "XRP"
+    ],
+    "2026-09-22": [
+      "ADA",
+      "AVAX",
+      "SOL",
+      "UNI",
+      "XRP"
+    ],
+    "2026-09-23": [
+      "DOGE",
+      "ETH",
+      "XRP"
+    ],
+    "2026-09-24": [
+      "DOGE",
+      "SOL",
+      "UNI"
+    ],
+    "2026-09-25": [
+      "ADA",
+      "DOGE",
+      "LINK",
+      "LTC"
+    ],
+    "2026-09-26": [
+      "ADA",
+      "ETH",
+      "LTC",
+      "NEAR",
+      "SOL"
+    ],
+    "2026-09-28": [
+      "ETH",
+      "LTC",
+      "NEAR"
+    ],
+    "2026-09-29": [
+      "ETH",
+      "LINK",
+      "SOL"
+    ],
+    "2026-09-30": [
+      "LINK",
+      "SUI",
+      "XRP"
+    ],
+    "2026-10-01": [
+      "DOGE",
+      "LINK",
+      "NEAR"
+    ],
+    "2026-10-02": [
+      "ETH",
+      "SOL",
+      "XRP"
+    ],
+    "2026-10-03": [
+      "NEAR",
+      "XRP"
+    ]
+  },
+  "note": "Full session bodies live in data/research/alphai_sessions_merged.json (gitignored). Rebuild from pick_outcomes + tmp."
+}

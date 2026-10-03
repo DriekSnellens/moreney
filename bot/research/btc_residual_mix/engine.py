@@ -82,25 +82,55 @@ def apply_alt_allow(
     mode: str = "gate",
     excess_floor: float = 0.0,
     n_alts: int = 1,
+    excess_override: float | None = None,
 ) -> list[str]:
     """Keep residual rank. ``allowed is None`` leaves the pick unchanged.
 
-    ``gate`` takes the residual winner only when that name is allowed.
-    ``intersect`` takes the strongest residual names that are allowed and
-    still clear the excess floor.
+    Modes:
+      gate            — residual winner only if it is allowed; else empty
+      intersect       — strongest residual names that are allowed + clear floor
+      prefer          — winner if allowed; else intersect; else raw residual
+      overlap_or_rs   — intersect when any allowed name clears floor; else RS
+      override_gate   — like gate, but keep RS winner when excess >= override
     """
     wants = [str(b) for b in (pick.get("wants") or []) if b and b != "BTC"]
+    ranked = list(pick.get("ranked") or [])
+    n = max(1, int(n_alts))
     if allowed is None:
-        return wants[: max(1, int(n_alts))]
-    if mode == "intersect":
-        ranked = pick.get("ranked") or []
-        out = [
+        return wants[:n]
+
+    def _intersect() -> list[str]:
+        return [
             str(row["base"])
             for row in ranked
             if str(row.get("base") or "") in allowed
             and float(row.get("excess") or 0.0) > excess_floor
-        ]
-        return out[: max(1, int(n_alts))]
+        ][:n]
+
+    m = str(mode or "gate").lower()
+    if m == "intersect":
+        return _intersect()
+    if m in {"prefer", "soft"}:
+        if wants and wants[0] in allowed:
+            return wants[:1]
+        hit = _intersect()
+        return hit if hit else wants[:n]
+    if m in {"overlap_or_rs", "overlap"}:
+        hit = _intersect()
+        return hit if hit else wants[:n]
+    if m in {"override_gate", "gate_override"}:
+        if wants and wants[0] in allowed:
+            return wants[:1]
+        if (
+            excess_override is not None
+            and wants
+            and ranked
+            and str(ranked[0].get("base") or "") == wants[0]
+            and float(ranked[0].get("excess") or 0.0) >= float(excess_override)
+        ):
+            return wants[:1]
+        return []
+    # Default hard gate.
     if wants and wants[0] in allowed:
         return wants[:1]
     return []
@@ -268,6 +298,7 @@ def run_btc_residual(
     strategy: str = "",
     alt_allow: Mapping[str, set[str]] | None = None,
     alt_allow_mode: str = "gate",
+    alt_allow_excess_override: float | None = None,
     cash_when_no_alt: bool = False,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
@@ -343,6 +374,7 @@ def run_btc_residual(
                     mode=alt_allow_mode,
                     excess_floor=excess_floor,
                     n_alts=n_alts,
+                    excess_override=alt_allow_excess_override,
                 )
             last_reb = now_ms
             px = _px_map(ohlc, date, field=4)

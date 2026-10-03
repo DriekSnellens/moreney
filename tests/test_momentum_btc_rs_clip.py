@@ -1164,3 +1164,101 @@ def test_ledger_table_maps_clip_manual_external():
     assert "AAA" in html
     assert "4.47" in html
     assert "manual_external" in html
+
+
+def _brk20_thrust(
+    n: int, base_px: float, thrust_px: float, vol: float = 20_000.0
+) -> list[list[float]]:
+    """Flat range then close above prior 20d high — brk20_day candidate."""
+    rows: list[list[float]] = []
+    t0 = 1_700_000_000_000
+    day = 86_400_000
+    for i in range(n - 1):
+        px = base_px
+        rows.append([t0 + i * day, px, px * 1.01, px * 0.99, px, vol])
+    rows.append(
+        [
+            t0 + (n - 1) * day,
+            base_px,
+            thrust_px * 1.01,
+            base_px * 0.99,
+            thrust_px,
+            vol,
+        ]
+    )
+    return rows
+
+
+def test_daily_green_brk20_day_picks_breakout_and_caps_book():
+    from bot.live.momentum_btc_rs_clip import EXPAND_LIQUID_UNIVERSE, daily_green_config
+
+    btc = _bars(80, 100.0, 0.05)
+    # ETH flat below range; SOL breaks 20d high
+    eth = _bars(80, 10.0, 0.0, vol=20_000.0)
+    sol = _brk20_thrust(80, base_px=8.0, thrust_px=8.5, vol=20_000.0)
+    t0 = 1_700_000_000_000
+    for series in (btc, eth, sol):
+        for i, r in enumerate(series):
+            r[0] = t0 + i * 86_400_000
+    cfg = daily_green_config(
+        ClipConfig(universe=("ETH", "SOL"), min_qvol_eur=1.0, book_eur=1_700.0)
+    )
+    out = evaluate_clip(
+        {"BTC": btc, "ETH": eth, "SOL": sol},
+        cfg,
+        held={},
+        cash_eur=5_000.0,
+        deployed_eur=0.0,
+        now_ms=10**12,
+        last_rebalance_ms=0,
+        now=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    assert out["risk_on"] is True
+    assert out["want_alt"] == "SOL"
+    alts = [e for e in out["entries"] if e["role"] == "alt"]
+    assert alts and alts[0]["base"] == "SOL"
+    assert alts[0]["notional_eur"] == pytest.approx(1_700.0, abs=0.01)
+    assert "Daily sleeve" in out["caption"]
+    assert "brk20_day" in out["caption"]
+    assert cfg.entry_mode == "brk20_day"
+    assert cfg.time_max_days == 5
+    assert cfg.hard_stop_pct == pytest.approx(0.05)
+    assert cfg.alt_trail_pct == pytest.approx(0.12)
+    assert cfg.universe == ("ETH", "SOL")
+    assert len(daily_green_config().universe) == len(EXPAND_LIQUID_UNIVERSE)
+
+
+def test_rebalance_weekday_gate_only_fires_on_target_day():
+    """Age due + weekday pin: Tuesday-only clock."""
+    btc = _bars(60, 100.0, 0.1)
+    eth = _bars(60, 10.0, 0.0, vol=20_000.0)
+    t0 = 1_700_000_000_000
+    for series in (btc, eth):
+        for i, r in enumerate(series):
+            r[0] = t0 + i * 86_400_000
+    now_ms = t0 + 60 * 86_400_000
+    last = now_ms - 8 * 86_400_000  # age > 7d
+    cfg = ClipConfig(universe=("ETH",), rebalance_days=7, rebalance_weekday=1, min_qvol_eur=1.0)
+    # Monday 2026-06-01 is weekday 0
+    mon = evaluate_clip(
+        {"BTC": btc, "ETH": eth},
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=last,
+        now=datetime(2026, 6, 1, tzinfo=UTC),  # Monday
+    )
+    assert mon["rebalance_due"] is False
+    tue = evaluate_clip(
+        {"BTC": btc, "ETH": eth},
+        cfg,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=now_ms,
+        last_rebalance_ms=last,
+        now=datetime(2026, 6, 2, tzinfo=UTC),  # Tuesday
+    )
+    assert tue["rebalance_due"] is True

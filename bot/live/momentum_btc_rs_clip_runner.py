@@ -84,6 +84,16 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         lookback_days=_i("momentum_btc_rs_clip_lookback_days", base.lookback_days),
         skip_days=_i("momentum_btc_rs_clip_skip_days", base.skip_days),
         rebalance_days=_i("momentum_btc_rs_clip_rebalance_days", base.rebalance_days),
+        rebalance_weekday=(
+            None
+            if getattr(settings, "momentum_btc_rs_clip_rebalance_weekday", None) is None
+            else _i(
+                "momentum_btc_rs_clip_rebalance_weekday",
+                int(base.rebalance_weekday)
+                if base.rebalance_weekday is not None
+                else 1,
+            )
+        ),
         sma_n=_i("momentum_btc_rs_clip_sma_n", base.sma_n),
         min_qvol_eur=_f("momentum_btc_rs_clip_min_qvol_eur", base.min_qvol_eur),
         universe=base.universe,
@@ -814,37 +824,51 @@ class BtcRsClipPaperRunner:
         return net
 
     async def manage_alt_trail(self) -> list[dict[str, Any]]:
-        """Intraday 10% trail on the alt sleeve only. Seeds peak from live mark."""
+        """Intraday hard-stop / trail / optional time-stop on the alt sleeve."""
         trail = float(self.cfg.alt_trail_pct or 0.0)
-        if trail <= 0:
+        time_max = int(getattr(self.cfg, "time_max_days", 0) or 0)
+        hard = float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0)
+        if trail <= 0 and time_max <= 0 and hard <= 0:
             return []
         applied: list[dict[str, Any]] = []
+        now_ms = int(time.time() * 1000)
         for pos in list(self.positions):
             if pos.role != "alt":
                 continue
             mark = float(self.marks.get(pos.base) or 0.0)
             if mark <= 0:
                 continue
-            peak = float(pos.peak_px or 0.0)
-            if peak <= 0:
-                pos.peak_px = mark
+            reason = ""
+            if hard > 0 and float(pos.entry_price or 0) > 0:
+                if mark <= float(pos.entry_price) * (1.0 - hard):
+                    reason = "hard_stop"
+            if not reason and time_max > 0 and pos.opened_ms > 0:
+                age_days = (now_ms - int(pos.opened_ms)) / 86_400_000.0
+                if age_days >= float(time_max):
+                    reason = "time_stop"
+            if not reason and trail > 0:
+                peak = float(pos.peak_px or 0.0)
+                if peak <= 0:
+                    pos.peak_px = mark
+                    continue
+                if mark > peak:
+                    pos.peak_px = mark
+                    continue
+                if mark <= peak * (1.0 - trail):
+                    reason = "alt_trail"
+            if not reason:
                 continue
-            if mark > peak:
-                pos.peak_px = mark
-                continue
-            if mark > peak * (1.0 - trail):
-                continue
-            net = await self._close_lot(pos, mark, "alt_trail")
+            net = await self._close_lot(pos, mark, reason)
             if net is not None:
                 applied.append(
                     {
                         "action": "exit",
                         "base": pos.base,
                         "net_eur": round(net, 2),
-                        "reason": "alt_trail",
+                        "reason": reason,
                     }
                 )
-                self.last_rebalance_ms = int(time.time() * 1000)
+                self.last_rebalance_ms = now_ms
         if applied:
             self._save_state()
         return applied
@@ -938,7 +962,13 @@ class BtcRsClipPaperRunner:
 
     def _rebalance_due(self, now_ms: int) -> bool:
         reb_ms = int(self.cfg.rebalance_days) * 86_400_000
-        return self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
+        age_due = self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
+        if not age_due:
+            return False
+        wd = self.cfg.rebalance_weekday
+        if wd is None or int(wd) < 0:
+            return True
+        return datetime.now(UTC).weekday() == int(wd)
 
     def _arm_residual_pack(self, reason: str) -> None:
         """Switch to the full residual pack after a sale or the weekly clock."""
@@ -1167,11 +1197,12 @@ class BtcRsClipPaperRunner:
                 "lookback_days": self.cfg.lookback_days,
                 "skip_days": self.cfg.skip_days,
                 "rebalance_days": self.cfg.rebalance_days,
+                "rebalance_weekday": self.cfg.rebalance_weekday,
                 "sma_n": self.cfg.sma_n,
                 "min_qvol_eur": self.cfg.min_qvol_eur,
                 "book_eur": self.cfg.book_eur,
                 "trail_pct": self.cfg.alt_trail_pct,
-                "hard_stop_pct": 0.0,
+                "hard_stop_pct": float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0),
                 "require_alt_sma": self.cfg.require_alt_sma,
                 "cash_when_no_alt": self.cfg.cash_when_no_alt,
                 "pack_mode": self.pack_mode,
