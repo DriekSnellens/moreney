@@ -60,8 +60,10 @@ See **[`DAILY_3M.md`](./DAILY_3M.md)** (`2026-07-05` → `2026-10-03`, €20k we
 | Pack | Total | Avg day | Green days | Green weeks | Worst day |
 |---|---:|---:|---:|---:|---:|
 | **btc50 primary** | **+€9,921** | **+€109** | 56% (51/91) | 64% (9/14) | −€1,870 |
-| Stack 70% btc50 + 15% residual_full | +€10,757 | +€118 | 55% | 50% (7/14) | −€2,098 |
-| residual_full alone | +€25,417 | +€279 | 27% | 43% | −€5,258 |
+| Stack 70% btc50 + 15% residual_full | +€9,246 | +€102 | 54% | 50% (7/14) | −€1,923 |
+| residual_full alone (skip0) | +€15,346 | +€169 | 25% | 36% | −€4,091 |
+
+Note: an earlier draft of `DAILY_3M` accidentally coerced `skip_days=0`→`1` for residual_full (+€25k); corrected figures use true residual_full (`skip=0`).
 
 ## Cross-engine synthesis
 

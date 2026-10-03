@@ -1,5 +1,5 @@
 {
-  "asof": "2026-10-03T09:43:26.530642+00:00",
+  "asof": "2026-10-03T09:51:14.610675+00:00",
   "start": "2026-07-05",
   "end": "2026-10-03",
   "book_eur": 20000.0,
@@ -1410,43 +1410,43 @@
         "sma_n": 50,
         "n_alts": 1
       },
-      "engine_pnl": 25416.75,
-      "engine_max_dd_pct": 0.1076,
+      "engine_pnl": 15346.02,
+      "engine_max_dd_pct": 0.2347,
       "summary": {
         "start": "2026-07-05",
         "end": "2026-10-03",
         "n_days": 91,
-        "total_pnl": 25416.75,
-        "total_ret_pct": 127.08,
-        "avg_day_pnl": 279.3,
+        "total_pnl": 15346.02,
+        "total_ret_pct": 76.73,
+        "avg_day_pnl": 168.64,
         "median_day_pnl": 0.0,
-        "best_day": 5666.16,
-        "worst_day": -5258.06,
-        "pct_days_green": 0.2747,
-        "n_days_green": 25,
-        "n_days_red": 28,
+        "best_day": 4409.02,
+        "worst_day": -4091.46,
+        "pct_days_green": 0.2527,
+        "n_days_green": 23,
+        "n_days_red": 30,
         "n_days_flat": 38,
         "n_weeks": 14,
-        "pct_weeks_green": 0.4286,
-        "n_weeks_green": 6,
-        "worst_week": -5478.58,
-        "best_week": 17179.27,
-        "max_dd_pct": 10.76,
+        "pct_weeks_green": 0.3571,
+        "n_weeks_green": 5,
+        "worst_week": -4257.23,
+        "best_week": 13371.63,
+        "max_dd_pct": 23.47,
         "weeks": {
           "2026-W27": 0.0,
           "2026-W28": 0.0,
           "2026-W29": -806.13,
           "2026-W30": 137.21,
-          "2026-W31": -894.8,
-          "2026-W32": 70.45,
-          "2026-W33": -415.05,
-          "2026-W34": 3530.0,
-          "2026-W35": -1338.09,
-          "2026-W36": 3542.93,
-          "2026-W37": -1934.89,
-          "2026-W38": 17179.27,
-          "2026-W39": 11824.43,
-          "2026-W40": -5478.58
+          "2026-W31": -442.16,
+          "2026-W32": -519.52,
+          "2026-W33": -1755.16,
+          "2026-W34": 622.67,
+          "2026-W35": -1465.19,
+          "2026-W36": 2759.76,
+          "2026-W37": -1500.82,
+          "2026-W38": 13371.63,
+          "2026-W39": 9200.96,
+          "2026-W40": -4257.23
         }
       },
       "daily": [
@@ -1620,472 +1620,472 @@
         },
         {
           "date": "2026-07-29",
-          "equity": 18436.28,
-          "day_pnl": -89.58,
-          "day_ret_pct": -0.484,
-          "cum_pnl": -1563.72
+          "equity": 18652.91,
+          "day_pnl": 127.05,
+          "day_ret_pct": 0.686,
+          "cum_pnl": -1347.09
         },
         {
           "date": "2026-07-30",
-          "equity": 18436.28,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1563.72
+          "equity": 20608.25,
+          "day_pnl": 1955.34,
+          "day_ret_pct": 10.483,
+          "cum_pnl": 608.25
         },
         {
           "date": "2026-07-31",
-          "equity": 18436.28,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1563.72
+          "equity": 20204.64,
+          "day_pnl": -403.61,
+          "day_ret_pct": -1.958,
+          "cum_pnl": 204.64
         },
         {
           "date": "2026-08-01",
-          "equity": 18436.28,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1563.72
+          "equity": 18992.2,
+          "day_pnl": -1212.44,
+          "day_ret_pct": -6.001,
+          "cum_pnl": -1007.8
         },
         {
           "date": "2026-08-02",
-          "equity": 18436.28,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1563.72
+          "equity": 18888.92,
+          "day_pnl": -103.28,
+          "day_ret_pct": -0.544,
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-03",
-          "equity": 18436.28,
+          "equity": 18888.92,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": -1563.72
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-04",
-          "equity": 18436.28,
+          "equity": 18888.92,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": -1563.72
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-05",
-          "equity": 18170.32,
-          "day_pnl": -265.96,
-          "day_ret_pct": -1.443,
-          "cum_pnl": -1829.68
+          "equity": 18888.92,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-06",
-          "equity": 19181.74,
-          "day_pnl": 1011.42,
-          "day_ret_pct": 5.566,
-          "cum_pnl": -818.26
+          "equity": 18888.92,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-07",
-          "equity": 19089.39,
-          "day_pnl": -92.35,
-          "day_ret_pct": -0.481,
-          "cum_pnl": -910.61
+          "equity": 18888.92,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-08",
-          "equity": 18958.57,
-          "day_pnl": -130.82,
-          "day_ret_pct": -0.685,
-          "cum_pnl": -1041.43
+          "equity": 18888.92,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -1111.08
         },
         {
           "date": "2026-08-09",
-          "equity": 18506.73,
-          "day_pnl": -451.84,
-          "day_ret_pct": -2.383,
-          "cum_pnl": -1493.27
+          "equity": 18369.4,
+          "day_pnl": -519.52,
+          "day_ret_pct": -2.75,
+          "cum_pnl": -1630.6
         },
         {
           "date": "2026-08-10",
-          "equity": 18159.33,
-          "day_pnl": -347.4,
+          "equity": 18024.58,
+          "day_pnl": -344.82,
           "day_ret_pct": -1.877,
-          "cum_pnl": -1840.67
+          "cum_pnl": -1975.42
         },
         {
           "date": "2026-08-11",
-          "equity": 18091.68,
-          "day_pnl": -67.65,
-          "day_ret_pct": -0.373,
-          "cum_pnl": -1908.32
+          "equity": 17674.3,
+          "day_pnl": -350.28,
+          "day_ret_pct": -1.943,
+          "cum_pnl": -2325.7
         },
         {
           "date": "2026-08-12",
-          "equity": 18091.68,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1908.32
+          "equity": 17283.65,
+          "day_pnl": -390.65,
+          "day_ret_pct": -2.21,
+          "cum_pnl": -2716.35
         },
         {
           "date": "2026-08-13",
-          "equity": 18091.68,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1908.32
+          "equity": 17249.82,
+          "day_pnl": -33.83,
+          "day_ret_pct": -0.196,
+          "cum_pnl": -2750.18
         },
         {
           "date": "2026-08-14",
-          "equity": 18091.68,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1908.32
+          "equity": 16980.3,
+          "day_pnl": -269.52,
+          "day_ret_pct": -1.562,
+          "cum_pnl": -3019.7
         },
         {
           "date": "2026-08-15",
-          "equity": 18091.68,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1908.32
+          "equity": 16688.94,
+          "day_pnl": -291.36,
+          "day_ret_pct": -1.716,
+          "cum_pnl": -3311.06
         },
         {
           "date": "2026-08-16",
-          "equity": 18091.68,
-          "day_pnl": 0.0,
-          "day_ret_pct": 0.0,
-          "cum_pnl": -1908.32
+          "equity": 16614.24,
+          "day_pnl": -74.7,
+          "day_ret_pct": -0.448,
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-17",
-          "equity": 18091.68,
+          "equity": 16614.24,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": -1908.32
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-18",
-          "equity": 18013.44,
-          "day_pnl": -78.24,
-          "day_ret_pct": -0.432,
-          "cum_pnl": -1986.56
+          "equity": 16614.24,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-19",
-          "equity": 19767.8,
-          "day_pnl": 1754.36,
-          "day_ret_pct": 9.739,
-          "cum_pnl": -232.2
+          "equity": 16614.24,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-20",
-          "equity": 20003.58,
-          "day_pnl": 235.78,
-          "day_ret_pct": 1.193,
-          "cum_pnl": 3.58
+          "equity": 16614.24,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-21",
-          "equity": 22454.79,
-          "day_pnl": 2451.21,
-          "day_ret_pct": 12.254,
-          "cum_pnl": 2454.79
+          "equity": 16614.24,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-22",
-          "equity": 21750.07,
-          "day_pnl": -704.72,
-          "day_ret_pct": -3.138,
-          "cum_pnl": 1750.07
+          "equity": 16614.24,
+          "day_pnl": 0.0,
+          "day_ret_pct": 0.0,
+          "cum_pnl": -3385.76
         },
         {
           "date": "2026-08-23",
-          "equity": 21621.68,
-          "day_pnl": -128.39,
-          "day_ret_pct": -0.59,
-          "cum_pnl": 1621.68
+          "equity": 17236.91,
+          "day_pnl": 622.67,
+          "day_ret_pct": 3.748,
+          "cum_pnl": -2763.09
         },
         {
           "date": "2026-08-24",
-          "equity": 21798.19,
-          "day_pnl": 176.51,
-          "day_ret_pct": 0.816,
-          "cum_pnl": 1798.19
+          "equity": 16825.75,
+          "day_pnl": -411.16,
+          "day_ret_pct": -2.385,
+          "cum_pnl": -3174.25
         },
         {
           "date": "2026-08-25",
-          "equity": 20929.51,
-          "day_pnl": -868.68,
-          "day_ret_pct": -3.985,
-          "cum_pnl": 929.51
+          "equity": 16273.08,
+          "day_pnl": -552.67,
+          "day_ret_pct": -3.285,
+          "cum_pnl": -3726.92
         },
         {
           "date": "2026-08-26",
-          "equity": 20796.92,
-          "day_pnl": -132.59,
+          "equity": 16169.99,
+          "day_pnl": -103.09,
           "day_ret_pct": -0.634,
-          "cum_pnl": 796.92
+          "cum_pnl": -3830.01
         },
         {
           "date": "2026-08-27",
-          "equity": 21254.16,
-          "day_pnl": 457.24,
+          "equity": 16525.5,
+          "day_pnl": 355.51,
           "day_ret_pct": 2.199,
-          "cum_pnl": 1254.16
+          "cum_pnl": -3474.5
         },
         {
           "date": "2026-08-28",
-          "equity": 20350.94,
-          "day_pnl": -903.22,
+          "equity": 15823.23,
+          "day_pnl": -702.27,
           "day_ret_pct": -4.25,
-          "cum_pnl": 350.94
+          "cum_pnl": -4176.77
         },
         {
           "date": "2026-08-29",
-          "equity": 20283.59,
-          "day_pnl": -67.35,
-          "day_ret_pct": -0.331,
-          "cum_pnl": 283.59
+          "equity": 15771.72,
+          "day_pnl": -51.51,
+          "day_ret_pct": -0.326,
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-08-30",
-          "equity": 20283.59,
+          "equity": 15771.72,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 283.59
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-08-31",
-          "equity": 20283.59,
+          "equity": 15771.72,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 283.59
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-09-01",
-          "equity": 20283.59,
+          "equity": 15771.72,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 283.59
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-09-02",
-          "equity": 20283.59,
+          "equity": 15771.72,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 283.59
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-09-03",
-          "equity": 20283.59,
+          "equity": 15771.72,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 283.59
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-09-04",
-          "equity": 20283.59,
+          "equity": 15771.72,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 283.59
+          "cum_pnl": -4228.28
         },
         {
           "date": "2026-09-05",
-          "equity": 23020.79,
-          "day_pnl": 2737.2,
-          "day_ret_pct": 13.495,
-          "cum_pnl": 3020.79
+          "equity": 17904.81,
+          "day_pnl": 2133.09,
+          "day_ret_pct": 13.525,
+          "cum_pnl": -2095.19
         },
         {
           "date": "2026-09-06",
-          "equity": 23826.52,
-          "day_pnl": 805.73,
+          "equity": 18531.48,
+          "day_pnl": 626.67,
           "day_ret_pct": 3.5,
-          "cum_pnl": 3826.52
+          "cum_pnl": -1468.52
         },
         {
           "date": "2026-09-07",
-          "equity": 22353.83,
-          "day_pnl": -1472.69,
+          "equity": 17386.07,
+          "day_pnl": -1145.41,
           "day_ret_pct": -6.181,
-          "cum_pnl": 2353.83
+          "cum_pnl": -2613.93
         },
         {
           "date": "2026-09-08",
-          "equity": 21994.0,
-          "day_pnl": -359.83,
+          "equity": 17106.21,
+          "day_pnl": -279.86,
           "day_ret_pct": -1.61,
-          "cum_pnl": 1994.0
+          "cum_pnl": -2893.79
         },
         {
           "date": "2026-09-09",
-          "equity": 21891.63,
-          "day_pnl": -102.37,
-          "day_ret_pct": -0.465,
-          "cum_pnl": 1891.63
+          "equity": 17030.66,
+          "day_pnl": -75.55,
+          "day_ret_pct": -0.442,
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-10",
-          "equity": 21891.63,
+          "equity": 17030.66,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1891.63
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-11",
-          "equity": 21891.63,
+          "equity": 17030.66,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1891.63
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-12",
-          "equity": 21891.63,
+          "equity": 17030.66,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1891.63
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-13",
-          "equity": 21891.63,
+          "equity": 17030.66,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1891.63
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-14",
-          "equity": 21891.63,
+          "equity": 17030.66,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1891.63
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-15",
-          "equity": 21891.63,
+          "equity": 17030.66,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1891.63
+          "cum_pnl": -2969.34
         },
         {
           "date": "2026-09-16",
-          "equity": 24586.76,
-          "day_pnl": 2695.13,
-          "day_ret_pct": 12.311,
-          "cum_pnl": 4586.76
+          "equity": 19131.73,
+          "day_pnl": 2101.07,
+          "day_ret_pct": 12.337,
+          "cum_pnl": -868.27
         },
         {
           "date": "2026-09-17",
-          "equity": 29537.92,
-          "day_pnl": 4951.16,
-          "day_ret_pct": 20.138,
-          "cum_pnl": 9537.92
+          "equity": 22984.38,
+          "day_pnl": 3852.65,
+          "day_ret_pct": 20.137,
+          "cum_pnl": 2984.38
         },
         {
           "date": "2026-09-18",
-          "equity": 35204.08,
-          "day_pnl": 5666.16,
+          "equity": 27393.4,
+          "day_pnl": 4409.02,
           "day_ret_pct": 19.183,
-          "cum_pnl": 15204.08
+          "cum_pnl": 7393.4
         },
         {
           "date": "2026-09-19",
-          "equity": 33627.64,
-          "day_pnl": -1576.44,
+          "equity": 26166.72,
+          "day_pnl": -1226.68,
           "day_ret_pct": -4.478,
-          "cum_pnl": 13627.64
+          "cum_pnl": 6166.72
         },
         {
           "date": "2026-09-20",
-          "equity": 39070.9,
-          "day_pnl": 5443.26,
+          "equity": 30402.29,
+          "day_pnl": 4235.57,
           "day_ret_pct": 16.187,
-          "cum_pnl": 19070.9
+          "cum_pnl": 10402.29
         },
         {
           "date": "2026-09-21",
-          "equity": 40220.93,
-          "day_pnl": 1150.03,
+          "equity": 31297.17,
+          "day_pnl": 894.88,
           "day_ret_pct": 2.943,
-          "cum_pnl": 20220.93
+          "cum_pnl": 11297.17
         },
         {
           "date": "2026-09-22",
-          "equity": 41626.16,
-          "day_pnl": 1405.23,
+          "equity": 32390.62,
+          "day_pnl": 1093.45,
           "day_ret_pct": 3.494,
-          "cum_pnl": 21626.16
+          "cum_pnl": 12390.62
         },
         {
           "date": "2026-09-23",
-          "equity": 40990.85,
-          "day_pnl": -635.31,
+          "equity": 31896.26,
+          "day_pnl": -494.36,
           "day_ret_pct": -1.526,
-          "cum_pnl": 20990.85
+          "cum_pnl": 11896.26
         },
         {
           "date": "2026-09-24",
-          "equity": 43421.2,
-          "day_pnl": 2430.35,
+          "equity": 33787.4,
+          "day_pnl": 1891.14,
           "day_ret_pct": 5.929,
-          "cum_pnl": 23421.2
+          "cum_pnl": 13787.4
         },
         {
           "date": "2026-09-25",
-          "equity": 46772.23,
-          "day_pnl": 3351.03,
+          "equity": 36394.94,
+          "day_pnl": 2607.54,
           "day_ret_pct": 7.717,
-          "cum_pnl": 26772.23
+          "cum_pnl": 16394.94
         },
         {
           "date": "2026-09-26",
-          "equity": 47637.98,
-          "day_pnl": 865.75,
+          "equity": 37068.61,
+          "day_pnl": 673.67,
           "day_ret_pct": 1.851,
-          "cum_pnl": 27637.98
+          "cum_pnl": 17068.61
         },
         {
           "date": "2026-09-27",
-          "equity": 50895.33,
-          "day_pnl": 3257.35,
+          "equity": 39603.25,
+          "day_pnl": 2534.64,
           "day_ret_pct": 6.838,
-          "cum_pnl": 30895.33
+          "cum_pnl": 19603.25
         },
         {
           "date": "2026-09-28",
-          "equity": 45637.27,
-          "day_pnl": -5258.06,
+          "equity": 35511.79,
+          "day_pnl": -4091.46,
           "day_ret_pct": -10.331,
-          "cum_pnl": 25637.27
+          "cum_pnl": 15511.79
         },
         {
           "date": "2026-09-29",
-          "equity": 45416.75,
-          "day_pnl": -220.52,
-          "day_ret_pct": -0.483,
-          "cum_pnl": 25416.75
+          "equity": 35346.02,
+          "day_pnl": -165.77,
+          "day_ret_pct": -0.467,
+          "cum_pnl": 15346.02
         },
         {
           "date": "2026-09-30",
-          "equity": 45416.75,
+          "equity": 35346.02,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 25416.75
+          "cum_pnl": 15346.02
         },
         {
           "date": "2026-10-01",
-          "equity": 45416.75,
+          "equity": 35346.02,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 25416.75
+          "cum_pnl": 15346.02
         },
         {
           "date": "2026-10-02",
-          "equity": 45416.75,
+          "equity": 35346.02,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 25416.75
+          "cum_pnl": 15346.02
         },
         {
           "date": "2026-10-03",
-          "equity": 45416.75,
+          "equity": 35346.02,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 25416.75
+          "cum_pnl": 15346.02
         }
       ]
     },
@@ -2789,37 +2789,37 @@
         "start": "2026-07-05",
         "end": "2026-10-03",
         "n_days": 91,
-        "total_pnl": 10756.93,
-        "total_ret_pct": 63.28,
-        "avg_day_pnl": 118.21,
-        "median_day_pnl": 13.12,
-        "best_day": 2347.59,
-        "worst_day": -2097.76,
-        "pct_days_green": 0.5495,
-        "n_days_green": 50,
-        "n_days_red": 39,
+        "total_pnl": 9246.32,
+        "total_ret_pct": 54.39,
+        "avg_day_pnl": 101.61,
+        "median_day_pnl": 8.88,
+        "best_day": 1979.91,
+        "worst_day": -1922.77,
+        "pct_days_green": 0.5385,
+        "n_days_green": 49,
+        "n_days_red": 40,
         "n_days_flat": 2,
         "n_weeks": 14,
         "pct_weeks_green": 0.5,
         "n_weeks_green": 7,
-        "worst_week": -1912.28,
-        "best_week": 4345.72,
-        "max_dd_pct": 7.17,
+        "worst_week": -1729.08,
+        "best_week": 3952.2,
+        "max_dd_pct": 8.23,
         "weeks": {
           "2026-W27": 0.0,
           "2026-W28": 961.69,
           "2026-W29": -212.07,
           "2026-W30": 918.64,
-          "2026-W31": -107.4,
-          "2026-W32": 151.02,
-          "2026-W33": -287.15,
-          "2026-W34": 4202.98,
-          "2026-W35": -125.7,
-          "2026-W36": 1145.76,
-          "2026-W37": -1527.11,
-          "2026-W38": 3202.81,
-          "2026-W39": 4345.72,
-          "2026-W40": -1912.28
+          "2026-W31": -39.5,
+          "2026-W32": 62.53,
+          "2026-W33": -488.16,
+          "2026-W34": 3766.88,
+          "2026-W35": -144.76,
+          "2026-W36": 1028.28,
+          "2026-W37": -1462.0,
+          "2026-W38": 2631.66,
+          "2026-W39": 3952.2,
+          "2026-W40": -1729.08
         },
         "seed_eur": 17000.0,
         "weights": {
@@ -2998,472 +2998,472 @@
         },
         {
           "date": "2026-07-29",
-          "equity": 18535.07,
-          "day_pnl": 113.21,
-          "day_ret_pct": 0.615,
-          "cum_pnl": 1535.07
+          "equity": 18567.56,
+          "day_pnl": 145.71,
+          "day_ret_pct": 0.791,
+          "cum_pnl": 1567.56
         },
         {
           "date": "2026-07-30",
-          "equity": 19507.08,
-          "day_pnl": 972.01,
-          "day_ret_pct": 5.244,
-          "cum_pnl": 2507.08
+          "equity": 19832.88,
+          "day_pnl": 1265.31,
+          "day_ret_pct": 6.815,
+          "cum_pnl": 2832.88
         },
         {
           "date": "2026-07-31",
-          "equity": 19108.1,
-          "day_pnl": -398.99,
-          "day_ret_pct": -2.045,
-          "cum_pnl": 2108.1
+          "equity": 19373.35,
+          "day_pnl": -459.53,
+          "day_ret_pct": -2.317,
+          "cum_pnl": 2373.35
         },
         {
           "date": "2026-08-01",
-          "equity": 18536.5,
-          "day_pnl": -571.6,
-          "day_ret_pct": -2.991,
-          "cum_pnl": 1536.5
+          "equity": 18619.89,
+          "day_pnl": -753.47,
+          "day_ret_pct": -3.889,
+          "cum_pnl": 1619.89
         },
         {
           "date": "2026-08-02",
-          "equity": 18560.87,
-          "day_pnl": 24.37,
-          "day_ret_pct": 0.131,
-          "cum_pnl": 1560.87
+          "equity": 18628.77,
+          "day_pnl": 8.88,
+          "day_ret_pct": 0.048,
+          "cum_pnl": 1628.77
         },
         {
           "date": "2026-08-03",
-          "equity": 18577.61,
+          "equity": 18645.5,
           "day_pnl": 16.74,
           "day_ret_pct": 0.09,
-          "cum_pnl": 1577.61
+          "cum_pnl": 1645.5
         },
         {
           "date": "2026-08-04",
-          "equity": 18627.07,
+          "equity": 18694.97,
           "day_pnl": 49.46,
-          "day_ret_pct": 0.266,
-          "cum_pnl": 1627.07
+          "day_ret_pct": 0.265,
+          "cum_pnl": 1694.97
         },
         {
           "date": "2026-08-05",
-          "equity": 18631.72,
-          "day_pnl": 4.65,
-          "day_ret_pct": 0.025,
-          "cum_pnl": 1631.72
+          "equity": 18739.51,
+          "day_pnl": 44.55,
+          "day_ret_pct": 0.238,
+          "cum_pnl": 1739.51
         },
         {
           "date": "2026-08-06",
-          "equity": 18767.2,
-          "day_pnl": 135.48,
-          "day_ret_pct": 0.727,
-          "cum_pnl": 1767.2
+          "equity": 18723.28,
+          "day_pnl": -16.23,
+          "day_ret_pct": -0.087,
+          "cum_pnl": 1723.28
         },
         {
           "date": "2026-08-07",
-          "equity": 18801.3,
-          "day_pnl": 34.1,
-          "day_ret_pct": 0.182,
-          "cum_pnl": 1801.3
+          "equity": 18771.23,
+          "day_pnl": 47.95,
+          "day_ret_pct": 0.256,
+          "cum_pnl": 1771.23
         },
         {
           "date": "2026-08-08",
-          "equity": 18785.58,
-          "day_pnl": -15.72,
-          "day_ret_pct": -0.084,
-          "cum_pnl": 1785.58
+          "equity": 18775.13,
+          "day_pnl": 3.9,
+          "day_ret_pct": 0.021,
+          "cum_pnl": 1775.13
         },
         {
           "date": "2026-08-09",
-          "equity": 18711.89,
-          "day_pnl": -73.69,
-          "day_ret_pct": -0.392,
-          "cum_pnl": 1711.89
+          "equity": 18691.29,
+          "day_pnl": -83.84,
+          "day_ret_pct": -0.447,
+          "cum_pnl": 1691.29
         },
         {
           "date": "2026-08-10",
-          "equity": 18563.0,
-          "day_pnl": -148.88,
-          "day_ret_pct": -0.796,
-          "cum_pnl": 1563.0
+          "equity": 18542.79,
+          "day_pnl": -148.5,
+          "day_ret_pct": -0.794,
+          "cum_pnl": 1542.79
         },
         {
           "date": "2026-08-11",
-          "equity": 18512.95,
-          "day_pnl": -50.05,
-          "day_ret_pct": -0.27,
-          "cum_pnl": 1512.95
+          "equity": 18450.35,
+          "day_pnl": -92.44,
+          "day_ret_pct": -0.499,
+          "cum_pnl": 1450.35
         },
         {
           "date": "2026-08-12",
-          "equity": 18509.31,
-          "day_pnl": -3.65,
-          "day_ret_pct": -0.02,
-          "cum_pnl": 1509.31
+          "equity": 18388.1,
+          "day_pnl": -62.24,
+          "day_ret_pct": -0.337,
+          "cum_pnl": 1388.1
         },
         {
           "date": "2026-08-13",
-          "equity": 18506.91,
-          "day_pnl": -2.39,
-          "day_ret_pct": -0.013,
-          "cum_pnl": 1506.91
+          "equity": 18380.63,
+          "day_pnl": -7.47,
+          "day_ret_pct": -0.041,
+          "cum_pnl": 1380.63
         },
         {
           "date": "2026-08-14",
-          "equity": 18436.56,
-          "day_pnl": -70.35,
-          "day_ret_pct": -0.38,
-          "cum_pnl": 1436.56
+          "equity": 18269.86,
+          "day_pnl": -110.78,
+          "day_ret_pct": -0.603,
+          "cum_pnl": 1269.86
         },
         {
           "date": "2026-08-15",
-          "equity": 18445.12,
-          "day_pnl": 8.55,
-          "day_ret_pct": 0.046,
-          "cum_pnl": 1445.12
+          "equity": 18234.71,
+          "day_pnl": -35.15,
+          "day_ret_pct": -0.192,
+          "cum_pnl": 1234.71
         },
         {
           "date": "2026-08-16",
-          "equity": 18424.74,
-          "day_pnl": -20.38,
-          "day_ret_pct": -0.11,
-          "cum_pnl": 1424.74
+          "equity": 18203.12,
+          "day_pnl": -31.58,
+          "day_ret_pct": -0.173,
+          "cum_pnl": 1203.12
         },
         {
           "date": "2026-08-17",
-          "equity": 18424.74,
+          "equity": 18203.12,
           "day_pnl": 0.0,
           "day_ret_pct": 0.0,
-          "cum_pnl": 1424.74
+          "cum_pnl": 1203.12
         },
         {
           "date": "2026-08-18",
-          "equity": 18410.34,
-          "day_pnl": -14.4,
-          "day_ret_pct": -0.078,
-          "cum_pnl": 1410.34
+          "equity": 18200.46,
+          "day_pnl": -2.67,
+          "day_ret_pct": -0.015,
+          "cum_pnl": 1200.46
         },
         {
           "date": "2026-08-19",
-          "equity": 19650.88,
-          "day_pnl": 1240.54,
-          "day_ret_pct": 6.738,
-          "cum_pnl": 2650.88
+          "equity": 19177.85,
+          "day_pnl": 977.39,
+          "day_ret_pct": 5.37,
+          "cum_pnl": 2177.85
         },
         {
           "date": "2026-08-20",
-          "equity": 20655.31,
-          "day_pnl": 1004.43,
-          "day_ret_pct": 5.111,
-          "cum_pnl": 3655.31
+          "equity": 20146.91,
+          "day_pnl": 969.07,
+          "day_ret_pct": 5.053,
+          "cum_pnl": 3146.91
         },
         {
           "date": "2026-08-21",
-          "equity": 23002.9,
-          "day_pnl": 2347.59,
-          "day_ret_pct": 11.366,
-          "cum_pnl": 6002.9
+          "equity": 22126.82,
+          "day_pnl": 1979.91,
+          "day_ret_pct": 9.827,
+          "cum_pnl": 5126.82
         },
         {
           "date": "2026-08-22",
-          "equity": 22571.2,
-          "day_pnl": -431.7,
-          "day_ret_pct": -1.877,
-          "cum_pnl": 5571.2
+          "equity": 21800.82,
+          "day_pnl": -326.0,
+          "day_ret_pct": -1.473,
+          "cum_pnl": 4800.82
         },
         {
           "date": "2026-08-23",
-          "equity": 22627.72,
-          "day_pnl": 56.52,
-          "day_ret_pct": 0.25,
-          "cum_pnl": 5627.72
+          "equity": 21970.01,
+          "day_pnl": 169.18,
+          "day_ret_pct": 0.776,
+          "cum_pnl": 4970.01
         },
         {
           "date": "2026-08-24",
-          "equity": 22821.18,
-          "day_pnl": 193.46,
-          "day_ret_pct": 0.855,
-          "cum_pnl": 5821.18
+          "equity": 22075.32,
+          "day_pnl": 105.31,
+          "day_ret_pct": 0.479,
+          "cum_pnl": 5075.32
         },
         {
           "date": "2026-08-25",
-          "equity": 22623.6,
-          "day_pnl": -197.58,
-          "day_ret_pct": -0.866,
-          "cum_pnl": 5623.6
+          "equity": 21925.14,
+          "day_pnl": -150.18,
+          "day_ret_pct": -0.68,
+          "cum_pnl": 4925.14
         },
         {
           "date": "2026-08-26",
-          "equity": 22685.52,
-          "day_pnl": 61.91,
-          "day_ret_pct": 0.274,
-          "cum_pnl": 5685.52
+          "equity": 21991.48,
+          "day_pnl": 66.34,
+          "day_ret_pct": 0.303,
+          "cum_pnl": 4991.48
         },
         {
           "date": "2026-08-27",
-          "equity": 22906.71,
-          "day_pnl": 221.19,
-          "day_ret_pct": 0.975,
-          "cum_pnl": 5906.71
+          "equity": 22197.41,
+          "day_pnl": 205.93,
+          "day_ret_pct": 0.936,
+          "cum_pnl": 5197.41
         },
         {
           "date": "2026-08-28",
-          "equity": 22529.77,
-          "day_pnl": -376.94,
-          "day_ret_pct": -1.646,
-          "cum_pnl": 5529.77
+          "equity": 21850.61,
+          "day_pnl": -346.8,
+          "day_ret_pct": -1.562,
+          "cum_pnl": 4850.61
         },
         {
           "date": "2026-08-29",
-          "equity": 22578.19,
-          "day_pnl": 48.42,
-          "day_ret_pct": 0.215,
-          "cum_pnl": 5578.19
+          "equity": 21901.41,
+          "day_pnl": 50.8,
+          "day_ret_pct": 0.232,
+          "cum_pnl": 4901.41
         },
         {
           "date": "2026-08-30",
-          "equity": 22502.03,
+          "equity": 21825.25,
           "day_pnl": -76.16,
-          "day_ret_pct": -0.337,
-          "cum_pnl": 5502.03
+          "day_ret_pct": -0.348,
+          "cum_pnl": 4825.25
         },
         {
           "date": "2026-08-31",
-          "equity": 22583.7,
+          "equity": 21906.92,
           "day_pnl": 81.66,
-          "day_ret_pct": 0.363,
-          "cum_pnl": 5583.7
+          "day_ret_pct": 0.374,
+          "cum_pnl": 4906.92
         },
         {
           "date": "2026-09-01",
-          "equity": 22464.24,
+          "equity": 21787.46,
           "day_pnl": -119.46,
-          "day_ret_pct": -0.529,
-          "cum_pnl": 5464.24
+          "day_ret_pct": -0.545,
+          "cum_pnl": 4787.46
         },
         {
           "date": "2026-09-02",
-          "equity": 22457.47,
+          "equity": 21780.69,
           "day_pnl": -6.77,
-          "day_ret_pct": -0.03,
-          "cum_pnl": 5457.47
+          "day_ret_pct": -0.031,
+          "cum_pnl": 4780.69
         },
         {
           "date": "2026-09-03",
-          "equity": 22899.9,
+          "equity": 22223.12,
           "day_pnl": 442.43,
-          "day_ret_pct": 1.97,
-          "cum_pnl": 5899.9
+          "day_ret_pct": 2.031,
+          "cum_pnl": 5223.12
         },
         {
           "date": "2026-09-04",
-          "equity": 22725.3,
+          "equity": 22048.52,
           "day_pnl": -174.6,
-          "day_ret_pct": -0.762,
-          "cum_pnl": 5725.3
+          "day_ret_pct": -0.786,
+          "cum_pnl": 5048.52
         },
         {
           "date": "2026-09-05",
-          "equity": 23155.06,
-          "day_pnl": 429.76,
-          "day_ret_pct": 1.891,
-          "cum_pnl": 6155.06
+          "equity": 22387.66,
+          "day_pnl": 339.14,
+          "day_ret_pct": 1.538,
+          "cum_pnl": 5387.66
         },
         {
           "date": "2026-09-06",
-          "equity": 23647.8,
-          "day_pnl": 492.74,
-          "day_ret_pct": 2.128,
-          "cum_pnl": 6647.8
+          "equity": 22853.54,
+          "day_pnl": 465.88,
+          "day_ret_pct": 2.081,
+          "cum_pnl": 5853.54
         },
         {
           "date": "2026-09-07",
-          "equity": 22634.81,
-          "day_pnl": -1013.0,
-          "day_ret_pct": -4.284,
-          "cum_pnl": 5634.81
+          "equity": 21889.64,
+          "day_pnl": -963.9,
+          "day_ret_pct": -4.218,
+          "cum_pnl": 4889.64
         },
         {
           "date": "2026-09-08",
-          "equity": 22347.45,
-          "day_pnl": -287.35,
-          "day_ret_pct": -1.27,
-          "cum_pnl": 5347.45
+          "equity": 21614.28,
+          "day_pnl": -275.36,
+          "day_ret_pct": -1.258,
+          "cum_pnl": 4614.28
         },
         {
           "date": "2026-09-09",
-          "equity": 22270.05,
-          "day_pnl": -77.4,
-          "day_ret_pct": -0.346,
-          "cum_pnl": 5270.05
+          "equity": 21540.9,
+          "day_pnl": -73.38,
+          "day_ret_pct": -0.34,
+          "cum_pnl": 4540.9
         },
         {
           "date": "2026-09-10",
-          "equity": 22072.74,
+          "equity": 21343.59,
           "day_pnl": -197.31,
-          "day_ret_pct": -0.886,
-          "cum_pnl": 5072.74
+          "day_ret_pct": -0.916,
+          "cum_pnl": 4343.59
         },
         {
           "date": "2026-09-11",
-          "equity": 22165.4,
+          "equity": 21436.25,
           "day_pnl": 92.66,
-          "day_ret_pct": 0.42,
-          "cum_pnl": 5165.4
+          "day_ret_pct": 0.434,
+          "cum_pnl": 4436.25
         },
         {
           "date": "2026-09-12",
-          "equity": 22178.52,
+          "equity": 21449.37,
           "day_pnl": 13.12,
-          "day_ret_pct": 0.059,
-          "cum_pnl": 5178.52
+          "day_ret_pct": 0.061,
+          "cum_pnl": 4449.37
         },
         {
           "date": "2026-09-13",
-          "equity": 22120.69,
+          "equity": 21391.54,
           "day_pnl": -57.83,
-          "day_ret_pct": -0.261,
-          "cum_pnl": 5120.69
+          "day_ret_pct": -0.27,
+          "cum_pnl": 4391.54
         },
         {
           "date": "2026-09-14",
-          "equity": 22320.11,
+          "equity": 21590.97,
           "day_pnl": 199.42,
-          "day_ret_pct": 0.902,
-          "cum_pnl": 5320.11
+          "day_ret_pct": 0.932,
+          "cum_pnl": 4590.97
         },
         {
           "date": "2026-09-15",
-          "equity": 22016.75,
+          "equity": 21287.6,
           "day_pnl": -303.37,
-          "day_ret_pct": -1.359,
-          "cum_pnl": 5016.75
+          "day_ret_pct": -1.405,
+          "cum_pnl": 4287.6
         },
         {
           "date": "2026-09-16",
-          "equity": 22543.57,
-          "day_pnl": 526.83,
-          "day_ret_pct": 2.393,
-          "cum_pnl": 5543.57
+          "equity": 21725.32,
+          "day_pnl": 437.72,
+          "day_ret_pct": 2.056,
+          "cum_pnl": 4725.32
         },
         {
           "date": "2026-09-17",
-          "equity": 23308.53,
-          "day_pnl": 764.96,
-          "day_ret_pct": 3.393,
-          "cum_pnl": 6308.53
+          "equity": 22325.5,
+          "day_pnl": 600.19,
+          "day_ret_pct": 2.763,
+          "cum_pnl": 5325.5
         },
         {
           "date": "2026-09-18",
-          "equity": 24689.6,
-          "day_pnl": 1381.07,
-          "day_ret_pct": 5.925,
-          "cum_pnl": 7689.6
+          "equity": 23518.0,
+          "day_pnl": 1192.5,
+          "day_ret_pct": 5.341,
+          "cum_pnl": 6518.0
         },
         {
           "date": "2026-09-19",
-          "equity": 24499.68,
-          "day_pnl": -189.92,
-          "day_ret_pct": -0.769,
-          "cum_pnl": 7499.68
+          "equity": 23380.54,
+          "day_pnl": -137.46,
+          "day_ret_pct": -0.584,
+          "cum_pnl": 6380.54
         },
         {
           "date": "2026-09-20",
-          "equity": 25323.5,
-          "day_pnl": 823.82,
-          "day_ret_pct": 3.363,
-          "cum_pnl": 8323.5
+          "equity": 24023.21,
+          "day_pnl": 642.66,
+          "day_ret_pct": 2.749,
+          "cum_pnl": 7023.21
         },
         {
           "date": "2026-09-21",
-          "equity": 26179.19,
-          "day_pnl": 855.69,
-          "day_ret_pct": 3.379,
-          "cum_pnl": 9179.19
+          "equity": 24840.62,
+          "day_pnl": 817.42,
+          "day_ret_pct": 3.403,
+          "cum_pnl": 7840.62
         },
         {
           "date": "2026-09-22",
-          "equity": 26353.87,
-          "day_pnl": 174.68,
-          "day_ret_pct": 0.667,
-          "cum_pnl": 9353.87
+          "equity": 24968.54,
+          "day_pnl": 127.91,
+          "day_ret_pct": 0.515,
+          "cum_pnl": 7968.54
         },
         {
           "date": "2026-09-23",
-          "equity": 25923.91,
-          "day_pnl": -429.95,
-          "day_ret_pct": -1.631,
-          "cum_pnl": 8923.91
+          "equity": 24559.73,
+          "day_pnl": -408.81,
+          "day_ret_pct": -1.637,
+          "cum_pnl": 7559.73
         },
         {
           "date": "2026-09-24",
-          "equity": 26845.93,
-          "day_pnl": 922.02,
-          "day_ret_pct": 3.557,
-          "cum_pnl": 9845.93
+          "equity": 25400.86,
+          "day_pnl": 841.14,
+          "day_ret_pct": 3.425,
+          "cum_pnl": 8400.86
         },
         {
           "date": "2026-09-25",
-          "equity": 28058.75,
-          "day_pnl": 1212.82,
-          "day_ret_pct": 4.518,
-          "cum_pnl": 11058.75
+          "equity": 26502.16,
+          "day_pnl": 1101.3,
+          "day_ret_pct": 4.336,
+          "cum_pnl": 9502.16
         },
         {
           "date": "2026-09-26",
-          "equity": 28437.29,
-          "day_pnl": 378.54,
-          "day_ret_pct": 1.349,
-          "cum_pnl": 11437.29
+          "equity": 26851.88,
+          "day_pnl": 349.73,
+          "day_ret_pct": 1.32,
+          "cum_pnl": 9851.88
         },
         {
           "date": "2026-09-27",
-          "equity": 29669.21,
-          "day_pnl": 1231.92,
-          "day_ret_pct": 4.332,
-          "cum_pnl": 12669.21
+          "equity": 27975.4,
+          "day_pnl": 1123.51,
+          "day_ret_pct": 4.184,
+          "cum_pnl": 10975.4
         },
         {
           "date": "2026-09-28",
-          "equity": 27571.45,
-          "day_pnl": -2097.76,
-          "day_ret_pct": -7.07,
-          "cum_pnl": 10571.45
+          "equity": 26052.63,
+          "day_pnl": -1922.77,
+          "day_ret_pct": -6.873,
+          "cum_pnl": 9052.63
         },
         {
           "date": "2026-09-29",
-          "equity": 27542.98,
-          "day_pnl": -28.47,
-          "day_ret_pct": -0.103,
-          "cum_pnl": 10542.98
+          "equity": 26032.37,
+          "day_pnl": -20.26,
+          "day_ret_pct": -0.078,
+          "cum_pnl": 9032.37
         },
         {
           "date": "2026-09-30",
-          "equity": 27546.93,
+          "equity": 26036.32,
           "day_pnl": 3.95,
-          "day_ret_pct": 0.014,
-          "cum_pnl": 10546.93
+          "day_ret_pct": 0.015,
+          "cum_pnl": 9036.32
         },
         {
           "date": "2026-10-01",
-          "equity": 27780.91,
+          "equity": 26270.3,
           "day_pnl": 233.98,
-          "day_ret_pct": 0.849,
-          "cum_pnl": 10780.91
+          "day_ret_pct": 0.899,
+          "cum_pnl": 9270.3
         },
         {
           "date": "2026-10-02",
-          "equity": 27738.87,
+          "equity": 26228.26,
           "day_pnl": -42.03,
-          "day_ret_pct": -0.151,
-          "cum_pnl": 10738.87
+          "day_ret_pct": -0.16,
+          "cum_pnl": 9228.26
         },
         {
           "date": "2026-10-03",
-          "equity": 27756.93,
+          "equity": 26246.32,
           "day_pnl": 18.05,
-          "day_ret_pct": 0.065,
-          "cum_pnl": 10756.93
+          "day_ret_pct": 0.069,
+          "cum_pnl": 9246.32
         }
       ]
     }
