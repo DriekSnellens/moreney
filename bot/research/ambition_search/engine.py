@@ -297,7 +297,7 @@ def eval_spec(
         sma_n=int(spec.get("sma_n") or 50),
         rebalance_days=int(spec.get("rebalance_days") or 7),
         lookback_days=int(spec.get("lookback_days") or 20),
-        skip_days=int(spec.get("skip_days") or 1),
+        skip_days=int(spec["skip_days"]) if spec.get("skip_days") is not None else 1,
         n_alts=int(spec.get("n_alts") or 1),
         require_alt_sma=bool(spec.get("require_alt_sma")),
         cash_when_no_alt=bool(spec.get("cash_when_no_alt")),
