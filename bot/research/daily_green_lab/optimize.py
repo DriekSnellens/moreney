@@ -536,7 +536,18 @@ def run_optimize(
             and float(o["avg_day_pnl"]) > 0
         )
 
-    robust = [r for r in rows if _pass_oos(r)]
+    def _pass_dual(r: Mapping[str, Any]) -> bool:
+        """Require non-negative IS weeks and capped IS DD — avoid pure OOS spike-fit."""
+        i = r["is"]
+        return (
+            _pass_oos(r)
+            and float(i["avg_week_pnl"]) > 0
+            and float(i["max_dd_pct"]) <= 0.70
+        )
+
+    robust = [r for r in rows if _pass_dual(r)]
+    if not robust:
+        robust = [r for r in rows if _pass_oos(r)]
     robust.sort(key=lambda r: (-float(r["score_blend"]), -float(r["oos"]["avg_week_pnl"])))
 
     # best by entry family on blend among robust (else all)

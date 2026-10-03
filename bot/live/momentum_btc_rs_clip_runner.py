@@ -814,10 +814,11 @@ class BtcRsClipPaperRunner:
         return net
 
     async def manage_alt_trail(self) -> list[dict[str, Any]]:
-        """Intraday trail + optional time-stop on the alt sleeve only."""
+        """Intraday hard-stop / trail / optional time-stop on the alt sleeve."""
         trail = float(self.cfg.alt_trail_pct or 0.0)
         time_max = int(getattr(self.cfg, "time_max_days", 0) or 0)
-        if trail <= 0 and time_max <= 0:
+        hard = float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0)
+        if trail <= 0 and time_max <= 0 and hard <= 0:
             return []
         applied: list[dict[str, Any]] = []
         now_ms = int(time.time() * 1000)
@@ -828,7 +829,10 @@ class BtcRsClipPaperRunner:
             if mark <= 0:
                 continue
             reason = ""
-            if time_max > 0 and pos.opened_ms > 0:
+            if hard > 0 and float(pos.entry_price or 0) > 0:
+                if mark <= float(pos.entry_price) * (1.0 - hard):
+                    reason = "hard_stop"
+            if not reason and time_max > 0 and pos.opened_ms > 0:
                 age_days = (now_ms - int(pos.opened_ms)) / 86_400_000.0
                 if age_days >= float(time_max):
                     reason = "time_stop"
@@ -1181,7 +1185,7 @@ class BtcRsClipPaperRunner:
                 "min_qvol_eur": self.cfg.min_qvol_eur,
                 "book_eur": self.cfg.book_eur,
                 "trail_pct": self.cfg.alt_trail_pct,
-                "hard_stop_pct": 0.0,
+                "hard_stop_pct": float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0),
                 "require_alt_sma": self.cfg.require_alt_sma,
                 "cash_when_no_alt": self.cfg.cash_when_no_alt,
                 "pack_mode": self.pack_mode,

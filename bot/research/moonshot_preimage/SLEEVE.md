@@ -1,32 +1,31 @@
 # €1.700 daily-green sleeve
 
-Vaste small book naast de owner residual/clip. **Doel:** elke risk-on dag actief, zo structureel mogelijk groen.
+Vaste small book naast de owner residual/clip. **Doel:** elke risk-on dag actief, zo structureel mogelijk groen — over **alle liquid coins**.
 
-## Lab verdict (`daily_green_lab`, full universe)
+## Optimize verdict (walk-forward)
 
-| Claim | Resultaat |
-|---|---|
-| Alle liquid coins (niet enkel desk) | **Ja** — `data/ignition_expand_candles` · **80** names |
-| Alle entry × exit packs | **Ja** — **8000** packs (RS / day / breakout / coil / vol / AlphaI × trail / time / stop / BTC-SMA) |
-| Elke dag **+€100** op €1.7k (~5.9%/dag) | **Niet structureel** — winner avg ~**€319/dag** maar gedreven door enkele grote movers (LSK / USELESS / PUMP) |
-| Elke dag in de markt + max groen | **coil_day** trail **12%**, hold ≤**5d**, day≥**2%**, BTC>SMA50 |
-| AlphaI als oracle | **Nee** — `alphai1` ~vlak; structure/day-winners winnen |
+7680 packs · 80 names · fixed €1700 sizing · IS `2024-06→2025-12` / OOS `2026`.
 
-Recent 45d winner: `coil_day_t12_h5_hs0_btc1_fl0.02` · avg **~€319/dag** · **~57%** groene dagen · **~74%** in-markt · 16/46 dagen ≥€100 · DD ~6%.
+Score = groene weken + activity − DD. Winner moet **IS én OOS** positief zijn (geen pure spike-fit).
 
-AlphaI-overlap (14d): zelfde coil familie ~**€87/dag**, **71%** groen; pure AlphaI-picks blijven zwak.
+| Pack | Rol | OOS €/wk | OOS greenW | OOS DD | IS €/wk | Full pnl | Full DD |
+|---|---|---:|---:|---:|---:|---:|---:|
+| **`brk20_day_t12_h5_hs5_btc1`** | **armed** | +317 | 48% | 40% | **+6** | **+€13.2k** | **55%** |
+| `brk20_day_t15_h2_hs0_btc0` | blend-max (verworpen) | +333 | 65% | 26% | −10 | +€12.5k | 94% |
+| old `coil_day_t12_h5` | baseline | — | — | — | — | +€10.6k | 172% |
 
-Runner-up families (full universe): `top_day` / `brk20_day` / `brk20_day6_vol2` — ook sterk; desk-only RS packs blijven lager.
+Zie [`OPTIMIZE.md`](../daily_green_lab/OPTIMIZE.md) · [`LAST_6W.md`](LAST_6W.md) · [`LAST_FULL.md`](LAST_FULL.md).
 
-## Armed pack (`daily_coil_day`)
+## Armed pack (`daily_brk20_day`)
 
 ```
 book_eur        = 1700
 universe        = EXPAND_LIQUID_UNIVERSE (~80)
-entry_mode      = coil_day   # compressie + day thrust
-excess_floor    = 0.02       # min day return na coil
+entry_mode      = brk20_day   # close ≥ prior 20d high
+excess_floor    = 0.0
 rebalance_days  = 1
 alt_trail_pct   = 0.12
+hard_stop_pct   = 0.05
 time_max_days   = 5
 btc_frac        = 0
 cash_when_no_alt= true
@@ -34,6 +33,8 @@ size_to_book    = true
 min_qvol_eur    = 50000
 BTC filter      = SMA50 (risk-off → cash)
 ```
+
+Laatste 6w (fixed book): **+€12.0k** · 86% groene weken · maxDD 20%.
 
 ## Arm
 
@@ -44,20 +45,8 @@ MOMENTUM_MOONSHOT_CLIP_BOOK_EUR=1700
 curl -X POST /live/momentum/moonshot-clip/start
 ```
 
-## Historische wet replays
-
-| Window | PnL | avg/dag | green% | maxDD | File |
-|---|---:|---:|---:|---:|---|
-| Laatste 6w | **+€13.5k** | +313 | 49% | 14.9% | [`LAST_6W.md`](LAST_6W.md) |
-| Laatste 3m | +€13.4k | +147 | 38% | 28.5% | [`LAST_FULL.md`](LAST_FULL.md) |
-| Laatste 6m | +€12.0k | +66 | 30% | 43.5% | idem |
-| Laatste 1y | +€9.0k | +25 | 21% | 68.3% | idem |
-| Full (~2.3y) | **+€1.3k** | +1.6 | 22% | **93%** | idem |
-
-Recente spikeweken (USELESS/LSK) redden het pad; vóór mid-2026 is coil_day **niet** structureel groen — lange drawdown tot ~−93% op het €1.7k boek.
-
-Reproduce lab:
+Reproduce:
 
 ```bash
-.venv/bin/python -m bot.research.daily_green_lab --candles data/ignition_expand_candles --broad --book 1700 --days 45
+.venv/bin/python -m bot.research.daily_green_lab --optimize
 ```
