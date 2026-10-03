@@ -43,6 +43,11 @@ class ClipConfig:
     require_alt_sma: bool = False
     # With no qualifying alt, do not open a BTC sleeve. Paired with btc_frac 0.
     cash_when_no_alt: bool = False
+    # Moonshot preimage gates (coin-agnostic). 0 / False = off.
+    min_r3_pct: float = 0.0
+    require_trend: bool = False
+    # Cap sizing base at book_eur so a small sleeve stays fixed-size.
+    size_to_book: bool = False
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
@@ -62,6 +67,32 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
         excess_floor=0.035,
         require_alt_sma=True,
         cash_when_no_alt=True,
+    )
+
+
+def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
+    """Fixed small spike sleeve: r3≥15% + RS≥25% + trend (lab best P50).
+
+    Default book €1,700 — separate from the owner residual/clip book.
+    Cash when no setup; 10% alt trail; size capped at book_eur.
+    """
+    base = cfg or ClipConfig()
+    return replace(
+        base,
+        book_eur=float(base.book_eur) if float(base.book_eur) > 0 else 1_700.0,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        excess_floor=0.25,
+        lookback_days=10,
+        skip_days=1,
+        rebalance_days=3,
+        sma_n=50,
+        require_alt_sma=True,
+        cash_when_no_alt=True,
+        min_r3_pct=0.15,
+        require_trend=True,
+        size_to_book=True,
+        alt_trail_pct=0.10,
     )
 
 
@@ -209,7 +240,12 @@ def evaluate_clip(
             "trims": [],
         }
     risk_on = last > s50
-    equity = max(0.0, float(cash_eur) + float(deployed_eur))
+    raw_equity = max(0.0, float(cash_eur) + float(deployed_eur))
+    equity = (
+        min(raw_equity, float(cfg.book_eur))
+        if bool(cfg.size_to_book) and float(cfg.book_eur) > 0
+        else raw_equity
+    )
     held_btc = next((b for b, role in held.items() if role == "btc"), None)
     held_alt = next((b for b, role in held.items() if role == "alt"), None)
     exits: list[dict[str, Any]] = []
@@ -271,7 +307,40 @@ def evaluate_clip(
                     }
                 )
                 continue
-        ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
+        if float(cfg.min_r3_pct or 0.0) > 0:
+            if len(cl) < 4 or cl[-4] <= 0:
+                skipped.append({"base": base, "reason": "short_r3", "excess": round(xs, 4)})
+                continue
+            r3 = cl[-1] / cl[-4] - 1.0
+            if r3 < float(cfg.min_r3_pct):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "weak_r3",
+                        "r3": round(r3, 4),
+                        "excess": round(xs, 4),
+                    }
+                )
+                continue
+        else:
+            r3 = None
+        if cfg.require_trend:
+            s20 = sma(cl, 20)
+            s50_alt = sma(cl, cfg.sma_n)
+            last_alt = float(cl[-1]) if cl else 0.0
+            if s20 is None or s50_alt is None or not (last_alt > s20 > s50_alt):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "no_trend",
+                        "excess": round(xs, 4),
+                    }
+                )
+                continue
+        row = {"base": base, "excess": xs, "qvol": round(qv, 0)}
+        if r3 is not None:
+            row["r3"] = round(float(r3), 4)
+        ranked.append(row)
     ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want_alt: str | None = None
     if rebalance_due and ranked and float(ranked[0]["excess"]) > cfg.excess_floor:
@@ -384,13 +453,29 @@ def evaluate_clip(
                 )
 
     alt_txt = want_alt or "geen alt"
-    caption = (
-        f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
-        f"{int(cfg.alt_frac * 100)}% {alt_txt}"
-        + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
-        + (f", alt-trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
-        + f", {cfg.lookback_days}d RS. Telt niet mee in live mix-equity."
-    )
+    if float(cfg.min_r3_pct or 0.0) > 0 or bool(cfg.require_trend):
+        detail = ""
+        if want_alt and ranked:
+            top = ranked[0]
+            detail = f" (xs {float(top['excess']):+.1%}"
+            if top.get("r3") is not None:
+                detail += f", r3 {float(top['r3']):+.1%}"
+            detail += ")"
+        caption = (
+            f"Moonshot sleeve €{cfg.book_eur:,.0f}: {alt_txt}{detail}"
+            f", gate r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
+            + ("+trend" if cfg.require_trend else "")
+            + (f", trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
+            + ". Vast boek — cash zonder setup."
+        )
+    else:
+        caption = (
+            f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
+            f"{int(cfg.alt_frac * 100)}% {alt_txt}"
+            + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
+            + (f", alt-trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
+            + f", {cfg.lookback_days}d RS. Telt niet mee in live mix-equity."
+        )
     return {
         "ok": True,
         "risk_block": "",

@@ -46,7 +46,20 @@ Best test precision (n≥20): **`r3_15+xs25+trend`** → P50=**15.8%** (n=278, l
 3. **AlphaI alone** is not a moonshot oracle on this sample; combine with tape features.
 4. Trading the signal still needs exits; prior explosive scans showed high P50 rules can still lose money with naive holds.
 
-Reproduce:
+## Live deployment (fixed €1.7k book)
+
+See **[`SLEEVE.md`](./SLEEVE.md)**. Separate Bitvavo sleeve with the best lab gate
+(`r3≥15% + xs≥25% + trend`), cash when flat, 10% trail, sizing capped at €1.700.
+Does not replace the owner residual/clip book.
+
+```bash
+MOMENTUM_MOONSHOT_CLIP_ENABLED=true
+MOMENTUM_MOONSHOT_CLIP_ALLOW_LIVE=false   # paper first
+MOMENTUM_MOONSHOT_CLIP_BOOK_EUR=1700
+curl -X POST /live/momentum/moonshot-clip/start
+```
+
+Reproduce lab:
 
 ```bash
 .venv/bin/python -m bot.research.moonshot_preimage
