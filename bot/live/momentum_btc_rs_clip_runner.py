@@ -76,6 +76,20 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         raw = getattr(settings, name, default)
         return int(default if raw is None else raw)
 
+    hours_raw = str(
+        getattr(settings, "momentum_btc_rs_clip_decision_hours_utc", "7,13,16")
+        or "7,13,16"
+    )
+    hours = tuple(
+        sorted(
+            {
+                int(x.strip())
+                for x in hours_raw.split(",")
+                if x.strip().isdigit() and 0 <= int(x.strip()) <= 23
+            }
+        )
+    ) or (7, 13, 16)
+
     return ClipConfig(
         book_eur=_f("momentum_btc_rs_clip_book_eur", base.book_eur),
         btc_frac=_f("momentum_btc_rs_clip_btc_frac", base.btc_frac),
@@ -87,7 +101,7 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
         sma_n=_i("momentum_btc_rs_clip_sma_n", base.sma_n),
         min_qvol_eur=_f("momentum_btc_rs_clip_min_qvol_eur", base.min_qvol_eur),
         universe=base.universe,
-        decision_hours_utc=base.decision_hours_utc,
+        decision_hours_utc=hours,
         tick_sec=base.tick_sec,
         ohlc_days=base.ohlc_days,
         fee_rt=base.fee_rt,
@@ -1017,6 +1031,7 @@ class BtcRsClipPaperRunner:
         async with self._decide_lock:
             now = datetime.now(UTC)
             self._roll_day(now)
+            in_buy_window = self._in_buy_window(now)
             due = self._rebalance_due(int(now.timestamp() * 1000))
             if self.pending_pack == "residual_full" and due:
                 self._arm_residual_pack("weekly_clock")
@@ -1039,6 +1054,7 @@ class BtcRsClipPaperRunner:
                 sleeve_eur=sleeves,
             )
             applied: list[dict[str, Any]] = []
+            skipped: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
                 for ex in decision.get("exits") or []:
                     pos = next((p for p in self.positions if p.base == ex["base"]), None)
@@ -1066,24 +1082,38 @@ class BtcRsClipPaperRunner:
                                 "sold_eur": float(row["sell_notional_eur"]),
                             }
                         )
-                for row in decision.get("entries") or []:
-                    close = self._last_close(ohlc, row["base"])
-                    if not close:
-                        continue
-                    px = fill_px(close, "buy", slip=self.cfg.slip)
-                    want = float(row["notional_eur"])
-                    left = await self._decision_cash()
-                    want = min(want, left)
-                    pos = await self._open_lot(
-                        str(row["base"]),
-                        want,
-                        px,
-                        str(row.get("role") or "btc"),
-                        list(row.get("reasons") or []),
-                    )
-                    if pos:
-                        applied.append(
-                            {"action": "entry", "base": pos.base, "notional_eur": pos.notional_eur}
+                # New buys only at best hours; SMA/trail exits stay anytime.
+                if in_buy_window:
+                    for row in decision.get("entries") or []:
+                        close = self._last_close(ohlc, row["base"])
+                        if not close:
+                            continue
+                        px = fill_px(close, "buy", slip=self.cfg.slip)
+                        want = float(row["notional_eur"])
+                        left = await self._decision_cash()
+                        want = min(want, left)
+                        pos = await self._open_lot(
+                            str(row["base"]),
+                            want,
+                            px,
+                            str(row.get("role") or "btc"),
+                            list(row.get("reasons") or []),
+                        )
+                        if pos:
+                            applied.append(
+                                {
+                                    "action": "entry",
+                                    "base": pos.base,
+                                    "notional_eur": pos.notional_eur,
+                                }
+                            )
+                else:
+                    for row in decision.get("entries") or []:
+                        skipped.append(
+                            {
+                                "base": str(row.get("base") or ""),
+                                "reason": "outside_buy_window",
+                            }
                         )
                 planned = bool(
                     decision.get("entries")
@@ -1091,13 +1121,16 @@ class BtcRsClipPaperRunner:
                     or decision.get("trims")
                 )
                 # Advance the weekly clock only after a successful action, or
-                # when due with nothing to do. Keep it due if planned fills failed.
+                # when due with nothing to do. Keep it due if planned fills failed
+                # or buys were deferred outside the buy window.
                 if applied or (decision.get("rebalance_due") and not planned):
                     self.last_rebalance_ms = int(now.timestamp() * 1000)
             self.last_decision = {
                 **decision,
                 "applied": applied,
+                "skipped": skipped,
                 "execute": bool(execute),
+                "buy_window": in_buy_window,
                 "at": now.isoformat(),
             }
             await self._refresh_marks()
@@ -1145,9 +1178,15 @@ class BtcRsClipPaperRunner:
                 "failed": failed,
             }
 
+    def _in_buy_window(self, now: datetime | None = None) -> bool:
+        """True during a configured buy hour (minute < 8 grace). Exits ignore this."""
+        now = now or datetime.now(UTC)
+        hours = {int(h) for h in (self.cfg.decision_hours_utc or (7, 13, 16))}
+        return now.hour in hours and now.minute < 8
+
     def next_decision(self) -> str:
         now = datetime.now(UTC)
-        hours = self.cfg.decision_hours_utc or (0,)
+        hours = self.cfg.decision_hours_utc or (7, 13, 16)
         for h in hours:
             cand = now.replace(hour=int(h), minute=5, second=0, microsecond=0)
             if cand > now:
@@ -1224,21 +1263,21 @@ class BtcRsClipPaperRunner:
                 "cash_when_no_alt": self.cfg.cash_when_no_alt,
                 "pack_mode": self.pack_mode,
                 "pending_pack": self.pending_pack,
+                "decision_hours_utc": list(self.cfg.decision_hours_utc),
             },
         }
 
     async def run(self, should_stop) -> None:  # noqa: ANN001
         last_hour_fire: set[str] = set()
-        hours = self.cfg.decision_hours_utc or (0,)
         try:
             await self.reconcile_external_inventory()
         except Exception:  # noqa: BLE001
             logger.exception("clip kick reconcile failed")
         now = datetime.now(UTC)
-        in_window = now.hour in hours and now.minute < 8
-        # Empty-book kick would rebuy immediately; only fill inside the daily window.
+        in_window = self._in_buy_window(now)
+        # Always evaluate (exits); buys hard-gated inside decide() to buy hours.
         try:
-            await self.decide(execute=in_window)
+            await self.decide(execute=True)
         except Exception:  # noqa: BLE001
             logger.exception("clip kick decide failed")
         if in_window:
@@ -1254,7 +1293,7 @@ class BtcRsClipPaperRunner:
                     await self.manage_alt_trail()
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
-                if now.hour in hours and now.minute < 8 and key not in last_hour_fire:
+                if self._in_buy_window(now) and key not in last_hour_fire:
                     await self.decide(execute=True)
                     last_hour_fire.add(key)
                 if len(last_hour_fire) > 48:

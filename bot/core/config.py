@@ -726,6 +726,8 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_sma_n: int = Field(default=50, ge=10, le=200)
     momentum_btc_rs_clip_min_qvol_eur: float = Field(default=80_000.0, ge=0)
     momentum_btc_rs_clip_alt_trail_pct: float = Field(default=0.10, ge=0.0, le=1.0)
+    # Same quality buy hours as the 15m desk / top_day sleeve (7+13+16 UTC).
+    momentum_btc_rs_clip_decision_hours_utc: str = "7,13,16"
     # Empty keeps the 20/80 clip. ``residual_full`` waits for a sleeve sale or
     # the weekly clock, then switches without flattening the open book first.
     momentum_btc_rs_clip_pending_pack: str = ""
@@ -780,11 +782,12 @@ class Settings(BaseSettings):
     momentum_ignition_require_btc_sma: bool = True
     momentum_ignition_min_points: int = Field(default=3, ge=1, le=12)
     momentum_ignition_tick_sec: float = Field(default=30.0, ge=5.0, le=300.0)
-    # 0 = only decision_hours_utc; >0 = scan this often (default 15m).
+    # 0 = only decision_hours_utc (best buy windows). Continuous scan bleeds edge.
     momentum_ignition_decision_interval_sec: float = Field(
-        default=900.0, ge=0.0, le=86_400.0
+        default=0.0, ge=0.0, le=86_400.0
     )
-    momentum_ignition_decision_hours_utc: str = "0"
+    # Same quality hours as the 15m desk (7+13+16 UTC).
+    momentum_ignition_decision_hours_utc: str = "7,13,16"
     # Top-day/sniper entries must clear AlphaI daily+volatile picks.
     momentum_ignition_requires_alphai_pick: bool = True
     momentum_ignition_block_alphai_avoid: bool = True

@@ -151,10 +151,10 @@ class IgnitionConfig:
     liquid_top_n: int = 80
     exclude_bases: tuple[str, ...] = RS_DESK_BASES
     universe: tuple[str, ...] = FALLBACK_SNIPER_UNIVERSE
-    # Sparse hour slots when ``decision_interval_sec`` is 0.
-    decision_hours_utc: tuple[int, ...] = (0,)
-    # When > 0, scan for entries this often (UTC), not only at decision hours.
-    decision_interval_sec: float = 900.0
+    # Best buy windows (desk research): 07/13/16 UTC. Sparse when interval is 0.
+    decision_hours_utc: tuple[int, ...] = (7, 13, 16)
+    # 0 = only decision_hours_utc. Continuous scan ≈ every-bar and bleeds edge.
+    decision_interval_sec: float = 0.0
     tick_sec: float = 30.0
     ohlc_days: int = 120
     # Re-rank sniper universe from Bitvavo 24h volume this often (0 = once).

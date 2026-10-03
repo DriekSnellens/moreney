@@ -44,7 +44,8 @@ class ClipConfig:
     # With no qualifying alt, do not open a BTC sleeve. Paired with btc_frac 0.
     cash_when_no_alt: bool = False
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
-    decision_hours_utc: tuple[int, ...] = (0,)
+    # Same quality hours as the 15m desk / top_day sleeve (7+13+16 UTC).
+    decision_hours_utc: tuple[int, ...] = (7, 13, 16)
     tick_sec: float = 30.0
     ohlc_days: int = 120
 

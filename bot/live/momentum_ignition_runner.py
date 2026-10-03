@@ -86,7 +86,8 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
         return bool(default if raw is None else raw)
 
     hours_raw = str(
-        getattr(settings, "momentum_ignition_decision_hours_utc", "0") or "0"
+        getattr(settings, "momentum_ignition_decision_hours_utc", "7,13,16")
+        or "7,13,16"
     )
     hours = tuple(
         sorted(
@@ -96,7 +97,7 @@ def config_from_settings(settings: Settings | None = None) -> IgnitionConfig:
                 if x.strip().isdigit() and 0 <= int(x.strip()) <= 23
             }
         )
-    ) or (0,)
+    ) or (7, 13, 16)
 
     mode = str(
         getattr(settings, "momentum_ignition_universe_mode", base.universe_mode)
@@ -1000,6 +1001,9 @@ class IgnitionPaperRunner:
         async with self._decide_lock:
             now = datetime.now(UTC)
             self._roll_day(now)
+            in_buy_window = self._in_buy_window(now)
+            # New entries only inside best buy hours; trails/exits run separately.
+            allow_entries = bool(execute) and in_buy_window
             cash = await self._decision_cash()
             ohlc = await self._load_ohlc()
             held = [p.base for p in self.positions]
@@ -1016,7 +1020,11 @@ class IgnitionPaperRunner:
             decision = {**decision, "alphai": alphai_meta}
             applied: list[dict[str, Any]] = []
             skipped: list[dict[str, Any]] = []
-            if execute and decision.get("ok") and not decision.get("risk_block"):
+            if (
+                allow_entries
+                and decision.get("ok")
+                and not decision.get("risk_block")
+            ):
                 held_set = {str(b).upper() for b in held}
                 free = max(0, int(self.cfg.max_positions) - len(held_set))
                 candidates = self._entry_candidates(decision)
@@ -1083,11 +1091,19 @@ class IgnitionPaperRunner:
                             "ignition skip %s (venue fill failed); trying next ranked",
                             base,
                         )
+            elif execute and not in_buy_window and decision.get("want"):
+                skipped.append(
+                    {
+                        "base": str(decision.get("want") or ""),
+                        "reason": "outside_buy_window",
+                    }
+                )
             self.last_decision = {
                 **decision,
                 "applied": applied,
                 "skipped": skipped,
                 "execute": bool(execute),
+                "buy_window": in_buy_window,
                 "at": now.isoformat(),
             }
             await self._refresh_marks()
@@ -1112,17 +1128,25 @@ class IgnitionPaperRunner:
         nxt = now.replace(hour=hours[0], minute=5, second=0, microsecond=0)
         return (nxt + timedelta(days=1)).isoformat()
 
+    def _in_buy_window(self, now: datetime | None = None) -> bool:
+        """True during a configured buy hour (minute < 8 grace). Exits ignore this."""
+        now = now or datetime.now(UTC)
+        hours = {int(h) for h in self.cfg.decision_hours_utc}
+        return now.hour in hours and now.minute < 8
+
     def _decision_slot_due(self, now: datetime, last_slot: int | None) -> int | None:
         """Return a new decision slot id when a scan is due, else None."""
         interval = float(self.cfg.decision_interval_sec or 0.0)
         if interval > 0.0:
+            # Interval mode still hard-gates new buys to decision_hours_utc.
+            if not self._in_buy_window(now):
+                return None
             slot = max(1, int(interval))
             cur = int(now.timestamp()) // slot * slot
             if last_slot is not None and cur <= int(last_slot):
                 return None
             return cur
-        hours = set(int(h) for h in self.cfg.decision_hours_utc)
-        if now.hour not in hours or now.minute >= 8:
+        if not self._in_buy_window(now):
             return None
         # One fire per calendar hour in the sparse schedule.
         cur = int(now.timestamp()) // 3600 * 3600

@@ -530,7 +530,8 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert venues == ("okx",)
     assert Settings().momentum_ignition_allow_live is False
     cfg = config_from_settings(Settings())
-    assert cfg.decision_interval_sec == 900.0
+    assert cfg.decision_interval_sec == 0.0
+    assert cfg.decision_hours_utc == (7, 13, 16)
     assert cfg.entry_mode == "top_day"
     assert cfg.trail_pct == 0.08
     assert cfg.time_max_days == 2.0
@@ -560,7 +561,8 @@ def test_ignition_defaults_to_okx_venue() -> None:
     assert st["target_venue"] == "okx"
     assert st["venues"] == ["okx"]
     assert st["allow_live"] is False
-    assert st["config"]["decision_interval_sec"] == 900.0
+    assert st["config"]["decision_interval_sec"] == 0.0
+    assert st["config"]["decision_hours_utc"] == [7, 13, 16]
     assert st["config"]["universe_mode"] == "ex_desk"
     assert st["config"]["entry_mode"] == "top_day"
     assert st["config"]["requires_alphai_pick"] is True
@@ -622,21 +624,63 @@ def test_ignition_decision_slot_fires_on_interval() -> None:
     from bot.live.momentum_ignition import IgnitionConfig
     from bot.live.momentum_ignition_runner import IgnitionPaperRunner
 
-    cfg = IgnitionConfig(requires_alphai_pick=False, decision_interval_sec=900.0, decision_hours_utc=(0,))
+    # Short interval inside a buy hour: still hard-gated to decision_hours_utc.
+    cfg = IgnitionConfig(
+        requires_alphai_pick=False,
+        decision_interval_sec=60.0,
+        decision_hours_utc=(9,),
+    )
     runner = IgnitionPaperRunner(
         cfg,
         state_path="/tmp/ign-slot-state.json",
         ledger_path="/tmp/ign-slot-ledger.jsonl",
         venues=("okx",),
     )
-    t0 = datetime(2026, 10, 2, 9, 10, tzinfo=UTC)
+    t0 = datetime(2026, 10, 2, 9, 1, tzinfo=UTC)
     slot = runner._decision_slot_due(t0, last_slot=None)
     assert slot is not None
     assert runner._decision_slot_due(t0, last_slot=slot) is None
-    later = datetime(2026, 10, 2, 9, 30, tzinfo=UTC)
+    later = datetime(2026, 10, 2, 9, 3, tzinfo=UTC)
     nxt = runner._decision_slot_due(later, last_slot=slot)
     assert nxt is not None
     assert nxt > slot
+    # Outside the buy-hour grace, interval mode must not fire.
+    assert runner._decision_slot_due(
+        datetime(2026, 10, 2, 9, 10, tzinfo=UTC), last_slot=None
+    ) is None
+    assert runner._decision_slot_due(
+        datetime(2026, 10, 2, 10, 0, tzinfo=UTC), last_slot=None
+    ) is None
+
+
+def test_ignition_buy_window_defaults_and_gate() -> None:
+    from bot.core.config import Settings
+    from bot.live.momentum_ignition import IgnitionConfig
+    from bot.live.momentum_ignition_runner import IgnitionPaperRunner, config_from_settings
+
+    cfg = config_from_settings(Settings())
+    assert cfg.decision_hours_utc == (7, 13, 16)
+    assert cfg.decision_interval_sec == 0.0
+    runner = IgnitionPaperRunner(
+        IgnitionConfig(requires_alphai_pick=False),
+        state_path="/tmp/ign-buy-window.json",
+        ledger_path="/tmp/ign-buy-window.jsonl",
+        venues=("okx",),
+    )
+    assert runner._in_buy_window(datetime(2026, 10, 2, 7, 3, tzinfo=UTC))
+    assert runner._in_buy_window(datetime(2026, 10, 2, 13, 0, tzinfo=UTC))
+    assert runner._in_buy_window(datetime(2026, 10, 2, 16, 7, tzinfo=UTC))
+    assert not runner._in_buy_window(datetime(2026, 10, 2, 7, 8, tzinfo=UTC))
+    assert not runner._in_buy_window(datetime(2026, 10, 2, 12, 0, tzinfo=UTC))
+    assert runner._decision_slot_due(
+        datetime(2026, 10, 2, 7, 2, tzinfo=UTC), last_slot=None
+    ) is not None
+    assert (
+        runner._decision_slot_due(
+            datetime(2026, 10, 2, 8, 0, tzinfo=UTC), last_slot=None
+        )
+        is None
+    )
 
 
 def test_no_per_coin_hardcodes_in_ignition_modules() -> None:

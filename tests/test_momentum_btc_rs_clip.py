@@ -195,8 +195,33 @@ def test_allow_live_defaults_off():
     assert cfg.excess_floor == 0.04
     assert cfg.lookback_days == 10
     assert cfg.alt_trail_pct == 0.10
+    assert cfg.decision_hours_utc == (7, 13, 16)
     text = open("bot/live/momentum_btc_rs_clip_runner.py", encoding="utf-8").read()
     assert "from bot.live.executor" not in text
+
+
+def test_clip_buy_window_from_settings_and_gate(tmp_path):
+    from bot.core.config import Settings
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    cfg = config_from_settings(Settings())
+    assert cfg.decision_hours_utc == (7, 13, 16)
+    custom = config_from_settings(
+        Settings(momentum_btc_rs_clip_decision_hours_utc="8,14")
+    )
+    assert custom.decision_hours_utc == (8, 14)
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=20_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+    )
+    assert r._in_buy_window(datetime(2026, 10, 2, 7, 1, tzinfo=UTC))
+    assert r._in_buy_window(datetime(2026, 10, 2, 13, 7, tzinfo=UTC))
+    assert r._in_buy_window(datetime(2026, 10, 2, 16, 0, tzinfo=UTC))
+    assert not r._in_buy_window(datetime(2026, 10, 2, 7, 8, tzinfo=UTC))
+    assert not r._in_buy_window(datetime(2026, 10, 2, 11, 0, tzinfo=UTC))
+    assert r.status()["config"]["decision_hours_utc"] == [7, 13, 16]
 
 
 def test_no_coin_hardcodes_in_clip_module():
