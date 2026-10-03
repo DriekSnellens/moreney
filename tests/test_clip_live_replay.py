@@ -34,6 +34,24 @@ def test_alt_allow_gate_and_intersect() -> None:
     assert apply_alt_allow(pick, {"NEAR", "UNI"}, mode="gate") == ["NEAR"]
     assert apply_alt_allow(pick, {"UNI", "LTC"}, mode="intersect", excess_floor=0.04) == ["UNI"]
     assert apply_alt_allow(pick, {"SOL"}, mode="intersect", excess_floor=0.04) == []
+    # Soft modes keep residual when AlphaI disagrees.
+    assert apply_alt_allow(pick, {"UNI", "LTC"}, mode="prefer", excess_floor=0.04) == ["UNI"]
+    assert apply_alt_allow(pick, {"SOL"}, mode="prefer", excess_floor=0.04) == ["NEAR"]
+    assert apply_alt_allow(pick, {"SOL"}, mode="overlap_or_rs", excess_floor=0.04) == ["NEAR"]
+    assert apply_alt_allow(pick, {"UNI"}, mode="overlap_or_rs", excess_floor=0.04) == ["UNI"]
+    # Excess override keeps a strong RS winner even if not an AlphaI pick.
+    assert (
+        apply_alt_allow(
+            pick, {"SOL"}, mode="override_gate", excess_override=0.30
+        )
+        == ["NEAR"]
+    )
+    assert (
+        apply_alt_allow(
+            pick, {"SOL"}, mode="override_gate", excess_override=0.50
+        )
+        == []
+    )
 
 
 def test_live_pack_knobs_match_clip_config() -> None:

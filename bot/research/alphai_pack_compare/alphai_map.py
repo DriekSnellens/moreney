@@ -32,16 +32,38 @@ def _session_ts(sess: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _picks_from_session(
+    sess: Mapping[str, Any],
+    *,
+    universe: set[str],
+    top_k: int | None = None,
+) -> set[str]:
+    rows = [p for p in (sess.get("picks") or []) if isinstance(p, Mapping) and p.get("base")]
+    rows.sort(
+        key=lambda p: (
+            int(p["rank"]) if p.get("rank") is not None else 999,
+            -float(p.get("score") or 0.0),
+        )
+    )
+    if top_k is not None:
+        rows = rows[: max(1, int(top_k))]
+    return {str(p.get("base") or "").upper() for p in rows if str(p.get("base") or "").upper() in universe}
+
+
 def picks_asof_hour(
     sessions: Sequence[Mapping[str, Any]],
     *,
     hour_utc: int = 7,
     minute_grace: int = 8,
     universe: Sequence[str] = DEFAULT_UNIVERSE,
+    top_k: int | None = None,
+    day_union: bool = False,
 ) -> dict[str, set[str]]:
     """Latest session at or before ``hour_utc:minute_grace`` each UTC day.
 
     Matches the live desk/clip buy-window cadence (07/13/16, minute < 8).
+    ``day_union`` unions every session that day (wider allow-list).
+    ``top_k`` keeps only the best-ranked AlphaI names.
     """
     univ = {str(b).upper() for b in universe}
     by_day: dict[str, list[Mapping[str, Any]]] = {}
@@ -53,6 +75,12 @@ def picks_asof_hour(
 
     out: dict[str, set[str]] = {}
     for day, rows in sorted(by_day.items()):
+        if day_union:
+            merged: set[str] = set()
+            for sess in rows:
+                merged |= _picks_from_session(sess, universe=univ, top_k=top_k)
+            out[day] = merged
+            continue
         cutoff = datetime(
             int(day[:4]),
             int(day[5:7]),
@@ -63,12 +91,7 @@ def picks_asof_hour(
         ).timestamp()
         eligible = [s for s in rows if _session_ts(s) <= cutoff]
         chosen = max(eligible, key=_session_ts) if eligible else min(rows, key=_session_ts)
-        picks = {
-            str(p.get("base") or "").upper()
-            for p in (chosen.get("picks") or [])
-            if isinstance(p, Mapping) and p.get("base")
-        }
-        out[day] = {b for b in picks if b in univ}
+        out[day] = _picks_from_session(chosen, universe=univ, top_k=top_k)
     return out
 
 
