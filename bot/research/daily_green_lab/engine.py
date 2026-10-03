@@ -1,23 +1,24 @@
-"""Daily-active sleeve grid for a fixed small book (€1.7k default).
+"""Daily-active sleeve grid — full liquid universe, broad entry×exit search.
 
-Each pack tries to be **in market every risk-on day** (or every calendar day),
-optionally steered by AlphaI picks. Ranked by green-day rate among packs that
-stay active, then by avg day PnL / worst day.
+Default candles: ``data/ignition_expand_candles`` (~80+ liquid EUR names),
+not the 16-name desk residual set.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from collections import defaultdict
+import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-
 Row = list[float]
+
+_WORKER: dict[str, Any] = {}
 
 
 def _load_dir(cache: Path) -> dict[str, list[Row]]:
@@ -64,7 +65,6 @@ def _alphai_daily(path: Path) -> dict[str, list[str]]:
     sessions = raw.get("sessions") if isinstance(raw, dict) else raw
     if not isinstance(sessions, list):
         return {}
-    # latest session per day → ordered picks
     latest: dict[str, tuple[str, list[str]]] = {}
     for sess in sessions:
         if not isinstance(sess, dict):
@@ -90,42 +90,64 @@ def _alphai_daily(path: Path) -> dict[str, list[str]]:
 @dataclass(frozen=True)
 class Spec:
     name: str
-    pick: str  # top_day | top_rs10 | alphai1 | alphai_or_rs | rs_in_alphai
+    pick: str
     trail_pct: float
     time_max_days: int
+    hard_stop_pct: float
     require_btc_sma: bool
     excess_floor: float
     lookback: int
-    # Enter even if BTC below SMA when False risk filter off for alt-only day trades
     force_daily: bool
 
 
-def specs() -> list[Spec]:
+def specs(*, broad: bool = True) -> list[Spec]:
+    """Entry × exit grid. ``broad`` adds structure entries + more exits."""
+    picks = [
+        ("top_day", 1, (0.0,)),
+        ("top_rs5", 5, (0.0, 0.05, 0.10)),
+        ("top_rs10", 10, (0.0, 0.05, 0.10, 0.15)),
+        ("top_rs20", 20, (0.0, 0.08, 0.15)),
+        ("alphai1", 10, (0.0,)),
+        ("alphai_or_rs", 10, (0.0, 0.05)),
+        ("rs_in_alphai", 10, (0.0, 0.05)),
+        ("alphai_top_day", 1, (0.0,)),
+    ]
+    if broad:
+        picks += [
+            ("brk20_day", 1, (0.0, 0.02)),
+            ("brk20_day6_vol2", 1, (0.0,)),
+            ("coil_day", 1, (0.0, 0.02)),
+            ("vol2_day", 1, (0.0, 0.03)),
+            ("top_day_above_sma20", 1, (0.0,)),
+        ]
+    trails = (0.02, 0.03, 0.05, 0.08, 0.10, 0.12, 0.15, 0.20) if broad else (0.05, 0.08, 0.12)
+    times = (1, 2, 3, 5, 7) if broad else (1, 2, 3, 5)
+    stops = (0.0, 0.03, 0.05, 0.08) if broad else (0.0, 0.05)
     out: list[Spec] = []
-    for pick in ("top_day", "top_rs10", "alphai1", "alphai_or_rs", "rs_in_alphai"):
-        for trail in (0.03, 0.05, 0.08, 0.10, 0.12):
-            for tmax in (1, 2, 3, 5):
-                for btc_sma in (True, False):
-                    for floor in (0.0, 0.02, 0.04, 0.08):
-                        if pick.startswith("alphai") and floor > 0.02:
-                            continue  # AlphaI packs: lighter RS floors
-                        name = (
-                            f"{pick}_t{int(trail*100)}_h{tmax}"
-                            f"_btc{int(btc_sma)}_fl{floor:.2f}"
-                        )
-                        out.append(
-                            Spec(
-                                name=name,
-                                pick=pick,
-                                trail_pct=trail,
-                                time_max_days=tmax,
-                                require_btc_sma=btc_sma,
-                                excess_floor=floor,
-                                lookback=10 if "rs" in pick or pick == "top_rs10" else 1,
-                                force_daily=not btc_sma,
+    for pick, lb, floors in picks:
+        for trail in trails:
+            for tmax in times:
+                for hard in stops:
+                    for btc_sma in (True, False):
+                        for floor in floors:
+                            name = (
+                                f"{pick}_t{int(round(trail * 100))}_h{tmax}"
+                                f"_hs{int(round(hard * 100))}"
+                                f"_btc{int(btc_sma)}_fl{floor:.2f}"
                             )
-                        )
-    # Dedup
+                            out.append(
+                                Spec(
+                                    name=name,
+                                    pick=pick,
+                                    trail_pct=float(trail),
+                                    time_max_days=int(tmax),
+                                    hard_stop_pct=float(hard),
+                                    require_btc_sma=bool(btc_sma),
+                                    excess_floor=float(floor),
+                                    lookback=int(lb),
+                                    force_daily=not btc_sma,
+                                )
+                            )
     seen: set[str] = set()
     uniq: list[Spec] = []
     for s in out:
@@ -147,11 +169,11 @@ def _rank_day(
     alphai: Sequence[str],
     btc_dates: Sequence[str],
 ) -> str | None:
-    """Pick one alt for ``date`` (signal on close → enter next open)."""
     if "BTC" not in ohlc_by or date not in ohlc_by["BTC"]:
         return None
     btc_hist = [d for d in btc_dates if d <= date]
-    if len(btc_hist) < lookback + 2:
+    need = max(lookback + 2, 25)
+    if len(btc_hist) < need:
         return None
     btc_c = [float(ohlc_by["BTC"][d][4]) for d in btc_hist]
 
@@ -160,30 +182,72 @@ def _rank_day(
         if base == "BTC":
             continue
         hist = [d for d in dates_by_base[base] if d <= date]
-        if len(hist) < max(lookback + 2, 5):
+        if len(hist) < need:
             continue
         closes = [float(by[d][4]) for d in hist]
-        # day return
+        highs = [float(by[d][2]) for d in hist]
+        lows = [float(by[d][3]) for d in hist]
+        vols = [float(by[d][5]) for d in hist]
         r1 = _ret(closes, 1)
         if r1 is None:
             continue
         xs = None
-        if lookback >= 3:
-            a = _ret(closes, lookback)
-            b = _ret(btc_c, lookback)
-            if a is not None and b is not None:
-                xs = a - b
-        qvol = float(by[hist[-1]][5]) * float(by[hist[-1]][4])
+        a = _ret(closes, lookback) if lookback >= 2 else None
+        b = _ret(btc_c, lookback) if lookback >= 2 else None
+        if a is not None and b is not None:
+            xs = a - b
+        qvol = vols[-1] * closes[-1]
         if qvol < 50_000:
             continue
+        vol_ma = sum(vols[-20:]) / 20.0 if len(vols) >= 20 else 0.0
+        volx = (vols[-1] / vol_ma) if vol_ma > 0 else 0.0
+        prior_hi20 = max(highs[-21:-1]) if len(highs) >= 21 else max(highs[:-1])
+        brk20 = closes[-1] >= prior_hi20
+        span5 = (
+            max(highs[-5:]) / min(lows[-5:]) - 1.0 if min(lows[-5:]) > 0 else 0.0
+        )
+        span20 = (
+            max(highs[-20:]) / min(lows[-20:]) - 1.0 if min(lows[-20:]) > 0 else 0.0
+        )
+        coil = span20 > 1e-9 and span5 / span20 < 0.5
+        s20 = _sma(closes, 20)
+
         if mode == "top_day":
+            if float(r1) < excess_floor:
+                continue
             scored.append((float(r1), base))
-        elif mode == "top_rs10":
+        elif mode == "top_day_above_sma20":
+            if s20 is None or closes[-1] <= s20:
+                continue
+            if float(r1) < excess_floor:
+                continue
+            scored.append((float(r1), base))
+        elif mode in {"top_rs5", "top_rs10", "top_rs20"}:
             if xs is None or xs < excess_floor:
                 continue
             scored.append((float(xs), base))
+        elif mode == "brk20_day":
+            if not brk20 or float(r1) < max(0.0, excess_floor):
+                continue
+            scored.append((float(r1), base))
+        elif mode == "brk20_day6_vol2":
+            if not (brk20 and float(r1) >= 0.06 and volx >= 2.0):
+                continue
+            scored.append((float(r1) * volx, base))
+        elif mode == "coil_day":
+            if not coil or float(r1) < max(0.0, excess_floor):
+                continue
+            scored.append((float(r1), base))
+        elif mode == "vol2_day":
+            if volx < 2.0 or float(r1) < max(0.0, excess_floor):
+                continue
+            scored.append((float(r1) * volx, base))
         elif mode == "alphai1":
-            continue  # handled below
+            continue
+        elif mode == "alphai_top_day":
+            if not alphai or base not in alphai:
+                continue
+            scored.append((float(r1), base))
         elif mode == "alphai_or_rs":
             if alphai and base == alphai[0]:
                 scored.append((1e6 + float(xs or r1), base))
@@ -234,10 +298,9 @@ def simulate(
     daily: list[dict[str, Any]] = []
     trades: list[dict[str, Any]] = []
     prev_eq = book
+    last_ai: list[str] = []
 
     for i, date in enumerate(cal):
-        row_btc = by["BTC"][date]
-        # Fill pending at today's open
         if pending_sell and pos is not None:
             base = pos["base"]
             if date in by.get(base, {}):
@@ -262,7 +325,7 @@ def simulate(
             base = pending_buy
             if date in by.get(base, {}):
                 px = float(by[base][date][1]) * (1 + slip)
-                notion = min(cash * 0.98, book)  # fixed book sizing
+                notion = min(cash * 0.98, book)
                 if notion >= 40 and px > 0:
                     fee_eur = notion * fee
                     qty = notion / px
@@ -288,46 +351,45 @@ def simulate(
                     )
             pending_buy = None
 
-        # Mark
         eq = cash
         if pos is not None:
             base = pos["base"]
             if date in by.get(base, {}):
                 hi = float(by[base][date][2])
+                lo = float(by[base][date][3])
                 cl = float(by[base][date][4])
                 pos["peak"] = max(float(pos["peak"]), hi)
                 pos["days"] = int(pos.get("days") or 0) + 1
                 eq += pos["qty"] * cl
-                # Exit checks on close (trail / time)
+                hard = float(spec.hard_stop_pct or 0.0)
+                hard_hit = hard > 0 and lo <= float(pos["entry"]) * (1 - hard)
                 trail_hit = cl <= float(pos["peak"]) * (1 - spec.trail_pct)
                 time_hit = int(pos["days"]) >= int(spec.time_max_days)
-                if trail_hit or time_hit:
+                if hard_hit:
+                    pos["exit_reason"] = "hard_stop"
+                    # approximate fill at stop
+                    pending_sell = True
+                elif trail_hit or time_hit:
                     pos["exit_reason"] = "alt_trail" if trail_hit else "time_stop"
                     pending_sell = True
 
-        # BTC regime
         btc_hist = [float(by["BTC"][d][4]) for d in btc_dates if d <= date]
         s50 = _sma(btc_hist, 50)
         risk_on = s50 is not None and btc_hist[-1] > s50
         allow = risk_on or spec.force_daily or not spec.require_btc_sma
 
-        # Signal for next-day entry if flat (or replacing after pending sell)
+        if date in alphai_by_day:
+            last_ai = list(alphai_by_day[date])
+        ai = last_ai
+
         if pos is None and not pending_sell and allow:
-            ai = list(alphai_by_day.get(date) or [])
-            # Forward-fill AlphaI within window
-            if not ai:
-                # last known
-                for d in reversed(cal[: i + 1]):
-                    if d in alphai_by_day:
-                        ai = list(alphai_by_day[d])
-                        break
             pick = _rank_day(
                 by,
                 date,
                 dates_by,
                 mode=spec.pick,
-                lookback=max(spec.lookback, 10 if "rs" in spec.pick else 1),
-                excess_floor=spec.excess_floor,
+                lookback=max(int(spec.lookback), 1),
+                excess_floor=float(spec.excess_floor),
                 alphai=ai,
                 btc_dates=btc_dates,
             )
@@ -349,7 +411,6 @@ def simulate(
         )
         prev_eq = eq
 
-    # Liquidate last mark
     if pos is not None:
         base = pos["base"]
         last = cal[-1]
@@ -388,6 +449,7 @@ def simulate(
         "pick": spec.pick,
         "trail_pct": spec.trail_pct,
         "time_max_days": spec.time_max_days,
+        "hard_stop_pct": spec.hard_stop_pct,
         "require_btc_sma": spec.require_btc_sma,
         "excess_floor": spec.excess_floor,
         "pnl_eur": round(float(daily[-1]["cum_pnl"]), 2) if daily else 0.0,
@@ -406,26 +468,58 @@ def simulate(
         "n_trades": len(trades),
         "daily": daily,
         "trades": trades,
-        # Objective: active + green first, then avg day, then less-bad worst day
         "score": round(
-            1000 * (in_mkt / n)  # activity
-            + 2000 * (green / n)  # green days
-            + avg  # euro/day
-            + 0.1 * (min(pnls) if pnls else 0)  # worst day penalty
+            1000 * (in_mkt / n)
+            + 2000 * (green / n)
+            + avg
+            + 0.1 * (min(pnls) if pnls else 0)
             - 50 * max_dd,
             4,
         ),
     }
 
 
+def _init_worker(
+    ohlc: Mapping[str, Sequence[Row]],
+    alphai: Mapping[str, Sequence[str]],
+    book: float,
+    start: str,
+    end: str,
+) -> None:
+    _WORKER.update(ohlc=ohlc, alphai=alphai, book=book, start=start, end=end)
+
+
+def _job(spec_dict: dict[str, Any]) -> dict[str, Any]:
+    spec = Spec(**spec_dict)
+    if spec.pick.startswith("alphai") and not _WORKER["alphai"]:
+        return {"name": spec.name, "ok": False, "reason": "no_alphai"}
+    row = simulate(
+        _WORKER["ohlc"],
+        spec,
+        start=_WORKER["start"],
+        end=_WORKER["end"],
+        book=_WORKER["book"],
+        alphai_by_day=_WORKER["alphai"],
+    )
+    if row.get("ok"):
+        return {k: v for k, v in row.items() if k not in {"daily", "trades"}}
+    return row
+
+
 def run_daily_green_lab(
     *,
-    candle_dir: Path | str = "data/residual_wet_candles",
+    candle_dir: Path | str = "data/ignition_expand_candles",
     alphai_path: Path | str = "data/research/alphai_sessions_merged.json",
     book: float = 1_700.0,
     days: int = 45,
+    workers: int | None = None,
+    broad: bool = True,
 ) -> dict[str, Any]:
     ohlc = _load_dir(Path(candle_dir))
+    # Merge BTC from residual if expand BTC shorter
+    res_btc = Path("data/residual_wet_candles/BTC.json")
+    if "BTC" not in ohlc and res_btc.exists():
+        ohlc["BTC"] = _load_dir(res_btc.parent)["BTC"]
     if "BTC" not in ohlc:
         raise ValueError("BTC required")
     btc_dates = sorted(_by_date(ohlc["BTC"]))
@@ -434,47 +528,51 @@ def run_daily_green_lab(
     start = (end_dt - timedelta(days=days)).strftime("%Y-%m-%d")
     start = next(d for d in btc_dates if d >= start)
     alphai = _alphai_daily(Path(alphai_path))
-
-    # Two windows: recent tape + AlphaI-overlap only
     ai_days = sorted(d for d in alphai if start <= d <= end)
-    windows = {
-        "last_period": (start, end),
-    }
+    windows = {"last_period": (start, end)}
     if ai_days:
         windows["alphai_overlap"] = (ai_days[0], min(ai_days[-1], end))
 
-    all_specs = specs()
+    all_specs = specs(broad=broad)
+    n_workers = workers if workers is not None else max(1, (os.cpu_count() or 4) - 1)
     results: dict[str, Any] = {
         "asof": datetime.now(UTC).isoformat(),
         "book_eur": book,
+        "candle_dir": str(candle_dir),
+        "n_bases": len(ohlc) - 1,
+        "bases": sorted(b for b in ohlc if b != "BTC"),
         "n_specs": len(all_specs),
+        "broad": broad,
         "note": (
-            "+€100/day on €1.7k is ~5.9%/day — structurally unavailable every day. "
-            "This lab maximizes daily activity + green-day rate + avg €/day."
+            f"Full liquid universe ({len(ohlc) - 1} names), broad entry×exit grid. "
+            "+€100/day every day on €1.7k (~5.9%/day) is the aspiration — "
+            "this ranks what the tape allows."
         ),
         "windows": {},
     }
 
     for wname, (w0, w1) in windows.items():
+        print(
+            f"  window {wname} {w0}→{w1} specs={len(all_specs)} workers={n_workers}",
+            flush=True,
+        )
+        spec_dicts = [asdict(s) for s in all_specs]
         rows: list[dict[str, Any]] = []
-        for spec in all_specs:
-            # Skip AlphaI-only packs on windows with no picks
-            if spec.pick.startswith("alphai") and not any(
-                w0 <= d <= w1 for d in alphai
-            ):
-                continue
-            row = simulate(
-                ohlc,
-                spec,
-                start=w0,
-                end=w1,
-                book=book,
-                alphai_by_day=alphai,
-            )
-            if row.get("ok"):
-                # Drop bulky series from ranked list
-                slim = {k: v for k, v in row.items() if k not in {"daily", "trades"}}
-                rows.append(slim)
+        if n_workers <= 1:
+            _init_worker(ohlc, alphai, book, w0, w1)
+            for sd in spec_dicts:
+                row = _job(sd)
+                if row.get("ok"):
+                    rows.append(row)
+        else:
+            with ProcessPoolExecutor(
+                max_workers=n_workers,
+                initializer=_init_worker,
+                initargs=(ohlc, alphai, book, w0, w1),
+            ) as ex:
+                for row in ex.map(_job, spec_dicts, chunksize=8):
+                    if row.get("ok"):
+                        rows.append(row)
         rows.sort(key=lambda r: (-float(r["score"]), -float(r["avg_day_pnl"])))
         active = [r for r in rows if float(r["pct_days_in_market"]) >= 0.7]
         greenish = [
@@ -482,58 +580,60 @@ def run_daily_green_lab(
             for r in active
             if float(r["pct_days_green"]) >= 0.45 and float(r["avg_day_pnl"]) > 0
         ]
-        best_active = active[0] if active else None
         best_green = (
             max(greenish, key=lambda r: (r["pct_days_green"], r["avg_day_pnl"]))
             if greenish
-            else None
+            else (active[0] if active else None)
         )
-        best_avg = (
-            max(rows, key=lambda r: float(r["avg_day_pnl"])) if rows else None
-        )
-        hit100 = [
-            r for r in rows if float(r["pct_days_hit_100"]) >= 0.2 and float(r["avg_day_pnl"]) > 0
-        ]
+        # Best by entry family
+        by_pick: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            p = str(r.get("pick") or "")
+            cur = by_pick.get(p)
+            if cur is None or float(r["score"]) > float(cur["score"]):
+                by_pick[p] = r
+
         results["windows"][wname] = {
             "start": w0,
             "end": w1,
             "n_rows": len(rows),
             "best_score": rows[0] if rows else None,
-            "best_active_green": best_green or best_active,
-            "best_avg_day": best_avg,
-            "closest_to_100_per_day": max(
-                rows, key=lambda r: float(r["avg_day_pnl"])
-            )
+            "best_active_green": best_green,
+            "best_avg_day": max(rows, key=lambda r: float(r["avg_day_pnl"]))
             if rows
             else None,
-            "n_hit100_ge_20pct_days": len(hit100),
-            "top": rows[:15],
+            "closest_to_100_per_day": max(rows, key=lambda r: float(r["avg_day_pnl"]))
+            if rows
+            else None,
+            "best_by_entry": by_pick,
+            "top": rows[:25],
         }
-        # Keep full daily for the winner
-        if rows:
+        if best_green or rows:
             winner_name = (best_green or rows[0])["name"]
-            full = next(
-                simulate(ohlc, s, start=w0, end=w1, book=book, alphai_by_day=alphai)
-                for s in all_specs
-                if s.name == winner_name
+            wspec = next(s for s in all_specs if s.name == winner_name)
+            full = simulate(
+                ohlc, wspec, start=w0, end=w1, book=book, alphai_by_day=alphai
             )
-            results["windows"][wname]["winner_daily"] = full.get("daily")
-            results["windows"][wname]["winner_trades"] = full.get("trades")
             results["windows"][wname]["winner"] = {
                 k: v for k, v in full.items() if k not in {"daily", "trades"}
             }
+            results["windows"][wname]["winner_daily"] = full.get("daily")
+            results["windows"][wname]["winner_trades"] = full.get("trades")
 
     return results
 
 
 def to_markdown(payload: dict[str, Any]) -> str:
     lines = [
-        "# Daily-green lab — €1.7k active sleeve",
+        "# Daily-green lab — full universe entry×exit search",
         "",
         f"asof `{payload.get('asof')}`  book €{payload.get('book_eur'):,.0f}  "
-        f"specs `{payload.get('n_specs')}`",
+        f"bases **{payload.get('n_bases')}**  specs `{payload.get('n_specs')}`  "
+        f"candles `{payload.get('candle_dir')}`",
         "",
         payload.get("note", ""),
+        "",
+        f"Universe sample: {', '.join((payload.get('bases') or [])[:25])}…",
         "",
     ]
     for wname, block in (payload.get("windows") or {}).items():
@@ -544,37 +644,52 @@ def to_markdown(payload: dict[str, Any]) -> str:
             "",
         ]
         for label, key in (
-            ("Best score (active+green)", "best_score"),
+            ("Best score", "best_score"),
             ("Best active & green", "best_active_green"),
             ("Best avg €/day", "best_avg_day"),
-            ("Closest to +€100/day (avg)", "closest_to_100_per_day"),
-            ("Winner used for daily table", "winner"),
+            ("Winner", "winner"),
         ):
             r = block.get(key)
             if not r:
-                lines.append(f"- {label}: _(none)_")
                 continue
             lines.append(
                 f"- **{label}**: `{r.get('name')}`  "
                 f"avg/day **€{r.get('avg_day_pnl'):+.1f}**  "
-                f"green **{100*float(r.get('pct_days_green') or 0):.0f}%**  "
-                f"in-market **{100*float(r.get('pct_days_in_market') or 0):.0f}%**  "
+                f"green **{100 * float(r.get('pct_days_green') or 0):.0f}%**  "
+                f"in-market **{100 * float(r.get('pct_days_in_market') or 0):.0f}%**  "
                 f"hit≥€100 **{r.get('n_days_hit_100')}/{r.get('n_days')}**  "
-                f"total {r.get('pnl_eur'):+.0f}  "
-                f"worst {r.get('worst_day'):+.0f}  "
-                f"DD {100*float(r.get('max_dd_pct') or 0):.1f}%"
+                f"total {r.get('pnl_eur'):+.0f}  worst {r.get('worst_day'):+.0f}  "
+                f"DD {100 * float(r.get('max_dd_pct') or 0):.1f}%"
             )
+        if block.get("best_by_entry"):
+            lines += [
+                "",
+                "### Best pack per entry family",
+                "",
+                "| Entry | Pack | avg/day | green% | in-mkt% | total |",
+                "|---|---|---:|---:|---:|---:|",
+            ]
+            for pick, r in sorted(
+                block["best_by_entry"].items(),
+                key=lambda kv: -float(kv[1].get("score") or 0),
+            ):
+                lines.append(
+                    f"| `{pick}` | `{r['name']}` | {r['avg_day_pnl']:+.1f} | "
+                    f"{100 * r['pct_days_green']:.0f}% | "
+                    f"{100 * r['pct_days_in_market']:.0f}% | {r['pnl_eur']:+.0f} |"
+                )
         lines += [
             "",
             "| Pack | avg/day | green% | in-mkt% | hit€100 | total | worst | DD |",
             "|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
-        for r in (block.get("top") or [])[:12]:
+        for r in (block.get("top") or [])[:20]:
             lines.append(
                 f"| `{r['name']}` | {r['avg_day_pnl']:+.1f} | "
-                f"{100*r['pct_days_green']:.0f}% | {100*r['pct_days_in_market']:.0f}% | "
+                f"{100 * r['pct_days_green']:.0f}% | "
+                f"{100 * r['pct_days_in_market']:.0f}% | "
                 f"{r['n_days_hit_100']}/{r['n_days']} | {r['pnl_eur']:+.0f} | "
-                f"{r['worst_day']:+.0f} | {100*r['max_dd_pct']:.1f}% |"
+                f"{r['worst_day']:+.0f} | {100 * r['max_dd_pct']:.1f}% |"
             )
         lines.append("")
         if block.get("winner_daily"):
@@ -586,18 +701,15 @@ def to_markdown(payload: dict[str, Any]) -> str:
             ]
             for d in block["winner_daily"]:
                 lines.append(
-                    f"| {d['date']} | {d['day_pnl']:+.2f} | {d['cum_pnl']:+.2f} | {d['hold']} |"
+                    f"| {d['date']} | {d['day_pnl']:+.2f} | "
+                    f"{d['cum_pnl']:+.2f} | {d['hold']} |"
                 )
             lines.append("")
     lines += [
-        "## Reading",
-        "",
-        "1. **Every day +€100** on €1.7k did not appear as a robust pack.",
-        "2. Prefer packs with high **in-market%** + high **green%** + positive avg/day.",
-        "3. AlphaI packs are only scored on real pick overlap days.",
+        "## Reproduce",
         "",
         "```bash",
-        ".venv/bin/python -m bot.research.daily_green_lab",
+        ".venv/bin/python -m bot.research.daily_green_lab --candles data/ignition_expand_candles --broad",
         "```",
         "",
     ]

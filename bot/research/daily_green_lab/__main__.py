@@ -10,17 +10,31 @@ from bot.research.daily_green_lab.engine import run_daily_green_lab, to_markdown
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Daily-green €1.7k sleeve search")
+    p = argparse.ArgumentParser(
+        description="Daily-green €1.7k sleeve search — full liquid universe × entry/exit grid"
+    )
     p.add_argument("--book", type=float, default=1_700.0)
     p.add_argument("--days", type=int, default=45)
-    p.add_argument("--candles", default="data/residual_wet_candles")
+    p.add_argument(
+        "--candles",
+        default="data/ignition_expand_candles",
+        help="OHLCV dir (default: full expand universe, not desk residual)",
+    )
     p.add_argument("--alphai", default="data/research/alphai_sessions_merged.json")
     p.add_argument("--out", default="artifacts/daily_green_lab.json")
     p.add_argument("--md", default="artifacts/daily_green_lab.md")
+    p.add_argument(
+        "--broad",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Broad entry×exit grid (default on); --no-broad for narrower pack",
+    )
+    p.add_argument("--workers", type=int, default=None)
     args = p.parse_args()
 
     print(
-        f"daily_green_lab book=€{args.book:.0f} days={args.days}",
+        f"daily_green_lab book=€{args.book:.0f} days={args.days} "
+        f"candles={args.candles} broad={args.broad}",
         flush=True,
     )
     payload = run_daily_green_lab(
@@ -28,6 +42,12 @@ def main() -> None:
         alphai_path=args.alphai,
         book=args.book,
         days=args.days,
+        workers=args.workers,
+        broad=args.broad,
+    )
+    print(
+        f"universe n_bases={payload.get('n_bases')} n_specs={payload.get('n_specs')}",
+        flush=True,
     )
     for wname, block in (payload.get("windows") or {}).items():
         w = block.get("winner") or block.get("best_score") or {}
