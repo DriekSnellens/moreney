@@ -53,14 +53,21 @@ You asked for **structural profit** and **weekly green**. In this search that po
 
 3. **Satellite / risk sleeve only:** residual_full (floor 3.5%, trail 10%, rq+cash) if you explicitly want max PnL and accept many red weeks.
 
-## What this search did *not* fully retune
+## Cross-engine synthesis
 
-- 15m WR desk (different tape; prior research already set 7/13/16)  
-- Ignition / top_day OKX sleeve (separate daily sniper tape)  
-- Avoid-lists (not in pick_outcomes history)  
-- Intraday sizing / partial exits  
+Full capital stack (residual + ignition + 15m WR) with armed parameters:
+**[`CROSS_ENGINE_BEST.md`](./CROSS_ENGINE_BEST.md)**.
 
-Those need their own ambition grids; this pass owns the **daily Bitvavo residual/clip** family where most capital sits.
+Short version for “structural + green weeks + lots of capital”:
+
+| Sleeve | Best pack | Notes |
+|---|---|---|
+| **Primary (most capital)** | **btc50** trail10 lb20 reb14 sma20 + AlphaI prefer/overlap | ~64% green / 90d; 3/3 on AlphaI window |
+| Max-PnL satellite | residual_full floor 3.5% trail10 rq+cash | ~29% green weeks; huge red weeks |
+| Ignition OKX | top_day trail8 + BTC SMA (or €10k/2-slot compound spikes) | Not every-week green; spike engine |
+| 15m WR desk | hours 7/13/16, trail 5%, min_excess 2.5%, cap ≤€2k | Peak WR was 7+16 trail3%; shipped compromise is better ops |
+
+Avoid-lists and intraday partials were not in this residual grid.
 
 ## Reproduce
 
