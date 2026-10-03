@@ -53,6 +53,16 @@ You asked for **structural profit** and **weekly green**. In this search that po
 
 3. **Satellite / risk sleeve only:** residual_full (floor 3.5%, trail 10%, rq+cash) if you explicitly want max PnL and accept many red weeks.
 
+## Last 3 months — daily PnL (simulated)
+
+See **[`DAILY_3M.md`](./DAILY_3M.md)** (`2026-07-05` → `2026-10-03`, €20k wet next-open).
+
+| Pack | Total | Avg day | Green days | Green weeks | Worst day |
+|---|---:|---:|---:|---:|---:|
+| **btc50 primary** | **+€9,921** | **+€109** | 56% (51/91) | 64% (9/14) | −€1,870 |
+| Stack 70% btc50 + 15% residual_full | +€10,757 | +€118 | 55% | 50% (7/14) | −€2,098 |
+| residual_full alone | +€25,417 | +€279 | 27% | 43% | −€5,258 |
+
 ## Cross-engine synthesis
 
 Full capital stack (residual + ignition + 15m WR) with armed parameters:
