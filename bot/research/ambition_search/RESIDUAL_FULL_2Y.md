@@ -1,130 +1,125 @@
-# residual_full (100% alt) — fair ~2y wet replay (no AlphaI)
+# residual_full — huidige RS engine (~2y, compound)
 
-asof `2026-10-03T09:53:22.707657+00:00`  `2024-03-16` → `2026-10-03`  book €20,000  wet Bitvavo next-open
+asof `2026-10-04T19:35:10.021877+00:00`  `2024-03-16` → `2026-10-03`  book €20,000  wet Bitvavo next-open  **sizing = equity (winst herbelegd)**
 
-Params (true residual_full): `btc=0` lookback**10** skip**0** trail**10%** floor**3.5%** sma**50** flatten=all `require_alt_sma` + `cash_when_no_alt` reb**7**.
+Live params: `btc=0` lookback**10** skip**1** trail**10%** floor**3.5%** sma**50** flatten=all `require_alt_sma` + `cash_when_no_alt` reb**7** weekday**Tue** · desk 16 · **geen AlphaI** in deze fair replay.
 
-## Summary
+## Summary (live = Tue + skip=1)
 
-| Metric | skip=0 (true) | skip=1 (sensitivity) |
-|---|---:|---:|
-| Total PnL | **+109,206** | +410,891 |
-| Return | **546.0%** | 2054.5% |
-| End equity | €129,206 | €430,891 |
-| maxDD | **33.1%** | 30.9% |
-| Green weeks | 36/134 (26.9%) | 39/134 |
-| Best week | +48,837 | +162,618 |
-| Worst week | -15,725 | -53,389 |
+| Metric | Value |
+|---|---:|
+| Total PnL | **+17,119** |
+| Return | **85.6%** |
+| End equity | €37,119 |
+| maxDD | **64.0%** |
+| Ann | 27.4% |
+| Calmar | 0.43 |
+| Trades | 74 |
+| Green weeks | 23/134 (17.2%) |
+| Best / worst week | +14,042 / -4,472 |
+| End hold | `cash` |
 
-> Note: an older ambition grid coerced `skip_days=0`→`1` in the evaluator, so its “sk0” rows were actually skip=1 (~+€411k). Figures below use **true skip=0**.
+## Variants
 
-## Yearly (skip=0)
+| Variant | PnL | Return | End eq | maxDD | trades |
+|---|---:|---:|---:|---:|---:|
+| **live Tue + skip=1** | +17,119 | 85.6% | €37,119 | 64.0% | 74 |
+| **any-day + skip=1 (pre-Tue pin)** | +410,891 | 2054.5% | €430,891 | 30.9% | 92 |
+| **any-day + skip=0** | +109,206 | 546.0% | €129,206 | 33.1% | 94 |
+
+## Yearly (live Tue skip=1)
 
 | Year | PnL |
 |---|---:|
-| 2024 | +34,275 |
-| 2025 | -2,537 |
-| 2026 | +77,468 |
+| 2024 | +10,533 |
+| 2025 | -12,112 |
+| 2026 | +18,698 |
 
-## Monthly (skip=0)
+## Monthly (live Tue skip=1)
 
 | Month | PnL |
 |---|---:|
-| 2024-03 | +269 |
-| 2024-04 | -3,805 |
-| 2024-05 | +1,461 |
-| 2024-06 | +782 |
-| 2024-07 | -547 |
-| 2024-08 | +1,070 |
-| 2024-09 | +13,706 |
-| 2024-10 | -1,400 |
-| 2024-11 | +18,626 |
-| 2024-12 | +4,113 |
-| 2025-01 | +350 |
-| 2025-02 | -4,467 |
+| 2024-03 | +876 |
+| 2024-04 | +0 |
+| 2024-05 | +1,907 |
+| 2024-06 | +0 |
+| 2024-07 | -2,805 |
+| 2024-08 | -2,409 |
+| 2024-09 | +9,025 |
+| 2024-10 | +5,031 |
+| 2024-11 | +1,705 |
+| 2024-12 | -2,796 |
+| 2025-01 | -2,028 |
+| 2025-02 | -2,327 |
 | 2025-03 | +0 |
-| 2025-04 | +5,215 |
-| 2025-05 | -5,403 |
-| 2025-06 | -4,329 |
-| 2025-07 | +6,900 |
-| 2025-08 | -5,270 |
-| 2025-09 | +4,467 |
+| 2025-04 | +2,757 |
+| 2025-05 | -2,633 |
+| 2025-06 | -3,261 |
+| 2025-07 | +985 |
+| 2025-08 | -3,388 |
+| 2025-09 | -2,218 |
 | 2025-10 | +0 |
 | 2025-11 | +0 |
 | 2025-12 | +0 |
-| 2026-01 | -4,219 |
+| 2026-01 | -1,037 |
 | 2026-02 | +0 |
-| 2026-03 | +4,008 |
-| 2026-04 | +3,583 |
-| 2026-05 | +19,941 |
+| 2026-03 | -2,194 |
+| 2026-04 | +2,458 |
+| 2026-05 | -2,773 |
 | 2026-06 | +0 |
-| 2026-07 | -315 |
-| 2026-08 | -16,727 |
-| 2026-09 | +71,198 |
+| 2026-07 | -1,141 |
+| 2026-08 | +1,965 |
+| 2026-09 | +21,420 |
 | 2026-10 | +0 |
 
-## Realized by base (skip=0)
+## Realized by base
 
 | Base | Realized PnL | n exits |
 |---|---:|---:|
-| ARB | -8,725 | 3 |
-| ADA | -8,161 | 1 |
-| SOL | -7,899 | 3 |
-| XRP | -6,033 | 4 |
-| LINK | -1,345 | 2 |
-| ETH | -217 | 1 |
-| LTC | +1,565 | 2 |
-| UNI | +3,038 | 9 |
-| AVAX | +4,714 | 1 |
-| DOGE | +5,567 | 5 |
-| DOT | +9,178 | 2 |
-| FET | +9,898 | 5 |
-| SUI | +27,250 | 5 |
-| NEAR | +91,278 | 4 |
+| NEAR | +18,070 | 3 |
+| UNI | +6,522 | 4 |
+| DOT | +6,365 | 1 |
+| SUI | +4,961 | 6 |
+| ARB | +1,015 | 2 |
+| FET | +827 | 4 |
+| ADA | -185 | 1 |
+| DOGE | -465 | 5 |
+| ETH | -1,947 | 1 |
+| AVAX | -2,356 | 2 |
+| LINK | -3,219 | 4 |
+| XRP | -3,425 | 2 |
+| SOL | -4,783 | 2 |
 
 ## Worst weeks
 
 | Week | Hold | PnL |
 |---|---|---:|
-| 2026-W40 (2026-09-28) | cash | -15,725 |
-| 2025-W33 (2025-08-11) | cash | -6,973 |
-| 2026-W13 (2026-03-23) | cash | -6,809 |
-| 2026-W33 (2026-08-10) | cash | -6,515 |
-| 2025-W05 (2025-01-27) | cash | -6,172 |
-| 2026-W20 (2026-05-11) | cash | -5,962 |
-| 2025-W24 (2025-06-09) | cash | -5,726 |
-| 2026-W37 (2026-09-07) | cash | -5,612 |
-| 2026-W35 (2026-08-24) | cash | -5,413 |
-| 2025-W30 (2025-07-21) | cash | -5,303 |
-| 2024-W12 (2024-03-18) | cash | -3,537 |
-| 2025-W21 (2025-05-19) | cash | -3,422 |
-| 2026-W29 (2026-07-13) | alt:ARB | -3,233 |
-| 2025-W02 (2025-01-06) | cash | -2,914 |
-| 2024-W25 (2024-06-17) | cash | -2,708 |
+| 2026-W40 | cash | -4,472 |
+| 2024-W42 | cash | -3,889 |
+| 2024-W51 | cash | -3,483 |
+| 2024-W31 | cash | -3,361 |
+| 2025-W31 | cash | -3,290 |
+| 2025-W23 | cash | -3,261 |
+| 2026-W20 | cash | -2,239 |
+| 2026-W12 | cash | -2,194 |
+| 2024-W30 | cash | -2,066 |
+| 2025-W20 | alt:ETH | -2,061 |
 
 ## Best weeks
 
 | Week | Hold | PnL |
 |---|---|---:|
-| 2026-W38 (2026-09-14) | alt:NEAR | +48,837 |
-| 2026-W39 (2026-09-21) | alt:NEAR | +33,672 |
-| 2026-W21 (2026-05-18) | alt:NEAR | +20,031 |
-| 2026-W36 (2026-08-31) | alt:UNI | +10,027 |
-| 2024-W45 (2024-11-04) | alt:SUI | +9,551 |
-| 2024-W38 (2024-09-16) | alt:SUI | +9,157 |
-| 2025-W29 (2025-07-14) | alt:XRP | +7,050 |
-| 2024-W49 (2024-12-02) | cash | +6,780 |
-| 2026-W12 (2026-03-16) | cash | +6,191 |
-| 2025-W28 (2025-07-07) | alt:SUI | +6,016 |
-| 2025-W38 (2025-09-15) | alt:AVAX | +5,768 |
-| 2025-W17 (2025-04-21) | alt:FET | +5,615 |
-| 2025-W03 (2025-01-13) | alt:XRP | +5,519 |
-| 2024-W46 (2024-11-11) | alt:DOGE | +5,411 |
-| 2026-W11 (2026-03-09) | alt:FET | +4,626 |
+| 2026-W38 | alt:NEAR | +14,042 |
+| 2026-W39 | alt:NEAR | +9,663 |
+| 2024-W38 | alt:SUI | +6,086 |
+| 2024-W41 | alt:SUI | +4,377 |
+| 2024-W48 | alt:DOT | +4,332 |
+| 2026-W36 | alt:UNI | +3,764 |
+| 2024-W21 | alt:UNI | +3,205 |
+| 2024-W44 | cash | +3,054 |
+| 2025-W17 | alt:FET | +2,947 |
+| 2024-W39 | alt:SUI | +2,635 |
 
-## Where the money came from
+## Note
 
-- **NEAR** dominates realized PnL (~+€91k across exits), especially Sep 2026 and a long 2024→2026 hold.
-- **SUI** second (~+€27k). Losers: ARB/ADA/SOL/XRP clusters.
-- **2025** is roughly flat/slightly red (−€2.5k): long underwater stretch (peak DD ~33% into Jul 2025).
-- Green-week rate stays ~**27%** — same structural message as the short window: big spikes, many red/flat weeks.
+Ticketsizen op gemarkeerde equity bij elke rebalance → compound. Live AlphaI-gate staat aan maar zit **niet** in deze fair replay. De Tuesday week-clock mist t.o.v. any-day een groot deel van het compound-pad (any-day skip=1 ≈ +€411k); pin is live gezet na de weekday-studie.

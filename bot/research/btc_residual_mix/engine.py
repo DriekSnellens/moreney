@@ -300,11 +300,15 @@ def run_btc_residual(
     alt_allow_mode: str = "gate",
     alt_allow_excess_override: float | None = None,
     cash_when_no_alt: bool = False,
+    rebalance_weekday: int | None = None,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
     ``btc_frac=0`` is 100% residual weekly. ``btc_frac=1`` is BTC-only
     (SMA50 cash if flatten is all/regime).
+
+    Sizing uses marked equity each rebalance (compound / winst herbelegd).
+    ``rebalance_weekday`` (0=Mon … 6=Sun) matches live week-clock pin.
     """
     name = strategy or f"btc{int(btc_frac * 100)}_res_f{flatten}"
     dates = [bar_date(r) for r in (ohlc.get("BTC") or [])]
@@ -323,6 +327,11 @@ def run_btc_residual(
     reclaim_watches: list[dict[str, Any]] = []
     need = int(lookback_days) + int(skip_days) + 1
     alt_frac = max(0.0, 1.0 - float(btc_frac))
+    wd_pin = (
+        int(rebalance_weekday)
+        if rebalance_weekday is not None and int(rebalance_weekday) >= 0
+        else None
+    )
 
     for date in dates:
         if date < start or date > end:
@@ -354,7 +363,11 @@ def run_btc_residual(
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
         risk_on = s50 is not None and last > s50
-        due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
+        age_due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
+        if wd_pin is not None:
+            due = age_due and now.weekday() == wd_pin
+        else:
+            due = age_due
         if due and len(btc_c) >= need:
             pick = pick_residual(
                 ohlc,
