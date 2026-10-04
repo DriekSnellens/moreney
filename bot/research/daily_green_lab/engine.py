@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
@@ -283,7 +284,15 @@ def simulate(
     alphai_by_day: Mapping[str, Sequence[str]],
     fee: float = 0.0015,
     slip: float = 0.001,
+    compound: bool = False,
 ) -> dict[str, Any]:
+    """Wet next-open sleeve replay.
+
+    Sizing:
+    - ``compound=False`` (default / live sleeve): ``notion = min(cash×0.98, book)``
+      — wins do not grow the next ticket above €book; losses shrink it.
+    - ``compound=True``: ``notion = cash×0.98`` — full equity reinvestment.
+    """
     by = {b: _by_date(rows) for b, rows in ohlc.items()}
     dates_by = {b: sorted(m) for b, m in by.items()}
     btc_dates = dates_by.get("BTC") or []
@@ -325,7 +334,7 @@ def simulate(
             base = pending_buy
             if date in by.get(base, {}):
                 px = float(by[base][date][1]) * (1 + slip)
-                notion = min(cash * 0.98, book)
+                notion = cash * 0.98 if compound else min(cash * 0.98, book)
                 if notion >= 40 and px > 0:
                     fee_eur = notion * fee
                     qty = notion / px
@@ -443,6 +452,14 @@ def simulate(
         if peak > 0:
             max_dd = max(max_dd, (peak - eq) / peak)
     avg = sum(pnls) / n
+    weeks: dict[str, float] = defaultdict(float)
+    for d in daily:
+        dt = datetime.strptime(str(d["date"]), "%Y-%m-%d")
+        weeks[dt.strftime("%Y-W%W")] += float(d["day_pnl"])
+    wvals = list(weeks.values())
+    wn = len(wvals) or 1
+    wgreen = sum(1 for v in wvals if v > 0)
+    end_eq = float(daily[-1]["equity"]) if daily else book
     return {
         "ok": True,
         "name": spec.name,
@@ -452,7 +469,10 @@ def simulate(
         "hard_stop_pct": spec.hard_stop_pct,
         "require_btc_sma": spec.require_btc_sma,
         "excess_floor": spec.excess_floor,
+        "sizing": "compound" if compound else "fixed_book_cap",
         "pnl_eur": round(float(daily[-1]["cum_pnl"]), 2) if daily else 0.0,
+        "end_equity": round(end_eq, 2),
+        "return_pct": round((end_eq / book - 1.0) if book else 0.0, 4),
         "avg_day_pnl": round(avg, 2),
         "median_day_pnl": round(sorted(pnls)[n // 2], 2),
         "pct_days_green": round(green / n, 4),
@@ -466,6 +486,12 @@ def simulate(
         "worst_day": round(min(pnls), 2) if pnls else 0.0,
         "max_dd_pct": round(max_dd, 4),
         "n_trades": len(trades),
+        "n_weeks": float(len(wvals)),
+        "pct_weeks_green": round(wgreen / wn, 4),
+        "avg_week_pnl": round(sum(wvals) / wn, 4),
+        "best_week": round(max(wvals), 2) if wvals else 0.0,
+        "worst_week": round(min(wvals), 2) if wvals else 0.0,
+        "weeks": {k: round(v, 2) for k, v in sorted(weeks.items())},
         "daily": daily,
         "trades": trades,
         "score": round(

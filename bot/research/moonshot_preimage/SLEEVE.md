@@ -14,7 +14,7 @@ Score = groene weken + activity − DD. Winner moet **IS én OOS** positief zijn
 | `brk20_day_t15_h2_hs0_btc0` | blend-max (verworpen) | +333 | 65% | 26% | −10 | +€12.5k | 94% |
 | old `coil_day_t12_h5` | baseline | — | — | — | — | +€10.6k | 172% |
 
-Zie [`OPTIMIZE.md`](../daily_green_lab/OPTIMIZE.md) · [`LAST_6W.md`](LAST_6W.md) · [`LAST_FULL.md`](LAST_FULL.md).
+Zie [`OPTIMIZE.md`](../daily_green_lab/OPTIMIZE.md) · [`LAST_6W.md`](LAST_6W.md) · [`LAST_FULL.md`](LAST_FULL.md) · [`COMPOUND.md`](COMPOUND.md).
 
 ## Armed pack (`daily_brk20_day`)
 
@@ -36,6 +36,19 @@ BTC filter      = SMA50 (risk-off → cash)
 
 Laatste 6w (fixed book): **+€12.0k** · 86% groene weken · maxDD 20%.
 
+## Compound sim (research only)
+
+Zelfde armed pack, start €1700, maar `notion = cash×0.98` (winst wordt herbelegd). Live blijft `size_to_book`.
+
+| Window | Fixed PnL | Compound PnL | Fixed DD | Compound DD | Compound greenW |
+|---|---:|---:|---:|---:|---:|
+| last 6w | +€12.0k | **+€30.1k** | 20% | 23% | 71% |
+| last 3m | +€12.4k | **+€37.1k** | 26% | 26% | 64% |
+| last 1y | +€12.7k | **+€38.6k** | 39% | 47% | 39% |
+| full | +€12.0k | **+€29.3k** | 56% | 57% | 29% |
+
+Compound trekt ~2.5× meer PnL uit de late spikes (QNT e.d. op grotere equity), met vergelijkbare DD% maar veel grotere €-drawdowns. Zie [`COMPOUND.md`](COMPOUND.md).
+
 ## Arm
 
 ```bash
@@ -49,4 +62,5 @@ Reproduce:
 
 ```bash
 .venv/bin/python -m bot.research.daily_green_lab --optimize
+.venv/bin/python -m bot.research.daily_green_lab --compound
 ```
