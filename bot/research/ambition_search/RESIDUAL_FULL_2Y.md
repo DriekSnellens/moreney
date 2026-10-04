@@ -2,9 +2,11 @@
 
 asof `2026-10-04T19:35:10.021877+00:00`  `2024-03-16` → `2026-10-03`  book €20,000  wet Bitvavo next-open  **sizing = equity (winst herbelegd)**
 
-Live params: `btc=0` lookback**10** skip**1** trail**10%** floor**3.5%** sma**50** flatten=all `require_alt_sma` + `cash_when_no_alt` reb**7** weekday**Tue** · desk 16 · **geen AlphaI** in deze fair replay.
+Live params (max-PnL, any-day): `btc=0` lookback**10** skip**1** trail**10%** floor**3.5%** sma**50** flatten=all `require_alt_sma` + `cash_when_no_alt` reb**7** **no weekday pin** · desk 16 · **geen AlphaI** in deze fair replay.
 
-## Summary (live = Tue + skip=1)
+> Live staat weer op **any-day + skip=1** (≈ +€411k pad). Tuesday-pin is uitgezet.
+
+## Summary (reference: Tue + skip=1 was live briefly)
 
 | Metric | Value |
 |---|---:|

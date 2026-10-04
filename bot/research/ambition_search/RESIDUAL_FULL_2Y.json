@@ -17,7 +17,7 @@
     "require_alt_sma": true,
     "cash_when_no_alt": true,
     "rebalance_days": 7,
-    "rebalance_weekday": 1,
+    "rebalance_weekday": null,
     "universe": [
       "ETH",
       "SOL",
@@ -73,7 +73,7 @@
       "skip_days": 0
     }
   },
-  "primary": "live_tue_sk1",
+  "primary": "anyday_sk1",
   "summary": {
     "pnl_eur": 17119.18,
     "end_equity": 37119.18,
@@ -343,5 +343,6 @@
       "2026-10-03",
       37119.18
     ]
-  ]
+  ],
+  "live_note": "Live restored to any-day + skip=1 (max PnL / +\u20ac411k path); Tuesday pin removed."
 }
