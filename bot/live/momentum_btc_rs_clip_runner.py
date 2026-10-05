@@ -189,6 +189,8 @@ class BtcRsClipPaperRunner:
         self._gws: dict[str, Any] = dict(gateways or {})
         self._reserved_quote_eur = max(0.0, float(reserved_quote_eur or 0.0))
         self._reserved_qty = {str(k).upper(): float(v) for k, v in dict(reserved_qty or {}).items()}
+        # MoonShot keeps a fixed book. The owner clip adopts free venue EUR.
+        self.pin_cash_to_book = False
         self.positions: list[ClipPosition] = []
         self.cash_eur = float(cfg.book_eur)
         self.realized_total_eur = 0.0
@@ -615,12 +617,28 @@ class BtcRsClipPaperRunner:
     async def _decision_cash(self) -> float:
         """EUR available for clip sizing.
 
-        Live: Bitvavo free quote minus any 15m reserved sleeve is the book —
-        not the configured ``book_eur`` paper ledger. Paper keeps the
-        synthetic cash counter (optionally capped by a mocked venue).
+        Live owner clip: Bitvavo free quote minus any 15m reserved sleeve is
+        the book — not the configured ``book_eur`` paper ledger. Paper keeps
+        the synthetic cash counter (optionally capped by a mocked venue).
+
+        ``pin_cash_to_book`` (MoonShot) never adopts that leftover. Spend is
+        ``min(book − deployed, free EUR after reserves)``.
         """
         cash = float(self.cash_eur)
         venue_eur = await self._venue_quote_eur()
+        if self.pin_cash_to_book:
+            book = max(0.0, float(self.cfg.book_eur))
+            sleeve_cash = max(0.0, book - self._deployed())
+            if venue_eur is None:
+                usable = min(max(0.0, cash), sleeve_cash)
+            else:
+                left = max(0.0, venue_eur - self._reserved_quote_eur)
+                usable = min(sleeve_cash, left)
+            if not self.dry_run:
+                self.cash_eur = usable
+            else:
+                usable = min(max(0.0, cash), usable)
+            return usable
         if venue_eur is None:
             return cash
         left = max(0.0, venue_eur - self._reserved_quote_eur)
@@ -1160,9 +1178,14 @@ class BtcRsClipPaperRunner:
         equity = self._equity_now()
         last = self.last_decision or {}
         live = not self.dry_run
-        # Live sizing follows Bitvavo free EUR; surface that as the book so the
-        # operator page does not keep advertising the paper BOOK_EUR constant.
-        book_shown = round(equity, 2) if live else float(self.cfg.book_eur)
+        # Owner clip: live sizing follows Bitvavo free EUR, so the operator page
+        # shows that equity as the book. MoonShot stays on its fixed book_eur.
+        if self.pin_cash_to_book:
+            book_shown = float(self.cfg.book_eur)
+        elif live:
+            book_shown = round(equity, 2)
+        else:
+            book_shown = float(self.cfg.book_eur)
         return {
             "desk": self._desk(),
             "mode": "btc_rs_clip_live" if live else "btc_rs_clip_paper",

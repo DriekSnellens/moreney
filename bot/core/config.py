@@ -733,12 +733,12 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_pending_pack: str = ""
     momentum_btc_rs_clip_state_path: str = "./data/momentum_btc_rs_clip_state.json"
     momentum_btc_rs_clip_ledger_path: str = "./data/momentum_btc_rs_clip_ledger.jsonl"
-    # Fixed €1.7k moonshot spike sleeve (r3≥15% + RS≥25% + trend). Own state;
-    # does not replace the owner BTC+RS / residual_full book.
+    # Fixed €2k MoonShot sleeve (daily brk20_day). Own state; does not replace
+    # the owner BTC+RS / residual_full book. Live orders only when allow_live.
     momentum_moonshot_clip_enabled: bool = False
     momentum_moonshot_clip_allow_live: bool = False
     momentum_moonshot_clip_venues: str = "bitvavo"
-    momentum_moonshot_clip_book_eur: float = Field(default=1_700.0, gt=0)
+    momentum_moonshot_clip_book_eur: float = Field(default=2_000.0, gt=0)
     momentum_moonshot_clip_state_path: str = "./data/momentum_moonshot_clip_state.json"
     momentum_moonshot_clip_ledger_path: str = "./data/momentum_moonshot_clip_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"

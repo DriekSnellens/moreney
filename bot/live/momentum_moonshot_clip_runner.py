@@ -1,8 +1,8 @@
-"""Fixed €1.7k daily-green sleeve — separate book beside residual/clip.
+"""MoonShot — fixed-book daily-green sleeve beside residual/clip.
 
 Pack ``daily_brk20_day`` (walk-forward dual IS+OOS winner):
   20d breakout on the ~80-name liquid pool, trail 12%, hard-stop 5%,
-  time≤5d, sizing capped at book_eur. Not a +€100/day guarantee.
+  time≤5d, sizing capped at book_eur. Dashboard title is MoonShot.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _write_flag(state_path: str, **payload: Any) -> None:
 
 def moonshot_config_from_settings(settings: Settings | None = None):
     settings = settings or get_settings()
-    book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 1_700.0) or 1_700.0)
+    book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 2_000.0) or 2_000.0)
     base = config_from_settings(settings)
     return daily_green_config(replace(base, book_eur=book))
 
@@ -74,6 +74,7 @@ class MoonshotClipDeskManager:
             "paper_only": not allow_live,
             "allow_live": allow_live,
             "pack": "daily_brk20_day",
+            "title": "MoonShot",
         }
         if self._runner is not None:
             st = self._runner.status()
@@ -124,7 +125,7 @@ class MoonshotClipDeskManager:
                     "last_decision": last,
                     "live_caption": str(
                         last.get("caption")
-                        or "Moonshot €1.7k sleeve klaar (niet gestart)."
+                        or "MoonShot sleeve klaar (niet gestart)."
                     ),
                     "config": {
                         "book_eur": cfg.book_eur,
@@ -175,10 +176,10 @@ class MoonshotClipDeskManager:
         )
         gateways: dict[str, Any] = {}
         dry_run = not allow_live
-        # Reserve main desk + leave owner clip alone: moonshot only uses its book.
-        reserved_quote = reserved_quote_eur_from_settings(settings) + float(
-            getattr(settings, "momentum_btc_rs_clip_book_eur", 0.0) or 0.0
-        )
+        # Keep the 15m desk's EUR aside. Do not also reserve the owner clip's
+        # configured book: that pile is the same Bitvavo balance, and MoonShot
+        # already caps its own ticket at book_eur.
+        reserved_quote = reserved_quote_eur_from_settings(settings)
         reserved_qty = load_side_desk_reserved_qty(settings, venues[0] if venues else "bitvavo")
         if allow_live:
             from bot.live.micro_engine import LiveMicroEngine
@@ -220,6 +221,7 @@ class MoonshotClipDeskManager:
             pending_pack="",
         )
         self._runner.pack_mode = "daily_brk20_day"
+        self._runner.pin_cash_to_book = True
         # Fresh sleeve: seed cash to fixed book if empty state.
         if not self._runner.positions and self._runner.cash_eur <= 0:
             self._runner.cash_eur = float(cfg.book_eur)
