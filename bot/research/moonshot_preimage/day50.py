@@ -757,6 +757,9 @@ def run_day50(
             arm_start=_next_day_str(train_end),
             arm_end=last,
         )
+        fu = simulate(
+            bases, sigs, pick, ex, full_cal, book=book, arm_start=start_floor, arm_end=last
+        )
         rows.append(
             {
                 "name": _spec_name(gate, score, btc, gap, ex),
@@ -767,6 +770,7 @@ def run_day50(
                 "exit": ex.name,
                 "train": _compact(tr),
                 "test": _compact(te),
+                "full_compact": _compact(fu),
             }
         )
 
@@ -795,6 +799,15 @@ def run_day50(
     ]
     best_test_floor = (
         max(best_test_n, key=lambda r: float(r["test"]["pnl"])) if best_test_n else best_test
+    )
+    best_full = max(rows, key=lambda r: (float(r["full_compact"]["pnl"]), float(r["test"]["pnl"])))
+    robust_full_pool = [
+        r for r in rows if int(r["train"]["trades"]) >= 12 and float(r["train"]["pnl"]) > 0
+    ]
+    best_full_robust = (
+        max(robust_full_pool, key=lambda r: float(r["full_compact"]["pnl"]))
+        if robust_full_pool
+        else None
     )
 
     def _materialize(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -844,6 +857,23 @@ def run_day50(
         acc_m if money and acc and money["name"] == acc["name"] else _materialize(money)
     )
     best_m = _materialize(best_test_floor)
+    full_m = (
+        best_m
+        if best_full and best_test_floor and best_full["name"] == best_test_floor["name"]
+        else _materialize(best_full)
+    )
+    full_robust_m = None
+    if best_full_robust is not None:
+        if money and best_full_robust["name"] == money["name"]:
+            full_robust_m = money_m
+        elif acc and best_full_robust["name"] == acc["name"]:
+            full_robust_m = acc_m
+        elif best_m and best_full_robust["name"] == best_m["name"]:
+            full_robust_m = best_m
+        elif full_m and best_full_robust["name"] == full_m["name"]:
+            full_robust_m = full_m
+        else:
+            full_robust_m = _materialize(best_full_robust)
 
     oracle_test = _oracle(sigs, start=_next_day_str(train_end), end=last, book=book)
     oracle_full = _oracle(sigs, start=start_floor, end=last, book=book)
@@ -881,6 +911,8 @@ def run_day50(
         "walkforward_accuracy": acc_m,
         "walkforward_pnl": money_m,
         "best_test_pnl": best_m,
+        "best_full_pnl": full_m,
+        "best_full_pnl_train_positive": full_robust_m,
         "top_test_pnl": sorted(rows, key=lambda r: -float(r["test"]["pnl"]))[:15],
         "top_test_precision": sorted(
             [r for r in rows if int(r["test"]["trades"]) >= 8],
@@ -889,8 +921,9 @@ def run_day50(
         "note": (
             "Walk-forward accuracy = hoogste train-Wilson op packs met train-PnL>0, "
             "≥3 hits en ≥12 trades. Walk-forward PnL = hoogste train-PnL met ≥12 trades "
-            "en train-DD≤70%. Best test PnL is het maximum van de grid op 2026 "
-            "(zoekmaximum, geen schone keuze)."
+            "en train-DD≤70%. Best test / best full zijn de maxima van de grid "
+            "(zoekmaxima, geen schone keuze). Best full met train-PnL>0 is het "
+            "hoogste full-pad dat in-sample ook geld verdiende."
         ),
     }
 
@@ -953,10 +986,6 @@ def _fmt_pct(x: float) -> str:
     return f"{100.0 * float(x):.1f}%"
 
 
-def _fmt_eur(x: float) -> str:
-    return f"{float(x):+.0f}"
-
-
 def _pack_line(row: dict[str, Any], window: str) -> str:
     w = row[window]
     return (
@@ -982,6 +1011,12 @@ def to_markdown(payload: dict[str, Any]) -> str:
         f"Label: {payload['label']}.",
         "Kosten: 15 bp fee/side, 10 bp slip, vaste book-cap (winst schaalt het ticket niet boven €book).",
         "Eén slot. Signaal op de slotkoers, koop de volgende open. Geen munt-specifieke regels.",
+        "",
+        "## Kort",
+        "",
+    ]
+    lines += _verdict_lines(payload)
+    lines += [
         "",
         "## Basiskans",
         "",
@@ -1113,6 +1148,30 @@ def to_markdown(payload: dict[str, Any]) -> str:
 
     lines += [
         "",
+        "## Hoogste PnL op het hele pad",
+        "",
+        "Vers boek vanaf 2024-06-15, zelfde kosten. Het absolute maximum mag in 2025 "
+        "verlies hebben gedraaid. Daarnaast het maximum onder packs die t/m 2025 wél positief waren.",
+        "",
+    ]
+    full_best = payload.get("best_full_pnl")
+    full_robust = payload.get("best_full_pnl_train_positive")
+    if full_best:
+        lines += [
+            f"- Absoluut maximum: {_pack_line(full_best, 'full_compact')} op full, "
+            f"test €{float(full_best['test']['pnl']):+,.0f}, train €{float(full_best['train']['pnl']):+,.0f}.",
+            _setup_block(full_best),
+            "",
+        ]
+    if full_robust:
+        lines += [
+            f"- Hoogste full-PnL met train-PnL>0: {_pack_line(full_robust, 'full_compact')} op full, "
+            f"test €{float(full_robust['test']['pnl']):+,.0f}, train €{float(full_robust['train']['pnl']):+,.0f}.",
+            _setup_block(full_robust),
+            "",
+        ]
+    lines += [
+        "",
         "### Top 10 test-PnL",
         "",
         "| Pack | test PnL | test P50 | test DD | train PnL | train P50 |",
@@ -1154,6 +1213,59 @@ def to_markdown(payload: dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _verdict_lines(payload: dict[str, Any]) -> list[str]:
+    acc = payload.get("walkforward_accuracy") or {}
+    money = payload.get("walkforward_pnl") or {}
+    best = payload.get("best_test_pnl") or {}
+    full_best = payload.get("best_full_pnl") or {}
+    full_robust = payload.get("best_full_pnl_train_positive") or {}
+    lines = [
+        f"Basiskans dat de volgende sessie +50% vanaf de open handelt: "
+        f"**{_fmt_pct(payload['base_rate_test']['p50'])}** in 2026 "
+        f"({payload['base_rate_test']['k']} hits op {payload['base_rate_test']['n']} signalen). "
+        f"Geen gate haalt 40% precisie met n≥10.",
+    ]
+    rule = payload.get("best_rule_n20")
+    if rule:
+        lines.append(
+            f"Nauwkeurigste gate met test n≥20: `{rule['gate']}` — "
+            f"P50 {_fmt_pct(rule['test']['p50'])} (n={rule['test']['n']}, lift×{rule['lift']})."
+        )
+    if acc:
+        lines.append(
+            f"Walk-forward accuracy-sleeve: `{acc['gate']}` / `{acc['exit']}` — "
+            f"full **€{float(acc['full']['pnl']):+,.0f}**, "
+            f"2026 €{float(acc['test']['pnl']):+,.0f}, "
+            f"precisie {_fmt_pct(acc['test']['precision'])} op de test."
+        )
+    if money:
+        lines.append(
+            f"Walk-forward PnL-sleeve: `{money['gate']}` / `{money['exit']}` — "
+            f"full **€{float(money['full']['pnl']):+,.0f}**, "
+            f"2026 €{float(money['test']['pnl']):+,.0f}."
+        )
+    if full_robust:
+        lines.append(
+            f"Hoogste full-PnL die t/m 2025 ook positief was: "
+            f"**€{float(full_robust['full_compact']['pnl']):+,.0f}** (`{full_robust['name']}`)."
+        )
+    if best:
+        lines.append(
+            f"Hoogste 2026-PnL in de grid: **€{float(best['test']['pnl']):+,.0f}** "
+            f"(`{best['name']}`), train €{float(best['train']['pnl']):+,.0f}."
+        )
+    if full_best:
+        lines.append(
+            f"Hoogste full-PnL in de grid: **€{float(full_best['full_compact']['pnl']):+,.0f}** "
+            f"(`{full_best['name']}`)."
+        )
+    lines.append(
+        f"Plafond bij een perfecte +50%-limit elke event-dag, zonder verliezen: "
+        f"€{float(payload['oracle_full']['pnl_if_perfect_tp50']):+,.0f} over het hele pad."
+    )
+    return lines
 
 
 def _setup_block(row: dict[str, Any]) -> str:
