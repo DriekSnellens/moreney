@@ -301,18 +301,24 @@ class MoonshotClipDeskManager:
         return await self.start(settings=settings)
 
     async def refresh_live(self) -> dict[str, Any]:
+        """Bitvavo marks, inventory, and the pinned book on every dashboard poll."""
         if self._runner is not None:
             try:
                 await self._runner._refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("moonshot: mark refresh failed")
-            now = time.monotonic()
-            if now - self._last_reconcile_mono >= 5.0:
-                self._last_reconcile_mono = now
-                try:
-                    await self._runner.reconcile_external_inventory()
-                except Exception:  # noqa: BLE001
-                    logger.exception("moonshot: reconcile failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("moonshot: reconcile failed")
+            try:
+                await self._runner._decision_cash()
+            except Exception:  # noqa: BLE001
+                logger.exception("moonshot: venue cash sync failed")
+            try:
+                self._runner._sample_equity()
+            except Exception:  # noqa: BLE001
+                logger.exception("moonshot: equity sample failed")
         return self.status()
 
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:

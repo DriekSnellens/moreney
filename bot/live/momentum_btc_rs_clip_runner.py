@@ -1427,19 +1427,24 @@ class BtcRsClipDeskManager:
         return base
 
     async def refresh_live(self) -> dict[str, Any]:
-        """Fresh marks every poll; venue reconcile is throttled so 1s UI stays light."""
+        """Bitvavo marks, inventory, and free EUR on every dashboard poll."""
         if self._runner is not None:
             try:
                 await self._runner._refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("clip: mark refresh for status failed")
-            now = time.monotonic()
-            if now - self._last_reconcile_mono >= 5.0:
-                self._last_reconcile_mono = now
-                try:
-                    await self._runner.reconcile_external_inventory()
-                except Exception:  # noqa: BLE001
-                    logger.exception("clip: reconcile for status failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: reconcile for status failed")
+            try:
+                await self._runner._decision_cash()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: venue cash sync for status failed")
+            try:
+                self._runner._sample_equity()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: equity sample for status failed")
         return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:
