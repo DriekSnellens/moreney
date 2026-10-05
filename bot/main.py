@@ -70,6 +70,7 @@ from bot.live.momentum_short_weakest_runner import (
 )
 from bot.live.momentum_donchian_runner import get_donchian_desk_manager
 from bot.live.momentum_btc_rs_clip_runner import get_btc_rs_clip_desk_manager
+from bot.live.momentum_moonshot_clip_runner import get_moonshot_clip_desk_manager
 from bot.live.desk_allocator import live_snapshot
 from bot.risk.events import InMemoryRiskEventStore
 from bot.risk.kill_switch import KillSwitch
@@ -313,6 +314,17 @@ async def lifespan(_app: FastAPI):
                 logger.info("BTC+RS clip disabled — skip auto-resume")
         except Exception:  # noqa: BLE001
             logger.exception("failed to auto-resume BTC+RS clip")
+        try:
+            if bool(getattr(get_settings(), "momentum_moonshot_clip_enabled", False)):
+                ms = await get_moonshot_clip_desk_manager().resume_if_flagged()
+                if ms and ms.get("started"):
+                    logger.info("auto-resumed moonshot €1.7k sleeve")
+                elif ms:
+                    logger.warning("moonshot sleeve auto-resume did not start: %s", ms)
+            else:
+                logger.info("moonshot sleeve disabled — skip auto-resume")
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to auto-resume moonshot sleeve")
     yield
     if paper_runner is not None:
         try:
@@ -1558,6 +1570,48 @@ async def live_momentum_btc_rs_clip_sell_all(
             notice += f" — mislukt: {', '.join(str(x) for x in failed)}"
         return _volatile_redirect(notice)
     return result
+
+
+@app.get("/live/momentum/moonshot-clip/status")
+async def live_momentum_moonshot_clip_status() -> dict[str, Any]:
+    return await get_moonshot_clip_desk_manager().refresh_live()
+
+
+@app.get("/live/momentum/moonshot-clip/ledger")
+async def live_momentum_moonshot_clip_ledger(limit: int = 200) -> dict[str, Any]:
+    path = get_settings().momentum_moonshot_clip_ledger_path
+    rows = read_ledger_tail(path, limit=limit)
+    exits = [r for r in rows if r.get("event") == "exit"]
+    return {
+        "rows": rows,
+        "exits": len(exits),
+        "net_eur": round(
+            sum(float(r.get("net_eur") or 0) for r in exits), 2
+        ),
+        "path": str(path),
+    }
+
+
+@app.post("/live/momentum/moonshot-clip/start")
+async def live_momentum_moonshot_clip_start(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_moonshot_clip_desk_manager().start()
+
+
+@app.post("/live/momentum/moonshot-clip/stop")
+async def live_momentum_moonshot_clip_stop(
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_moonshot_clip_desk_manager().stop()
+
+
+@app.post("/live/momentum/moonshot-clip/decide")
+async def live_momentum_moonshot_clip_decide(
+    execute: bool = True,
+    _: None = Depends(require_dashboard_access),
+) -> dict[str, Any]:
+    return await get_moonshot_clip_desk_manager().decide(execute=bool(execute))
 
 
 @app.post("/live/momentum/btc-rs-clip/reconcile")

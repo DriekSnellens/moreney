@@ -1,0 +1,372 @@
+{
+  "asof": "2026-10-03T14:21:39.213557+00:00",
+  "candle_dir": "data/ignition_expand_candles",
+  "n_bases": 80,
+  "horizon_sessions": 7,
+  "label": "forward high from next open >= +30% / +50%",
+  "train_end": "2025-12-31",
+  "base_rate_train": {
+    "n": 32084,
+    "p30": 0.0823,
+    "p50": 0.0265,
+    "wilson50": 0.0248
+  },
+  "base_rate_test": {
+    "n": 16506,
+    "p30": 0.0899,
+    "p50": 0.0289,
+    "wilson50": 0.0265
+  },
+  "alphai_session_days": 13,
+  "alphai_coverage_test_rows": 436,
+  "alphai_pick_rows_test": 50,
+  "alphai_pick_p50_test": 0.0,
+  "best_precision_n20": {
+    "rule": "r3_15+xs25+trend",
+    "train": {
+      "n": 420,
+      "p30": 0.2833,
+      "p50": 0.1357,
+      "k30": 119,
+      "k50": 57
+    },
+    "test": {
+      "n": 278,
+      "p30": 0.277,
+      "p50": 0.1583,
+      "k30": 77,
+      "k50": 44
+    },
+    "test_on_alphai_days": null,
+    "lift50_test": 5.48,
+    "wilson50_test": 0.1201
+  },
+  "rules_hitting_60pct_precision_n10": [],
+  "ranked": [
+    {
+      "rule": "r3_15+xs25+trend",
+      "train": {
+        "n": 420,
+        "p30": 0.2833,
+        "p50": 0.1357,
+        "k30": 119,
+        "k50": 57
+      },
+      "test": {
+        "n": 278,
+        "p30": 0.277,
+        "p50": 0.1583,
+        "k30": 77,
+        "k50": 44
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 5.48,
+      "wilson50_test": 0.1201
+    },
+    {
+      "rule": "r3_15+vol2+trend",
+      "train": {
+        "n": 350,
+        "p30": 0.26,
+        "p50": 0.1371,
+        "k30": 91,
+        "k50": 48
+      },
+      "test": {
+        "n": 275,
+        "p30": 0.2582,
+        "p50": 0.1382,
+        "k30": 71,
+        "k50": 38
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 4.78,
+      "wilson50_test": 0.1024
+    },
+    {
+      "rule": "xs25+sma50+trend",
+      "train": {
+        "n": 1153,
+        "p30": 0.2368,
+        "p50": 0.1015,
+        "k30": 273,
+        "k50": 117
+      },
+      "test": {
+        "n": 667,
+        "p30": 0.2459,
+        "p50": 0.1139,
+        "k30": 164,
+        "k50": 76
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 3.94,
+      "wilson50_test": 0.092
+    },
+    {
+      "rule": "xs25",
+      "train": {
+        "n": 1637,
+        "p30": 0.2132,
+        "p50": 0.088,
+        "k30": 349,
+        "k50": 144
+      },
+      "test": {
+        "n": 938,
+        "p30": 0.2217,
+        "p50": 0.1077,
+        "k30": 208,
+        "k50": 101
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 3.73,
+      "wilson50_test": 0.0894
+    },
+    {
+      "rule": "brk20+day6+vol2",
+      "train": {
+        "n": 466,
+        "p30": 0.206,
+        "p50": 0.103,
+        "k30": 96,
+        "k50": 48
+      },
+      "test": {
+        "n": 394,
+        "p30": 0.2132,
+        "p50": 0.099,
+        "k30": 84,
+        "k50": 39
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 3.43,
+      "wilson50_test": 0.0733
+    },
+    {
+      "rule": "xs15",
+      "train": {
+        "n": 3401,
+        "p30": 0.1555,
+        "p50": 0.0623,
+        "k30": 529,
+        "k50": 212
+      },
+      "test": {
+        "n": 1863,
+        "p30": 0.1814,
+        "p50": 0.0778,
+        "k30": 338,
+        "k50": 145
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 2.69,
+      "wilson50_test": 0.0665
+    },
+    {
+      "rule": "coil+xs15",
+      "train": {
+        "n": 2132,
+        "p30": 0.1496,
+        "p50": 0.0577,
+        "k30": 319,
+        "k50": 123
+      },
+      "test": {
+        "n": 863,
+        "p30": 0.1831,
+        "p50": 0.066,
+        "k30": 158,
+        "k50": 57
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 2.28,
+      "wilson50_test": 0.0513
+    },
+    {
+      "rule": "quiet+brk20+day6+vol2",
+      "train": {
+        "n": 39,
+        "p30": 0.0769,
+        "p50": 0.0256,
+        "k30": 3,
+        "k50": 1
+      },
+      "test": {
+        "n": 49,
+        "p30": 0.1837,
+        "p50": 0.0612,
+        "k30": 9,
+        "k50": 3
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 2.12,
+      "wilson50_test": 0.021
+    },
+    {
+      "rule": "all_liquid",
+      "train": {
+        "n": 32084,
+        "p30": 0.0823,
+        "p50": 0.0265,
+        "k30": 2642,
+        "k50": 851
+      },
+      "test": {
+        "n": 16506,
+        "p30": 0.0899,
+        "p50": 0.0289,
+        "k30": 1484,
+        "k50": 477
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 1.0,
+      "wilson50_test": 0.0265
+    },
+    {
+      "rule": "coil",
+      "train": {
+        "n": 19900,
+        "p30": 0.0788,
+        "p50": 0.024,
+        "k30": 1568,
+        "k50": 478
+      },
+      "test": {
+        "n": 9652,
+        "p30": 0.087,
+        "p50": 0.0279,
+        "k30": 840,
+        "k50": 269
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 0.97,
+      "wilson50_test": 0.0248
+    },
+    {
+      "rule": "quiet10",
+      "train": {
+        "n": 25932,
+        "p30": 0.0704,
+        "p50": 0.0206,
+        "k30": 1826,
+        "k50": 535
+      },
+      "test": {
+        "n": 13340,
+        "p30": 0.078,
+        "p50": 0.0229,
+        "k30": 1041,
+        "k50": 306
+      },
+      "test_on_alphai_days": null,
+      "lift50_test": 0.79,
+      "wilson50_test": 0.0205
+    },
+    {
+      "rule": "alphai_pick",
+      "train": {
+        "n": 0,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "test": {
+        "n": 50,
+        "p30": 0.02,
+        "p50": 0.0,
+        "k30": 1,
+        "k50": 0
+      },
+      "test_on_alphai_days": {
+        "n": 50,
+        "p30": 0.02,
+        "p50": 0.0,
+        "k30": 1,
+        "k50": 0
+      },
+      "lift50_test": 0.0,
+      "wilson50_test": 0.0
+    },
+    {
+      "rule": "alphai+xs15",
+      "train": {
+        "n": 0,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "test": {
+        "n": 20,
+        "p30": 0.05,
+        "p50": 0.0,
+        "k30": 1,
+        "k50": 0
+      },
+      "test_on_alphai_days": {
+        "n": 20,
+        "p30": 0.05,
+        "p50": 0.0,
+        "k30": 1,
+        "k50": 0
+      },
+      "lift50_test": 0.0,
+      "wilson50_test": 0.0
+    },
+    {
+      "rule": "alphai+coil",
+      "train": {
+        "n": 0,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "test": {
+        "n": 15,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "test_on_alphai_days": {
+        "n": 15,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "lift50_test": 0.0,
+      "wilson50_test": 0.0
+    },
+    {
+      "rule": "alphai+r3_15+trend",
+      "train": {
+        "n": 0,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "test": {
+        "n": 11,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "test_on_alphai_days": {
+        "n": 11,
+        "p30": 0.0,
+        "p50": 0.0,
+        "k30": 0,
+        "k50": 0
+      },
+      "lift50_test": 0.0,
+      "wilson50_test": 0.0
+    }
+  ],
+  "note": "Precision = P(moonshot | signal). Base rate of +50%/7d is ~3%. 60\u201370% precision is a different claim than 'patterns exist' \u2014 patterns can lift 5\u20136\u00d7 and still land near 15\u201320% precision."
+}

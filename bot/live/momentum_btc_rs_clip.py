@@ -22,6 +22,92 @@ from bot.live.momentum_desk import DEFAULT_UNIVERSE
 FEE_RT = 0.003
 SLIP = 0.001
 
+# Full liquid Bitvavo EUR pool (ignition_expand_candles), not the 16-name desk.
+EXPAND_LIQUID_UNIVERSE: tuple[str, ...] = (
+    "AAVE",
+    "ADA",
+    "ALGO",
+    "ALICE",
+    "ARB",
+    "ARK",
+    "ATOM",
+    "AVAX",
+    "BCH",
+    "BNB",
+    "CAP",
+    "COTI",
+    "CRV",
+    "CT",
+    "CVX",
+    "DATAIP",
+    "DOGE",
+    "DOT",
+    "EIGEN",
+    "ENA",
+    "ENJ",
+    "ETH",
+    "FARTCOIN",
+    "FET",
+    "GLMR",
+    "GRASS",
+    "GTC",
+    "HBAR",
+    "HYPE",
+    "ICP",
+    "INJ",
+    "JASMY",
+    "JUP",
+    "KAS",
+    "LINK",
+    "LPT",
+    "LSK",
+    "LTC",
+    "MAGIC",
+    "MANA",
+    "MEGA",
+    "MON",
+    "MOVR",
+    "NEAR",
+    "NOM",
+    "NPC",
+    "ONDO",
+    "OP",
+    "PENGU",
+    "PEPE",
+    "PHA",
+    "PLUME",
+    "PUMP",
+    "QNT",
+    "RAY",
+    "RENDER",
+    "SAND",
+    "SCR",
+    "SEI",
+    "SHIB",
+    "SKY",
+    "SOL",
+    "STX",
+    "SUI",
+    "SUPER",
+    "SWEAT",
+    "SYN",
+    "TAO",
+    "TIA",
+    "TRX",
+    "UNI",
+    "USELESS",
+    "VET",
+    "VIRTUAL",
+    "VVV",
+    "WIF",
+    "WLD",
+    "XDP",
+    "XLM",
+    "XPL",
+    "XRP",
+    "ZRO",
+)
+
 
 @dataclass(frozen=True)
 class ClipConfig:
@@ -32,6 +118,9 @@ class ClipConfig:
     lookback_days: int = 10
     skip_days: int = 1
     rebalance_days: int = 7
+    # If set (0=Mon … 6=Sun), weekly clock only fires on that weekday
+    # after ``rebalance_days`` have elapsed. None / <0 = any day.
+    rebalance_weekday: int | None = None
     sma_n: int = 50
     min_qvol_eur: float = 80_000.0
     min_notional_eur: float = 50.0
@@ -43,6 +132,17 @@ class ClipConfig:
     require_alt_sma: bool = False
     # With no qualifying alt, do not open a BTC sleeve. Paired with btc_frac 0.
     cash_when_no_alt: bool = False
+    # Moonshot preimage gates (coin-agnostic). 0 / False = off.
+    min_r3_pct: float = 0.0
+    require_trend: bool = False
+    # Cap sizing base at book_eur so a small sleeve stays fixed-size.
+    size_to_book: bool = False
+    # weekly_rs | top_day | coil_day | brk20_day | top_rs
+    entry_mode: str = "weekly_rs"
+    # Exit alt after N calendar days (0 = trail/rotate only).
+    time_max_days: int = 0
+    # Hard stop from entry (0 = off).
+    hard_stop_pct: float = 0.0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
@@ -62,6 +162,51 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
         excess_floor=0.035,
         require_alt_sma=True,
         cash_when_no_alt=True,
+    )
+
+
+def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
+    """Deprecated alias — use ``daily_green_config`` (active top_day sleeve)."""
+    return daily_green_config(cfg)
+
+
+def daily_green_config(cfg: ClipConfig | None = None) -> ClipConfig:
+    """Fixed €1.7k daily-active sleeve (walk-forward dual IS+OOS winner).
+
+    Full liquid universe (~80 names). Risk-on: 20d breakout + day thrust
+    (brk20_day), trail 12%, hard-stop 5%, time-stop 5d, size capped at book.
+    BTC SMA50 filter on. Optimized for green weeks − DD, not spike-fit alone.
+    """
+    base = cfg or ClipConfig()
+    uni = tuple(base.universe) if base.universe else EXPAND_LIQUID_UNIVERSE
+    if uni == DEFAULT_UNIVERSE:
+        uni = EXPAND_LIQUID_UNIVERSE
+    qvol = float(base.min_qvol_eur or 0.0)
+    if qvol <= 0:
+        qvol = 50_000.0
+    elif qvol > 50_000.0:
+        qvol = 50_000.0
+    return replace(
+        base,
+        book_eur=float(base.book_eur) if float(base.book_eur) > 0 else 1_700.0,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        rebalance_days=1,
+        sma_n=50,
+        min_qvol_eur=qvol,
+        require_alt_sma=False,
+        cash_when_no_alt=True,
+        min_r3_pct=0.0,
+        require_trend=False,
+        size_to_book=True,
+        alt_trail_pct=0.12,
+        entry_mode="brk20_day",
+        time_max_days=5,
+        hard_stop_pct=0.05,
+        universe=uni,
     )
 
 
@@ -209,7 +354,12 @@ def evaluate_clip(
             "trims": [],
         }
     risk_on = last > s50
-    equity = max(0.0, float(cash_eur) + float(deployed_eur))
+    raw_equity = max(0.0, float(cash_eur) + float(deployed_eur))
+    equity = (
+        min(raw_equity, float(cfg.book_eur))
+        if bool(cfg.size_to_book) and float(cfg.book_eur) > 0
+        else raw_equity
+    )
     held_btc = next((b for b, role in held.items() if role == "btc"), None)
     held_alt = next((b for b, role in held.items() if role == "alt"), None)
     exits: list[dict[str, Any]] = []
@@ -237,8 +387,15 @@ def evaluate_clip(
     reb_ms = int(cfg.rebalance_days) * 86_400_000
     # A fresh book (no clock yet) may enter. After a trail or weekly check the
     # clock blocks the next buy, including when the book is already flat.
-    rebalance_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
+    age_due = last_rebalance_ms <= 0 or (now_ms - last_rebalance_ms) >= reb_ms
+    wd = cfg.rebalance_weekday
+    if age_due and wd is not None and int(wd) >= 0:
+        rebalance_due = now.weekday() == int(wd)
+    else:
+        rebalance_due = age_due
 
+    mode = str(cfg.entry_mode or "weekly_rs").lower()
+    day_modes = {"top_day", "coil_day", "brk20_day"}
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for base in cfg.universe:
@@ -246,7 +403,10 @@ def evaluate_clip(
         cl = closes_of(rows)
         xs = rs_excess(cl, btc_c, lb=cfg.lookback_days, skip=cfg.skip_days)
         qv = quote_vol(rows)
-        if xs is None:
+        if mode not in day_modes and xs is None:
+            skipped.append({"base": base, "reason": "short_history"})
+            continue
+        if mode in day_modes and len(cl) < 2:
             skipped.append({"base": base, "reason": "short_history"})
             continue
         if qv < cfg.min_qvol_eur:
@@ -255,7 +415,7 @@ def evaluate_clip(
                     "base": base,
                     "reason": "thin_volume",
                     "qvol": round(qv, 0),
-                    "excess": round(xs, 4),
+                    "excess": round(xs, 4) if xs is not None else None,
                 }
             )
             continue
@@ -267,15 +427,104 @@ def evaluate_clip(
                     {
                         "base": base,
                         "reason": "below_sma",
-                        "excess": round(xs, 4),
+                        "excess": round(xs, 4) if xs is not None else None,
                     }
                 )
                 continue
-        ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
-    ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
+        if float(cfg.min_r3_pct or 0.0) > 0:
+            if len(cl) < 4 or cl[-4] <= 0:
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "short_r3",
+                        "excess": round(xs, 4) if xs is not None else None,
+                    }
+                )
+                continue
+            r3 = cl[-1] / cl[-4] - 1.0
+            if r3 < float(cfg.min_r3_pct):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "weak_r3",
+                        "r3": round(r3, 4),
+                        "excess": round(xs, 4) if xs is not None else None,
+                    }
+                )
+                continue
+        else:
+            r3 = None
+        if cfg.require_trend:
+            s20 = sma(cl, 20)
+            s50_alt = sma(cl, cfg.sma_n)
+            last_alt = float(cl[-1]) if cl else 0.0
+            if s20 is None or s50_alt is None or not (last_alt > s20 > s50_alt):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "no_trend",
+                        "excess": round(xs, 4) if xs is not None else None,
+                    }
+                )
+                continue
+        day_ret = 0.0
+        if len(cl) >= 2 and cl[-2] > 0:
+            day_ret = cl[-1] / cl[-2] - 1.0
+        highs = [float(r[2]) for r in rows if len(r) >= 3 and float(r[2]) > 0]
+        lows = [float(r[3]) for r in rows if len(r) >= 4 and float(r[3]) > 0]
+        coil = False
+        if len(highs) >= 20 and len(lows) >= 20:
+            hi5, lo5 = max(highs[-5:]), min(lows[-5:])
+            hi20, lo20 = max(highs[-20:]), min(lows[-20:])
+            span5 = hi5 / lo5 - 1.0 if lo5 > 0 else 0.0
+            span20 = hi20 / lo20 - 1.0 if lo20 > 0 else 0.0
+            coil = span20 > 1e-9 and span5 / span20 < 0.5
+        brk20 = False
+        if len(highs) >= 21 and cl:
+            prior_hi20 = max(highs[-21:-1])
+            brk20 = float(cl[-1]) >= prior_hi20
+        if mode == "coil_day":
+            if not coil or day_ret < float(cfg.excess_floor):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "no_coil" if not coil else "weak_day",
+                        "day_ret": round(day_ret, 4),
+                    }
+                )
+                continue
+        if mode == "brk20_day":
+            if not brk20 or day_ret < float(cfg.excess_floor):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "no_breakout" if not brk20 else "weak_day",
+                        "day_ret": round(day_ret, 4),
+                    }
+                )
+                continue
+        row = {
+            "base": base,
+            "excess": float(xs) if xs is not None else 0.0,
+            "day_ret": day_ret,
+            "qvol": round(qv, 0),
+            "coil": coil,
+            "brk20": brk20,
+        }
+        if r3 is not None:
+            row["r3"] = round(float(r3), 4)
+        ranked.append(row)
+    if mode in day_modes:
+        ranked.sort(key=lambda r: float(r.get("day_ret") or 0.0), reverse=True)
+    else:
+        ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want_alt: str | None = None
-    if rebalance_due and ranked and float(ranked[0]["excess"]) > cfg.excess_floor:
-        want_alt = str(ranked[0]["base"])
+    if rebalance_due and ranked:
+        top = ranked[0]
+        if mode in day_modes:
+            want_alt = str(top["base"])
+        elif float(top["excess"]) > cfg.excess_floor:
+            want_alt = str(top["base"])
     elif not rebalance_due:
         want_alt = held_alt
 
@@ -335,9 +584,13 @@ def evaluate_clip(
                     "notional_eur": round(n_alt, 2),
                     "role": "alt",
                     "reasons": [
-                        f"excess={float(top.get('excess') or 0):.3f}",
+                        (
+                            f"day={float(top.get('day_ret') or 0):.3f}"
+                            if mode in day_modes
+                            else f"excess={float(top.get('excess') or 0):.3f}"
+                        ),
                         f"frac={cfg.alt_frac:.2f}",
-                        "weekly_rs",
+                        mode if mode != "weekly_rs" else "weekly_rs",
                     ],
                 }
             )
@@ -384,13 +637,44 @@ def evaluate_clip(
                 )
 
     alt_txt = want_alt or "geen alt"
-    caption = (
-        f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
-        f"{int(cfg.alt_frac * 100)}% {alt_txt}"
-        + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
-        + (f", alt-trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
-        + f", {cfg.lookback_days}d RS. Telt niet mee in live mix-equity."
-    )
+    if mode in day_modes or float(cfg.min_r3_pct or 0.0) > 0:
+        detail = ""
+        if want_alt and ranked:
+            top = ranked[0]
+            if mode in day_modes:
+                detail = f" (day {float(top.get('day_ret') or 0):+.1%})"
+            else:
+                detail = f" (xs {float(top['excess']):+.1%}"
+                if top.get("r3") is not None:
+                    detail += f", r3 {float(top['r3']):+.1%}"
+                detail += ")"
+        if mode == "coil_day":
+            gate = f"coil_day+day≥{cfg.excess_floor:.0%}"
+        elif mode == "brk20_day":
+            gate = f"brk20_day+day≥{cfg.excess_floor:.0%}"
+        elif mode == "top_day":
+            gate = "top_day"
+        else:
+            gate = (
+                f"r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
+                + ("+trend" if cfg.require_trend else "")
+            )
+        caption = (
+            f"Daily sleeve €{cfg.book_eur:,.0f}: {alt_txt}{detail}"
+            f", {gate}"
+            + (f", trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
+            + (f", hs {cfg.hard_stop_pct:.0%}" if float(cfg.hard_stop_pct or 0) > 0 else "")
+            + (f", time≤{cfg.time_max_days}d" if int(cfg.time_max_days or 0) > 0 else "")
+            + ". Vast boek — elke risk-on dag actief."
+        )
+    else:
+        caption = (
+            f"Clip: {int(cfg.btc_frac * 100)}% BTC boven SMA{cfg.sma_n}, "
+            f"{int(cfg.alt_frac * 100)}% {alt_txt}"
+            + (f" (excess {ranked[0]['excess']:+.1%})" if want_alt and ranked else "")
+            + (f", alt-trail {cfg.alt_trail_pct:.0%}" if float(cfg.alt_trail_pct or 0) > 0 else "")
+            + f", {cfg.lookback_days}d RS. Telt niet mee in live mix-equity."
+        )
     return {
         "ok": True,
         "risk_block": "",
