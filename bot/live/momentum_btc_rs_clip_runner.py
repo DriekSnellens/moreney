@@ -1067,9 +1067,12 @@ class BtcRsClipPaperRunner:
             if str(self.cfg.entry_mode or "") == "brk20_now":
                 await self._refresh_universe_marks()
                 live_marks = dict(self.marks)
-                from bot.live.momentum_btc_rs_clip import load_alphai_breakout_sets
+                from bot.live.momentum_btc_rs_clip import fresh_alphai_breakout_sets
 
-                alphai_picks, alphai_avoid = load_alphai_breakout_sets()
+                alphai_picks, alphai_avoid = await asyncio.to_thread(
+                    fresh_alphai_breakout_sets,
+                    focus_bases=tuple(self.cfg.universe),
+                )
             held = {p.base: p.role for p in self.positions}
             sleeves = {
                 "btc": sum(p.notional_eur for p in self.positions if p.role == "btc"),

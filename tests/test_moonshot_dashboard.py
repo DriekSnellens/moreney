@@ -328,3 +328,114 @@ def test_brk20_now_skips_a_day_already_up_22pct():
     assert out["want_alt"] is None
     assert out["entries"] == []
     assert any(row.get("reason") == "too_extended" for row in out["skipped"])
+
+
+def _alphai_file(path, payload) -> None:
+    import json
+
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_current_alphai_session_is_used_without_a_refresh(tmp_path):
+    from bot.integrations.alphai.daily_recommendations import (
+        next_update_at_utc,
+        recommendation_session_id,
+    )
+    from bot.live.momentum_btc_rs_clip import fresh_alphai_breakout_sets
+
+    now = datetime(2026, 10, 5, 14, 7, tzinfo=UTC)
+    path = tmp_path / "alphai.json"
+    _alphai_file(
+        path,
+        {
+            "session_id": recommendation_session_id(now=now, interval_minutes=15),
+            "next_update_at": next_update_at_utc(now=now, interval_minutes=15).isoformat(),
+            "picks": [{"base": "XRP"}],
+            "avoid": [{"base": "AAVE"}],
+        },
+    )
+
+    class Boom:
+        def __getattr__(self, _name):
+            raise AssertionError("fresh session must not call AlphaI")
+
+    picks, avoid = fresh_alphai_breakout_sets(
+        path=str(path),
+        focus_bases=("XRP",),
+        now=now,
+        client=Boom(),
+        interval_minutes=15,
+    )
+    assert picks == frozenset({"XRP"})
+    assert avoid == frozenset({"AAVE"})
+
+
+def test_stale_alphai_is_ignored_when_refresh_is_off(tmp_path):
+    from bot.live.momentum_btc_rs_clip import fresh_alphai_breakout_sets
+
+    path = tmp_path / "alphai.json"
+    _alphai_file(
+        path,
+        {
+            "session_id": "2026-10-04T11:45",
+            "generated_at": "2026-10-04T09:45:13+00:00",
+            "next_update_at": "2026-10-04T10:00:00+00:00",
+            "picks": [{"base": "XRP"}],
+            "avoid": [{"base": "ETH"}],
+        },
+    )
+    picks, avoid = fresh_alphai_breakout_sets(
+        path=str(path),
+        focus_bases=("XRP", "ETH"),
+        now=datetime(2026, 10, 5, 16, 0, tzinfo=UTC),
+        interval_minutes=15,
+        allow_network=False,
+    )
+    assert picks == frozenset()
+    assert avoid == frozenset()
+
+
+def test_stale_alphai_is_refreshed_before_the_scan(tmp_path, monkeypatch):
+    from bot.integrations.alphai.daily_recommendations import (
+        next_update_at_utc,
+        recommendation_session_id,
+        save_daily_recommendations,
+    )
+    from bot.live.momentum_btc_rs_clip import fresh_alphai_breakout_sets
+
+    now = datetime(2026, 10, 5, 16, 0, tzinfo=UTC)
+    path = tmp_path / "alphai.json"
+    _alphai_file(
+        path,
+        {
+            "session_id": "2026-10-04T11:45",
+            "next_update_at": "2026-10-04T10:00:00+00:00",
+            "picks": [{"base": "XRP"}],
+            "avoid": [{"base": "ETH"}],
+        },
+    )
+
+    def _refresh(client, out_path, **kwargs):
+        del client, kwargs
+        report = {
+            "session_id": recommendation_session_id(now=now, interval_minutes=15),
+            "next_update_at": next_update_at_utc(now=now, interval_minutes=15).isoformat(),
+            "picks": [{"base": "SOL"}],
+            "avoid": [{"base": "AAVE"}],
+        }
+        save_daily_recommendations(out_path, report)
+        return report
+
+    monkeypatch.setattr(
+        "bot.integrations.alphai.daily_recommendations.maybe_refresh_daily",
+        _refresh,
+    )
+    picks, avoid = fresh_alphai_breakout_sets(
+        path=str(path),
+        focus_bases=("SOL", "AAVE"),
+        now=now,
+        client=object(),
+        interval_minutes=15,
+    )
+    assert picks == frozenset({"SOL"})
+    assert avoid == frozenset({"AAVE"})

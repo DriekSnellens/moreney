@@ -351,6 +351,123 @@ def load_alphai_breakout_sets(path: str | None = None) -> tuple[frozenset[str], 
     return frozenset(view.picks), frozenset(view.avoid)
 
 
+def fresh_alphai_breakout_sets(
+    *,
+    path: str | None = None,
+    focus_bases: Collection[str] | None = None,
+    now: datetime | None = None,
+    client: Any | None = None,
+    interval_minutes: int | None = None,
+    allow_network: bool = True,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Picks and avoid from the current AlphaI session.
+
+    A scan refreshes the file when its session bucket has rolled. A list that
+    is still stale after that attempt is ignored, so yesterday's picks cannot
+    steer the breakout.
+    """
+    from bot.integrations.alphai.daily_recommendations import (
+        load_daily_recommendations,
+        maybe_refresh_daily,
+        needs_session_refresh,
+    )
+
+    instant = now or datetime.now(UTC)
+    settings = None
+    if path is None or interval_minutes is None or (allow_network and client is None):
+        from bot.core.config import get_settings
+
+        settings = get_settings()
+    if path is None and settings is not None:
+        path = str(getattr(settings, "alphai_daily_recommendations_path", "") or "")
+    if not path:
+        return frozenset(), frozenset()
+    minutes = interval_minutes
+    if minutes is None and settings is not None:
+        minutes = int(getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15)
+    minutes = int(minutes or 15)
+    hour = 12
+    if settings is not None:
+        hour = int(getattr(settings, "alphai_daily_recommendations_hour", 12) or 12)
+
+    def _current(report: dict[str, Any] | None) -> tuple[frozenset[str], frozenset[str]] | None:
+        if not report or needs_session_refresh(
+            report,
+            now=instant,
+            interval_minutes=minutes,
+            update_hour_local=hour,
+        ):
+            return None
+        from bot.live.momentum_desk import AlphaIView
+
+        view = AlphaIView.from_recommendations(report)
+        return frozenset(view.picks), frozenset(view.avoid)
+
+    cached = load_daily_recommendations(path)
+    fresh = _current(cached)
+    if fresh is not None:
+        return fresh
+    if not allow_network:
+        return frozenset(), frozenset()
+
+    if client is None and settings is not None:
+        client = _alphai_client_from_settings(settings)
+    if client is None:
+        return frozenset(), frozenset()
+
+    from bot.integrations.alphai.regime import _parse_csv_bases
+    from bot.integrations.alphai.symbols import LIQUID_EUR_BASES
+
+    focus = {str(b).upper() for b in (focus_bases or ()) if b}
+    focus |= set(LIQUID_EUR_BASES)
+    if settings is not None:
+        focus |= _parse_csv_bases(getattr(settings, "live_micro_focus_bases", "") or "", fallback=set())
+    report = maybe_refresh_daily(
+        client,
+        path,
+        focus_bases=focus or set(LIQUID_EUR_BASES),
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        )
+        if settings is not None
+        else 6,
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8)
+        if settings is not None
+        else 8,
+        update_hour_local=hour,
+        interval_minutes=minutes,
+        interval_hours=int(getattr(settings, "alphai_recommendations_interval_hours", 1) or 1)
+        if settings is not None
+        else 1,
+        now=instant,
+    )
+    fresh = _current(report if isinstance(report, dict) else None)
+    if fresh is not None:
+        return fresh
+    return frozenset(), frozenset()
+
+
+def _alphai_client_from_settings(settings: Any) -> Any | None:
+    import os
+
+    if not bool(getattr(settings, "alphai_enabled", False)):
+        return None
+    from bot.integrations.alphai.client import AlphaIClient
+
+    key = getattr(settings, "alphai_api_key", None)
+    secret = ""
+    if key is not None and hasattr(key, "get_secret_value"):
+        secret = str(key.get_secret_value() or "")
+    elif key:
+        secret = str(key)
+    if not secret:
+        secret = os.environ.get("ALPHAI_API_KEY", "")
+    if not secret:
+        return None
+    return AlphaIClient(secret)
+
+
 def evaluate_clip(
     ohlc_by_base: Mapping[str, Sequence[Sequence[float]]],
     cfg: ClipConfig,
