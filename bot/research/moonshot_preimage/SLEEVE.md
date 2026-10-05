@@ -64,3 +64,7 @@ Reproduce:
 .venv/bin/python -m bot.research.daily_green_lab --optimize
 .venv/bin/python -m bot.research.daily_green_lab --compound
 ```
+
+## Continuous daily (research)
+
+Los van residual: zoekresultaat voor dagelijks actieve sleeve op groene dagen — zie [`../daily_green_lab/CONTINUOUS.md`](../daily_green_lab/CONTINUOUS.md).
