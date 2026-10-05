@@ -149,9 +149,10 @@ def test_brk20_now_buys_the_live_cross_and_skips_a_finished_breakout():
 
     btc = _closed_days(40, 100.0, high=101.0)
     btc[-1][4] = 110.0
-    # SOL: 20d high is 12, yesterday closed at 10 — the cross is still ahead.
+    # SOL: 20d high is 10.20, yesterday closed at 10. A print at 10.35
+    # is the first pierce (+3.5% on the day, 1.5% through the high).
     sol = _closed_days(40, 10.0, high=10.0)
-    sol[-8][2] = 12.0
+    sol[-8][2] = 10.2
     # ETH already closed on its own 20d high yesterday.
     eth = _closed_days(40, 8.0, high=8.0)
     eth[-1][2] = 9.0
@@ -167,6 +168,8 @@ def test_brk20_now_buys_the_live_cross_and_skips_a_finished_breakout():
         alt_frac=1.0,
         cash_when_no_alt=True,
         excess_floor=0.0,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
     )
     out = evaluate_clip(
         {"BTC": btc, "SOL": sol, "ETH": eth},
@@ -177,7 +180,7 @@ def test_brk20_now_buys_the_live_cross_and_skips_a_finished_breakout():
         now_ms=1_717_200_000_000,
         last_rebalance_ms=0,
         now=datetime(2024, 6, 1, tzinfo=UTC),
-        live_marks={"SOL": 12.4, "ETH": 9.4},
+        live_marks={"SOL": 10.35, "ETH": 9.4},
         alphai_picks=("ETH",),
         alphai_avoid=(),
     )
@@ -194,9 +197,9 @@ def test_brk20_now_blocks_alphai_avoid_and_marks_a_pick():
     btc = _closed_days(40, 100.0, high=101.0)
     btc[-1][4] = 110.0
     sol = _closed_days(40, 10.0, high=10.0)
-    sol[-8][2] = 12.0
+    sol[-8][2] = 10.2
     ada = _closed_days(40, 5.0, high=5.0)
-    ada[-8][2] = 6.0
+    ada[-8][2] = 5.15
     cfg = ClipConfig(
         universe=("SOL", "ADA"),
         entry_mode="brk20_now",
@@ -207,6 +210,8 @@ def test_brk20_now_blocks_alphai_avoid_and_marks_a_pick():
         alt_frac=1.0,
         cash_when_no_alt=True,
         excess_floor=0.0,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
     )
     blocked = evaluate_clip(
         {"BTC": btc, "SOL": sol, "ADA": ada},
@@ -217,9 +222,45 @@ def test_brk20_now_blocks_alphai_avoid_and_marks_a_pick():
         now_ms=1_717_200_000_000,
         last_rebalance_ms=0,
         now=datetime(2024, 6, 1, tzinfo=UTC),
-        live_marks={"SOL": 12.2, "ADA": 6.1},
+        live_marks={"SOL": 10.35, "ADA": 5.25},
         alphai_avoid=("SOL",),
         alphai_picks=("ADA",),
     )
     assert blocked["want_alt"] == "ADA"
     assert "AlphaI" in blocked["caption"]
+
+
+def test_brk20_now_skips_a_day_already_up_22pct():
+    from bot.live.momentum_btc_rs_clip import ClipConfig, evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    gtc = _closed_days(40, 10.0, high=10.0)
+    gtc[-8][2] = 10.2
+    cfg = ClipConfig(
+        universe=("GTC",),
+        entry_mode="brk20_now",
+        sma_n=20,
+        min_qvol_eur=1.0,
+        book_eur=2_000.0,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        cash_when_no_alt=True,
+        excess_floor=0.0,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
+    )
+    out = evaluate_clip(
+        {"BTC": btc, "GTC": gtc},
+        cfg,
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"GTC": 12.2},
+    )
+    assert out["want_alt"] is None
+    assert out["entries"] == []
+    assert any(row.get("reason") == "too_extended" for row in out["skipped"])

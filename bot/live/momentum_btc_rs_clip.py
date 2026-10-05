@@ -150,6 +150,10 @@ class ClipConfig:
     ohlc_days: int = 120
     # >0: scan for entries through the day (MoonShot first-breakout). 0 = hour clock.
     entry_scan_sec: float = 0.0
+    # 0 = off. MoonShot refuses a cross that is already this far above yesterday's close.
+    max_entry_day_ret: float = 0.0
+    # 0 = off. MoonShot only buys while price is still this close above the 20d high.
+    max_break_extension: float = 0.0
 
 
 def residual_full_config(cfg: ClipConfig) -> ClipConfig:
@@ -566,6 +570,18 @@ def evaluate_clip(
                     {
                         "base": base,
                         "reason": "no_breakout" if mark < prior_hi else "weak_day",
+                        "day_ret": round(live_ret, 4),
+                    }
+                )
+                continue
+            day_cap = float(getattr(cfg, "max_entry_day_ret", 0.0) or 0.0)
+            ext_cap = float(getattr(cfg, "max_break_extension", 0.0) or 0.0)
+            extension = mark / prior_hi - 1.0 if prior_hi > 0 else 0.0
+            if (day_cap > 0 and live_ret > day_cap) or (ext_cap > 0 and extension > ext_cap):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "too_extended",
                         "day_ret": round(live_ret, 4),
                     }
                 )

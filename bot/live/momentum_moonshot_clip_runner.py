@@ -48,8 +48,15 @@ def moonshot_config_from_settings(settings: Settings | None = None):
     book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 2_000.0) or 2_000.0)
     base = config_from_settings(settings)
     cfg = daily_green_config(replace(base, book_eur=book))
-    # Buy the first 20d cross while it is printing, not the next midnight.
-    return replace(cfg, entry_mode="brk20_now", entry_scan_sec=300.0)
+    # Buy the first pierce of the 20d high. A day that is already +8%,
+    # or a price more than 3% through that high, is the move itself.
+    return replace(
+        cfg,
+        entry_mode="brk20_now",
+        entry_scan_sec=300.0,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
+    )
 
 
 class MoonshotClipDeskManager:
