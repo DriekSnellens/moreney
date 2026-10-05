@@ -1,6 +1,8 @@
-"""MoonShot dashboard title and fixed €2k book cap."""
+"""MoonShot dashboard title, fixed €2k book, and the live first-breakout entry."""
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import pytest
 
@@ -130,3 +132,94 @@ async def test_pinned_cash_does_not_adopt_venue_leftover(tmp_path):
     cash = await runner._decision_cash()
     assert cash == 500.0
     assert runner.cash_eur == 500.0
+
+
+def _closed_days(n: int, close: float, *, high: float | None = None, start_ms: int = 1_704_067_200_000):
+    """Daily bars in the past so they stay completed."""
+    rows = []
+    hi = close if high is None else high
+    for i in range(n):
+        px = close
+        rows.append([start_ms + i * 86_400_000, px, hi, px * 0.99, px, 100_000.0])
+    return rows
+
+
+def test_brk20_now_buys_the_live_cross_and_skips_a_finished_breakout():
+    from bot.live.momentum_btc_rs_clip import ClipConfig, evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    # SOL: 20d high is 12, yesterday closed at 10 — the cross is still ahead.
+    sol = _closed_days(40, 10.0, high=10.0)
+    sol[-8][2] = 12.0
+    # ETH already closed on its own 20d high yesterday.
+    eth = _closed_days(40, 8.0, high=8.0)
+    eth[-1][2] = 9.0
+    eth[-1][4] = 9.0
+    cfg = ClipConfig(
+        universe=("SOL", "ETH"),
+        entry_mode="brk20_now",
+        sma_n=20,
+        min_qvol_eur=1.0,
+        book_eur=2_000.0,
+        size_to_book=True,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        cash_when_no_alt=True,
+        excess_floor=0.0,
+    )
+    out = evaluate_clip(
+        {"BTC": btc, "SOL": sol, "ETH": eth},
+        cfg,
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"SOL": 12.4, "ETH": 9.4},
+        alphai_picks=("ETH",),
+        alphai_avoid=(),
+    )
+    assert out["want_alt"] == "SOL"
+    assert out["entries"][0]["base"] == "SOL"
+    assert out["entries"][0]["notional_eur"] == pytest.approx(2_000.0, abs=0.01)
+    assert "eerste 20d-breakout" in out["caption"]
+    assert "AlphaI" not in out["caption"]
+
+
+def test_brk20_now_blocks_alphai_avoid_and_marks_a_pick():
+    from bot.live.momentum_btc_rs_clip import ClipConfig, evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    sol = _closed_days(40, 10.0, high=10.0)
+    sol[-8][2] = 12.0
+    ada = _closed_days(40, 5.0, high=5.0)
+    ada[-8][2] = 6.0
+    cfg = ClipConfig(
+        universe=("SOL", "ADA"),
+        entry_mode="brk20_now",
+        sma_n=20,
+        min_qvol_eur=1.0,
+        book_eur=2_000.0,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        cash_when_no_alt=True,
+        excess_floor=0.0,
+    )
+    blocked = evaluate_clip(
+        {"BTC": btc, "SOL": sol, "ADA": ada},
+        cfg,
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"SOL": 12.2, "ADA": 6.1},
+        alphai_avoid=("SOL",),
+        alphai_picks=("ADA",),
+    )
+    assert blocked["want_alt"] == "ADA"
+    assert "AlphaI" in blocked["caption"]

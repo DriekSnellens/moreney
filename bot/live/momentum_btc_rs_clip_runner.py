@@ -204,6 +204,8 @@ class BtcRsClipPaperRunner:
         self._decide_lock = asyncio.Lock()
         self._last_curve_save = 0.0
         self._last_reconcile_mono = 0.0
+        self._ohlc_cache: dict[str, list[list[float]]] | None = None
+        self._ohlc_cache_mono = 0.0
         self._load_state()
 
     def _desk(self) -> str:
@@ -1016,6 +1018,41 @@ class BtcRsClipPaperRunner:
             return None
         return float(rows[-1][4])
 
+    def _order_px(self, ohlc: dict[str, list[list[float]]], base: str) -> float | None:
+        """Live mark while hunting the first breakout; else the last closed daily."""
+        if str(self.cfg.entry_mode or "") == "brk20_now":
+            mark = float(self.marks.get(base) or 0.0)
+            if mark > 0:
+                return mark
+        return self._last_close(ohlc, base)
+
+    async def _ohlc_for_decision(self) -> dict[str, list[list[float]]]:
+        ttl = 900.0 if float(getattr(self.cfg, "entry_scan_sec", 0.0) or 0.0) > 0 else 0.0
+        now = time.monotonic()
+        if ttl > 0 and self._ohlc_cache is not None and now - self._ohlc_cache_mono < ttl:
+            return self._ohlc_cache
+        data = await self._load_ohlc()
+        self._ohlc_cache = data
+        self._ohlc_cache_mono = now
+        return data
+
+    async def _refresh_universe_marks(self) -> None:
+        bases = tuple(dict.fromkeys((*self.cfg.universe, "BTC")))
+
+        async def _one(base: str) -> tuple[str, float | None]:
+            try:
+                px = await self._feed.last_price(base)
+                return base, float(px) if px else None
+            except Exception:  # noqa: BLE001
+                return base, None
+
+        rows = await asyncio.gather(*(_one(base) for base in bases))
+        now = time.time()
+        for base, px in rows:
+            if px and px > 0:
+                self.marks[base] = float(px)
+                self.mark_ts[base] = now
+
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:
         async with self._decide_lock:
             now = datetime.now(UTC)
@@ -1023,7 +1060,16 @@ class BtcRsClipPaperRunner:
             due = self._rebalance_due(int(now.timestamp() * 1000))
             if self.pending_pack == "residual_full" and due:
                 self._arm_residual_pack("weekly_clock")
-            ohlc = await self._load_ohlc()
+            ohlc = await self._ohlc_for_decision()
+            live_marks: dict[str, float] | None = None
+            alphai_picks: frozenset[str] = frozenset()
+            alphai_avoid: frozenset[str] = frozenset()
+            if str(self.cfg.entry_mode or "") == "brk20_now":
+                await self._refresh_universe_marks()
+                live_marks = dict(self.marks)
+                from bot.live.momentum_btc_rs_clip import load_alphai_breakout_sets
+
+                alphai_picks, alphai_avoid = load_alphai_breakout_sets()
             held = {p.base: p.role for p in self.positions}
             sleeves = {
                 "btc": sum(p.notional_eur for p in self.positions if p.role == "btc"),
@@ -1042,12 +1088,15 @@ class BtcRsClipPaperRunner:
                 last_rebalance_ms=self.last_rebalance_ms,
                 now=now,
                 sleeve_eur=sleeves,
+                live_marks=live_marks,
+                alphai_picks=alphai_picks,
+                alphai_avoid=alphai_avoid,
             )
             applied: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
                 for ex in decision.get("exits") or []:
                     pos = next((p for p in self.positions if p.base == ex["base"]), None)
-                    close = self._last_close(ohlc, ex["base"])
+                    close = self._order_px(ohlc, ex["base"])
                     if pos and close:
                         px = fill_px(close, "sell", slip=self.cfg.slip)
                         net = await self._close_lot(pos, px, str(ex.get("reason") or "exit"))
@@ -1072,7 +1121,7 @@ class BtcRsClipPaperRunner:
                             }
                         )
                 for row in decision.get("entries") or []:
-                    close = self._last_close(ohlc, row["base"])
+                    close = self._order_px(ohlc, row["base"])
                     if not close:
                         continue
                     px = fill_px(close, "buy", slip=self.cfg.slip)
@@ -1241,14 +1290,17 @@ class BtcRsClipPaperRunner:
         except Exception:  # noqa: BLE001
             logger.exception("clip kick reconcile failed")
         now = datetime.now(UTC)
-        in_window = now.hour in hours and now.minute < 8
-        # Empty-book kick would rebuy immediately; only fill inside the daily window.
+        scan_sec = float(getattr(self.cfg, "entry_scan_sec", 0.0) or 0.0)
+        in_window = scan_sec > 0 or (now.hour in hours and now.minute < 8)
+        # Hour-clock books only buy inside the daily window. MoonShot scans
+        # through the day so the first breakout can fill while it is printing.
         try:
             await self.decide(execute=in_window)
         except Exception:  # noqa: BLE001
             logger.exception("clip kick decide failed")
-        if in_window:
+        if in_window and scan_sec <= 0:
             last_hour_fire.add(f"{now.date()}-{now.hour}")
+        last_scan = time.monotonic()
         while not should_stop():
             try:
                 await self._refresh_marks()
@@ -1264,7 +1316,15 @@ class BtcRsClipPaperRunner:
                     await self.manage_alt_trail()
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
-                if now.hour in hours and now.minute < 8 and key not in last_hour_fire:
+                if scan_sec > 0 and time.monotonic() - last_scan >= scan_sec:
+                    await self.decide(execute=True)
+                    last_scan = time.monotonic()
+                elif (
+                    scan_sec <= 0
+                    and now.hour in hours
+                    and now.minute < 8
+                    and key not in last_hour_fire
+                ):
                     await self.decide(execute=True)
                     last_hour_fire.add(key)
                 if len(last_hour_fire) > 48:

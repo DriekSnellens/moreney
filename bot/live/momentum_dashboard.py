@@ -2259,7 +2259,7 @@ def _moonshot_panel(status: Mapping[str, Any] | None) -> str:
             f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
         )
     empty = (
-        "Nog geen live-positie — instap in het dagvenster 00:05 UTC."
+        "Nog geen live-positie — koopt zodra een munt vandaag het 20-daagse hoogtepunt breekt."
         if live
         else "Nog geen positie."
     )
@@ -3624,7 +3624,7 @@ _LIVE_MARKS_JS = r"""
             return `<span class="mix-chip" data-holding="${hid}"><strong>${esc(p.base || "")}</strong>`
               + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
           }).join("")
-        : `<span class="muted">${live ? "Nog geen live-positie — instap in het dagvenster 00:05 UTC." : "Nog geen positie."}</span>`;
+        : `<span class="muted">${live ? "Nog geen live-positie — koopt zodra een munt vandaag het 20-daagse hoogtepunt breekt." : "Nog geen positie."}</span>`;
     }
   }
   function applyPulse(core, clip, moonshot) {

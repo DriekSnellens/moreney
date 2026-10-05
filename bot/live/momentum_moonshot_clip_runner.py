@@ -47,7 +47,9 @@ def moonshot_config_from_settings(settings: Settings | None = None):
     settings = settings or get_settings()
     book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 2_000.0) or 2_000.0)
     base = config_from_settings(settings)
-    return daily_green_config(replace(base, book_eur=book))
+    cfg = daily_green_config(replace(base, book_eur=book))
+    # Buy the first 20d cross while it is printing, not the next midnight.
+    return replace(cfg, entry_mode="brk20_now", entry_scan_sec=300.0)
 
 
 class MoonshotClipDeskManager:
@@ -73,7 +75,7 @@ class MoonshotClipDeskManager:
             "dry_run": not allow_live,
             "paper_only": not allow_live,
             "allow_live": allow_live,
-            "pack": "daily_brk20_day",
+            "pack": "brk20_now",
             "title": "MoonShot",
         }
         if self._runner is not None:
@@ -81,7 +83,7 @@ class MoonshotClipDeskManager:
             st.update(base)
             st["allow_live"] = allow_live and not self._runner.dry_run
             st["paper_only"] = self._runner.dry_run
-            st["pack"] = "daily_brk20_day"
+            st["pack"] = "brk20_now"
             return st
         if enabled:
             cfg = moonshot_config_from_settings(settings)
@@ -220,7 +222,7 @@ class MoonshotClipDeskManager:
             reserved_qty=reserved_qty,
             pending_pack="",
         )
-        self._runner.pack_mode = "daily_brk20_day"
+        self._runner.pack_mode = "brk20_now"
         self._runner.pin_cash_to_book = True
         # Fresh sleeve: seed cash to fixed book if empty state.
         if not self._runner.positions and self._runner.cash_eur <= 0:
@@ -243,7 +245,7 @@ class MoonshotClipDeskManager:
             dry_run=dry_run,
             paper_only=dry_run,
             allow_live=not dry_run,
-            pack="daily_brk20_day",
+            pack="brk20_now",
             book_eur=cfg.book_eur,
         )
         return {"ok": True, "started": True, "status": self.status()}
@@ -266,7 +268,7 @@ class MoonshotClipDeskManager:
                 "./data/momentum_moonshot_clip_state.json",
             )
         )
-        _write_flag(state_path, running=False, pack="daily_brk20_day")
+        _write_flag(state_path, running=False, pack="brk20_now")
         return {"ok": True, "stopped": True, "status": self.status()}
 
     async def resume_if_flagged(self) -> dict[str, Any] | None:
