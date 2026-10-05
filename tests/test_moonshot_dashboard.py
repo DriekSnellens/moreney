@@ -70,7 +70,71 @@ def test_dashboard_names_live_sleeve_moonshot():
     assert 'id="moonshot"' in html
     assert "LIVE" in html
     assert "2,000.00 €" in html
+    # Flat MoonShot cash already sits in the clip balance, so the headline
+    # stays the account (19,000) and the two sleeve lines are 17,000 + 2,000.
+    assert 'data-live="equity-total"' in html
+    assert "19,000.00 €" in html
+    assert "17,000.00 €" in html
     assert "PAPER" not in html.split('id="moonshot"', 1)[1].split("</section>", 1)[0]
+    panel = html.split('id="moonshot"', 1)[1].split("</section>", 1)[0]
+    assert 'data-eq-desk="moonshot"' in panel
+
+
+def test_dashboard_headline_adds_both_sleeves_when_moonshot_holds_a_coin():
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo"],
+            "config": {},
+            "positions": [],
+            "equity_eur": 0.0,
+            "unrealized_net_eur": 0.0,
+        },
+        [],
+        show_btc_rs_clip=True,
+        btc_rs_clip={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "equity_eur": 17_202.0,
+            "book_eur": 17_202.0,
+            "cash_eur": 17_202.0,
+            "realized_total_eur": 0.0,
+            "unrealized_net_eur": 4.0,
+            "positions": [],
+            "equity_curve": [[1.0, 19_196.0], [2.0, 17_202.0]],
+            "risk_on": True,
+        },
+        show_moonshot=True,
+        moonshot={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "book_eur": 2_000.0,
+            "equity_eur": 2_006.0,
+            "cash_eur": 5.56,
+            "realized_total_eur": 0.0,
+            "unrealized_net_eur": 6.0,
+            "positions": [
+                {"base": "GTC", "quantity": 100, "notional_eur": 2000.44, "unrealized_net_eur": 6}
+            ],
+            "risk_on": True,
+            "equity_curve": [[1.0, 2_000.0], [2.0, 2_006.0]],
+            "pack": "brk20_now",
+            "config": {"trail_pct": 0.12, "hard_stop_pct": 0.05},
+        },
+    ).body.decode()
+    # 17,202 - 5.56 cash already in the clip + MoonShot 2,006 = 19,202.44
+    assert "19,202.44 €" in html
+    assert "17,196.44 €" in html
+    assert "2,006.00 €" in html
+    assert "+10.00 €" in html
+    assert html.count('data-live="equity-total"') >= 3
+    panel = html.split('id="moonshot"', 1)[1].split("</section>", 1)[0]
+    assert 'data-eq-desk="moonshot"' in panel
+    assert "<svg" in panel
+    assert "GTC" in panel
 
 
 def test_dashboard_paper_moonshot_is_not_live():
