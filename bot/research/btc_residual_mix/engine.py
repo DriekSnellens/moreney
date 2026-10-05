@@ -49,10 +49,14 @@ def pick_residual(
     n_alts: int = 1,
     require_alt_sma: bool = False,
     sma_n: int = 50,
+    exclude_bases: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
     ranked: list[dict[str, Any]] = []
     for base in universe:
+        if str(base).upper() in ban:
+            continue
         rows = rows_through(ohlc.get(base) or [], date)
         cl = closes_of(rows)
         xs = rs_excess(cl, btc_c, lb=lookback_days, skip=skip_days)
@@ -301,6 +305,7 @@ def run_btc_residual(
     alt_allow_excess_override: float | None = None,
     cash_when_no_alt: bool = False,
     rebalance_weekday: int | None = None,
+    immediate_rebuy: bool = False,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -309,6 +314,9 @@ def run_btc_residual(
 
     Sizing uses marked equity each rebalance (compound / winst herbelegd).
     ``rebalance_weekday`` (0=Mon … 6=Sun) matches live week-clock pin.
+
+    ``immediate_rebuy``: after a trail/overlay sell, queue a next-open buy of
+    the best qualifying alt **excluding** just-sold bases (no 7d cash wait).
     """
     name = strategy or f"btc{int(btc_frac * 100)}_res_f{flatten}"
     dates = [bar_date(r) for r in (ohlc.get("BTC") or [])]
@@ -323,6 +331,7 @@ def run_btc_residual(
     want_alts: tuple[str, ...] = ()
     n_rotate = 0
     n_overlay = 0
+    n_immediate_rebuy = 0
     overlay_reasons: dict[str, int] = {}
     reclaim_watches: list[dict[str, Any]] = []
     need = int(lookback_days) + int(skip_days) + 1
@@ -363,6 +372,48 @@ def run_btc_residual(
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
         risk_on = s50 is not None and last > s50
+        # Immediate rebuy after trail/overlay: same next-open as the sell, skip
+        # the sold name(s). Weekly rotate path below still handles due clocks.
+        if (
+            immediate_rebuy
+            and overlay_sold
+            and risk_on
+            and float(btc_frac) <= 0.0
+            and len(btc_c) >= need
+        ):
+            pick_now = pick_residual(
+                ohlc,
+                date,
+                excess_floor=excess_floor,
+                lookback_days=lookback_days,
+                skip_days=skip_days,
+                n_alts=n_alts,
+                require_alt_sma=require_alt_sma,
+                sma_n=sma_n,
+                exclude_bases=sorted(overlay_sold),
+            )
+            winners = list(pick_now.get("wants") or [])
+            if winners:
+                px = _px_map(ohlc, date, field=4)
+                eq = book.mark(px)
+                # After pending sells fill next open, notion ≈ current mark eq.
+                for alt in winners:
+                    if alt in overlay_sold:
+                        continue
+                    overlay.append(
+                        Order(
+                            side="buy",
+                            base=alt,
+                            role="alt",
+                            adv=_adv(ohlc, alt, date),
+                            notional=eq / max(1, len(winners)),
+                            reason="immediate_rebuy",
+                        )
+                    )
+                    n_immediate_rebuy += 1
+                want_alts = tuple(winners)
+                want_btc = ""
+                last_reb = now_ms
         age_due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
         if wd_pin is not None:
             due = age_due and now.weekday() == wd_pin
@@ -516,6 +567,8 @@ def run_btc_residual(
         "n_alts": int(n_alts),
         "require_alt_sma": bool(require_alt_sma),
         "n_overlay_exits": n_overlay,
+        "n_immediate_rebuy": n_immediate_rebuy,
+        "immediate_rebuy": bool(immediate_rebuy),
         "overlay_reasons": overlay_reasons,
         "exit_policy": None if policy is None else policy.name,
     }
