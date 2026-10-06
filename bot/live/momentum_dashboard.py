@@ -132,6 +132,17 @@ body {
   background: rgba(15,23,42,.8); font-size: .8rem;
 }
 .mix-chip strong { font-family: var(--mono); }
+.rs-pick { margin: .65rem 0 .15rem; }
+.rs-pick-k {
+  margin: 0; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.rs-pick .rs-buy { margin: .12rem 0 0; font-size: 1.05rem; }
+.rs-pick .rs-buy strong { font-family: var(--mono); }
+.rs-pick .rs-rank { margin: .2rem 0 0; font-size: .75rem; color: var(--muted); }
+.ms-alphai { margin-top: .7rem; }
+.ms-alphai h3 { margin: 0 0 .2rem; font-size: .84rem; font-weight: 600; }
+.ms-alphai .ms-buy { margin: 0 0 .35rem; font-size: .92rem; }
+.ms-alphai table { margin: 0; }
 .paper-clip .mix-chip { align-items: center; }
 .paper-clip .mix-chip form { margin: 0; }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
@@ -581,6 +592,8 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 @media (min-width: 820px) { .sleeve-split { grid-template-columns: 1fr 1fr; } }
 .sleeve-earn { font-size: .76rem; color: var(--muted); margin: .3rem 0 .1rem; }
 .sleeve-earn b { font-family: var(--mono); font-weight: 600; }
+.sleeve-earn-split { display: grid; gap: .15rem; margin-top: .55rem; }
+.sleeve-earn-name { color: var(--ink); font-weight: 650; margin-right: .2rem; }
 .sleeve-totals {
   margin: .28rem 0 0; font-size: .76rem; color: var(--muted); line-height: 1.35;
 }
@@ -1019,24 +1032,31 @@ def _hero(
 
 
 
-def _period_tiles(period: Any, week_meta: str, *, muted: bool = False) -> str:
+def _period_tiles(
+    period: Any, week_meta: str, *, muted: bool = False, live: bool = False
+) -> str:
     tiles = [
-        ("Deze week", period.week_eur, week_meta),
-        ("Deze maand", period.month_eur, f"{period.trades_month} trades deze maand"),
+        ("Deze week", period.week_eur, week_meta, "week"),
+        ("Deze maand", period.month_eur, f"{period.trades_month} trades deze maand", "month"),
         (
             "Vanaf begin",
             period.all_time_eur,
             f"{period.trades_all_time} trades all-time · netto gesloten",
+            "all",
         ),
     ]
-    return "".join(
-        '<div class="earn-tile">'
-        f'<p class="period">{escape(label)}</p>'
-        f'<p class="amount {("muted" if muted else _cls(val))}">{_fmt_eur(val)}</p>'
-        f'<p class="meta">{escape(meta)}</p>'
-        "</div>"
-        for label, val, meta in tiles
-    )
+    parts: list[str] = []
+    for label, val, meta, key in tiles:
+        amount_attr = f' data-live="earn-{key}"' if live else ""
+        meta_attr = f' data-live="earn-{key}-meta"' if live else ""
+        parts.append(
+            '<div class="earn-tile">'
+            f'<p class="period">{escape(label)}</p>'
+            f'<p class="amount {("muted" if muted else _cls(val))}"{amount_attr}>{_fmt_eur(val)}</p>'
+            f'<p class="meta"{meta_attr}>{escape(meta)}</p>'
+            "</div>"
+        )
+    return "".join(parts)
 
 
 def _zero_period() -> PeriodNet:
@@ -1084,6 +1104,49 @@ def _paper_earnings_panel(earnings: DeskEarnings | None) -> str:
     )
 
 
+def _sleeve_profit_row(label: str, key: str, period: Any, open_eur: float) -> str:
+    """One sleeve's live closed PnL plus its open mark-to-market."""
+    return (
+        f'<p class="sleeve-earn" data-sleeve-earn="{escape(key)}">'
+        f'<span class="sleeve-earn-name">{escape(label)}</span>'
+        f'week <b data-k="week" class="{_cls(period.week_eur)}">{_fmt_eur(period.week_eur)}</b>'
+        f" · maand <b data-k=\"month\" class=\"{_cls(period.month_eur)}\">{_fmt_eur(period.month_eur)}</b>"
+        f" · begin <b data-k=\"all\" class=\"{_cls(period.all_time_eur)}\">{_fmt_eur(period.all_time_eur)}</b>"
+        f" · open <b data-k=\"open\" class=\"{_cls(open_eur)}\">{_fmt_eur(open_eur)}</b>"
+        "</p>"
+    )
+
+
+def _sleeve_profit_split(
+    earnings: DeskEarnings | None,
+    *,
+    show_clip: bool = False,
+    show_moonshot: bool = False,
+) -> str:
+    """BTC + RS and MoonShot live profits, each on its own line."""
+    if earnings is None:
+        return ""
+    rows: list[str] = []
+    if show_clip and earnings.clip_live is not None:
+        rows.append(
+            _sleeve_profit_row(
+                "BTC + RS", "clip", earnings.clip_live, earnings.clip_open_mtm_eur
+            )
+        )
+    if show_moonshot and earnings.moonshot_live is not None:
+        rows.append(
+            _sleeve_profit_row(
+                "MoonShot",
+                "moonshot",
+                earnings.moonshot_live,
+                earnings.moonshot_open_mtm_eur,
+            )
+        )
+    if not rows:
+        return ""
+    return f'<div class="sleeve-earn-split" data-live="sleeve-earn">{"".join(rows)}</div>'
+
+
 def _earnings_masthead(
     earnings: DeskEarnings | None,
     *,
@@ -1091,12 +1154,17 @@ def _earnings_masthead(
     venue: str,
     show_volatile: bool = False,
     show_mix: bool = False,
+    show_clip: bool = False,
+    show_moonshot: bool = False,
 ) -> str:
     """Live net only. Paper PnL is a collapsed footnote, never in these tiles."""
     del show_volatile, show_mix, venue
     live = earnings.combined if earnings is not None else _zero_period()
     open_mtm = earnings.open_mtm_eur if earnings is not None else 0.0
-    tiles_html = _period_tiles(live, f"{live.trades_week} live")
+    tiles_html = _period_tiles(live, f"{live.trades_week} live", live=True)
+    split = _sleeve_profit_split(
+        earnings, show_clip=show_clip, show_moonshot=show_moonshot
+    )
     return (
         '<section class="masthead visual">'
         '<div class="masthead-top">'
@@ -1108,22 +1176,13 @@ def _earnings_masthead(
         "</div>"
         '<p class="earn-label">Netto verdiend</p>'
         f'<div class="earn-grid">{tiles_html}</div>'
+        f"{split}"
         '<div class="earn-foot">'
-        f"<span>Vandaag <strong class='{_cls(live.day_eur)}'>"
+        f"<span>Vandaag <strong class='{_cls(live.day_eur)}' data-live='earn-day'>"
         f"{_fmt_eur(live.day_eur)}</strong></span>"
-        f"<span>Open <strong class='{_cls(open_mtm)}'>"
+        f"<span>Open <strong class='{_cls(open_mtm)}' data-live='earn-open'>"
         f"{_fmt_eur(open_mtm)}</strong></span>"
         "</div></section>"
-    )
-
-
-def _sleeve_earnings_line(period: Any) -> str:
-    if period is None:
-        return ""
-    return (
-        f'<p class="sleeve-earn">week <b class="{_cls(period.week_eur)}">{_fmt_eur(period.week_eur)}</b>'
-        f" · maand <b class='{_cls(period.month_eur)}'>{_fmt_eur(period.month_eur)}</b>"
-        f" · begin <b class='{_cls(period.all_time_eur)}'>{_fmt_eur(period.all_time_eur)}</b></p>"
     )
 
 
@@ -2132,6 +2191,25 @@ def _clip_bag_cards(status: Mapping[str, Any]) -> str:
     )
 
 
+def _rs_pick_html(status: Mapping[str, Any]) -> str:
+    """RS sleeve buy line. The coin is the current ranking, not a fixed name."""
+    from bot.live.momentum_btc_rs_clip import rs_sleeve_pick
+
+    pick = rs_sleeve_pick(status)
+    meta = str(pick.get("meta") or "")
+    meta_html = f' <span class="muted" data-k="rs-meta">{escape(meta)}</span>' if meta else (
+        '<span class="muted" data-k="rs-meta"></span>'
+    )
+    return (
+        '<div class="rs-pick" data-live="rs-pick">'
+        '<p class="rs-pick-k">RS sleeve</p>'
+        f'<p class="rs-buy"><strong data-k="rs-buy">{escape(str(pick.get("line") or ""))}</strong>'
+        f"{meta_html}</p>"
+        f'<p class="rs-rank" data-k="rs-rank">{escape(str(pick.get("rank") or ""))}</p>'
+        "</div>"
+    )
+
+
 def _clip_visual_desk(
     status: Mapping[str, Any] | None,
     moonshot: Mapping[str, Any] | None = None,
@@ -2183,6 +2261,7 @@ def _clip_visual_desk(
         f'<span class="dot"></span>{gate}</span>'
         f'<p class="eq-open {_cls(shown_open)}" {open_attr}>{_fmt_eur(shown_open)}</p>'
         f"</div></div>"
+        f"{_rs_pick_html(st)}"
         f"{chart_label}{_equity_chart_svg(curve, equity=float(eq or 0.0), desk='clip')}"
         f"{_alloc_visual(st)}"
         f"{_clip_bag_cards(st)}"
@@ -2284,6 +2363,89 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     )
 
 
+def _pct(value: Any, *, signed: bool = False) -> str:
+    if value is None or value == "":
+        return "—"
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    text = f"{n:+.1%}" if signed else f"{abs(n):.1%}"
+    return text
+
+
+def _gap_label(gap: Any) -> str:
+    if gap is None or gap == "":
+        return "—"
+    try:
+        n = float(gap)
+    except (TypeError, ValueError):
+        return "—"
+    if n < 0:
+        return f"{abs(n):.1%} onder"
+    return f"{n:.1%} erboven"
+
+
+def _moonshot_alphai_html(board: Mapping[str, Any] | None) -> str:
+    """AlphaI picks versus the live 20d breakout. The runner refreshes this each quarter."""
+    data = dict(board or {})
+    cadence = escape(str(data.get("cadence") or "elk kwartier"))
+    buy = escape(str(data.get("buy_line") or "Geen koop"))
+    clock = escape(str(data.get("clock_line") or ""))
+    checked = escape(str(data.get("checked_label") or ""))
+    nxt = escape(str(data.get("next_label") or ""))
+    when = ""
+    if checked or nxt:
+        when = f" · bijgewerkt {checked} · volgende {nxt}"
+    note = str(data.get("note") or "")
+    rows = list(data.get("rows") or [])
+    body = []
+    for row in rows:
+        score = row.get("score")
+        score_s = "—" if score is None else f"{float(score):.0f}"
+        body.append(
+            "<tr>"
+            f"<td>{escape(str(row.get('base') or ''))}</td>"
+            f'<td class="num">{score_s}</td>'
+            f'<td class="num">{_pct(row.get("day_ret"), signed=True)}</td>'
+            f'<td class="num">{_gap_label(row.get("gap"))}</td>'
+            f"<td>{escape(str(row.get('status') or ''))}</td>"
+            "</tr>"
+        )
+    if body:
+        table = (
+            '<div class="table-scroll"><table class="desk"><thead><tr>'
+            "<th>Munt</th><th>Score</th><th>Dag</th><th>T.o.v. high</th><th>Status</th>"
+            "</tr></thead><tbody>"
+            + "".join(body)
+            + "</tbody></table></div>"
+        )
+    elif note:
+        table = f'<p class="muted">{escape(note)}</p>'
+    else:
+        table = '<p class="muted">AlphaI-check volgt op het kwartier.</p>'
+    avoid = [str(b) for b in (data.get("avoid") or []) if b]
+    avoid_html = (
+        f'<p class="muted" style="margin:.35rem 0 0">Avoid: {escape(", ".join(avoid))}</p>'
+        if avoid
+        else ""
+    )
+    note_html = (
+        f'<p class="muted" style="margin:.35rem 0 0">{escape(note)}</p>'
+        if note and body
+        else ""
+    )
+    clock_html = f" · {clock}" if clock else ""
+    return (
+        '<div class="ms-alphai" data-live="ms-alphai">'
+        f"<h3>AlphaI · {cadence}</h3>"
+        f'<p class="ms-buy"><strong data-k="ms-buy">{buy}</strong>'
+        f'<span class="muted" data-k="ms-clock">{clock_html}</span></p>'
+        f'<p class="muted" data-k="ms-when" style="margin:0 0 .35rem">{when}</p>'
+        f"{table}{avoid_html}{note_html}</div>"
+    )
+
+
 def _moonshot_panel(status: Mapping[str, Any] | None) -> str:
     """Fixed-book MoonShot sleeve on the operator desk."""
     st = status or {}
@@ -2350,7 +2512,9 @@ def _moonshot_panel(status: Mapping[str, Any] | None) -> str:
         f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
         f'{escape(pack)} · trail {escape(trail_s)} · hs {escape(hs_s)} · '
         f'{escape(mode)} · next <strong data-live="ms-next">{_ts(st.get("next_decision"))}</strong></p>'
-        f"{pos_html}</section>"
+        f"{pos_html}"
+        f"{_moonshot_alphai_html(st.get('alphai_board'))}"
+        f"</section>"
     )
 
 
@@ -2816,6 +2980,73 @@ def _ledger_reason(row: Mapping[str, Any]) -> str:
     if sleeve and reason:
         return f"{sleeve} · {reason}"
     return sleeve or reason
+
+
+_FILL_EVENTS = {"entry", "exit", "entry_failed", "exit_failed"}
+
+
+def tagged_ledger(
+    rows: Sequence[Mapping[str, Any]] | None, sleeve: str
+) -> list[dict[str, Any]]:
+    """Copy rows and stamp a sleeve label when the row has none."""
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        item = dict(row)
+        if not str(item.get("sleeve") or "").strip():
+            item["sleeve"] = sleeve
+        out.append(item)
+    return out
+
+
+def combine_ledgers(
+    *groups: tuple[str, Sequence[Mapping[str, Any]] | None],
+) -> list[dict[str, Any]]:
+    """Merge sleeve ledgers in time order so bot and manual fills sit together."""
+    rows: list[dict[str, Any]] = []
+    for sleeve, group in groups:
+        rows.extend(tagged_ledger(group, sleeve))
+    rows.sort(key=lambda r: str(r.get("ts") or ""))
+    return rows
+
+
+def ledger_signature(rows: Sequence[Mapping[str, Any]]) -> str:
+    fills = [r for r in rows if r.get("event") in _FILL_EVENTS]
+    if not fills:
+        return "0"
+    last = fills[-1]
+    return (
+        f"{len(fills)}:{last.get('ts')}:{last.get('base')}:"
+        f"{last.get('event')}:{last.get('net_eur')}:{last.get('sleeve')}"
+    )
+
+
+def win_rate_label(rows: Sequence[Mapping[str, Any]]) -> str:
+    exits = [r for r in rows if r.get("event") == "exit"]
+    if not exits:
+        return "—"
+    wins = sum(1 for r in exits if float(r.get("net_eur") or 0) > 0)
+    return f"{100 * wins / len(exits):.0f}%"
+
+
+def operator_book_payload(
+    groups: Sequence[tuple[str, Sequence[Mapping[str, Any]] | None]],
+) -> dict[str, str]:
+    """Ledger HTML plus the signature the dashboard poll uses to skip no-ops."""
+    rows = combine_ledgers(*groups)
+    return {
+        "ledger_html": _ledger_table(rows),
+        "ledger_sig": ledger_signature(rows),
+        "win_rate": win_rate_label(rows),
+    }
+
+
+def ledger_host(rows: Sequence[Mapping[str, Any]], *, live_key: str = "ledger-body") -> str:
+    """Ledger markup the 1s poll can replace when a fill lands."""
+    sig = escape(ledger_signature(rows))
+    return (
+        f'<div class="fold-body" data-live="{escape(live_key)}" '
+        f'data-ledger-sig="{sig}">{_ledger_table(rows)}</div>'
+    )
 
 
 def _ledger_table(rows: Sequence[Mapping[str, Any]]) -> str:
@@ -3287,6 +3518,8 @@ _LIVE_MARKS_JS = r"""
   const PULSE_URL = "/live/momentum/pulse";
   const STATUS_URL = "/live/momentum/status";
   const CLIP_STATUS_URL = "/live/momentum/btc-rs-clip/status";
+  const MOONSHOT_STATUS_URL = "/live/momentum/moonshot-clip/status";
+  const EARNINGS_URL = "/live/momentum/earnings";
   const INTERVAL_MS = 1000;
 
   function fmtPct(v) {
@@ -3577,6 +3810,18 @@ _LIVE_MARKS_JS = r"""
       });
     });
     stampMarks(st);
+    patchRsPick(st);
+  }
+  function patchRsPick(st) {
+    const host = document.querySelector('[data-live="rs-pick"]');
+    if (!host || !st || !st.rs_pick) return;
+    const pick = st.rs_pick;
+    const buy = host.querySelector('[data-k="rs-buy"]');
+    if (buy) buy.textContent = pick.line || "";
+    const meta = host.querySelector('[data-k="rs-meta"]');
+    if (meta) meta.textContent = pick.meta ? " " + pick.meta : "";
+    const rank = host.querySelector('[data-k="rs-rank"]');
+    if (rank) rank.textContent = pick.rank || "";
   }
   function rebuildClipBags(st) {
     const grid = document.querySelector('[data-live="clip-open"]');
@@ -3679,6 +3924,53 @@ _LIVE_MARKS_JS = r"""
       });
     }
   }
+  function gapLabel(gap) {
+    if (gap == null || gap === "") return "—";
+    const n = Number(gap);
+    if (!Number.isFinite(n)) return "—";
+    return n < 0 ? (Math.abs(n) * 100).toFixed(1) + "% onder" : (n * 100).toFixed(1) + "% erboven";
+  }
+  function dayLabel(v) {
+    if (v == null || v === "") return "—";
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return (n >= 0 ? "+" : "") + (n * 100).toFixed(1) + "%";
+  }
+  function alphaiBoardHtml(board) {
+    const data = board || {};
+    const cadence = esc(data.cadence || "elk kwartier");
+    const buy = esc(data.buy_line || "Geen koop");
+    const clock = data.clock_line ? " · " + esc(data.clock_line) : "";
+    const when = (data.checked_label || data.next_label)
+      ? " · bijgewerkt " + esc(data.checked_label || "") + " · volgende " + esc(data.next_label || "")
+      : "";
+    const rows = data.rows || [];
+    let table;
+    if (rows.length) {
+      const body = rows.map((row) => {
+        const score = row.score == null ? "—" : String(Math.round(Number(row.score)));
+        return `<tr><td>${esc(row.base || "")}</td><td class="num">${score}</td>`
+          + `<td class="num">${dayLabel(row.day_ret)}</td><td class="num">${gapLabel(row.gap)}</td>`
+          + `<td>${esc(row.status || "")}</td></tr>`;
+      }).join("");
+      table = `<div class="table-scroll"><table class="desk"><thead><tr>`
+        + `<th>Munt</th><th>Score</th><th>Dag</th><th>T.o.v. high</th><th>Status</th>`
+        + `</tr></thead><tbody>${body}</tbody></table></div>`;
+    } else if (data.note) {
+      table = `<p class="muted">${esc(data.note)}</p>`;
+    } else {
+      table = `<p class="muted">AlphaI-check volgt op het kwartier.</p>`;
+    }
+    const avoid = (data.avoid || []).filter(Boolean);
+    const avoidHtml = avoid.length
+      ? `<p class="muted" style="margin:.35rem 0 0">Avoid: ${esc(avoid.join(", "))}</p>` : "";
+    const noteHtml = data.note && rows.length
+      ? `<p class="muted" style="margin:.35rem 0 0">${esc(data.note)}</p>` : "";
+    return `<h3>AlphaI · ${cadence}</h3>`
+      + `<p class="ms-buy"><strong>${buy}</strong><span class="muted">${clock}</span></p>`
+      + `<p class="muted" style="margin:0 0 .35rem">${when}</p>`
+      + table + avoidHtml + noteHtml;
+  }
   function patchMoonshot(st) {
     const root = document.querySelector('[data-live="moonshot"]');
     if (!root || !st) return;
@@ -3716,14 +4008,76 @@ _LIVE_MARKS_JS = r"""
           }).join("")
         : `<span class="muted">${live ? "Nog geen live-positie — koopt zodra een munt vandaag het 20-daagse hoogtepunt breekt." : "Nog geen positie."}</span>`;
     }
+    const alphai = root.querySelector('[data-live="ms-alphai"]');
+    if (alphai) {
+      const sig = JSON.stringify(st.alphai_board || null);
+      if (alphai.getAttribute("data-sig") !== sig) {
+        alphai.innerHTML = alphaiBoardHtml(st.alphai_board);
+        alphai.setAttribute("data-sig", sig);
+      }
+    }
   }
-  function applyPulse(core, clip, moonshot) {
+  function paintAmount(el, value) {
+    if (!el) return;
+    el.textContent = fmtEur(value);
+    el.classList.remove("good", "bad");
+    const c = cls(value);
+    if (c) el.classList.add(c);
+  }
+  function patchEarnings(e) {
+    if (!e || !e.combined) return;
+    const c = e.combined;
+    paintAmount(document.querySelector('[data-live="earn-week"]'), c.week_eur);
+    paintAmount(document.querySelector('[data-live="earn-month"]'), c.month_eur);
+    paintAmount(document.querySelector('[data-live="earn-all"]'), c.all_time_eur);
+    paintAmount(document.querySelector('[data-live="earn-day"]'), c.day_eur);
+    paintAmount(document.querySelector('[data-live="earn-open"]'), e.open_mtm_eur);
+    const metas = {
+      week: `${c.trades_week} live`,
+      month: `${c.trades_month} trades deze maand`,
+      all: `${c.trades_all_time} trades all-time · netto gesloten`,
+    };
+    Object.entries(metas).forEach(([key, text]) => {
+      const el = document.querySelector(`[data-live="earn-${key}-meta"]`);
+      if (el) el.textContent = text;
+    });
+    patchSleeveProfit("clip", e.clip_live, e.clip_open_mtm_eur);
+    patchSleeveProfit("moonshot", e.moonshot_live, e.moonshot_open_mtm_eur);
+  }
+  function patchSleeveProfit(id, period, openEur) {
+    const root = document.querySelector(`[data-sleeve-earn="${id}"]`);
+    if (!root || !period) return;
+    setText(root, "week", fmtEur(period.week_eur), cls(period.week_eur));
+    setText(root, "month", fmtEur(period.month_eur), cls(period.month_eur));
+    setText(root, "all", fmtEur(period.all_time_eur), cls(period.all_time_eur));
+    setText(root, "open", fmtEur(openEur), cls(openEur));
+  }
+  function patchLedgerHost(key, sig, html) {
+    if (!sig || html == null) return;
+    const host = document.querySelector(`[data-live="${key}"]`);
+    if (!host || host.getAttribute("data-ledger-sig") === String(sig)) return;
+    host.innerHTML = html;
+    host.setAttribute("data-ledger-sig", String(sig));
+  }
+  function patchBooks(extra) {
+    if (!extra) return;
+    patchEarnings(extra.earnings);
+    patchLedgerHost("ledger-body", extra.ledger_sig, extra.ledger_html);
+    patchLedgerHost("ledger-15m-body", extra.ledger_15m_sig, extra.ledger_15m_html);
+    if (extra.win_rate) {
+      document.querySelectorAll('[data-live="win-rate"]').forEach((el) => {
+        el.textContent = extra.win_rate;
+      });
+    }
+  }
+  function applyPulse(core, clip, moonshot, extra) {
     if (moonshot) patchMoonshot(moonshot);
     const clipRoot = document.querySelector('[data-live="clip"]');
     if (clipRoot) {
       if (clip) patchClip(clip);
       if (core) patchCore15m(core);
       patchSleeveTotals(clip, moonshot);
+      patchBooks(extra);
       return;
     }
     if (core) {
@@ -3738,14 +4092,19 @@ _LIVE_MARKS_JS = r"""
       (core.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
       patchCore15m(core);
     }
+    patchBooks(extra);
   }
   async function fetchJson(url) {
     const sep = url.includes("?") ? "&" : "?";
-    const res = await fetch(url + sep + "_=" + Date.now(), {
+    const opts = {
       cache: "no-store",
       credentials: "same-origin",
       headers: { "Cache-Control": "no-cache" },
-    });
+    };
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      opts.signal = AbortSignal.timeout(12000);
+    }
+    const res = await fetch(url + sep + "_=" + Date.now(), opts);
     if (!res.ok) return null;
     return res.json();
   }
@@ -3755,15 +4114,17 @@ _LIVE_MARKS_JS = r"""
     tickBusy = true;
     try {
       const pulse = await fetchJson(PULSE_URL).catch(() => null);
-      if (pulse && (pulse.core || pulse.clip || pulse.moonshot)) {
-        applyPulse(pulse.core, pulse.clip, pulse.moonshot);
+      if (pulse && (pulse.core || pulse.clip || pulse.moonshot || pulse.earnings)) {
+        applyPulse(pulse.core, pulse.clip, pulse.moonshot, pulse);
         return;
       }
-      const [core, clip] = await Promise.all([
+      const [core, clip, moonshot, earn] = await Promise.all([
         fetchJson(STATUS_URL).catch(() => null),
         fetchJson(CLIP_STATUS_URL).catch(() => null),
+        fetchJson(MOONSHOT_STATUS_URL).catch(() => null),
+        fetchJson(EARNINGS_URL).catch(() => null),
       ]);
-      applyPulse(core, clip, null);
+      applyPulse(core, clip, moonshot, { earnings: earn });
     } finally {
       tickBusy = false;
     }
@@ -3805,6 +4166,7 @@ def render_momentum_dashboard(
     show_btc_rs_clip: bool = False,
     moonshot: Mapping[str, Any] | None = None,
     show_moonshot: bool = False,
+    moonshot_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> HTMLResponse:
     del volatile, volatile_ledger_rows, show_volatile
     del short_weakest, short_weakest_ledger_rows, show_short_weakest
@@ -3819,6 +4181,7 @@ def render_momentum_dashboard(
         "allow_live"
     ) is not False
     book = clip if show_clip else dict(status)
+    moonshot_on = bool(show_moonshot or moonshot is not None)
     if clip_live or core_live:
         pill = '<span class="pill on"><span class="dot"></span>LIVE</span>'
     else:
@@ -3829,14 +4192,17 @@ def render_momentum_dashboard(
         for p in (book.get("positions") or [])
         if float(p.get("quantity") or 0.0) > 1e-12
     )
-    fill_src: list[Mapping[str, Any]] = (
-        list(btc_rs_clip_ledger_rows or []) if show_clip else list(ledger_rows)
-    )
-    if not fill_src:
-        fill_src = list(ledger_rows)
-    exits = [r for r in fill_src if r.get("event") == "exit"]
-    wins = sum(1 for r in exits if float(r.get("net_eur") or 0) > 0)
-    win_rate = f"{100 * wins / len(exits):.0f}%" if exits else "—"
+    book_rows: list[dict[str, Any]]
+    if show_clip or moonshot_on:
+        groups: list[tuple[str, Sequence[Mapping[str, Any]] | None]] = []
+        if show_clip:
+            groups.append(("BTC+RS", btc_rs_clip_ledger_rows))
+        if moonshot_on:
+            groups.append(("MoonShot", moonshot_ledger_rows))
+        book_rows = combine_ledgers(*groups)
+    else:
+        book_rows = combine_ledgers(("15m", ledger_rows))
+    win_rate = win_rate_label(book_rows)
     err = status.get("last_error")
     err_html = f'<div class="hint bad">Laatste fout: {escape(str(err))}</div>' if err else ""
     venue = escape(
@@ -3882,12 +4248,13 @@ def render_momentum_dashboard(
         if preview
         else ""
     )
-    moonshot_on = bool(show_moonshot or moonshot is not None)
     moonshot_html = _moonshot_panel(moonshot) if moonshot_on else ""
     earnings_html = _earnings_masthead(
         earnings,
         pill=pill,
         venue=venue,
+        show_clip=show_clip,
+        show_moonshot=moonshot_on,
     )
     paper_html = _paper_earnings_panel(earnings)
     open_pnl = book.get("unrealized_net_eur")
@@ -3918,15 +4285,15 @@ def render_momentum_dashboard(
             '<details class="fold" id="ledger">'
             '<summary><span class="fold-head">Ledger</span>'
             '<span class="chev"></span></summary>'
-            f'<div class="fold-body">{_ledger_table(btc_rs_clip_ledger_rows or ledger_rows)}</div>'
-            "</details>"
+            f"{ledger_host(book_rows)}</details>"
         )
         if core_live:
+            core_rows = combine_ledgers(("15m", ledger_rows))
             exec_ledger_html += (
                 '<details class="fold" id="ledger-15m">'
                 '<summary><span class="fold-head">15m ledger</span>'
                 '<span class="chev"></span></summary>'
-                f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
+                f"{ledger_host(core_rows, live_key='ledger-15m-body')}</details>"
             )
         rules_html = (
             '<details class="fold">'
@@ -3970,7 +4337,7 @@ def render_momentum_dashboard(
             '<details class="fold" open id="ledger">'
             '<summary><span class="fold-head">Ledger</span>'
             '<span class="chev"></span></summary>'
-            f'<div class="fold-body">{_ledger_table(ledger_rows)}</div></details>'
+            f"{ledger_host(book_rows)}</details>"
         )
         rules_html = (
             '<details class="fold">'
@@ -4032,7 +4399,7 @@ def render_momentum_dashboard(
       <span class="v {_cls(open_pnl)}" data-live="{open_live}">{
         _fmt_eur(open_pnl)
       }</span></div>
-    <div class="top-metric winrate"><span class="k">Win</span><span class="v">{escape(win_rate)}</span></div>
+    <div class="top-metric winrate"><span class="k">Win</span><span class="v" data-live="win-rate">{escape(win_rate)}</span></div>
   </div>
   <div class="topbar-right">{toolbar}</div>
 </header>

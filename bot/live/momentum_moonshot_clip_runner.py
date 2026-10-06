@@ -104,6 +104,7 @@ class MoonshotClipDeskManager:
             cash = cfg.book_eur
             positions: list[dict[str, Any]] = []
             last: dict[str, Any] = {}
+            last_rebalance_ms = 0
             curve: list[list[float]] = []
             realized = 0.0
             try:
@@ -112,6 +113,10 @@ class MoonshotClipDeskManager:
                 realized = float(raw.get("realized_total_eur") or 0.0)
                 positions = list(raw.get("positions") or [])
                 last = dict(raw.get("last_decision") or {})
+                last_rebalance_ms = int(raw.get("last_rebalance_ms") or 0)
+                saved_board = raw.get("alphai_board")
+                if isinstance(saved_board, dict):
+                    base["alphai_board"] = dict(saved_board)
                 for row in raw.get("equity_curve") or []:
                     if not isinstance(row, (list, tuple)) or len(row) < 2:
                         continue
@@ -122,6 +127,12 @@ class MoonshotClipDeskManager:
             except Exception:  # noqa: BLE001
                 pass
             deployed = sum(float(p.get("notional_eur") or 0) for p in positions)
+            unrealized = 0.0
+            for pos in positions:
+                try:
+                    unrealized += float(pos.get("unrealized_net_eur") or 0.0)
+                except (TypeError, ValueError):
+                    continue
             base.update(
                 {
                     "book_eur": cfg.book_eur,
@@ -130,6 +141,7 @@ class MoonshotClipDeskManager:
                     "deployed_eur": round(deployed, 2),
                     "positions": positions,
                     "realized_total_eur": round(realized, 2),
+                    "unrealized_net_eur": round(unrealized, 2),
                     "equity_curve": curve[-_EQUITY_CURVE_MAX:],
                     "last_decision": last,
                     "live_caption": str(
@@ -146,6 +158,18 @@ class MoonshotClipDeskManager:
                     },
                 }
             )
+            from datetime import UTC, datetime
+
+            from bot.live.momentum_btc_rs_clip import breakout_board_headline
+
+            board = dict(base.get("alphai_board") or {})
+            board.update(
+                breakout_board_headline(last, cfg, last_rebalance_ms, datetime.now(UTC))
+            )
+            board.setdefault("rows", [])
+            board.setdefault("avoid", [])
+            board.setdefault("cadence", "elk kwartier")
+            base["alphai_board"] = board
         return base
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:

@@ -58,7 +58,11 @@ from bot.live.micro_session_manager import (
     get_micro_session_manager,
     reset_micro_session_manager,
 )
-from bot.live.momentum_dashboard import read_ledger_tail, render_momentum_dashboard
+from bot.live.momentum_dashboard import (
+    operator_book_payload,
+    read_ledger_tail,
+    render_momentum_dashboard,
+)
 from bot.live.momentum_period_pnl import compute_desk_earnings, earnings_as_dict
 from bot.live.momentum_runner import get_momentum_desk_manager, momentum_desk_flagged_running
 from bot.live.momentum_volatile_runner import (
@@ -697,27 +701,163 @@ async def live_momentum_status() -> dict[str, Any]:
     return await get_momentum_desk_manager().status_fresh()
 
 
+def _ok_status(payload: object) -> dict[str, Any] | None:
+    return payload if isinstance(payload, dict) else None
+
+
+async def _async_none() -> None:
+    return None
+
+
+def _quiet_status(getter: Any) -> dict[str, Any] | None:
+    try:
+        return _ok_status(getter())
+    except Exception:  # noqa: BLE001
+        logger.exception("sleeve status for dashboard books failed")
+        return None
+
+
+def _build_desk_earnings(
+    settings: Settings,
+    *,
+    core_status: Mapping[str, Any] | None,
+    clip_status: Mapping[str, Any] | None,
+    moonshot_status: Mapping[str, Any] | None,
+    volatile_status: Mapping[str, Any] | None = None,
+    short_status: Mapping[str, Any] | None = None,
+    donchian_status: Mapping[str, Any] | None = None,
+) -> Any:
+    """Live net for every enabled sleeve. Clip and MoonShot both count."""
+    show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
+    show_short = bool(getattr(settings, "momentum_short_weakest_enabled", False))
+    show_donchian = bool(getattr(settings, "momentum_donchian_enabled", False))
+    show_moonshot = bool(getattr(settings, "momentum_moonshot_clip_enabled", False))
+    return compute_desk_earnings(
+        core_ledger_path=settings.momentum_desk_ledger_path,
+        volatile_ledger_path=(
+            settings.momentum_volatile_ledger_path if show_volatile else None
+        ),
+        core_status=core_status,
+        volatile_status=volatile_status if show_volatile else None,
+        short_weakest_ledger_path=(
+            settings.momentum_short_weakest_ledger_path if show_short else None
+        ),
+        short_weakest_status=short_status if show_short else None,
+        donchian_ledger_path=(
+            settings.momentum_donchian_ledger_path if show_donchian else None
+        ),
+        donchian_status=donchian_status if show_donchian else None,
+        clip_ledger_path=getattr(settings, "momentum_btc_rs_clip_ledger_path", None),
+        clip_status=clip_status,
+        moonshot_ledger_path=(
+            getattr(settings, "momentum_moonshot_clip_ledger_path", None)
+            if show_moonshot
+            else None
+        ),
+        moonshot_status=moonshot_status if show_moonshot else None,
+    )
+
+
+def _optional_sleeve_statuses(
+    settings: Settings,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    volatile = short = donchian = None
+    if bool(getattr(settings, "momentum_volatile_enabled", False)):
+        volatile = _quiet_status(get_volatile_desk_manager().status)
+    if bool(getattr(settings, "momentum_short_weakest_enabled", False)):
+        short = _quiet_status(get_short_weakest_desk_manager().status)
+    if bool(getattr(settings, "momentum_donchian_enabled", False)):
+        donchian = _quiet_status(get_donchian_desk_manager().status)
+    return volatile, short, donchian
+
+
+def _pulse_books(
+    settings: Settings,
+    core: dict[str, Any] | None,
+    clip: dict[str, Any] | None,
+    moonshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Earnings and ledger HTML after the venue refresh, including manual fills."""
+    volatile, short, donchian = _optional_sleeve_statuses(settings)
+    earnings = _build_desk_earnings(
+        settings,
+        core_status=core,
+        clip_status=clip,
+        moonshot_status=moonshot,
+        volatile_status=volatile,
+        short_status=short,
+        donchian_status=donchian,
+    )
+    show_clip = bool(getattr(settings, "momentum_btc_rs_clip_enabled", False))
+    show_moonshot = bool(getattr(settings, "momentum_moonshot_clip_enabled", False))
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    if show_clip:
+        groups.append(
+            (
+                "BTC+RS",
+                read_ledger_tail(settings.momentum_btc_rs_clip_ledger_path, limit=400),
+            )
+        )
+    if show_moonshot:
+        groups.append(
+            (
+                "MoonShot",
+                read_ledger_tail(settings.momentum_moonshot_clip_ledger_path, limit=400),
+            )
+        )
+    if not groups:
+        groups.append(
+            ("15m", read_ledger_tail(settings.momentum_desk_ledger_path, limit=400))
+        )
+    payload: dict[str, Any] = {
+        "earnings": earnings_as_dict(earnings),
+        **operator_book_payload(groups),
+    }
+    core_live = bool(core and core.get("running") and not core.get("dry_run"))
+    if show_clip and core_live:
+        fifteen = operator_book_payload(
+            [("15m", read_ledger_tail(settings.momentum_desk_ledger_path, limit=400))]
+        )
+        payload["ledger_15m_html"] = fifteen["ledger_html"]
+        payload["ledger_15m_sig"] = fifteen["ledger_sig"]
+    return payload
+
+
 @app.get("/live/momentum/pulse")
-async def live_momentum_pulse() -> dict[str, Any]:
-    """One round-trip for 1s dashboard marks: live clip + 15m only."""
+async def live_momentum_pulse() -> JSONResponse:
+    """One round-trip for the dashboard: marks, both sleeve profits, and fills.
+
+    Clip and MoonShot reconcile venue inventory first, so a bot fill and a
+    manual Bitvavo buy or sell land in the same snapshot.
+    """
     core, clip, moonshot = await asyncio.gather(
         get_momentum_desk_manager().status_fresh(),
         get_btc_rs_clip_desk_manager().refresh_live(),
         get_moonshot_clip_desk_manager().refresh_live(),
         return_exceptions=True,
     )
-
-    def _ok(payload: object) -> dict[str, Any] | None:
-        return payload if isinstance(payload, dict) else None
-
-    return {
-        "core": _ok(core),
-        "clip": _ok(clip),
-        "moonshot": _ok(moonshot),
-        "short_weakest": None,
-        "donchian": None,
-        "ts": time.time(),
-    }
+    core_ok = _ok_status(core)
+    clip_ok = _ok_status(clip)
+    moonshot_ok = _ok_status(moonshot)
+    books: dict[str, Any] = {}
+    try:
+        books = await asyncio.to_thread(
+            _pulse_books, get_settings(), core_ok, clip_ok, moonshot_ok
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("momentum pulse books failed")
+    return JSONResponse(
+        {
+            "core": core_ok,
+            "clip": clip_ok,
+            "moonshot": moonshot_ok,
+            "short_weakest": None,
+            "donchian": None,
+            "ts": time.time(),
+            **books,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/live/momentum/start")
@@ -1026,6 +1166,27 @@ async def live_momentum_dashboard(
             ),
             limit=400,
         )
+    show_moonshot = bool(getattr(settings, "momentum_moonshot_clip_enabled", False))
+
+    async def _refresh_named(label: str, call: Any) -> dict[str, Any] | None:
+        try:
+            return _ok_status(await call)
+        except Exception:  # noqa: BLE001
+            logger.exception("%s refresh for dashboard failed", label)
+            return None
+
+    async def _refresh_moonshot() -> dict[str, Any] | None:
+        if not show_moonshot:
+            return None
+        return await _refresh_named(
+            "moonshot", get_moonshot_clip_desk_manager().refresh_live()
+        )
+
+    clip_status, moonshot_status = await asyncio.gather(
+        _refresh_named("clip", get_btc_rs_clip_desk_manager().refresh_live()),
+        _refresh_moonshot(),
+    )
+    moonshot_ledger: list[dict[str, Any]] | None = None
     if show_clip:
         clip_ledger = read_ledger_tail(
             getattr(
@@ -1035,17 +1196,15 @@ async def live_momentum_dashboard(
             ),
             limit=400,
         )
-    try:
-        clip_status = get_btc_rs_clip_desk_manager().status()
-    except Exception:  # noqa: BLE001
-        clip_status = None
-    show_moonshot = bool(getattr(settings, "momentum_moonshot_clip_enabled", False))
-    moonshot_status: dict[str, Any] | None = None
     if show_moonshot:
-        try:
-            moonshot_status = get_moonshot_clip_desk_manager().status()
-        except Exception:  # noqa: BLE001
-            moonshot_status = None
+        moonshot_ledger = read_ledger_tail(
+            getattr(
+                settings,
+                "momentum_moonshot_clip_ledger_path",
+                "./data/momentum_moonshot_clip_ledger.jsonl",
+            ),
+            limit=400,
+        )
     allocator = None
     if donchian_status and isinstance(donchian_status.get("allocator"), dict) and donchian_status["allocator"].get("ok"):
         allocator = donchian_status["allocator"]
@@ -1054,25 +1213,14 @@ async def live_momentum_dashboard(
             allocator = live_snapshot()
         except Exception as exc:  # noqa: BLE001
             allocator = {"ok": False, "error": str(exc), "label": "mid", "why": str(exc)}
-    earnings = compute_desk_earnings(
-        core_ledger_path=settings.momentum_desk_ledger_path,
-        volatile_ledger_path=(
-            settings.momentum_volatile_ledger_path if show_volatile else None
-        ),
+    earnings = _build_desk_earnings(
+        settings,
         core_status=status,
-        volatile_status=volatile_status if show_volatile else None,
-        short_weakest_ledger_path=(
-            settings.momentum_short_weakest_ledger_path if show_short_weakest else None
-        ),
-        short_weakest_status=short_status if show_short_weakest else None,
-        donchian_ledger_path=(
-            settings.momentum_donchian_ledger_path if show_donchian else None
-        ),
-        donchian_status=donchian_status if show_donchian else None,
-        clip_ledger_path=getattr(
-            settings, "momentum_btc_rs_clip_ledger_path", None
-        ),
         clip_status=clip_status,
+        moonshot_status=moonshot_status if show_moonshot else None,
+        volatile_status=volatile_status if show_volatile else None,
+        short_status=short_status if show_short_weakest else None,
+        donchian_status=donchian_status if show_donchian else None,
     )
     return render_momentum_dashboard(
         status,
@@ -1097,61 +1245,37 @@ async def live_momentum_dashboard(
         show_btc_rs_clip=show_clip,
         moonshot=moonshot_status if show_moonshot else None,
         show_moonshot=show_moonshot,
+        moonshot_ledger_rows=moonshot_ledger if show_moonshot else None,
     )
 
 
 @app.get("/live/momentum/earnings")
-async def live_momentum_earnings() -> dict[str, Any]:
-    """Week / month / all-time net PnL (Amsterdam calendar). Optional sleeves."""
+async def live_momentum_earnings() -> JSONResponse:
+    """Week / month / all-time net PnL (Amsterdam calendar), both live sleeves."""
     settings = get_settings()
-    show_volatile = bool(getattr(settings, "momentum_volatile_enabled", False))
-    show_short_weakest = bool(getattr(settings, "momentum_short_weakest_enabled", False))
-    show_donchian = bool(getattr(settings, "momentum_donchian_enabled", False))
-    core = get_momentum_desk_manager().status()
-    volatile = None
-    if show_volatile:
-        try:
-            volatile = get_volatile_desk_manager().status()
-        except Exception:  # noqa: BLE001
-            volatile = None
-    short_status = None
-    if show_short_weakest:
-        try:
-            short_status = get_short_weakest_desk_manager().status()
-        except Exception:  # noqa: BLE001
-            short_status = None
-    donchian_status = None
-    if show_donchian:
-        try:
-            donchian_status = await get_donchian_desk_manager().status_fresh()
-        except Exception:  # noqa: BLE001
-            donchian_status = None
-    clip_status = None
-    try:
-        clip_status = get_btc_rs_clip_desk_manager().status()
-    except Exception:  # noqa: BLE001
-        clip_status = None
-    earnings = compute_desk_earnings(
-        core_ledger_path=settings.momentum_desk_ledger_path,
-        volatile_ledger_path=(
-            settings.momentum_volatile_ledger_path if show_volatile else None
-        ),
-        core_status=core,
-        volatile_status=volatile,
-        short_weakest_ledger_path=(
-            settings.momentum_short_weakest_ledger_path if show_short_weakest else None
-        ),
-        short_weakest_status=short_status,
-        donchian_ledger_path=(
-            settings.momentum_donchian_ledger_path if show_donchian else None
-        ),
-        donchian_status=donchian_status,
-        clip_ledger_path=getattr(
-            settings, "momentum_btc_rs_clip_ledger_path", None
-        ),
-        clip_status=clip_status,
+    show_moonshot = bool(getattr(settings, "momentum_moonshot_clip_enabled", False))
+    core, clip, moonshot = await asyncio.gather(
+        get_momentum_desk_manager().status_fresh(),
+        get_btc_rs_clip_desk_manager().refresh_live(),
+        get_moonshot_clip_desk_manager().refresh_live()
+        if show_moonshot
+        else _async_none(),
+        return_exceptions=True,
     )
-    return earnings_as_dict(earnings)
+    volatile, short, donchian = _optional_sleeve_statuses(settings)
+    earnings = _build_desk_earnings(
+        settings,
+        core_status=_ok_status(core),
+        clip_status=_ok_status(clip),
+        moonshot_status=_ok_status(moonshot) if show_moonshot else None,
+        volatile_status=volatile,
+        short_status=short,
+        donchian_status=donchian,
+    )
+    return JSONResponse(
+        earnings_as_dict(earnings),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/live/momentum/commit", response_model=None)
