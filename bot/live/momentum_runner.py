@@ -162,6 +162,24 @@ class LiveGateway:
                 return float(bal.total)
         return 0.0
 
+    async def account_history_items(self) -> list[dict[str, Any]]:
+        """Recent Bitvavo account history (buys and sells), newest page."""
+        try:
+            client = self._client(trading=False)
+            ex = await client._get_exchange()  # noqa: SLF001
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: %s history client failed: %s", self._venue, exc)
+            return []
+        if not hasattr(ex, "privateGetAccountHistory"):
+            return []
+        try:
+            res = await ex.privateGetAccountHistory({})
+        except Exception as exc:  # noqa: BLE001
+            logger.info("momentum desk: %s account history failed: %s", self._venue, exc)
+            return []
+        items = res.get("items") if isinstance(res, dict) else res
+        return [row for row in (items or []) if isinstance(row, dict)]
+
     async def base_free(self, base: str) -> float | None:
         """Free units of ``base`` available to sell (None if balance fetch fails)."""
         try:
