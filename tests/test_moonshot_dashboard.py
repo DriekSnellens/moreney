@@ -638,3 +638,85 @@ def test_alphai_board_measures_the_gap_and_the_dashboard_shows_it():
     assert "ADA" in panel
     assert "onder de high" in panel
     assert "Avoid: BTC" in panel
+
+
+def test_rs_sleeve_pick_names_the_buy_and_the_dashboard_shows_it():
+    from bot.live.momentum_btc_rs_clip import rs_sleeve_pick
+
+    decision = {
+        "risk_on": True,
+        "rebalance_due": True,
+        "want_alt": "SUI",
+        "entries": [{"base": "SUI", "role": "alt", "notional_eur": 1000}],
+        "ranked": [
+            {"base": "SUI", "excess": 0.168},
+            {"base": "FET", "excess": 0.082},
+            {"base": "AVAX", "excess": 0.066},
+        ],
+    }
+    pick = rs_sleeve_pick({"last_decision": decision, "positions": []})
+    assert pick["line"] == "Zou kopen SUI"
+    assert pick["base"] == "SUI"
+    assert pick["meta"] == "excess +16.8%"
+    assert pick["rank"].startswith("SUI +16.8% · FET +8.2%")
+    held = rs_sleeve_pick(
+        {
+            "last_decision": {
+                "risk_on": True,
+                "rebalance_due": False,
+                "want_alt": "ETH",
+                "entries": [],
+                "ranked": [{"base": "ETH", "excess": 0.04}],
+            },
+            "positions": [{"base": "ETH", "role": "alt", "quantity": 2}],
+        }
+    )
+    assert held["line"] == "Houdt ETH"
+    waiting = rs_sleeve_pick(
+        {
+            "last_decision": {
+                "risk_on": True,
+                "rebalance_due": False,
+                "want_alt": None,
+                "entries": [],
+                "ranked": [{"base": "NEAR", "excess": 0.05}],
+            },
+            "positions": [],
+        }
+    )
+    assert waiting["line"] == "Volgende koop: NEAR"
+    assert waiting["meta"] == "wacht op de klok"
+    flat = rs_sleeve_pick(
+        {
+            "last_decision": {"risk_on": False, "ranked": [{"base": "SOL", "excess": 0.1}]},
+            "positions": [],
+        }
+    )
+    assert flat["line"] == "Geen koop"
+    assert flat["meta"] == "BTC onder de SMA"
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo"],
+            "config": {},
+            "positions": [],
+            "equity_eur": 20_000.0,
+        },
+        [],
+        show_btc_rs_clip=True,
+        btc_rs_clip={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "equity_eur": 19_000.0,
+            "cash_eur": 19_000.0,
+            "positions": [],
+            "last_decision": decision,
+        },
+    ).body.decode()
+    card = html.split('data-live="clip"', 1)[1].split('data-live="rs-pick"', 1)[1]
+    assert "RS sleeve" in card
+    assert "Zou kopen SUI" in card
+    assert "excess +16.8%" in card
+    assert "FET +8.2%" in card

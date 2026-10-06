@@ -1392,6 +1392,16 @@ class BtcRsClipPaperRunner:
         equity = self._equity_now()
         last = self.last_decision or {}
         live = not self.dry_run
+        from bot.live.momentum_btc_rs_clip import rs_sleeve_pick
+
+        rs_pick = rs_sleeve_pick(
+            {
+                "last_decision": last,
+                "positions": positions,
+                "want_alt": last.get("want_alt"),
+                "risk_on": bool(last.get("risk_on")),
+            }
+        )
         # Owner clip: live sizing follows Bitvavo free EUR, so the operator page
         # shows that equity as the book. MoonShot stays on its fixed book_eur.
         if self.pin_cash_to_book:
@@ -1428,6 +1438,7 @@ class BtcRsClipPaperRunner:
             "gap_pct": last.get("gap_pct"),
             "want_alt": last.get("want_alt"),
             "next_decision": self.next_decision(),
+            "rs_pick": rs_pick,
             "config": {
                 "btc_frac": self.cfg.btc_frac,
                 "alt_frac": self.cfg.alt_frac,

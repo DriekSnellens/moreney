@@ -132,6 +132,13 @@ body {
   background: rgba(15,23,42,.8); font-size: .8rem;
 }
 .mix-chip strong { font-family: var(--mono); }
+.rs-pick { margin: .65rem 0 .15rem; }
+.rs-pick-k {
+  margin: 0; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.rs-pick .rs-buy { margin: .12rem 0 0; font-size: 1.05rem; }
+.rs-pick .rs-buy strong { font-family: var(--mono); }
+.rs-pick .rs-rank { margin: .2rem 0 0; font-size: .75rem; color: var(--muted); }
 .ms-alphai { margin-top: .7rem; }
 .ms-alphai h3 { margin: 0 0 .2rem; font-size: .84rem; font-weight: 600; }
 .ms-alphai .ms-buy { margin: 0 0 .35rem; font-size: .92rem; }
@@ -2184,6 +2191,25 @@ def _clip_bag_cards(status: Mapping[str, Any]) -> str:
     )
 
 
+def _rs_pick_html(status: Mapping[str, Any]) -> str:
+    """RS sleeve buy line. The coin is the current ranking, not a fixed name."""
+    from bot.live.momentum_btc_rs_clip import rs_sleeve_pick
+
+    pick = rs_sleeve_pick(status)
+    meta = str(pick.get("meta") or "")
+    meta_html = f' <span class="muted" data-k="rs-meta">{escape(meta)}</span>' if meta else (
+        '<span class="muted" data-k="rs-meta"></span>'
+    )
+    return (
+        '<div class="rs-pick" data-live="rs-pick">'
+        '<p class="rs-pick-k">RS sleeve</p>'
+        f'<p class="rs-buy"><strong data-k="rs-buy">{escape(str(pick.get("line") or ""))}</strong>'
+        f"{meta_html}</p>"
+        f'<p class="rs-rank" data-k="rs-rank">{escape(str(pick.get("rank") or ""))}</p>'
+        "</div>"
+    )
+
+
 def _clip_visual_desk(
     status: Mapping[str, Any] | None,
     moonshot: Mapping[str, Any] | None = None,
@@ -2235,6 +2261,7 @@ def _clip_visual_desk(
         f'<span class="dot"></span>{gate}</span>'
         f'<p class="eq-open {_cls(shown_open)}" {open_attr}>{_fmt_eur(shown_open)}</p>'
         f"</div></div>"
+        f"{_rs_pick_html(st)}"
         f"{chart_label}{_equity_chart_svg(curve, equity=float(eq or 0.0), desk='clip')}"
         f"{_alloc_visual(st)}"
         f"{_clip_bag_cards(st)}"
@@ -3783,6 +3810,18 @@ _LIVE_MARKS_JS = r"""
       });
     });
     stampMarks(st);
+    patchRsPick(st);
+  }
+  function patchRsPick(st) {
+    const host = document.querySelector('[data-live="rs-pick"]');
+    if (!host || !st || !st.rs_pick) return;
+    const pick = st.rs_pick;
+    const buy = host.querySelector('[data-k="rs-buy"]');
+    if (buy) buy.textContent = pick.line || "";
+    const meta = host.querySelector('[data-k="rs-meta"]');
+    if (meta) meta.textContent = pick.meta ? " " + pick.meta : "";
+    const rank = host.querySelector('[data-k="rs-rank"]');
+    if (rank) rank.textContent = pick.rank || "";
   }
   function rebuildClipBags(st) {
     const grid = document.querySelector('[data-live="clip-open"]');

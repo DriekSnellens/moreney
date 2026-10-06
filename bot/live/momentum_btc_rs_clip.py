@@ -347,6 +347,103 @@ def live_breakout_view(
     }
 
 
+def _rs_excess_meta(ranked: Sequence[Mapping[str, Any]], base: str) -> str:
+    for row in ranked:
+        if str(row.get("base") or "") != base:
+            continue
+        raw = row.get("excess")
+        if raw is None:
+            return ""
+        try:
+            return f"excess {float(raw):+.1%}"
+        except (TypeError, ValueError):
+            return ""
+    return ""
+
+
+def rs_sleeve_pick(status: Mapping[str, Any] | None) -> dict[str, str]:
+    """Which alt the RS sleeve would buy, from the last decision.
+
+    The name comes from the ranking, never from a fixed ticker. A queued
+    entry is a buy. A name already held is a hold. A leader while the
+    rebalance clock is closed is the next buy, not an order.
+    """
+    st = dict(status or {})
+    last = dict(st.get("last_decision") or {})
+    ranked = [row for row in (last.get("ranked") or []) if isinstance(row, dict)]
+    entries = [
+        row
+        for row in (last.get("entries") or [])
+        if isinstance(row, dict)
+        and str(row.get("role") or "alt") != "btc"
+        and str(row.get("base") or "")
+    ]
+    held: list[str] = []
+    for pos in st.get("positions") or []:
+        if not isinstance(pos, dict):
+            continue
+        if str(pos.get("role") or "").lower() == "btc":
+            continue
+        try:
+            qty = float(pos.get("quantity") or pos.get("notional_eur") or 0.0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        base = str(pos.get("base") or "")
+        if base and qty > 1e-12:
+            held.append(base)
+    if last and "risk_on" in last:
+        risk_on = bool(last.get("risk_on"))
+    else:
+        risk_on = bool(st.get("risk_on"))
+    due = bool(last.get("rebalance_due"))
+    want = str(last.get("want_alt") or st.get("want_alt") or "")
+    top = str(ranked[0].get("base") or "") if ranked else ""
+    name = ""
+    if not last:
+        line = "Nog geen RS-check"
+        meta = ""
+    elif not risk_on:
+        line = "Geen koop"
+        meta = "BTC onder de SMA"
+    elif entries:
+        name = str(entries[0].get("base") or "")
+        line = f"Zou kopen {name}"
+        meta = _rs_excess_meta(ranked, name)
+    elif want and want in held:
+        name = want
+        line = f"Houdt {name}"
+        meta = _rs_excess_meta(ranked, name)
+    elif top and due:
+        name = top
+        line = f"Zou kopen {name}"
+        meta = _rs_excess_meta(ranked, name)
+    elif top:
+        name = top
+        line = f"Volgende koop: {name}"
+        meta = "wacht op de klok"
+    elif want:
+        name = want
+        line = f"Houdt {name}"
+        meta = ""
+    else:
+        line = "Geen RS-koop"
+        meta = ""
+    bits: list[str] = []
+    for row in ranked[:5]:
+        base = str(row.get("base") or "")
+        if not base:
+            continue
+        raw = row.get("excess")
+        if raw is None:
+            bits.append(base)
+            continue
+        try:
+            bits.append(f"{base} {float(raw):+.1%}")
+        except (TypeError, ValueError):
+            bits.append(base)
+    return {"line": line, "base": name, "meta": meta, "rank": " · ".join(bits)}
+
+
 def breakout_board_headline(
     decision: Mapping[str, Any] | None,
     cfg: ClipConfig,
