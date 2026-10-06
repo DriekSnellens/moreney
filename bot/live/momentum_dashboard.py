@@ -132,6 +132,10 @@ body {
   background: rgba(15,23,42,.8); font-size: .8rem;
 }
 .mix-chip strong { font-family: var(--mono); }
+.ms-alphai { margin-top: .7rem; }
+.ms-alphai h3 { margin: 0 0 .2rem; font-size: .84rem; font-weight: 600; }
+.ms-alphai .ms-buy { margin: 0 0 .35rem; font-size: .92rem; }
+.ms-alphai table { margin: 0; }
 .paper-clip .mix-chip { align-items: center; }
 .paper-clip .mix-chip form { margin: 0; }
 .mix-foot { margin: .75rem 0 0; font-size: .78rem; color: var(--muted); }
@@ -2332,6 +2336,89 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
     )
 
 
+def _pct(value: Any, *, signed: bool = False) -> str:
+    if value is None or value == "":
+        return "—"
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    text = f"{n:+.1%}" if signed else f"{abs(n):.1%}"
+    return text
+
+
+def _gap_label(gap: Any) -> str:
+    if gap is None or gap == "":
+        return "—"
+    try:
+        n = float(gap)
+    except (TypeError, ValueError):
+        return "—"
+    if n < 0:
+        return f"{abs(n):.1%} onder"
+    return f"{n:.1%} erboven"
+
+
+def _moonshot_alphai_html(board: Mapping[str, Any] | None) -> str:
+    """AlphaI picks versus the live 20d breakout. The runner refreshes this each quarter."""
+    data = dict(board or {})
+    cadence = escape(str(data.get("cadence") or "elk kwartier"))
+    buy = escape(str(data.get("buy_line") or "Geen koop"))
+    clock = escape(str(data.get("clock_line") or ""))
+    checked = escape(str(data.get("checked_label") or ""))
+    nxt = escape(str(data.get("next_label") or ""))
+    when = ""
+    if checked or nxt:
+        when = f" · bijgewerkt {checked} · volgende {nxt}"
+    note = str(data.get("note") or "")
+    rows = list(data.get("rows") or [])
+    body = []
+    for row in rows:
+        score = row.get("score")
+        score_s = "—" if score is None else f"{float(score):.0f}"
+        body.append(
+            "<tr>"
+            f"<td>{escape(str(row.get('base') or ''))}</td>"
+            f'<td class="num">{score_s}</td>'
+            f'<td class="num">{_pct(row.get("day_ret"), signed=True)}</td>'
+            f'<td class="num">{_gap_label(row.get("gap"))}</td>'
+            f"<td>{escape(str(row.get('status') or ''))}</td>"
+            "</tr>"
+        )
+    if body:
+        table = (
+            '<div class="table-scroll"><table class="desk"><thead><tr>'
+            "<th>Munt</th><th>Score</th><th>Dag</th><th>T.o.v. high</th><th>Status</th>"
+            "</tr></thead><tbody>"
+            + "".join(body)
+            + "</tbody></table></div>"
+        )
+    elif note:
+        table = f'<p class="muted">{escape(note)}</p>'
+    else:
+        table = '<p class="muted">AlphaI-check volgt op het kwartier.</p>'
+    avoid = [str(b) for b in (data.get("avoid") or []) if b]
+    avoid_html = (
+        f'<p class="muted" style="margin:.35rem 0 0">Avoid: {escape(", ".join(avoid))}</p>'
+        if avoid
+        else ""
+    )
+    note_html = (
+        f'<p class="muted" style="margin:.35rem 0 0">{escape(note)}</p>'
+        if note and body
+        else ""
+    )
+    clock_html = f" · {clock}" if clock else ""
+    return (
+        '<div class="ms-alphai" data-live="ms-alphai">'
+        f"<h3>AlphaI · {cadence}</h3>"
+        f'<p class="ms-buy"><strong data-k="ms-buy">{buy}</strong>'
+        f'<span class="muted" data-k="ms-clock">{clock_html}</span></p>'
+        f'<p class="muted" data-k="ms-when" style="margin:0 0 .35rem">{when}</p>'
+        f"{table}{avoid_html}{note_html}</div>"
+    )
+
+
 def _moonshot_panel(status: Mapping[str, Any] | None) -> str:
     """Fixed-book MoonShot sleeve on the operator desk."""
     st = status or {}
@@ -2398,7 +2485,9 @@ def _moonshot_panel(status: Mapping[str, Any] | None) -> str:
         f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
         f'{escape(pack)} · trail {escape(trail_s)} · hs {escape(hs_s)} · '
         f'{escape(mode)} · next <strong data-live="ms-next">{_ts(st.get("next_decision"))}</strong></p>'
-        f"{pos_html}</section>"
+        f"{pos_html}"
+        f"{_moonshot_alphai_html(st.get('alphai_board'))}"
+        f"</section>"
     )
 
 
@@ -3796,6 +3885,53 @@ _LIVE_MARKS_JS = r"""
       });
     }
   }
+  function gapLabel(gap) {
+    if (gap == null || gap === "") return "—";
+    const n = Number(gap);
+    if (!Number.isFinite(n)) return "—";
+    return n < 0 ? (Math.abs(n) * 100).toFixed(1) + "% onder" : (n * 100).toFixed(1) + "% erboven";
+  }
+  function dayLabel(v) {
+    if (v == null || v === "") return "—";
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return (n >= 0 ? "+" : "") + (n * 100).toFixed(1) + "%";
+  }
+  function alphaiBoardHtml(board) {
+    const data = board || {};
+    const cadence = esc(data.cadence || "elk kwartier");
+    const buy = esc(data.buy_line || "Geen koop");
+    const clock = data.clock_line ? " · " + esc(data.clock_line) : "";
+    const when = (data.checked_label || data.next_label)
+      ? " · bijgewerkt " + esc(data.checked_label || "") + " · volgende " + esc(data.next_label || "")
+      : "";
+    const rows = data.rows || [];
+    let table;
+    if (rows.length) {
+      const body = rows.map((row) => {
+        const score = row.score == null ? "—" : String(Math.round(Number(row.score)));
+        return `<tr><td>${esc(row.base || "")}</td><td class="num">${score}</td>`
+          + `<td class="num">${dayLabel(row.day_ret)}</td><td class="num">${gapLabel(row.gap)}</td>`
+          + `<td>${esc(row.status || "")}</td></tr>`;
+      }).join("");
+      table = `<div class="table-scroll"><table class="desk"><thead><tr>`
+        + `<th>Munt</th><th>Score</th><th>Dag</th><th>T.o.v. high</th><th>Status</th>`
+        + `</tr></thead><tbody>${body}</tbody></table></div>`;
+    } else if (data.note) {
+      table = `<p class="muted">${esc(data.note)}</p>`;
+    } else {
+      table = `<p class="muted">AlphaI-check volgt op het kwartier.</p>`;
+    }
+    const avoid = (data.avoid || []).filter(Boolean);
+    const avoidHtml = avoid.length
+      ? `<p class="muted" style="margin:.35rem 0 0">Avoid: ${esc(avoid.join(", "))}</p>` : "";
+    const noteHtml = data.note && rows.length
+      ? `<p class="muted" style="margin:.35rem 0 0">${esc(data.note)}</p>` : "";
+    return `<h3>AlphaI · ${cadence}</h3>`
+      + `<p class="ms-buy"><strong>${buy}</strong><span class="muted">${clock}</span></p>`
+      + `<p class="muted" style="margin:0 0 .35rem">${when}</p>`
+      + table + avoidHtml + noteHtml;
+  }
   function patchMoonshot(st) {
     const root = document.querySelector('[data-live="moonshot"]');
     if (!root || !st) return;
@@ -3832,6 +3968,14 @@ _LIVE_MARKS_JS = r"""
               + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
           }).join("")
         : `<span class="muted">${live ? "Nog geen live-positie — koopt zodra een munt vandaag het 20-daagse hoogtepunt breekt." : "Nog geen positie."}</span>`;
+    }
+    const alphai = root.querySelector('[data-live="ms-alphai"]');
+    if (alphai) {
+      const sig = JSON.stringify(st.alphai_board || null);
+      if (alphai.getAttribute("data-sig") !== sig) {
+        alphai.innerHTML = alphaiBoardHtml(st.alphai_board);
+        alphai.setAttribute("data-sig", sig);
+      }
     }
   }
   function paintAmount(el, value) {

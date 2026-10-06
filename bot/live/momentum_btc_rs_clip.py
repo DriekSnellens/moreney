@@ -294,6 +294,159 @@ def sma(closes: Sequence[float], n: int) -> float | None:
     return sum(float(x) for x in closes[-n:]) / n
 
 
+_BREAKOUT_STATUS = {
+    "ready": "breekt nu",
+    "no_breakout": "onder de high",
+    "already_broken": "gisteren al gebroken",
+    "too_extended": "te ver door",
+    "weak_day": "dag te zwak",
+    "alphai_avoid": "avoid",
+    "short_history": "te korte historie",
+    "thin_volume": "te dun volume",
+}
+
+
+def live_breakout_view(
+    rows: Sequence[Sequence[float]],
+    mark: float,
+    cfg: ClipConfig,
+    *,
+    avoid: bool = False,
+) -> dict[str, Any]:
+    """First pierce of the prior 20d high, with the live chase caps.
+
+    ``rows`` are completed daily bars. The mark is the live price.
+    """
+    cl = closes_of(rows)
+    highs = [float(r[2]) for r in rows if len(r) >= 3 and float(r[2]) > 0]
+    prev_close = float(cl[-1]) if cl else 0.0
+    if mark <= 0 or prev_close <= 0 or len(highs) < 20:
+        return {"reason": "short_history", "qualifies": False, "day_ret": None, "gap": None}
+    prior_hi = max(highs[-20:])
+    live_ret = mark / prev_close - 1.0
+    gap = mark / prior_hi - 1.0 if prior_hi > 0 else None
+    if prev_close >= prior_hi:
+        reason = "already_broken"
+    elif mark < prior_hi or live_ret < float(cfg.excess_floor):
+        reason = "no_breakout" if mark < prior_hi else "weak_day"
+    else:
+        day_cap = float(getattr(cfg, "max_entry_day_ret", 0.0) or 0.0)
+        ext_cap = float(getattr(cfg, "max_break_extension", 0.0) or 0.0)
+        extension = mark / prior_hi - 1.0 if prior_hi > 0 else 0.0
+        if (day_cap > 0 and live_ret > day_cap) or (ext_cap > 0 and extension > ext_cap):
+            reason = "too_extended"
+        elif avoid:
+            reason = "alphai_avoid"
+        else:
+            reason = "ready"
+    return {
+        "reason": reason,
+        "qualifies": reason == "ready",
+        "day_ret": live_ret,
+        "gap": gap,
+    }
+
+
+def breakout_board_headline(
+    decision: Mapping[str, Any] | None,
+    cfg: ClipConfig,
+    last_rebalance_ms: int,
+    now: datetime,
+) -> dict[str, str]:
+    """What the sleeve would buy, plus the rebalance clock. Cheap to recompute."""
+    from zoneinfo import ZoneInfo
+
+    dec = dict(decision or {})
+    due = bool(dec.get("rebalance_due"))
+    want = str(dec.get("want_alt") or "") or None
+    ranked = list(dec.get("ranked") or [])
+    top = str(ranked[0].get("base") or "") if ranked else ""
+    entries = [
+        str(row.get("base") or "")
+        for row in (dec.get("entries") or [])
+        if str(row.get("role") or "alt") != "btc" and row.get("base")
+    ]
+    zone = ZoneInfo("Europe/Amsterdam")
+    unlock_ms = 0
+    if int(last_rebalance_ms or 0) > 0:
+        unlock_ms = int(last_rebalance_ms) + int(cfg.rebalance_days) * 86_400_000
+    if due:
+        clock_line = "Klok open"
+    elif unlock_ms > int(now.timestamp() * 1000):
+        when = datetime.fromtimestamp(unlock_ms / 1000, UTC).astimezone(zone)
+        clock_line = f"Nieuwe koop vanaf {when.strftime('%H:%M')}"
+    else:
+        clock_line = "Klok dicht"
+    if entries:
+        buy_line = f"Koopt {entries[0]}"
+    elif want and due:
+        buy_line = f"Houdt {want}"
+    elif top and not due:
+        buy_line = f"{top} staat klaar"
+    elif want:
+        buy_line = f"Houdt {want}"
+    else:
+        buy_line = "Geen koop"
+    return {"buy_line": buy_line, "clock_line": clock_line}
+
+
+def alphai_breakout_board(
+    ohlc_by_base: Mapping[str, Sequence[Sequence[float]]],
+    marks: Mapping[str, float],
+    view: Any,
+    cfg: ClipConfig,
+    *,
+    now: datetime | None = None,
+    interval_minutes: int = 15,
+    note: str = "",
+) -> dict[str, Any]:
+    """AlphaI picks against the live breakout rule. One snapshot per quarter."""
+    from zoneinfo import ZoneInfo
+
+    from bot.integrations.alphai.daily_recommendations import next_update_at_utc
+
+    instant = now or datetime.now(UTC)
+    zone = ZoneInfo("Europe/Amsterdam")
+    minutes = max(5, int(interval_minutes or 15))
+    picks = [str(b).upper() for b in (getattr(view, "picks", ()) or ())]
+    ranks = dict(getattr(view, "pick_ranks", {}) or {})
+    scores = dict(getattr(view, "pick_scores", {}) or {})
+    picks.sort(key=lambda b: (int(ranks.get(b) or 10_000), -float(scores.get(b) or 0.0), b))
+    avoid = {str(b).upper() for b in (getattr(view, "avoid", ()) or ())}
+    mark_map = {str(k).upper(): float(v) for k, v in dict(marks or {}).items() if float(v or 0.0) > 0}
+    rows_out: list[dict[str, Any]] = []
+    for base in picks:
+        done = completed_ohlc(ohlc_by_base.get(base) or [], now=instant)
+        geo = live_breakout_view(done, mark_map.get(base, 0.0), cfg, avoid=base in avoid)
+        reason = str(geo["reason"])
+        if geo["qualifies"] and quote_vol(done) < float(cfg.min_qvol_eur or 0.0):
+            reason = "thin_volume"
+        score = scores.get(base)
+        rows_out.append(
+            {
+                "base": base,
+                "score": None if score is None else round(float(score), 1),
+                "day_ret": None if geo["day_ret"] is None else round(float(geo["day_ret"]), 4),
+                "gap": None if geo["gap"] is None else round(float(geo["gap"]), 4),
+                "reason": reason,
+                "status": _BREAKOUT_STATUS.get(reason, reason),
+                "qualifies": reason == "ready",
+            }
+        )
+    nxt = next_update_at_utc(now=instant, interval_minutes=minutes)
+    cadence = "elk kwartier" if minutes == 15 else f"elke {minutes} min"
+    return {
+        "cadence": cadence,
+        "checked_at": instant.isoformat(),
+        "checked_label": instant.astimezone(zone).strftime("%H:%M"),
+        "next_label": nxt.astimezone(zone).strftime("%H:%M"),
+        "rows": rows_out,
+        "avoid": sorted(b for b in avoid if b not in set(picks)),
+        "note": note,
+        "interval_minutes": minutes,
+    }
+
+
 def quote_vol(rows: Sequence[Sequence[float]], n: int = 20) -> float:
     if len(rows) < 1:
         return 0.0
@@ -666,57 +819,20 @@ def evaluate_clip(
             # First breakout: yesterday's close is still under the 20d high,
             # and the live price is crossing it now. Yesterday's breakout is
             # already in the price, so it does not qualify.
-            mark = marks.get(base, 0.0)
-            prev_close = float(cl[-1]) if cl else 0.0
-            if mark <= 0 or prev_close <= 0 or len(highs) < 20:
-                skipped.append({"base": base, "reason": "short_history"})
-                continue
-            prior_hi = max(highs[-20:])
-            live_ret = mark / prev_close - 1.0
-            if prev_close >= prior_hi:
-                skipped.append(
-                    {
-                        "base": base,
-                        "reason": "already_broken",
-                        "day_ret": round(live_ret, 4),
-                    }
-                )
-                continue
-            if mark < prior_hi or live_ret < float(cfg.excess_floor):
-                skipped.append(
-                    {
-                        "base": base,
-                        "reason": "no_breakout" if mark < prior_hi else "weak_day",
-                        "day_ret": round(live_ret, 4),
-                    }
-                )
-                continue
-            day_cap = float(getattr(cfg, "max_entry_day_ret", 0.0) or 0.0)
-            ext_cap = float(getattr(cfg, "max_break_extension", 0.0) or 0.0)
-            extension = mark / prior_hi - 1.0 if prior_hi > 0 else 0.0
-            if (day_cap > 0 and live_ret > day_cap) or (ext_cap > 0 and extension > ext_cap):
-                skipped.append(
-                    {
-                        "base": base,
-                        "reason": "too_extended",
-                        "day_ret": round(live_ret, 4),
-                    }
-                )
-                continue
-            if base in alphai_avoid_set:
-                skipped.append(
-                    {
-                        "base": base,
-                        "reason": "alphai_avoid",
-                        "day_ret": round(live_ret, 4),
-                    }
-                )
+            view = live_breakout_view(
+                rows, marks.get(base, 0.0), cfg, avoid=base in alphai_avoid_set
+            )
+            if not view["qualifies"]:
+                skip: dict[str, Any] = {"base": base, "reason": view["reason"]}
+                if view["day_ret"] is not None:
+                    skip["day_ret"] = round(float(view["day_ret"]), 4)
+                skipped.append(skip)
                 continue
             ranked.append(
                 {
                     "base": base,
                     "excess": float(xs) if xs is not None else 0.0,
-                    "day_ret": live_ret,
+                    "day_ret": float(view["day_ret"] or 0.0),
                     "qvol": round(qv, 0),
                     "coil": False,
                     "brk20": True,

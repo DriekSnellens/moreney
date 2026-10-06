@@ -550,3 +550,91 @@ def test_stale_alphai_is_refreshed_before_the_scan(tmp_path, monkeypatch):
     )
     assert picks == frozenset({"SOL"})
     assert avoid == frozenset({"AAVE"})
+
+
+def test_alphai_board_measures_the_gap_and_the_dashboard_shows_it():
+    from bot.live.momentum_btc_rs_clip import (
+        ClipConfig,
+        alphai_breakout_board,
+        breakout_board_headline,
+        live_breakout_view,
+    )
+    from bot.live.momentum_desk import AlphaIView
+
+    rows = _closed_days(40, 10.0, high=10.0)
+    rows[-8][2] = 10.2
+    cfg = ClipConfig(
+        min_qvol_eur=1.0,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
+        excess_floor=0.0,
+        rebalance_days=1,
+    )
+    under = live_breakout_view(rows, 10.1, cfg)
+    assert under["reason"] == "no_breakout"
+    assert under["gap"] < 0
+    assert live_breakout_view(rows, 10.35, cfg)["qualifies"] is True
+    assert live_breakout_view(rows, 10.35, cfg, avoid=True)["reason"] == "alphai_avoid"
+    view = AlphaIView(
+        picks=frozenset({"ADA"}),
+        avoid=frozenset({"BTC"}),
+        pick_scores={"ADA": 18.0},
+        pick_ranks={"ADA": 4},
+    )
+    now = datetime(2026, 10, 6, 10, 32, tzinfo=UTC)
+    board = alphai_breakout_board({"ADA": rows}, {"ADA": 10.1}, view, cfg, now=now)
+    assert board["cadence"] == "elk kwartier"
+    assert board["rows"][0]["base"] == "ADA"
+    assert board["rows"][0]["status"] == "onder de high"
+    assert board["avoid"] == ["BTC"]
+    assert board["next_label"] == "12:45"
+    head = breakout_board_headline(
+        {"rebalance_due": False, "want_alt": None, "ranked": [], "entries": []},
+        cfg,
+        1_791_210_519_426,
+        now,
+    )
+    assert head["buy_line"] == "Geen koop"
+    assert head["clock_line"] == "Nieuwe koop vanaf 16:28"
+    ready = breakout_board_headline(
+        {
+            "rebalance_due": False,
+            "want_alt": None,
+            "ranked": [{"base": "ADA"}],
+            "entries": [],
+        },
+        cfg,
+        1_791_210_519_426,
+        now,
+    )
+    assert ready["buy_line"] == "ADA staat klaar"
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo"],
+            "config": {"max_positions": 1},
+            "positions": [],
+            "equity_eur": 20_000.0,
+        },
+        [],
+        show_moonshot=True,
+        moonshot={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "book_eur": 2_000.0,
+            "equity_eur": 2_000.0,
+            "cash_eur": 2_000.0,
+            "positions": [],
+            "risk_on": True,
+            "alphai_board": {**board, **head},
+        },
+    ).body.decode()
+    panel = html.split('id="moonshot"', 1)[1].split("</section>", 1)[0]
+    assert 'data-live="ms-alphai"' in panel
+    assert "AlphaI · elk kwartier" in panel
+    assert "Geen koop" in panel
+    assert "ADA" in panel
+    assert "onder de high" in panel
+    assert "Avoid: BTC" in panel

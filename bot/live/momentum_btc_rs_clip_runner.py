@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.live.external_roundtrip import (
+    booked_exit_qty,
+    ledger_exit_net_eur,
+    ledger_reset_ts,
+    unbooked_roundtrip_exits,
+)
 from bot.live.momentum_btc_rs_clip import (
     ClipConfig,
     ClipPosition,
@@ -197,6 +203,8 @@ class BtcRsClipPaperRunner:
         self.day_realized_eur = 0.0
         self.last_rebalance_ms = 0
         self.last_decision: dict[str, Any] = {}
+        self.alphai_board: dict[str, Any] | None = None
+        self._alphai_session = ""
         self.marks: dict[str, float] = {}
         self.mark_ts: dict[str, float] = {}
         self.equity_curve: list[list[float]] = []
@@ -240,6 +248,9 @@ class BtcRsClipPaperRunner:
             self.pending_pack = ""
         self.positions = [ClipPosition.from_dict(row) for row in (raw.get("positions") or [])]
         self.last_decision = dict(raw.get("last_decision") or {})
+        board = raw.get("alphai_board")
+        self.alphai_board = dict(board) if isinstance(board, dict) else None
+        self._alphai_session = str((self.alphai_board or {}).get("session_id") or "")
         curve: list[list[float]] = []
         for row in raw.get("equity_curve") or []:
             if not isinstance(row, (list, tuple)) or len(row) < 2:
@@ -249,6 +260,22 @@ class BtcRsClipPaperRunner:
             except (TypeError, ValueError):
                 continue
         self.equity_curve = curve[-_EQUITY_CURVE_MAX:]
+        self._adopt_ledger_realized()
+
+    def _adopt_ledger_realized(self) -> None:
+        """Lift the realized counter up to live exits already on the ledger.
+
+        A manual round-trip can be appended while this process still holds
+        the previous total. Cash is not touched: venue EUR already includes
+        the proceeds. The counter only moves up, and only for live fills
+        after the dashboard reset.
+        """
+        if self.dry_run:
+            return
+        since = ledger_reset_ts([self.ledger_path])
+        total = ledger_exit_net_eur([self.ledger_path], since=since)
+        if total > self.realized_total_eur + 0.009:
+            self.realized_total_eur = total
 
     def _equity_now(self) -> float:
         return self.cash_eur + self._deployed() + self._unrealized()
@@ -285,6 +312,7 @@ class BtcRsClipPaperRunner:
                     "pending_pack": self.pending_pack,
                     "positions": [p.to_dict() for p in self.positions],
                     "last_decision": self.last_decision,
+                    "alphai_board": self.alphai_board,
                     "equity_curve": [
                         [round(float(t), 1), round(float(eq), 2)]
                         for t, eq in self.equity_curve[-_EQUITY_CURVE_MAX:]
@@ -602,6 +630,66 @@ class BtcRsClipPaperRunner:
                 self._sample_equity()
                 self._save_state()
         return closed
+
+    async def reconcile_untracked_roundtrips(self) -> list[dict[str, Any]]:
+        """Book a finished manual buy/sell that no sleeve ledger owns.
+
+        The owner clip does this. MoonShot keeps a pinned book and must not
+        also claim the same Bitvavo fill. Cash is already the venue balance,
+        so this only adds the missing realized exit.
+        """
+        if self.dry_run or self.pin_cash_to_book or not self._gws:
+            return []
+        now = time.monotonic()
+        if now - getattr(self, "_last_roundtrip_mono", 0.0) < 60.0:
+            return []
+        self._last_roundtrip_mono = now
+        gw = self._primary_gw()
+        fetch = getattr(gw, "account_history_items", None) if gw is not None else None
+        if fetch is None:
+            return []
+        try:
+            items = await fetch()
+        except Exception as exc:  # noqa: BLE001
+            logger.info("clip account history failed: %s", exc)
+            return []
+        if not items:
+            return []
+        settings = get_settings()
+        paths = [
+            self.ledger_path,
+            getattr(settings, "momentum_moonshot_clip_ledger_path", None),
+            getattr(settings, "momentum_desk_ledger_path", None),
+        ]
+        fresh = unbooked_roundtrip_exits(
+            items,
+            booked_exit_qty(paths),
+            since=ledger_reset_ts(paths),
+        )
+        if not fresh:
+            before = self.realized_total_eur
+            self._adopt_ledger_realized()
+            if self.realized_total_eur > before + 0.009:
+                self._save_state()
+            return []
+        booked: list[dict[str, Any]] = []
+        for row in fresh:
+            net = float(row.get("net_eur") or 0.0)
+            stamped = {**row, "desk": self._desk()}
+            self.realized_total_eur += net
+            self.day_realized_eur += net
+            self._ledger_append(stamped)
+            booked.append(stamped)
+            logger.info(
+                "clip: booked untracked round-trip %s qty=%.8f net=%.2f",
+                stamped.get("base"),
+                float(stamped.get("quantity") or 0.0),
+                net,
+            )
+        self._adopt_ledger_realized()
+        self._sample_equity()
+        self._save_state()
+        return booked
 
     async def _venue_quote_eur(self) -> float | None:
         gw = self._primary_gw()
@@ -1026,6 +1114,80 @@ class BtcRsClipPaperRunner:
                 return mark
         return self._last_close(ohlc, base)
 
+    def _track_alphai_board(self) -> bool:
+        return str(self.cfg.entry_mode or "") == "brk20_now"
+
+    def _alphai_minutes(self) -> int:
+        return max(5, int(getattr(get_settings(), "alphai_recommendations_interval_minutes", 15) or 15))
+
+    def _alphai_board_status(self, *, now_dt: datetime) -> dict[str, Any] | None:
+        if not self._track_alphai_board():
+            return None
+        from bot.live.momentum_btc_rs_clip import breakout_board_headline
+
+        board = dict(self.alphai_board or {})
+        board.update(breakout_board_headline(self.last_decision, self.cfg, self.last_rebalance_ms, now_dt))
+        board.setdefault("rows", [])
+        board.setdefault("avoid", [])
+        board.setdefault("cadence", "elk kwartier")
+        return board
+
+    async def refresh_alphai_board(self) -> None:
+        """Rebuild the AlphaI-versus-breakout snapshot once per recommendation quarter."""
+        if not self._track_alphai_board():
+            return
+        from bot.integrations.alphai.daily_recommendations import (
+            load_daily_recommendations,
+            recommendation_session_id,
+        )
+        from bot.live.momentum_btc_rs_clip import alphai_breakout_board, fresh_alphai_breakout_sets
+        from bot.live.momentum_desk import AlphaIView
+
+        minutes = self._alphai_minutes()
+        now = datetime.now(UTC)
+        session = recommendation_session_id(now=now, interval_minutes=minutes)
+        if self._alphai_session == session and self.alphai_board:
+            return
+        async with self._decide_lock:
+            now = datetime.now(UTC)
+            session = recommendation_session_id(now=now, interval_minutes=minutes)
+            if self._alphai_session == session and self.alphai_board:
+                return
+            ohlc = await self._ohlc_for_decision()
+            await self._refresh_universe_marks()
+            picks, avoid = await asyncio.to_thread(
+                fresh_alphai_breakout_sets,
+                focus_bases=tuple(self.cfg.universe),
+                now=now,
+                interval_minutes=minutes,
+            )
+            settings = get_settings()
+            path = str(getattr(settings, "alphai_daily_recommendations_path", "") or "")
+            report = load_daily_recommendations(path) if path else None
+            view = AlphaIView.from_recommendations(report if isinstance(report, dict) else None)
+            fresh = bool(picks or avoid)
+            if fresh:
+                from dataclasses import replace
+
+                view = replace(view, picks=picks, avoid=avoid)
+            note = "" if fresh else "AlphaI-lijst niet vers"
+            if not fresh and self.alphai_board and self.alphai_board.get("rows"):
+                self.alphai_board = {**self.alphai_board, "note": note, "session_id": session}
+            else:
+                built = alphai_breakout_board(
+                    ohlc,
+                    self.marks,
+                    view if fresh else AlphaIView(),
+                    self.cfg,
+                    now=now,
+                    interval_minutes=minutes,
+                    note=note,
+                )
+                built["session_id"] = session
+                self.alphai_board = built
+            self._alphai_session = session
+            self._save_state()
+
     async def _ohlc_for_decision(self) -> dict[str, list[list[float]]]:
         ttl = 900.0 if float(getattr(self.cfg, "entry_scan_sec", 0.0) or 0.0) > 0 else 0.0
         now = time.monotonic()
@@ -1259,6 +1421,7 @@ class BtcRsClipPaperRunner:
             "positions": positions,
             "last_decision": last,
             "live_caption": str(last.get("caption") or ""),
+            "alphai_board": self._alphai_board_status(now_dt=datetime.now(UTC)),
             "risk_on": bool(last.get("risk_on")),
             "sma50": last.get("sma50"),
             "btc": self.marks.get("BTC") or last.get("btc"),
@@ -1301,6 +1464,11 @@ class BtcRsClipPaperRunner:
             await self.decide(execute=in_window)
         except Exception:  # noqa: BLE001
             logger.exception("clip kick decide failed")
+        if self._track_alphai_board():
+            try:
+                await self.refresh_alphai_board()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip alphai board failed")
         if in_window and scan_sec <= 0:
             last_hour_fire.add(f"{now.date()}-{now.hour}")
         last_scan = time.monotonic()
@@ -1319,6 +1487,11 @@ class BtcRsClipPaperRunner:
                     await self.manage_alt_trail()
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
+                if self._track_alphai_board():
+                    try:
+                        await self.refresh_alphai_board()
+                    except Exception:  # noqa: BLE001
+                        logger.exception("clip alphai board failed")
                 if scan_sec > 0 and time.monotonic() - last_scan >= scan_sec:
                     await self.decide(execute=True)
                     last_scan = time.monotonic()
@@ -1437,6 +1610,10 @@ class BtcRsClipDeskManager:
                 await self._runner.reconcile_external_inventory()
             except Exception:  # noqa: BLE001
                 logger.exception("clip: reconcile for status failed")
+            try:
+                await self._runner.reconcile_untracked_roundtrips()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: untracked round-trip reconcile failed")
             try:
                 await self._runner._decision_cash()
             except Exception:  # noqa: BLE001
