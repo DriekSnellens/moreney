@@ -192,6 +192,70 @@ def test_live_clip_fills_fold_into_combined(tmp_path: Path) -> None:
     assert payload["paper_open_mtm_eur"] == 0.0
 
 
+def test_live_moonshot_and_clip_both_fold_into_combined(tmp_path: Path) -> None:
+    """Manual and bot exits on each sleeve count toward the same live net."""
+    clip = tmp_path / "clip.jsonl"
+    moon = tmp_path / "moon.jsonl"
+    _write_ledger(
+        clip,
+        [
+            {
+                "ts": "2026-09-22T11:00:00+00:00",
+                "event": "exit",
+                "base": "NEAR",
+                "net_eur": 40.0,
+                "dry_run": False,
+                "venue": "bitvavo",
+                "reason": "trail",
+            }
+        ],
+    )
+    _write_ledger(
+        moon,
+        [
+            {
+                "ts": "2026-09-22T12:00:00+00:00",
+                "event": "exit",
+                "base": "GTC",
+                "net_eur": 15.5,
+                "dry_run": False,
+                "venue": "bitvavo",
+                "reason": "manual_external",
+            }
+        ],
+    )
+    earn = compute_desk_earnings(
+        core_ledger_path=None,
+        clip_ledger_path=clip,
+        moonshot_ledger_path=moon,
+        clip_status={
+            "dry_run": False,
+            "allow_live": True,
+            "unrealized_net_eur": 4.0,
+        },
+        moonshot_status={
+            "dry_run": False,
+            "allow_live": True,
+            "unrealized_net_eur": 6.0,
+        },
+        now=datetime(2026, 9, 22, 14, 0, tzinfo=UTC),
+    )
+    assert earn.clip_live is not None and earn.moonshot_live is not None
+    assert earn.clip_live.week_eur == 40.0
+    assert earn.moonshot_live.week_eur == 15.5
+    assert earn.moonshot_live.trades_week == 1
+    assert earn.combined.week_eur == 55.5
+    assert earn.combined.day_eur == 55.5
+    assert earn.paper.week_eur == 0.0
+    assert earn.open_mtm_eur == 10.0
+    assert earn.clip_open_mtm_eur == 4.0
+    assert earn.moonshot_open_mtm_eur == 6.0
+    payload = earnings_as_dict(earn)
+    assert payload["moonshot_live"]["week_eur"] == 15.5
+    assert payload["clip_live"]["all_time_eur"] == 40.0
+    assert payload["combined"]["all_time_eur"] == 55.5
+
+
 def test_explicit_live_fill_stays_live_after_sleeve_goes_dry(tmp_path: Path) -> None:
     clip = tmp_path / "clip.jsonl"
     _write_ledger(

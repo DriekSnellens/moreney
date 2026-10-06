@@ -45,6 +45,12 @@ class DeskEarnings:
     short_weakest: PeriodNet | None = None
     donchian: PeriodNet | None = None
     clip: PeriodNet | None = None
+    moonshot: PeriodNet | None = None
+    # Live fills only — these are what "Netto verdiend" splits per sleeve.
+    clip_live: PeriodNet | None = None
+    moonshot_live: PeriodNet | None = None
+    clip_open_mtm_eur: float = 0.0
+    moonshot_open_mtm_eur: float = 0.0
 
 
 def _parse_ts(raw: Any) -> datetime | None:
@@ -294,14 +300,24 @@ def compute_desk_earnings(
     donchian_status: Mapping[str, Any] | None = None,
     clip_ledger_path: str | Path | None = None,
     clip_status: Mapping[str, Any] | None = None,
+    moonshot_ledger_path: str | Path | None = None,
+    moonshot_status: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> DeskEarnings:
-    """Live net vs paper net. ``combined`` is live venue fills only."""
+    """Live net vs paper net. ``combined`` is live venue fills only.
+
+    Clip (BTC + RS) and MoonShot are separate books. Both live ledgers fold
+    into ``combined``; each sleeve also keeps its own live period so the
+    dashboard can show them apart.
+    """
+    has_clip = bool(clip_ledger_path or clip_status)
+    has_ms = bool(moonshot_ledger_path or moonshot_status)
     core_status = core_status or {}
     volatile_status = volatile_status or {}
     short_weakest_status = short_weakest_status or {}
     donchian_status = donchian_status or {}
     clip_status = clip_status or {}
+    moonshot_status = moonshot_status or {}
     now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
     def _open(status: Mapping[str, Any], live: bool) -> tuple[float, float]:
@@ -313,6 +329,7 @@ def compute_desk_earnings(
     sw_live_flag = sleeve_is_live(short_weakest_status, default_live=False)
     dc_live_flag = sleeve_is_live(donchian_status, default_live=False)
     clip_live_flag = sleeve_is_live(clip_status, default_live=False)
+    ms_live_flag = sleeve_is_live(moonshot_status, default_live=False)
 
     def _paper_only(status: Mapping[str, Any]) -> bool:
         return bool(status.get("paper_only"))
@@ -352,33 +369,48 @@ def compute_desk_earnings(
         realized_fallback=_as_float(clip_status.get("realized_total_eur")),
         paper_only=_paper_only(clip_status),
     )
+    ms_live, ms_paper = _sum_split(
+        load_exit_fills(moonshot_ledger_path),
+        now=now_utc,
+        sleeve_live=ms_live_flag,
+        realized_fallback=_as_float(moonshot_status.get("realized_total_eur")),
+        paper_only=_paper_only(moonshot_status),
+    )
 
     core = _combine(core_live, core_paper)
     volatile = _combine(vol_live, vol_paper)
     short_weakest = _combine(sw_live, sw_paper)
     donchian = _combine(dc_live, dc_paper)
     clip = _combine(clip_live, clip_paper)
+    moonshot = _combine(ms_live, ms_paper)
 
     live = _combine(_combine(core_live, vol_live), _combine(sw_live, dc_live))
     live = _combine(live, clip_live)
+    live = _combine(live, ms_live)
     paper = _combine(_combine(core_paper, vol_paper), _combine(sw_paper, dc_paper))
     paper = _combine(paper, clip_paper)
+    paper = _combine(paper, ms_paper)
 
     live_open = paper_open = 0.0
-    for st, flag in (
-        (core_status, core_live_flag),
-        (volatile_status, vol_live_flag),
-        (short_weakest_status, sw_live_flag),
-        (donchian_status, dc_live_flag),
-        (clip_status, clip_live_flag),
+    clip_open_live = ms_open_live = 0.0
+    for key, st, flag in (
+        ("core", core_status, core_live_flag),
+        ("volatile", volatile_status, vol_live_flag),
+        ("short_weakest", short_weakest_status, sw_live_flag),
+        ("donchian", donchian_status, dc_live_flag),
+        ("clip", clip_status, clip_live_flag),
+        ("moonshot", moonshot_status, ms_live_flag),
     ):
         lo, po = _open(st, flag)
         live_open += lo
         paper_open += po
+        if key == "clip":
+            clip_open_live = lo
+        elif key == "moonshot":
+            ms_open_live = lo
 
     has_sw = bool(short_weakest_ledger_path or short_weakest_status)
     has_dc = bool(donchian_ledger_path or donchian_status)
-    has_clip = bool(clip_ledger_path or clip_status)
     return DeskEarnings(
         core=core,
         volatile=volatile,
@@ -390,6 +422,11 @@ def compute_desk_earnings(
         short_weakest=short_weakest if has_sw else None,
         donchian=donchian if has_dc else None,
         clip=clip if has_clip else None,
+        moonshot=moonshot if has_ms else None,
+        clip_live=clip_live if has_clip else None,
+        moonshot_live=ms_live if has_ms else None,
+        clip_open_mtm_eur=round(clip_open_live, 2) if has_clip else 0.0,
+        moonshot_open_mtm_eur=round(ms_open_live, 2) if has_ms else 0.0,
     )
 
 
@@ -429,4 +466,12 @@ def earnings_as_dict(e: DeskEarnings) -> dict[str, Any]:
         out["donchian"] = _p(e.donchian)
     if e.clip is not None:
         out["clip"] = _p(e.clip)
+    if e.moonshot is not None:
+        out["moonshot"] = _p(e.moonshot)
+    if e.clip_live is not None:
+        out["clip_live"] = _p(e.clip_live)
+        out["clip_open_mtm_eur"] = e.clip_open_mtm_eur
+    if e.moonshot_live is not None:
+        out["moonshot_live"] = _p(e.moonshot_live)
+        out["moonshot_open_mtm_eur"] = e.moonshot_open_mtm_eur
     return out

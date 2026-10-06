@@ -122,6 +122,12 @@ class MoonshotClipDeskManager:
             except Exception:  # noqa: BLE001
                 pass
             deployed = sum(float(p.get("notional_eur") or 0) for p in positions)
+            unrealized = 0.0
+            for pos in positions:
+                try:
+                    unrealized += float(pos.get("unrealized_net_eur") or 0.0)
+                except (TypeError, ValueError):
+                    continue
             base.update(
                 {
                     "book_eur": cfg.book_eur,
@@ -130,6 +136,7 @@ class MoonshotClipDeskManager:
                     "deployed_eur": round(deployed, 2),
                     "positions": positions,
                     "realized_total_eur": round(realized, 2),
+                    "unrealized_net_eur": round(unrealized, 2),
                     "equity_curve": curve[-_EQUITY_CURVE_MAX:],
                     "last_decision": last,
                     "live_caption": str(

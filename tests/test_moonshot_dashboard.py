@@ -137,6 +137,117 @@ def test_dashboard_headline_adds_both_sleeves_when_moonshot_holds_a_coin():
     assert "GTC" in panel
 
 
+def test_dashboard_shows_both_sleeve_profits_and_live_hooks(tmp_path):
+    from bot.live.momentum_dashboard import combine_ledgers
+    from bot.live.momentum_period_pnl import compute_desk_earnings
+
+    clip = tmp_path / "clip.jsonl"
+    moon = tmp_path / "moon.jsonl"
+    clip.write_text(
+        '{"ts":"2026-10-06T08:00:00+00:00","event":"exit","base":"BTC",'
+        '"net_eur":40,"dry_run":false,"venue":"bitvavo","reason":"trail"}\n'
+        '{"ts":"2026-10-06T08:05:00+00:00","event":"entry","base":"NEAR",'
+        '"entry_price":2.5,"notional_eur":800,"reason":"rebalance"}\n',
+        encoding="utf-8",
+    )
+    moon.write_text(
+        '{"ts":"2026-10-06T09:00:00+00:00","event":"exit","base":"GTC",'
+        '"net_eur":15.5,"dry_run":false,"venue":"bitvavo","reason":"manual_external"}\n',
+        encoding="utf-8",
+    )
+    earn = compute_desk_earnings(
+        core_ledger_path=None,
+        clip_ledger_path=clip,
+        moonshot_ledger_path=moon,
+        clip_status={"dry_run": False, "allow_live": True, "unrealized_net_eur": 4},
+        moonshot_status={"dry_run": False, "allow_live": True, "unrealized_net_eur": 6},
+        now=datetime(2026, 10, 6, 12, 0, tzinfo=UTC),
+    )
+    clip_rows = [
+        {
+            "ts": "2026-10-06T08:00:00+00:00",
+            "event": "exit",
+            "base": "BTC",
+            "net_eur": 40,
+            "reason": "trail",
+            "venue": "bitvavo",
+        },
+        {
+            "ts": "2026-10-06T08:05:00+00:00",
+            "event": "entry",
+            "base": "NEAR",
+            "entry_price": 2.5,
+            "notional_eur": 800,
+            "reason": "rebalance",
+            "venue": "bitvavo",
+        },
+    ]
+    moon_rows = [
+        {
+            "ts": "2026-10-06T09:00:00+00:00",
+            "event": "exit",
+            "base": "GTC",
+            "net_eur": 15.5,
+            "reason": "manual_external",
+            "venue": "bitvavo",
+        }
+    ]
+    merged = combine_ledgers(("BTC+RS", clip_rows), ("MoonShot", moon_rows))
+    assert [r["base"] for r in merged] == ["BTC", "NEAR", "GTC"]
+    assert merged[2]["sleeve"] == "MoonShot"
+    html = render_momentum_dashboard(
+        {
+            "running": True,
+            "dry_run": False,
+            "venues": ["bitvavo"],
+            "config": {},
+            "positions": [],
+            "equity_eur": 0.0,
+            "unrealized_net_eur": 0.0,
+        },
+        [],
+        earnings=earn,
+        show_btc_rs_clip=True,
+        btc_rs_clip={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "equity_eur": 17000.0,
+            "cash_eur": 17000.0,
+            "unrealized_net_eur": 4.0,
+            "positions": [],
+        },
+        btc_rs_clip_ledger_rows=clip_rows,
+        show_moonshot=True,
+        moonshot={
+            "running": True,
+            "dry_run": False,
+            "allow_live": True,
+            "equity_eur": 2006.0,
+            "cash_eur": 5.0,
+            "unrealized_net_eur": 6.0,
+            "realized_total_eur": 15.5,
+            "positions": [],
+        },
+        moonshot_ledger_rows=moon_rows,
+    ).body.decode()
+    assert "Netto verdiend" in html
+    assert "+55.50" in html
+    assert 'data-live="earn-week"' in html
+    assert 'data-live="earn-day"' in html
+    assert 'data-sleeve-earn="clip"' in html
+    assert 'data-sleeve-earn="moonshot"' in html
+    assert "+40.00" in html
+    assert "+15.50" in html
+    assert "BTC+RS · trail" in html
+    assert "MoonShot · manual_external" in html
+    assert "NEAR" in html
+    assert 'data-live="ledger-body"' in html
+    assert "patchEarnings" in html
+    assert "MOONSHOT_STATUS_URL" in html
+    assert "ledger_sig" in html
+
+
 def test_dashboard_paper_moonshot_is_not_live():
     html = render_momentum_dashboard(
         {
