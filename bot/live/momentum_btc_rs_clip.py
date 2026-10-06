@@ -11,8 +11,9 @@ does not flatten or dump the book.
 
 from __future__ import annotations
 
+import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
@@ -147,6 +148,12 @@ class ClipConfig:
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
     ohlc_days: int = 120
+    # >0: scan for entries through the day (MoonShot first-breakout). 0 = hour clock.
+    entry_scan_sec: float = 0.0
+    # 0 = off. MoonShot refuses a cross that is already this far above yesterday's close.
+    max_entry_day_ret: float = 0.0
+    # 0 = off. MoonShot only buys while price is still this close above the 20d high.
+    max_break_extension: float = 0.0
 
 
 def residual_full_config(cfg: ClipConfig) -> ClipConfig:
@@ -319,6 +326,148 @@ def default_config() -> ClipConfig:
     return ClipConfig()
 
 
+def load_alphai_breakout_sets(path: str | None = None) -> tuple[frozenset[str], frozenset[str]]:
+    """AlphaI picks and avoid-list for the live breakout scan."""
+    from pathlib import Path
+
+    from bot.live.momentum_desk import AlphaIView
+
+    if path is None:
+        from bot.core.config import get_settings
+
+        path = str(getattr(get_settings(), "alphai_daily_recommendations_path", "") or "")
+    if not path:
+        return frozenset(), frozenset()
+    file = Path(path)
+    if not file.exists():
+        return frozenset(), frozenset()
+    try:
+        payload = json.loads(file.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return frozenset(), frozenset()
+    if not isinstance(payload, dict):
+        return frozenset(), frozenset()
+    view = AlphaIView.from_recommendations(payload)
+    return frozenset(view.picks), frozenset(view.avoid)
+
+
+def fresh_alphai_breakout_sets(
+    *,
+    path: str | None = None,
+    focus_bases: Collection[str] | None = None,
+    now: datetime | None = None,
+    client: Any | None = None,
+    interval_minutes: int | None = None,
+    allow_network: bool = True,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Picks and avoid from the current AlphaI session.
+
+    A scan refreshes the file when its session bucket has rolled. A list that
+    is still stale after that attempt is ignored, so yesterday's picks cannot
+    steer the breakout.
+    """
+    from bot.integrations.alphai.daily_recommendations import (
+        load_daily_recommendations,
+        maybe_refresh_daily,
+        needs_session_refresh,
+    )
+
+    instant = now or datetime.now(UTC)
+    settings = None
+    if path is None or interval_minutes is None or (allow_network and client is None):
+        from bot.core.config import get_settings
+
+        settings = get_settings()
+    if path is None and settings is not None:
+        path = str(getattr(settings, "alphai_daily_recommendations_path", "") or "")
+    if not path:
+        return frozenset(), frozenset()
+    minutes = interval_minutes
+    if minutes is None and settings is not None:
+        minutes = int(getattr(settings, "alphai_recommendations_interval_minutes", 15) or 15)
+    minutes = int(minutes or 15)
+    hour = 12
+    if settings is not None:
+        hour = int(getattr(settings, "alphai_daily_recommendations_hour", 12) or 12)
+
+    def _current(report: dict[str, Any] | None) -> tuple[frozenset[str], frozenset[str]] | None:
+        if not report or needs_session_refresh(
+            report,
+            now=instant,
+            interval_minutes=minutes,
+            update_hour_local=hour,
+        ):
+            return None
+        from bot.live.momentum_desk import AlphaIView
+
+        view = AlphaIView.from_recommendations(report)
+        return frozenset(view.picks), frozenset(view.avoid)
+
+    cached = load_daily_recommendations(path)
+    fresh = _current(cached)
+    if fresh is not None:
+        return fresh
+    if not allow_network:
+        return frozenset(), frozenset()
+
+    if client is None and settings is not None:
+        client = _alphai_client_from_settings(settings)
+    if client is None:
+        return frozenset(), frozenset()
+
+    from bot.integrations.alphai.regime import _parse_csv_bases
+    from bot.integrations.alphai.symbols import LIQUID_EUR_BASES
+
+    focus = {str(b).upper() for b in (focus_bases or ()) if b}
+    focus |= set(LIQUID_EUR_BASES)
+    if settings is not None:
+        focus |= _parse_csv_bases(getattr(settings, "live_micro_focus_bases", "") or "", fallback=set())
+    report = maybe_refresh_daily(
+        client,
+        path,
+        focus_bases=focus or set(LIQUID_EUR_BASES),
+        enabled=True,
+        min_relevance=int(
+            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
+        )
+        if settings is not None
+        else 6,
+        top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8)
+        if settings is not None
+        else 8,
+        update_hour_local=hour,
+        interval_minutes=minutes,
+        interval_hours=int(getattr(settings, "alphai_recommendations_interval_hours", 1) or 1)
+        if settings is not None
+        else 1,
+        now=instant,
+    )
+    fresh = _current(report if isinstance(report, dict) else None)
+    if fresh is not None:
+        return fresh
+    return frozenset(), frozenset()
+
+
+def _alphai_client_from_settings(settings: Any) -> Any | None:
+    import os
+
+    if not bool(getattr(settings, "alphai_enabled", False)):
+        return None
+    from bot.integrations.alphai.client import AlphaIClient
+
+    key = getattr(settings, "alphai_api_key", None)
+    secret = ""
+    if key is not None and hasattr(key, "get_secret_value"):
+        secret = str(key.get_secret_value() or "")
+    elif key:
+        secret = str(key)
+    if not secret:
+        secret = os.environ.get("ALPHAI_API_KEY", "")
+    if not secret:
+        return None
+    return AlphaIClient(secret)
+
+
 def evaluate_clip(
     ohlc_by_base: Mapping[str, Sequence[Sequence[float]]],
     cfg: ClipConfig,
@@ -330,6 +479,9 @@ def evaluate_clip(
     last_rebalance_ms: int,
     now: datetime | None = None,
     sleeve_eur: Mapping[str, float] | None = None,
+    live_marks: Mapping[str, float] | None = None,
+    alphai_picks: Collection[str] | None = None,
+    alphai_avoid: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Decide clip longs. ``held`` maps base → role (btc|alt)."""
     now = now or datetime.now(UTC)
@@ -395,7 +547,14 @@ def evaluate_clip(
         rebalance_due = age_due
 
     mode = str(cfg.entry_mode or "weekly_rs").lower()
-    day_modes = {"top_day", "coil_day", "brk20_day"}
+    day_modes = {"top_day", "coil_day", "brk20_day", "brk20_now"}
+    alphai_pick_set = {str(x).upper() for x in (alphai_picks or ())}
+    alphai_avoid_set = {str(x).upper() for x in (alphai_avoid or ())}
+    marks = {
+        str(k).upper(): float(v)
+        for k, v in dict(live_marks or {}).items()
+        if float(v or 0.0) > 0
+    }
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for base in cfg.universe:
@@ -503,6 +662,68 @@ def evaluate_clip(
                     }
                 )
                 continue
+        if mode == "brk20_now":
+            # First breakout: yesterday's close is still under the 20d high,
+            # and the live price is crossing it now. Yesterday's breakout is
+            # already in the price, so it does not qualify.
+            mark = marks.get(base, 0.0)
+            prev_close = float(cl[-1]) if cl else 0.0
+            if mark <= 0 or prev_close <= 0 or len(highs) < 20:
+                skipped.append({"base": base, "reason": "short_history"})
+                continue
+            prior_hi = max(highs[-20:])
+            live_ret = mark / prev_close - 1.0
+            if prev_close >= prior_hi:
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "already_broken",
+                        "day_ret": round(live_ret, 4),
+                    }
+                )
+                continue
+            if mark < prior_hi or live_ret < float(cfg.excess_floor):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "no_breakout" if mark < prior_hi else "weak_day",
+                        "day_ret": round(live_ret, 4),
+                    }
+                )
+                continue
+            day_cap = float(getattr(cfg, "max_entry_day_ret", 0.0) or 0.0)
+            ext_cap = float(getattr(cfg, "max_break_extension", 0.0) or 0.0)
+            extension = mark / prior_hi - 1.0 if prior_hi > 0 else 0.0
+            if (day_cap > 0 and live_ret > day_cap) or (ext_cap > 0 and extension > ext_cap):
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "too_extended",
+                        "day_ret": round(live_ret, 4),
+                    }
+                )
+                continue
+            if base in alphai_avoid_set:
+                skipped.append(
+                    {
+                        "base": base,
+                        "reason": "alphai_avoid",
+                        "day_ret": round(live_ret, 4),
+                    }
+                )
+                continue
+            ranked.append(
+                {
+                    "base": base,
+                    "excess": float(xs) if xs is not None else 0.0,
+                    "day_ret": live_ret,
+                    "qvol": round(qv, 0),
+                    "coil": False,
+                    "brk20": True,
+                    "alphai_pick": base in alphai_pick_set,
+                }
+            )
+            continue
         row = {
             "base": base,
             "excess": float(xs) if xs is not None else 0.0,
@@ -514,7 +735,15 @@ def evaluate_clip(
         if r3 is not None:
             row["r3"] = round(float(r3), 4)
         ranked.append(row)
-    if mode in day_modes:
+    if mode == "brk20_now":
+        ranked.sort(
+            key=lambda r: (
+                float(r.get("day_ret") or 0.0),
+                1.0 if r.get("alphai_pick") else 0.0,
+            ),
+            reverse=True,
+        )
+    elif mode in day_modes:
         ranked.sort(key=lambda r: float(r.get("day_ret") or 0.0), reverse=True)
     else:
         ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
@@ -650,6 +879,10 @@ def evaluate_clip(
                 detail += ")"
         if mode == "coil_day":
             gate = f"coil_day+day≥{cfg.excess_floor:.0%}"
+        elif mode == "brk20_now":
+            gate = "eerste 20d-breakout"
+            if want_alt and ranked and ranked[0].get("alphai_pick"):
+                gate += " · AlphaI"
         elif mode == "brk20_day":
             gate = f"brk20_day+day≥{cfg.excess_floor:.0%}"
         elif mode == "top_day":

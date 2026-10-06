@@ -581,6 +581,12 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 @media (min-width: 820px) { .sleeve-split { grid-template-columns: 1fr 1fr; } }
 .sleeve-earn { font-size: .76rem; color: var(--muted); margin: .3rem 0 .1rem; }
 .sleeve-earn b { font-family: var(--mono); font-weight: 600; }
+.sleeve-totals {
+  margin: .28rem 0 0; font-size: .76rem; color: var(--muted); line-height: 1.35;
+}
+.sleeve-totals b { font-family: var(--mono); font-weight: 650; color: var(--ink); }
+.side-capital .sleeve-totals { margin-top: .4rem; font-size: .68rem; }
+.mix-board .eq-chart { height: 148px; margin: .35rem 0 .15rem; }
 
 .foot {
   margin-top: 1.25rem; font-size: .72rem; color: var(--muted-2);
@@ -928,6 +934,34 @@ table.desk .num, table.ledger .num { font-family: var(--mono); }
 }
 """
 
+
+
+def _fnum(v: Any) -> float:
+    try:
+        return float(v or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _sleeve_books(
+    clip: Mapping[str, Any] | None,
+    moonshot: Mapping[str, Any] | None,
+) -> tuple[float, float, float, float]:
+    """Account split that adds up: clip-own, MoonShot, total, open PnL.
+
+    MoonShot's leftover EUR still sits in the clip's free balance. That cash
+    stays on the MoonShot line, so the headline is the sum of both sleeves
+    and the coin bag is not missing from the total.
+    """
+    clip_d = dict(clip or {})
+    ms = dict(moonshot or {})
+    clip_eq = _fnum(clip_d.get("equity_eur"))
+    ms_eq = _fnum(ms.get("equity_eur"))
+    ms_cash = _fnum(ms.get("cash_eur")) if ms.get("cash_eur") is not None else 0.0
+    clip_own = max(0.0, clip_eq - ms_cash)
+    total = clip_own + ms_eq
+    open_pnl = _fnum(clip_d.get("unrealized_net_eur")) + _fnum(ms.get("unrealized_net_eur"))
+    return total, clip_own, ms_eq, open_pnl
 
 
 def _fmt_eur(v: Any, *, signed: bool = True) -> str:
@@ -2098,7 +2132,10 @@ def _clip_bag_cards(status: Mapping[str, Any]) -> str:
     )
 
 
-def _clip_visual_desk(status: Mapping[str, Any] | None) -> str:
+def _clip_visual_desk(
+    status: Mapping[str, Any] | None,
+    moonshot: Mapping[str, Any] | None = None,
+) -> str:
     st = dict(status or {})
     running = bool(st.get("running"))
     dry = bool(st.get("dry_run", True))
@@ -2106,29 +2143,47 @@ def _clip_visual_desk(status: Mapping[str, Any] | None) -> str:
     live = running and not dry and allow_live is not False
     if live:
         pill = '<span class="pill on" data-live="clip-pill"><span class="dot"></span>LIVE</span>'
-        title = "BTC + RS"
-    elif running:
-        pill = '<span class="pill off" data-live="clip-pill"><span class="dot"></span>STOP</span>'
-        title = "BTC + RS"
     else:
         pill = '<span class="pill off" data-live="clip-pill"><span class="dot"></span>STOP</span>'
-        title = "BTC + RS"
     risk_on = bool(st.get("risk_on"))
     gate = "SMA50" if risk_on else "flat"
     eq = st.get("equity_eur")
     open_pnl = st.get("unrealized_net_eur")
     curve = st.get("equity_curve") or []
+    title = "BTC + RS"
+    eq_attr = 'data-live="equity"'
+    open_attr = 'data-live="open-pnl"'
+    split = ""
+    shown_eq: Any = eq
+    shown_open: Any = open_pnl
+    if moonshot is not None:
+        total, clip_own, ms_eq, open_sum = _sleeve_books(st, moonshot)
+        title = "Totaal"
+        shown_eq = total
+        shown_open = open_sum
+        eq_attr = 'data-live="equity-total"'
+        open_attr = 'data-live="open-total"'
+        split = (
+            f'<p class="sleeve-totals">BTC + RS '
+            f'<b data-live="sleeve-clip">{_fmt_eur(clip_own, signed=False)}</b>'
+            f" · MoonShot "
+            f'<b data-live="sleeve-moonshot">{_fmt_eur(ms_eq, signed=False)}</b></p>'
+        )
+    chart_label = (
+        '<p class="eq-k" style="margin-top:.45rem">BTC + RS</p>' if moonshot is not None else ""
+    )
     return (
         f'<section class="eq-hero" id="clip" data-live="clip">'
         f'<div class="eq-top"><div>'
         f'<p class="eq-k" data-live="clip-title">{escape(title)}</p>'
-        f'<p class="eq-val" data-live="equity">{_fmt_eur(eq, signed=False)}</p></div>'
+        f'<p class="eq-val" {eq_attr}>{_fmt_eur(shown_eq, signed=False)}</p>'
+        f"{split}</div>"
         f"<div>{pill}"
         f'<span class="pill {"on" if risk_on else "off"}" data-live="clip-gate">'
         f'<span class="dot"></span>{gate}</span>'
-        f'<p class="eq-open {_cls(open_pnl)}" data-live="open-pnl">{_fmt_eur(open_pnl)}</p>'
+        f'<p class="eq-open {_cls(shown_open)}" {open_attr}>{_fmt_eur(shown_open)}</p>'
         f"</div></div>"
-        f"{_equity_chart_svg(curve, equity=float(eq or 0.0), desk='clip')}"
+        f"{chart_label}{_equity_chart_svg(curve, equity=float(eq or 0.0), desk='clip')}"
         f"{_alloc_visual(st)}"
         f"{_clip_bag_cards(st)}"
         f"</section>"
@@ -2226,6 +2281,76 @@ def _paper_clip_panel(status: Mapping[str, Any] | None) -> str:
         f'next <strong data-live="clip-next">{_ts(st.get("next_decision"))}</strong> · '
         f'<span data-live="clip-foot">{foot}</span></p>'
         f"{pos_html}{actions}</section>"
+    )
+
+
+def _moonshot_panel(status: Mapping[str, Any] | None) -> str:
+    """Fixed-book MoonShot sleeve on the operator desk."""
+    st = status or {}
+    running = bool(st.get("running"))
+    dry = bool(st.get("dry_run", True))
+    allow_live = st.get("allow_live")
+    live = running and not dry and allow_live is not False
+    if not running:
+        pill = '<span class="pill off" data-live="ms-pill"><span class="dot"></span>STOP</span>'
+        mode = "gestopt"
+    elif live:
+        pill = '<span class="pill on" data-live="ms-pill"><span class="dot"></span>LIVE</span>'
+        mode = "live orders"
+    else:
+        pill = '<span class="pill obs" data-live="ms-pill"><span class="dot"></span>PAPER</span>'
+        mode = "paper"
+    caption = str(st.get("live_caption") or st.get("last_decision", {}).get("caption") or "")
+    if not caption:
+        caption = "MoonShot · 20d breakout, trail 12%, hard-stop 5%, time≤5d."
+    pos_bits = []
+    for p in st.get("positions") or []:
+        if float(p.get("quantity") or p.get("notional_eur") or 0.0) <= 1e-12:
+            continue
+        net = p.get("unrealized_net_eur")
+        pos_bits.append(
+            f'<span class="mix-chip" data-holding="{escape(str(p.get("holding_id") or p.get("base") or ""))}">'
+            f'<strong>{escape(str(p.get("base") or ""))}</strong>'
+            f'<span class="{_cls(net)}" data-k="net">{_fmt_eur(net)}</span></span>'
+        )
+    empty = (
+        "Nog geen live-positie — koopt zodra een munt vandaag het 20-daagse hoogtepunt breekt."
+        if live
+        else "Nog geen positie."
+    )
+    pos_html = (
+        f'<div class="mix-open" data-live="ms-open">{"".join(pos_bits)}</div>'
+        if pos_bits
+        else f'<div class="mix-open" data-live="ms-open"><span class="muted">{empty}</span></div>'
+    )
+    risk_on = bool(st.get("risk_on"))
+    gate = "BTC &gt; SMA50" if risk_on else "cash (BTC ≤ SMA50)"
+    cfg = st.get("config") or {}
+    trail = cfg.get("trail_pct")
+    hs = cfg.get("hard_stop_pct")
+    pack = str(st.get("pack") or cfg.get("pack_mode") or "daily_brk20_day")
+    trail_s = f"{float(trail):.0%}" if trail not in (None, "") else "12%"
+    hs_s = f"{float(hs):.0%}" if hs not in (None, "") else "5%"
+    ms_eq = _fnum(st.get("equity_eur"))
+    return (
+        f'<section class="panel mix-board" id="moonshot" data-live="moonshot">'
+        f'<div class="card-head"><h2>MoonShot</h2>{pill}'
+        f'<span class="pill {"on" if risk_on else "off"}" data-live="ms-gate">'
+        f'<span class="dot"></span>{gate}</span></div>'
+        f'<p class="mix-why" data-live="ms-caption">{escape(caption)}</p>'
+        f"{_equity_chart_svg(st.get('equity_curve'), equity=ms_eq, desk='moonshot')}"
+        f'<div class="clip-kpis">'
+        f'<div><span>Equity</span><strong data-k="ms-eq">{_fmt_eur(st.get("equity_eur"), signed=False)}</strong></div>'
+        f'<div><span>Open</span><strong data-k="ms-open" class="{_cls(st.get("unrealized_net_eur"))}">'
+        f'{_fmt_eur(st.get("unrealized_net_eur"))}</strong></div>'
+        f'<div><span>Gerealiseerd</span><strong data-k="ms-real" class="{_cls(st.get("realized_total_eur"))}">'
+        f'{_fmt_eur(st.get("realized_total_eur"))}</strong></div>'
+        f'<div><span>Boek</span><strong data-k="ms-book">{_fmt_eur(st.get("book_eur"), signed=False)}</strong></div>'
+        f"</div>"
+        f'<p class="muted" style="font-size:.78rem;margin:.15rem 0 .4rem">'
+        f'{escape(pack)} · trail {escape(trail_s)} · hs {escape(hs_s)} · '
+        f'{escape(mode)} · next <strong data-live="ms-next">{_ts(st.get("next_decision"))}</strong></p>'
+        f"{pos_html}</section>"
     )
 
 
@@ -3522,11 +3647,83 @@ _LIVE_MARKS_JS = r"""
     const knobs = trailKnobs(status);
     (status.positions || []).forEach((p) => patchHolding(p, knobs.trail, knobs.tightAfter, knobs.tight));
   }
-  function applyPulse(core, clip) {
+  function moonshotCash(st) {
+    if (!st || st.cash_eur == null || st.cash_eur === "") return 0;
+    const n = Number(st.cash_eur);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function patchSleeveTotals(clip, moonshot) {
+    const hosts = document.querySelectorAll('[data-live="equity-total"]');
+    if (!hosts.length || !clip || clip.equity_eur == null) return;
+    const clipEq = Number(clip.equity_eur);
+    if (!Number.isFinite(clipEq)) return;
+    const ms = moonshot || {};
+    const msEq = ms.equity_eur == null ? 0 : Number(ms.equity_eur);
+    const msCash = moonshotCash(ms);
+    const clipOwn = Math.max(0, clipEq - msCash);
+    const total = clipOwn + (Number.isFinite(msEq) ? msEq : 0);
+    const open = Number(clip.unrealized_net_eur || 0) + Number(ms.unrealized_net_eur || 0);
+    hosts.forEach((el) => { el.textContent = fmtEur(total, false); });
+    document.querySelectorAll('[data-live="open-total"]').forEach((el) => {
+      el.textContent = fmtEur(open);
+      el.classList.remove("good", "bad");
+      const c = cls(open);
+      if (c) el.classList.add(c);
+    });
+    document.querySelectorAll('[data-live="sleeve-clip"]').forEach((el) => {
+      el.textContent = fmtEur(clipOwn, false);
+    });
+    if (ms.equity_eur != null && Number.isFinite(msEq)) {
+      document.querySelectorAll('[data-live="sleeve-moonshot"]').forEach((el) => {
+        el.textContent = fmtEur(msEq, false);
+      });
+    }
+  }
+  function patchMoonshot(st) {
+    const root = document.querySelector('[data-live="moonshot"]');
+    if (!root || !st) return;
+    drawEqChart(root.querySelector('[data-eq-desk="moonshot"]'), st.equity_curve, st.equity_eur);
+    setText(root, "ms-eq", fmtEur(st.equity_eur, false));
+    setText(root, "ms-open", fmtEur(st.unrealized_net_eur), cls(st.unrealized_net_eur));
+    setText(root, "ms-real", fmtEur(st.realized_total_eur), cls(st.realized_total_eur));
+    setText(root, "ms-book", fmtEur(st.book_eur, false));
+    const cap = root.querySelector('[data-live="ms-caption"]');
+    const caption = st.live_caption || (st.last_decision || {}).caption || "";
+    if (cap && caption) cap.textContent = caption;
+    const live = !!st.running && !st.dry_run && st.allow_live !== false;
+    const pill = root.querySelector('[data-live="ms-pill"]');
+    if (pill) {
+      pill.className = !st.running ? "pill off" : (live ? "pill on" : "pill obs");
+      pill.innerHTML = !st.running
+        ? '<span class="dot"></span>STOP'
+        : (live ? '<span class="dot"></span>LIVE' : '<span class="dot"></span>PAPER');
+    }
+    const gate = root.querySelector('[data-live="ms-gate"]');
+    if (gate) {
+      const on = !!st.risk_on;
+      gate.className = on ? "pill on" : "pill off";
+      gate.innerHTML = `<span class="dot"></span>${on ? "BTC > SMA50" : "cash (BTC ≤ SMA50)"}`;
+    }
+    const open = root.querySelector('[data-live="ms-open"]');
+    if (open) {
+      const pos = (st.positions || []).filter((p) => Number(p.quantity || p.notional_eur || 0) > 1e-12);
+      open.innerHTML = pos.length
+        ? pos.map((p) => {
+            const net = p.unrealized_net_eur;
+            const hid = esc(p.holding_id || p.base || "");
+            return `<span class="mix-chip" data-holding="${hid}"><strong>${esc(p.base || "")}</strong>`
+              + `<span class="${cls(net)}" data-k="net">${fmtEur(net)}</span></span>`;
+          }).join("")
+        : `<span class="muted">${live ? "Nog geen live-positie — koopt zodra een munt vandaag het 20-daagse hoogtepunt breekt." : "Nog geen positie."}</span>`;
+    }
+  }
+  function applyPulse(core, clip, moonshot) {
+    if (moonshot) patchMoonshot(moonshot);
     const clipRoot = document.querySelector('[data-live="clip"]');
     if (clipRoot) {
       if (clip) patchClip(clip);
       if (core) patchCore15m(core);
+      patchSleeveTotals(clip, moonshot);
       return;
     }
     if (core) {
@@ -3558,15 +3755,15 @@ _LIVE_MARKS_JS = r"""
     tickBusy = true;
     try {
       const pulse = await fetchJson(PULSE_URL).catch(() => null);
-      if (pulse && (pulse.core || pulse.clip)) {
-        applyPulse(pulse.core, pulse.clip);
+      if (pulse && (pulse.core || pulse.clip || pulse.moonshot)) {
+        applyPulse(pulse.core, pulse.clip, pulse.moonshot);
         return;
       }
       const [core, clip] = await Promise.all([
         fetchJson(STATUS_URL).catch(() => null),
         fetchJson(CLIP_STATUS_URL).catch(() => null),
       ]);
-      applyPulse(core, clip);
+      applyPulse(core, clip, null);
     } finally {
       tickBusy = false;
     }
@@ -3606,6 +3803,8 @@ def render_momentum_dashboard(
     btc_rs_clip: Mapping[str, Any] | None = None,
     btc_rs_clip_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
     show_btc_rs_clip: bool = False,
+    moonshot: Mapping[str, Any] | None = None,
+    show_moonshot: bool = False,
 ) -> HTMLResponse:
     del volatile, volatile_ledger_rows, show_volatile
     del short_weakest, short_weakest_ledger_rows, show_short_weakest
@@ -3683,6 +3882,8 @@ def render_momentum_dashboard(
         if preview
         else ""
     )
+    moonshot_on = bool(show_moonshot or moonshot is not None)
+    moonshot_html = _moonshot_panel(moonshot) if moonshot_on else ""
     earnings_html = _earnings_masthead(
         earnings,
         pill=pill,
@@ -3693,8 +3894,23 @@ def render_momentum_dashboard(
     if open_pnl is None and earnings:
         open_pnl = earnings.open_mtm_eur
     equity = float(book.get("equity_eur") or 0)
+    combine = bool(show_clip and moonshot_on)
+    clip_own = equity
+    ms_shown = 0.0
+    if combine:
+        equity, clip_own, ms_shown, open_pnl = _sleeve_books(clip, moonshot)
+    eq_live = "equity-total" if combine else "equity"
+    open_live = "open-total" if combine else "open-pnl"
+    cap_label = "Totaal" if combine else "Equity"
+    sleeve_line = (
+        f'<div class="sleeve-totals">BTC + RS '
+        f'<b data-live="sleeve-clip">{_fmt_eur(clip_own, signed=False)}</b>'
+        f' · MoonShot <b data-live="sleeve-moonshot">{_fmt_eur(ms_shown, signed=False)}</b></div>'
+        if combine
+        else ""
+    )
     if show_clip:
-        visual = _clip_visual_desk(clip)
+        visual = _clip_visual_desk(clip, moonshot if combine else None)
         sat = _core_15m_panel(status) if core_live else ""
         positions_html = ""
         decisions_html = ""
@@ -3719,7 +3935,12 @@ def render_momentum_dashboard(
         )
         footer_links = (
             '<a href="/live/momentum/btc-rs-clip/status">clip</a>'
-            '<a href="/live/momentum/earnings">earnings</a>'
+            + (
+                '<a href="/live/momentum#moonshot">MoonShot</a>'
+                if moonshot_html
+                else ""
+            )
+            + '<a href="/live/momentum/earnings">earnings</a>'
         )
         slots = str(len(clip.get("positions") or []) or n_pos)
         side_sub = "BTC + RS"
@@ -3759,7 +3980,12 @@ def render_momentum_dashboard(
         footer_links = (
             '<a href="/live/momentum/status">status</a>'
             '<a href="/live/momentum/ledger">ledger</a>'
-            '<a href="/live/momentum/earnings">earnings</a>'
+            + (
+                '<a href="/live/momentum#moonshot">MoonShot</a>'
+                if moonshot_html
+                else ""
+            )
+            + '<a href="/live/momentum/earnings">earnings</a>'
         )
         slots = escape(str(cfg.get("max_positions") or "—"))
         side_sub = "15m"
@@ -3780,16 +4006,18 @@ def render_momentum_dashboard(
     <nav class="side-nav">
       <div class="label">Desk</div>
       <a class="active" href="/live/momentum#clip">Desk</a>
+      {"<a href=\"/live/momentum#moonshot\">MoonShot</a>" if moonshot_html else ""}
       <a href="/live/momentum#open-pos">Bags</a>
       {('<a href="/live/momentum#core-15m">15m</a>' if core_live else "")}
       <a href="/live/momentum#ledger">Ledger</a>
     </nav>
   </div>
   <div class="side-capital">
-    <div class="cap-label"><span>Equity</span>
-      <span class="{_cls(open_pnl)} mono">{_fmt_eur(open_pnl)}</span>
+    <div class="cap-label"><span>{cap_label}</span>
+      <span class="{_cls(open_pnl)} mono" data-live="{open_live}">{_fmt_eur(open_pnl)}</span>
     </div>
-    <div class="cap-val" data-live="equity">{_fmt_eur(equity, signed=False)}</div>
+    <div class="cap-val" data-live="{eq_live}">{_fmt_eur(equity, signed=False)}</div>
+    {sleeve_line}
     <div class="bar"><i style="width:100%"></i></div>
   </div>
 </aside>
@@ -3798,10 +4026,10 @@ def render_momentum_dashboard(
 <header class="topbar">
   <div class="topbar-left">
     {pill}
-    <div class="top-metric"><span class="k">Equity</span>
-      <span class="v" data-live="equity">{_fmt_eur(equity, signed=False)}</span></div>
+    <div class="top-metric"><span class="k">{cap_label}</span>
+      <span class="v" data-live="{eq_live}">{_fmt_eur(equity, signed=False)}</span></div>
     <div class="top-metric openpnl"><span class="k">Open</span>
-      <span class="v {_cls(open_pnl)}" data-live="open-pnl">{
+      <span class="v {_cls(open_pnl)}" data-live="{open_live}">{
         _fmt_eur(open_pnl)
       }</span></div>
     <div class="top-metric winrate"><span class="k">Win</span><span class="v">{escape(win_rate)}</span></div>
@@ -3843,6 +4071,7 @@ def render_momentum_dashboard(
 <div class="wrap">
 {earnings_html}
 {visual}
+{moonshot_html}
 {sat}
 {positions_html}
 {err_html}

@@ -1,8 +1,8 @@
-"""Fixed €1.7k daily-green sleeve — separate book beside residual/clip.
+"""MoonShot — fixed-book daily-green sleeve beside residual/clip.
 
 Pack ``daily_brk20_day`` (walk-forward dual IS+OOS winner):
   20d breakout on the ~80-name liquid pool, trail 12%, hard-stop 5%,
-  time≤5d, sizing capped at book_eur. Not a +€100/day guarantee.
+  time≤5d, sizing capped at book_eur. Dashboard title is MoonShot.
 """
 
 from __future__ import annotations
@@ -45,9 +45,18 @@ def _write_flag(state_path: str, **payload: Any) -> None:
 
 def moonshot_config_from_settings(settings: Settings | None = None):
     settings = settings or get_settings()
-    book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 1_700.0) or 1_700.0)
+    book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 2_000.0) or 2_000.0)
     base = config_from_settings(settings)
-    return daily_green_config(replace(base, book_eur=book))
+    cfg = daily_green_config(replace(base, book_eur=book))
+    # Buy the first pierce of the 20d high. A day that is already +8%,
+    # or a price more than 3% through that high, is the move itself.
+    return replace(
+        cfg,
+        entry_mode="brk20_now",
+        entry_scan_sec=300.0,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
+    )
 
 
 class MoonshotClipDeskManager:
@@ -73,14 +82,15 @@ class MoonshotClipDeskManager:
             "dry_run": not allow_live,
             "paper_only": not allow_live,
             "allow_live": allow_live,
-            "pack": "daily_brk20_day",
+            "pack": "brk20_now",
+            "title": "MoonShot",
         }
         if self._runner is not None:
             st = self._runner.status()
             st.update(base)
             st["allow_live"] = allow_live and not self._runner.dry_run
             st["paper_only"] = self._runner.dry_run
-            st["pack"] = "daily_brk20_day"
+            st["pack"] = "brk20_now"
             return st
         if enabled:
             cfg = moonshot_config_from_settings(settings)
@@ -124,7 +134,7 @@ class MoonshotClipDeskManager:
                     "last_decision": last,
                     "live_caption": str(
                         last.get("caption")
-                        or "Moonshot €1.7k sleeve klaar (niet gestart)."
+                        or "MoonShot sleeve klaar (niet gestart)."
                     ),
                     "config": {
                         "book_eur": cfg.book_eur,
@@ -175,10 +185,10 @@ class MoonshotClipDeskManager:
         )
         gateways: dict[str, Any] = {}
         dry_run = not allow_live
-        # Reserve main desk + leave owner clip alone: moonshot only uses its book.
-        reserved_quote = reserved_quote_eur_from_settings(settings) + float(
-            getattr(settings, "momentum_btc_rs_clip_book_eur", 0.0) or 0.0
-        )
+        # Keep the 15m desk's EUR aside. Do not also reserve the owner clip's
+        # configured book: that pile is the same Bitvavo balance, and MoonShot
+        # already caps its own ticket at book_eur.
+        reserved_quote = reserved_quote_eur_from_settings(settings)
         reserved_qty = load_side_desk_reserved_qty(settings, venues[0] if venues else "bitvavo")
         if allow_live:
             from bot.live.micro_engine import LiveMicroEngine
@@ -219,7 +229,8 @@ class MoonshotClipDeskManager:
             reserved_qty=reserved_qty,
             pending_pack="",
         )
-        self._runner.pack_mode = "daily_brk20_day"
+        self._runner.pack_mode = "brk20_now"
+        self._runner.pin_cash_to_book = True
         # Fresh sleeve: seed cash to fixed book if empty state.
         if not self._runner.positions and self._runner.cash_eur <= 0:
             self._runner.cash_eur = float(cfg.book_eur)
@@ -241,7 +252,7 @@ class MoonshotClipDeskManager:
             dry_run=dry_run,
             paper_only=dry_run,
             allow_live=not dry_run,
-            pack="daily_brk20_day",
+            pack="brk20_now",
             book_eur=cfg.book_eur,
         )
         return {"ok": True, "started": True, "status": self.status()}
@@ -264,7 +275,7 @@ class MoonshotClipDeskManager:
                 "./data/momentum_moonshot_clip_state.json",
             )
         )
-        _write_flag(state_path, running=False, pack="daily_brk20_day")
+        _write_flag(state_path, running=False, pack="brk20_now")
         return {"ok": True, "stopped": True, "status": self.status()}
 
     async def resume_if_flagged(self) -> dict[str, Any] | None:
@@ -290,18 +301,24 @@ class MoonshotClipDeskManager:
         return await self.start(settings=settings)
 
     async def refresh_live(self) -> dict[str, Any]:
+        """Bitvavo marks, inventory, and the pinned book on every dashboard poll."""
         if self._runner is not None:
             try:
                 await self._runner._refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("moonshot: mark refresh failed")
-            now = time.monotonic()
-            if now - self._last_reconcile_mono >= 5.0:
-                self._last_reconcile_mono = now
-                try:
-                    await self._runner.reconcile_external_inventory()
-                except Exception:  # noqa: BLE001
-                    logger.exception("moonshot: reconcile failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("moonshot: reconcile failed")
+            try:
+                await self._runner._decision_cash()
+            except Exception:  # noqa: BLE001
+                logger.exception("moonshot: venue cash sync failed")
+            try:
+                self._runner._sample_equity()
+            except Exception:  # noqa: BLE001
+                logger.exception("moonshot: equity sample failed")
         return self.status()
 
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:

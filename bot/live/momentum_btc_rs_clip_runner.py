@@ -189,6 +189,8 @@ class BtcRsClipPaperRunner:
         self._gws: dict[str, Any] = dict(gateways or {})
         self._reserved_quote_eur = max(0.0, float(reserved_quote_eur or 0.0))
         self._reserved_qty = {str(k).upper(): float(v) for k, v in dict(reserved_qty or {}).items()}
+        # MoonShot keeps a fixed book. The owner clip adopts free venue EUR.
+        self.pin_cash_to_book = False
         self.positions: list[ClipPosition] = []
         self.cash_eur = float(cfg.book_eur)
         self.realized_total_eur = 0.0
@@ -202,6 +204,8 @@ class BtcRsClipPaperRunner:
         self._decide_lock = asyncio.Lock()
         self._last_curve_save = 0.0
         self._last_reconcile_mono = 0.0
+        self._ohlc_cache: dict[str, list[list[float]]] | None = None
+        self._ohlc_cache_mono = 0.0
         self._load_state()
 
     def _desk(self) -> str:
@@ -615,12 +619,28 @@ class BtcRsClipPaperRunner:
     async def _decision_cash(self) -> float:
         """EUR available for clip sizing.
 
-        Live: Bitvavo free quote minus any 15m reserved sleeve is the book —
-        not the configured ``book_eur`` paper ledger. Paper keeps the
-        synthetic cash counter (optionally capped by a mocked venue).
+        Live owner clip: Bitvavo free quote minus any 15m reserved sleeve is
+        the book — not the configured ``book_eur`` paper ledger. Paper keeps
+        the synthetic cash counter (optionally capped by a mocked venue).
+
+        ``pin_cash_to_book`` (MoonShot) never adopts that leftover. Spend is
+        ``min(book − deployed, free EUR after reserves)``.
         """
         cash = float(self.cash_eur)
         venue_eur = await self._venue_quote_eur()
+        if self.pin_cash_to_book:
+            book = max(0.0, float(self.cfg.book_eur))
+            sleeve_cash = max(0.0, book - self._deployed())
+            if venue_eur is None:
+                usable = min(max(0.0, cash), sleeve_cash)
+            else:
+                left = max(0.0, venue_eur - self._reserved_quote_eur)
+                usable = min(sleeve_cash, left)
+            if not self.dry_run:
+                self.cash_eur = usable
+            else:
+                usable = min(max(0.0, cash), usable)
+            return usable
         if venue_eur is None:
             return cash
         left = max(0.0, venue_eur - self._reserved_quote_eur)
@@ -998,6 +1018,41 @@ class BtcRsClipPaperRunner:
             return None
         return float(rows[-1][4])
 
+    def _order_px(self, ohlc: dict[str, list[list[float]]], base: str) -> float | None:
+        """Live mark while hunting the first breakout; else the last closed daily."""
+        if str(self.cfg.entry_mode or "") == "brk20_now":
+            mark = float(self.marks.get(base) or 0.0)
+            if mark > 0:
+                return mark
+        return self._last_close(ohlc, base)
+
+    async def _ohlc_for_decision(self) -> dict[str, list[list[float]]]:
+        ttl = 900.0 if float(getattr(self.cfg, "entry_scan_sec", 0.0) or 0.0) > 0 else 0.0
+        now = time.monotonic()
+        if ttl > 0 and self._ohlc_cache is not None and now - self._ohlc_cache_mono < ttl:
+            return self._ohlc_cache
+        data = await self._load_ohlc()
+        self._ohlc_cache = data
+        self._ohlc_cache_mono = now
+        return data
+
+    async def _refresh_universe_marks(self) -> None:
+        bases = tuple(dict.fromkeys((*self.cfg.universe, "BTC")))
+
+        async def _one(base: str) -> tuple[str, float | None]:
+            try:
+                px = await self._feed.last_price(base)
+                return base, float(px) if px else None
+            except Exception:  # noqa: BLE001
+                return base, None
+
+        rows = await asyncio.gather(*(_one(base) for base in bases))
+        now = time.time()
+        for base, px in rows:
+            if px and px > 0:
+                self.marks[base] = float(px)
+                self.mark_ts[base] = now
+
     async def decide(self, *, execute: bool = True) -> dict[str, Any]:
         async with self._decide_lock:
             now = datetime.now(UTC)
@@ -1005,7 +1060,19 @@ class BtcRsClipPaperRunner:
             due = self._rebalance_due(int(now.timestamp() * 1000))
             if self.pending_pack == "residual_full" and due:
                 self._arm_residual_pack("weekly_clock")
-            ohlc = await self._load_ohlc()
+            ohlc = await self._ohlc_for_decision()
+            live_marks: dict[str, float] | None = None
+            alphai_picks: frozenset[str] = frozenset()
+            alphai_avoid: frozenset[str] = frozenset()
+            if str(self.cfg.entry_mode or "") == "brk20_now":
+                await self._refresh_universe_marks()
+                live_marks = dict(self.marks)
+                from bot.live.momentum_btc_rs_clip import fresh_alphai_breakout_sets
+
+                alphai_picks, alphai_avoid = await asyncio.to_thread(
+                    fresh_alphai_breakout_sets,
+                    focus_bases=tuple(self.cfg.universe),
+                )
             held = {p.base: p.role for p in self.positions}
             sleeves = {
                 "btc": sum(p.notional_eur for p in self.positions if p.role == "btc"),
@@ -1024,12 +1091,15 @@ class BtcRsClipPaperRunner:
                 last_rebalance_ms=self.last_rebalance_ms,
                 now=now,
                 sleeve_eur=sleeves,
+                live_marks=live_marks,
+                alphai_picks=alphai_picks,
+                alphai_avoid=alphai_avoid,
             )
             applied: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
                 for ex in decision.get("exits") or []:
                     pos = next((p for p in self.positions if p.base == ex["base"]), None)
-                    close = self._last_close(ohlc, ex["base"])
+                    close = self._order_px(ohlc, ex["base"])
                     if pos and close:
                         px = fill_px(close, "sell", slip=self.cfg.slip)
                         net = await self._close_lot(pos, px, str(ex.get("reason") or "exit"))
@@ -1054,7 +1124,7 @@ class BtcRsClipPaperRunner:
                             }
                         )
                 for row in decision.get("entries") or []:
-                    close = self._last_close(ohlc, row["base"])
+                    close = self._order_px(ohlc, row["base"])
                     if not close:
                         continue
                     px = fill_px(close, "buy", slip=self.cfg.slip)
@@ -1160,9 +1230,14 @@ class BtcRsClipPaperRunner:
         equity = self._equity_now()
         last = self.last_decision or {}
         live = not self.dry_run
-        # Live sizing follows Bitvavo free EUR; surface that as the book so the
-        # operator page does not keep advertising the paper BOOK_EUR constant.
-        book_shown = round(equity, 2) if live else float(self.cfg.book_eur)
+        # Owner clip: live sizing follows Bitvavo free EUR, so the operator page
+        # shows that equity as the book. MoonShot stays on its fixed book_eur.
+        if self.pin_cash_to_book:
+            book_shown = float(self.cfg.book_eur)
+        elif live:
+            book_shown = round(equity, 2)
+        else:
+            book_shown = float(self.cfg.book_eur)
         return {
             "desk": self._desk(),
             "mode": "btc_rs_clip_live" if live else "btc_rs_clip_paper",
@@ -1218,14 +1293,17 @@ class BtcRsClipPaperRunner:
         except Exception:  # noqa: BLE001
             logger.exception("clip kick reconcile failed")
         now = datetime.now(UTC)
-        in_window = now.hour in hours and now.minute < 8
-        # Empty-book kick would rebuy immediately; only fill inside the daily window.
+        scan_sec = float(getattr(self.cfg, "entry_scan_sec", 0.0) or 0.0)
+        in_window = scan_sec > 0 or (now.hour in hours and now.minute < 8)
+        # Hour-clock books only buy inside the daily window. MoonShot scans
+        # through the day so the first breakout can fill while it is printing.
         try:
             await self.decide(execute=in_window)
         except Exception:  # noqa: BLE001
             logger.exception("clip kick decide failed")
-        if in_window:
+        if in_window and scan_sec <= 0:
             last_hour_fire.add(f"{now.date()}-{now.hour}")
+        last_scan = time.monotonic()
         while not should_stop():
             try:
                 await self._refresh_marks()
@@ -1241,7 +1319,15 @@ class BtcRsClipPaperRunner:
                     await self.manage_alt_trail()
                 now = datetime.now(UTC)
                 key = f"{now.date()}-{now.hour}"
-                if now.hour in hours and now.minute < 8 and key not in last_hour_fire:
+                if scan_sec > 0 and time.monotonic() - last_scan >= scan_sec:
+                    await self.decide(execute=True)
+                    last_scan = time.monotonic()
+                elif (
+                    scan_sec <= 0
+                    and now.hour in hours
+                    and now.minute < 8
+                    and key not in last_hour_fire
+                ):
                     await self.decide(execute=True)
                     last_hour_fire.add(key)
                 if len(last_hour_fire) > 48:
@@ -1341,19 +1427,24 @@ class BtcRsClipDeskManager:
         return base
 
     async def refresh_live(self) -> dict[str, Any]:
-        """Fresh marks every poll; venue reconcile is throttled so 1s UI stays light."""
+        """Bitvavo marks, inventory, and free EUR on every dashboard poll."""
         if self._runner is not None:
             try:
                 await self._runner._refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("clip: mark refresh for status failed")
-            now = time.monotonic()
-            if now - self._last_reconcile_mono >= 5.0:
-                self._last_reconcile_mono = now
-                try:
-                    await self._runner.reconcile_external_inventory()
-                except Exception:  # noqa: BLE001
-                    logger.exception("clip: reconcile for status failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: reconcile for status failed")
+            try:
+                await self._runner._decision_cash()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: venue cash sync for status failed")
+            try:
+                self._runner._sample_equity()
+            except Exception:  # noqa: BLE001
+                logger.exception("clip: equity sample for status failed")
         return self.status()
 
     async def start(self, *, settings: Settings | None = None) -> dict[str, Any]:

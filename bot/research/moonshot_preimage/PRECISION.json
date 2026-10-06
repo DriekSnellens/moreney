@@ -1,0 +1,277 @@
+{
+  "asof": "2026-10-05T13:51:52.990824+00:00",
+  "candle_dir": "data/ignition_expand_candles",
+  "n_rows": 48521,
+  "n_bases": 80,
+  "fit_end": "2024-12-31",
+  "select_end": "2025-12-31",
+  "label": "forward high / next open - 1 >= +50%",
+  "published_baseline": "r3>=15% + xs10>=25% + trend",
+  "horizons": {
+    "hit7": {
+      "base_rate": {
+        "fit": {
+          "n": 10470,
+          "k": 415,
+          "p": 0.0396,
+          "wilson": 0.0361
+        },
+        "select": {
+          "n": 21550,
+          "k": 435,
+          "p": 0.0202,
+          "wilson": 0.0184
+        },
+        "test": {
+          "n": 16501,
+          "k": 477,
+          "p": 0.0289,
+          "wilson": 0.0265
+        }
+      },
+      "baseline": {
+        "fit": {
+          "n": 283,
+          "k": 52,
+          "p": 0.1837,
+          "wilson": 0.143
+        },
+        "select": {
+          "n": 137,
+          "k": 5,
+          "p": 0.0365,
+          "wilson": 0.0157
+        },
+        "test": {
+          "n": 278,
+          "k": 44,
+          "p": 0.1583,
+          "wilson": 0.1201
+        }
+      },
+      "refined": {
+        "atoms": [],
+        "fit": {
+          "n": 283,
+          "k": 52,
+          "p": 0.1837,
+          "wilson": 0.143
+        },
+        "select": {
+          "n": 137,
+          "k": 5,
+          "p": 0.0365,
+          "wilson": 0.0157
+        },
+        "test": {
+          "n": 278,
+          "k": 44,
+          "p": 0.1583,
+          "wilson": 0.1201
+        }
+      },
+      "score": {
+        "threshold": 0.7769,
+        "fit": {
+          "n": 156,
+          "k": 33,
+          "p": 0.2115,
+          "wilson": 0.1548
+        },
+        "select": {
+          "n": 65,
+          "k": 4,
+          "p": 0.0615,
+          "wilson": 0.0242
+        },
+        "test": {
+          "n": 154,
+          "k": 36,
+          "p": 0.2338,
+          "wilson": 0.1739
+        },
+        "coefficients": {
+          "btc_on": 0.706,
+          "trend": 0.381,
+          "loc20": -0.304,
+          "rngx": 0.261,
+          "r3": 0.164,
+          "xs10": 0.13,
+          "dayloc": 0.082,
+          "volx": 0.049,
+          "brk20": -0.049,
+          "r1": 0.037
+        }
+      },
+      "operating_point": "score",
+      "operating": {
+        "fit": {
+          "n": 156,
+          "k": 33,
+          "p": 0.2115,
+          "wilson": 0.1548
+        },
+        "select": {
+          "n": 65,
+          "k": 4,
+          "p": 0.0615,
+          "wilson": 0.0242
+        },
+        "test": {
+          "n": 154,
+          "k": 36,
+          "p": 0.2338,
+          "wilson": 0.1739
+        }
+      },
+      "top1_inside_operating": {
+        "select": {
+          "n": 48,
+          "k": 4,
+          "p": 0.0833,
+          "wilson": 0.0329
+        },
+        "test": {
+          "n": 83,
+          "k": 27,
+          "p": 0.3253,
+          "wilson": 0.2342
+        }
+      }
+    },
+    "hit1": {
+      "base_rate": {
+        "fit": {
+          "n": 10470,
+          "k": 21,
+          "p": 0.002,
+          "wilson": 0.0013
+        },
+        "select": {
+          "n": 21550,
+          "k": 31,
+          "p": 0.0014,
+          "wilson": 0.001
+        },
+        "test": {
+          "n": 16501,
+          "k": 45,
+          "p": 0.0027,
+          "wilson": 0.002
+        }
+      },
+      "baseline": {
+        "fit": {
+          "n": 283,
+          "k": 8,
+          "p": 0.0283,
+          "wilson": 0.0144
+        },
+        "select": {
+          "n": 137,
+          "k": 1,
+          "p": 0.0073,
+          "wilson": 0.0013
+        },
+        "test": {
+          "n": 278,
+          "k": 12,
+          "p": 0.0432,
+          "wilson": 0.0249
+        }
+      },
+      "refined": {
+        "atoms": [
+          "r3_25"
+        ],
+        "fit": {
+          "n": 174,
+          "k": 7,
+          "p": 0.0402,
+          "wilson": 0.0196
+        },
+        "select": {
+          "n": 70,
+          "k": 1,
+          "p": 0.0143,
+          "wilson": 0.0025
+        },
+        "test": {
+          "n": 156,
+          "k": 10,
+          "p": 0.0641,
+          "wilson": 0.0352
+        }
+      },
+      "score": {
+        "threshold": 0.9377,
+        "fit": {
+          "n": 73,
+          "k": 3,
+          "p": 0.0411,
+          "wilson": 0.0141
+        },
+        "select": {
+          "n": 29,
+          "k": 1,
+          "p": 0.0345,
+          "wilson": 0.0061
+        },
+        "test": {
+          "n": 77,
+          "k": 9,
+          "p": 0.1169,
+          "wilson": 0.0627
+        },
+        "coefficients": {
+          "btc_on": 2.139,
+          "r1": 0.758,
+          "r3": 0.711,
+          "rngx": 0.582,
+          "brk20": -0.458,
+          "volx": 0.327,
+          "dayloc": 0.268,
+          "xs10": -0.245,
+          "loc20": -0.149,
+          "trend": 0.033
+        }
+      },
+      "operating_point": "score",
+      "operating": {
+        "fit": {
+          "n": 73,
+          "k": 3,
+          "p": 0.0411,
+          "wilson": 0.0141
+        },
+        "select": {
+          "n": 29,
+          "k": 1,
+          "p": 0.0345,
+          "wilson": 0.0061
+        },
+        "test": {
+          "n": 77,
+          "k": 9,
+          "p": 0.1169,
+          "wilson": 0.0627
+        }
+      },
+      "top1_inside_operating": {
+        "select": {
+          "n": 22,
+          "k": 1,
+          "p": 0.0455,
+          "wilson": 0.0081
+        },
+        "test": {
+          "n": 47,
+          "k": 7,
+          "p": 0.1489,
+          "wilson": 0.0741
+        }
+      }
+    }
+  },
+  "note": "Operating point is the candidate with the highest Wilson lower bound on 2025. Fit is 2024. Test (2026) is not used to choose."
+}

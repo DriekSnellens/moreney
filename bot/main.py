@@ -318,7 +318,7 @@ async def lifespan(_app: FastAPI):
             if bool(getattr(get_settings(), "momentum_moonshot_clip_enabled", False)):
                 ms = await get_moonshot_clip_desk_manager().resume_if_flagged()
                 if ms and ms.get("started"):
-                    logger.info("auto-resumed moonshot €1.7k sleeve")
+                    logger.info("auto-resumed MoonShot sleeve")
                 elif ms:
                     logger.warning("moonshot sleeve auto-resume did not start: %s", ms)
             else:
@@ -700,9 +700,10 @@ async def live_momentum_status() -> dict[str, Any]:
 @app.get("/live/momentum/pulse")
 async def live_momentum_pulse() -> dict[str, Any]:
     """One round-trip for 1s dashboard marks: live clip + 15m only."""
-    core, clip = await asyncio.gather(
+    core, clip, moonshot = await asyncio.gather(
         get_momentum_desk_manager().status_fresh(),
         get_btc_rs_clip_desk_manager().refresh_live(),
+        get_moonshot_clip_desk_manager().refresh_live(),
         return_exceptions=True,
     )
 
@@ -712,6 +713,7 @@ async def live_momentum_pulse() -> dict[str, Any]:
     return {
         "core": _ok(core),
         "clip": _ok(clip),
+        "moonshot": _ok(moonshot),
         "short_weakest": None,
         "donchian": None,
         "ts": time.time(),
@@ -1037,6 +1039,13 @@ async def live_momentum_dashboard(
         clip_status = get_btc_rs_clip_desk_manager().status()
     except Exception:  # noqa: BLE001
         clip_status = None
+    show_moonshot = bool(getattr(settings, "momentum_moonshot_clip_enabled", False))
+    moonshot_status: dict[str, Any] | None = None
+    if show_moonshot:
+        try:
+            moonshot_status = get_moonshot_clip_desk_manager().status()
+        except Exception:  # noqa: BLE001
+            moonshot_status = None
     allocator = None
     if donchian_status and isinstance(donchian_status.get("allocator"), dict) and donchian_status["allocator"].get("ok"):
         allocator = donchian_status["allocator"]
@@ -1086,6 +1095,8 @@ async def live_momentum_dashboard(
         btc_rs_clip=clip_status if show_clip else None,
         btc_rs_clip_ledger_rows=clip_ledger if show_clip else None,
         show_btc_rs_clip=show_clip,
+        moonshot=moonshot_status if show_moonshot else None,
+        show_moonshot=show_moonshot,
     )
 
 

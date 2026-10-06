@@ -1124,6 +1124,35 @@ def test_clip_sell_all_books_gone_lots_without_orders(tmp_path):
     assert "manual_external" in led
 
 
+def test_clip_refresh_live_reads_venue_eur_on_every_poll(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipDeskManager
+
+    class _BalGw(_ReconGw):
+        def __init__(self) -> None:
+            super().__init__(held={})
+            self.eur = 19_000.0
+            self.calls = 0
+
+        async def quote_balance_eur(self) -> float:
+            self.calls += 1
+            return self.eur
+
+    gw = _BalGw()
+    r = _live_clip(tmp_path, gw)
+    r.cash_eur = 1.0
+    mgr = BtcRsClipDeskManager()
+    mgr._runner = r
+    first = asyncio.run(mgr.refresh_live())
+    gw.eur = 18_250.0
+    second = asyncio.run(mgr.refresh_live())
+    assert gw.calls == 2
+    assert first["equity_eur"] == 19_000.0
+    assert second["equity_eur"] == 18_250.0
+    assert gw.placed == []
+
+
 def test_clip_refresh_live_books_external(tmp_path):
     import asyncio
 

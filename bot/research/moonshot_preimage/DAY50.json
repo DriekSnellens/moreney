@@ -1,0 +1,3747 @@
+{
+  "asof": "2026-10-05T13:38:29.258891+00:00",
+  "candle_dir": "data/ignition_expand_candles",
+  "book_eur": 1700.0,
+  "n_bases": 80,
+  "n_signals": 49035,
+  "n_specs": 11904,
+  "train_end": "2025-12-31",
+  "start": "2024-06-15",
+  "end": "2026-10-02",
+  "label": "entry session high / open - 1 >= +50% (signal = prior close)",
+  "costs": {
+    "fee_per_side": 0.0015,
+    "slip": 0.001,
+    "sizing": "min(cash*0.98, book)"
+  },
+  "base_rate_train": {
+    "n": 31787,
+    "p50": 0.0016,
+    "p50_close": 0.0006,
+    "k": 52,
+    "event_days": 47,
+    "wilson": 0.0012
+  },
+  "base_rate_test": {
+    "n": 16951,
+    "p50": 0.003,
+    "p50_close": 0.0012,
+    "k": 51,
+    "event_days": 43,
+    "wilson": 0.0023
+  },
+  "base_rate_full": {
+    "n": 48738,
+    "p50": 0.0021,
+    "p50_close": 0.0008,
+    "k": 103,
+    "event_days": 90,
+    "wilson": 0.0017
+  },
+  "oracle_train": {
+    "event_days": 47,
+    "pnl_if_perfect_tp50": 38623.05,
+    "eur_per_hit": 821.77,
+    "note": "One perfect +50% limit-fill per event day, no losses, fresh notion each day (the slot is free after the intraday target). Ignores same-bar path risk."
+  },
+  "oracle_test": {
+    "event_days": 43,
+    "pnl_if_perfect_tp50": 35335.98,
+    "eur_per_hit": 821.77,
+    "note": "One perfect +50% limit-fill per event day, no losses, fresh notion each day (the slot is free after the intraday target). Ignores same-bar path risk."
+  },
+  "oracle_full": {
+    "event_days": 90,
+    "pnl_if_perfect_tp50": 73959.03,
+    "eur_per_hit": 821.77,
+    "note": "One perfect +50% limit-fill per event day, no losses, fresh notion each day (the slot is free after the intraday target). Ignores same-bar path risk."
+  },
+  "best_rule_n20": {
+    "gate": "r1_35_vol1.5_loc0",
+    "train": {
+      "n": 49,
+      "k": 2,
+      "p50": 0.0408,
+      "p50_close": 0.0204,
+      "wilson": 0.0113
+    },
+    "test": {
+      "n": 43,
+      "k": 7,
+      "p50": 0.1628,
+      "p50_close": 0.093,
+      "wilson": 0.0812
+    },
+    "lift": 54.27
+  },
+  "rules_p50_ge_40_n10": [],
+  "rule_top": [
+    {
+      "gate": "r1_35_vol4.0_loc75",
+      "train": {
+        "n": 28,
+        "k": 1,
+        "p50": 0.0357,
+        "p50_close": 0.0,
+        "wilson": 0.0063
+      },
+      "test": {
+        "n": 11,
+        "k": 3,
+        "p50": 0.2727,
+        "p50_close": 0.1818,
+        "wilson": 0.0975
+      },
+      "lift": 90.9
+    },
+    {
+      "gate": "r1_35_vol2.5_loc75",
+      "train": {
+        "n": 36,
+        "k": 1,
+        "p50": 0.0278,
+        "p50_close": 0.0,
+        "wilson": 0.0049
+      },
+      "test": {
+        "n": 15,
+        "k": 3,
+        "p50": 0.2,
+        "p50_close": 0.1333,
+        "wilson": 0.0705
+      },
+      "lift": 66.67
+    },
+    {
+      "gate": "r1_35_vol1.5_loc75",
+      "train": {
+        "n": 38,
+        "k": 1,
+        "p50": 0.0263,
+        "p50_close": 0.0,
+        "wilson": 0.0047
+      },
+      "test": {
+        "n": 16,
+        "k": 3,
+        "p50": 0.1875,
+        "p50_close": 0.125,
+        "wilson": 0.0659
+      },
+      "lift": 62.5
+    },
+    {
+      "gate": "r1_35_vol1.5_loc0",
+      "train": {
+        "n": 49,
+        "k": 2,
+        "p50": 0.0408,
+        "p50_close": 0.0204,
+        "wilson": 0.0113
+      },
+      "test": {
+        "n": 43,
+        "k": 7,
+        "p50": 0.1628,
+        "p50_close": 0.093,
+        "wilson": 0.0812
+      },
+      "lift": 54.27
+    },
+    {
+      "gate": "climax_vol5_r1_15",
+      "train": {
+        "n": 46,
+        "k": 1,
+        "p50": 0.0217,
+        "p50_close": 0.0,
+        "wilson": 0.0038
+      },
+      "test": {
+        "n": 26,
+        "k": 4,
+        "p50": 0.1538,
+        "p50_close": 0.1154,
+        "wilson": 0.0615
+      },
+      "lift": 51.27
+    },
+    {
+      "gate": "r1_35_vol2.5_loc0",
+      "train": {
+        "n": 47,
+        "k": 2,
+        "p50": 0.0426,
+        "p50_close": 0.0213,
+        "wilson": 0.0117
+      },
+      "test": {
+        "n": 40,
+        "k": 6,
+        "p50": 0.15,
+        "p50_close": 0.075,
+        "wilson": 0.0706
+      },
+      "lift": 50.0
+    },
+    {
+      "gate": "r1_35_vol4.0_loc0",
+      "train": {
+        "n": 39,
+        "k": 2,
+        "p50": 0.0513,
+        "p50_close": 0.0256,
+        "wilson": 0.0142
+      },
+      "test": {
+        "n": 34,
+        "k": 5,
+        "p50": 0.1471,
+        "p50_close": 0.0588,
+        "wilson": 0.0645
+      },
+      "lift": 49.03
+    },
+    {
+      "gate": "r1_25_vol4.0_loc75",
+      "train": {
+        "n": 46,
+        "k": 2,
+        "p50": 0.0435,
+        "p50_close": 0.0217,
+        "wilson": 0.012
+      },
+      "test": {
+        "n": 26,
+        "k": 3,
+        "p50": 0.1154,
+        "p50_close": 0.0769,
+        "wilson": 0.04
+      },
+      "lift": 38.47
+    },
+    {
+      "gate": "r3_40_xs40_trend",
+      "train": {
+        "n": 86,
+        "k": 5,
+        "p50": 0.0581,
+        "p50_close": 0.0349,
+        "wilson": 0.0251
+      },
+      "test": {
+        "n": 71,
+        "k": 8,
+        "p50": 0.1127,
+        "p50_close": 0.0563,
+        "wilson": 0.0582
+      },
+      "lift": 37.57
+    },
+    {
+      "gate": "climax_vol5_r1_5",
+      "train": {
+        "n": 73,
+        "k": 1,
+        "p50": 0.0137,
+        "p50_close": 0.0,
+        "wilson": 0.0024
+      },
+      "test": {
+        "n": 36,
+        "k": 4,
+        "p50": 0.1111,
+        "p50_close": 0.0833,
+        "wilson": 0.0441
+      },
+      "lift": 37.03
+    },
+    {
+      "gate": "climax_vol8_r1_15",
+      "train": {
+        "n": 18,
+        "k": 1,
+        "p50": 0.0556,
+        "p50_close": 0.0,
+        "wilson": 0.0099
+      },
+      "test": {
+        "n": 9,
+        "k": 1,
+        "p50": 0.1111,
+        "p50_close": 0.1111,
+        "wilson": 0.0199
+      },
+      "lift": 37.03
+    },
+    {
+      "gate": "r1_18_vol4.0_loc0",
+      "train": {
+        "n": 128,
+        "k": 3,
+        "p50": 0.0234,
+        "p50_close": 0.0156,
+        "wilson": 0.008
+      },
+      "test": {
+        "n": 95,
+        "k": 10,
+        "p50": 0.1053,
+        "p50_close": 0.0632,
+        "wilson": 0.0582
+      },
+      "lift": 35.1
+    },
+    {
+      "gate": "r1_25_vol2.5_loc75",
+      "train": {
+        "n": 70,
+        "k": 2,
+        "p50": 0.0286,
+        "p50_close": 0.0143,
+        "wilson": 0.0079
+      },
+      "test": {
+        "n": 38,
+        "k": 4,
+        "p50": 0.1053,
+        "p50_close": 0.0789,
+        "wilson": 0.0417
+      },
+      "lift": 35.1
+    },
+    {
+      "gate": "r1_25_vol2.5_loc0",
+      "train": {
+        "n": 104,
+        "k": 3,
+        "p50": 0.0288,
+        "p50_close": 0.0192,
+        "wilson": 0.0099
+      },
+      "test": {
+        "n": 77,
+        "k": 8,
+        "p50": 0.1039,
+        "p50_close": 0.0519,
+        "wilson": 0.0536
+      },
+      "lift": 34.63
+    },
+    {
+      "gate": "r3_40_xs25_trend",
+      "train": {
+        "n": 103,
+        "k": 5,
+        "p50": 0.0485,
+        "p50_close": 0.0291,
+        "wilson": 0.0209
+      },
+      "test": {
+        "n": 78,
+        "k": 8,
+        "p50": 0.1026,
+        "p50_close": 0.0513,
+        "wilson": 0.0529
+      },
+      "lift": 34.2
+    },
+    {
+      "gate": "r1_25_vol1.5_loc0",
+      "train": {
+        "n": 122,
+        "k": 3,
+        "p50": 0.0246,
+        "p50_close": 0.0164,
+        "wilson": 0.0084
+      },
+      "test": {
+        "n": 89,
+        "k": 9,
+        "p50": 0.1011,
+        "p50_close": 0.0562,
+        "wilson": 0.0541
+      },
+      "lift": 33.7
+    },
+    {
+      "gate": "r1_18_vol4.0_loc75",
+      "train": {
+        "n": 83,
+        "k": 2,
+        "p50": 0.0241,
+        "p50_close": 0.012,
+        "wilson": 0.0066
+      },
+      "test": {
+        "n": 40,
+        "k": 4,
+        "p50": 0.1,
+        "p50_close": 0.075,
+        "wilson": 0.0396
+      },
+      "lift": 33.33
+    },
+    {
+      "gate": "climax_vol8_r1_5",
+      "train": {
+        "n": 20,
+        "k": 1,
+        "p50": 0.05,
+        "p50_close": 0.0,
+        "wilson": 0.0089
+      },
+      "test": {
+        "n": 10,
+        "k": 1,
+        "p50": 0.1,
+        "p50_close": 0.1,
+        "wilson": 0.0179
+      },
+      "lift": 33.33
+    },
+    {
+      "gate": "r3_40_xs15_trend",
+      "train": {
+        "n": 109,
+        "k": 6,
+        "p50": 0.055,
+        "p50_close": 0.0275,
+        "wilson": 0.0255
+      },
+      "test": {
+        "n": 81,
+        "k": 8,
+        "p50": 0.0988,
+        "p50_close": 0.0494,
+        "wilson": 0.0509
+      },
+      "lift": 32.93
+    },
+    {
+      "gate": "r1_25_vol4.0_loc0",
+      "train": {
+        "n": 72,
+        "k": 3,
+        "p50": 0.0417,
+        "p50_close": 0.0278,
+        "wilson": 0.0143
+      },
+      "test": {
+        "n": 61,
+        "k": 6,
+        "p50": 0.0984,
+        "p50_close": 0.0328,
+        "wilson": 0.0459
+      },
+      "lift": 32.8
+    },
+    {
+      "gate": "r1_18_vol2.5_loc0",
+      "train": {
+        "n": 203,
+        "k": 3,
+        "p50": 0.0148,
+        "p50_close": 0.0099,
+        "wilson": 0.005
+      },
+      "test": {
+        "n": 145,
+        "k": 13,
+        "p50": 0.0897,
+        "p50_close": 0.0552,
+        "wilson": 0.0531
+      },
+      "lift": 29.9
+    },
+    {
+      "gate": "r3_25_xs40_trend",
+      "train": {
+        "n": 182,
+        "k": 6,
+        "p50": 0.033,
+        "p50_close": 0.022,
+        "wilson": 0.0152
+      },
+      "test": {
+        "n": 128,
+        "k": 11,
+        "p50": 0.0859,
+        "p50_close": 0.0547,
+        "wilson": 0.0487
+      },
+      "lift": 28.63
+    },
+    {
+      "gate": "r1_25_vol1.5_loc75",
+      "train": {
+        "n": 86,
+        "k": 2,
+        "p50": 0.0233,
+        "p50_close": 0.0116,
+        "wilson": 0.0064
+      },
+      "test": {
+        "n": 47,
+        "k": 4,
+        "p50": 0.0851,
+        "p50_close": 0.0638,
+        "wilson": 0.0336
+      },
+      "lift": 28.37
+    },
+    {
+      "gate": "climax_vol3_r1_15",
+      "train": {
+        "n": 125,
+        "k": 2,
+        "p50": 0.016,
+        "p50_close": 0.008,
+        "wilson": 0.0044
+      },
+      "test": {
+        "n": 72,
+        "k": 6,
+        "p50": 0.0833,
+        "p50_close": 0.0417,
+        "wilson": 0.0388
+      },
+      "lift": 27.77
+    },
+    {
+      "gate": "rng3_r1_15_vol2",
+      "train": {
+        "n": 93,
+        "k": 2,
+        "p50": 0.0215,
+        "p50_close": 0.0108,
+        "wilson": 0.0059
+      },
+      "test": {
+        "n": 112,
+        "k": 9,
+        "p50": 0.0804,
+        "p50_close": 0.0446,
+        "wilson": 0.0429
+      },
+      "lift": 26.8
+    }
+  ],
+  "walkforward_accuracy": {
+    "name": "r3_40_xs15_trend__r1__btc1__gapNA__tp50_hs12_d1",
+    "gate": "r3_40_xs15_trend",
+    "score": "r1",
+    "btc": true,
+    "gap": null,
+    "exit": "tp50_hs12_d1",
+    "train": {
+      "pnl": 1687.73,
+      "max_dd": 0.3107,
+      "trades": 41,
+      "hits": 4,
+      "hits_close": 3,
+      "precision": 0.0976,
+      "precision_close": 0.0732,
+      "wilson": 0.0386,
+      "in_market_days": 22
+    },
+    "test": {
+      "pnl": 593.74,
+      "max_dd": 0.6574,
+      "trades": 35,
+      "hits": 6,
+      "hits_close": 3,
+      "precision": 0.1714,
+      "precision_close": 0.0857,
+      "wilson": 0.081,
+      "in_market_days": 14
+    },
+    "full_compact": {
+      "pnl": 2804.18,
+      "max_dd": 0.4182,
+      "trades": 76,
+      "hits": 10,
+      "hits_close": 6,
+      "precision": 0.1316,
+      "precision_close": 0.0789,
+      "wilson": 0.0731,
+      "in_market_days": 36
+    },
+    "full": {
+      "pnl": 2804.18,
+      "end_eq": 4504.18,
+      "max_dd": 0.4182,
+      "trades": 76,
+      "hits": 10,
+      "hits_close": 6,
+      "precision": 0.1316,
+      "precision_close": 0.0789,
+      "wilson": 0.0731,
+      "in_market_days": 36,
+      "by_base": {
+        "PHA": 1644.63,
+        "ENJ": 1436.24,
+        "QNT": 890.86,
+        "HBAR": 704.47,
+        "LSK": 626.76,
+        "DOGE": 533.49,
+        "XLM": 414.98,
+        "RAY": 295.77,
+        "MOVR": 227.44,
+        "CVX": 186.43,
+        "PEPE": 172.15,
+        "VIRTUAL": 82.15,
+        "ARB": 74.6,
+        "PUMP": 73.61,
+        "AAVE": 33.32,
+        "WIF": 18.7,
+        "ALGO": -1.11,
+        "AVAX": -19.88,
+        "ENA": -22.26,
+        "GRASS": -67.4,
+        "PENGU": -110.62,
+        "CRV": -113.07,
+        "NPC": -160.49,
+        "CAP": -183.42,
+        "COTI": -211.78,
+        "ARK": -211.78,
+        "JASMY": -211.78,
+        "NOM": -211.78,
+        "SWEAT": -211.78,
+        "SYN": -211.78,
+        "SAND": -423.56,
+        "MAGIC": -423.56,
+        "LPT": -544.68,
+        "USELESS": -635.34,
+        "GTC": -635.34
+      },
+      "months": {
+        "2024-06": 609.99,
+        "2024-07": 0.0,
+        "2024-08": 0.0,
+        "2024-09": -211.78,
+        "2024-10": 0.0,
+        "2024-11": 1700.11,
+        "2024-12": 1003.23,
+        "2025-01": 0.0,
+        "2025-02": 0.0,
+        "2025-03": 0.0,
+        "2025-04": -271.64,
+        "2025-05": 16.4,
+        "2025-06": -332.9,
+        "2025-07": -190.34,
+        "2025-08": -635.34,
+        "2025-09": 0.0,
+        "2025-10": 0.0,
+        "2025-11": 0.0,
+        "2025-12": 0.0,
+        "2026-01": 0.0,
+        "2026-02": 0.0,
+        "2026-03": 0.0,
+        "2026-04": 613.36,
+        "2026-05": -561.07,
+        "2026-06": 0.0,
+        "2026-07": 0.0,
+        "2026-08": -298.67,
+        "2026-09": 736.06,
+        "2026-10": 626.76
+      },
+      "top_trades": [
+        {
+          "date": "2024-11-18",
+          "base": "HBAR",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2024-11-17"
+        },
+        {
+          "date": "2024-11-23",
+          "base": "XLM",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2024-11-22"
+        },
+        {
+          "date": "2024-12-27",
+          "base": "PHA",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2024-12-26"
+        },
+        {
+          "date": "2026-04-14",
+          "base": "ENJ",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-04-13"
+        },
+        {
+          "date": "2026-04-15",
+          "base": "ENJ",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-04-14"
+        },
+        {
+          "date": "2026-09-13",
+          "base": "LSK",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-12"
+        },
+        {
+          "date": "2026-09-27",
+          "base": "QNT",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-26"
+        },
+        {
+          "date": "2026-10-01",
+          "base": "MOVR",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-30"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-10-02",
+          "base": "GTC",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-10-01"
+        },
+        {
+          "date": "2026-09-28",
+          "base": "QNT",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-27"
+        },
+        {
+          "date": "2026-09-26",
+          "base": "PHA",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-25"
+        },
+        {
+          "date": "2026-09-18",
+          "base": "COTI",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-17"
+        },
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-13"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.1514
+    },
+    "test_detail": {
+      "pnl": 593.74,
+      "end_eq": 2293.74,
+      "max_dd": 0.6574,
+      "trades": 35,
+      "hits": 6,
+      "hits_close": 3,
+      "precision": 0.1714,
+      "precision_close": 0.0857,
+      "wilson": 0.081,
+      "in_market_days": 14,
+      "by_base": {
+        "ENJ": 1369.63,
+        "QNT": 563.44,
+        "LSK": 439.09,
+        "MOVR": 205.37,
+        "ARB": 117.59,
+        "PUMP": 62.57,
+        "RAY": 60.63,
+        "AVAX": -14.87,
+        "PHA": -29.71,
+        "GRASS": -62.78,
+        "NPC": -139.04,
+        "CAP": -183.42,
+        "COTI": -195.59,
+        "PEPE": -205.06,
+        "NOM": -207.54,
+        "SWEAT": -211.78,
+        "GTC": -423.56,
+        "USELESS": -551.22
+      },
+      "months": {
+        "2026-01": 0.0,
+        "2026-02": 0.0,
+        "2026-03": 0.0,
+        "2026-04": 550.98,
+        "2026-05": -571.29,
+        "2026-06": 0.0,
+        "2026-07": 0.0,
+        "2026-08": -281.54,
+        "2026-09": 290.9,
+        "2026-10": 604.69
+      },
+      "top_trades": [
+        {
+          "date": "2026-04-15",
+          "base": "ENJ",
+          "pnl": 838.54,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-04-14"
+        },
+        {
+          "date": "2026-10-01",
+          "base": "MOVR",
+          "pnl": 816.47,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-30"
+        },
+        {
+          "date": "2026-04-14",
+          "base": "ENJ",
+          "pnl": 797.44,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-04-13"
+        },
+        {
+          "date": "2026-09-13",
+          "base": "LSK",
+          "pnl": 650.87,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-12"
+        },
+        {
+          "date": "2026-09-27",
+          "base": "QNT",
+          "pnl": 544.11,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-26"
+        },
+        {
+          "date": "2026-09-30",
+          "base": "QNT",
+          "pnl": 223.17,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-09-28"
+        },
+        {
+          "date": "2026-04-12",
+          "base": "ENJ",
+          "pnl": 157.21,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-10"
+        },
+        {
+          "date": "2026-09-04",
+          "base": "ARB",
+          "pnl": 154.8,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-09-02"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-10-02",
+          "base": "GTC",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-10-01"
+        },
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-13"
+        },
+        {
+          "date": "2026-05-13",
+          "base": "USELESS",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-05-12"
+        },
+        {
+          "date": "2026-05-12",
+          "base": "GTC",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-05-11"
+        },
+        {
+          "date": "2026-05-11",
+          "base": "SWEAT",
+          "pnl": -211.78,
+          "reason": "hard_stop",
+          "hit50": true,
+          "signal": "2026-05-10"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.304
+    }
+  },
+  "walkforward_pnl": {
+    "name": "r1_18_vol1.5_loc0__rs__btc0__gapNA__tp100_hs20_d3",
+    "gate": "r1_18_vol1.5_loc0",
+    "score": "rs",
+    "btc": false,
+    "gap": null,
+    "exit": "tp100_hs20_d3",
+    "train": {
+      "pnl": 4807.75,
+      "max_dd": 0.349,
+      "trades": 77,
+      "hits": 2,
+      "hits_close": 1,
+      "precision": 0.026,
+      "precision_close": 0.013,
+      "wilson": 0.0072,
+      "in_market_days": 211
+    },
+    "test": {
+      "pnl": 7846.95,
+      "max_dd": 0.7604,
+      "trades": 57,
+      "hits": 4,
+      "hits_close": 3,
+      "precision": 0.0702,
+      "precision_close": 0.0526,
+      "wilson": 0.0276,
+      "in_market_days": 111
+    },
+    "full_compact": {
+      "pnl": 13731.54,
+      "max_dd": 0.3694,
+      "trades": 134,
+      "hits": 6,
+      "hits_close": 4,
+      "precision": 0.0448,
+      "precision_close": 0.0299,
+      "wilson": 0.0207,
+      "in_market_days": 322
+    },
+    "full": {
+      "pnl": 13731.54,
+      "end_eq": 15431.54,
+      "max_dd": 0.3694,
+      "trades": 134,
+      "hits": 6,
+      "hits_close": 4,
+      "precision": 0.0448,
+      "precision_close": 0.0299,
+      "wilson": 0.0207,
+      "in_market_days": 322,
+      "by_base": {
+        "LSK": 2966.24,
+        "SYN": 2836.63,
+        "NOM": 2613.06,
+        "MAGIC": 2577.72,
+        "USELESS": 1400.61,
+        "QNT": 1338.26,
+        "ENJ": 1217.2,
+        "NPC": 1209.77,
+        "ICP": 1123.09,
+        "CVX": 908.59,
+        "PHA": 817.26,
+        "PENGU": 715.75,
+        "PEPE": 649.41,
+        "HYPE": 537.24,
+        "GRASS": 510.43,
+        "ENA": 269.01,
+        "NEAR": 224.33,
+        "VIRTUAL": 207.59,
+        "KAS": 198.16,
+        "FARTCOIN": 128.94,
+        "SUI": 123.98,
+        "TAO": 115.75,
+        "TIA": 107.28,
+        "PUMP": 60.55,
+        "SHIB": 56.2,
+        "SEI": 55.1,
+        "EIGEN": 23.03,
+        "CRV": 11.18,
+        "DOT": -1.75,
+        "ALGO": -3.3,
+        "COTI": -27.68,
+        "RAY": -43.68,
+        "XRP": -52.18,
+        "OP": -54.95,
+        "BCH": -61.62,
+        "SCR": -117.58,
+        "XLM": -121.54,
+        "SAND": -191.04,
+        "ZRO": -205.3,
+        "SUPER": -249.34,
+        "PLUME": -254.93,
+        "GLMR": -347.3,
+        "HBAR": -388.42,
+        "WLD": -398.84,
+        "WIF": -489.25,
+        "UNI": -597.05,
+        "SWEAT": -692.82,
+        "JASMY": -694.61,
+        "ARK": -753.08,
+        "LPT": -919.34,
+        "MOVR": -940.05,
+        "ALICE": -1665.16
+      },
+      "months": {
+        "2024-06": 379.35,
+        "2024-07": -67.48,
+        "2024-08": 114.43,
+        "2024-09": -376.01,
+        "2024-10": 352.82,
+        "2024-11": 313.67,
+        "2024-12": 1366.97,
+        "2025-01": -1.94,
+        "2025-02": -639.62,
+        "2025-03": -272.73,
+        "2025-04": 3206.57,
+        "2025-05": -455.06,
+        "2025-06": -655.24,
+        "2025-07": 245.52,
+        "2025-08": 646.38,
+        "2025-09": 15.96,
+        "2025-10": 622.48,
+        "2025-11": 808.98,
+        "2025-12": -797.32,
+        "2026-01": 50.9,
+        "2026-02": -735.62,
+        "2026-03": -518.42,
+        "2026-04": 3175.53,
+        "2026-05": 95.51,
+        "2026-06": 2086.48,
+        "2026-07": -215.01,
+        "2026-08": -420.08,
+        "2026-09": 5428.03,
+        "2026-10": -23.53
+      },
+      "top_trades": [
+        {
+          "date": "2024-12-27",
+          "base": "PHA",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2024-12-24"
+        },
+        {
+          "date": "2025-04-21",
+          "base": "MAGIC",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2025-04-19"
+        },
+        {
+          "date": "2026-04-01",
+          "base": "NOM",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-03-30"
+        },
+        {
+          "date": "2026-04-02",
+          "base": "NOM",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-04-01"
+        },
+        {
+          "date": "2026-04-15",
+          "base": "ENJ",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-04-12"
+        },
+        {
+          "date": "2026-06-18",
+          "base": "SYN",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-06-15"
+        },
+        {
+          "date": "2026-06-25",
+          "base": "SYN",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-06-22"
+        },
+        {
+          "date": "2026-09-03",
+          "base": "USELESS",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-08-31"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-28",
+          "base": "QNT",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-27"
+        },
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-13"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "USELESS",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-08"
+        },
+        {
+          "date": "2026-08-28",
+          "base": "MOVR",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-27"
+        },
+        {
+          "date": "2026-08-15",
+          "base": "ALICE",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-14"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.0974
+    },
+    "test_detail": {
+      "pnl": 7846.95,
+      "end_eq": 9546.95,
+      "max_dd": 0.7604,
+      "trades": 57,
+      "hits": 4,
+      "hits_close": 3,
+      "precision": 0.0702,
+      "precision_close": 0.0526,
+      "wilson": 0.0276,
+      "in_market_days": 111,
+      "by_base": {
+        "LSK": 3023.83,
+        "SYN": 2204.47,
+        "USELESS": 1400.61,
+        "QNT": 1338.26,
+        "NPC": 1309.77,
+        "ENJ": 1280.87,
+        "NOM": 1202.61,
+        "PEPE": 649.66,
+        "GRASS": 417.96,
+        "NEAR": 224.33,
+        "ICP": 161.9,
+        "DOT": -1.11,
+        "SUPER": -2.48,
+        "BCH": -17.43,
+        "COTI": -27.68,
+        "VIRTUAL": -39.42,
+        "XLM": -121.54,
+        "CRV": -137.51,
+        "OP": -137.8,
+        "SUI": -163.0,
+        "SAND": -191.04,
+        "LPT": -224.73,
+        "HBAR": -264.18,
+        "ARK": -300.92,
+        "SWEAT": -303.72,
+        "GLMR": -347.3,
+        "PHA": -421.97,
+        "WLD": -694.61,
+        "MOVR": -981.04,
+        "ALICE": -989.84
+      },
+      "months": {
+        "2026-01": 9.06,
+        "2026-02": -613.66,
+        "2026-03": -338.02,
+        "2026-04": 1838.17,
+        "2026-05": 95.51,
+        "2026-06": 2086.48,
+        "2026-07": -215.01,
+        "2026-08": -420.08,
+        "2026-09": 5428.03,
+        "2026-10": -23.53
+      },
+      "top_trades": [
+        {
+          "date": "2026-04-15",
+          "base": "ENJ",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-04-12"
+        },
+        {
+          "date": "2026-06-18",
+          "base": "SYN",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-06-15"
+        },
+        {
+          "date": "2026-06-25",
+          "base": "SYN",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-06-22"
+        },
+        {
+          "date": "2026-09-03",
+          "base": "USELESS",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": false,
+          "signal": "2026-08-31"
+        },
+        {
+          "date": "2026-09-12",
+          "base": "LSK",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-09-13",
+          "base": "LSK",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-12"
+        },
+        {
+          "date": "2026-09-27",
+          "base": "QNT",
+          "pnl": 1685.57,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-09-26"
+        },
+        {
+          "date": "2026-04-02",
+          "base": "NOM",
+          "pnl": 1172.07,
+          "reason": "take_profit",
+          "hit50": true,
+          "signal": "2026-04-01"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-28",
+          "base": "QNT",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-27"
+        },
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-13"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "USELESS",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-08"
+        },
+        {
+          "date": "2026-08-28",
+          "base": "MOVR",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-27"
+        },
+        {
+          "date": "2026-08-15",
+          "base": "ALICE",
+          "pnl": -347.3,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-14"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.1797
+    }
+  },
+  "best_test_pnl": {
+    "name": "r1_18_vol2.5_loc0__rs__btc1__gapNA__trail30_hs15_d4",
+    "gate": "r1_18_vol2.5_loc0",
+    "score": "rs",
+    "btc": true,
+    "gap": null,
+    "exit": "trail30_hs15_d4",
+    "train": {
+      "pnl": -934.39,
+      "max_dd": 0.7015,
+      "trades": 40,
+      "hits": 1,
+      "hits_close": 0,
+      "precision": 0.025,
+      "precision_close": 0.0,
+      "wilson": 0.0044,
+      "in_market_days": 116
+    },
+    "test": {
+      "pnl": 19893.76,
+      "max_dd": 0.3076,
+      "trades": 26,
+      "hits": 5,
+      "hits_close": 4,
+      "precision": 0.1923,
+      "precision_close": 0.1538,
+      "wilson": 0.0851,
+      "in_market_days": 68
+    },
+    "full_compact": {
+      "pnl": 17769.66,
+      "max_dd": 0.7357,
+      "trades": 66,
+      "hits": 6,
+      "hits_close": 4,
+      "precision": 0.0909,
+      "precision_close": 0.0606,
+      "wilson": 0.0423,
+      "in_market_days": 184
+    },
+    "full": {
+      "pnl": 17769.66,
+      "end_eq": 19469.66,
+      "max_dd": 0.7357,
+      "trades": 66,
+      "hits": 6,
+      "hits_close": 4,
+      "precision": 0.0909,
+      "precision_close": 0.0606,
+      "wilson": 0.0423,
+      "in_market_days": 184,
+      "by_base": {
+        "LSK": 8032.46,
+        "USELESS": 3266.45,
+        "PHA": 2449.27,
+        "NPC": 1653.06,
+        "SYN": 1643.25,
+        "ENJ": 1144.61,
+        "QNT": 875.66,
+        "MOVR": 666.81,
+        "MAGIC": 607.3,
+        "GRASS": 462.26,
+        "PENGU": 351.74,
+        "COTI": 319.62,
+        "NOM": 313.34,
+        "PEPE": 83.63,
+        "ICP": 76.29,
+        "XLM": 69.82,
+        "OP": 62.03,
+        "ADA": 37.33,
+        "AAVE": 25.37,
+        "ALGO": 0.74,
+        "TAO": -17.8,
+        "ENA": -34.17,
+        "TIA": -39.41,
+        "VIRTUAL": -62.33,
+        "FET": -120.95,
+        "FARTCOIN": -165.12,
+        "UNI": -177.77,
+        "WLD": -179.83,
+        "SUPER": -226.25,
+        "GTC": -262.6,
+        "PLUME": -284.27,
+        "ALICE": -285.21,
+        "SWEAT": -349.37,
+        "ARK": -369.8,
+        "JASMY": -478.27,
+        "LPT": -636.45,
+        "CVX": -681.78
+      },
+      "months": {
+        "2024-06": -257.35,
+        "2024-07": -252.86,
+        "2024-08": -180.11,
+        "2024-09": -192.26,
+        "2024-10": 230.78,
+        "2024-11": 198.13,
+        "2024-12": 986.82,
+        "2025-01": -423.86,
+        "2025-02": -288.18,
+        "2025-03": 0.0,
+        "2025-04": 351.74,
+        "2025-05": -489.01,
+        "2025-06": -294.49,
+        "2025-07": -81.45,
+        "2025-08": 274.0,
+        "2025-09": -113.75,
+        "2025-10": -402.53,
+        "2025-11": 0.0,
+        "2025-12": 0.0,
+        "2026-01": 33.36,
+        "2026-02": 0.0,
+        "2026-03": -120.95,
+        "2026-04": 1017.69,
+        "2026-05": 458.21,
+        "2026-06": 0.0,
+        "2026-07": 57.02,
+        "2026-08": 1086.67,
+        "2026-09": 16235.33,
+        "2026-10": -63.27
+      },
+      "top_trades": [
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": 8032.46,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-09-05",
+          "base": "USELESS",
+          "pnl": 3266.45,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-31"
+        },
+        {
+          "date": "2026-09-20",
+          "base": "SYN",
+          "pnl": 2067.07,
+          "reason": "time",
+          "hit50": true,
+          "signal": "2026-09-15"
+        },
+        {
+          "date": "2026-08-24",
+          "base": "NPC",
+          "pnl": 1653.06,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-19"
+        },
+        {
+          "date": "2026-09-26",
+          "base": "PHA",
+          "pnl": 1263.62,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-09-21"
+        },
+        {
+          "date": "2026-10-02",
+          "base": "MOVR",
+          "pnl": 1192.01,
+          "reason": "eow",
+          "hit50": true,
+          "signal": "2026-09-29"
+        },
+        {
+          "date": "2024-12-29",
+          "base": "PHA",
+          "pnl": 1185.65,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2024-12-24"
+        },
+        {
+          "date": "2026-04-17",
+          "base": "ENJ",
+          "pnl": 1144.61,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-12"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-15",
+          "base": "ARK",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-14"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "NOM",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-05"
+        },
+        {
+          "date": "2026-08-06",
+          "base": "SYN",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-05"
+        },
+        {
+          "date": "2026-07-24",
+          "base": "SWEAT",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-07-23"
+        },
+        {
+          "date": "2026-05-12",
+          "base": "GTC",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-05-11"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.3304
+    },
+    "test_detail": {
+      "pnl": 19893.76,
+      "end_eq": 21593.76,
+      "max_dd": 0.3076,
+      "trades": 26,
+      "hits": 5,
+      "hits_close": 4,
+      "precision": 0.1923,
+      "precision_close": 0.1538,
+      "wilson": 0.0851,
+      "in_market_days": 68,
+      "by_base": {
+        "LSK": 8032.46,
+        "USELESS": 3266.45,
+        "SYN": 1804.47,
+        "NPC": 1653.06,
+        "ENJ": 1625.15,
+        "PHA": 1263.62,
+        "NOM": 1028.89,
+        "QNT": 875.66,
+        "GRASS": 740.72,
+        "MOVR": 666.81,
+        "COTI": 319.62,
+        "PEPE": 185.7,
+        "ICP": 78.04,
+        "SUPER": -44.54,
+        "OP": -102.69,
+        "PLUME": -119.59,
+        "ALICE": -145.46,
+        "CVX": -184.2,
+        "FET": -262.6,
+        "GTC": -262.6,
+        "SWEAT": -262.6,
+        "ARK": -262.6
+      },
+      "months": {
+        "2026-01": 83.01,
+        "2026-02": 0.0,
+        "2026-03": -262.6,
+        "2026-04": 2201.44,
+        "2026-05": 556.16,
+        "2026-06": 0.0,
+        "2026-07": 57.02,
+        "2026-08": 1086.67,
+        "2026-09": 16235.33,
+        "2026-10": -63.27
+      },
+      "top_trades": [
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": 8032.46,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-09-05",
+          "base": "USELESS",
+          "pnl": 3266.45,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-31"
+        },
+        {
+          "date": "2026-09-20",
+          "base": "SYN",
+          "pnl": 2067.07,
+          "reason": "time",
+          "hit50": true,
+          "signal": "2026-09-15"
+        },
+        {
+          "date": "2026-08-24",
+          "base": "NPC",
+          "pnl": 1653.06,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-19"
+        },
+        {
+          "date": "2026-04-17",
+          "base": "ENJ",
+          "pnl": 1625.15,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-12"
+        },
+        {
+          "date": "2026-04-03",
+          "base": "NOM",
+          "pnl": 1291.49,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-03-31"
+        },
+        {
+          "date": "2026-09-26",
+          "base": "PHA",
+          "pnl": 1263.62,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-09-21"
+        },
+        {
+          "date": "2026-10-02",
+          "base": "MOVR",
+          "pnl": 1192.01,
+          "reason": "eow",
+          "hit50": true,
+          "signal": "2026-09-29"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-15",
+          "base": "ARK",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-14"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "NOM",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-05"
+        },
+        {
+          "date": "2026-08-06",
+          "base": "SYN",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-05"
+        },
+        {
+          "date": "2026-07-24",
+          "base": "SWEAT",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-07-23"
+        },
+        {
+          "date": "2026-05-12",
+          "base": "GTC",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-05-11"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.3556
+    }
+  },
+  "best_full_pnl": {
+    "name": "r1_18_vol2.5_loc0__rs__btc1__gapNA__trail30_hs15_d4",
+    "gate": "r1_18_vol2.5_loc0",
+    "score": "rs",
+    "btc": true,
+    "gap": null,
+    "exit": "trail30_hs15_d4",
+    "train": {
+      "pnl": -934.39,
+      "max_dd": 0.7015,
+      "trades": 40,
+      "hits": 1,
+      "hits_close": 0,
+      "precision": 0.025,
+      "precision_close": 0.0,
+      "wilson": 0.0044,
+      "in_market_days": 116
+    },
+    "test": {
+      "pnl": 19893.76,
+      "max_dd": 0.3076,
+      "trades": 26,
+      "hits": 5,
+      "hits_close": 4,
+      "precision": 0.1923,
+      "precision_close": 0.1538,
+      "wilson": 0.0851,
+      "in_market_days": 68
+    },
+    "full_compact": {
+      "pnl": 17769.66,
+      "max_dd": 0.7357,
+      "trades": 66,
+      "hits": 6,
+      "hits_close": 4,
+      "precision": 0.0909,
+      "precision_close": 0.0606,
+      "wilson": 0.0423,
+      "in_market_days": 184
+    },
+    "full": {
+      "pnl": 17769.66,
+      "end_eq": 19469.66,
+      "max_dd": 0.7357,
+      "trades": 66,
+      "hits": 6,
+      "hits_close": 4,
+      "precision": 0.0909,
+      "precision_close": 0.0606,
+      "wilson": 0.0423,
+      "in_market_days": 184,
+      "by_base": {
+        "LSK": 8032.46,
+        "USELESS": 3266.45,
+        "PHA": 2449.27,
+        "NPC": 1653.06,
+        "SYN": 1643.25,
+        "ENJ": 1144.61,
+        "QNT": 875.66,
+        "MOVR": 666.81,
+        "MAGIC": 607.3,
+        "GRASS": 462.26,
+        "PENGU": 351.74,
+        "COTI": 319.62,
+        "NOM": 313.34,
+        "PEPE": 83.63,
+        "ICP": 76.29,
+        "XLM": 69.82,
+        "OP": 62.03,
+        "ADA": 37.33,
+        "AAVE": 25.37,
+        "ALGO": 0.74,
+        "TAO": -17.8,
+        "ENA": -34.17,
+        "TIA": -39.41,
+        "VIRTUAL": -62.33,
+        "FET": -120.95,
+        "FARTCOIN": -165.12,
+        "UNI": -177.77,
+        "WLD": -179.83,
+        "SUPER": -226.25,
+        "GTC": -262.6,
+        "PLUME": -284.27,
+        "ALICE": -285.21,
+        "SWEAT": -349.37,
+        "ARK": -369.8,
+        "JASMY": -478.27,
+        "LPT": -636.45,
+        "CVX": -681.78
+      },
+      "months": {
+        "2024-06": -257.35,
+        "2024-07": -252.86,
+        "2024-08": -180.11,
+        "2024-09": -192.26,
+        "2024-10": 230.78,
+        "2024-11": 198.13,
+        "2024-12": 986.82,
+        "2025-01": -423.86,
+        "2025-02": -288.18,
+        "2025-03": 0.0,
+        "2025-04": 351.74,
+        "2025-05": -489.01,
+        "2025-06": -294.49,
+        "2025-07": -81.45,
+        "2025-08": 274.0,
+        "2025-09": -113.75,
+        "2025-10": -402.53,
+        "2025-11": 0.0,
+        "2025-12": 0.0,
+        "2026-01": 33.36,
+        "2026-02": 0.0,
+        "2026-03": -120.95,
+        "2026-04": 1017.69,
+        "2026-05": 458.21,
+        "2026-06": 0.0,
+        "2026-07": 57.02,
+        "2026-08": 1086.67,
+        "2026-09": 16235.33,
+        "2026-10": -63.27
+      },
+      "top_trades": [
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": 8032.46,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-09-05",
+          "base": "USELESS",
+          "pnl": 3266.45,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-31"
+        },
+        {
+          "date": "2026-09-20",
+          "base": "SYN",
+          "pnl": 2067.07,
+          "reason": "time",
+          "hit50": true,
+          "signal": "2026-09-15"
+        },
+        {
+          "date": "2026-08-24",
+          "base": "NPC",
+          "pnl": 1653.06,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-19"
+        },
+        {
+          "date": "2026-09-26",
+          "base": "PHA",
+          "pnl": 1263.62,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-09-21"
+        },
+        {
+          "date": "2026-10-02",
+          "base": "MOVR",
+          "pnl": 1192.01,
+          "reason": "eow",
+          "hit50": true,
+          "signal": "2026-09-29"
+        },
+        {
+          "date": "2024-12-29",
+          "base": "PHA",
+          "pnl": 1185.65,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2024-12-24"
+        },
+        {
+          "date": "2026-04-17",
+          "base": "ENJ",
+          "pnl": 1144.61,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-12"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-15",
+          "base": "ARK",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-14"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "NOM",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-05"
+        },
+        {
+          "date": "2026-08-06",
+          "base": "SYN",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-05"
+        },
+        {
+          "date": "2026-07-24",
+          "base": "SWEAT",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-07-23"
+        },
+        {
+          "date": "2026-05-12",
+          "base": "GTC",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-05-11"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.3304
+    },
+    "test_detail": {
+      "pnl": 19893.76,
+      "end_eq": 21593.76,
+      "max_dd": 0.3076,
+      "trades": 26,
+      "hits": 5,
+      "hits_close": 4,
+      "precision": 0.1923,
+      "precision_close": 0.1538,
+      "wilson": 0.0851,
+      "in_market_days": 68,
+      "by_base": {
+        "LSK": 8032.46,
+        "USELESS": 3266.45,
+        "SYN": 1804.47,
+        "NPC": 1653.06,
+        "ENJ": 1625.15,
+        "PHA": 1263.62,
+        "NOM": 1028.89,
+        "QNT": 875.66,
+        "GRASS": 740.72,
+        "MOVR": 666.81,
+        "COTI": 319.62,
+        "PEPE": 185.7,
+        "ICP": 78.04,
+        "SUPER": -44.54,
+        "OP": -102.69,
+        "PLUME": -119.59,
+        "ALICE": -145.46,
+        "CVX": -184.2,
+        "FET": -262.6,
+        "GTC": -262.6,
+        "SWEAT": -262.6,
+        "ARK": -262.6
+      },
+      "months": {
+        "2026-01": 83.01,
+        "2026-02": 0.0,
+        "2026-03": -262.6,
+        "2026-04": 2201.44,
+        "2026-05": 556.16,
+        "2026-06": 0.0,
+        "2026-07": 57.02,
+        "2026-08": 1086.67,
+        "2026-09": 16235.33,
+        "2026-10": -63.27
+      },
+      "top_trades": [
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": 8032.46,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-09-05",
+          "base": "USELESS",
+          "pnl": 3266.45,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-31"
+        },
+        {
+          "date": "2026-09-20",
+          "base": "SYN",
+          "pnl": 2067.07,
+          "reason": "time",
+          "hit50": true,
+          "signal": "2026-09-15"
+        },
+        {
+          "date": "2026-08-24",
+          "base": "NPC",
+          "pnl": 1653.06,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-19"
+        },
+        {
+          "date": "2026-04-17",
+          "base": "ENJ",
+          "pnl": 1625.15,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-12"
+        },
+        {
+          "date": "2026-04-03",
+          "base": "NOM",
+          "pnl": 1291.49,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-03-31"
+        },
+        {
+          "date": "2026-09-26",
+          "base": "PHA",
+          "pnl": 1263.62,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-09-21"
+        },
+        {
+          "date": "2026-10-02",
+          "base": "MOVR",
+          "pnl": 1192.01,
+          "reason": "eow",
+          "hit50": true,
+          "signal": "2026-09-29"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-15",
+          "base": "ARK",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-14"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "NOM",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-05"
+        },
+        {
+          "date": "2026-08-06",
+          "base": "SYN",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-05"
+        },
+        {
+          "date": "2026-07-24",
+          "base": "SWEAT",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-07-23"
+        },
+        {
+          "date": "2026-05-12",
+          "base": "GTC",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-05-11"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.3556
+    }
+  },
+  "best_full_pnl_train_positive": {
+    "name": "r1_18_vol2.5_loc0__vol__btc0__gapNA__trail30_hs15_d4",
+    "gate": "r1_18_vol2.5_loc0",
+    "score": "vol",
+    "btc": false,
+    "gap": null,
+    "exit": "trail30_hs15_d4",
+    "train": {
+      "pnl": 285.67,
+      "max_dd": 0.6024,
+      "trades": 64,
+      "hits": 2,
+      "hits_close": 1,
+      "precision": 0.0312,
+      "precision_close": 0.0156,
+      "wilson": 0.0086,
+      "in_market_days": 200
+    },
+    "test": {
+      "pnl": 16780.11,
+      "max_dd": 0.4395,
+      "trades": 42,
+      "hits": 6,
+      "hits_close": 6,
+      "precision": 0.1429,
+      "precision_close": 0.1429,
+      "wilson": 0.0672,
+      "in_market_days": 105
+    },
+    "full_compact": {
+      "pnl": 17080.02,
+      "max_dd": 0.6024,
+      "trades": 106,
+      "hits": 8,
+      "hits_close": 7,
+      "precision": 0.0755,
+      "precision_close": 0.066,
+      "wilson": 0.0387,
+      "in_market_days": 305
+    },
+    "full": {
+      "pnl": 17080.02,
+      "end_eq": 18780.02,
+      "max_dd": 0.6024,
+      "trades": 106,
+      "hits": 8,
+      "hits_close": 7,
+      "precision": 0.0755,
+      "precision_close": 0.066,
+      "wilson": 0.0387,
+      "in_market_days": 305,
+      "by_base": {
+        "LSK": 7913.85,
+        "SYN": 2729.51,
+        "NOM": 1787.49,
+        "NPC": 1653.06,
+        "MAGIC": 1646.97,
+        "ENJ": 1625.15,
+        "ICP": 1021.5,
+        "PHA": 950.03,
+        "MOVR": 929.41,
+        "QNT": 875.66,
+        "GRASS": 833.71,
+        "PEPE": 618.59,
+        "VIRTUAL": 387.94,
+        "ARB": 343.08,
+        "XLM": 325.24,
+        "KAS": 239.3,
+        "ALGO": 163.07,
+        "HBAR": 154.84,
+        "RENDER": 116.31,
+        "PENGU": 112.57,
+        "COTI": 59.1,
+        "HYPE": 32.59,
+        "TIA": 27.63,
+        "AAVE": 24.08,
+        "OP": 3.89,
+        "VET": -1.11,
+        "TAO": -29.27,
+        "CRV": -51.26,
+        "WLD": -86.4,
+        "SHIB": -86.67,
+        "DOT": -131.89,
+        "NEAR": -164.67,
+        "SCR": -173.16,
+        "UNI": -188.76,
+        "XRP": -195.61,
+        "FARTCOIN": -197.95,
+        "ZRO": -262.6,
+        "GTC": -262.6,
+        "ENA": -330.72,
+        "FET": -358.1,
+        "SUPER": -361.02,
+        "PLUME": -382.19,
+        "ARK": -384.89,
+        "CVX": -492.21,
+        "GLMR": -525.2,
+        "SWEAT": -611.97,
+        "JASMY": -622.96,
+        "LPT": -697.61,
+        "ALICE": -895.77
+      },
+      "months": {
+        "2024-06": -352.85,
+        "2024-07": -183.96,
+        "2024-08": -196.7,
+        "2024-09": -227.66,
+        "2024-10": 208.59,
+        "2024-11": 235.44,
+        "2024-12": 989.71,
+        "2025-01": -154.32,
+        "2025-02": -313.58,
+        "2025-03": -117.32,
+        "2025-04": 600.56,
+        "2025-05": -221.64,
+        "2025-06": -571.24,
+        "2025-07": 221.56,
+        "2025-08": 333.21,
+        "2025-09": -60.5,
+        "2025-10": -3.16,
+        "2025-11": 987.11,
+        "2025-12": -887.58,
+        "2026-01": 1087.84,
+        "2026-02": -111.26,
+        "2026-03": -404.65,
+        "2026-04": 2740.44,
+        "2026-05": 1016.38,
+        "2026-06": 560.05,
+        "2026-07": -730.78,
+        "2026-08": 744.56,
+        "2026-09": 11955.06,
+        "2026-10": -63.27
+      },
+      "top_trades": [
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": 8032.46,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-04-03",
+          "base": "NOM",
+          "pnl": 2243.34,
+          "reason": "trail",
+          "hit50": false,
+          "signal": "2026-03-30"
+        },
+        {
+          "date": "2026-09-20",
+          "base": "SYN",
+          "pnl": 2067.07,
+          "reason": "time",
+          "hit50": true,
+          "signal": "2026-09-15"
+        },
+        {
+          "date": "2026-08-24",
+          "base": "NPC",
+          "pnl": 1653.06,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-19"
+        },
+        {
+          "date": "2026-04-17",
+          "base": "ENJ",
+          "pnl": 1625.15,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-12"
+        },
+        {
+          "date": "2026-10-02",
+          "base": "MOVR",
+          "pnl": 1192.01,
+          "reason": "eow",
+          "hit50": true,
+          "signal": "2026-09-29"
+        },
+        {
+          "date": "2024-12-29",
+          "base": "PHA",
+          "pnl": 1125.28,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2024-12-24"
+        },
+        {
+          "date": "2026-06-21",
+          "base": "SYN",
+          "pnl": 1078.31,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-06-17"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-15",
+          "base": "ARK",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-14"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "NOM",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-05"
+        },
+        {
+          "date": "2026-08-15",
+          "base": "ALICE",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-14"
+        },
+        {
+          "date": "2026-08-06",
+          "base": "SYN",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-05"
+        },
+        {
+          "date": "2026-08-02",
+          "base": "COTI",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-07-31"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.2765
+    },
+    "test_detail": {
+      "pnl": 16780.11,
+      "end_eq": 18480.11,
+      "max_dd": 0.4395,
+      "trades": 42,
+      "hits": 6,
+      "hits_close": 6,
+      "precision": 0.1429,
+      "precision_close": 0.1429,
+      "wilson": 0.0672,
+      "in_market_days": 105,
+      "by_base": {
+        "LSK": 8032.46,
+        "SYN": 2882.77,
+        "NOM": 1787.49,
+        "NPC": 1653.06,
+        "ENJ": 1625.15,
+        "MOVR": 929.41,
+        "QNT": 875.66,
+        "GRASS": 740.72,
+        "PEPE": 604.35,
+        "ARB": 343.08,
+        "XLM": 325.24,
+        "ICP": 78.04,
+        "COTI": 57.02,
+        "HYPE": 32.59,
+        "VET": -1.11,
+        "SUPER": -44.54,
+        "XRP": -99.82,
+        "OP": -102.69,
+        "PLUME": -119.59,
+        "CRV": -120.68,
+        "DOT": -131.89,
+        "JASMY": -155.68,
+        "NEAR": -164.67,
+        "FET": -262.6,
+        "GTC": -262.6,
+        "SWEAT": -262.6,
+        "ENA": -262.6,
+        "ARK": -262.6,
+        "ALICE": -408.06,
+        "GLMR": -525.2
+      },
+      "months": {
+        "2026-01": 1073.6,
+        "2026-02": -111.26,
+        "2026-03": -404.65,
+        "2026-04": 2740.44,
+        "2026-05": 1016.38,
+        "2026-06": 560.05,
+        "2026-07": -730.78,
+        "2026-08": 744.56,
+        "2026-09": 11955.06,
+        "2026-10": -63.27
+      },
+      "top_trades": [
+        {
+          "date": "2026-09-14",
+          "base": "LSK",
+          "pnl": 8032.46,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-11"
+        },
+        {
+          "date": "2026-04-03",
+          "base": "NOM",
+          "pnl": 2243.34,
+          "reason": "trail",
+          "hit50": false,
+          "signal": "2026-03-30"
+        },
+        {
+          "date": "2026-09-20",
+          "base": "SYN",
+          "pnl": 2067.07,
+          "reason": "time",
+          "hit50": true,
+          "signal": "2026-09-15"
+        },
+        {
+          "date": "2026-08-24",
+          "base": "NPC",
+          "pnl": 1653.06,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-08-19"
+        },
+        {
+          "date": "2026-04-17",
+          "base": "ENJ",
+          "pnl": 1625.15,
+          "reason": "time",
+          "hit50": false,
+          "signal": "2026-04-12"
+        },
+        {
+          "date": "2026-10-02",
+          "base": "MOVR",
+          "pnl": 1192.01,
+          "reason": "eow",
+          "hit50": true,
+          "signal": "2026-09-29"
+        },
+        {
+          "date": "2026-06-21",
+          "base": "SYN",
+          "pnl": 1078.31,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-06-17"
+        },
+        {
+          "date": "2026-09-29",
+          "base": "QNT",
+          "pnl": 875.66,
+          "reason": "trail",
+          "hit50": true,
+          "signal": "2026-09-26"
+        }
+      ],
+      "worst_trades": [
+        {
+          "date": "2026-09-15",
+          "base": "ARK",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-14"
+        },
+        {
+          "date": "2026-09-09",
+          "base": "NOM",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-09-05"
+        },
+        {
+          "date": "2026-08-15",
+          "base": "ALICE",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-14"
+        },
+        {
+          "date": "2026-08-06",
+          "base": "SYN",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-08-05"
+        },
+        {
+          "date": "2026-08-02",
+          "base": "COTI",
+          "pnl": -262.6,
+          "reason": "hard_stop",
+          "hit50": false,
+          "signal": "2026-07-31"
+        }
+      ],
+      "top_base_share_of_gross_wins": 0.3668
+    }
+  },
+  "top_test_pnl": [
+    {
+      "name": "r1_18_vol2.5_loc0__rs__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -934.39,
+        "max_dd": 0.7015,
+        "trades": 40,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.025,
+        "precision_close": 0.0,
+        "wilson": 0.0044,
+        "in_market_days": 116
+      },
+      "test": {
+        "pnl": 19893.76,
+        "max_dd": 0.3076,
+        "trades": 26,
+        "hits": 5,
+        "hits_close": 4,
+        "precision": 0.1923,
+        "precision_close": 0.1538,
+        "wilson": 0.0851,
+        "in_market_days": 68
+      },
+      "full_compact": {
+        "pnl": 17769.66,
+        "max_dd": 0.7357,
+        "trades": 66,
+        "hits": 6,
+        "hits_close": 4,
+        "precision": 0.0909,
+        "precision_close": 0.0606,
+        "wilson": 0.0423,
+        "in_market_days": 184
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__rs__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -934.39,
+        "max_dd": 0.7015,
+        "trades": 40,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.025,
+        "precision_close": 0.0,
+        "wilson": 0.0044,
+        "in_market_days": 116
+      },
+      "test": {
+        "pnl": 19893.76,
+        "max_dd": 0.3076,
+        "trades": 26,
+        "hits": 5,
+        "hits_close": 4,
+        "precision": 0.1923,
+        "precision_close": 0.1538,
+        "wilson": 0.0851,
+        "in_market_days": 68
+      },
+      "full_compact": {
+        "pnl": 17769.66,
+        "max_dd": 0.7357,
+        "trades": 66,
+        "hits": 6,
+        "hits_close": 4,
+        "precision": 0.0909,
+        "precision_close": 0.0606,
+        "wilson": 0.0423,
+        "in_market_days": 184
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__rs__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -934.39,
+        "max_dd": 0.7015,
+        "trades": 40,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.025,
+        "precision_close": 0.0,
+        "wilson": 0.0044,
+        "in_market_days": 116
+      },
+      "test": {
+        "pnl": 19893.76,
+        "max_dd": 0.3076,
+        "trades": 26,
+        "hits": 5,
+        "hits_close": 4,
+        "precision": 0.1923,
+        "precision_close": 0.1538,
+        "wilson": 0.0851,
+        "in_market_days": 68
+      },
+      "full_compact": {
+        "pnl": 17769.66,
+        "max_dd": 0.7357,
+        "trades": 66,
+        "hits": 6,
+        "hits_close": 4,
+        "precision": 0.0909,
+        "precision_close": 0.0606,
+        "wilson": 0.0423,
+        "in_market_days": 184
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__rs__btc0__gapNA__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "rs",
+      "btc": false,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -589.2,
+        "max_dd": 0.6024,
+        "trades": 66,
+        "hits": 2,
+        "hits_close": 1,
+        "precision": 0.0303,
+        "precision_close": 0.0152,
+        "wilson": 0.0083,
+        "in_market_days": 201
+      },
+      "test": {
+        "pnl": 18956.43,
+        "max_dd": 0.6174,
+        "trades": 43,
+        "hits": 5,
+        "hits_close": 5,
+        "precision": 0.1163,
+        "precision_close": 0.1163,
+        "wilson": 0.0507,
+        "in_market_days": 103
+      },
+      "full_compact": {
+        "pnl": 17520.69,
+        "max_dd": 0.7837,
+        "trades": 109,
+        "hits": 7,
+        "hits_close": 6,
+        "precision": 0.0642,
+        "precision_close": 0.055,
+        "wilson": 0.0315,
+        "in_market_days": 304
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__rs__btc0__gap10__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "rs",
+      "btc": false,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -589.2,
+        "max_dd": 0.6024,
+        "trades": 66,
+        "hits": 2,
+        "hits_close": 1,
+        "precision": 0.0303,
+        "precision_close": 0.0152,
+        "wilson": 0.0083,
+        "in_market_days": 201
+      },
+      "test": {
+        "pnl": 18956.43,
+        "max_dd": 0.6174,
+        "trades": 43,
+        "hits": 5,
+        "hits_close": 5,
+        "precision": 0.1163,
+        "precision_close": 0.1163,
+        "wilson": 0.0507,
+        "in_market_days": 103
+      },
+      "full_compact": {
+        "pnl": 17520.69,
+        "max_dd": 0.7837,
+        "trades": 109,
+        "hits": 7,
+        "hits_close": 6,
+        "precision": 0.0642,
+        "precision_close": 0.055,
+        "wilson": 0.0315,
+        "in_market_days": 304
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__rs__btc0__gap25__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "rs",
+      "btc": false,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -589.2,
+        "max_dd": 0.6024,
+        "trades": 66,
+        "hits": 2,
+        "hits_close": 1,
+        "precision": 0.0303,
+        "precision_close": 0.0152,
+        "wilson": 0.0083,
+        "in_market_days": 201
+      },
+      "test": {
+        "pnl": 18956.43,
+        "max_dd": 0.6174,
+        "trades": 43,
+        "hits": 5,
+        "hits_close": 5,
+        "precision": 0.1163,
+        "precision_close": 0.1163,
+        "wilson": 0.0507,
+        "in_market_days": 103
+      },
+      "full_compact": {
+        "pnl": 17520.69,
+        "max_dd": 0.7837,
+        "trades": 109,
+        "hits": 7,
+        "hits_close": 6,
+        "precision": 0.0642,
+        "precision_close": 0.055,
+        "wilson": 0.0315,
+        "in_market_days": 304
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__r1__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -894.63,
+        "max_dd": 0.701,
+        "trades": 40,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.025,
+        "precision_close": 0.0,
+        "wilson": 0.0044,
+        "in_market_days": 116
+      },
+      "test": {
+        "pnl": 18943.2,
+        "max_dd": 0.2889,
+        "trades": 25,
+        "hits": 3,
+        "hits_close": 2,
+        "precision": 0.12,
+        "precision_close": 0.08,
+        "wilson": 0.0417,
+        "in_market_days": 71
+      },
+      "full_compact": {
+        "pnl": 17011.85,
+        "max_dd": 0.7038,
+        "trades": 65,
+        "hits": 4,
+        "hits_close": 2,
+        "precision": 0.0615,
+        "precision_close": 0.0308,
+        "wilson": 0.0242,
+        "in_market_days": 187
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__r1__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -894.63,
+        "max_dd": 0.701,
+        "trades": 40,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.025,
+        "precision_close": 0.0,
+        "wilson": 0.0044,
+        "in_market_days": 116
+      },
+      "test": {
+        "pnl": 18943.2,
+        "max_dd": 0.2889,
+        "trades": 25,
+        "hits": 3,
+        "hits_close": 2,
+        "precision": 0.12,
+        "precision_close": 0.08,
+        "wilson": 0.0417,
+        "in_market_days": 71
+      },
+      "full_compact": {
+        "pnl": 17011.85,
+        "max_dd": 0.7038,
+        "trades": 65,
+        "hits": 4,
+        "hits_close": 2,
+        "precision": 0.0615,
+        "precision_close": 0.0308,
+        "wilson": 0.0242,
+        "in_market_days": 187
+      }
+    },
+    {
+      "name": "r1_18_vol2.5_loc0__r1__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_18_vol2.5_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -894.63,
+        "max_dd": 0.701,
+        "trades": 40,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.025,
+        "precision_close": 0.0,
+        "wilson": 0.0044,
+        "in_market_days": 116
+      },
+      "test": {
+        "pnl": 18943.2,
+        "max_dd": 0.2889,
+        "trades": 25,
+        "hits": 3,
+        "hits_close": 2,
+        "precision": 0.12,
+        "precision_close": 0.08,
+        "wilson": 0.0417,
+        "in_market_days": 71
+      },
+      "full_compact": {
+        "pnl": 17011.85,
+        "max_dd": 0.7038,
+        "trades": 65,
+        "hits": 4,
+        "hits_close": 2,
+        "precision": 0.0615,
+        "precision_close": 0.0308,
+        "wilson": 0.0242,
+        "in_market_days": 187
+      }
+    },
+    {
+      "name": "r1_18_vol1.5_loc0__r1__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_18_vol1.5_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -1390.35,
+        "max_dd": 0.828,
+        "trades": 42,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0238,
+        "precision_close": 0.0,
+        "wilson": 0.0042,
+        "in_market_days": 122
+      },
+      "test": {
+        "pnl": 18766.16,
+        "max_dd": 0.3042,
+        "trades": 28,
+        "hits": 3,
+        "hits_close": 2,
+        "precision": 0.1071,
+        "precision_close": 0.0714,
+        "wilson": 0.0371,
+        "in_market_days": 75
+      },
+      "full_compact": {
+        "pnl": 12895.3,
+        "max_dd": 0.828,
+        "trades": 70,
+        "hits": 4,
+        "hits_close": 2,
+        "precision": 0.0571,
+        "precision_close": 0.0286,
+        "wilson": 0.0224,
+        "in_market_days": 197
+      }
+    },
+    {
+      "name": "r1_18_vol1.5_loc0__r1__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_18_vol1.5_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -1390.35,
+        "max_dd": 0.828,
+        "trades": 42,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0238,
+        "precision_close": 0.0,
+        "wilson": 0.0042,
+        "in_market_days": 122
+      },
+      "test": {
+        "pnl": 18766.16,
+        "max_dd": 0.3042,
+        "trades": 28,
+        "hits": 3,
+        "hits_close": 2,
+        "precision": 0.1071,
+        "precision_close": 0.0714,
+        "wilson": 0.0371,
+        "in_market_days": 75
+      },
+      "full_compact": {
+        "pnl": 12895.3,
+        "max_dd": 0.828,
+        "trades": 70,
+        "hits": 4,
+        "hits_close": 2,
+        "precision": 0.0571,
+        "precision_close": 0.0286,
+        "wilson": 0.0224,
+        "in_market_days": 197
+      }
+    },
+    {
+      "name": "r1_18_vol1.5_loc0__r1__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_18_vol1.5_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -1390.35,
+        "max_dd": 0.828,
+        "trades": 42,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0238,
+        "precision_close": 0.0,
+        "wilson": 0.0042,
+        "in_market_days": 122
+      },
+      "test": {
+        "pnl": 18766.16,
+        "max_dd": 0.3042,
+        "trades": 28,
+        "hits": 3,
+        "hits_close": 2,
+        "precision": 0.1071,
+        "precision_close": 0.0714,
+        "wilson": 0.0371,
+        "in_market_days": 75
+      },
+      "full_compact": {
+        "pnl": 12895.3,
+        "max_dd": 0.828,
+        "trades": 70,
+        "hits": 4,
+        "hits_close": 2,
+        "precision": 0.0571,
+        "precision_close": 0.0286,
+        "wilson": 0.0224,
+        "in_market_days": 197
+      }
+    },
+    {
+      "name": "r1_18_vol1.5_loc0__rs__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_18_vol1.5_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -1036.47,
+        "max_dd": 0.6809,
+        "trades": 41,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0244,
+        "precision_close": 0.0,
+        "wilson": 0.0043,
+        "in_market_days": 125
+      },
+      "test": {
+        "pnl": 18423.87,
+        "max_dd": 0.3196,
+        "trades": 29,
+        "hits": 4,
+        "hits_close": 3,
+        "precision": 0.1379,
+        "precision_close": 0.1034,
+        "wilson": 0.055,
+        "in_market_days": 73
+      },
+      "full_compact": {
+        "pnl": 15163.85,
+        "max_dd": 0.713,
+        "trades": 70,
+        "hits": 5,
+        "hits_close": 3,
+        "precision": 0.0714,
+        "precision_close": 0.0429,
+        "wilson": 0.0309,
+        "in_market_days": 198
+      }
+    },
+    {
+      "name": "r1_18_vol1.5_loc0__rs__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_18_vol1.5_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -1036.47,
+        "max_dd": 0.6809,
+        "trades": 41,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0244,
+        "precision_close": 0.0,
+        "wilson": 0.0043,
+        "in_market_days": 125
+      },
+      "test": {
+        "pnl": 18423.87,
+        "max_dd": 0.3196,
+        "trades": 29,
+        "hits": 4,
+        "hits_close": 3,
+        "precision": 0.1379,
+        "precision_close": 0.1034,
+        "wilson": 0.055,
+        "in_market_days": 73
+      },
+      "full_compact": {
+        "pnl": 15163.85,
+        "max_dd": 0.713,
+        "trades": 70,
+        "hits": 5,
+        "hits_close": 3,
+        "precision": 0.0714,
+        "precision_close": 0.0429,
+        "wilson": 0.0309,
+        "in_market_days": 198
+      }
+    },
+    {
+      "name": "r1_18_vol1.5_loc0__rs__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_18_vol1.5_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -1036.47,
+        "max_dd": 0.6809,
+        "trades": 41,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0244,
+        "precision_close": 0.0,
+        "wilson": 0.0043,
+        "in_market_days": 125
+      },
+      "test": {
+        "pnl": 18423.87,
+        "max_dd": 0.3196,
+        "trades": 29,
+        "hits": 4,
+        "hits_close": 3,
+        "precision": 0.1379,
+        "precision_close": 0.1034,
+        "wilson": 0.055,
+        "in_market_days": 73
+      },
+      "full_compact": {
+        "pnl": 15163.85,
+        "max_dd": 0.713,
+        "trades": 70,
+        "hits": 5,
+        "hits_close": 3,
+        "precision": 0.0714,
+        "precision_close": 0.0429,
+        "wilson": 0.0309,
+        "in_market_days": 198
+      }
+    }
+  ],
+  "top_test_precision": [
+    {
+      "name": "r1_35_vol4.0_loc0__r1__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__r1__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__r1__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__r1vol__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "r1vol",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__r1vol__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "r1vol",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__r1vol__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "r1vol",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__rs__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__rs__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__rs__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "rs",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__vol__btc1__gapNA__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "vol",
+      "btc": true,
+      "gap": null,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__vol__btc1__gap10__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "vol",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "r1_35_vol4.0_loc0__vol__btc1__gap25__trail30_hs15_d4",
+      "gate": "r1_35_vol4.0_loc0",
+      "score": "vol",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "trail30_hs15_d4",
+      "train": {
+        "pnl": -287.31,
+        "max_dd": 0.5376,
+        "trades": 17,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.0588,
+        "precision_close": 0.0,
+        "wilson": 0.0105,
+        "in_market_days": 35
+      },
+      "test": {
+        "pnl": -26.46,
+        "max_dd": 0.6651,
+        "trades": 14,
+        "hits": 5,
+        "hits_close": 2,
+        "precision": 0.3571,
+        "precision_close": 0.1429,
+        "wilson": 0.1634,
+        "in_market_days": 12
+      },
+      "full_compact": {
+        "pnl": -309.3,
+        "max_dd": 0.8444,
+        "trades": 31,
+        "hits": 6,
+        "hits_close": 2,
+        "precision": 0.1935,
+        "precision_close": 0.0645,
+        "wilson": 0.0919,
+        "in_market_days": 47
+      }
+    },
+    {
+      "name": "climax_vol5_r1_15__r1__btc1__gapNA__tp100_hs20_d2",
+      "gate": "climax_vol5_r1_15",
+      "score": "r1",
+      "btc": true,
+      "gap": null,
+      "exit": "tp100_hs20_d2",
+      "train": {
+        "pnl": 566.02,
+        "max_dd": 0.5749,
+        "trades": 20,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.05,
+        "precision_close": 0.0,
+        "wilson": 0.0089,
+        "in_market_days": 39
+      },
+      "test": {
+        "pnl": 5407.22,
+        "max_dd": 0.1514,
+        "trades": 12,
+        "hits": 4,
+        "hits_close": 3,
+        "precision": 0.3333,
+        "precision_close": 0.25,
+        "wilson": 0.1381,
+        "in_market_days": 17
+      },
+      "full_compact": {
+        "pnl": 5979.69,
+        "max_dd": 0.5749,
+        "trades": 32,
+        "hits": 5,
+        "hits_close": 3,
+        "precision": 0.1562,
+        "precision_close": 0.0938,
+        "wilson": 0.0686,
+        "in_market_days": 56
+      }
+    },
+    {
+      "name": "climax_vol5_r1_15__r1__btc1__gap10__tp100_hs20_d2",
+      "gate": "climax_vol5_r1_15",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.1,
+      "exit": "tp100_hs20_d2",
+      "train": {
+        "pnl": 566.02,
+        "max_dd": 0.5749,
+        "trades": 20,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.05,
+        "precision_close": 0.0,
+        "wilson": 0.0089,
+        "in_market_days": 39
+      },
+      "test": {
+        "pnl": 5407.22,
+        "max_dd": 0.1514,
+        "trades": 12,
+        "hits": 4,
+        "hits_close": 3,
+        "precision": 0.3333,
+        "precision_close": 0.25,
+        "wilson": 0.1381,
+        "in_market_days": 17
+      },
+      "full_compact": {
+        "pnl": 5979.69,
+        "max_dd": 0.5749,
+        "trades": 32,
+        "hits": 5,
+        "hits_close": 3,
+        "precision": 0.1562,
+        "precision_close": 0.0938,
+        "wilson": 0.0686,
+        "in_market_days": 56
+      }
+    },
+    {
+      "name": "climax_vol5_r1_15__r1__btc1__gap25__tp100_hs20_d2",
+      "gate": "climax_vol5_r1_15",
+      "score": "r1",
+      "btc": true,
+      "gap": 0.25,
+      "exit": "tp100_hs20_d2",
+      "train": {
+        "pnl": 566.02,
+        "max_dd": 0.5749,
+        "trades": 20,
+        "hits": 1,
+        "hits_close": 0,
+        "precision": 0.05,
+        "precision_close": 0.0,
+        "wilson": 0.0089,
+        "in_market_days": 39
+      },
+      "test": {
+        "pnl": 5407.22,
+        "max_dd": 0.1514,
+        "trades": 12,
+        "hits": 4,
+        "hits_close": 3,
+        "precision": 0.3333,
+        "precision_close": 0.25,
+        "wilson": 0.1381,
+        "in_market_days": 17
+      },
+      "full_compact": {
+        "pnl": 5979.69,
+        "max_dd": 0.5749,
+        "trades": 32,
+        "hits": 5,
+        "hits_close": 3,
+        "precision": 0.1562,
+        "precision_close": 0.0938,
+        "wilson": 0.0686,
+        "in_market_days": 56
+      }
+    }
+  ],
+  "note": "Walk-forward accuracy = hoogste train-Wilson op packs met train-PnL>0, \u22653 hits en \u226512 trades. Walk-forward PnL = hoogste train-PnL met \u226512 trades en train-DD\u226470%. Best test / best full zijn de maxima van de grid (zoekmaxima, geen schone keuze). Best full met train-PnL>0 is het hoogste full-pad dat in-sample ook geld verdiende."
+}

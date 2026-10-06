@@ -2566,23 +2566,20 @@ class MomentumDeskManager:
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
-        """Fresh marks every poll; inventory/cash reconcile is throttled for 1s UI."""
+        """Marks, inventory, and venue EUR on every dashboard poll."""
         if self._runner is not None:
             try:
                 await self._runner.refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("momentum desk: mark refresh for status failed")
-            now = time.monotonic()
-            if now - self._last_reconcile_mono >= 5.0:
-                self._last_reconcile_mono = now
-                try:
-                    await self._runner.reconcile_external_inventory()
-                except Exception:  # noqa: BLE001
-                    logger.exception("momentum desk: reconcile for status failed")
-                try:
-                    await self._runner._refresh_cash(force=True)  # noqa: SLF001
-                except Exception:  # noqa: BLE001
-                    logger.exception("momentum desk: cash refresh for status failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: reconcile for status failed")
+            try:
+                await self._runner._refresh_cash(force=True)  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: cash refresh for status failed")
             try:
                 self._runner._sample_equity()  # noqa: SLF001
             except Exception:  # noqa: BLE001
