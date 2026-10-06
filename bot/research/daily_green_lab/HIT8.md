@@ -1,6 +1,6 @@
 # +8% precisie — zoektocht naar 70%
 
-asof `2026-10-06T06:03:26.136411+00:00`  rijen `48668`  bases **80**
+asof `2026-10-06T07:30:46.121288+00:00`  rijen `48668`  bases **80**
 
 Label: hoogste koers binnen de horizon / volgende opening − 1 ≥ +8%.
 Koop op de volgende opening. Features van de slotdag, plus de gap die bij de opening bekend is.
@@ -82,6 +82,18 @@ Hoogste select-precisie per horizon (test niet gebruikt om te kiezen):
 | 5d | `btc_day_down + btc_off + r1<=0.02 + volx>=3.0` | 71.6% (n=81) | 40.4% (n=146, wilson≥32.8%) |
 | 5d | `btc_off + loc20<=0.50 + r1<=0.02 + volx>=3.0` | 72.0% (n=82) | 39.9% (n=163, wilson≥32.7%) |
 | 5d | `btc_day_down + btc_off + loc20<=0.50 + volx>=3.0` | 71.4% (n=84) | 39.8% (n=161, wilson≥32.5%) |
+
+## Hoogste trefzekerheid met positieve PnL
+
+Eén slot, vast boek €2,000, +8% take-profit vóór een −5% stop, anders de horizonsluit. Kosten zoals de TP8-sleeve. Gekozen op de hoogste trefzekerheid in 2025 onder de sleeves die op fit én 2025 groen zijn. 2026 wordt daarna één keer gemeten en alleen getoond als die PnL ook positief is.
+
+**Getoond.** horizon 3d · label `high` · `r3<=0.05 + up_vol>=0.08 + xs10>=0.25`
+
+| Venster | High ≥ +8% | +8% vóór stop | Mediaan trade | Trades | PnL |
+|---|---|---|---|---:|---:|
+| Fit | 68.6% (wilson≥52.0%) | 42.9% | -5.39% | 35 | €+120 |
+| Select 2025 | 74.0% (wilson≥63.3%) | 46.8% | -5.39% | 77 | €+1,182 |
+| Test 2026 | 62.5% (wilson≥52.1%) | 43.2% | -5.39% | 88 | €+375 |
 
 Reproduce:
 

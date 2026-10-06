@@ -37,6 +37,9 @@ TARGET = 0.08
 MIN_N = 80
 MIN_QVOL = 50_000.0
 HARD = 0.05
+BOOK_EUR = 2_000.0
+MIN_FIT_TRADES = 12
+MIN_SEL_TRADES = 20
 
 FEATURES = (
     "r1",
@@ -73,6 +76,7 @@ class Frame:
     y_close: dict[int, np.ndarray]
     y_tp: dict[int, np.ndarray]
     ret: dict[int, np.ndarray]
+    exit_date: dict[int, np.ndarray]
 
     def col(self, name: str) -> np.ndarray:
         return self.x[:, self.names.index(name)]
@@ -97,10 +101,11 @@ def _clip(v: float, lo: float, hi: float) -> float:
     return float(min(hi, max(lo, v)))
 
 
-def _trade_ret(ser: Series, i: int, horizon: int) -> tuple[bool, float]:
+def _trade_ret(ser: Series, i: int, horizon: int) -> tuple[bool, float, int]:
     """Take-profit at +8% before a 5% stop, else the horizon close.
 
     Entry is the next open plus slippage, matching the TP8 sleeve.
+    The third value is the exit bar index inside ``ser``.
     """
     raw = ser.o[i + 1]
     fill = raw * (1.0 + SLIP)
@@ -118,9 +123,9 @@ def _trade_ret(ser: Series, i: int, horizon: int) -> tuple[bool, float]:
         )
         if got is not None:
             reason, px = got
-            return reason == "take_profit", px / fill - 1.0 - 2.0 * FEE
+            return reason == "take_profit", px / fill - 1.0 - 2.0 * FEE, k
     exit_px = ser.c[last] * (1.0 - SLIP)
-    return False, exit_px / fill - 1.0 - 2.0 * FEE
+    return False, exit_px / fill - 1.0 - 2.0 * FEE, last
 
 
 def build_frame(series: dict[str, Series], *, min_qvol: float = MIN_QVOL) -> Frame:
@@ -153,6 +158,7 @@ def build_frame(series: dict[str, Series], *, min_qvol: float = MIN_QVOL) -> Fra
     y_close = {h: [] for h in HORIZONS}
     y_tp = {h: [] for h in HORIZONS}
     ret = {h: [] for h in HORIZONS}
+    exit_date = {h: [] for h in HORIZONS}
     for base, ser in series.items():
         if base == "BTC":
             continue
@@ -240,11 +246,12 @@ def build_frame(series: dict[str, Series], *, min_qvol: float = MIN_QVOL) -> Fra
             for h in HORIZONS:
                 fwd_h = max(ser.h[i + 1 : i + 1 + h]) / raw_entry - 1.0
                 fwd_c = max(ser.c[i + 1 : i + 1 + h]) / raw_entry - 1.0
-                tp, pnl = _trade_ret(ser, i, h)
+                tp, pnl, exit_i = _trade_ret(ser, i, h)
                 y_up[h].append(fwd_h >= TARGET)
                 y_close[h].append(fwd_c >= TARGET)
                 y_tp[h].append(tp)
                 ret[h].append(pnl)
+                exit_date[h].append(ser.dates[exit_i])
     return Frame(
         date=np.asarray(dates),
         base=np.asarray(bases),
@@ -254,6 +261,7 @@ def build_frame(series: dict[str, Series], *, min_qvol: float = MIN_QVOL) -> Fra
         y_close={h: np.asarray(v, dtype=bool) for h, v in y_close.items()},
         y_tp={h: np.asarray(v, dtype=bool) for h, v in y_tp.items()},
         ret={h: np.asarray(v, dtype=np.float64) for h, v in ret.items()},
+        exit_date={h: np.asarray(v) for h, v in exit_date.items()},
     )
 
 
@@ -429,9 +437,10 @@ def _candidates_for_label(
             )
         )
 
-    add("alle liquide", np.ones(len(y), dtype=bool))
+    strength = frame.col("xs10")
+    add("alle liquide", np.ones(len(y), dtype=bool), rank=strength)
     for name, mask in climb_atoms(y, fit, sel, atoms):
-        add(name, mask, kind="rule")
+        add(name, mask, kind="rule", rank=strength)
 
     x_fit = frame.x[fit]
     y_fit = y[fit]
@@ -446,7 +455,7 @@ def _candidates_for_label(
     fit_scores = proba[fit]
     grid = np.unique(np.quantile(fit_scores, np.linspace(0.50, 0.99, 30)))
     for thr in grid:
-        add(f"score>={float(thr):.3f}", proba >= float(thr), kind="score")
+        add(f"score>={float(thr):.3f}", proba >= float(thr), kind="score", rank=proba)
 
     tree = DecisionTreeClassifier(
         max_depth=3, min_samples_leaf=MIN_N, random_state=0
@@ -455,8 +464,103 @@ def _candidates_for_label(
     leaves = tree.apply(frame.x)
     rules = _leaf_rules(tree, frame.names)
     for leaf, rule in rules.items():
-        add(f"boom: {rule}", leaves == leaf, kind="tree")
+        add(f"boom: {rule}", leaves == leaf, kind="tree", rank=strength)
     return cands
+
+
+def sleeve_on(
+    frame: Frame,
+    cand: Cand,
+    window: np.ndarray,
+    *,
+    book: float = BOOK_EUR,
+) -> dict[str, Any]:
+    """One slot. Each day takes the strongest name, then waits until that exit.
+
+    Hit rate is the share of taken trades whose high reached +8% from the open.
+    PnL refills a fixed book on every trade, with the TP8 costs already in ``ret``.
+    """
+    horizon = cand.horizon
+    rank = cand.extra.get("rank")
+    if rank is None:
+        rank = frame.col("xs10")
+    rank = np.asarray(rank, dtype=np.float64)
+    idx = np.flatnonzero(cand.mask & window)
+    best: dict[str, int] = {}
+    for i in idx:
+        day = str(frame.date[i])
+        prev = best.get(day)
+        if prev is None:
+            best[day] = int(i)
+            continue
+        ri, rp = float(rank[i]), float(rank[prev])
+        if ri > rp or (ri == rp and str(frame.base[i]) < str(frame.base[prev])):
+            best[day] = int(i)
+    taken: list[int] = []
+    exit_on = ""
+    for day in sorted(best):
+        if exit_on and day < exit_on:
+            continue
+        i = best[day]
+        taken.append(i)
+        exit_on = str(frame.exit_date[horizon][i])
+    n = len(taken)
+    if n == 0:
+        return {
+            "n": 0,
+            "k": 0,
+            "p": 0.0,
+            "wilson": 0.0,
+            "p_tp": 0.0,
+            "median": 0.0,
+            "pnl": 0.0,
+            "avg": 0.0,
+        }
+    hits = frame.y_up[horizon][taken]
+    tps = frame.y_tp[horizon][taken]
+    rets = frame.ret[horizon][taken]
+    k = int(hits.sum())
+    return {
+        "n": n,
+        "k": k,
+        "p": k / n,
+        "wilson": _wilson(k, n),
+        "p_tp": float(tps.mean()),
+        "median": float(np.median(rets)),
+        "pnl": float(rets.sum()) * book,
+        "avg": float(rets.mean()),
+    }
+
+
+def pick_green(
+    frame: Frame,
+    cands: list[Cand],
+    fit: np.ndarray,
+    sel: np.ndarray,
+    *,
+    min_fit: int = MIN_FIT_TRADES,
+    min_sel: int = MIN_SEL_TRADES,
+) -> tuple[Cand, dict[str, Any], dict[str, Any]] | None:
+    """Highest select hit rate among sleeves that are green on fit and on select.
+
+    Test trades are not an argument.
+    """
+    best: tuple[Cand, dict[str, Any], dict[str, Any]] | None = None
+    best_key: tuple[float, float, float] | None = None
+    for cand in cands:
+        if cand.name == "alle liquide":
+            continue
+        fit_stats = sleeve_on(frame, cand, fit)
+        sel_stats = sleeve_on(frame, cand, sel)
+        if fit_stats["n"] < min_fit or sel_stats["n"] < min_sel:
+            continue
+        if fit_stats["pnl"] <= 0 or sel_stats["pnl"] <= 0:
+            continue
+        key = (float(sel_stats["p"]), float(sel_stats["wilson"]), float(sel_stats["pnl"]))
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (cand, fit_stats, sel_stats)
+    return best
 
 
 def pick_winner(cands: list[Cand]) -> tuple[Cand | None, bool]:
@@ -510,7 +614,7 @@ def _question(
     fit: np.ndarray,
     sel: np.ndarray,
     test: np.ndarray,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[Cand]]:
     """One precommitted question. Horizon is chosen on select, then test is scored once."""
     cands: list[Cand] = []
     bases: dict[int, dict[str, tuple[int, float, float]]] = {}
@@ -556,21 +660,47 @@ def _question(
             "select": _window_detail(frame, winner, winner.mask & sel),
             "test": _window_detail(frame, winner, winner.mask & test),
         }
-    return row
+    return row, cands
+
+
+def _green_report(
+    frame: Frame,
+    cands: list[Cand],
+    fit: np.ndarray,
+    sel: np.ndarray,
+    test: np.ndarray,
+) -> dict[str, Any]:
+    """Max select hit rate among sleeves green on fit and select. Test PnL is one look."""
+    picked = pick_green(frame, cands, fit, sel)
+    if picked is None:
+        return {"shown": False, "reason": "geen sleeve die op fit én 2025 geld verdient"}
+    cand, fit_stats, sel_stats = picked
+    test_stats = sleeve_on(frame, cand, test)
+    shown = float(test_stats["pnl"]) > 0
+    return {
+        "shown": shown,
+        "reason": "" if shown else "2026-PnL is niet positief",
+        "name": cand.name,
+        "horizon": cand.horizon,
+        "label": cand.label,
+        "book": BOOK_EUR,
+        "fit": fit_stats,
+        "select": sel_stats,
+        "test": test_stats,
+    }
 
 
 def search(frame: Frame) -> dict[str, Any]:
     fit, sel, test = split_masks(frame.date)
-    # Two questions, each with one test look. Horizon is part of the select choice.
-    questions = [
-        _question(frame, label="high", fit=fit, sel=sel, test=test),
-        _question(frame, label="tp", fit=fit, sel=sel, test=test),
-    ]
+    # Two precision questions, plus one sleeve question. Each scores 2026 once.
+    high, high_cands = _question(frame, label="high", fit=fit, sel=sel, test=test)
+    tp, tp_cands = _question(frame, label="tp", fit=fit, sel=sel, test=test)
     return {
         "asof": datetime.now(UTC).isoformat(),
         "rows": int(len(frame.date)),
         "bases": int(len(set(frame.base.tolist()))),
-        "questions": questions,
+        "questions": [high, tp],
+        "green": _green_report(frame, [*high_cands, *tp_cands], fit, sel, test),
     }
 
 
@@ -638,6 +768,42 @@ def to_markdown(payload: dict[str, Any]) -> str:
                 f"{_fmt_pct(row['sel_p'])} (n={row['sel_n']}, wilson≥{_fmt_pct(row['sel_w'])}) |"
             )
         lines.append("")
+    green = payload.get("green") or {}
+    lines.append("## Hoogste trefzekerheid met positieve PnL")
+    lines.append("")
+    lines.append(
+        f"Eén slot, vast boek €{BOOK_EUR:,.0f}, +8% take-profit vóór een −5% stop, "
+        "anders de horizonsluit. Kosten zoals de TP8-sleeve. "
+        "Gekozen op de hoogste trefzekerheid in 2025 onder de sleeves die op fit én 2025 groen zijn. "
+        "2026 wordt daarna één keer gemeten en alleen getoond als die PnL ook positief is."
+    )
+    lines.append("")
+    if not green.get("shown"):
+        lines.append(f"Niet getoond. {green.get('reason', '')}")
+        if green.get("test"):
+            lines.append("")
+            lines.append(
+                f"De gekozen sleeve ({green['horizon']}d, `{green['name']}`) "
+                f"heeft in 2026 PnL €{float(green['test']['pnl']):+,.0f} "
+                f"bij trefzekerheid {_fmt_pct(float(green['test']['p']))} "
+                f"(n={green['test']['n']})."
+            )
+        lines.append("")
+    else:
+        lines.append(
+            f"**Getoond.** horizon {green['horizon']}d · label `{green['label']}` · `{green['name']}`"
+        )
+        lines.append("")
+        lines.append("| Venster | High ≥ +8% | +8% vóór stop | Mediaan trade | Trades | PnL |")
+        lines.append("|---|---|---|---|---:|---:|")
+        for key, title in (("fit", "Fit"), ("select", "Select 2025"), ("test", "Test 2026")):
+            d = green[key]
+            lines.append(
+                f"| {title} | {_fmt_pct(float(d['p']))} (wilson≥{_fmt_pct(float(d['wilson']))}) | "
+                f"{_fmt_pct(float(d['p_tp']))} | {float(d['median']) * 100:+.2f}% | "
+                f"{d['n']} | €{float(d['pnl']):+,.0f} |"
+            )
+        lines.append("")
     lines.extend(
         [
             "Reproduce:",
@@ -672,6 +838,11 @@ def main() -> None:
             f"{q['label']} claimed={q['claimed_on_select']} h={w.get('horizon', '-')} "
             f"rule={w.get('name', '-')} test_p={test.get('p_up', 0):.3f} n={test.get('n', 0)}"
         )
+    green = payload.get("green") or {}
+    print(
+        f"green shown={green.get('shown')} reason={green.get('reason', '')} "
+        f"h={green.get('horizon', '-')} rule={green.get('name', '-')}"
+    )
 
 
 if __name__ == "__main__":
