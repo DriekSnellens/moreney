@@ -447,6 +447,85 @@ def test_decision_cash_live_uses_full_venue_not_book(tmp_path):
     assert r.cash_eur == 17_976.95
 
 
+def test_decision_cash_uses_free_eur_not_total(tmp_path):
+    """A locked quote must not be spent: sizing reads free EUR, not the total."""
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    class Gw:
+        async def quote_balance_eur(self):
+            return 12_628.10
+
+        async def quote_free_eur(self):
+            return 9_518.75
+
+    r = BtcRsClipPaperRunner(
+        ClipConfig(book_eur=10_000.0),
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=False,
+        venues=("bitvavo",),
+        gateways={"bitvavo": Gw()},
+        reserved_quote_eur=0.0,
+    )
+    r.cash_eur = 12_628.10
+    cash = asyncio.run(r._decision_cash())
+    assert cash == 9_518.75
+    assert r.cash_eur == 9_518.75
+
+
+def test_live_buy_fits_inside_free_eur(tmp_path):
+    """Ordering the whole free balance must leave the taker fee inside that balance."""
+    import asyncio
+
+    from bot.core.venue_fees import venue_taker_fee
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner, buy_notional_that_fits
+    from bot.live.momentum_runner import OrderState
+
+    class Gw:
+        def __init__(self) -> None:
+            self.placed: list[dict] = []
+
+        async def best_bid_ask(self, symbol):
+            return 2.40, 2.41
+
+        async def place_limit(self, symbol, side, qty, price, *, post_only):
+            self.placed.append(
+                {"symbol": symbol, "side": side, "qty": qty, "price": price, "post_only": post_only}
+            )
+            return OrderState("o1", "closed", qty, price, qty * price * 0.0025)
+
+        async def fetch_order(self, order_id, symbol):
+            p = self.placed[-1]
+            return OrderState("o1", "closed", p["qty"], p["price"], 0.0)
+
+        async def cancel_order(self, order_id, symbol):
+            return await self.fetch_order(order_id, symbol)
+
+    async def go() -> None:
+        gw = Gw()
+        r = BtcRsClipPaperRunner(
+            ClipConfig(book_eur=10_000.0),
+            state_path=str(tmp_path / "s.json"),
+            ledger_path=str(tmp_path / "l.jsonl"),
+            dry_run=False,
+            venues=("bitvavo",),
+            gateways={"bitvavo": gw},
+        )
+        free = 9_518.75
+        r.cash_eur = free
+        fee = float(venue_taker_fee("bitvavo"))
+        pos = await r._open_lot("NEAR", free, 2.41, "alt", ["excess=0.050"])
+        assert pos is not None
+        assert gw.placed and gw.placed[0]["side"] == "buy"
+        locked = gw.placed[0]["qty"] * gw.placed[0]["price"]
+        assert locked <= buy_notional_that_fits(free, fee) + 1e-6
+        assert locked * (1.0 + fee) <= free
+
+    asyncio.run(go())
+
+
 def test_decision_cash_paper_still_caps_to_ledger(tmp_path):
     import asyncio
 

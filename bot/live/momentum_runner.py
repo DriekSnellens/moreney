@@ -162,6 +162,14 @@ class LiveGateway:
                 return float(bal.total)
         return 0.0
 
+    async def quote_free_eur(self) -> float | None:
+        """EUR the venue will let a new order spend (excludes locked quote)."""
+        snap = await self._client(trading=False).get_balances()
+        for bal in snap.balances:
+            if str(bal.asset).upper() == "EUR":
+                return float(bal.free)
+        return 0.0
+
     async def account_history_items(self) -> list[dict[str, Any]]:
         """Recent Bitvavo account history (buys and sells), newest page."""
         try:
