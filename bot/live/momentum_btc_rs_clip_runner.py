@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from bot.core.config import Settings, get_settings
+from bot.core.venue_fees import venue_taker_fee
 from bot.live.external_roundtrip import (
     booked_exit_qty,
     ledger_exit_net_eur,
@@ -42,8 +43,22 @@ logger = logging.getLogger("bot.live.momentum_btc_rs_clip_runner")
 
 _MIN_ORDER_EUR = 5.0
 _TAKER_CROSS = 0.002
+# Leaves a little under the fee-adjusted free balance so price rounding
+# cannot push the locked quote over what the venue will accept.
+_BUY_BALANCE_BUFFER = 0.995
 _EQUITY_CURVE_MAX = 2016
 _EQUITY_CURVE_MIN_GAP_SEC = 5.0
+
+
+def buy_notional_that_fits(cash_eur: float, fee_rate: float) -> float:
+    """Largest limit notional whose quote lock plus taker fee stays inside cash.
+
+    A buy sized to the full free balance is rejected: the venue locks
+    ``qty * limit`` and bills the fee from the same EUR.
+    """
+    cash = max(0.0, float(cash_eur))
+    rate = max(0.0, float(fee_rate))
+    return cash / (1.0 + rate) * _BUY_BALANCE_BUFFER
 
 
 @dataclass
@@ -691,12 +706,22 @@ class BtcRsClipPaperRunner:
         self._save_state()
         return booked
 
+    def _live_buy_fee_rate(self) -> float:
+        """One-way rate reserved so the order plus the venue fee fits in free EUR."""
+        model = max(0.0, float(self.cfg.fee_rt) / 2.0)
+        venue = float(venue_taker_fee(self._primary_venue()))
+        return max(model, venue)
+
     async def _venue_quote_eur(self) -> float | None:
+        """Free EUR a new order can spend. Falls back to total when free is unknown."""
         gw = self._primary_gw()
-        if self.dry_run or gw is None or not hasattr(gw, "quote_balance_eur"):
+        if self.dry_run or gw is None:
+            return None
+        fetch = getattr(gw, "quote_free_eur", None) or getattr(gw, "quote_balance_eur", None)
+        if fetch is None:
             return None
         try:
-            raw = await gw.quote_balance_eur()
+            raw = await fetch()
         except Exception as exc:  # noqa: BLE001
             logger.warning("clip quote balance failed: %s", exc)
             return None
@@ -1027,6 +1052,19 @@ class BtcRsClipPaperRunner:
                 }
             )
             return pos
+        asked = notional
+        notional = min(notional, buy_notional_that_fits(self.cash_eur, self._live_buy_fee_rate()))
+        if notional + 1e-9 < asked:
+            logger.info(
+                "clip buy %s sized to free EUR %.2f (asked %.2f, cash %.2f)",
+                base,
+                notional,
+                asked,
+                self.cash_eur,
+            )
+        if notional < self.cfg.min_notional_eur:
+            logger.warning("clip buy skipped %s (free EUR %.2f too small)", base, self.cash_eur)
+            return None
         fill = await self._fill(base, "buy", notional_eur=notional)
         if fill is None or fill.qty <= 0:
             logger.warning("clip buy skipped %s (no fill)", base)
