@@ -1055,7 +1055,7 @@ async def login_submit(
 @app.get("/logout")
 async def logout() -> Response:
     response = RedirectResponse(url="/login", status_code=303)
-    clear_session_cookie(response)
+    clear_session_cookie(response, get_settings())
     return response
 
 

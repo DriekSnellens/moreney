@@ -279,6 +279,9 @@ class Settings(BaseSettings):
     dashboard_basic_auth_username: str = "moreney"
     dashboard_basic_auth_password: SecretStr | None = None
     dashboard_session_secret: SecretStr | None = None
+    # Separate hosts that share a registrable domain still share cookies.
+    # Each public account sets its own name so logins do not overwrite each other.
+    dashboard_cookie_name: str = "moreney_dash"
 
     # --- Global opportunity engine (multi-market architecture) ---
     global_opportunity_engine_enabled: bool = True
