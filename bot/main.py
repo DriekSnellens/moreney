@@ -162,6 +162,27 @@ def reset_risk_singletons() -> None:
     reset_micro_session_manager()
 
 
+def live_operator_redirect(
+    settings: Settings,
+    *,
+    momentum_running: bool,
+    micro_running: bool,
+) -> str | None:
+    """Where / should send the operator, or None to render the legacy page.
+
+    The momentum page is the BTC+RS weekly book. A stopped maker session keeps
+    that page as home when the 15m desk is running, or when this account sets
+    DASHBOARD_MOMENTUM_HOME. The legacy maker page stays at /live/dashboard/legacy.
+    """
+    if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
+        return "/paper/dashboard"
+    if micro_running:
+        return None
+    if momentum_running or bool(getattr(settings, "dashboard_momentum_home", False)):
+        return "/live/momentum"
+    return None
+
+
 class DashboardLoginRedirect(Exception):
     """Raised when an HTML dashboard request needs the login page."""
 
@@ -1065,14 +1086,13 @@ async def logout() -> Response:
 async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLResponse | RedirectResponse:
     """Live operator dashboard; paper lab instances redirect to the simple lab UI."""
     settings = get_settings()
-    if settings.execution_mode == ExecutionMode.PAPER and settings.paper_trading_enabled:
-        return RedirectResponse(url="/paper/dashboard", status_code=303)
-    # The momentum desk owns the operator view while it runs and the legacy
-    # maker desk is stopped; the old page stays reachable at /live/dashboard/legacy.
-    if get_momentum_desk_manager().running() and not bool(
-        get_micro_session_manager().status().get("running")
-    ):
-        return RedirectResponse(url="/live/momentum", status_code=303)
+    target = live_operator_redirect(
+        settings,
+        momentum_running=get_momentum_desk_manager().running(),
+        micro_running=bool(get_micro_session_manager().status().get("running")),
+    )
+    if target:
+        return RedirectResponse(url=target, status_code=303)
     return render_live_dashboard(await _live_dashboard_payload())
 
 

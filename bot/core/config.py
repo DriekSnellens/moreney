@@ -282,6 +282,8 @@ class Settings(BaseSettings):
     # Separate hosts that share a registrable domain still share cookies.
     # Each public account sets its own name so logins do not overwrite each other.
     dashboard_cookie_name: str = "moreney_dash"
+    # Open / on the momentum page (BTC+RS weekly clip) when the 15m desk is stopped.
+    dashboard_momentum_home: bool = False
 
     # --- Global opportunity engine (multi-market architecture) ---
     global_opportunity_engine_enabled: bool = True
@@ -857,6 +859,9 @@ class Settings(BaseSettings):
     live_micro_long_hold_bases: str = ""
     # Durable trail/resting/session counters across micro session restarts.
     live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
+    # Empty uses the shared default. Each live account sets its own file so a
+    # restart cannot resume another account's maker session.
+    live_micro_session_status_path: str = ""
     # OKX: prefer deploying free EUR into these liquid bases (not Bitvavo max-base bags).
     live_micro_okx_deploy_bases: str = "BTC,ADA,NEAR,DOT,XRP,LINK,ATOM"
     # Prefer these dual-liquid bases when ranking NET-passing emits (comma-separated).

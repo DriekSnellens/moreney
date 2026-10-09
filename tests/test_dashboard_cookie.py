@@ -1,8 +1,10 @@
-"""Per-account dashboard session cookies."""
+"""Per-account dashboard session cookies and home routing."""
 
 from starlette.responses import Response
 
 from bot.core.config import Settings
+from bot.core.enums import ExecutionMode
+from bot.main import live_operator_redirect
 from bot.paper.auth import (
     COOKIE_NAME,
     clear_session_cookie,
@@ -34,3 +36,26 @@ def test_account_cookie_name_is_set_and_cleared() -> None:
     cleared = Response()
     clear_session_cookie(cleared, settings)
     assert cleared.headers["set-cookie"].startswith("moreney_dash_peter=")
+
+
+def test_momentum_home_opens_weekly_rs_page() -> None:
+    home = _settings(
+        execution_mode=ExecutionMode.LIVE,
+        paper_trading_enabled=False,
+        dashboard_momentum_home=True,
+    )
+    assert (
+        live_operator_redirect(home, momentum_running=False, micro_running=False)
+        == "/live/momentum"
+    )
+    assert live_operator_redirect(home, momentum_running=False, micro_running=True) is None
+    legacy = _settings(
+        execution_mode=ExecutionMode.LIVE,
+        paper_trading_enabled=False,
+        dashboard_momentum_home=False,
+    )
+    assert live_operator_redirect(legacy, momentum_running=False, micro_running=False) is None
+    assert (
+        live_operator_redirect(legacy, momentum_running=True, micro_running=False)
+        == "/live/momentum"
+    )
