@@ -1,8 +1,9 @@
-"""MoonShot — fixed-book daily-green sleeve beside residual/clip.
+"""MoonShot — fixed-book sleeve beside residual/clip.
 
-Pack ``daily_brk20_day`` (walk-forward dual IS+OOS winner):
-  20d breakout on the ~80-name liquid pool, trail 12%, hard-stop 5%,
-  time≤5d, sizing capped at book_eur. Dashboard title is MoonShot.
+Pack ``news_momo``: an AlphaI bullish name can be bought while the live day
+is still inside the entry band, without waiting for a 20d breakout. A fresh
+20d breakout still qualifies. A name that is only hot does not. Trail 10%,
+hard-stop 5%, time≤3d, sizing capped at book_eur. Dashboard title is MoonShot.
 """
 
 from __future__ import annotations
@@ -48,14 +49,21 @@ def moonshot_config_from_settings(settings: Settings | None = None):
     book = float(getattr(settings, "momentum_moonshot_clip_book_eur", 2_000.0) or 2_000.0)
     base = config_from_settings(settings)
     cfg = daily_green_config(replace(base, book_eur=book))
-    # Buy the first pierce of the 20d high. A day that is already +8%,
-    # or a price more than 3% through that high, is the move itself.
+    # News can enter a name that is already up, up to +12% on the day.
+    # The fresh 20d breakout still refuses a cross that is already +8%
+    # or more than 3% through the high.
     return replace(
         cfg,
-        entry_mode="brk20_now",
+        entry_mode="news_momo",
         entry_scan_sec=300.0,
+        alt_trail_pct=0.10,
+        hard_stop_pct=0.05,
+        time_max_days=3,
         max_entry_day_ret=0.08,
         max_break_extension=0.03,
+        news_min_day_ret=0.02,
+        news_max_day_ret=0.12,
+        news_score_boost=0.03,
     )
 
 
@@ -82,7 +90,7 @@ class MoonshotClipDeskManager:
             "dry_run": not allow_live,
             "paper_only": not allow_live,
             "allow_live": allow_live,
-            "pack": "brk20_now",
+            "pack": "news_momo",
             "title": "MoonShot",
         }
         if self._runner is not None:
@@ -90,7 +98,7 @@ class MoonshotClipDeskManager:
             st.update(base)
             st["allow_live"] = allow_live and not self._runner.dry_run
             st["paper_only"] = self._runner.dry_run
-            st["pack"] = "brk20_now"
+            st["pack"] = "news_momo"
             return st
         if enabled:
             cfg = moonshot_config_from_settings(settings)
@@ -253,7 +261,7 @@ class MoonshotClipDeskManager:
             reserved_qty=reserved_qty,
             pending_pack="",
         )
-        self._runner.pack_mode = "brk20_now"
+        self._runner.pack_mode = "news_momo"
         self._runner.pin_cash_to_book = True
         # Fresh sleeve: seed cash to fixed book if empty state.
         if not self._runner.positions and self._runner.cash_eur <= 0:
@@ -276,7 +284,7 @@ class MoonshotClipDeskManager:
             dry_run=dry_run,
             paper_only=dry_run,
             allow_live=not dry_run,
-            pack="brk20_now",
+            pack="news_momo",
             book_eur=cfg.book_eur,
         )
         return {"ok": True, "started": True, "status": self.status()}
@@ -299,7 +307,7 @@ class MoonshotClipDeskManager:
                 "./data/momentum_moonshot_clip_state.json",
             )
         )
-        _write_flag(state_path, running=False, pack="brk20_now")
+        _write_flag(state_path, running=False, pack="news_momo")
         return {"ok": True, "stopped": True, "status": self.status()}
 
     async def resume_if_flagged(self) -> dict[str, Any] | None:

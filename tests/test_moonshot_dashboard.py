@@ -405,6 +405,149 @@ def test_brk20_now_blocks_alphai_avoid_and_marks_a_pick():
     assert "AlphaI" in blocked["caption"]
 
 
+def _news_cfg() -> object:
+    from bot.live.momentum_btc_rs_clip import ClipConfig
+
+    return ClipConfig(
+        universe=("ADA", "SOL"),
+        entry_mode="news_momo",
+        sma_n=20,
+        min_qvol_eur=1.0,
+        book_eur=2_000.0,
+        size_to_book=True,
+        btc_frac=0.0,
+        alt_frac=1.0,
+        cash_when_no_alt=True,
+        excess_floor=0.0,
+        rebalance_days=1,
+        news_min_day_ret=0.02,
+        news_max_day_ret=0.12,
+        news_score_boost=0.03,
+        max_entry_day_ret=0.08,
+        max_break_extension=0.03,
+    )
+
+
+def test_news_momo_buys_an_alphai_pick_that_is_not_a_breakout():
+    from bot.live.momentum_btc_rs_clip import evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    # Yesterday closed under the 20d high. Live print is +4.7%, still not through it.
+    ada = _closed_days(40, 10.0, high=12.0)
+    sol = _closed_days(40, 8.0, high=9.0)
+    out = evaluate_clip(
+        {"BTC": btc, "ADA": ada, "SOL": sol},
+        _news_cfg(),
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=1_717_200_000_000,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"ADA": 10.47, "SOL": 8.5},
+        alphai_picks=("ADA",),
+        alphai_avoid=(),
+    )
+    assert out["want_alt"] == "ADA"
+    assert out["entries"][0]["base"] == "ADA"
+    assert out["entries"][0]["notional_eur"] == pytest.approx(2_000.0, abs=0.01)
+    assert "news" in out["entries"][0]["reasons"]
+    assert "AlphaI" in out["caption"]
+
+
+def test_news_momo_skips_a_hot_name_without_news_or_a_fresh_breakout():
+    from bot.live.momentum_btc_rs_clip import evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    ada = _closed_days(40, 10.0, high=12.0)
+    out = evaluate_clip(
+        {"BTC": btc, "ADA": ada},
+        _news_cfg(),
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"ADA": 10.47},
+        alphai_picks=(),
+        alphai_avoid=(),
+    )
+    assert out["want_alt"] is None
+    assert out["entries"] == []
+
+
+def test_news_momo_skips_an_extended_pick_and_an_avoid():
+    from bot.live.momentum_btc_rs_clip import evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    ada = _closed_days(40, 10.0, high=12.0)
+    sol = _closed_days(40, 8.0, high=9.0)
+    extended = evaluate_clip(
+        {"BTC": btc, "ADA": ada, "SOL": sol},
+        _news_cfg(),
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"ADA": 12.2, "SOL": 8.4},
+        alphai_picks=("ADA", "SOL"),
+        alphai_avoid=("SOL",),
+    )
+    assert extended["want_alt"] is None
+    reasons = {row["base"]: row["reason"] for row in extended["skipped"]}
+    assert reasons["ADA"] == "too_extended"
+    assert reasons["SOL"] == "alphai_avoid"
+
+
+def test_news_momo_holds_through_a_hotter_headline_and_respects_exit_cooldown():
+    from bot.live.momentum_btc_rs_clip import evaluate_clip
+
+    btc = _closed_days(40, 100.0, high=101.0)
+    btc[-1][4] = 110.0
+    ada = _closed_days(40, 10.0, high=12.0)
+    sol = _closed_days(40, 8.0, high=8.0)
+    sol[-8][2] = 8.2
+    cfg = _news_cfg()
+    held = evaluate_clip(
+        {"BTC": btc, "ADA": ada, "SOL": sol},
+        cfg,
+        held={"SOL": "alt"},
+        cash_eur=0.0,
+        deployed_eur=2_000.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, tzinfo=UTC),
+        live_marks={"ADA": 10.47, "SOL": 8.3},
+        alphai_picks=("ADA",),
+    )
+    assert held["want_alt"] == "SOL"
+    assert held["entries"] == []
+    assert held["exits"] == []
+
+    cooling = evaluate_clip(
+        {"BTC": btc, "ADA": ada, "SOL": sol},
+        cfg,
+        held={},
+        cash_eur=2_000.0,
+        deployed_eur=0.0,
+        now_ms=1_717_200_000_000,
+        last_rebalance_ms=0,
+        now=datetime(2024, 6, 1, 12, tzinfo=UTC),
+        live_marks={"ADA": 10.47, "SOL": 8.3},
+        alphai_picks=("ADA",),
+        cooldown_until_ms=1_717_286_400_000,
+    )
+    assert cooling["want_alt"] is None
+    assert cooling["entries"] == []
+    assert "wacht na exit" in cooling["caption"]
+
+
 def test_brk20_now_skips_a_day_already_up_22pct():
     from bot.live.momentum_btc_rs_clip import ClipConfig, evaluate_clip
 

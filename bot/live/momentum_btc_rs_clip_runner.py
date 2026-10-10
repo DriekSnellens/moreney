@@ -85,6 +85,12 @@ def _write_flag(state_path: str, **payload: Any) -> None:
     )
 
 
+def _next_utc_midnight_ms(now_ms: int) -> int:
+    dt = datetime.fromtimestamp(now_ms / 1000.0, tz=UTC)
+    nxt = datetime(dt.year, dt.month, dt.day, tzinfo=UTC) + timedelta(days=1)
+    return int(nxt.timestamp() * 1000)
+
+
 def config_from_settings(settings: Settings | None = None) -> ClipConfig:
     settings = settings or get_settings()
     base = default_config()
@@ -217,6 +223,7 @@ class BtcRsClipPaperRunner:
         self.realized_total_eur = 0.0
         self.day_realized_eur = 0.0
         self.last_rebalance_ms = 0
+        self.cooldown_until_ms = 0
         self.last_decision: dict[str, Any] = {}
         self.alphai_board: dict[str, Any] | None = None
         self._alphai_session = ""
@@ -255,6 +262,7 @@ class BtcRsClipPaperRunner:
         self.realized_total_eur = float(raw.get("realized_total_eur") or 0.0)
         self.day_realized_eur = float(raw.get("day_realized_eur") or 0.0)
         self.last_rebalance_ms = int(raw.get("last_rebalance_ms") or 0)
+        self.cooldown_until_ms = int(raw.get("cooldown_until_ms") or 0)
         if raw.get("pending_pack"):
             self.pending_pack = str(raw.get("pending_pack") or "")
         self.pack_mode = str(raw.get("pack_mode") or self.pack_mode)
@@ -323,6 +331,7 @@ class BtcRsClipPaperRunner:
                     "realized_total_eur": self.realized_total_eur,
                     "day_realized_eur": self.day_realized_eur,
                     "last_rebalance_ms": self.last_rebalance_ms,
+                    "cooldown_until_ms": self.cooldown_until_ms,
                     "pack_mode": self.pack_mode,
                     "pending_pack": self.pending_pack,
                     "positions": [p.to_dict() for p in self.positions],
@@ -1002,6 +1011,8 @@ class BtcRsClipPaperRunner:
                     }
                 )
                 self.last_rebalance_ms = now_ms
+                if str(self.cfg.entry_mode or "") == "news_momo":
+                    self.cooldown_until_ms = _next_utc_midnight_ms(now_ms)
         if applied:
             self._save_state()
         return applied
@@ -1146,14 +1157,17 @@ class BtcRsClipPaperRunner:
 
     def _order_px(self, ohlc: dict[str, list[list[float]]], base: str) -> float | None:
         """Live mark while hunting the first breakout; else the last closed daily."""
-        if str(self.cfg.entry_mode or "") == "brk20_now":
+        if self._live_scan_mode():
             mark = float(self.marks.get(base) or 0.0)
             if mark > 0:
                 return mark
         return self._last_close(ohlc, base)
 
+    def _live_scan_mode(self) -> bool:
+        return str(self.cfg.entry_mode or "") in {"brk20_now", "news_momo"}
+
     def _track_alphai_board(self) -> bool:
-        return str(self.cfg.entry_mode or "") == "brk20_now"
+        return self._live_scan_mode()
 
     def _alphai_minutes(self) -> int:
         return max(5, int(getattr(get_settings(), "alphai_recommendations_interval_minutes", 15) or 15))
@@ -1264,7 +1278,7 @@ class BtcRsClipPaperRunner:
             live_marks: dict[str, float] | None = None
             alphai_picks: frozenset[str] = frozenset()
             alphai_avoid: frozenset[str] = frozenset()
-            if str(self.cfg.entry_mode or "") == "brk20_now":
+            if self._live_scan_mode():
                 await self._refresh_universe_marks()
                 live_marks = dict(self.marks)
                 from bot.live.momentum_btc_rs_clip import fresh_alphai_breakout_sets
@@ -1294,6 +1308,7 @@ class BtcRsClipPaperRunner:
                 live_marks=live_marks,
                 alphai_picks=alphai_picks,
                 alphai_avoid=alphai_avoid,
+                cooldown_until_ms=self.cooldown_until_ms,
             )
             applied: list[dict[str, Any]] = []
             if execute and decision.get("ok"):
@@ -1342,7 +1357,12 @@ class BtcRsClipPaperRunner:
                         applied.append(
                             {"action": "entry", "base": pos.base, "notional_eur": pos.notional_eur}
                         )
-                if decision.get("rebalance_due") or applied:
+                exited = any(row.get("action") == "exit" for row in applied)
+                if exited and str(self.cfg.entry_mode or "") == "news_momo":
+                    self.cooldown_until_ms = _next_utc_midnight_ms(int(now.timestamp() * 1000))
+                # A live scan that finds nothing must not burn the daily clock.
+                # Otherwise the first empty check blocks every later breakout.
+                if applied or (decision.get("rebalance_due") and not self._live_scan_mode()):
                     self.last_rebalance_ms = int(now.timestamp() * 1000)
             self.last_decision = {
                 **decision,

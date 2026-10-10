@@ -243,6 +243,12 @@ def _rank_day(
             if volx < 2.0 or float(r1) < max(0.0, excess_floor):
                 continue
             scored.append((float(r1) * volx, base))
+        elif mode == "day_cap12":
+            # Same-day chase cap used live: buy the leader only while the
+            # closed day is still inside the band the sleeve is willing to enter.
+            if not (0.0 < float(r1) <= 0.12):
+                continue
+            scored.append((float(r1), base))
         elif mode == "alphai1":
             continue
         elif mode == "alphai_top_day":

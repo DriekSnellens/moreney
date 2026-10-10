@@ -154,6 +154,12 @@ class ClipConfig:
     max_entry_day_ret: float = 0.0
     # 0 = off. MoonShot only buys while price is still this close above the 20d high.
     max_break_extension: float = 0.0
+    # news_momo: an AlphaI pick may enter without a 20d breakout while the
+    # live day return sits in this band. Above the cap the move is already
+    # the trade. 0 leaves the mode defaults in ``news_momo_view``.
+    news_min_day_ret: float = 0.02
+    news_max_day_ret: float = 0.12
+    news_score_boost: float = 0.03
 
 
 def residual_full_config(cfg: ClipConfig) -> ClipConfig:
@@ -303,6 +309,9 @@ _BREAKOUT_STATUS = {
     "alphai_avoid": "avoid",
     "short_history": "te korte historie",
     "thin_volume": "te dun volume",
+    "news": "nieuws + momentum",
+    "momo": "momentum",
+    "breakout": "breekt nu",
 }
 
 
@@ -344,6 +353,106 @@ def live_breakout_view(
         "qualifies": reason == "ready",
         "day_ret": live_ret,
         "gap": gap,
+        "kind": "breakout" if reason == "ready" else "",
+        "score": live_ret if reason == "ready" else 0.0,
+    }
+
+
+def news_momo_view(
+    rows: Sequence[Sequence[float]],
+    mark: float,
+    cfg: ClipConfig,
+    *,
+    pick: bool,
+    avoid: bool,
+) -> dict[str, Any]:
+    """News-confirmed momentum, with the fresh 20d breakout as fallback.
+
+    A bullish AlphaI name can be bought while it is already up on the day,
+    as long as the live return is still inside the band. A name that is only
+    hot, with no headline and no fresh breakout, does not qualify: that chase
+    loses on the expand-universe replay.
+    """
+    cl = closes_of(rows)
+    prev_close = float(cl[-1]) if cl else 0.0
+    highs = [float(r[2]) for r in rows if len(r) >= 3 and float(r[2]) > 0]
+    prior_hi = max(highs[-20:]) if len(highs) >= 20 else 0.0
+    gap = mark / prior_hi - 1.0 if mark > 0 and prior_hi > 0 else None
+    if mark <= 0 or prev_close <= 0 or len(cl) < 2:
+        return {
+            "reason": "short_history",
+            "qualifies": False,
+            "day_ret": None,
+            "gap": gap,
+            "kind": "",
+            "score": 0.0,
+        }
+    live_ret = mark / prev_close - 1.0
+    if avoid:
+        return {
+            "reason": "alphai_avoid",
+            "qualifies": False,
+            "day_ret": live_ret,
+            "gap": gap,
+            "kind": "",
+            "score": 0.0,
+        }
+    if quote_vol(rows) < float(cfg.min_qvol_eur or 0.0):
+        return {
+            "reason": "thin_volume",
+            "qualifies": False,
+            "day_ret": live_ret,
+            "gap": gap,
+            "kind": "",
+            "score": 0.0,
+        }
+    hi_cap = float(cfg.news_max_day_ret or 0.0)
+    if hi_cap <= 0:
+        hi_cap = 0.12
+    lo_cap = float(cfg.news_min_day_ret or 0.0)
+    if lo_cap <= 0:
+        lo_cap = 0.02
+    if live_ret > hi_cap:
+        return {
+            "reason": "too_extended",
+            "qualifies": False,
+            "day_ret": live_ret,
+            "gap": gap,
+            "kind": "",
+            "score": 0.0,
+        }
+    if pick and live_ret >= lo_cap:
+        boost = float(cfg.news_score_boost or 0.0)
+        return {
+            "reason": "ready",
+            "qualifies": True,
+            "day_ret": live_ret,
+            "gap": gap,
+            "kind": "news",
+            "score": live_ret + max(0.0, boost),
+        }
+    brk = live_breakout_view(rows, mark, cfg, avoid=False)
+    if brk.get("qualifies"):
+        return {
+            "reason": "ready",
+            "qualifies": True,
+            "day_ret": live_ret,
+            "gap": gap,
+            "kind": "breakout",
+            "score": live_ret,
+        }
+    reason = str(brk.get("reason") or "weak_day")
+    if reason == "ready":
+        reason = "weak_day"
+    if live_ret < lo_cap and reason in {"no_breakout", "already_broken", "weak_day"}:
+        reason = "weak_day" if live_ret <= 0 else reason
+    return {
+        "reason": reason,
+        "qualifies": False,
+        "day_ret": live_ret,
+        "gap": gap,
+        "kind": "",
+        "score": 0.0,
     }
 
 
@@ -514,7 +623,12 @@ def alphai_breakout_board(
     rows_out: list[dict[str, Any]] = []
     for base in picks:
         done = completed_ohlc(ohlc_by_base.get(base) or [], now=instant)
-        geo = live_breakout_view(done, mark_map.get(base, 0.0), cfg, avoid=base in avoid)
+        if str(cfg.entry_mode or "") == "news_momo":
+            geo = news_momo_view(
+                done, mark_map.get(base, 0.0), cfg, pick=True, avoid=base in avoid
+            )
+        else:
+            geo = live_breakout_view(done, mark_map.get(base, 0.0), cfg, avoid=base in avoid)
         reason = str(geo["reason"])
         if geo["qualifies"] and quote_vol(done) < float(cfg.min_qvol_eur or 0.0):
             reason = "thin_volume"
@@ -526,8 +640,9 @@ def alphai_breakout_board(
                 "day_ret": None if geo["day_ret"] is None else round(float(geo["day_ret"]), 4),
                 "gap": None if geo["gap"] is None else round(float(geo["gap"]), 4),
                 "reason": reason,
-                "status": _BREAKOUT_STATUS.get(reason, reason),
-                "qualifies": reason == "ready",
+                "kind": str(geo.get("kind") or ""),
+                "status": _BREAKOUT_STATUS.get(str(geo.get("kind") or "") or reason, reason),
+                "qualifies": bool(geo.get("qualifies")),
             }
         )
     nxt = next_update_at_utc(now=instant, interval_minutes=minutes)
@@ -732,6 +847,7 @@ def evaluate_clip(
     live_marks: Mapping[str, float] | None = None,
     alphai_picks: Collection[str] | None = None,
     alphai_avoid: Collection[str] | None = None,
+    cooldown_until_ms: int = 0,
 ) -> dict[str, Any]:
     """Decide clip longs. ``held`` maps base → role (btc|alt)."""
     now = now or datetime.now(UTC)
@@ -797,7 +913,16 @@ def evaluate_clip(
         rebalance_due = age_due
 
     mode = str(cfg.entry_mode or "weekly_rs").lower()
-    day_modes = {"top_day", "coil_day", "brk20_day", "brk20_now"}
+    day_modes = {"top_day", "coil_day", "brk20_day", "brk20_now", "news_momo"}
+    # Flat news sleeve keeps hunting the same day. A filled exit sets
+    # ``cooldown_until_ms`` so the book does not immediately rebuy.
+    if mode == "news_momo":
+        if held_alt:
+            rebalance_due = False
+        elif int(cooldown_until_ms or 0) > int(now_ms):
+            rebalance_due = False
+        else:
+            rebalance_due = True
     alphai_pick_set = {str(x).upper() for x in (alphai_picks or ())}
     alphai_avoid_set = {str(x).upper() for x in (alphai_avoid or ())}
     marks = {
@@ -912,6 +1037,34 @@ def evaluate_clip(
                     }
                 )
                 continue
+        if mode == "news_momo":
+            view = news_momo_view(
+                rows,
+                marks.get(base, 0.0),
+                cfg,
+                pick=base in alphai_pick_set,
+                avoid=base in alphai_avoid_set,
+            )
+            if not view["qualifies"]:
+                skip = {"base": base, "reason": view["reason"]}
+                if view["day_ret"] is not None:
+                    skip["day_ret"] = round(float(view["day_ret"]), 4)
+                skipped.append(skip)
+                continue
+            ranked.append(
+                {
+                    "base": base,
+                    "excess": float(xs) if xs is not None else 0.0,
+                    "day_ret": float(view["day_ret"] or 0.0),
+                    "qvol": round(qv, 0),
+                    "coil": False,
+                    "brk20": view.get("kind") == "breakout",
+                    "alphai_pick": base in alphai_pick_set,
+                    "kind": view.get("kind") or "",
+                    "score": float(view.get("score") or 0.0),
+                }
+            )
+            continue
         if mode == "brk20_now":
             # First breakout: yesterday's close is still under the 20d high,
             # and the live price is crossing it now. Yesterday's breakout is
@@ -948,7 +1101,12 @@ def evaluate_clip(
         if r3 is not None:
             row["r3"] = round(float(r3), 4)
         ranked.append(row)
-    if mode == "brk20_now":
+    if mode == "news_momo":
+        ranked.sort(
+            key=lambda r: (float(r.get("score") or 0.0), float(r.get("day_ret") or 0.0)),
+            reverse=True,
+        )
+    elif mode == "brk20_now":
         ranked.sort(
             key=lambda r: (
                 float(r.get("day_ret") or 0.0),
@@ -1032,7 +1190,9 @@ def evaluate_clip(
                             else f"excess={float(top.get('excess') or 0):.3f}"
                         ),
                         f"frac={cfg.alt_frac:.2f}",
-                        mode if mode != "weekly_rs" else "weekly_rs",
+                        str(top.get("kind") or mode) if mode == "news_momo" else (
+                            mode if mode != "weekly_rs" else "weekly_rs"
+                        ),
                     ],
                 }
             )
@@ -1096,6 +1256,12 @@ def evaluate_clip(
             gate = "eerste 20d-breakout"
             if want_alt and ranked and ranked[0].get("alphai_pick"):
                 gate += " · AlphaI"
+        elif mode == "news_momo":
+            gate = "nieuws + momentum"
+            if want_alt and ranked and ranked[0].get("kind") == "news":
+                gate += " · AlphaI"
+            elif not want_alt and int(cooldown_until_ms or 0) > int(now_ms):
+                gate += " · wacht na exit"
         elif mode == "brk20_day":
             gate = f"brk20_day+day≥{cfg.excess_floor:.0%}"
         elif mode == "top_day":
