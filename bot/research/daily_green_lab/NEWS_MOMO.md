@@ -17,6 +17,17 @@ Live MoonShot (`news_momo`) therefore does two things only:
 
 A name that is only hot, with no pick and no fresh breakout, is not bought. After a filled exit the sleeve waits until the next UTC day. An empty scan no longer burns that clock.
 
+## Plafond (voorkennis)
+
+Zelfde tape, `2024-06-01` → `2026-10-02`, 854 dagen, quote-volume ≥ €50k. Elke dag de munt die achteraf de beste was, gekocht op de opening. Kapotte prints boven 3× de opening vallen eruit.
+
+| Fill | Gemiddelde | Mediaan | Dagen ≥ +30% | Dagen ≥ +10% |
+|---|---:|---:|---:|---:|
+| Slot / opening | **17.4%** | 13.1% | 13.9% | 65.3% |
+| High / opening (wick) | 29.8% | 21.9% | 34.0% | 90.3% |
+
+30% per dag op de slotkoers ligt boven dit plafond. Een regel zonder voorkennis komt lager uit. De wick haalt gemiddeld bijna 30%, maar dat is de hoogste print van de dag, niet een fill, en alleen als de winnaar aan de opening al vaststond.
+
 ```bash
 .venv/bin/python -m bot.research.daily_green_lab.news_momo_replay
 ```
