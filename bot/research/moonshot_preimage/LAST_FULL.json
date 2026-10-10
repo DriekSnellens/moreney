@@ -1,0 +1,8984 @@
+{
+  "asof": "2026-10-03T15:55:35.753798+00:00",
+  "pack": "daily_coil_day",
+  "spec": "coil_day_t12_h5_hs0_btc1_fl0.02",
+  "book_eur": 1700.0,
+  "candle_dir": "data/ignition_expand_candles",
+  "n_bases": 80,
+  "start": "2024-06-15",
+  "end": "2026-10-02",
+  "summary": {
+    "ok": true,
+    "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+    "pick": "coil_day",
+    "trail_pct": 0.12,
+    "time_max_days": 5,
+    "hard_stop_pct": 0.0,
+    "require_btc_sma": true,
+    "excess_floor": 0.02,
+    "pnl_eur": 1338.06,
+    "avg_day_pnl": 1.59,
+    "median_day_pnl": 0.0,
+    "pct_days_green": 0.2179,
+    "n_days_green": 183,
+    "n_days_red": 280,
+    "n_days": 840,
+    "pct_days_in_market": 0.4226,
+    "n_days_hit_100": 21,
+    "pct_days_hit_100": 0.025,
+    "best_day": 1270.44,
+    "worst_day": -255.44,
+    "max_dd_pct": 0.9332,
+    "n_trades": 216,
+    "score": 787.7215
+  },
+  "windows": {
+    "full": {
+      "start": "2024-06-15",
+      "end": "2026-10-02",
+      "ok": true,
+      "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+      "pick": "coil_day",
+      "trail_pct": 0.12,
+      "time_max_days": 5,
+      "hard_stop_pct": 0.0,
+      "require_btc_sma": true,
+      "excess_floor": 0.02,
+      "pnl_eur": 1338.06,
+      "avg_day_pnl": 1.59,
+      "median_day_pnl": 0.0,
+      "pct_days_green": 0.2179,
+      "n_days_green": 183,
+      "n_days_red": 280,
+      "n_days": 840,
+      "pct_days_in_market": 0.4226,
+      "n_days_hit_100": 21,
+      "pct_days_hit_100": 0.025,
+      "best_day": 1270.44,
+      "worst_day": -255.44,
+      "max_dd_pct": 0.9332,
+      "n_trades": 216,
+      "score": 787.7215
+    },
+    "last_2y": {
+      "start": "2024-10-02",
+      "end": "2026-10-02",
+      "ok": true,
+      "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+      "pick": "coil_day",
+      "trail_pct": 0.12,
+      "time_max_days": 5,
+      "hard_stop_pct": 0.0,
+      "require_btc_sma": true,
+      "excess_floor": 0.02,
+      "pnl_eur": 4087.98,
+      "avg_day_pnl": 5.59,
+      "median_day_pnl": 0.0,
+      "pct_days_green": 0.2285,
+      "n_days_green": 167,
+      "n_days_red": 252,
+      "n_days": 731,
+      "pct_days_in_market": 0.4405,
+      "n_days_hit_100": 29,
+      "pct_days_hit_100": 0.0397,
+      "best_day": 2850.1,
+      "worst_day": -274.64,
+      "max_dd_pct": 0.9124,
+      "n_trades": 194,
+      "score": 829.9072
+    },
+    "last_1y": {
+      "start": "2025-10-02",
+      "end": "2026-10-02",
+      "ok": true,
+      "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+      "pick": "coil_day",
+      "trail_pct": 0.12,
+      "time_max_days": 5,
+      "hard_stop_pct": 0.0,
+      "require_btc_sma": true,
+      "excess_floor": 0.02,
+      "pnl_eur": 8976.18,
+      "avg_day_pnl": 24.52,
+      "median_day_pnl": 0.0,
+      "pct_days_green": 0.2104,
+      "n_days_green": 77,
+      "n_days_red": 108,
+      "n_days": 366,
+      "pct_days_in_market": 0.3907,
+      "n_days_hit_100": 14,
+      "pct_days_hit_100": 0.0383,
+      "best_day": 5658.07,
+      "worst_day": -255.44,
+      "max_dd_pct": 0.6835,
+      "n_trades": 84,
+      "score": 776.2828
+    },
+    "last_6m": {
+      "start": "2026-04-03",
+      "end": "2026-10-02",
+      "ok": true,
+      "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+      "pick": "coil_day",
+      "trail_pct": 0.12,
+      "time_max_days": 5,
+      "hard_stop_pct": 0.0,
+      "require_btc_sma": true,
+      "excess_floor": 0.02,
+      "pnl_eur": 11984.74,
+      "avg_day_pnl": 65.49,
+      "median_day_pnl": 0.0,
+      "pct_days_green": 0.2951,
+      "n_days_green": 54,
+      "n_days_red": 72,
+      "n_days": 183,
+      "pct_days_in_market": 0.5301,
+      "n_days_hit_100": 21,
+      "pct_days_hit_100": 0.1148,
+      "best_day": 6687.77,
+      "worst_day": -306.05,
+      "max_dd_pct": 0.4352,
+      "n_trades": 58,
+      "score": 1133.3448
+    },
+    "last_3m": {
+      "start": "2026-07-04",
+      "end": "2026-10-02",
+      "ok": true,
+      "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+      "pick": "coil_day",
+      "trail_pct": 0.12,
+      "time_max_days": 5,
+      "hard_stop_pct": 0.0,
+      "require_btc_sma": true,
+      "excess_floor": 0.02,
+      "pnl_eur": 13404.66,
+      "avg_day_pnl": 147.3,
+      "median_day_pnl": 0.0,
+      "pct_days_green": 0.3846,
+      "n_days_green": 35,
+      "n_days_red": 39,
+      "n_days": 91,
+      "pct_days_in_market": 0.6154,
+      "n_days_hit_100": 17,
+      "pct_days_hit_100": 0.1868,
+      "best_day": 6687.77,
+      "worst_day": -435.15,
+      "max_dd_pct": 0.285,
+      "n_trades": 36,
+      "score": 1474.1526
+    },
+    "last_6w": {
+      "start": "2026-08-21",
+      "end": "2026-10-02",
+      "ok": true,
+      "name": "coil_day_t12_h5_hs0_btc1_fl0.02",
+      "pick": "coil_day",
+      "trail_pct": 0.12,
+      "time_max_days": 5,
+      "hard_stop_pct": 0.0,
+      "require_btc_sma": true,
+      "excess_floor": 0.02,
+      "pnl_eur": 13452.88,
+      "avg_day_pnl": 312.86,
+      "median_day_pnl": 0.0,
+      "pct_days_green": 0.4884,
+      "n_days_green": 21,
+      "n_days_red": 21,
+      "n_days": 43,
+      "pct_days_in_market": 0.7209,
+      "n_days_hit_100": 13,
+      "pct_days_hit_100": 0.3023,
+      "best_day": 6687.77,
+      "worst_day": -255.44,
+      "max_dd_pct": 0.1493,
+      "n_trades": 22,
+      "score": 1977.5213
+    }
+  },
+  "weeks": {
+    "2024-W24": 52.61,
+    "2024-W25": -223.31,
+    "2024-W26": 0.0,
+    "2024-W27": 0.0,
+    "2024-W28": 0.0,
+    "2024-W29": 107.48,
+    "2024-W30": -266.79,
+    "2024-W31": -341.9,
+    "2024-W32": 0.0,
+    "2024-W33": 0.0,
+    "2024-W34": -20.33,
+    "2024-W35": -68.7,
+    "2024-W36": 0.0,
+    "2024-W37": -71.85,
+    "2024-W38": 216.53,
+    "2024-W39": -115.03,
+    "2024-W40": -71.24,
+    "2024-W41": -46.83,
+    "2024-W42": -58.5,
+    "2024-W43": 226.73,
+    "2024-W44": -248.3,
+    "2024-W45": 250.04,
+    "2024-W46": 400.42,
+    "2024-W47": 376.47,
+    "2024-W48": -231.93,
+    "2024-W49": -343.64,
+    "2024-W50": -212.84,
+    "2024-W51": -263.12,
+    "2024-W52": 42.97,
+    "2024-W53": -40.93,
+    "2025-W00": 76.68,
+    "2025-W01": -73.79,
+    "2025-W02": 73.87,
+    "2025-W03": 22.22,
+    "2025-W04": -143.07,
+    "2025-W05": -106.97,
+    "2025-W06": 0.0,
+    "2025-W07": 0.0,
+    "2025-W08": 0.0,
+    "2025-W09": 0.0,
+    "2025-W10": 0.0,
+    "2025-W11": 0.0,
+    "2025-W12": 0.0,
+    "2025-W13": 0.0,
+    "2025-W14": 0.0,
+    "2025-W15": 0.0,
+    "2025-W16": -23.98,
+    "2025-W17": -62.32,
+    "2025-W18": 116.26,
+    "2025-W19": -108.9,
+    "2025-W20": 6.39,
+    "2025-W21": -93.32,
+    "2025-W22": 16.9,
+    "2025-W23": 146.14,
+    "2025-W24": -34.18,
+    "2025-W25": 0.0,
+    "2025-W26": -32.52,
+    "2025-W27": 53.75,
+    "2025-W28": 63.38,
+    "2025-W29": 140.04,
+    "2025-W30": -181.16,
+    "2025-W31": 1.05,
+    "2025-W32": -145.29,
+    "2025-W33": 19.52,
+    "2025-W34": 0.0,
+    "2025-W35": 0.0,
+    "2025-W36": 30.73,
+    "2025-W37": -40.93,
+    "2025-W38": -65.47,
+    "2025-W39": 42.42,
+    "2025-W40": -95.56,
+    "2025-W41": -10.21,
+    "2025-W42": 0.0,
+    "2025-W43": -63.36,
+    "2025-W44": 0.0,
+    "2025-W45": 0.0,
+    "2025-W46": 0.0,
+    "2025-W47": 0.0,
+    "2025-W48": 0.0,
+    "2025-W49": 0.0,
+    "2025-W50": 0.0,
+    "2025-W51": 0.0,
+    "2025-W52": 0.0,
+    "2026-W00": -5.36,
+    "2026-W01": -17.35,
+    "2026-W02": -0.33,
+    "2026-W03": 21.03,
+    "2026-W04": 0.0,
+    "2026-W05": 0.0,
+    "2026-W06": 0.0,
+    "2026-W07": 0.0,
+    "2026-W08": 0.0,
+    "2026-W09": 0.0,
+    "2026-W10": -25.47,
+    "2026-W11": -46.86,
+    "2026-W12": -17.35,
+    "2026-W13": 24.14,
+    "2026-W14": -3.94,
+    "2026-W15": -5.92,
+    "2026-W16": -1.36,
+    "2026-W17": 6.38,
+    "2026-W18": -0.42,
+    "2026-W19": -29.13,
+    "2026-W20": -36.4,
+    "2026-W21": 3.95,
+    "2026-W22": 0.0,
+    "2026-W23": 0.0,
+    "2026-W24": 0.0,
+    "2026-W25": 0.0,
+    "2026-W26": 0.0,
+    "2026-W27": 0.0,
+    "2026-W28": -10.55,
+    "2026-W29": 0.59,
+    "2026-W30": -5.93,
+    "2026-W31": 5.18,
+    "2026-W32": 21.17,
+    "2026-W33": -12.32,
+    "2026-W34": -5.28,
+    "2026-W35": 240.68,
+    "2026-W36": 1806.51,
+    "2026-W37": 152.72,
+    "2026-W38": 329.48,
+    "2026-W39": 373.83
+  },
+  "months": {
+    "2024-06": -170.7,
+    "2024-07": -299.67,
+    "2024-08": -290.57,
+    "2024-09": -50.34,
+    "2024-10": 9.96,
+    "2024-11": 649.76,
+    "2024-12": -800.43,
+    "2025-01": -42.05,
+    "2025-02": -109.01,
+    "2025-03": 0.0,
+    "2025-04": -34.61,
+    "2025-05": -139.98,
+    "2025-06": 137.58,
+    "2025-07": 79.48,
+    "2025-08": -160.71,
+    "2025-09": -85.42,
+    "2025-10": -116.96,
+    "2025-11": 0.0,
+    "2025-12": 0.0,
+    "2026-01": -2.01,
+    "2026-02": 0.0,
+    "2026-03": -89.68,
+    "2026-04": -8.57,
+    "2026-05": -34.13,
+    "2026-06": 0.0,
+    "2026-07": -16.22,
+    "2026-08": 8.16,
+    "2026-09": 2870.28,
+    "2026-10": 33.86
+  },
+  "quarters": {
+    "2024-Q2": -170.7,
+    "2024-Q3": -640.58,
+    "2024-Q4": -140.71,
+    "2025-Q1": -151.06,
+    "2025-Q2": -37.01,
+    "2025-Q3": -166.65,
+    "2025-Q4": -116.96,
+    "2026-Q1": -91.69,
+    "2026-Q2": -42.7,
+    "2026-Q3": 2862.22,
+    "2026-Q4": 33.86
+  },
+  "week_stats": {
+    "n_weeks": 123,
+    "n_green": 34,
+    "n_red": 48,
+    "pct_green": 0.2764,
+    "avg_week": 10.88,
+    "best_week": 1806.51,
+    "worst_week": -343.64
+  },
+  "top_sells": [
+    {
+      "date": "2026-09-14",
+      "side": "sell",
+      "base": "LSK",
+      "pnl": 1882.1,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-22",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 490.2,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-11-15",
+      "side": "sell",
+      "base": "PEPE",
+      "pnl": 457.49,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-10-02",
+      "side": "sell",
+      "base": "CAP",
+      "pnl": 425.45,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-28",
+      "side": "sell",
+      "base": "ARK",
+      "pnl": 390.49,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-24",
+      "side": "sell",
+      "base": "ATOM",
+      "pnl": 383.06,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-09-23",
+      "side": "sell",
+      "base": "SUI",
+      "pnl": 275.83,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-09-06",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": 241.6,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-08",
+      "side": "sell",
+      "base": "DOGE",
+      "pnl": 169.67,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-06-11",
+      "side": "sell",
+      "base": "FARTCOIN",
+      "pnl": 149.66,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-07-30",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": 126.36,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-11",
+      "side": "sell",
+      "base": "TAO",
+      "pnl": 116.27,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-12-27",
+      "side": "sell",
+      "base": "LPT",
+      "pnl": 110.5,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-07-21",
+      "side": "sell",
+      "base": "PEPE",
+      "pnl": 107.49,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-10-26",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 101.09,
+      "reason": "alt_trail"
+    }
+  ],
+  "worst_sells": [
+    {
+      "date": "2024-12-06",
+      "side": "sell",
+      "base": "VET",
+      "pnl": -261.35,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-16",
+      "side": "sell",
+      "base": "NPC",
+      "pnl": -243.89,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-24",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": -235.82,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-07-25",
+      "side": "sell",
+      "base": "AVAX",
+      "pnl": -207.07,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-27",
+      "side": "sell",
+      "base": "ENJ",
+      "pnl": -201.83,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-08-04",
+      "side": "sell",
+      "base": "CVX",
+      "pnl": -201.55,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-06-18",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": -170.7,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-07-31",
+      "side": "sell",
+      "base": "CVX",
+      "pnl": -151.27,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-08",
+      "side": "sell",
+      "base": "HBAR",
+      "pnl": -134.9,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-09-17",
+      "side": "sell",
+      "base": "SYN",
+      "pnl": -131.72,
+      "reason": "alt_trail"
+    }
+  ],
+  "top_bases": [
+    {
+      "base": "LSK",
+      "n": 2,
+      "pnl": 1901.32
+    },
+    {
+      "base": "RAY",
+      "n": 6,
+      "pnl": 755.39
+    },
+    {
+      "base": "PEPE",
+      "n": 2,
+      "pnl": 564.98
+    },
+    {
+      "base": "CAP",
+      "n": 4,
+      "pnl": 444.86
+    },
+    {
+      "base": "ATOM",
+      "n": 1,
+      "pnl": 383.06
+    },
+    {
+      "base": "ARK",
+      "n": 3,
+      "pnl": 358.84000000000003
+    },
+    {
+      "base": "DOGE",
+      "n": 2,
+      "pnl": 157.39999999999998
+    },
+    {
+      "base": "TAO",
+      "n": 3,
+      "pnl": 125.13
+    },
+    {
+      "base": "LPT",
+      "n": 1,
+      "pnl": 110.5
+    },
+    {
+      "base": "SUI",
+      "n": 3,
+      "pnl": 96.53999999999998
+    },
+    {
+      "base": "UNI",
+      "n": 1,
+      "pnl": 64.15
+    },
+    {
+      "base": "VIRTUAL",
+      "n": 2,
+      "pnl": 56.769999999999996
+    },
+    {
+      "base": "BNB",
+      "n": 1,
+      "pnl": 42.41
+    },
+    {
+      "base": "MON",
+      "n": 1,
+      "pnl": 25.92
+    },
+    {
+      "base": "OP",
+      "n": 1,
+      "pnl": 22.51
+    }
+  ],
+  "milestones": [
+    {
+      "equity": 2000,
+      "date": "2026-09-13",
+      "cum_pnl": 482.01
+    }
+  ],
+  "daily": [
+    {
+      "date": "2024-06-15",
+      "equity": 1700.0,
+      "day_pnl": 0.0,
+      "cum_pnl": 0.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-16",
+      "equity": 1752.61,
+      "day_pnl": 52.61,
+      "cum_pnl": 52.61,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2024-06-17",
+      "equity": 1540.59,
+      "day_pnl": -212.02,
+      "cum_pnl": -159.41,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2024-06-18",
+      "equity": 1529.3,
+      "day_pnl": -11.29,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-19",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-20",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-21",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-22",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-23",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-24",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-25",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-26",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-27",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-28",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-29",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-06-30",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-01",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-02",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-03",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-04",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-05",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-06",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-07",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-08",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-09",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-10",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-11",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-12",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-13",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-14",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-15",
+      "equity": 1529.3,
+      "day_pnl": 0.0,
+      "cum_pnl": -170.7,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-16",
+      "equity": 1660.24,
+      "day_pnl": 130.94,
+      "cum_pnl": -39.76,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-17",
+      "equity": 1565.85,
+      "day_pnl": -94.39,
+      "cum_pnl": -134.15,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-18",
+      "equity": 1564.84,
+      "day_pnl": -1.01,
+      "cum_pnl": -135.16,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-19",
+      "equity": 1704.56,
+      "day_pnl": 139.72,
+      "cum_pnl": 4.56,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-20",
+      "equity": 1639.95,
+      "day_pnl": -64.61,
+      "cum_pnl": -60.05,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-21",
+      "equity": 1636.79,
+      "day_pnl": -3.17,
+      "cum_pnl": -63.21,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-22",
+      "equity": 1599.3,
+      "day_pnl": -37.49,
+      "cum_pnl": -100.7,
+      "hold": "AVAX",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-23",
+      "equity": 1503.94,
+      "day_pnl": -95.36,
+      "cum_pnl": -196.06,
+      "hold": "AVAX",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-24",
+      "equity": 1434.24,
+      "day_pnl": -69.7,
+      "cum_pnl": -265.76,
+      "hold": "AVAX",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-25",
+      "equity": 1429.72,
+      "day_pnl": -4.52,
+      "cum_pnl": -270.28,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-26",
+      "equity": 1451.75,
+      "day_pnl": 22.03,
+      "cum_pnl": -248.25,
+      "hold": "COTI",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-27",
+      "equity": 1448.14,
+      "day_pnl": -3.61,
+      "cum_pnl": -251.86,
+      "hold": "COTI",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-28",
+      "equity": 1370.0,
+      "day_pnl": -78.14,
+      "cum_pnl": -330.0,
+      "hold": "COTI",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-29",
+      "equity": 1380.92,
+      "day_pnl": 10.92,
+      "cum_pnl": -319.08,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-07-30",
+      "equity": 1233.16,
+      "day_pnl": -147.76,
+      "cum_pnl": -466.84,
+      "hold": "CVX",
+      "in_market": true
+    },
+    {
+      "date": "2024-07-31",
+      "equity": 1229.64,
+      "day_pnl": -3.52,
+      "cum_pnl": -470.36,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-01",
+      "equity": 1229.64,
+      "day_pnl": 0.0,
+      "cum_pnl": -470.36,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-02",
+      "equity": 1141.56,
+      "day_pnl": -88.08,
+      "cum_pnl": -558.44,
+      "hold": "CVX",
+      "in_market": true
+    },
+    {
+      "date": "2024-08-03",
+      "equity": 1026.45,
+      "day_pnl": -115.11,
+      "cum_pnl": -673.55,
+      "hold": "CVX",
+      "in_market": true
+    },
+    {
+      "date": "2024-08-04",
+      "equity": 1028.1,
+      "day_pnl": 1.65,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-05",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-06",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-07",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-08",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-09",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-10",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-11",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-12",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-13",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-14",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-15",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-16",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-17",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-18",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-19",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-20",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-21",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-22",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-23",
+      "equity": 1028.1,
+      "day_pnl": 0.0,
+      "cum_pnl": -671.9,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-24",
+      "equity": 1026.56,
+      "day_pnl": -1.53,
+      "cum_pnl": -673.44,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-08-25",
+      "equity": 1007.76,
+      "day_pnl": -18.8,
+      "cum_pnl": -692.24,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-08-26",
+      "equity": 938.42,
+      "day_pnl": -69.34,
+      "cum_pnl": -761.58,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-08-27",
+      "equity": 939.07,
+      "day_pnl": 0.64,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-28",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-29",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-30",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-08-31",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-01",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-02",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-03",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-04",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-05",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-06",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-07",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-08",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-09",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-10",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-11",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-12",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-13",
+      "equity": 939.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -760.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-14",
+      "equity": 888.84,
+      "day_pnl": -50.23,
+      "cum_pnl": -811.16,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-15",
+      "equity": 867.22,
+      "day_pnl": -21.62,
+      "cum_pnl": -832.78,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-16",
+      "equity": 801.15,
+      "day_pnl": -66.07,
+      "cum_pnl": -898.85,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-17",
+      "equity": 807.34,
+      "day_pnl": 6.2,
+      "cum_pnl": -892.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-18",
+      "equity": 906.93,
+      "day_pnl": 99.59,
+      "cum_pnl": -793.07,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-19",
+      "equity": 945.46,
+      "day_pnl": 38.53,
+      "cum_pnl": -754.54,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-20",
+      "equity": 1007.29,
+      "day_pnl": 61.83,
+      "cum_pnl": -692.71,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-21",
+      "equity": 1017.62,
+      "day_pnl": 10.33,
+      "cum_pnl": -682.38,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-22",
+      "equity": 1083.74,
+      "day_pnl": 66.12,
+      "cum_pnl": -616.26,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-23",
+      "equity": 1083.18,
+      "day_pnl": -0.56,
+      "cum_pnl": -616.82,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-24",
+      "equity": 1035.46,
+      "day_pnl": -47.71,
+      "cum_pnl": -664.54,
+      "hold": "TIA",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-25",
+      "equity": 1001.34,
+      "day_pnl": -34.12,
+      "cum_pnl": -698.66,
+      "hold": "TIA",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-26",
+      "equity": 1015.33,
+      "day_pnl": 13.99,
+      "cum_pnl": -684.67,
+      "hold": "TIA",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-27",
+      "equity": 1036.14,
+      "day_pnl": 20.81,
+      "cum_pnl": -663.86,
+      "hold": "TIA",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-28",
+      "equity": 971.86,
+      "day_pnl": -64.28,
+      "cum_pnl": -728.14,
+      "hold": "TIA",
+      "in_market": true
+    },
+    {
+      "date": "2024-09-29",
+      "equity": 968.71,
+      "day_pnl": -3.16,
+      "cum_pnl": -731.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-09-30",
+      "equity": 888.71,
+      "day_pnl": -79.99,
+      "cum_pnl": -811.29,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-01",
+      "equity": 910.05,
+      "day_pnl": 21.34,
+      "cum_pnl": -789.95,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-02",
+      "equity": 910.05,
+      "day_pnl": 0.0,
+      "cum_pnl": -789.95,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-03",
+      "equity": 820.15,
+      "day_pnl": -89.89,
+      "cum_pnl": -879.85,
+      "hold": "SUI",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-04",
+      "equity": 819.79,
+      "day_pnl": -0.36,
+      "cum_pnl": -880.21,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-05",
+      "equity": 786.18,
+      "day_pnl": -33.61,
+      "cum_pnl": -913.82,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-06",
+      "equity": 897.45,
+      "day_pnl": 111.27,
+      "cum_pnl": -802.55,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-07",
+      "equity": 851.52,
+      "day_pnl": -45.93,
+      "cum_pnl": -848.48,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-08",
+      "equity": 846.8,
+      "day_pnl": -4.72,
+      "cum_pnl": -853.2,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-09",
+      "equity": 799.95,
+      "day_pnl": -46.85,
+      "cum_pnl": -900.05,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-10",
+      "equity": 802.56,
+      "day_pnl": 2.61,
+      "cum_pnl": -897.44,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-11",
+      "equity": 851.49,
+      "day_pnl": 48.93,
+      "cum_pnl": -848.51,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-12",
+      "equity": 858.64,
+      "day_pnl": 7.15,
+      "cum_pnl": -841.36,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-13",
+      "equity": 850.63,
+      "day_pnl": -8.02,
+      "cum_pnl": -849.37,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-14",
+      "equity": 850.6,
+      "day_pnl": -0.02,
+      "cum_pnl": -849.4,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-15",
+      "equity": 826.19,
+      "day_pnl": -24.41,
+      "cum_pnl": -873.81,
+      "hold": "JASMY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-16",
+      "equity": 816.52,
+      "day_pnl": -9.67,
+      "cum_pnl": -883.48,
+      "hold": "JASMY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-17",
+      "equity": 781.27,
+      "day_pnl": -35.25,
+      "cum_pnl": -918.73,
+      "hold": "JASMY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-18",
+      "equity": 794.06,
+      "day_pnl": 12.79,
+      "cum_pnl": -905.94,
+      "hold": "JASMY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-19",
+      "equity": 793.36,
+      "day_pnl": -0.7,
+      "cum_pnl": -906.64,
+      "hold": "JASMY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-20",
+      "equity": 792.12,
+      "day_pnl": -1.24,
+      "cum_pnl": -907.88,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-21",
+      "equity": 803.87,
+      "day_pnl": 11.75,
+      "cum_pnl": -896.13,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-22",
+      "equity": 850.1,
+      "day_pnl": 46.23,
+      "cum_pnl": -849.9,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-23",
+      "equity": 851.92,
+      "day_pnl": 1.82,
+      "cum_pnl": -848.08,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-24",
+      "equity": 970.81,
+      "day_pnl": 118.88,
+      "cum_pnl": -729.19,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-25",
+      "equity": 898.3,
+      "day_pnl": -72.51,
+      "cum_pnl": -801.7,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-26",
+      "equity": 893.21,
+      "day_pnl": -5.09,
+      "cum_pnl": -806.79,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-10-27",
+      "equity": 1018.85,
+      "day_pnl": 125.65,
+      "cum_pnl": -681.15,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-28",
+      "equity": 954.95,
+      "day_pnl": -63.9,
+      "cum_pnl": -745.05,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-29",
+      "equity": 965.49,
+      "day_pnl": 10.54,
+      "cum_pnl": -734.51,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-30",
+      "equity": 899.44,
+      "day_pnl": -66.05,
+      "cum_pnl": -800.56,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-10-31",
+      "equity": 898.67,
+      "day_pnl": -0.78,
+      "cum_pnl": -801.33,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-01",
+      "equity": 843.29,
+      "day_pnl": -55.37,
+      "cum_pnl": -856.71,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-02",
+      "equity": 815.2,
+      "day_pnl": -28.09,
+      "cum_pnl": -884.8,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-03",
+      "equity": 770.55,
+      "day_pnl": -44.65,
+      "cum_pnl": -929.45,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-04",
+      "equity": 774.08,
+      "day_pnl": 3.53,
+      "cum_pnl": -925.92,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-05",
+      "equity": 824.71,
+      "day_pnl": 50.62,
+      "cum_pnl": -875.29,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-06",
+      "equity": 965.76,
+      "day_pnl": 141.05,
+      "cum_pnl": -734.24,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-07",
+      "equity": 945.3,
+      "day_pnl": -20.46,
+      "cum_pnl": -754.7,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-08",
+      "equity": 943.76,
+      "day_pnl": -1.55,
+      "cum_pnl": -756.24,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-09",
+      "equity": 1065.97,
+      "day_pnl": 122.21,
+      "cum_pnl": -634.03,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-10",
+      "equity": 1020.61,
+      "day_pnl": -45.36,
+      "cum_pnl": -679.39,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-11",
+      "equity": 985.79,
+      "day_pnl": -34.82,
+      "cum_pnl": -714.21,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-12",
+      "equity": 980.93,
+      "day_pnl": -4.86,
+      "cum_pnl": -719.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-13",
+      "equity": 1441.61,
+      "day_pnl": 460.68,
+      "cum_pnl": -258.39,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-14",
+      "equity": 1438.71,
+      "day_pnl": -2.9,
+      "cum_pnl": -261.29,
+      "hold": "PEPE",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-15",
+      "equity": 1438.42,
+      "day_pnl": -0.29,
+      "cum_pnl": -261.58,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-16",
+      "equity": 1515.62,
+      "day_pnl": 77.21,
+      "cum_pnl": -184.38,
+      "hold": "ALGO",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-17",
+      "equity": 1421.02,
+      "day_pnl": -94.6,
+      "cum_pnl": -278.98,
+      "hold": "ALGO",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-18",
+      "equity": 1414.42,
+      "day_pnl": -6.6,
+      "cum_pnl": -285.58,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-19",
+      "equity": 1370.1,
+      "day_pnl": -44.32,
+      "cum_pnl": -329.9,
+      "hold": "ATOM",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-20",
+      "equity": 1360.76,
+      "day_pnl": -9.34,
+      "cum_pnl": -339.24,
+      "hold": "ATOM",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-21",
+      "equity": 1415.34,
+      "day_pnl": 54.58,
+      "cum_pnl": -284.66,
+      "hold": "ATOM",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-22",
+      "equity": 1667.82,
+      "day_pnl": 252.48,
+      "cum_pnl": -32.18,
+      "hold": "ATOM",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-23",
+      "equity": 1809.09,
+      "day_pnl": 141.28,
+      "cum_pnl": 109.09,
+      "hold": "ATOM",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-24",
+      "equity": 1797.48,
+      "day_pnl": -11.61,
+      "cum_pnl": 97.48,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-25",
+      "equity": 1638.36,
+      "day_pnl": -159.12,
+      "cum_pnl": -61.64,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-26",
+      "equity": 1601.3,
+      "day_pnl": -37.07,
+      "cum_pnl": -98.7,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-27",
+      "equity": 1595.65,
+      "day_pnl": -5.64,
+      "cum_pnl": -104.35,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-11-28",
+      "equity": 1497.34,
+      "day_pnl": -98.31,
+      "cum_pnl": -202.66,
+      "hold": "OP",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-29",
+      "equity": 1507.98,
+      "day_pnl": 10.64,
+      "cum_pnl": -192.02,
+      "hold": "OP",
+      "in_market": true
+    },
+    {
+      "date": "2024-11-30",
+      "equity": 1548.42,
+      "day_pnl": 40.44,
+      "cum_pnl": -151.58,
+      "hold": "OP",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-01",
+      "equity": 1565.55,
+      "day_pnl": 17.13,
+      "cum_pnl": -134.45,
+      "hold": "OP",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-02",
+      "equity": 1629.3,
+      "day_pnl": 63.74,
+      "cum_pnl": -70.7,
+      "hold": "OP",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-03",
+      "equity": 1618.16,
+      "day_pnl": -11.13,
+      "cum_pnl": -81.84,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-04",
+      "equity": 1426.34,
+      "day_pnl": -191.82,
+      "cum_pnl": -273.66,
+      "hold": "VET",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-05",
+      "equity": 1361.63,
+      "day_pnl": -64.71,
+      "cum_pnl": -338.37,
+      "hold": "VET",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-06",
+      "equity": 1356.81,
+      "day_pnl": -4.82,
+      "cum_pnl": -343.19,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-07",
+      "equity": 1224.61,
+      "day_pnl": -132.21,
+      "cum_pnl": -475.39,
+      "hold": "HBAR",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-08",
+      "equity": 1221.92,
+      "day_pnl": -2.69,
+      "cum_pnl": -478.08,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-09",
+      "equity": 1159.66,
+      "day_pnl": -62.26,
+      "cum_pnl": -540.34,
+      "hold": "SUPER",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-10",
+      "equity": 1111.94,
+      "day_pnl": -47.72,
+      "cum_pnl": -588.06,
+      "hold": "SUPER",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-11",
+      "equity": 1108.39,
+      "day_pnl": -3.54,
+      "cum_pnl": -591.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-12",
+      "equity": 1071.33,
+      "day_pnl": -37.06,
+      "cum_pnl": -628.67,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-13",
+      "equity": 1070.23,
+      "day_pnl": -1.1,
+      "cum_pnl": -629.77,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-14",
+      "equity": 1011.86,
+      "day_pnl": -58.37,
+      "cum_pnl": -688.14,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-15",
+      "equity": 1009.07,
+      "day_pnl": -2.79,
+      "cum_pnl": -690.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-16",
+      "equity": 932.26,
+      "day_pnl": -76.82,
+      "cum_pnl": -767.74,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-17",
+      "equity": 930.63,
+      "day_pnl": -1.63,
+      "cum_pnl": -769.37,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-18",
+      "equity": 815.16,
+      "day_pnl": -115.47,
+      "cum_pnl": -884.84,
+      "hold": "LTC",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-19",
+      "equity": 812.86,
+      "day_pnl": -2.3,
+      "cum_pnl": -887.14,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-20",
+      "equity": 812.86,
+      "day_pnl": 0.0,
+      "cum_pnl": -887.14,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-21",
+      "equity": 752.4,
+      "day_pnl": -60.46,
+      "cum_pnl": -947.6,
+      "hold": "SAND",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-22",
+      "equity": 745.96,
+      "day_pnl": -6.44,
+      "cum_pnl": -954.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-23",
+      "equity": 749.95,
+      "day_pnl": 3.99,
+      "cum_pnl": -950.05,
+      "hold": "LPT",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-24",
+      "equity": 944.46,
+      "day_pnl": 194.51,
+      "cum_pnl": -755.54,
+      "hold": "LPT",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-25",
+      "equity": 922.42,
+      "day_pnl": -22.04,
+      "cum_pnl": -777.58,
+      "hold": "LPT",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-26",
+      "equity": 849.94,
+      "day_pnl": -72.48,
+      "cum_pnl": -850.06,
+      "hold": "LPT",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-27",
+      "equity": 856.46,
+      "day_pnl": 6.52,
+      "cum_pnl": -843.54,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-28",
+      "equity": 856.46,
+      "day_pnl": 0.0,
+      "cum_pnl": -843.54,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2024-12-29",
+      "equity": 788.92,
+      "day_pnl": -67.53,
+      "cum_pnl": -911.08,
+      "hold": "CVX",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-30",
+      "equity": 755.33,
+      "day_pnl": -33.6,
+      "cum_pnl": -944.67,
+      "hold": "CVX",
+      "in_market": true
+    },
+    {
+      "date": "2024-12-31",
+      "equity": 748.0,
+      "day_pnl": -7.33,
+      "cum_pnl": -952.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-01",
+      "equity": 748.0,
+      "day_pnl": 0.0,
+      "cum_pnl": -952.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-02",
+      "equity": 748.0,
+      "day_pnl": 0.0,
+      "cum_pnl": -952.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-03",
+      "equity": 753.25,
+      "day_pnl": 5.25,
+      "cum_pnl": -946.75,
+      "hold": "MAGIC",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-04",
+      "equity": 857.62,
+      "day_pnl": 104.37,
+      "cum_pnl": -842.38,
+      "hold": "MAGIC",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-05",
+      "equity": 824.68,
+      "day_pnl": -32.94,
+      "cum_pnl": -875.32,
+      "hold": "MAGIC",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-06",
+      "equity": 834.02,
+      "day_pnl": 9.34,
+      "cum_pnl": -865.98,
+      "hold": "MAGIC",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-07",
+      "equity": 747.88,
+      "day_pnl": -86.14,
+      "cum_pnl": -952.12,
+      "hold": "MAGIC",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-08",
+      "equity": 750.89,
+      "day_pnl": 3.01,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-09",
+      "equity": 750.89,
+      "day_pnl": 0.0,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-10",
+      "equity": 750.89,
+      "day_pnl": 0.0,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-11",
+      "equity": 750.89,
+      "day_pnl": 0.0,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-12",
+      "equity": 750.89,
+      "day_pnl": 0.0,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-13",
+      "equity": 750.89,
+      "day_pnl": 0.0,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-14",
+      "equity": 750.89,
+      "day_pnl": 0.0,
+      "cum_pnl": -949.11,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-15",
+      "equity": 936.63,
+      "day_pnl": 185.74,
+      "cum_pnl": -763.37,
+      "hold": "VIRTUAL",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-16",
+      "equity": 829.09,
+      "day_pnl": -107.54,
+      "cum_pnl": -870.91,
+      "hold": "VIRTUAL",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-17",
+      "equity": 829.91,
+      "day_pnl": 0.82,
+      "cum_pnl": -870.09,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-18",
+      "equity": 828.2,
+      "day_pnl": -1.71,
+      "cum_pnl": -871.8,
+      "hold": "ONDO",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-19",
+      "equity": 824.76,
+      "day_pnl": -3.44,
+      "cum_pnl": -875.24,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-20",
+      "equity": 824.76,
+      "day_pnl": 0.0,
+      "cum_pnl": -875.24,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-21",
+      "equity": 849.0,
+      "day_pnl": 24.24,
+      "cum_pnl": -851.0,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-22",
+      "equity": 879.66,
+      "day_pnl": 30.65,
+      "cum_pnl": -820.34,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-23",
+      "equity": 909.08,
+      "day_pnl": 29.43,
+      "cum_pnl": -790.92,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-24",
+      "equity": 871.76,
+      "day_pnl": -37.32,
+      "cum_pnl": -828.24,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-25",
+      "equity": 847.53,
+      "day_pnl": -24.23,
+      "cum_pnl": -852.47,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-26",
+      "equity": 846.98,
+      "day_pnl": -0.55,
+      "cum_pnl": -853.02,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-27",
+      "equity": 731.15,
+      "day_pnl": -115.83,
+      "cum_pnl": -968.85,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-28",
+      "equity": 734.33,
+      "day_pnl": 3.19,
+      "cum_pnl": -965.67,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-29",
+      "equity": 734.33,
+      "day_pnl": 0.0,
+      "cum_pnl": -965.67,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-01-30",
+      "equity": 714.15,
+      "day_pnl": -20.18,
+      "cum_pnl": -985.85,
+      "hold": "WIF",
+      "in_market": true
+    },
+    {
+      "date": "2025-01-31",
+      "equity": 705.94,
+      "day_pnl": -8.21,
+      "cum_pnl": -994.06,
+      "hold": "WIF",
+      "in_market": true
+    },
+    {
+      "date": "2025-02-01",
+      "equity": 703.9,
+      "day_pnl": -2.04,
+      "cum_pnl": -996.1,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-02",
+      "equity": 703.9,
+      "day_pnl": 0.0,
+      "cum_pnl": -996.1,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-03",
+      "equity": 703.9,
+      "day_pnl": 0.0,
+      "cum_pnl": -996.1,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-04",
+      "equity": 650.67,
+      "day_pnl": -53.23,
+      "cum_pnl": -1049.33,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-02-05",
+      "equity": 648.5,
+      "day_pnl": -2.17,
+      "cum_pnl": -1051.5,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-02-06",
+      "equity": 583.82,
+      "day_pnl": -64.68,
+      "cum_pnl": -1116.18,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-02-07",
+      "equity": 596.93,
+      "day_pnl": 13.11,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-08",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-09",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-10",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-11",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-12",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-13",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-14",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-15",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-16",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-17",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-18",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-19",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-20",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-21",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-22",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-23",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-24",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-25",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-26",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-27",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-02-28",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-01",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-02",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-03",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-04",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-05",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-06",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-07",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-08",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-09",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-10",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-11",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-12",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-13",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-14",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-15",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-16",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-17",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-18",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-19",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-20",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-21",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-22",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-23",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-24",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-25",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-26",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-27",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-28",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-29",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-30",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-03-31",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-01",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-02",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-03",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-04",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-05",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-06",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-07",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-08",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-09",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-10",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-11",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-12",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-13",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-14",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-15",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-16",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-17",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-18",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-19",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-20",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-21",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-22",
+      "equity": 596.93,
+      "day_pnl": 0.0,
+      "cum_pnl": -1103.07,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-23",
+      "equity": 574.38,
+      "day_pnl": -22.55,
+      "cum_pnl": -1125.62,
+      "hold": "VIRTUAL",
+      "in_market": true
+    },
+    {
+      "date": "2025-04-24",
+      "equity": 574.68,
+      "day_pnl": 0.3,
+      "cum_pnl": -1125.32,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-04-25",
+      "equity": 603.87,
+      "day_pnl": 29.2,
+      "cum_pnl": -1096.13,
+      "hold": "FET",
+      "in_market": true
+    },
+    {
+      "date": "2025-04-26",
+      "equity": 625.33,
+      "day_pnl": 21.45,
+      "cum_pnl": -1074.67,
+      "hold": "FET",
+      "in_market": true
+    },
+    {
+      "date": "2025-04-27",
+      "equity": 572.95,
+      "day_pnl": -52.38,
+      "cum_pnl": -1127.05,
+      "hold": "FET",
+      "in_market": true
+    },
+    {
+      "date": "2025-04-28",
+      "equity": 573.27,
+      "day_pnl": 0.32,
+      "cum_pnl": -1126.73,
+      "hold": "FET",
+      "in_market": true
+    },
+    {
+      "date": "2025-04-29",
+      "equity": 563.86,
+      "day_pnl": -9.41,
+      "cum_pnl": -1136.14,
+      "hold": "FET",
+      "in_market": true
+    },
+    {
+      "date": "2025-04-30",
+      "equity": 562.32,
+      "day_pnl": -1.54,
+      "cum_pnl": -1137.68,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-01",
+      "equity": 577.53,
+      "day_pnl": 15.21,
+      "cum_pnl": -1122.47,
+      "hold": "COTI",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-02",
+      "equity": 554.17,
+      "day_pnl": -23.36,
+      "cum_pnl": -1145.83,
+      "hold": "COTI",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-03",
+      "equity": 512.44,
+      "day_pnl": -41.73,
+      "cum_pnl": -1187.56,
+      "hold": "COTI",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-04",
+      "equity": 510.63,
+      "day_pnl": -1.81,
+      "cum_pnl": -1189.37,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-05",
+      "equity": 510.63,
+      "day_pnl": 0.0,
+      "cum_pnl": -1189.37,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-06",
+      "equity": 505.8,
+      "day_pnl": -4.84,
+      "cum_pnl": -1194.2,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-07",
+      "equity": 500.04,
+      "day_pnl": -5.76,
+      "cum_pnl": -1199.96,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-08",
+      "equity": 576.92,
+      "day_pnl": 76.88,
+      "cum_pnl": -1123.08,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-09",
+      "equity": 586.19,
+      "day_pnl": 9.27,
+      "cum_pnl": -1113.81,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-10",
+      "equity": 631.28,
+      "day_pnl": 45.09,
+      "cum_pnl": -1068.72,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-11",
+      "equity": 626.9,
+      "day_pnl": -4.38,
+      "cum_pnl": -1073.1,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-12",
+      "equity": 626.9,
+      "day_pnl": 0.0,
+      "cum_pnl": -1073.1,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-13",
+      "equity": 599.13,
+      "day_pnl": -27.77,
+      "cum_pnl": -1100.87,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-14",
+      "equity": 597.31,
+      "day_pnl": -1.82,
+      "cum_pnl": -1102.69,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-15",
+      "equity": 542.94,
+      "day_pnl": -54.37,
+      "cum_pnl": -1157.06,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-16",
+      "equity": 519.01,
+      "day_pnl": -23.93,
+      "cum_pnl": -1180.99,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-17",
+      "equity": 518.0,
+      "day_pnl": -1.01,
+      "cum_pnl": -1182.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-18",
+      "equity": 518.0,
+      "day_pnl": 0.0,
+      "cum_pnl": -1182.0,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-19",
+      "equity": 476.65,
+      "day_pnl": -41.35,
+      "cum_pnl": -1223.35,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-20",
+      "equity": 490.87,
+      "day_pnl": 14.21,
+      "cum_pnl": -1209.13,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-21",
+      "equity": 525.58,
+      "day_pnl": 34.71,
+      "cum_pnl": -1174.42,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-22",
+      "equity": 551.41,
+      "day_pnl": 25.82,
+      "cum_pnl": -1148.59,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-23",
+      "equity": 478.84,
+      "day_pnl": -72.57,
+      "cum_pnl": -1221.16,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-24",
+      "equity": 477.36,
+      "day_pnl": -1.48,
+      "cum_pnl": -1222.64,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-25",
+      "equity": 524.41,
+      "day_pnl": 47.05,
+      "cum_pnl": -1175.59,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-26",
+      "equity": 504.67,
+      "day_pnl": -19.73,
+      "cum_pnl": -1195.33,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-27",
+      "equity": 481.45,
+      "day_pnl": -23.22,
+      "cum_pnl": -1218.55,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-28",
+      "equity": 466.97,
+      "day_pnl": -14.49,
+      "cum_pnl": -1233.03,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-05-29",
+      "equity": 463.35,
+      "day_pnl": -3.62,
+      "cum_pnl": -1236.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-30",
+      "equity": 463.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1236.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-05-31",
+      "equity": 422.36,
+      "day_pnl": -40.98,
+      "cum_pnl": -1277.64,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-01",
+      "equity": 431.09,
+      "day_pnl": 8.72,
+      "cum_pnl": -1268.91,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-02",
+      "equity": 457.65,
+      "day_pnl": 26.56,
+      "cum_pnl": -1242.35,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-03",
+      "equity": 461.61,
+      "day_pnl": 3.96,
+      "cum_pnl": -1238.39,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-04",
+      "equity": 449.14,
+      "day_pnl": -12.47,
+      "cum_pnl": -1250.86,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-05",
+      "equity": 444.47,
+      "day_pnl": -4.67,
+      "cum_pnl": -1255.53,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-06",
+      "equity": 418.14,
+      "day_pnl": -26.33,
+      "cum_pnl": -1281.86,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-07",
+      "equity": 434.37,
+      "day_pnl": 16.23,
+      "cum_pnl": -1265.63,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-08",
+      "equity": 447.99,
+      "day_pnl": 13.62,
+      "cum_pnl": -1252.01,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-09",
+      "equity": 527.47,
+      "day_pnl": 79.49,
+      "cum_pnl": -1172.53,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-10",
+      "equity": 593.62,
+      "day_pnl": 66.14,
+      "cum_pnl": -1106.38,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-11",
+      "equity": 594.13,
+      "day_pnl": 0.51,
+      "cum_pnl": -1105.87,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-12",
+      "equity": 594.13,
+      "day_pnl": 0.0,
+      "cum_pnl": -1105.87,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-13",
+      "equity": 594.13,
+      "day_pnl": 0.0,
+      "cum_pnl": -1105.87,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-14",
+      "equity": 594.13,
+      "day_pnl": 0.0,
+      "cum_pnl": -1105.87,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-15",
+      "equity": 594.13,
+      "day_pnl": 0.0,
+      "cum_pnl": -1105.87,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-16",
+      "equity": 558.76,
+      "day_pnl": -35.37,
+      "cum_pnl": -1141.24,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-17",
+      "equity": 542.13,
+      "day_pnl": -16.64,
+      "cum_pnl": -1157.87,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-18",
+      "equity": 539.04,
+      "day_pnl": -3.09,
+      "cum_pnl": -1160.96,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-19",
+      "equity": 540.44,
+      "day_pnl": 1.4,
+      "cum_pnl": -1159.56,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-20",
+      "equity": 564.59,
+      "day_pnl": 24.15,
+      "cum_pnl": -1135.41,
+      "hold": "SWEAT",
+      "in_market": true
+    },
+    {
+      "date": "2025-06-21",
+      "equity": 559.96,
+      "day_pnl": -4.63,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-22",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-23",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-24",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-25",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-26",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-27",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-28",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-29",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-06-30",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-01",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-02",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-03",
+      "equity": 559.96,
+      "day_pnl": 0.0,
+      "cum_pnl": -1140.04,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-04",
+      "equity": 542.42,
+      "day_pnl": -17.54,
+      "cum_pnl": -1157.58,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-05",
+      "equity": 535.92,
+      "day_pnl": -6.5,
+      "cum_pnl": -1164.08,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-06",
+      "equity": 527.44,
+      "day_pnl": -8.48,
+      "cum_pnl": -1172.56,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-07",
+      "equity": 483.64,
+      "day_pnl": -43.8,
+      "cum_pnl": -1216.36,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-08",
+      "equity": 481.16,
+      "day_pnl": -2.48,
+      "cum_pnl": -1218.84,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-09",
+      "equity": 524.18,
+      "day_pnl": 43.02,
+      "cum_pnl": -1175.82,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-10",
+      "equity": 566.86,
+      "day_pnl": 42.68,
+      "cum_pnl": -1133.14,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-11",
+      "equity": 562.77,
+      "day_pnl": -4.09,
+      "cum_pnl": -1137.23,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-12",
+      "equity": 553.75,
+      "day_pnl": -9.02,
+      "cum_pnl": -1146.25,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-13",
+      "equity": 581.2,
+      "day_pnl": 27.44,
+      "cum_pnl": -1118.8,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-14",
+      "equity": 580.42,
+      "day_pnl": -0.78,
+      "cum_pnl": -1119.58,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-15",
+      "equity": 595.53,
+      "day_pnl": 15.12,
+      "cum_pnl": -1104.47,
+      "hold": "UNI",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-16",
+      "equity": 566.7,
+      "day_pnl": -28.83,
+      "cum_pnl": -1133.3,
+      "hold": "UNI",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-17",
+      "equity": 568.65,
+      "day_pnl": 1.95,
+      "cum_pnl": -1131.35,
+      "hold": "UNI",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-18",
+      "equity": 643.21,
+      "day_pnl": 74.56,
+      "cum_pnl": -1056.79,
+      "hold": "UNI",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-19",
+      "equity": 645.77,
+      "day_pnl": 2.56,
+      "cum_pnl": -1054.23,
+      "hold": "UNI",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-20",
+      "equity": 644.57,
+      "day_pnl": -1.2,
+      "cum_pnl": -1055.43,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-21",
+      "equity": 674.69,
+      "day_pnl": 30.12,
+      "cum_pnl": -1025.31,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-22",
+      "equity": 673.87,
+      "day_pnl": -0.82,
+      "cum_pnl": -1026.13,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-23",
+      "equity": 551.45,
+      "day_pnl": -122.42,
+      "cum_pnl": -1148.55,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-24",
+      "equity": 557.67,
+      "day_pnl": 6.22,
+      "cum_pnl": -1142.33,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-25",
+      "equity": 713.31,
+      "day_pnl": 155.64,
+      "cum_pnl": -986.69,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-26",
+      "equity": 727.6,
+      "day_pnl": 14.29,
+      "cum_pnl": -972.4,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-27",
+      "equity": 784.62,
+      "day_pnl": 57.01,
+      "cum_pnl": -915.38,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-28",
+      "equity": 753.9,
+      "day_pnl": -30.72,
+      "cum_pnl": -946.1,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-29",
+      "equity": 684.23,
+      "day_pnl": -69.67,
+      "cum_pnl": -1015.77,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-07-30",
+      "equity": 684.03,
+      "day_pnl": -0.2,
+      "cum_pnl": -1015.97,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-07-31",
+      "equity": 639.45,
+      "day_pnl": -44.58,
+      "cum_pnl": -1060.55,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-01",
+      "equity": 637.6,
+      "day_pnl": -1.85,
+      "cum_pnl": -1062.4,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-02",
+      "equity": 575.48,
+      "day_pnl": -62.12,
+      "cum_pnl": -1124.52,
+      "hold": "PLUME",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-03",
+      "equity": 603.46,
+      "day_pnl": 27.98,
+      "cum_pnl": -1096.54,
+      "hold": "PLUME",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-04",
+      "equity": 614.41,
+      "day_pnl": 10.95,
+      "cum_pnl": -1085.59,
+      "hold": "PLUME",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-05",
+      "equity": 565.46,
+      "day_pnl": -48.95,
+      "cum_pnl": -1134.54,
+      "hold": "PLUME",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-06",
+      "equity": 577.52,
+      "day_pnl": 12.06,
+      "cum_pnl": -1122.48,
+      "hold": "PLUME",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-07",
+      "equity": 581.94,
+      "day_pnl": 4.42,
+      "cum_pnl": -1118.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-08",
+      "equity": 586.89,
+      "day_pnl": 4.95,
+      "cum_pnl": -1113.11,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-09",
+      "equity": 604.83,
+      "day_pnl": 17.94,
+      "cum_pnl": -1095.17,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-10",
+      "equity": 604.51,
+      "day_pnl": -0.32,
+      "cum_pnl": -1095.49,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-11",
+      "equity": 493.41,
+      "day_pnl": -111.1,
+      "cum_pnl": -1206.59,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-12",
+      "equity": 492.2,
+      "day_pnl": -1.21,
+      "cum_pnl": -1207.8,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-13",
+      "equity": 518.17,
+      "day_pnl": 25.97,
+      "cum_pnl": -1181.83,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-14",
+      "equity": 458.22,
+      "day_pnl": -59.95,
+      "cum_pnl": -1241.78,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-15",
+      "equity": 458.12,
+      "day_pnl": -0.1,
+      "cum_pnl": -1241.88,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-16",
+      "equity": 457.33,
+      "day_pnl": -0.78,
+      "cum_pnl": -1242.67,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-17",
+      "equity": 459.22,
+      "day_pnl": 1.88,
+      "cum_pnl": -1240.78,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-18",
+      "equity": 436.33,
+      "day_pnl": -22.89,
+      "cum_pnl": -1263.67,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-19",
+      "equity": 437.11,
+      "day_pnl": 0.79,
+      "cum_pnl": -1262.89,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-20",
+      "equity": 478.53,
+      "day_pnl": 41.41,
+      "cum_pnl": -1221.47,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2025-08-21",
+      "equity": 478.74,
+      "day_pnl": 0.21,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-22",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-23",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-24",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-25",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-26",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-27",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-28",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-29",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-30",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-08-31",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-01",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-02",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-03",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-04",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-05",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-06",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-07",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-08",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-09",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-10",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-11",
+      "equity": 478.74,
+      "day_pnl": 0.0,
+      "cum_pnl": -1221.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-12",
+      "equity": 486.07,
+      "day_pnl": 7.33,
+      "cum_pnl": -1213.93,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-13",
+      "equity": 540.35,
+      "day_pnl": 54.28,
+      "cum_pnl": -1159.65,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-14",
+      "equity": 509.47,
+      "day_pnl": -30.88,
+      "cum_pnl": -1190.53,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-15",
+      "equity": 492.86,
+      "day_pnl": -16.61,
+      "cum_pnl": -1207.14,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-16",
+      "equity": 480.67,
+      "day_pnl": -12.19,
+      "cum_pnl": -1219.33,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-17",
+      "equity": 479.49,
+      "day_pnl": -1.18,
+      "cum_pnl": -1220.51,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-18",
+      "equity": 495.6,
+      "day_pnl": 16.11,
+      "cum_pnl": -1204.4,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-19",
+      "equity": 478.77,
+      "day_pnl": -16.83,
+      "cum_pnl": -1221.23,
+      "hold": "EIGEN",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-20",
+      "equity": 477.6,
+      "day_pnl": -1.17,
+      "cum_pnl": -1222.4,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-21",
+      "equity": 468.54,
+      "day_pnl": -9.06,
+      "cum_pnl": -1231.46,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-22",
+      "equity": 437.14,
+      "day_pnl": -31.4,
+      "cum_pnl": -1262.86,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-23",
+      "equity": 427.44,
+      "day_pnl": -9.7,
+      "cum_pnl": -1272.56,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-24",
+      "equity": 435.59,
+      "day_pnl": 8.15,
+      "cum_pnl": -1264.41,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-25",
+      "equity": 403.16,
+      "day_pnl": -32.43,
+      "cum_pnl": -1296.84,
+      "hold": "RENDER",
+      "in_market": true
+    },
+    {
+      "date": "2025-09-26",
+      "equity": 403.07,
+      "day_pnl": -0.09,
+      "cum_pnl": -1296.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-27",
+      "equity": 403.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -1296.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-28",
+      "equity": 403.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -1296.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-29",
+      "equity": 403.07,
+      "day_pnl": 0.0,
+      "cum_pnl": -1296.93,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-09-30",
+      "equity": 393.31,
+      "day_pnl": -9.75,
+      "cum_pnl": -1306.69,
+      "hold": "BNB",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-01",
+      "equity": 399.85,
+      "day_pnl": 6.53,
+      "cum_pnl": -1300.15,
+      "hold": "BNB",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-02",
+      "equity": 425.12,
+      "day_pnl": 25.28,
+      "cum_pnl": -1274.88,
+      "hold": "BNB",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-03",
+      "equity": 461.64,
+      "day_pnl": 36.52,
+      "cum_pnl": -1238.36,
+      "hold": "BNB",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-04",
+      "equity": 446.35,
+      "day_pnl": -15.29,
+      "cum_pnl": -1253.65,
+      "hold": "BNB",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-05",
+      "equity": 445.48,
+      "day_pnl": -0.87,
+      "cum_pnl": -1254.52,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-06",
+      "equity": 462.57,
+      "day_pnl": 17.09,
+      "cum_pnl": -1237.43,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-07",
+      "equity": 432.56,
+      "day_pnl": -30.01,
+      "cum_pnl": -1267.44,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-08",
+      "equity": 462.57,
+      "day_pnl": 30.01,
+      "cum_pnl": -1237.43,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-09",
+      "equity": 432.04,
+      "day_pnl": -30.53,
+      "cum_pnl": -1267.96,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-10",
+      "equity": 347.39,
+      "day_pnl": -84.65,
+      "cum_pnl": -1352.61,
+      "hold": "PENGU",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-11",
+      "equity": 349.92,
+      "day_pnl": 2.53,
+      "cum_pnl": -1350.08,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-12",
+      "equity": 349.92,
+      "day_pnl": 0.0,
+      "cum_pnl": -1350.08,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-13",
+      "equity": 367.92,
+      "day_pnl": 18.0,
+      "cum_pnl": -1332.08,
+      "hold": "SUPER",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-14",
+      "equity": 342.39,
+      "day_pnl": -25.52,
+      "cum_pnl": -1357.61,
+      "hold": "SUPER",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-15",
+      "equity": 338.94,
+      "day_pnl": -3.46,
+      "cum_pnl": -1361.06,
+      "hold": "SUPER",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-16",
+      "equity": 339.71,
+      "day_pnl": 0.77,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-17",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-18",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-19",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-20",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-21",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-22",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-23",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-24",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-25",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-26",
+      "equity": 339.71,
+      "day_pnl": 0.0,
+      "cum_pnl": -1360.29,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-10-27",
+      "equity": 320.34,
+      "day_pnl": -19.37,
+      "cum_pnl": -1379.66,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-28",
+      "equity": 320.31,
+      "day_pnl": -0.03,
+      "cum_pnl": -1379.69,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-29",
+      "equity": 322.8,
+      "day_pnl": 2.49,
+      "cum_pnl": -1377.2,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-30",
+      "equity": 278.82,
+      "day_pnl": -43.98,
+      "cum_pnl": -1421.18,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2025-10-31",
+      "equity": 276.35,
+      "day_pnl": -2.47,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-01",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-02",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-03",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-04",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-05",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-06",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-07",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-08",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-09",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-10",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-11",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-12",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-13",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-14",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-15",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-16",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-17",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-18",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-19",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-20",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-21",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-22",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-23",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-24",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-25",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-26",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-27",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-28",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-29",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-11-30",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-01",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-02",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-03",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-04",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-05",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-06",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-07",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-08",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-09",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-10",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-11",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-12",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-13",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-14",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-15",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-16",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-17",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-18",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-19",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-20",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-21",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-22",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-23",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-24",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-25",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-26",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-27",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-28",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-29",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-30",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2025-12-31",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-01",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-02",
+      "equity": 276.35,
+      "day_pnl": 0.0,
+      "cum_pnl": -1423.65,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-03",
+      "equity": 280.5,
+      "day_pnl": 4.15,
+      "cum_pnl": -1419.5,
+      "hold": "XPL",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-04",
+      "equity": 270.99,
+      "day_pnl": -9.51,
+      "cum_pnl": -1429.01,
+      "hold": "XPL",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-05",
+      "equity": 267.42,
+      "day_pnl": -3.56,
+      "cum_pnl": -1432.58,
+      "hold": "XPL",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-06",
+      "equity": 295.39,
+      "day_pnl": 27.97,
+      "cum_pnl": -1404.61,
+      "hold": "XPL",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-07",
+      "equity": 252.58,
+      "day_pnl": -42.81,
+      "cum_pnl": -1447.42,
+      "hold": "XPL",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-08",
+      "equity": 251.95,
+      "day_pnl": -0.63,
+      "cum_pnl": -1448.05,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-09",
+      "equity": 268.31,
+      "day_pnl": 16.37,
+      "cum_pnl": -1431.69,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-10",
+      "equity": 263.84,
+      "day_pnl": -4.48,
+      "cum_pnl": -1436.16,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-11",
+      "equity": 253.62,
+      "day_pnl": -10.21,
+      "cum_pnl": -1446.38,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-12",
+      "equity": 254.52,
+      "day_pnl": 0.9,
+      "cum_pnl": -1445.48,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-13",
+      "equity": 273.49,
+      "day_pnl": 18.98,
+      "cum_pnl": -1426.51,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-14",
+      "equity": 275.12,
+      "day_pnl": 1.63,
+      "cum_pnl": -1424.88,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-15",
+      "equity": 266.14,
+      "day_pnl": -8.98,
+      "cum_pnl": -1433.86,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-16",
+      "equity": 288.38,
+      "day_pnl": 22.24,
+      "cum_pnl": -1411.62,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-17",
+      "equity": 274.11,
+      "day_pnl": -14.27,
+      "cum_pnl": -1425.89,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-18",
+      "equity": 253.29,
+      "day_pnl": -20.83,
+      "cum_pnl": -1446.71,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-19",
+      "equity": 252.61,
+      "day_pnl": -0.68,
+      "cum_pnl": -1447.39,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-20",
+      "equity": 254.78,
+      "day_pnl": 2.17,
+      "cum_pnl": -1445.22,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-21",
+      "equity": 275.31,
+      "day_pnl": 20.52,
+      "cum_pnl": -1424.69,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-22",
+      "equity": 306.49,
+      "day_pnl": 31.18,
+      "cum_pnl": -1393.51,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-23",
+      "equity": 317.29,
+      "day_pnl": 10.8,
+      "cum_pnl": -1382.71,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-24",
+      "equity": 274.28,
+      "day_pnl": -43.01,
+      "cum_pnl": -1425.72,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-01-25",
+      "equity": 274.34,
+      "day_pnl": 0.05,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-26",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-27",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-28",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-29",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-30",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-01-31",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-01",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-02",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-03",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-04",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-05",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-06",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-07",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-08",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-09",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-10",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-11",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-12",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-13",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-14",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-15",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-16",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-17",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-18",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-19",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-20",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-21",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-22",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-23",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-24",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-25",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-26",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-27",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-02-28",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-01",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-02",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-03",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-04",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-05",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-06",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-07",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-08",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-09",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-10",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-11",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-12",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-13",
+      "equity": 274.34,
+      "day_pnl": 0.0,
+      "cum_pnl": -1425.66,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-14",
+      "equity": 259.22,
+      "day_pnl": -15.12,
+      "cum_pnl": -1440.78,
+      "hold": "PHA",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-15",
+      "equity": 248.87,
+      "day_pnl": -10.35,
+      "cum_pnl": -1451.13,
+      "hold": "PHA",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-16",
+      "equity": 246.72,
+      "day_pnl": -2.14,
+      "cum_pnl": -1453.28,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-17",
+      "equity": 221.95,
+      "day_pnl": -24.77,
+      "cum_pnl": -1478.05,
+      "hold": "GRASS",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-18",
+      "equity": 223.64,
+      "day_pnl": 1.69,
+      "cum_pnl": -1476.36,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-19",
+      "equity": 206.66,
+      "day_pnl": -16.98,
+      "cum_pnl": -1493.34,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-20",
+      "equity": 207.75,
+      "day_pnl": 1.09,
+      "cum_pnl": -1492.25,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-21",
+      "equity": 205.91,
+      "day_pnl": -1.85,
+      "cum_pnl": -1494.09,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-22",
+      "equity": 202.0,
+      "day_pnl": -3.9,
+      "cum_pnl": -1498.0,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-23",
+      "equity": 195.99,
+      "day_pnl": -6.01,
+      "cum_pnl": -1504.01,
+      "hold": "HYPE",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-24",
+      "equity": 195.84,
+      "day_pnl": -0.15,
+      "cum_pnl": -1504.16,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-25",
+      "equity": 202.14,
+      "day_pnl": 6.3,
+      "cum_pnl": -1497.86,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-26",
+      "equity": 196.69,
+      "day_pnl": -5.46,
+      "cum_pnl": -1503.31,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-27",
+      "equity": 185.08,
+      "day_pnl": -11.6,
+      "cum_pnl": -1514.92,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-03-28",
+      "equity": 184.65,
+      "day_pnl": -0.43,
+      "cum_pnl": -1515.35,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-29",
+      "equity": 184.65,
+      "day_pnl": 0.0,
+      "cum_pnl": -1515.35,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-30",
+      "equity": 184.65,
+      "day_pnl": 0.0,
+      "cum_pnl": -1515.35,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-03-31",
+      "equity": 184.65,
+      "day_pnl": 0.0,
+      "cum_pnl": -1515.35,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-01",
+      "equity": 176.03,
+      "day_pnl": -8.62,
+      "cum_pnl": -1523.97,
+      "hold": "MON",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-02",
+      "equity": 184.44,
+      "day_pnl": 8.41,
+      "cum_pnl": -1515.56,
+      "hold": "MON",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-03",
+      "equity": 200.98,
+      "day_pnl": 16.54,
+      "cum_pnl": -1499.02,
+      "hold": "MON",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-04",
+      "equity": 201.62,
+      "day_pnl": 0.64,
+      "cum_pnl": -1498.38,
+      "hold": "MON",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-05",
+      "equity": 208.78,
+      "day_pnl": 7.17,
+      "cum_pnl": -1491.22,
+      "hold": "MON",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-06",
+      "equity": 210.57,
+      "day_pnl": 1.79,
+      "cum_pnl": -1489.43,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-07",
+      "equity": 210.11,
+      "day_pnl": -0.46,
+      "cum_pnl": -1489.89,
+      "hold": "SKY",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-08",
+      "equity": 205.23,
+      "day_pnl": -4.88,
+      "cum_pnl": -1494.77,
+      "hold": "SKY",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-09",
+      "equity": 209.71,
+      "day_pnl": 4.48,
+      "cum_pnl": -1490.29,
+      "hold": "SKY",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-10",
+      "equity": 209.24,
+      "day_pnl": -0.47,
+      "cum_pnl": -1490.76,
+      "hold": "SKY",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-11",
+      "equity": 205.38,
+      "day_pnl": -3.86,
+      "cum_pnl": -1494.62,
+      "hold": "SKY",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-12",
+      "equity": 204.84,
+      "day_pnl": -0.54,
+      "cum_pnl": -1495.16,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-13",
+      "equity": 204.84,
+      "day_pnl": 0.0,
+      "cum_pnl": -1495.16,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-14",
+      "equity": 196.6,
+      "day_pnl": -8.23,
+      "cum_pnl": -1503.4,
+      "hold": "AAVE",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-15",
+      "equity": 207.22,
+      "day_pnl": 10.62,
+      "cum_pnl": -1492.78,
+      "hold": "AAVE",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-16",
+      "equity": 226.94,
+      "day_pnl": 19.72,
+      "cum_pnl": -1473.06,
+      "hold": "AAVE",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-17",
+      "equity": 226.01,
+      "day_pnl": -0.93,
+      "cum_pnl": -1473.99,
+      "hold": "AAVE",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-18",
+      "equity": 199.67,
+      "day_pnl": -26.34,
+      "cum_pnl": -1500.33,
+      "hold": "AAVE",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-19",
+      "equity": 198.91,
+      "day_pnl": -0.76,
+      "cum_pnl": -1501.09,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-20",
+      "equity": 207.53,
+      "day_pnl": 8.62,
+      "cum_pnl": -1492.47,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-21",
+      "equity": 203.19,
+      "day_pnl": -4.34,
+      "cum_pnl": -1496.81,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-22",
+      "equity": 195.24,
+      "day_pnl": -7.95,
+      "cum_pnl": -1504.76,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-23",
+      "equity": 206.01,
+      "day_pnl": 10.77,
+      "cum_pnl": -1493.99,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-24",
+      "equity": 211.59,
+      "day_pnl": 5.57,
+      "cum_pnl": -1488.41,
+      "hold": "ENJ",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-25",
+      "equity": 211.26,
+      "day_pnl": -0.33,
+      "cum_pnl": -1488.74,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-26",
+      "equity": 197.56,
+      "day_pnl": -13.7,
+      "cum_pnl": -1502.44,
+      "hold": "GLMR",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-27",
+      "equity": 182.02,
+      "day_pnl": -15.54,
+      "cum_pnl": -1517.98,
+      "hold": "GLMR",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-28",
+      "equity": 183.48,
+      "day_pnl": 1.45,
+      "cum_pnl": -1516.52,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-04-29",
+      "equity": 180.39,
+      "day_pnl": -3.08,
+      "cum_pnl": -1519.61,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-04-30",
+      "equity": 176.07,
+      "day_pnl": -4.32,
+      "cum_pnl": -1523.93,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-01",
+      "equity": 191.17,
+      "day_pnl": 15.1,
+      "cum_pnl": -1508.83,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-02",
+      "equity": 202.28,
+      "day_pnl": 11.11,
+      "cum_pnl": -1497.72,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-03",
+      "equity": 203.94,
+      "day_pnl": 1.66,
+      "cum_pnl": -1496.06,
+      "hold": "TAO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-04",
+      "equity": 203.53,
+      "day_pnl": -0.41,
+      "cum_pnl": -1496.47,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-05",
+      "equity": 202.43,
+      "day_pnl": -1.1,
+      "cum_pnl": -1497.57,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-06",
+      "equity": 207.75,
+      "day_pnl": 5.32,
+      "cum_pnl": -1492.25,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-07",
+      "equity": 210.1,
+      "day_pnl": 2.35,
+      "cum_pnl": -1489.9,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-08",
+      "equity": 203.85,
+      "day_pnl": -6.25,
+      "cum_pnl": -1496.15,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-09",
+      "equity": 203.79,
+      "day_pnl": -0.06,
+      "cum_pnl": -1496.21,
+      "hold": "ZRO",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-10",
+      "equity": 203.51,
+      "day_pnl": -0.27,
+      "cum_pnl": -1496.49,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-11",
+      "equity": 196.97,
+      "day_pnl": -6.55,
+      "cum_pnl": -1503.03,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-12",
+      "equity": 178.47,
+      "day_pnl": -18.5,
+      "cum_pnl": -1521.53,
+      "hold": "FARTCOIN",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-13",
+      "equity": 179.03,
+      "day_pnl": 0.56,
+      "cum_pnl": -1520.97,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-14",
+      "equity": 183.66,
+      "day_pnl": 4.64,
+      "cum_pnl": -1516.34,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-15",
+      "equity": 181.18,
+      "day_pnl": -2.48,
+      "cum_pnl": -1518.82,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-16",
+      "equity": 174.98,
+      "day_pnl": -6.2,
+      "cum_pnl": -1525.02,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-17",
+      "equity": 174.38,
+      "day_pnl": -0.6,
+      "cum_pnl": -1525.62,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-18",
+      "equity": 167.05,
+      "day_pnl": -7.34,
+      "cum_pnl": -1532.95,
+      "hold": "DOGE",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-19",
+      "equity": 166.75,
+      "day_pnl": -0.29,
+      "cum_pnl": -1533.25,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-20",
+      "equity": 161.24,
+      "day_pnl": -5.51,
+      "cum_pnl": -1538.76,
+      "hold": "VVV",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-21",
+      "equity": 161.57,
+      "day_pnl": 0.32,
+      "cum_pnl": -1538.43,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-22",
+      "equity": 144.17,
+      "day_pnl": -17.39,
+      "cum_pnl": -1555.83,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-23",
+      "equity": 143.74,
+      "day_pnl": -0.43,
+      "cum_pnl": -1556.26,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-24",
+      "equity": 137.98,
+      "day_pnl": -5.76,
+      "cum_pnl": -1562.02,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-25",
+      "equity": 152.42,
+      "day_pnl": 14.44,
+      "cum_pnl": -1547.58,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-26",
+      "equity": 142.29,
+      "day_pnl": -10.13,
+      "cum_pnl": -1557.71,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-05-27",
+      "equity": 141.94,
+      "day_pnl": -0.36,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-28",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-29",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-30",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-05-31",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-01",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-02",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-03",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-04",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-05",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-06",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-07",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-08",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-09",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-10",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-11",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-12",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-13",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-14",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-15",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-16",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-17",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-18",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-19",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-20",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-21",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-22",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-23",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-24",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-25",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-26",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-27",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-28",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-29",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-06-30",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-01",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-02",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-03",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-04",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-05",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-06",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-07",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-08",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-09",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-10",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-11",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-12",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-13",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-14",
+      "equity": 141.94,
+      "day_pnl": 0.0,
+      "cum_pnl": -1558.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-15",
+      "equity": 137.72,
+      "day_pnl": -4.21,
+      "cum_pnl": -1562.28,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-16",
+      "equity": 130.67,
+      "day_pnl": -7.05,
+      "cum_pnl": -1569.33,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-17",
+      "equity": 128.78,
+      "day_pnl": -1.89,
+      "cum_pnl": -1571.22,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-18",
+      "equity": 133.08,
+      "day_pnl": 4.3,
+      "cum_pnl": -1566.92,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-19",
+      "equity": 131.38,
+      "day_pnl": -1.7,
+      "cum_pnl": -1568.62,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-20",
+      "equity": 131.47,
+      "day_pnl": 0.09,
+      "cum_pnl": -1568.53,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-21",
+      "equity": 126.5,
+      "day_pnl": -4.97,
+      "cum_pnl": -1573.5,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-22",
+      "equity": 132.56,
+      "day_pnl": 6.06,
+      "cum_pnl": -1567.44,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-23",
+      "equity": 148.92,
+      "day_pnl": 16.37,
+      "cum_pnl": -1551.08,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-24",
+      "equity": 169.16,
+      "day_pnl": 20.23,
+      "cum_pnl": -1530.84,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-25",
+      "equity": 132.83,
+      "day_pnl": -36.33,
+      "cum_pnl": -1567.17,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-26",
+      "equity": 131.97,
+      "day_pnl": -0.86,
+      "cum_pnl": -1568.03,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-27",
+      "equity": 138.52,
+      "day_pnl": 6.56,
+      "cum_pnl": -1561.48,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-28",
+      "equity": 128.55,
+      "day_pnl": -9.97,
+      "cum_pnl": -1571.45,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-29",
+      "equity": 121.23,
+      "day_pnl": -7.32,
+      "cum_pnl": -1578.77,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-07-30",
+      "equity": 120.94,
+      "day_pnl": -0.29,
+      "cum_pnl": -1579.06,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-07-31",
+      "equity": 125.71,
+      "day_pnl": 4.76,
+      "cum_pnl": -1574.29,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-01",
+      "equity": 128.28,
+      "day_pnl": 2.58,
+      "cum_pnl": -1571.72,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-02",
+      "equity": 126.03,
+      "day_pnl": -2.25,
+      "cum_pnl": -1573.97,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-03",
+      "equity": 129.58,
+      "day_pnl": 3.55,
+      "cum_pnl": -1570.42,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-04",
+      "equity": 147.24,
+      "day_pnl": 17.65,
+      "cum_pnl": -1552.76,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-05",
+      "equity": 146.25,
+      "day_pnl": -0.99,
+      "cum_pnl": -1553.75,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-06",
+      "equity": 121.08,
+      "day_pnl": -25.17,
+      "cum_pnl": -1578.92,
+      "hold": "SYN",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-07",
+      "equity": 120.82,
+      "day_pnl": -0.26,
+      "cum_pnl": -1579.18,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-08",
+      "equity": 123.37,
+      "day_pnl": 2.54,
+      "cum_pnl": -1576.63,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-09",
+      "equity": 131.23,
+      "day_pnl": 7.86,
+      "cum_pnl": -1568.77,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-10",
+      "equity": 153.0,
+      "day_pnl": 21.78,
+      "cum_pnl": -1547.0,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-11",
+      "equity": 152.39,
+      "day_pnl": -0.61,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-12",
+      "equity": 152.39,
+      "day_pnl": 0.0,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-13",
+      "equity": 152.39,
+      "day_pnl": 0.0,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-14",
+      "equity": 152.39,
+      "day_pnl": 0.0,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-15",
+      "equity": 152.39,
+      "day_pnl": 0.0,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-16",
+      "equity": 152.39,
+      "day_pnl": 0.0,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-17",
+      "equity": 152.39,
+      "day_pnl": 0.0,
+      "cum_pnl": -1547.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-18",
+      "equity": 149.16,
+      "day_pnl": -3.23,
+      "cum_pnl": -1550.84,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-19",
+      "equity": 145.45,
+      "day_pnl": -3.72,
+      "cum_pnl": -1554.55,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-20",
+      "equity": 138.54,
+      "day_pnl": -6.91,
+      "cum_pnl": -1561.46,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-21",
+      "equity": 139.73,
+      "day_pnl": 1.2,
+      "cum_pnl": -1560.27,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-22",
+      "equity": 133.83,
+      "day_pnl": -5.9,
+      "cum_pnl": -1566.17,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-23",
+      "equity": 140.07,
+      "day_pnl": 6.24,
+      "cum_pnl": -1559.93,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-24",
+      "equity": 139.27,
+      "day_pnl": -0.8,
+      "cum_pnl": -1560.73,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-25",
+      "equity": 136.93,
+      "day_pnl": -2.34,
+      "cum_pnl": -1563.07,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-26",
+      "equity": 159.55,
+      "day_pnl": 22.62,
+      "cum_pnl": -1540.45,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-27",
+      "equity": 158.95,
+      "day_pnl": -0.6,
+      "cum_pnl": -1541.05,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-28",
+      "equity": 152.5,
+      "day_pnl": -6.46,
+      "cum_pnl": -1547.5,
+      "hold": "ENA",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-29",
+      "equity": 152.15,
+      "day_pnl": -0.35,
+      "cum_pnl": -1547.85,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-08-30",
+      "equity": 134.8,
+      "day_pnl": -17.35,
+      "cum_pnl": -1565.2,
+      "hold": "PUMP",
+      "in_market": true
+    },
+    {
+      "date": "2026-08-31",
+      "equity": 133.88,
+      "day_pnl": -0.92,
+      "cum_pnl": -1566.12,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-01",
+      "equity": 165.0,
+      "day_pnl": 31.12,
+      "cum_pnl": -1535.0,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-02",
+      "equity": 180.17,
+      "day_pnl": 15.17,
+      "cum_pnl": -1519.83,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-03",
+      "equity": 301.91,
+      "day_pnl": 121.75,
+      "cum_pnl": -1398.09,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-04",
+      "equity": 387.26,
+      "day_pnl": 85.34,
+      "cum_pnl": -1312.74,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-05",
+      "equity": 378.14,
+      "day_pnl": -9.12,
+      "cum_pnl": -1321.86,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-06",
+      "equity": 375.48,
+      "day_pnl": -2.66,
+      "cum_pnl": -1324.52,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-07",
+      "equity": 345.89,
+      "day_pnl": -29.59,
+      "cum_pnl": -1354.11,
+      "hold": "JUP",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-08",
+      "equity": 327.56,
+      "day_pnl": -18.33,
+      "cum_pnl": -1372.44,
+      "hold": "JUP",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-09",
+      "equity": 329.53,
+      "day_pnl": 1.97,
+      "cum_pnl": -1370.47,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-10",
+      "equity": 333.19,
+      "day_pnl": 3.65,
+      "cum_pnl": -1366.81,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-11",
+      "equity": 396.42,
+      "day_pnl": 63.23,
+      "cum_pnl": -1303.58,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-12",
+      "equity": 911.56,
+      "day_pnl": 515.14,
+      "cum_pnl": -788.44,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-13",
+      "equity": 2182.01,
+      "day_pnl": 1270.44,
+      "cum_pnl": 482.01,
+      "hold": "LSK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-14",
+      "equity": 2211.63,
+      "day_pnl": 29.62,
+      "cum_pnl": 511.63,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-15",
+      "equity": 1970.83,
+      "day_pnl": -240.8,
+      "cum_pnl": 270.83,
+      "hold": "NPC",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-16",
+      "equity": 1967.74,
+      "day_pnl": -3.1,
+      "cum_pnl": 267.74,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-17",
+      "equity": 2065.37,
+      "day_pnl": 97.63,
+      "cum_pnl": 365.37,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-18",
+      "equity": 2415.92,
+      "day_pnl": 350.55,
+      "cum_pnl": 715.92,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-19",
+      "equity": 2350.5,
+      "day_pnl": -65.41,
+      "cum_pnl": 650.5,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-20",
+      "equity": 2334.74,
+      "day_pnl": -15.77,
+      "cum_pnl": 634.74,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-21",
+      "equity": 2467.35,
+      "day_pnl": 132.62,
+      "cum_pnl": 767.35,
+      "hold": "RAY",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-22",
+      "equity": 2457.94,
+      "day_pnl": -9.42,
+      "cum_pnl": 757.94,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-23",
+      "equity": 2202.49,
+      "day_pnl": -255.44,
+      "cum_pnl": 502.49,
+      "hold": "USELESS",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-24",
+      "equity": 2222.12,
+      "day_pnl": 19.62,
+      "cum_pnl": 522.12,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-25",
+      "equity": 2718.51,
+      "day_pnl": 496.39,
+      "cum_pnl": 1018.51,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-26",
+      "equity": 2790.69,
+      "day_pnl": 72.18,
+      "cum_pnl": 1090.69,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-27",
+      "equity": 2664.22,
+      "day_pnl": -126.47,
+      "cum_pnl": 964.22,
+      "hold": "ARK",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-28",
+      "equity": 2612.61,
+      "day_pnl": -51.62,
+      "cum_pnl": 912.61,
+      "hold": "cash",
+      "in_market": false
+    },
+    {
+      "date": "2026-09-29",
+      "equity": 2708.03,
+      "day_pnl": 95.42,
+      "cum_pnl": 1008.03,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-09-30",
+      "equity": 3004.2,
+      "day_pnl": 296.17,
+      "cum_pnl": 1304.2,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-10-01",
+      "equity": 3042.76,
+      "day_pnl": 38.57,
+      "cum_pnl": 1342.76,
+      "hold": "CAP",
+      "in_market": true
+    },
+    {
+      "date": "2026-10-02",
+      "equity": 3038.06,
+      "day_pnl": -4.71,
+      "cum_pnl": 1338.06,
+      "hold": "cash",
+      "in_market": false
+    }
+  ],
+  "trades": [
+    {
+      "date": "2024-06-16",
+      "side": "buy",
+      "base": "ENA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1666.0
+    },
+    {
+      "date": "2024-06-18",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": -170.7,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-07-16",
+      "side": "buy",
+      "base": "PEPE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1498.72
+    },
+    {
+      "date": "2024-07-21",
+      "side": "sell",
+      "base": "PEPE",
+      "pnl": 107.49,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-07-22",
+      "side": "buy",
+      "base": "AVAX",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1604.05
+    },
+    {
+      "date": "2024-07-25",
+      "side": "sell",
+      "base": "AVAX",
+      "pnl": -207.07,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-07-26",
+      "side": "buy",
+      "base": "COTI",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1401.12
+    },
+    {
+      "date": "2024-07-29",
+      "side": "sell",
+      "base": "COTI",
+      "pnl": -48.8,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-07-30",
+      "side": "buy",
+      "base": "CVX",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1353.3
+    },
+    {
+      "date": "2024-07-31",
+      "side": "sell",
+      "base": "CVX",
+      "pnl": -151.27,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-08-02",
+      "side": "buy",
+      "base": "CVX",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1205.05
+    },
+    {
+      "date": "2024-08-04",
+      "side": "sell",
+      "base": "CVX",
+      "pnl": -201.55,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-08-24",
+      "side": "buy",
+      "base": "SUI",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1007.53
+    },
+    {
+      "date": "2024-08-27",
+      "side": "sell",
+      "base": "SUI",
+      "pnl": -89.03,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-09-14",
+      "side": "buy",
+      "base": "SYN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 920.28
+    },
+    {
+      "date": "2024-09-17",
+      "side": "sell",
+      "base": "SYN",
+      "pnl": -131.72,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-09-18",
+      "side": "buy",
+      "base": "SUI",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 791.2
+    },
+    {
+      "date": "2024-09-23",
+      "side": "sell",
+      "base": "SUI",
+      "pnl": 275.83,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-09-24",
+      "side": "buy",
+      "base": "TIA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1061.51
+    },
+    {
+      "date": "2024-09-29",
+      "side": "sell",
+      "base": "TIA",
+      "pnl": -114.47,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-09-30",
+      "side": "buy",
+      "base": "ARK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 949.33
+    },
+    {
+      "date": "2024-10-01",
+      "side": "sell",
+      "base": "ARK",
+      "pnl": -58.66,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-10-03",
+      "side": "buy",
+      "base": "SUI",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 891.85
+    },
+    {
+      "date": "2024-10-04",
+      "side": "sell",
+      "base": "SUI",
+      "pnl": -90.26,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-10-05",
+      "side": "buy",
+      "base": "ARK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 803.39
+    },
+    {
+      "date": "2024-10-08",
+      "side": "sell",
+      "base": "ARK",
+      "pnl": 27.01,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-10-09",
+      "side": "buy",
+      "base": "RENDER",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 829.87
+    },
+    {
+      "date": "2024-10-14",
+      "side": "sell",
+      "base": "RENDER",
+      "pnl": 3.8,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-10-15",
+      "side": "buy",
+      "base": "JASMY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 833.59
+    },
+    {
+      "date": "2024-10-20",
+      "side": "sell",
+      "base": "JASMY",
+      "pnl": -58.48,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-10-21",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 776.28
+    },
+    {
+      "date": "2024-10-26",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 101.09,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-10-27",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 875.34
+    },
+    {
+      "date": "2024-10-31",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 5.46,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-01",
+      "side": "buy",
+      "base": "SWEAT",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 880.69
+    },
+    {
+      "date": "2024-11-04",
+      "side": "sell",
+      "base": "SWEAT",
+      "pnl": -124.58,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-05",
+      "side": "buy",
+      "base": "DOGE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 758.6
+    },
+    {
+      "date": "2024-11-08",
+      "side": "sell",
+      "base": "DOGE",
+      "pnl": 169.67,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-09",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 924.88
+    },
+    {
+      "date": "2024-11-12",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 37.17,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-13",
+      "side": "buy",
+      "base": "PEPE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 961.31
+    },
+    {
+      "date": "2024-11-15",
+      "side": "sell",
+      "base": "PEPE",
+      "pnl": 457.49,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-16",
+      "side": "buy",
+      "base": "ALGO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1409.65
+    },
+    {
+      "date": "2024-11-18",
+      "side": "sell",
+      "base": "ALGO",
+      "pnl": -23.99,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-19",
+      "side": "buy",
+      "base": "ATOM",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1386.13
+    },
+    {
+      "date": "2024-11-24",
+      "side": "sell",
+      "base": "ATOM",
+      "pnl": 383.06,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-11-25",
+      "side": "buy",
+      "base": "ENJ",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2024-11-27",
+      "side": "sell",
+      "base": "ENJ",
+      "pnl": -201.83,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-11-28",
+      "side": "buy",
+      "base": "OP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1563.74
+    },
+    {
+      "date": "2024-12-03",
+      "side": "sell",
+      "base": "OP",
+      "pnl": 22.51,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2024-12-04",
+      "side": "buy",
+      "base": "VET",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1585.8
+    },
+    {
+      "date": "2024-12-06",
+      "side": "sell",
+      "base": "VET",
+      "pnl": -261.35,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-07",
+      "side": "buy",
+      "base": "HBAR",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1329.68
+    },
+    {
+      "date": "2024-12-08",
+      "side": "sell",
+      "base": "HBAR",
+      "pnl": -134.9,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-09",
+      "side": "buy",
+      "base": "SUPER",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1197.48
+    },
+    {
+      "date": "2024-12-11",
+      "side": "sell",
+      "base": "SUPER",
+      "pnl": -113.52,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-12",
+      "side": "buy",
+      "base": "EIGEN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1086.23
+    },
+    {
+      "date": "2024-12-15",
+      "side": "sell",
+      "base": "EIGEN",
+      "pnl": -99.32,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-16",
+      "side": "buy",
+      "base": "GRASS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 988.89
+    },
+    {
+      "date": "2024-12-17",
+      "side": "sell",
+      "base": "GRASS",
+      "pnl": -78.44,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-18",
+      "side": "buy",
+      "base": "LTC",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 912.02
+    },
+    {
+      "date": "2024-12-19",
+      "side": "sell",
+      "base": "LTC",
+      "pnl": -117.77,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-21",
+      "side": "buy",
+      "base": "SAND",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 796.6
+    },
+    {
+      "date": "2024-12-22",
+      "side": "sell",
+      "base": "SAND",
+      "pnl": -66.9,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-23",
+      "side": "buy",
+      "base": "LPT",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 731.04
+    },
+    {
+      "date": "2024-12-27",
+      "side": "sell",
+      "base": "LPT",
+      "pnl": 110.5,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2024-12-29",
+      "side": "buy",
+      "base": "CVX",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 839.33
+    },
+    {
+      "date": "2024-12-31",
+      "side": "sell",
+      "base": "CVX",
+      "pnl": -108.46,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-01-03",
+      "side": "buy",
+      "base": "MAGIC",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 733.04
+    },
+    {
+      "date": "2025-01-08",
+      "side": "sell",
+      "base": "MAGIC",
+      "pnl": 2.9,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-01-15",
+      "side": "buy",
+      "base": "VIRTUAL",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 735.87
+    },
+    {
+      "date": "2025-01-17",
+      "side": "sell",
+      "base": "VIRTUAL",
+      "pnl": 79.02,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-01-18",
+      "side": "buy",
+      "base": "ONDO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 813.31
+    },
+    {
+      "date": "2025-01-19",
+      "side": "sell",
+      "base": "ONDO",
+      "pnl": -5.15,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-01-21",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 808.27
+    },
+    {
+      "date": "2025-01-26",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 22.22,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-01-27",
+      "side": "buy",
+      "base": "PENGU",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 830.04
+    },
+    {
+      "date": "2025-01-28",
+      "side": "sell",
+      "base": "PENGU",
+      "pnl": -112.64,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-01-30",
+      "side": "buy",
+      "base": "WIF",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 719.65
+    },
+    {
+      "date": "2025-02-01",
+      "side": "sell",
+      "base": "WIF",
+      "pnl": -30.44,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-02-04",
+      "side": "buy",
+      "base": "GRASS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 689.82
+    },
+    {
+      "date": "2025-02-07",
+      "side": "sell",
+      "base": "GRASS",
+      "pnl": -106.96,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-04-23",
+      "side": "buy",
+      "base": "VIRTUAL",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 584.99
+    },
+    {
+      "date": "2025-04-24",
+      "side": "sell",
+      "base": "VIRTUAL",
+      "pnl": -22.25,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-04-25",
+      "side": "buy",
+      "base": "FET",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 563.19
+    },
+    {
+      "date": "2025-04-30",
+      "side": "sell",
+      "base": "FET",
+      "pnl": -12.36,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-01",
+      "side": "buy",
+      "base": "COTI",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 551.07
+    },
+    {
+      "date": "2025-05-04",
+      "side": "sell",
+      "base": "COTI",
+      "pnl": -51.69,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-06",
+      "side": "buy",
+      "base": "TAO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 500.42
+    },
+    {
+      "date": "2025-05-11",
+      "side": "sell",
+      "base": "TAO",
+      "pnl": 116.27,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-05-13",
+      "side": "buy",
+      "base": "SYN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 614.36
+    },
+    {
+      "date": "2025-05-14",
+      "side": "sell",
+      "base": "SYN",
+      "pnl": -29.59,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-15",
+      "side": "buy",
+      "base": "PENGU",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 585.36
+    },
+    {
+      "date": "2025-05-17",
+      "side": "sell",
+      "base": "PENGU",
+      "pnl": -79.31,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-19",
+      "side": "buy",
+      "base": "EIGEN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 507.64
+    },
+    {
+      "date": "2025-05-24",
+      "side": "sell",
+      "base": "EIGEN",
+      "pnl": -40.64,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-25",
+      "side": "buy",
+      "base": "HYPE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 467.81
+    },
+    {
+      "date": "2025-05-29",
+      "side": "sell",
+      "base": "HYPE",
+      "pnl": -14.01,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-05-31",
+      "side": "buy",
+      "base": "HYPE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 454.08
+    },
+    {
+      "date": "2025-06-05",
+      "side": "sell",
+      "base": "HYPE",
+      "pnl": -18.87,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-06-06",
+      "side": "buy",
+      "base": "FARTCOIN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 435.58
+    },
+    {
+      "date": "2025-06-11",
+      "side": "sell",
+      "base": "FARTCOIN",
+      "pnl": 149.66,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-06-16",
+      "side": "buy",
+      "base": "SWEAT",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 582.25
+    },
+    {
+      "date": "2025-06-21",
+      "side": "sell",
+      "base": "SWEAT",
+      "pnl": -34.18,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-07-04",
+      "side": "buy",
+      "base": "PENGU",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 548.76
+    },
+    {
+      "date": "2025-07-08",
+      "side": "sell",
+      "base": "PENGU",
+      "pnl": -78.79,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-07-09",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 471.54
+    },
+    {
+      "date": "2025-07-14",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 99.25,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-07-15",
+      "side": "buy",
+      "base": "UNI",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 568.81
+    },
+    {
+      "date": "2025-07-20",
+      "side": "sell",
+      "base": "UNI",
+      "pnl": 64.15,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-07-21",
+      "side": "buy",
+      "base": "ENA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 631.68
+    },
+    {
+      "date": "2025-07-22",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": 29.3,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-07-23",
+      "side": "buy",
+      "base": "SYN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 660.39
+    },
+    {
+      "date": "2025-07-24",
+      "side": "sell",
+      "base": "SYN",
+      "pnl": -116.2,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-07-25",
+      "side": "buy",
+      "base": "ENA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 546.52
+    },
+    {
+      "date": "2025-07-30",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": 126.36,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-07-31",
+      "side": "buy",
+      "base": "ENA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 670.35
+    },
+    {
+      "date": "2025-08-01",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": -46.43,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-08-02",
+      "side": "buy",
+      "base": "PLUME",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 624.85
+    },
+    {
+      "date": "2025-08-07",
+      "side": "sell",
+      "base": "PLUME",
+      "pnl": -55.66,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-08-08",
+      "side": "buy",
+      "base": "FARTCOIN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 570.3
+    },
+    {
+      "date": "2025-08-12",
+      "side": "sell",
+      "base": "FARTCOIN",
+      "pnl": -89.74,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-08-13",
+      "side": "buy",
+      "base": "FARTCOIN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 482.35
+    },
+    {
+      "date": "2025-08-15",
+      "side": "sell",
+      "base": "FARTCOIN",
+      "pnl": -34.08,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-08-16",
+      "side": "buy",
+      "base": "GRASS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 448.96
+    },
+    {
+      "date": "2025-08-21",
+      "side": "sell",
+      "base": "GRASS",
+      "pnl": 20.62,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-09-12",
+      "side": "buy",
+      "base": "EIGEN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 469.16
+    },
+    {
+      "date": "2025-09-17",
+      "side": "sell",
+      "base": "EIGEN",
+      "pnl": 0.75,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-09-18",
+      "side": "buy",
+      "base": "EIGEN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 469.9
+    },
+    {
+      "date": "2025-09-20",
+      "side": "sell",
+      "base": "EIGEN",
+      "pnl": -1.89,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-09-21",
+      "side": "buy",
+      "base": "RENDER",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 468.04
+    },
+    {
+      "date": "2025-09-26",
+      "side": "sell",
+      "base": "RENDER",
+      "pnl": -74.53,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-09-30",
+      "side": "buy",
+      "base": "BNB",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 395.01
+    },
+    {
+      "date": "2025-10-05",
+      "side": "sell",
+      "base": "BNB",
+      "pnl": 42.41,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2025-10-06",
+      "side": "buy",
+      "base": "PENGU",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 436.57
+    },
+    {
+      "date": "2025-10-11",
+      "side": "sell",
+      "base": "PENGU",
+      "pnl": -95.56,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-10-13",
+      "side": "buy",
+      "base": "SUPER",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 342.92
+    },
+    {
+      "date": "2025-10-16",
+      "side": "sell",
+      "base": "SUPER",
+      "pnl": -10.21,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2025-10-27",
+      "side": "buy",
+      "base": "NPC",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 332.91
+    },
+    {
+      "date": "2025-10-31",
+      "side": "sell",
+      "base": "NPC",
+      "pnl": -63.36,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-01-03",
+      "side": "buy",
+      "base": "XPL",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 270.82
+    },
+    {
+      "date": "2026-01-08",
+      "side": "sell",
+      "base": "XPL",
+      "pnl": -24.4,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-01-09",
+      "side": "buy",
+      "base": "SYN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 246.91
+    },
+    {
+      "date": "2026-01-14",
+      "side": "sell",
+      "base": "SYN",
+      "pnl": 23.17,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-01-15",
+      "side": "buy",
+      "base": "PUMP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 269.62
+    },
+    {
+      "date": "2026-01-19",
+      "side": "sell",
+      "base": "PUMP",
+      "pnl": -22.51,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-01-20",
+      "side": "buy",
+      "base": "ZRO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 247.56
+    },
+    {
+      "date": "2026-01-25",
+      "side": "sell",
+      "base": "ZRO",
+      "pnl": 21.73,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-03-14",
+      "side": "buy",
+      "base": "PHA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 268.85
+    },
+    {
+      "date": "2026-03-16",
+      "side": "sell",
+      "base": "PHA",
+      "pnl": -27.61,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-03-17",
+      "side": "buy",
+      "base": "GRASS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 241.79
+    },
+    {
+      "date": "2026-03-18",
+      "side": "sell",
+      "base": "GRASS",
+      "pnl": -23.08,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-03-19",
+      "side": "buy",
+      "base": "HYPE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 219.17
+    },
+    {
+      "date": "2026-03-24",
+      "side": "sell",
+      "base": "HYPE",
+      "pnl": -27.8,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-03-25",
+      "side": "buy",
+      "base": "TAO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 191.92
+    },
+    {
+      "date": "2026-03-28",
+      "side": "sell",
+      "base": "TAO",
+      "pnl": -11.19,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-04-01",
+      "side": "buy",
+      "base": "MON",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 180.96
+    },
+    {
+      "date": "2026-04-06",
+      "side": "sell",
+      "base": "MON",
+      "pnl": 25.92,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-04-07",
+      "side": "buy",
+      "base": "SKY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 206.36
+    },
+    {
+      "date": "2026-04-12",
+      "side": "sell",
+      "base": "SKY",
+      "pnl": -5.73,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-04-14",
+      "side": "buy",
+      "base": "AAVE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 200.74
+    },
+    {
+      "date": "2026-04-19",
+      "side": "sell",
+      "base": "AAVE",
+      "pnl": -5.93,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-04-20",
+      "side": "buy",
+      "base": "ENJ",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 194.93
+    },
+    {
+      "date": "2026-04-25",
+      "side": "sell",
+      "base": "ENJ",
+      "pnl": 12.35,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-04-26",
+      "side": "buy",
+      "base": "GLMR",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 207.04
+    },
+    {
+      "date": "2026-04-28",
+      "side": "sell",
+      "base": "GLMR",
+      "pnl": -27.78,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-04-29",
+      "side": "buy",
+      "base": "TAO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 179.81
+    },
+    {
+      "date": "2026-05-04",
+      "side": "sell",
+      "base": "TAO",
+      "pnl": 20.05,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-05-05",
+      "side": "buy",
+      "base": "ZRO",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 199.46
+    },
+    {
+      "date": "2026-05-10",
+      "side": "sell",
+      "base": "ZRO",
+      "pnl": -0.01,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-05-11",
+      "side": "buy",
+      "base": "FARTCOIN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 199.44
+    },
+    {
+      "date": "2026-05-13",
+      "side": "sell",
+      "base": "FARTCOIN",
+      "pnl": -24.49,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-05-14",
+      "side": "buy",
+      "base": "DOGE",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 175.45
+    },
+    {
+      "date": "2026-05-19",
+      "side": "sell",
+      "base": "DOGE",
+      "pnl": -12.27,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-05-20",
+      "side": "buy",
+      "base": "VVV",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 163.42
+    },
+    {
+      "date": "2026-05-21",
+      "side": "sell",
+      "base": "VVV",
+      "pnl": -5.19,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-05-22",
+      "side": "buy",
+      "base": "USELESS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 158.33
+    },
+    {
+      "date": "2026-05-23",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": -17.83,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-05-24",
+      "side": "buy",
+      "base": "USELESS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 140.86
+    },
+    {
+      "date": "2026-05-27",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": -1.8,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-07-15",
+      "side": "buy",
+      "base": "NPC",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 139.1
+    },
+    {
+      "date": "2026-07-20",
+      "side": "sell",
+      "base": "NPC",
+      "pnl": -10.47,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-07-21",
+      "side": "buy",
+      "base": "CAP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 128.84
+    },
+    {
+      "date": "2026-07-26",
+      "side": "sell",
+      "base": "CAP",
+      "pnl": 0.5,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-07-27",
+      "side": "buy",
+      "base": "PUMP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 129.33
+    },
+    {
+      "date": "2026-07-30",
+      "side": "sell",
+      "base": "PUMP",
+      "pnl": -11.02,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-07-31",
+      "side": "buy",
+      "base": "PUMP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 118.52
+    },
+    {
+      "date": "2026-08-05",
+      "side": "sell",
+      "base": "PUMP",
+      "pnl": 25.31,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-08-06",
+      "side": "buy",
+      "base": "SYN",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 143.33
+    },
+    {
+      "date": "2026-08-07",
+      "side": "sell",
+      "base": "SYN",
+      "pnl": -25.43,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-08-08",
+      "side": "buy",
+      "base": "CAP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 118.41
+    },
+    {
+      "date": "2026-08-11",
+      "side": "sell",
+      "base": "CAP",
+      "pnl": 31.57,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-08-18",
+      "side": "buy",
+      "base": "CAP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 149.34
+    },
+    {
+      "date": "2026-08-21",
+      "side": "sell",
+      "base": "CAP",
+      "pnl": -12.66,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-08-22",
+      "side": "buy",
+      "base": "LSK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 136.94
+    },
+    {
+      "date": "2026-08-27",
+      "side": "sell",
+      "base": "LSK",
+      "pnl": 19.22,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-08-28",
+      "side": "buy",
+      "base": "ENA",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 155.78
+    },
+    {
+      "date": "2026-08-29",
+      "side": "sell",
+      "base": "ENA",
+      "pnl": -6.81,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-08-30",
+      "side": "buy",
+      "base": "PUMP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 149.1
+    },
+    {
+      "date": "2026-08-31",
+      "side": "sell",
+      "base": "PUMP",
+      "pnl": -18.27,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-01",
+      "side": "buy",
+      "base": "USELESS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 131.2
+    },
+    {
+      "date": "2026-09-06",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": 241.6,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-07",
+      "side": "buy",
+      "base": "JUP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 367.97
+    },
+    {
+      "date": "2026-09-09",
+      "side": "sell",
+      "base": "JUP",
+      "pnl": -45.94,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-10",
+      "side": "buy",
+      "base": "LSK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 322.94
+    },
+    {
+      "date": "2026-09-14",
+      "side": "sell",
+      "base": "LSK",
+      "pnl": 1882.1,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-15",
+      "side": "buy",
+      "base": "NPC",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-16",
+      "side": "sell",
+      "base": "NPC",
+      "pnl": -243.89,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-17",
+      "side": "buy",
+      "base": "RAY",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-22",
+      "side": "sell",
+      "base": "RAY",
+      "pnl": 490.2,
+      "reason": "time_stop"
+    },
+    {
+      "date": "2026-09-23",
+      "side": "buy",
+      "base": "USELESS",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-24",
+      "side": "sell",
+      "base": "USELESS",
+      "pnl": -235.82,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-25",
+      "side": "buy",
+      "base": "ARK",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-09-28",
+      "side": "sell",
+      "base": "ARK",
+      "pnl": 390.49,
+      "reason": "alt_trail"
+    },
+    {
+      "date": "2026-09-29",
+      "side": "buy",
+      "base": "CAP",
+      "pnl": 0.0,
+      "reason": "coil_day",
+      "notion": 1700.0
+    },
+    {
+      "date": "2026-10-02",
+      "side": "sell",
+      "base": "CAP",
+      "pnl": 425.45,
+      "reason": "alt_trail"
+    }
+  ]
+}

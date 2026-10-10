@@ -17,6 +17,16 @@ from bot.live.micro_session import run_session
 logger = logging.getLogger(__name__)
 
 _STATUS_PATH = Path("./data/live_micro_session_status.json")
+
+
+def session_status_path() -> Path:
+    """Status file for this process. Override so accounts do not share one file."""
+    raw = str(getattr(get_settings(), "live_micro_session_status_path", "") or "").strip()
+    if raw:
+        return Path(raw)
+    return _STATUS_PATH
+
+
 _REPORT_PATH = Path("./data/live_micro_session_report.json")
 
 # Legacy paper-pocket fields that caused false +PnL / false kill signals.
@@ -91,9 +101,9 @@ class MicroSessionManager:
         task_alive = self._task_alive()
         if self._status.get("updated_at"):
             return self._with_liveness(self._status, task_alive=task_alive)
-        if _STATUS_PATH.exists():
+        if session_status_path().exists():
             try:
-                data = json.loads(_STATUS_PATH.read_text(encoding="utf-8"))
+                data = json.loads(session_status_path().read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     return self._with_liveness(data, task_alive=task_alive)
             except Exception:  # noqa: BLE001
@@ -109,9 +119,9 @@ class MicroSessionManager:
         if self._task_alive():
             return None
         raw: dict[str, Any] | None = None
-        if _STATUS_PATH.exists():
+        if session_status_path().exists():
             try:
-                data = json.loads(_STATUS_PATH.read_text(encoding="utf-8"))
+                data = json.loads(session_status_path().read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     raw = data
             except Exception:  # noqa: BLE001
@@ -162,8 +172,8 @@ class MicroSessionManager:
         self._status = self._strip_legacy_paper(self._status)
         self._status["updated_at"] = datetime.now(UTC).isoformat()
         try:
-            _STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _STATUS_PATH.write_text(
+            session_status_path().parent.mkdir(parents=True, exist_ok=True)
+            session_status_path().write_text(
                 json.dumps(self._status, indent=2, default=str),
                 encoding="utf-8",
             )

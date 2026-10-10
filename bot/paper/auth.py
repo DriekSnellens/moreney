@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import time
 from secrets import compare_digest, token_hex
 from typing import Any
@@ -16,6 +17,17 @@ from bot.core.config import Settings
 
 COOKIE_NAME = "moreney_dash"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+_COOKIE_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$")
+
+
+def session_cookie_name(settings: Settings | None) -> str:
+    """Cookie name for this process. Invalid values fall back to the default."""
+    if settings is None:
+        return COOKIE_NAME
+    raw = str(getattr(settings, "dashboard_cookie_name", "") or "").strip()
+    if _COOKIE_NAME_RE.fullmatch(raw):
+        return raw
+    return COOKIE_NAME
 
 
 def _secret(settings: Settings) -> str:
@@ -79,7 +91,7 @@ def credentials_valid(settings: Settings, username: str, password: str) -> bool:
 
 def set_session_cookie(response: Response, settings: Settings, username: str) -> None:
     response.set_cookie(
-        key=COOKIE_NAME,
+        key=session_cookie_name(settings),
         value=issue_session_token(settings, username),
         httponly=True,
         samesite="lax",
@@ -88,12 +100,12 @@ def set_session_cookie(response: Response, settings: Settings, username: str) ->
     )
 
 
-def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(key=COOKIE_NAME, path="/")
+def clear_session_cookie(response: Response, settings: Settings | None = None) -> None:
+    response.delete_cookie(key=session_cookie_name(settings), path="/")
 
 
 def request_has_valid_session(request: Request, settings: Settings) -> bool:
-    token = request.cookies.get(COOKIE_NAME)
+    token = request.cookies.get(session_cookie_name(settings))
     return verify_session_token(settings, token) is not None
 
 

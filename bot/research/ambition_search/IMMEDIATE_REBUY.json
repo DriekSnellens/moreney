@@ -1,0 +1,101 @@
+{
+  "asof": "2026-10-05T12:47:29.119137+00:00",
+  "start": "2024-03-16",
+  "end": "2026-10-03",
+  "book_eur": 20000.0,
+  "params": {
+    "pack": "residual_full",
+    "skip_days": 1,
+    "lookback_days": 10,
+    "trail_pct": 0.1,
+    "excess_floor": 0.035,
+    "rebalance_days": 7,
+    "sizing": "compound",
+    "immediate_rebuy_rule": "after trail/overlay sell, next-open buy best alt excluding sold bases"
+  },
+  "rows": [
+    {
+      "window": "full",
+      "mode": "wait_7d",
+      "pnl": 410891.21,
+      "dd": 0.3094,
+      "calmar": 7.532,
+      "ann": 2.3307,
+      "trades": 92,
+      "green_weeks": 39,
+      "n_weeks": 134,
+      "worst_week": -53388.63,
+      "best_week": 162617.77,
+      "n_immediate_rebuy": 0,
+      "n_overlay": 36,
+      "end_hold": "cash",
+      "imm_buy_trades": 0
+    },
+    {
+      "window": "full",
+      "mode": "immediate_rebuy",
+      "pnl": 132798.61,
+      "dd": 0.5831,
+      "calmar": 2.09,
+      "ann": 1.2186,
+      "trades": 159,
+      "green_weeks": 42,
+      "n_weeks": 134,
+      "worst_week": -29142.43,
+      "best_week": 60332.06,
+      "n_immediate_rebuy": 41,
+      "n_overlay": 56,
+      "end_hold": "alt:SUI",
+      "imm_buy_trades": 41
+    },
+    {
+      "window": "pre_near",
+      "mode": "wait_7d",
+      "pnl": 189150.13,
+      "dd": 0.3094,
+      "calmar": 5.025,
+      "ann": 1.5549,
+      "trades": 90,
+      "green_weeks": 37,
+      "n_weeks": 132,
+      "worst_week": -21775.14,
+      "best_week": 53260.44,
+      "n_immediate_rebuy": 0,
+      "n_overlay": 35,
+      "end_hold": "cash",
+      "imm_buy_trades": 0
+    },
+    {
+      "window": "pre_near",
+      "mode": "immediate_rebuy",
+      "pnl": 61907.59,
+      "dd": 0.5831,
+      "calmar": 1.298,
+      "ann": 0.7566,
+      "trades": 155,
+      "green_weeks": 41,
+      "n_weeks": 132,
+      "worst_week": -29142.43,
+      "best_week": 36857.5,
+      "n_immediate_rebuy": 40,
+      "n_overlay": 55,
+      "end_hold": "alt:ARB",
+      "imm_buy_trades": 40
+    }
+  ],
+  "full_wait": {
+    "pnl": 410891.21,
+    "dd": 0.3094,
+    "calmar": 7.532,
+    "trades": 92,
+    "n_overlay": 36
+  },
+  "full_imm": {
+    "pnl": 132798.61,
+    "dd": 0.5831,
+    "calmar": 2.09,
+    "trades": 159,
+    "n_immediate_rebuy": 41,
+    "n_overlay": 56
+  }
+}

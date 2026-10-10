@@ -279,6 +279,11 @@ class Settings(BaseSettings):
     dashboard_basic_auth_username: str = "moreney"
     dashboard_basic_auth_password: SecretStr | None = None
     dashboard_session_secret: SecretStr | None = None
+    # Separate hosts that share a registrable domain still share cookies.
+    # Each public account sets its own name so logins do not overwrite each other.
+    dashboard_cookie_name: str = "moreney_dash"
+    # Open / on the momentum page (BTC+RS weekly clip) when the 15m desk is stopped.
+    dashboard_momentum_home: bool = False
 
     # --- Global opportunity engine (multi-market architecture) ---
     global_opportunity_engine_enabled: bool = True
@@ -723,6 +728,8 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_lookback_days: int = Field(default=10, ge=5, le=90)
     momentum_btc_rs_clip_skip_days: int = Field(default=1, ge=0, le=10)
     momentum_btc_rs_clip_rebalance_days: int = Field(default=7, ge=1, le=30)
+    # 0=Mon … 6=Sun; None = any weekday (legacy). Wet replay favored Tuesday.
+    momentum_btc_rs_clip_rebalance_weekday: int | None = Field(default=None, ge=0, le=6)
     momentum_btc_rs_clip_sma_n: int = Field(default=50, ge=10, le=200)
     momentum_btc_rs_clip_min_qvol_eur: float = Field(default=80_000.0, ge=0)
     momentum_btc_rs_clip_alt_trail_pct: float = Field(default=0.10, ge=0.0, le=1.0)
@@ -731,6 +738,14 @@ class Settings(BaseSettings):
     momentum_btc_rs_clip_pending_pack: str = ""
     momentum_btc_rs_clip_state_path: str = "./data/momentum_btc_rs_clip_state.json"
     momentum_btc_rs_clip_ledger_path: str = "./data/momentum_btc_rs_clip_ledger.jsonl"
+    # Fixed €2k MoonShot sleeve (daily brk20_day). Own state; does not replace
+    # the owner BTC+RS / residual_full book. Live orders only when allow_live.
+    momentum_moonshot_clip_enabled: bool = False
+    momentum_moonshot_clip_allow_live: bool = False
+    momentum_moonshot_clip_venues: str = "bitvavo"
+    momentum_moonshot_clip_book_eur: float = Field(default=2_000.0, gt=0)
+    momentum_moonshot_clip_state_path: str = "./data/momentum_moonshot_clip_state.json"
+    momentum_moonshot_clip_ledger_path: str = "./data/momentum_moonshot_clip_ledger.jsonl"
     live_trading_venues: str = "bitvavo,kraken,binance,okx"
     # OKX regional API host (EU accounts use eea.okx.com, not okx.com).
     okx_hostname: str = "eea.okx.com"
@@ -844,6 +859,9 @@ class Settings(BaseSettings):
     live_micro_long_hold_bases: str = ""
     # Durable trail/resting/session counters across micro session restarts.
     live_micro_bridge_persist_path: str = "./data/live_micro_bridge_state.json"
+    # Empty uses the shared default. Each live account sets its own file so a
+    # restart cannot resume another account's maker session.
+    live_micro_session_status_path: str = ""
     # OKX: prefer deploying free EUR into these liquid bases (not Bitvavo max-base bags).
     live_micro_okx_deploy_bases: str = "BTC,ADA,NEAR,DOT,XRP,LINK,ATOM"
     # Prefer these dual-liquid bases when ranking NET-passing emits (comma-separated).

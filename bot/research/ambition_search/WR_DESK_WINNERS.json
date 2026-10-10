@@ -1,0 +1,568 @@
+{
+  "asof": "2026-09-15T06:38:32.458550+00:00",
+  "verdict": {
+    "best_wr_name": "wr_winner",
+    "best_wr": 0.54,
+    "best_wr_trades": 63,
+    "best_wr_pnl": 951.44,
+    "live_wr": 0.403,
+    "delta_wr_pp": 13.7,
+    "knobs_vs_live": {
+      "trail_pct": "0.04 \u2192 0.03",
+      "trail_tight_after": "0.05 \u2192 0.04",
+      "trail_tight_pct": "0.025 \u2192 0.02",
+      "time_exit_hours": "24 \u2192 36",
+      "green_deadline_hours": "4 \u2192 0 (off)",
+      "decision_hours_utc": "(7,13,16) \u2192 (7,16)"
+    }
+  },
+  "live_current": {
+    "total_eur": 752.86,
+    "max_drawdown_eur": -276.9,
+    "trades": 77,
+    "win_rate": 0.403,
+    "avg_net_per_trade_eur": 9.78,
+    "by_reason": {
+      "trail": {
+        "n": 46,
+        "net_eur": 1514.58
+      },
+      "hard_stop": {
+        "n": 8,
+        "net_eur": -406.61
+      },
+      "time_exit": {
+        "n": 5,
+        "net_eur": -31.27
+      },
+      "no_green": {
+        "n": 18,
+        "net_eur": -323.84
+      }
+    },
+    "name": "live_current",
+    "overrides": {}
+  },
+  "top_wr": [
+    {
+      "total_eur": 951.44,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.54,
+      "avg_net_per_trade_eur": 15.1,
+      "by_reason": {
+        "trail": {
+          "n": 61,
+          "net_eur": 1044.52
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.03_te36.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 951.44,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.54,
+      "avg_net_per_trade_eur": 15.1,
+      "by_reason": {
+        "trail": {
+          "n": 63,
+          "net_eur": 951.44
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.04_te36.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.04,
+        "time_exit_hours": 36.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 887.89,
+      "max_drawdown_eur": -198.05,
+      "trades": 80,
+      "win_rate": 0.525,
+      "avg_net_per_trade_eur": 11.1,
+      "by_reason": {
+        "trail": {
+          "n": 76,
+          "net_eur": 1099.97
+        },
+        "hard_stop": {
+          "n": 4,
+          "net_eur": -212.08
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.03_te36.0_gd0.0_h7-13-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          13,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 887.89,
+      "max_drawdown_eur": -198.05,
+      "trades": 80,
+      "win_rate": 0.525,
+      "avg_net_per_trade_eur": 11.1,
+      "by_reason": {
+        "trail": {
+          "n": 80,
+          "net_eur": 887.89
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.04_te36.0_gd0.0_h7-13-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.04,
+        "time_exit_hours": 36.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          13,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 925.71,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.524,
+      "avg_net_per_trade_eur": 14.69,
+      "by_reason": {
+        "trail": {
+          "n": 60,
+          "net_eur": 1021.73
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -2.94
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.03_te24.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 24.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    }
+  ],
+  "top_pnl": [
+    {
+      "total_eur": 951.44,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.54,
+      "avg_net_per_trade_eur": 15.1,
+      "by_reason": {
+        "trail": {
+          "n": 61,
+          "net_eur": 1044.52
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.03_te36.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 36.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 951.44,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.54,
+      "avg_net_per_trade_eur": 15.1,
+      "by_reason": {
+        "trail": {
+          "n": 63,
+          "net_eur": 951.44
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.04_te36.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.04,
+        "time_exit_hours": 36.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 925.71,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.524,
+      "avg_net_per_trade_eur": 14.69,
+      "by_reason": {
+        "trail": {
+          "n": 60,
+          "net_eur": 1021.73
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -2.94
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.03_te24.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 24.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 925.71,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.524,
+      "avg_net_per_trade_eur": 14.69,
+      "by_reason": {
+        "trail": {
+          "n": 62,
+          "net_eur": 928.65
+        },
+        "time_exit": {
+          "n": 1,
+          "net_eur": -2.94
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.04_te24.0_gd0.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.04,
+        "time_exit_hours": 24.0,
+        "green_deadline_hours": 0.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    },
+    {
+      "total_eur": 889.75,
+      "max_drawdown_eur": -148.83,
+      "trades": 66,
+      "win_rate": 0.455,
+      "avg_net_per_trade_eur": 13.48,
+      "by_reason": {
+        "trail": {
+          "n": 45,
+          "net_eur": 1253.93
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        },
+        "no_green": {
+          "n": 19,
+          "net_eur": -271.1
+        }
+      },
+      "name": "me0.025_tr0.03_tta0.04_ttp0.02_hs0.03_te24.0_gd4.0_h7-16",
+      "overrides": {
+        "min_excess": 0.025,
+        "trail_pct": 0.03,
+        "trail_tight_after": 0.04,
+        "trail_tight_pct": 0.02,
+        "hard_stop_pct": 0.03,
+        "time_exit_hours": 24.0,
+        "green_deadline_hours": 4.0,
+        "soft_regime_on_weak_tape": true,
+        "strong_clip_requires_quality": true,
+        "decision_hours_utc": [
+          7,
+          16
+        ]
+      }
+    }
+  ],
+  "baselines": {
+    "live_current": {
+      "total_eur": 752.86,
+      "max_drawdown_eur": -276.9,
+      "trades": 77,
+      "win_rate": 0.403,
+      "avg_net_per_trade_eur": 9.78,
+      "by_reason": {
+        "trail": {
+          "n": 46,
+          "net_eur": 1514.58
+        },
+        "hard_stop": {
+          "n": 8,
+          "net_eur": -406.61
+        },
+        "time_exit": {
+          "n": 5,
+          "net_eur": -31.27
+        },
+        "no_green": {
+          "n": 18,
+          "net_eur": -323.84
+        }
+      },
+      "name": "live_current"
+    },
+    "hours_0716_only": {
+      "total_eur": 719.73,
+      "max_drawdown_eur": -197.95,
+      "trades": 63,
+      "win_rate": 0.413,
+      "avg_net_per_trade_eur": 11.42,
+      "by_reason": {
+        "trail": {
+          "n": 37,
+          "net_eur": 1243.4
+        },
+        "hard_stop": {
+          "n": 5,
+          "net_eur": -260.92
+        },
+        "time_exit": {
+          "n": 4,
+          "net_eur": -28.37
+        },
+        "no_green": {
+          "n": 17,
+          "net_eur": -234.37
+        }
+      },
+      "name": "hours_0716_only"
+    },
+    "hours_0713": {
+      "total_eur": 743.12,
+      "max_drawdown_eur": -201.09,
+      "trades": 58,
+      "win_rate": 0.448,
+      "avg_net_per_trade_eur": 12.81,
+      "by_reason": {
+        "trail": {
+          "n": 37,
+          "net_eur": 1348.74
+        },
+        "hard_stop": {
+          "n": 7,
+          "net_eur": -360.89
+        },
+        "time_exit": {
+          "n": 2,
+          "net_eur": -7.63
+        },
+        "no_green": {
+          "n": 12,
+          "net_eur": -237.1
+        }
+      },
+      "name": "hours_0713"
+    },
+    "every_bar": {
+      "total_eur": -133.71,
+      "max_drawdown_eur": -759.81,
+      "trades": 245,
+      "win_rate": 0.294,
+      "avg_net_per_trade_eur": -0.55,
+      "by_reason": {
+        "no_green": {
+          "n": 75,
+          "net_eur": -1014.96
+        },
+        "time_exit": {
+          "n": 17,
+          "net_eur": -74.02
+        },
+        "trail": {
+          "n": 121,
+          "net_eur": 2415.64
+        },
+        "hard_stop": {
+          "n": 32,
+          "net_eur": -1460.38
+        }
+      },
+      "name": "every_bar"
+    },
+    "prior_40k_winner_scaled": {
+      "total_eur": 658.16,
+      "max_drawdown_eur": -265.6,
+      "trades": 58,
+      "win_rate": 0.466,
+      "avg_net_per_trade_eur": 11.35,
+      "by_reason": {
+        "trail": {
+          "n": 40,
+          "net_eur": 1365.33
+        },
+        "hard_stop": {
+          "n": 13,
+          "net_eur": -660.99
+        },
+        "midflat": {
+          "n": 5,
+          "net_eur": -46.18
+        }
+      },
+      "name": "prior_40k_winner_scaled"
+    },
+    "wr_winner": {
+      "total_eur": 951.44,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.54,
+      "avg_net_per_trade_eur": 15.1,
+      "by_reason": {
+        "trail": {
+          "n": 61,
+          "net_eur": 1044.52
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        }
+      },
+      "name": "wr_winner"
+    },
+    "wr_winner_keep_green": {
+      "total_eur": 889.75,
+      "max_drawdown_eur": -148.83,
+      "trades": 66,
+      "win_rate": 0.455,
+      "avg_net_per_trade_eur": 13.48,
+      "by_reason": {
+        "trail": {
+          "n": 45,
+          "net_eur": 1253.93
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        },
+        "no_green": {
+          "n": 19,
+          "net_eur": -271.1
+        }
+      },
+      "name": "wr_winner_keep_green"
+    },
+    "live_but_trail_pack_wr": {
+      "total_eur": 951.44,
+      "max_drawdown_eur": -148.83,
+      "trades": 63,
+      "win_rate": 0.54,
+      "avg_net_per_trade_eur": 15.1,
+      "by_reason": {
+        "trail": {
+          "n": 61,
+          "net_eur": 1044.52
+        },
+        "hard_stop": {
+          "n": 2,
+          "net_eur": -93.08
+        }
+      },
+      "name": "live_but_trail_pack_wr"
+    }
+  }
+}

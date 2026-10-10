@@ -162,6 +162,32 @@ class LiveGateway:
                 return float(bal.total)
         return 0.0
 
+    async def quote_free_eur(self) -> float | None:
+        """EUR the venue will let a new order spend (excludes locked quote)."""
+        snap = await self._client(trading=False).get_balances()
+        for bal in snap.balances:
+            if str(bal.asset).upper() == "EUR":
+                return float(bal.free)
+        return 0.0
+
+    async def account_history_items(self) -> list[dict[str, Any]]:
+        """Recent Bitvavo account history (buys and sells), newest page."""
+        try:
+            client = self._client(trading=False)
+            ex = await client._get_exchange()  # noqa: SLF001
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum desk: %s history client failed: %s", self._venue, exc)
+            return []
+        if not hasattr(ex, "privateGetAccountHistory"):
+            return []
+        try:
+            res = await ex.privateGetAccountHistory({})
+        except Exception as exc:  # noqa: BLE001
+            logger.info("momentum desk: %s account history failed: %s", self._venue, exc)
+            return []
+        items = res.get("items") if isinstance(res, dict) else res
+        return [row for row in (items or []) if isinstance(row, dict)]
+
     async def base_free(self, base: str) -> float | None:
         """Free units of ``base`` available to sell (None if balance fetch fails)."""
         try:
@@ -2566,23 +2592,20 @@ class MomentumDeskManager:
         return base
 
     async def status_fresh(self) -> dict[str, Any]:
-        """Fresh marks every poll; inventory/cash reconcile is throttled for 1s UI."""
+        """Marks, inventory, and venue EUR on every dashboard poll."""
         if self._runner is not None:
             try:
                 await self._runner.refresh_marks()
             except Exception:  # noqa: BLE001
                 logger.exception("momentum desk: mark refresh for status failed")
-            now = time.monotonic()
-            if now - self._last_reconcile_mono >= 5.0:
-                self._last_reconcile_mono = now
-                try:
-                    await self._runner.reconcile_external_inventory()
-                except Exception:  # noqa: BLE001
-                    logger.exception("momentum desk: reconcile for status failed")
-                try:
-                    await self._runner._refresh_cash(force=True)  # noqa: SLF001
-                except Exception:  # noqa: BLE001
-                    logger.exception("momentum desk: cash refresh for status failed")
+            try:
+                await self._runner.reconcile_external_inventory()
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: reconcile for status failed")
+            try:
+                await self._runner._refresh_cash(force=True)  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                logger.exception("momentum desk: cash refresh for status failed")
             try:
                 self._runner._sample_equity()  # noqa: SLF001
             except Exception:  # noqa: BLE001

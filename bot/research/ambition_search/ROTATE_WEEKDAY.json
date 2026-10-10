@@ -1,0 +1,149 @@
+{
+  "asof": "2026-10-04T19:43:45.934013+00:00",
+  "start": "2024-03-16",
+  "end": "2026-10-03",
+  "book_eur": 20000.0,
+  "params": {
+    "pack": "residual_full",
+    "skip_days": 1,
+    "lookback_days": 10,
+    "trail_pct": 0.1,
+    "excess_floor": 0.035,
+    "rebalance_days": 7,
+    "sizing": "compound_equity",
+    "alphai": false
+  },
+  "live_now": {
+    "rebalance_weekday": null,
+    "last_rebalance": "2026-09-29T08:41:25.308000+00:00",
+    "next_age_due": "2026-10-06T08:41:25.308000+00:00",
+    "phase_day": "Tuesday",
+    "note": "Any-day: check when \u22657d since last reb/trail. Currently Tuesday-phased until a mid-week trail shifts it."
+  },
+  "rows": [
+    {
+      "setup": "any_day",
+      "rebalance_weekday": null,
+      "pnl_eur": 410891.21,
+      "return_pct": 20.5446,
+      "max_dd_pct": 0.3094,
+      "calmar": 7.532,
+      "ann_pct": 2.3307,
+      "n_trades": 92,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Sun": 3,
+        "Tue": 5,
+        "Sat": 12,
+        "Fri": 8,
+        "Wed": 9,
+        "Mon": 7,
+        "Thu": 2
+      }
+    },
+    {
+      "setup": "pin_Mon",
+      "rebalance_weekday": 0,
+      "pnl_eur": -12867.4,
+      "return_pct": -0.6434,
+      "max_dd_pct": 0.703,
+      "calmar": -0.473,
+      "ann_pct": -0.3324,
+      "n_trades": 72,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Tue": 36
+      }
+    },
+    {
+      "setup": "pin_Tue",
+      "rebalance_weekday": 1,
+      "pnl_eur": 17119.18,
+      "return_pct": 0.856,
+      "max_dd_pct": 0.6401,
+      "calmar": 0.428,
+      "ann_pct": 0.2742,
+      "n_trades": 74,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Wed": 37
+      }
+    },
+    {
+      "setup": "pin_Wed",
+      "rebalance_weekday": 2,
+      "pnl_eur": 2501.92,
+      "return_pct": 0.1251,
+      "max_dd_pct": 0.6005,
+      "calmar": 0.079,
+      "ann_pct": 0.0473,
+      "n_trades": 68,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Thu": 34
+      }
+    },
+    {
+      "setup": "pin_Thu",
+      "rebalance_weekday": 3,
+      "pnl_eur": 77847.85,
+      "return_pct": 3.8924,
+      "max_dd_pct": 0.3572,
+      "calmar": 2.416,
+      "ann_pct": 0.863,
+      "n_trades": 70,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Fri": 35
+      }
+    },
+    {
+      "setup": "pin_Fri",
+      "rebalance_weekday": 4,
+      "pnl_eur": 9029.6,
+      "return_pct": 0.4515,
+      "max_dd_pct": 0.5731,
+      "calmar": 0.274,
+      "ann_pct": 0.1572,
+      "n_trades": 76,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Sat": 38
+      }
+    },
+    {
+      "setup": "pin_Sat",
+      "rebalance_weekday": 5,
+      "pnl_eur": 8892.55,
+      "return_pct": 0.4446,
+      "max_dd_pct": 0.5059,
+      "calmar": 0.307,
+      "ann_pct": 0.1551,
+      "n_trades": 76,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Sun": 38
+      }
+    },
+    {
+      "setup": "pin_Sun",
+      "rebalance_weekday": 6,
+      "pnl_eur": -14350.25,
+      "return_pct": -0.7175,
+      "max_dd_pct": 0.7566,
+      "calmar": -0.516,
+      "ann_pct": -0.3907,
+      "n_trades": 80,
+      "end_hold": "cash",
+      "buy_dow": {
+        "Mon": 40
+      }
+    }
+  ],
+  "verdict": {
+    "best_overall": "any_day",
+    "best_fixed_pin": "pin_Thu",
+    "monday": -12867.4,
+    "sunday": -14350.25
+  }
+}
