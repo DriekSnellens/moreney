@@ -199,6 +199,46 @@ def test_allow_live_defaults_off():
     assert "from bot.live.executor" not in text
 
 
+def test_profit_lock_sells_a_round_trip_and_leaves_a_trend_to_the_trail():
+    from bot.live.momentum_btc_rs_clip import alt_exit_reason, residual_full_config
+
+    cfg = residual_full_config(ClipConfig())
+    assert cfg.alt_lock_arm_pct == pytest.approx(0.12)
+    assert cfg.alt_lock_floor_pct == pytest.approx(0.06)
+    # Peak +15% arms the lock. A fall back to +6% of entry sells.
+    reason, peak = alt_exit_reason(
+        entry=100.0,
+        peak=115.0,
+        mark=106.0,
+        trail_pct=cfg.alt_trail_pct,
+        lock_arm_pct=cfg.alt_lock_arm_pct,
+        lock_floor_pct=cfg.alt_lock_floor_pct,
+    )
+    assert reason == "alt_lock"
+    assert peak == 115.0
+    # A trend that is still +30% after a +40% peak stays open. The 10% trail
+    # has not been hit, and price is well above the +6% floor.
+    reason, peak = alt_exit_reason(
+        entry=100.0,
+        peak=140.0,
+        mark=130.0,
+        trail_pct=cfg.alt_trail_pct,
+        lock_arm_pct=cfg.alt_lock_arm_pct,
+        lock_floor_pct=cfg.alt_lock_floor_pct,
+    )
+    assert reason == ""
+    assert peak == 140.0
+    reason, _peak = alt_exit_reason(
+        entry=100.0,
+        peak=140.0,
+        mark=125.0,
+        trail_pct=cfg.alt_trail_pct,
+        lock_arm_pct=cfg.alt_lock_arm_pct,
+        lock_floor_pct=cfg.alt_lock_floor_pct,
+    )
+    assert reason == "alt_trail"
+
+
 def test_no_coin_hardcodes_in_clip_module():
     text = open("bot/live/momentum_btc_rs_clip.py", encoding="utf-8").read()
     for needle in ('== "UNI"', "== 'SOL'", 'base == "ETH"'):

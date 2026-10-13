@@ -15,6 +15,16 @@ def live_pack_knobs(cfg: ClipConfig | None = None) -> dict[str, Any]:
     """Map live ClipConfig onto the residual-weekly wet engine."""
     c = cfg or ClipConfig()
     trail = float(c.alt_trail_pct or 0.0)
+    lock_arm = float(getattr(c, "alt_lock_arm_pct", 0.0) or 0.0)
+    lock_floor = float(getattr(c, "alt_lock_floor_pct", 0.0) or 0.0)
+    policy = None
+    if trail > 0 or lock_arm > 0:
+        policy = ExitPolicy(
+            name=f"alt_trail_{int(round(trail * 100))}_lock{int(round(lock_arm * 100))}",
+            alt_trail_pct=trail,
+            alt_lock_arm_pct=lock_arm,
+            alt_lock_floor_pct=lock_floor,
+        )
     return {
         "btc_frac": float(c.btc_frac),
         "excess_floor": float(c.excess_floor),
@@ -26,11 +36,7 @@ def live_pack_knobs(cfg: ClipConfig | None = None) -> dict[str, Any]:
         "n_alts": 1,
         "require_alt_sma": False,
         "trail_pct": trail,
-        "policy": (
-            ExitPolicy(name=f"alt_trail_{int(round(trail * 100))}", alt_trail_pct=trail)
-            if trail > 0
-            else None
-        ),
+        "policy": policy,
     }
 
 

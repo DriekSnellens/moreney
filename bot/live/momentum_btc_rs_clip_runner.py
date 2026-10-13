@@ -24,6 +24,7 @@ from bot.live.external_roundtrip import (
 from bot.live.momentum_btc_rs_clip import (
     ClipConfig,
     ClipPosition,
+    alt_exit_reason,
     completed_ohlc,
     default_config,
     evaluate_clip,
@@ -966,11 +967,13 @@ class BtcRsClipPaperRunner:
         return net
 
     async def manage_alt_trail(self) -> list[dict[str, Any]]:
-        """Intraday hard-stop / trail / optional time-stop on the alt sleeve."""
+        """Intraday hard-stop / profit-lock / trail / optional time-stop on the alt sleeve."""
         trail = float(self.cfg.alt_trail_pct or 0.0)
         time_max = int(getattr(self.cfg, "time_max_days", 0) or 0)
         hard = float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0)
-        if trail <= 0 and time_max <= 0 and hard <= 0:
+        lock_arm = float(getattr(self.cfg, "alt_lock_arm_pct", 0.0) or 0.0)
+        lock_floor = float(getattr(self.cfg, "alt_lock_floor_pct", 0.0) or 0.0)
+        if trail <= 0 and time_max <= 0 and hard <= 0 and lock_arm <= 0:
             return []
         applied: list[dict[str, Any]] = []
         now_ms = int(time.time() * 1000)
@@ -980,24 +983,19 @@ class BtcRsClipPaperRunner:
             mark = float(self.marks.get(pos.base) or 0.0)
             if mark <= 0:
                 continue
-            reason = ""
-            if hard > 0 and float(pos.entry_price or 0) > 0:
-                if mark <= float(pos.entry_price) * (1.0 - hard):
-                    reason = "hard_stop"
-            if not reason and time_max > 0 and pos.opened_ms > 0:
-                age_days = (now_ms - int(pos.opened_ms)) / 86_400_000.0
-                if age_days >= float(time_max):
-                    reason = "time_stop"
-            if not reason and trail > 0:
-                peak = float(pos.peak_px or 0.0)
-                if peak <= 0:
-                    pos.peak_px = mark
-                    continue
-                if mark > peak:
-                    pos.peak_px = mark
-                    continue
-                if mark <= peak * (1.0 - trail):
-                    reason = "alt_trail"
+            reason, peak = alt_exit_reason(
+                entry=float(pos.entry_price or 0.0),
+                peak=float(pos.peak_px or 0.0),
+                mark=mark,
+                trail_pct=trail,
+                hard_stop_pct=hard,
+                lock_arm_pct=lock_arm,
+                lock_floor_pct=lock_floor,
+                opened_ms=int(pos.opened_ms or 0),
+                now_ms=now_ms,
+                time_max_days=time_max,
+            )
+            pos.peak_px = peak
             if not reason:
                 continue
             net = await self._close_lot(pos, mark, reason)
