@@ -128,6 +128,11 @@ class ClipConfig:
     fee_rt: float = FEE_RT
     slip: float = SLIP
     alt_trail_pct: float = 0.10
+    # After peak gain reaches the arm, sell if price falls back to
+    # entry * (1 + floor). 0 disables. The wide trail still runs trends
+    # that never round-trip to that floor.
+    alt_lock_arm_pct: float = 0.0
+    alt_lock_floor_pct: float = 0.0
     resize_band: float = 0.10
     # Alt must also close above its own SMA. Off on the armed 20/80 clip.
     require_alt_sma: bool = False
@@ -167,6 +172,12 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
 
     Same 10d skip-1 week clock, SMA50 flatten and 10% alt trail as the clip.
     Excess floor 3.5% sits in the flat 3.2–3.6% band from the wet replay.
+
+    Profit lock: once the alt has been +12% above entry, a fall back to +6%
+    sells. A moderate spike (about +15% at the high) otherwise gives most of
+    that gain back to the 10% trail. On the wet replay through 2026-10-13 the
+    lock changed full-sample PnL by about €200 on +€345k, because trends that
+    keep running never revisit the floor.
     """
     return replace(
         cfg,
@@ -175,7 +186,48 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
         excess_floor=0.035,
         require_alt_sma=True,
         cash_when_no_alt=True,
+        alt_lock_arm_pct=0.12,
+        alt_lock_floor_pct=0.06,
     )
+
+
+def alt_exit_reason(
+    *,
+    entry: float,
+    peak: float,
+    mark: float,
+    trail_pct: float = 0.0,
+    hard_stop_pct: float = 0.0,
+    lock_arm_pct: float = 0.0,
+    lock_floor_pct: float = 0.0,
+    opened_ms: int = 0,
+    now_ms: int = 0,
+    time_max_days: int = 0,
+) -> tuple[str, float]:
+    """Exit reason for one alt mark, plus the updated peak.
+
+    An empty reason means hold. Peak ratchets up before the checks.
+    """
+    if mark <= 0:
+        return "", peak
+    if peak <= 0 or mark > peak:
+        peak = mark
+    if hard_stop_pct > 0 and entry > 0 and mark <= entry * (1.0 - hard_stop_pct):
+        return "hard_stop", peak
+    if time_max_days > 0 and opened_ms > 0 and now_ms > opened_ms:
+        age_days = (now_ms - opened_ms) / 86_400_000.0
+        if age_days >= float(time_max_days):
+            return "time_stop", peak
+    if (
+        lock_arm_pct > 0
+        and entry > 0
+        and peak / entry - 1.0 >= lock_arm_pct
+        and mark <= entry * (1.0 + lock_floor_pct)
+    ):
+        return "alt_lock", peak
+    if trail_pct > 0 and mark <= peak * (1.0 - trail_pct):
+        return "alt_trail", peak
+    return "", peak
 
 
 def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
