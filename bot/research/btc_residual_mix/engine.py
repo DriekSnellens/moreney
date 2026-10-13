@@ -13,7 +13,14 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from bot.live.momentum_btc_rs_clip import closes_of, quote_vol, rs_excess, sma
+from bot.live.momentum_btc_rs_clip import (
+    closes_of,
+    high_proximity,
+    quote_vol,
+    residual_rank_score,
+    rs_excess,
+    sma,
+)
 from bot.live.momentum_desk import DEFAULT_UNIVERSE
 from bot.research.clip_exit_lab.engine import (
     WET,
@@ -50,6 +57,7 @@ def pick_residual(
     require_alt_sma: bool = False,
     sma_n: int = 50,
     exclude_bases: Sequence[str] | None = None,
+    near_high_weight: float = 0.0,
 ) -> dict[str, Any]:
     ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
@@ -68,8 +76,22 @@ def pick_residual(
             last_px = float(cl[-1]) if cl else 0.0
             if s is None or last_px <= s:
                 continue
-        ranked.append({"base": base, "excess": xs, "qvol": round(qv, 0)})
-    ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
+        highs = [float(r[2]) for r in rows if len(r) >= 3]
+        close = float(cl[-1]) if cl else 0.0
+        prox = high_proximity(highs, close)
+        ranked.append(
+            {
+                "base": base,
+                "excess": xs,
+                "qvol": round(qv, 0),
+                "prox60": prox,
+                "score": residual_rank_score(float(xs), prox, weight=float(near_high_weight or 0.0)),
+            }
+        )
+    if float(near_high_weight or 0.0) > 0:
+        ranked.sort(key=lambda r: float(r["score"]), reverse=True)
+    else:
+        ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     alts = [
         str(r["base"])
         for r in ranked
@@ -206,6 +228,7 @@ def _spike_reclaim_orders(
     n_alts: int,
     require_alt_sma: bool,
     sma_n: int,
+    near_high_weight: float = 0.0,
 ) -> list[Order]:
     """Buy a spiked alt back if price reclaims that day's high within the window."""
     days = int(policy.alt_spike_reclaim_days or 0)
@@ -260,6 +283,7 @@ def _spike_reclaim_orders(
             n_alts=n_alts,
             require_alt_sma=require_alt_sma,
             sma_n=sma_n,
+            near_high_weight=near_high_weight,
         )
         if base not in (pick.get("wants") or []):
             still.append(watch)
@@ -306,6 +330,7 @@ def run_btc_residual(
     cash_when_no_alt: bool = False,
     rebalance_weekday: int | None = None,
     immediate_rebuy: bool = False,
+    near_high_weight: float = 0.0,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -391,6 +416,7 @@ def run_btc_residual(
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
                 exclude_bases=sorted(overlay_sold),
+                near_high_weight=near_high_weight,
             )
             winners = list(pick_now.get("wants") or [])
             if winners:
@@ -429,6 +455,7 @@ def run_btc_residual(
                 n_alts=n_alts,
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
+                near_high_weight=near_high_weight,
             )
             if alt_allow is not None and date in alt_allow:
                 pick = dict(pick)
@@ -531,6 +558,7 @@ def run_btc_residual(
                 n_alts=n_alts,
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
+                near_high_weight=near_high_weight,
             )
             for order in reclaim:
                 overlay_reasons[order.reason] = overlay_reasons.get(order.reason, 0) + 1
@@ -569,6 +597,7 @@ def run_btc_residual(
         "n_overlay_exits": n_overlay,
         "n_immediate_rebuy": n_immediate_rebuy,
         "immediate_rebuy": bool(immediate_rebuy),
+        "near_high_weight": float(near_high_weight or 0.0),
         "overlay_reasons": overlay_reasons,
         "exit_policy": None if policy is None else policy.name,
     }

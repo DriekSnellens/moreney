@@ -199,6 +199,73 @@ def test_allow_live_defaults_off():
     assert "from bot.live.executor" not in text
 
 
+def test_near_high_blend_prefers_a_close_tie_and_keeps_a_wide_excess_lead():
+    """Equal residual excess: the name still at its 60d high wins.
+
+    A much larger excess still wins after it has fallen off its high.
+    Weight 0 keeps the pure excess order.
+    """
+    from bot.live.momentum_btc_rs_clip import high_proximity, residual_rank_score
+
+    cfg = residual_full_config(ClipConfig())
+    assert cfg.near_high_weight == pytest.approx(0.25)
+    assert residual_rank_score(0.10, 1.0, weight=0.25) == pytest.approx(0.10 + 0.25 * 0.15)
+    assert residual_rank_score(0.10, 0.70, weight=0.0) == pytest.approx(0.10)
+    assert high_proximity([1.0] * 10, 1.0) == pytest.approx(0.85)
+
+    def bars(closes: list[float]) -> list[list[float]]:
+        rows: list[list[float]] = []
+        t0 = 1_700_000_000_000
+        for i, close in enumerate(closes):
+            rows.append([t0 + i * 86_400_000, close, close, close * 0.99, close, 20_000.0])
+        return rows
+
+    recent = [70 + i * 2.2 for i in range(20)]
+    fade = [90.0] * 40 + [160.0] * 10 + recent
+    peak = [40 + i * 0.8 for i in range(50)] + recent
+    lead = [90.0] * 40 + [220.0] * 10 + [70 + i * 4.0 for i in range(20)]
+    btc = [100 + i * 0.15 for i in range(70)]
+    ohlc = {"BTC": bars(btc), "FADE": bars(fade), "PEAK": bars(peak), "LEAD": bars(lead)}
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    armed = residual_full_config(
+        ClipConfig(universe=("FADE", "PEAK", "LEAD"), min_qvol_eur=1.0)
+    )
+    out = evaluate_clip(
+        ohlc,
+        armed,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=10**15,
+        last_rebalance_ms=0,
+        now=now,
+    )
+    assert out["want_alt"] == "LEAD"
+    pair = residual_full_config(ClipConfig(universe=("FADE", "PEAK"), min_qvol_eur=1.0))
+    tied = evaluate_clip(
+        {k: ohlc[k] for k in ("BTC", "FADE", "PEAK")},
+        pair,
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=10**15,
+        last_rebalance_ms=0,
+        now=now,
+    )
+    assert tied["want_alt"] == "PEAK"
+    plain = evaluate_clip(
+        {k: ohlc[k] for k in ("BTC", "FADE", "PEAK")},
+        ClipConfig(universe=("FADE", "PEAK"), min_qvol_eur=1.0, excess_floor=0.0),
+        held={},
+        cash_eur=20_000.0,
+        deployed_eur=0.0,
+        now_ms=10**15,
+        last_rebalance_ms=0,
+        now=now,
+    )
+    assert plain["want_alt"] == "FADE"
+
+
 def test_profit_lock_sells_a_round_trip_and_leaves_a_trend_to_the_trail():
     from bot.live.momentum_btc_rs_clip import alt_exit_reason, residual_full_config
 
