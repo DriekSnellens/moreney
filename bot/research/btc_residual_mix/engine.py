@@ -9,7 +9,7 @@ Wet = next-open Bitvavo taker. Not armed live. No per-coin branches.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -85,7 +85,9 @@ def pick_residual(
                 "excess": xs,
                 "qvol": round(qv, 0),
                 "prox60": prox,
-                "score": residual_rank_score(float(xs), prox, weight=float(near_high_weight or 0.0)),
+                "score": residual_rank_score(
+                    float(xs), prox, weight=float(near_high_weight or 0.0)
+                ),
             }
         )
     if float(near_high_weight or 0.0) > 0:
@@ -331,8 +333,17 @@ def run_btc_residual(
     rebalance_weekday: int | None = None,
     immediate_rebuy: bool = False,
     near_high_weight: float = 0.0,
+    entry_gate: Callable[[str, str], bool] | None = None,
+    alt_size_scale: Callable[[str, str], float] | None = None,
+    exit_cooldown_days: int | None = None,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
+
+    ``entry_gate(date, base)`` returning False drops that winner on the
+    weekly clock (the book goes to cash and re-checks daily, like
+    ``cash_when_no_alt``). ``alt_size_scale(date, base)`` scales the alt buy
+    notional into [0, 1]; the rest stays cash. Both are generic overlays for
+    regime, sizing and positioning research.
 
     ``btc_frac=0`` is 100% residual weekly. ``btc_frac=1`` is BTC-only
     (SMA50 cash if flatten is all/regime).
@@ -392,7 +403,13 @@ def run_btc_residual(
                     overlay_reasons[o.reason] = overlay_reasons.get(o.reason, 0) + 1
             if overlay_sold:
                 want_alts = tuple(a for a in want_alts if a not in overlay_sold)
-                last_reb = now_ms
+                # Default: a trail/lock sell restarts the full week clock.
+                # ``exit_cooldown_days`` shortens that wait to the next pick.
+                if exit_cooldown_days is None:
+                    last_reb = now_ms
+                else:
+                    wait = max(0, int(exit_cooldown_days))
+                    last_reb = now_ms - (int(rebalance_days) - wait) * DAY_MS
         btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
@@ -467,6 +484,11 @@ def run_btc_residual(
                     n_alts=n_alts,
                     excess_override=alt_allow_excess_override,
                 )
+            if entry_gate is not None:
+                pick = dict(pick)
+                pick["wants"] = [
+                    str(b) for b in (pick.get("wants") or []) if entry_gate(date, str(b))
+                ]
             last_reb = now_ms
             px = _px_map(ohlc, date, field=4)
             eq = book.mark(px)
@@ -512,6 +534,10 @@ def run_btc_residual(
                     if held.get(alt) == "alt" or alt in overlay_sold:
                         continue
                     notion = (eq if not next_btc else eq * alt_frac) / split
+                    if alt_size_scale is not None:
+                        notion *= max(0.0, min(1.0, float(alt_size_scale(date, alt))))
+                    if notion <= 0:
+                        continue
                     orders.append(
                         Order(
                             side="buy",
