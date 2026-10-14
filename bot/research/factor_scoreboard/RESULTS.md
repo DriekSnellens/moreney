@@ -213,3 +213,32 @@ full path) and charges ~20%/yr on the borrowed leg, so in a bear year leverage *
 (2025: +€2.0k at 1.5x vs +€2.5k unlevered, −€3.2k at 3x). In bull years it multiplies the PnL
 roughly in proportion to L, with the same 35–60% drawdowns as perps. Not usable by the bot until
 Bitvavo opens margin on the API; nothing armed.
+
+### What is realistic on OKX perps (bootstrap, 2026-10-14)
+
+OKX serves EEA retail through MiFID-regulated **X-Perps** (expiry perps with funding, up to 10x,
+2 bps maker / 5 bps taker, negative-balance protection, appropriateness test required). Resampling
+the 49 round trips (19 per year) 20,000 times, one-year PnL on a fresh €20k:
+
+| variant | p5 | p25 | median | p75 | p95 | P(losing year) | median maxDD | p95 maxDD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| spot 1x (live) | −1,381 | +15,983 | +41,150 | +87,881 | +250,970 | 6.3% | 23.7% | 44.5% |
+| perp 1x | −452 | +17,062 | +43,285 | +92,859 | +261,458 | 5.5% | 22.7% | 42.9% |
+| perp 1.25x | −1,112 | +21,640 | +57,743 | +134,462 | +439,438 | 5.9% | 27.9% | 51.2% |
+| perp 1.5x | −2,038 | +25,282 | +73,729 | +188,195 | +695,967 | 6.3% | 32.7% | 58.0% |
+| perp 2x | −4,667 | +30,206 | +104,070 | +308,735 | +1,534,607 | 7.9% | 42.4% | 70.5% |
+| perp 3x | −10,814 | +30,022 | +158,744 | +648,362 | +5,242,603 | 11.6% | 59.3% | 86.6% |
+
+Regime-conditional (resample only within that year's trips), median one-year PnL on €20k:
+
+| year | perp 1x | perp 1.5x | P(loss) 1x / 1.5x |
+|---|---:|---:|---:|
+| 2024 bull (18 trips) | +128,824 (p25 +66k, p75 +249k) | +300,354 (p25 +134k, p75 +688k) | 0.1% / 0.2% |
+| 2025 bear (14 trips) | +2,832 (p25 −2.4k, p75 +9.7k) | +3,277 (p25 −4.2k, p75 +14.5k) | 37% / 40% |
+| 2026 sideways (17 trips) | +27,279 (p25 +6.5k, p75 +69k) | +38,725 (p25 +6.6k, p75 +119k) | 15% / 18% |
+
+The unconditional table is bull-weighted (two of the 2.6 sampled years were good) and treats
+trips as independent, so it is an upper-ish bound. The regime table is the planning number: a
+bear year is a coin flip around zero at any leverage, a sideways year is +€6k–70k, a bull year
+is where leverage pays. Between 1x and 1.5x the median rises ~70% and the median drawdown
+~10 points; beyond 1.5x the drawdown grows faster than the median.
