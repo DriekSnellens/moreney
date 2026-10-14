@@ -132,6 +132,30 @@ the data in one respect: those names deliver the +13–16 % average 5-day wick w
 −8 % stops than the big-volume names, so discretionary entries there *feel* better. The
 median outcome is still −2 % after five days.
 
+### PnL with the full €20k book on the band
+
+"Trade that way" with the whole book, mechanically: every spike in the band is bought at
+the next open and the €20k is either all-in (1 slot) or split over 2/4/10 slots. Taker
+0.25 % per side plus impact `0.02 × notional / 20d ADV` capped at 3 % per side — for a
+€20k clip in a name whose normal day is €20k–€80k the cap binds, so the real fill would
+be worse than modelled.
+
+Band €150k–250k, net PnL IS (19 months) / OOS (9.5 months):
+
+| sizing | sell at close +1d | +3d | +5d | +10d | 4h, 10 % trail / 8 % stop | system (EMA/MACD + RSI75) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 × €20k | −€196k / −€123k | −€90k / −€38k | −€60k / −€53k | −€49k / −€44k | −€28k / −€26k | −€30k / −€62k |
+| 2 × €10k | −€84k / −€45k | −€43k / −€32k | −€37k / −€28k | −€45k / −€24k | −€5k / −€11k | — |
+| 4 × €5k | −€31k / −€13k | −€23k / −€22k | −€21k / −€16k | −€31k / −€5k | −€2.9k / +€3.5k | −€5k / −€26k |
+| 10 × €2k | −€10k / −€2.7k | −€5.8k / −€7.5k | −€7.8k / −€6.6k | −€20k / −€4.6k | +€1.0k / −€4.3k | — |
+
+Gross (before costs) is itself around zero or negative in every row (e.g. 1 × €20k,
++5d: +€3.2k IS / −€21k OOS gross; costs €63k / €32k). Band €100k–€400k is worse in every
+cell (1 × €20k, +1d: −€305k / −€218k; 10 × €2k, 4h trail: −€6.3k / −€8.8k). The only
+cells near break-even are the small clips (€2k–€5k) with a percent trail, and they flip
+sign between periods. Scaling the stake up scales the loss faster than linearly because
+the impact on €200k-a-day names grows with clip size.
+
 Kept generically: if a volume-spike entry is ever traded, cap the day volume
 (≈ €100k–€400k) rather than only flooring it — the floor keeps out the illiquid tail, the
 cap keeps out the crowded tail where adverse selection is worst. Not armed as a trigger.
