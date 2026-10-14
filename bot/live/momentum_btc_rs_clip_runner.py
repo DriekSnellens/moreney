@@ -1115,6 +1115,18 @@ class BtcRsClipPaperRunner:
         )
         return pos
 
+    def _clock_unfunded(
+        self, decision: Mapping[str, Any], applied: Sequence[Mapping[str, Any]], cash: float
+    ) -> bool:
+        """Due clock, a wanted name, nothing filled, and no EUR to fill it with."""
+        if applied or not decision.get("rebalance_due"):
+            return False
+        if not decision.get("want_alt"):
+            return False
+        if any(p.role == "alt" for p in self.positions):
+            return False
+        return float(cash or 0.0) < float(self.cfg.min_notional_eur)
+
     def _rebalance_due(self, now_ms: int) -> bool:
         reb_ms = int(self.cfg.rebalance_days) * 86_400_000
         age_due = self.last_rebalance_ms <= 0 or (now_ms - self.last_rebalance_ms) >= reb_ms
@@ -1360,7 +1372,14 @@ class BtcRsClipPaperRunner:
                     self.cooldown_until_ms = _next_utc_midnight_ms(int(now.timestamp() * 1000))
                 # A live scan that finds nothing must not burn the daily clock.
                 # Otherwise the first empty check blocks every later breakout.
-                if applied or (decision.get("rebalance_due") and not self._live_scan_mode()):
+                # Likewise a due clock that ranked a name but had no usable EUR
+                # (book parked elsewhere) stays open: the replay assumes a funded
+                # book, so the first funded window must still take the signal.
+                unfunded = self._clock_unfunded(decision, applied, cash)
+                decision["clock_held_unfunded"] = unfunded
+                if applied or (
+                    decision.get("rebalance_due") and not self._live_scan_mode() and not unfunded
+                ):
                     self.last_rebalance_ms = int(now.timestamp() * 1000)
             self.last_decision = {
                 **decision,

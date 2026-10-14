@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -949,6 +950,68 @@ def test_residual_full_midweek_keeps_both_bags():
     assert out["exits"] == []
     assert out["trims"] == []
     assert out["entries"] == []
+
+
+def _clock_runner(tmp_path, *, cash: float, dry_run: bool = True):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    ohlc = {"BTC": _bars(60, 100.0, 0.05), "ETH": _rising_alt()}
+    cfg = residual_full_config(ClipConfig(universe=("ETH",), min_qvol_eur=1.0, book_eur=cash))
+    r = BtcRsClipPaperRunner(
+        cfg,
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=dry_run,
+        feed=_Feed(),
+    )
+    r.pack_mode = "residual_full"
+    r.cash_eur = cash
+    r.last_rebalance_ms = 1_000  # long ago: clock is due
+
+    async def _ohlc():
+        return ohlc
+
+    r._ohlc_for_decision = _ohlc  # type: ignore[method-assign]
+    r.marks = {"ETH": ohlc["ETH"][-1][4], "BTC": ohlc["BTC"][-1][4]}
+    return r, asyncio
+
+
+def test_unfunded_due_clock_stays_open_until_eur_arrives(tmp_path):
+    """Due clock, a ranked name, but EUR 0: the week must not be burned."""
+    r, asyncio = _clock_runner(tmp_path, cash=0.0)
+    before = r.last_rebalance_ms
+    out = asyncio.run(r.decide(execute=True))
+    dec = out["decision"]
+    assert dec["rebalance_due"] is True
+    assert dec["want_alt"] == "ETH"
+    assert dec["applied"] == []
+    assert dec["clock_held_unfunded"] is True
+    assert r.last_rebalance_ms == before
+    assert r.positions == []
+
+    # EUR arrives: the next window takes the signal and closes the clock.
+    r.cash_eur = 5_000.0
+    out = asyncio.run(r.decide(execute=True))
+    dec = out["decision"]
+    assert dec["clock_held_unfunded"] is False
+    assert [row["action"] for row in dec["applied"]] == ["entry"]
+    assert [p.base for p in r.positions] == ["ETH"]
+    assert r.last_rebalance_ms > before
+
+
+def test_funded_due_clock_with_no_qualifying_name_still_closes(tmp_path):
+    """Cash present, nothing above the floor: the normal weekly reset stays."""
+    r, asyncio = _clock_runner(tmp_path, cash=5_000.0)
+    r.cfg = replace(r.cfg, excess_floor=99.0)
+    before = r.last_rebalance_ms
+    out = asyncio.run(r.decide(execute=True))
+    dec = out["decision"]
+    assert dec["rebalance_due"] is True
+    assert dec["want_alt"] is None
+    assert dec["clock_held_unfunded"] is False
+    assert r.last_rebalance_ms > before
 
 
 def test_pending_pack_arms_when_the_alt_is_sold(tmp_path):
