@@ -165,6 +165,9 @@ class ClipConfig:
     news_min_day_ret: float = 0.02
     news_max_day_ret: float = 0.12
     news_score_boost: float = 0.03
+    # Residual rank blend: excess plus weight * (close/60d-high - 0.85).
+    # 0 keeps pure excess. The floor still applies to excess, not to the score.
+    near_high_weight: float = 0.0
 
 
 def residual_full_config(cfg: ClipConfig) -> ClipConfig:
@@ -178,6 +181,14 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
     that gain back to the 10% trail. On the wet replay through 2026-10-13 the
     lock changed full-sample PnL by about €200 on +€345k, because trends that
     keep running never revisit the floor.
+
+    Near-high blend: among names that already clear the excess floor and
+    their own SMA50, rank by excess plus 0.25 times (close / 60d high − 0.85).
+    A name sitting on its own high outranks a similar excess that has already
+    fallen off that high. Wet replay 2024-03-16 → 2026-10-13, book €20k:
+    pure excess +€344k (DD 30.9%), blend +€393k (DD 31.2%). The same sign on
+    2024–25 and on a fresh 2026 book. Volume-attention, a wider universe,
+    breadth filters and climax exits were worse on that tape, so they stay off.
     """
     return replace(
         cfg,
@@ -188,6 +199,7 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
         cash_when_no_alt=True,
         alt_lock_arm_pct=0.12,
         alt_lock_floor_pct=0.06,
+        near_high_weight=0.25,
     )
 
 
@@ -719,6 +731,38 @@ def quote_vol(rows: Sequence[Sequence[float]], n: int = 20) -> float:
     return sum(vs) / len(vs) if vs else 0.0
 
 
+def high_proximity(
+    highs: Sequence[float],
+    close: float,
+    *,
+    window: int = 60,
+    min_bars: int = 20,
+) -> float:
+    """Close divided by the highest high in the window.
+
+    Returns 0.85 when the window is too short, so a near-high blend adds
+    nothing until the name has a real high to measure against.
+    """
+    use = [float(h) for h in list(highs)[-window:] if float(h) > 0]
+    if close <= 0 or len(use) < min_bars:
+        return 0.85
+    peak = max(use)
+    if peak <= 0:
+        return 0.85
+    return close / peak
+
+
+def residual_rank_score(excess: float, proximity: float, *, weight: float) -> float:
+    """Excess, plus a bonus for a close that is still near its own 60d high.
+
+    ``weight`` 0 leaves the excess unchanged. The anchor is 0.85: a close
+    on the high (proximity 1) gains ``weight * 0.15``.
+    """
+    if weight <= 0:
+        return float(excess)
+    return float(excess) + float(weight) * (float(proximity) - 0.85)
+
+
 def rs_excess(
     alt: Sequence[float],
     btc: Sequence[float],
@@ -1142,13 +1186,19 @@ def evaluate_clip(
                 }
             )
             continue
+        excess = float(xs) if xs is not None else 0.0
+        prox = high_proximity(highs, float(cl[-1]) if cl else 0.0)
         row = {
             "base": base,
-            "excess": float(xs) if xs is not None else 0.0,
+            "excess": excess,
             "day_ret": day_ret,
             "qvol": round(qv, 0),
             "coil": coil,
             "brk20": brk20,
+            "prox60": prox,
+            "score": residual_rank_score(
+                excess, prox, weight=float(cfg.near_high_weight or 0.0)
+            ),
         }
         if r3 is not None:
             row["r3"] = round(float(r3), 4)
@@ -1169,14 +1219,21 @@ def evaluate_clip(
     elif mode in day_modes:
         ranked.sort(key=lambda r: float(r.get("day_ret") or 0.0), reverse=True)
     else:
-        ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
+        if float(cfg.near_high_weight or 0.0) > 0:
+            ranked.sort(key=lambda r: float(r.get("score") or r["excess"]), reverse=True)
+        else:
+            ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
     want_alt: str | None = None
     if rebalance_due and ranked:
-        top = ranked[0]
         if mode in day_modes:
-            want_alt = str(top["base"])
-        elif float(top["excess"]) > cfg.excess_floor:
-            want_alt = str(top["base"])
+            want_alt = str(ranked[0]["base"])
+        else:
+            # Score may reorder names. The floor still applies to excess, so a
+            # near-high name that missed the floor cannot jump the queue.
+            for top in ranked:
+                if float(top["excess"]) > cfg.excess_floor:
+                    want_alt = str(top["base"])
+                    break
     elif not rebalance_due:
         want_alt = held_alt
 

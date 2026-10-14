@@ -36,6 +36,7 @@ def live_pack_knobs(cfg: ClipConfig | None = None) -> dict[str, Any]:
         "n_alts": 1,
         "require_alt_sma": False,
         "trail_pct": trail,
+        "near_high_weight": float(getattr(c, "near_high_weight", 0.0) or 0.0),
         "policy": policy,
     }
 
