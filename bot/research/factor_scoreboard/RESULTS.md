@@ -186,3 +186,30 @@ Reading:
    robustly; the untested dimensions were venue (perps) and leverage, and both are now measured.
    If anything is ever changed for the bull case it is 1.25–1.5x on perps with the same exits,
    gated by a maximum intraday-gap budget — after a live paper period on OKX. Not armed.
+
+### Bitvavo margin instead of OKX perps (checked 2026-10-14)
+
+Bitvavo has no perpetuals. Under MiCA it offers **Margin Short / Margin Long** on its regular spot
+markets (up to 5x for NL/DE users, 10x advertised, assessment test required), app and Pro web only:
+"Margin trading is not yet available over the API" ([help center](https://support.bitvavo.com/hc/en-us/articles/47112628358289-How-do-I-open-manage-and-close-a-margin-position));
+the API only exposes `GET /positions` and net liquidation. Costs: normal spot trading fee per side
+(0.25% at our tier, scaled by L), borrowing 0.0023%/hour ≈ 0.055%/day ≈ 20%/yr on the borrowed
+amount, 2% liquidation fee ([fees](https://bitvavo.com/en/fees)). 12 of the 16 desk names are
+marginable; ARB, ATOM, OP and UNI are not (11 of the 49 baseline round trips).
+
+Same ladder with Bitvavo margin economics (spot fee × L, borrow on (L−1)·E, no funding), fresh €20k
+per year, non-marginable names assumed tradable for comparability:
+
+| variant | 2024 | DD | 2025 | DD | 2026 | DD |
+|---|---:|---:|---:|---:|---:|---:|
+| spot 1x | +134,279 | 24.9% | +2,468 | 24.5% | +28,238 | 31.2% |
+| Bitvavo margin 1.5x | +299,476 | 35.3% | +1,978 | 35.4% | +37,215 | 44.1% |
+| Bitvavo margin 2x | +573,905 | 44.3% | +780 | 45.2% | +41,034 | 55.2% |
+| Bitvavo margin 3x | +1,591,774 | 59.2% | −3,244 | 61.7% | +32,900 | 72.7% |
+| OKX perp 1.5x (ref.) | +320,062 | 34.8% | +3,454 | 33.7% | +43,385 | 41.5% |
+
+Reading: Bitvavo margin keeps the 0.25% fee drag (fees €105k vs €48k on perps at 1.5x over the
+full path) and charges ~20%/yr on the borrowed leg, so in a bear year leverage *costs* money
+(2025: +€2.0k at 1.5x vs +€2.5k unlevered, −€3.2k at 3x). In bull years it multiplies the PnL
+roughly in proportion to L, with the same 35–60% drawdowns as perps. Not usable by the bot until
+Bitvavo opens margin on the API; nothing armed.
