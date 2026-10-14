@@ -242,3 +242,25 @@ trips as independent, so it is an upper-ish bound. The regime table is the plann
 bear year is a coin flip around zero at any leverage, a sideways year is +€6k–70k, a bull year
 is where leverage pays. Between 1x and 1.5x the median rises ~70% and the median drawdown
 ~10 points; beyond 1.5x the drawdown grows faster than the median.
+
+### Trail width sweep (2026-10-14): "everyone trails 10%, so trail 8%?"
+
+Live knobs, only the alt trail changed (lock +12%/+6% kept; without the lock every row is within
+€3k of the one shown):
+
+| trail | full PnL | full DD | IS PnL | IS DD | OOS PnL | OOS DD |
+|---|---:|---:|---:|---:|---:|---:|
+| 6% | +55,629 | 28.7% | +31,237 | 22.7% | +11,078 | 27.8% |
+| 7% | +141,222 | 30.6% | +52,295 | 27.2% | +28,967 | 18.7% |
+| 8% | +89,782 | 29.5% | +76,790 | 23.1% | +5,224 | 26.7% |
+| 9% | +292,554 | 31.1% | +142,869 | 24.8% | +24,644 | 26.7% |
+| **10% (live)** | **+393,195** | 31.2% | **+151,798** | 24.8% | **+36,575** | 26.7% |
+| 11% | +73,010 | 48.5% | +40,684 | 41.7% | +12,436 | 27.9% |
+| 12% | +51,582 | 47.5% | +18,803 | 45.4% | +18,055 | 28.3% |
+| 15% | +63,316 | 60.9% | +19,796 | 58.1% | +21,828 | 30.6% |
+
+Tighter trails sell normal alt noise (5–8% daily ranges) and miss the rides; wider trails give
+back the rides and double the drawdown. 10% is a sharp peak (9% −25%, 11% −81% on the full path),
+which says the trail is a noisy parameter on a one-name compounding book, not an edge in itself.
+Cosmetic de-crowding moves (8%, 9.5%, 10.5%) are not supported by this tape; the exits stay on
+daily closes with no resting stop orders in the book.
