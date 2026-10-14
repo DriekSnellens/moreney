@@ -86,6 +86,56 @@ the same day instead of the next): every variant is negative OOS (−€5.6k …
 - The hard stop fires on 35–50 % of trades, i.e. most volume spikes are followed by a
   −8 % move within the holding window — consistent with the daily audit.
 
+## Volume band around €200k ("everything near €200k is worth entering")
+
+Tested three readings of the observation, all causal, same periods.
+
+(a) Spike days (≥ 3× 30d) bucketed by the day's own quote volume, forward from the next open:
+
+| day qvol band | n IS / OOS | 5d close mean IS / OOS | 5d % positive | 5d max-high mean | 10d close mean IS / OOS |
+| --- | --- | --- | --- | --- | --- |
+| €50k–100k | 891 / 1,099 | +0.4 % / −0.8 % | 49 % / 41 % | +11 % / +13 % | −0.6 % / −1.1 % |
+| €100k–150k | 663 / 776 | −0.1 % / −0.1 % | 46 % / 39 % | +11 % / +13 % | −0.7 % / −0.4 % |
+| **€150k–250k** | 1,080 / 1,098 | **−0.2 % / −1.0 %** | 46 % / 40 % | +13 % / +16 % | −1.1 % / −0.5 % |
+| €100k–400k | 2,824 / 2,829 | −0.2 % / −0.9 % | 45 % / 40 % | +13 % / +15 % | −0.8 % / −1.0 % |
+| €200k–500k | 2,115 / 1,857 | −0.5 % / −1.8 % | 43 % / 38 % | +14 % / +16 % | −1.0 % / −2.2 % |
+| €500k–1M | 1,498 / 1,141 | −1.2 % / −1.1 % | 38 % / 34 % | +15 % / +23 % | −2.2 % / −1.9 % |
+| €1M–3M | 1,819 / 1,062 | −1.0 % / −3.4 % | 38 % / 30 % | +18 % / +24 % | −1.6 % / −5.9 % |
+| > €3M | 1,383 / 504 | −1.1 % / −3.6 % | 40 % / 35 % | +20 % / +25 % | −1.3 % / −5.2 % |
+
+(b) Spike days bucketed by the *coin's* 30-day average volume: ADV €150k–250k gives
+−1.1 % IS / −2.3 % OOS at 5 days (39 % / 35 % positive) — worse than (a), not better.
+
+(c) Every day on which a market printed €150k–250k, spike or not (13,556 / 7,415 days):
+−0.8 % IS / −0.2 % OOS at 5 days, 42–43 % positive; identical to every other band.
+Restricting to calm days (volume ≤ 1.5× normal) changes nothing.
+
+System on band-filtered spikes (IS / OOS, €2k slot):
+
+| band | RSI75 + swing | no RSI, 10 % trail | no confluence, 10 % trail | no confluence, 10 % trail, 3 slots |
+| --- | --- | --- | --- | --- |
+| €100k–300k | −€688 / +€1,326 | −€1,620 / +€2,197 | −€169 / −€2,000 | −€4,998 / −€1,151 |
+| €100k–400k | −€1,471 / +€682 | +€289 / +€1,182 | +€2,703 / −€1,156 | −€2,455 / −€6,815 |
+| €150k–250k | −€550 / −€1,509 | −€1,963 / +€134 | −€1,143 / +€1,985 | **+€343 / +€2,590** |
+| €200k–500k | +€3,673 / −€5,156 | +€420 / −€1,845 | +€385 / −€1,801 | −€2,619 / −€7,557 |
+
+What holds up: the band is a **real filter against the worst spikes**. Spikes printing
+> €1M lose 3–4× more over 5–10 days than spikes in the €100k–€400k band, and the
+€100k–€400k band is the least negative region (−0.2 % IS, −0.9 % OOS) with the highest
+share of positive outcomes (45 % / 40 %). What does not hold up: the band is not an edge
+on its own. Close-to-close returns stay below zero in every band and every period, the
+only cell positive in both periods (€150k–250k, no confluence, 10 % trail, 3 slots:
++€2.9k over 2.4 years on €6k deployed, max DD €4.3k) has negative neighbours on both
+sides (€100k–300k −€5.0k / −€1.2k, €200k–500k −€2.6k / −€7.6k), which is a sharp
+parameter, not a system. The impression that "everything around €200k works" matches
+the data in one respect: those names deliver the +13–16 % average 5-day wick with fewer
+−8 % stops than the big-volume names, so discretionary entries there *feel* better. The
+median outcome is still −2 % after five days.
+
+Kept generically: if a volume-spike entry is ever traded, cap the day volume
+(≈ €100k–€400k) rather than only flooring it — the floor keeps out the illiquid tail, the
+cap keeps out the crowded tail where adverse selection is worst. Not armed as a trigger.
+
 ## The ZEUS example (Bitvavo ZEUS-EUR, October 2026)
 
 Daily bars (qvol = volume × close, multiple vs the prior 30-day mean):

@@ -48,6 +48,29 @@ def h4_scans() -> dict[str, ScanSpec]:
     }
 
 
+VOLUME_BANDS: tuple[tuple[float, float], ...] = (
+    (50e3, 100e3),
+    (100e3, 150e3),
+    (150e3, 250e3),
+    (100e3, 300e3),
+    (100e3, 400e3),
+    (200e3, 500e3),
+    (500e3, 1e6),
+    (1e6, 3e6),
+    (3e6, 0),
+)
+
+
+def band_scans() -> dict[str, ScanSpec]:
+    """Spike days bucketed by the day's own quote volume (0 upper bound = open)."""
+    return {
+        f"band_{int(lo / 1e3)}k_{int(hi / 1e3) if hi else 'inf'}k": ScanSpec(
+            min_day_qvol_eur=lo, max_day_qvol_eur=hi
+        )
+        for lo, hi in VOLUME_BANDS
+    }
+
+
 def variants() -> list[SystemSpec]:
     s = SystemSpec
     return [
@@ -132,10 +155,22 @@ def main() -> None:
     n_is, n_oos = audit["IS"]["n_used"], audit["OOS"]["n_used"]
     log(f"daily signals {len(base_sig)}; audit IS n={n_is} OOS n={n_oos}")
 
+    band_audit = {}
+    for bname, bspec in band_scans().items():
+        sig = scan(daily, bspec, start=a.start, end=a.end)
+        band_audit[bname] = {
+            pn: forward_audit(daily, [s for s in sig if lo <= s["day"] <= hi])
+            for pn, (lo, hi) in periods.items()
+        }
+        c = {pn: band_audit[bname][pn]["horizons"][5]["close"] for pn in periods}
+        parts = [f"{pn} {c[pn].get('mean', 0):+.3f} (n {c[pn].get('n', 0)})" for pn in periods]
+        log(f"{bname:18s} 5d close mean " + "  ".join(parts))
+
     rows = []
     core = [v for v in variants() if v.name in ("base_rsi75_swing", "norsi_pct10", "pos3")]
     for scans, series, bar_ms in (
         (daily_scans(), daily, 86_400_000),
+        (band_scans(), daily, 86_400_000),
         (h4_scans(), h4, H4_MS),
     ):
         for sname, sspec in scans.items():
@@ -154,7 +189,11 @@ def main() -> None:
                 )
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"periods": periods, "audit": audit, "grid": rows}, indent=1))
+    out.write_text(
+        json.dumps(
+            {"periods": periods, "audit": audit, "band_audit": band_audit, "grid": rows}, indent=1
+        )
+    )
     log(f"wrote {out}")
 
 
