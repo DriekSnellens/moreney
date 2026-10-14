@@ -134,3 +134,55 @@ The capacity that is left on the table is not in the ranking. On 2026-10-14 the 
 ATOM first (excess +13.5% vs BTC over 10d, score 0.143 vs floor 0.035) with €0 EUR available; the
 modelled 2026 book is +€36.6k while live realized is −€1.1k. Funding the desk on every signal is
 the lever; widening the net is not.
+
+## Leverage ladder (2026-10-14): is the armed pack "optimal" in a bull, and what does leverage add?
+
+Reproduce: `.venv/bin/python -m bot.research.factor_scoreboard.leverage`. The baseline's 49 round
+trips (wet next-open fills) are re-priced as a USDT-margined perp long at leverage L: 0.05% fee +
+0.05% slip per side instead of the 0.25% spot fee, funding paid on the full notional (Binance
+daily-mean proxy, 3 settlements/day), cross-margin liquidation when the worst intraday low of a
+hold breaches 1/L − 2%. Exits are unchanged (10% trail, +12%/+6% lock), so this measures leverage
+on the pack *as armed*, not a re-optimised leveraged pack. The spot 1x reconstruction (+€398k)
+matches the engine (+€393k).
+
+Compounded €20k from 2024-03-16:
+
+| variant | total | maxDD | 2024 | 2025 | 2026 | liq | worst intraday | funding | fees |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| spot 1x (live) | +398,025 | 31.2% | +134,279 | +19,038 | +244,708 | 0 | −25.9% | 0 | 34,213 |
+| perp 1x | +440,172 | 29.7% | +137,842 | +24,033 | +278,297 | 0 | −25.9% | 5,145 | 14,473 |
+| perp 1.25x | +769,255 | 35.8% | +215,331 | +39,387 | +514,538 | 0 | −25.9% | 9,382 | 27,475 |
+| perp 1.5x | +1,243,853 | 41.5% | +320,062 | +58,723 | +865,068 | 0 | −25.9% | 15,971 | 48,333 |
+| perp 2x | +2,692,097 | 52.0% | +636,855 | +101,327 | +1,953,915 | 0 | −25.9% | 39,116 | 125,371 |
+| perp 3x | +6,820,475 | 69.1% | +1,903,207 | +24,829 | +4,892,439 | 0 | −25.9% | 137,796 | 499,398 |
+| perp 5x | −19,269 | 99.9% | +330,520 | −342,836 | −6,954 | 3 | −25.9% | | |
+
+Fresh €20k each calendar year (positions straddling a year boundary are skipped, so 2025 reads
++2.5k here vs +4.2k in the full engine):
+
+| variant | 2024 | DD | 2025 | DD | 2026 | DD |
+|---|---:|---:|---:|---:|---:|---:|
+| spot 1x | +134,279 | 24.9% | +2,468 | 24.5% | +28,238 | 31.2% |
+| perp 1x | +137,842 | 24.9% | +3,045 | 23.6% | +30,603 | 29.7% |
+| perp 1.25x | +215,331 | 30.0% | +3,347 | 28.8% | +37,459 | 35.8% |
+| perp 1.5x | +320,062 | 34.8% | +3,454 | 33.7% | +43,385 | 41.5% |
+| perp 2x | +636,855 | 43.4% | +3,085 | 42.9% | +51,542 | 52.0% |
+| perp 3x | +1,903,207 | 57.6% | +258 | 58.9% | +50,229 | 69.1% |
+
+Reading:
+
+1. **Perps at 1x already beat spot**: the long leg costs 0.10% a side instead of 0.25% and the
+   funding paid (~€5k over 2.6y) is a third of the fee saving (~€20k). +€440k vs +€398k, lower DD.
+   This is a venue question (OKX USDT-margined, EUR/USDT exposure, different depth), not a
+   strategy question.
+2. **Leverage is a bull-only multiplier.** 1.5x turns 2024 from +€134k into +€320k and lifts DD
+   from 25% to 35%; in 2025 it adds nothing (+€3.5k vs +€2.5k) while DD goes 24% → 34%. 2x–3x
+   compound to numbers that the wet fill model cannot support (clips of €1M+ in desk alts) and
+   carry 43–69% drawdowns. 5x is liquidated three times.
+3. The worst intraday excursion in any hold was −25.9%; the liquidation line is −31% at 3x and
+   −23% at 4x. The 10% close-to-close trail does not protect against gaps, so anything above 2x
+   is one bad night from zero.
+4. On "optimal in a bull": among ~1,400 packs and ~45 overlays no setting beats the armed pack
+   robustly; the untested dimensions were venue (perps) and leverage, and both are now measured.
+   If anything is ever changed for the bull case it is 1.25–1.5x on perps with the same exits,
+   gated by a maximum intraday-gap budget — after a live paper period on OKX. Not armed.
