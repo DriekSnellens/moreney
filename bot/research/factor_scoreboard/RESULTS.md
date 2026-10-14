@@ -98,3 +98,39 @@ thousands and why none of them is taken as evidence.
 4. Fear & Greed and funding are available as causal daily series now (`external.py`). They did not
    earn a place in the residual sleeve. They remain candidates for the news/momentum sleeve once that
    sleeve has a long enough pick history to test against.
+
+## Participation grid (2026-10-14): can the desk take more of the market?
+
+Question: the market shows more opportunities than the desk takes; does holding more names,
+re-ranking faster or lowering the floor capture them? Same windows and fill model as above
+(full 2024-03-16 → 2026-10-14, IS → 2025-12-31, OOS 2026). Baseline = the live pack.
+
+| Variant | Full PnL | Full DD | IS PnL | OOS PnL | trades |
+|---|---:|---:|---:|---:|---:|
+| **baseline (1 alt, 7d clock, floor 0.035)** | **+393,195** | 31.2% | +151,798 | +36,575 | 98 |
+| 2 alts (half size each) | +30,795 | 41.8% | +14,830 | +9,777 | 166 |
+| 3 alts | +20,551 | 34.4% | +12,027 | +5,697 | 196 |
+| 4 alts | +17,326 | 31.8% | +9,803 | +5,346 | 220 |
+| 2 alts, floor 0.02 / 0.05 | +22,105 / +19,055 | 44–47% | +9.8k / +7.2k | +8.7k / +9.1k | 178 / 158 |
+| 3 alts, floor 0.05 | −1,510 | 46.1% | +4,818 | −5,003 | 192 |
+| clock 1d | +21,154 | 79.9% | −3,201 | +27,871 | 337 |
+| clock 2d | +8,569 | 67.1% | −2,690 | +12,588 | 226 |
+| clock 3d | +23,512 | 61.9% | −4,146 | +33,838 | 180 |
+| clock 5d | +102,754 | 34.7% | +22,745 | +40,544 | 119 |
+| clock 10d | −2,178 | 52.4% | −3,695 | +1,745 | 78 |
+| clock 14d | +32,876 | 43.8% | +19,800 | +7,089 | 59 |
+| 2 alts, 5d / 3 alts, 5d | +34,376 / +61,236 | 37% | +6.4k / +26.7k | +21.7k / +16.4k | 196 / 235 |
+| floor 0.00 / 0.02 / 0.05 (1 alt) | +288k / +323k / +381k | 33–40% | +132k / +152k / +152k | +26.8k / +26.8k / +34.0k | 106 / 102 / 96 |
+
+Reading: every way of "taking more" (more names, faster clock, lower floor) takes less. Splitting
+the book over two names cuts the full path by 92%; a daily or 3-day clock turns the 2024–25 book
+negative with 60–80% drawdowns. Concentration in one name on a weekly clock *is* the edge: the
+return comes from riding the single strongest name for weeks, and every dilution or extra re-rank
+sells it early. The clock is also sharp (5d +103k, 7d +393k, 10d −2k on the full path), which is
+the known path-dependence of a one-name compounding book; on the fresh 2026 book clocks 1–7d are
+all positive (+28k…+41k) and 10–14d are the weak ones. Nothing here is armed; the 7-day clock stays.
+
+The capacity that is left on the table is not in the ranking. On 2026-10-14 the live desk ranked
+ATOM first (excess +13.5% vs BTC over 10d, score 0.143 vs floor 0.035) with €0 EUR available; the
+modelled 2026 book is +€36.6k while live realized is −€1.1k. Funding the desk on every signal is
+the lever; widening the net is not.
