@@ -134,6 +134,28 @@ years; one parameter step (−10% instead of −12%, or 5-day window) flips 2026
 Alt-side triggers are negative. Not a strategy, at most a rule to not be scared out of
 the RS sleeve's BTC leg after a flush.
 
+## What the rest of the market did in the bear (survey, 2026-10-14)
+
+Follow-up question: "there must be a tactic that still earns in a bear". External
+evidence, checked against our data where possible:
+
+| tactic | reported result | our check / feasibility |
+|---|---|---|
+| Quant / market-neutral funds | 2025: quant avg +0.4%, median +3.2%, 15/26 positive; long-only −15.3%; best named neutral fund +11.3% ([CFR](https://cryptofundresearch.com/crypto-hedge-fund-performance/), [CFR neutral](https://cryptofundresearch.com/market-neutral-crypto-funds/)) | RS sleeve 2025 +21% on a fresh €20k; the professionals' bear answer was "cut exposure, hedge, arb", not a bear-alpha engine |
+| Cash-and-carry (long spot / short perp, collect funding) | 2024-era decks 15–30%; independent backtest 5.9%/yr over 2y, <2% last 12m, fees ≈30% of that ([StratProof](https://stratproof.com/blog/basis-trade-works-but-not-as-much-as-they-say)); BTC basis 4.46% by Dec 2025 ([tv-hub](https://www.tv-hub.org/guide/market-neutral-strategy-crypto)) | Binance funding proxy, gross on notional: BTC 2024 12.0%, 2025 5.1%, 2026 2.3%; ETH 13.0 / 4.9 / 1.5; SOL 13.7 / 0.4 / −0.7. A "hold only when trailing funding > 0" filter is worse (flip costs). One round trip costs 0.90%. On €20k capital (spot + margin) ≈ 2–3% in 2025 |
+| Perp-to-perp funding spread (OKX vs Binance/Bybit) | Non-VIP retail: gross 0.0043% vs cost 0.294% per event, 0% win rate ([research repo](https://github.com/Kaleb0719/retail-funding-arbitrage-research)); practitioners 5–15% only with maker fills and capital on both venues ([LMEX](https://lmex.ai/blog/cross-exchange-arbitrage-honest/)) | Not viable at our fee tier; skipped |
+| Mean reversion / RSI oversold bounce | 2022 bear: −29% (60% win rate), naked MR averages −40.6% in bear regimes vs +16.3% in bull ([Coinquant](https://www.coinquant.ai/blog/bear-market-crypto-strategy-what-actually-backtests-well-when-bitcoin-falls), [78 backtests](https://www.coinquant.ai/blog/building-a-mean-reversion-strategy-in-cryptocurrency-markets-evidence-from-78-backtests)); RSI 30/70 on BTC 2024–26 −27% long-only ([StrategyVerdict](https://strategyverdict.com/rsi-strategy-backtest-bitcoin/)) | Matches family 3 above: BTC-only capitulation longs look fine on 8 events, alt-side triggers negative |
+| Selling volatility (Deribit strangles, covered calls) | Weekend strangle +45% APR Sep 24–Apr 25 but tail weeks of −63%/−39% in 2026; BTC 20-delta covered call +5.5% net on held BTC, negative over the full 2021–26 period unfiltered ([Deribit](https://insights.deribit.com/education/option-backtest-selling-weekend-vol-revisited/), [Anchorage](https://www.anchorage.com/insights/synthetic-yield-on-bitcoin-implementation-discipline-and-performance-boundaries-of-systematic-covered-call-writing)) | No options venue in the stack; only adds yield on BTC you already hold |
+| Idle-cash yield | Bitvavo EURC lending 4% (Germany only, Oct 2026); OKX USDC flexible 1.0–3.4%; EURC on Aave ~2.2% ([Bitvavo](https://www.bitvavo.com/en/news/flex-fixed-staking-lending-earn-rates-oct-2026), [OKX](https://www.okx.com/en-eu/learn/crypto-earn)) | The RS sleeve's cash sits idle; a 2–4% floor on it is the one free improvement, with issuer/platform risk |
+| Grid trading | Expected value ≈ 0 under simple assumptions ([arXiv 2506.11921](https://arxiv.gg/abs/2506.11921)) | Skipped |
+| Outright shorts | Quant funds "shifted net short" into the Nov 2025 selloff | Family 1: works in 2025/26, loses €6–10k in 2024 even gated |
+
+Bottom line of the survey: the tactics that reliably earn in a bear return low single
+digits (carry, lending); the ones that promise more either lose in bull years (shorts) or
+carry fat tails (vol selling, mean reversion). The only thing in this lab that beats
+both in 2024 *and* 2025 is the staggered BTC-dominance pair, and it is a trend trade in
+disguise.
+
 ## Verdict
 
 1. There is no structurally profitable *bear* sleeve in this data. Every strategy that
