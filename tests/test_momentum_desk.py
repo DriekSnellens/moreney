@@ -2620,3 +2620,48 @@ def test_candlefeed_all_ticker_snapshot_is_shared():
         assert calls["n"] == 1
     finally:
         CandleFeed.reset_ticker_cache()
+
+
+def test_merge_marks_prefers_book_mid_over_stale_ticker_price():
+    from bot.live.momentum_runner import merge_marks
+
+    book = [
+        {"market": "OP-EUR", "bid": "0.1204", "ask": "0.12044"},
+        {"market": "THIN-EUR", "bid": "1.0", "ask": "1.5"},  # spread 40% -> ignore
+        {"market": "CROSS-EUR", "bid": "2.0", "ask": "1.9"},  # crossed -> ignore
+        {"market": "NOASK-EUR", "bid": "3.0", "ask": ""},
+        {"market": "BTC-USDC", "bid": "80000", "ask": "80001"},
+    ]
+    price = [
+        {"market": "OP-EUR", "price": "0.1156"},  # stale last trade
+        {"market": "THIN-EUR", "price": "1.2"},
+        {"market": "CROSS-EUR", "price": "1.95"},
+        {"market": "NOASK-EUR", "price": "3.1"},
+        {"market": "ONLYPRICE-EUR", "price": "7"},
+        {"market": "ZERO-EUR", "price": "0"},
+    ]
+    out = merge_marks(book, price)
+    assert out["OP"] == pytest.approx(0.12042)
+    assert out["THIN"] == 1.2 and out["CROSS"] == 1.95 and out["NOASK"] == 3.1
+    assert out["ONLYPRICE"] == 7.0
+    assert "ZERO" not in out and "BTC" not in out
+    assert merge_marks([], price)["OP"] == 0.1156
+    assert merge_marks(book, [])["OP"] == pytest.approx(0.12042)
+
+
+def test_candlefeed_all_tickers_survive_one_failing_endpoint():
+    from bot.live.momentum_runner import CandleFeed
+
+    CandleFeed.reset_ticker_cache()
+    feed = CandleFeed(ticker_ttl_sec=5.0)
+
+    async def fake_rows(path: str, params=None):  # noqa: ANN001
+        if path == "ticker/book":
+            raise RuntimeError("book down")
+        return [{"market": "OP-EUR", "price": "0.1156"}]
+
+    feed._get_rows = fake_rows  # type: ignore[method-assign]
+    try:
+        assert asyncio.run(feed.last_price("OP")) == 0.1156
+    finally:
+        CandleFeed.reset_ticker_cache()
