@@ -25,6 +25,7 @@ from bot.live.momentum_btc_rs_clip import (
     ClipConfig,
     ClipPosition,
     alt_exit_reason,
+    close_based_alt_exit,
     completed_ohlc,
     default_config,
     evaluate_clip,
@@ -117,9 +118,7 @@ def config_from_settings(settings: Settings | None = None) -> ClipConfig:
             if getattr(settings, "momentum_btc_rs_clip_rebalance_weekday", None) is None
             else _i(
                 "momentum_btc_rs_clip_rebalance_weekday",
-                int(base.rebalance_weekday)
-                if base.rebalance_weekday is not None
-                else 1,
+                int(base.rebalance_weekday) if base.rebalance_weekday is not None else 1,
             )
         ),
         sma_n=_i("momentum_btc_rs_clip_sma_n", base.sma_n),
@@ -648,9 +647,7 @@ class BtcRsClipPaperRunner:
                     px, fee = vwap
                 else:
                     px, fee = (mark if mark > 0 else float(pos.entry_price)), 0.0
-                closed.append(
-                    self._book_external(pos, sold_qty=sold, price=px, fee_eur=fee)
-                )
+                closed.append(self._book_external(pos, sold_qty=sold, price=px, fee_eur=fee))
             if closed:
                 self._sample_equity()
                 self._save_state()
@@ -910,9 +907,7 @@ class BtcRsClipPaperRunner:
         )
         return net
 
-    async def _trim_lot(
-        self, pos: ClipPosition, sell_notional: float, reason: str
-    ) -> float | None:
+    async def _trim_lot(self, pos: ClipPosition, sell_notional: float, reason: str) -> float | None:
         """Sell part of a lot. Does not flatten the remainder."""
         if pos.notional_eur <= 0 or pos.qty <= 0:
             return None
@@ -926,9 +921,7 @@ class BtcRsClipPaperRunner:
         fill: _Fill | None
         if pos.is_paper() or self.dry_run:
             mark = px if px > 0 else pos.entry_price
-            fill = _Fill(
-                qty=qty, avg_price=float(mark), fee_eur=want * (self.cfg.fee_rt / 2)
-            )
+            fill = _Fill(qty=qty, avg_price=float(mark), fee_eur=want * (self.cfg.fee_rt / 2))
         else:
             sell_qty = min(qty, await self._sellable_qty(pos))
             if sell_qty * (px or pos.entry_price) < _MIN_ORDER_EUR:
@@ -967,7 +960,13 @@ class BtcRsClipPaperRunner:
         return net
 
     async def manage_alt_trail(self) -> list[dict[str, Any]]:
-        """Intraday hard-stop / profit-lock / trail / optional time-stop on the alt sleeve."""
+        """Intraday hard-stop / profit-lock / trail / optional time-stop on the alt sleeve.
+
+        Packs with ``exit_on_close`` skip this: their exits run on completed
+        daily bars inside ``decide`` so live matches the validated replay.
+        """
+        if bool(getattr(self.cfg, "exit_on_close", False)):
+            return []
         trail = float(self.cfg.alt_trail_pct or 0.0)
         time_max = int(getattr(self.cfg, "time_max_days", 0) or 0)
         hard = float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0)
@@ -1013,6 +1012,50 @@ class BtcRsClipPaperRunner:
                     self.cooldown_until_ms = _next_utc_midnight_ms(now_ms)
         if applied:
             self._save_state()
+        return applied
+
+    async def close_based_exits(
+        self, ohlc: dict[str, list[list[float]]], *, now: datetime, execute: bool
+    ) -> list[dict[str, Any]]:
+        """Replay-style trail/lock/stop on completed daily bars (``exit_on_close``).
+
+        The peak is ratcheted on every call so status shows the daily high;
+        sells only happen when ``execute`` is set, i.e. inside the decision window.
+        """
+        if not bool(getattr(self.cfg, "exit_on_close", False)):
+            return []
+        applied: list[dict[str, Any]] = []
+        for pos in list(self.positions):
+            if pos.role != "alt":
+                continue
+            reason, peak, last_close = close_based_alt_exit(
+                ohlc.get(pos.base) or [],
+                entry=float(pos.entry_price or 0.0),
+                opened_ms=int(pos.opened_ms or 0),
+                peak=float(pos.peak_px or 0.0),
+                trail_pct=float(self.cfg.alt_trail_pct or 0.0),
+                hard_stop_pct=float(getattr(self.cfg, "hard_stop_pct", 0.0) or 0.0),
+                lock_arm_pct=float(getattr(self.cfg, "alt_lock_arm_pct", 0.0) or 0.0),
+                lock_floor_pct=float(getattr(self.cfg, "alt_lock_floor_pct", 0.0) or 0.0),
+                time_max_days=int(getattr(self.cfg, "time_max_days", 0) or 0),
+                now=now,
+            )
+            pos.peak_px = peak
+            if not reason or not execute or last_close <= 0:
+                continue
+            px = fill_px(last_close, "sell", slip=self.cfg.slip)
+            net = await self._close_lot(pos, px, reason)
+            if net is not None:
+                applied.append(
+                    {
+                        "action": "exit",
+                        "base": pos.base,
+                        "net_eur": round(net, 2),
+                        "reason": reason,
+                        "close": last_close,
+                        "peak": peak,
+                    }
+                )
         return applied
 
     async def _open_lot(
@@ -1180,7 +1223,9 @@ class BtcRsClipPaperRunner:
         return self._live_scan_mode()
 
     def _alphai_minutes(self) -> int:
-        return max(5, int(getattr(get_settings(), "alphai_recommendations_interval_minutes", 15) or 15))
+        return max(
+            5, int(getattr(get_settings(), "alphai_recommendations_interval_minutes", 15) or 15)
+        )
 
     def _alphai_board_status(self, *, now_dt: datetime) -> dict[str, Any] | None:
         if not self._track_alphai_board():
@@ -1188,7 +1233,9 @@ class BtcRsClipPaperRunner:
         from bot.live.momentum_btc_rs_clip import breakout_board_headline
 
         board = dict(self.alphai_board or {})
-        board.update(breakout_board_headline(self.last_decision, self.cfg, self.last_rebalance_ms, now_dt))
+        board.update(
+            breakout_board_headline(self.last_decision, self.cfg, self.last_rebalance_ms, now_dt)
+        )
         board.setdefault("rows", [])
         board.setdefault("avoid", [])
         board.setdefault("cadence", "elk kwartier")
@@ -1297,6 +1344,14 @@ class BtcRsClipPaperRunner:
                     fresh_alphai_breakout_sets,
                     focus_bases=tuple(self.cfg.universe),
                 )
+            # Replay order: trail/lock on yesterday's completed bar first, then
+            # the clip decision sees the remaining lots. A sell here restarts
+            # the week clock below via ``applied``.
+            pre_exits = await self.close_based_exits(ohlc, now=now, execute=execute)
+            if pre_exits:
+                # Replay: a trail/lock sell restarts the full week clock, so the
+                # same window does not rebuy (immediate_rebuy stays off).
+                self.last_rebalance_ms = int(now.timestamp() * 1000)
             held = {p.base: p.role for p in self.positions}
             sleeves = {
                 "btc": sum(p.notional_eur for p in self.positions if p.role == "btc"),
@@ -1320,7 +1375,9 @@ class BtcRsClipPaperRunner:
                 alphai_avoid=alphai_avoid,
                 cooldown_until_ms=self.cooldown_until_ms,
             )
-            applied: list[dict[str, Any]] = []
+            applied: list[dict[str, Any]] = list(pre_exits)
+            if pre_exits:
+                decision["close_exits"] = pre_exits
             if execute and decision.get("ok"):
                 for ex in decision.get("exits") or []:
                     pos = next((p for p in self.positions if p.base == ex["base"]), None)

@@ -149,6 +149,10 @@ class ClipConfig:
     time_max_days: int = 0
     # Hard stop from entry (0 = off).
     hard_stop_pct: float = 0.0
+    # Replay semantics for trail/lock/stop: peak from completed daily highs,
+    # trigger on the last completed close, sell in the decision window.
+    # False keeps the tick-based check on live marks.
+    exit_on_close: bool = False
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     decision_hours_utc: tuple[int, ...] = (0,)
     tick_sec: float = 30.0
@@ -189,6 +193,12 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
     pure excess +€344k (DD 30.9%), blend +€393k (DD 31.2%). The same sign on
     2024–25 and on a fresh 2026 book. Volume-attention, a wider universe,
     breadth filters and climax exits were worse on that tape, so they stay off.
+
+    Exits follow the replay: the trail/lock peak is the highest completed daily
+    high since entry and the trigger is the last completed close, sold in the
+    00:00 window. A tick-based trail on live marks is a tighter stop than the
+    one that was validated; on the 49 replay trips it would have cut 37–42 of
+    them short.
     """
     return replace(
         cfg,
@@ -200,6 +210,7 @@ def residual_full_config(cfg: ClipConfig) -> ClipConfig:
         alt_lock_arm_pct=0.12,
         alt_lock_floor_pct=0.06,
         near_high_weight=0.25,
+        exit_on_close=True,
     )
 
 
@@ -240,6 +251,52 @@ def alt_exit_reason(
     if trail_pct > 0 and mark <= peak * (1.0 - trail_pct):
         return "alt_trail", peak
     return "", peak
+
+
+def close_based_alt_exit(
+    rows: Sequence[Sequence[float]],
+    *,
+    entry: float,
+    opened_ms: int,
+    peak: float,
+    trail_pct: float = 0.0,
+    hard_stop_pct: float = 0.0,
+    lock_arm_pct: float = 0.0,
+    lock_floor_pct: float = 0.0,
+    time_max_days: int = 0,
+    now: datetime | None = None,
+) -> tuple[str, float, float]:
+    """Replay exit for one alt lot on completed daily bars.
+
+    Peak ratchets over the highs and closes of every completed UTC day since the
+    entry day (inclusive); the trail, lock and stop are tested on the last
+    completed close, exactly as the wet replay does before it sells next open.
+    Returns ``(reason, peak, last_close)``; ``last_close`` is 0 when no day has
+    completed since entry yet, in which case nothing can trigger.
+    """
+    now = now or datetime.now(UTC)
+    done = completed_ohlc(rows, now=now)
+    day0 = int(opened_ms) - int(opened_ms) % 86_400_000
+    since = [r for r in done if int(r[0]) >= day0]
+    peak = max(float(peak or 0.0), float(entry or 0.0))
+    if not since:
+        return "", peak, 0.0
+    for r in since:
+        peak = max(peak, float(r[2]), float(r[4]))
+    last_close = float(since[-1][4])
+    reason, peak = alt_exit_reason(
+        entry=float(entry or 0.0),
+        peak=peak,
+        mark=last_close,
+        trail_pct=trail_pct,
+        hard_stop_pct=hard_stop_pct,
+        lock_arm_pct=lock_arm_pct,
+        lock_floor_pct=lock_floor_pct,
+        opened_ms=int(opened_ms or 0),
+        now_ms=int(now.timestamp() * 1000),
+        time_max_days=time_max_days,
+    )
+    return reason, peak, last_close
 
 
 def moonshot_spike_config(cfg: ClipConfig | None = None) -> ClipConfig:
@@ -683,14 +740,14 @@ def alphai_breakout_board(
     scores = dict(getattr(view, "pick_scores", {}) or {})
     picks.sort(key=lambda b: (int(ranks.get(b) or 10_000), -float(scores.get(b) or 0.0), b))
     avoid = {str(b).upper() for b in (getattr(view, "avoid", ()) or ())}
-    mark_map = {str(k).upper(): float(v) for k, v in dict(marks or {}).items() if float(v or 0.0) > 0}
+    mark_map = {
+        str(k).upper(): float(v) for k, v in dict(marks or {}).items() if float(v or 0.0) > 0
+    }
     rows_out: list[dict[str, Any]] = []
     for base in picks:
         done = completed_ohlc(ohlc_by_base.get(base) or [], now=instant)
         if str(cfg.entry_mode or "") == "news_momo":
-            geo = news_momo_view(
-                done, mark_map.get(base, 0.0), cfg, pick=True, avoid=base in avoid
-            )
+            geo = news_momo_view(done, mark_map.get(base, 0.0), cfg, pick=True, avoid=base in avoid)
         else:
             geo = live_breakout_view(done, mark_map.get(base, 0.0), cfg, avoid=base in avoid)
         reason = str(geo["reason"])
@@ -882,15 +939,15 @@ def fresh_alphai_breakout_sets(
     focus = {str(b).upper() for b in (focus_bases or ()) if b}
     focus |= set(LIQUID_EUR_BASES)
     if settings is not None:
-        focus |= _parse_csv_bases(getattr(settings, "live_micro_focus_bases", "") or "", fallback=set())
+        focus |= _parse_csv_bases(
+            getattr(settings, "live_micro_focus_bases", "") or "", fallback=set()
+        )
     report = maybe_refresh_daily(
         client,
         path,
         focus_bases=focus or set(LIQUID_EUR_BASES),
         enabled=True,
-        min_relevance=int(
-            getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6
-        )
+        min_relevance=int(getattr(settings, "alphai_daily_recommendations_min_relevance", 6) or 6)
         if settings is not None
         else 6,
         top_n=int(getattr(settings, "alphai_daily_recommendations_top_n", 8) or 8)
@@ -1022,9 +1079,7 @@ def evaluate_clip(
     alphai_pick_set = {str(x).upper() for x in (alphai_picks or ())}
     alphai_avoid_set = {str(x).upper() for x in (alphai_avoid or ())}
     marks = {
-        str(k).upper(): float(v)
-        for k, v in dict(live_marks or {}).items()
-        if float(v or 0.0) > 0
+        str(k).upper(): float(v) for k, v in dict(live_marks or {}).items() if float(v or 0.0) > 0
     }
     ranked: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -1196,9 +1251,7 @@ def evaluate_clip(
             "coil": coil,
             "brk20": brk20,
             "prox60": prox,
-            "score": residual_rank_score(
-                excess, prox, weight=float(cfg.near_high_weight or 0.0)
-            ),
+            "score": residual_rank_score(excess, prox, weight=float(cfg.near_high_weight or 0.0)),
         }
         if r3 is not None:
             row["r3"] = round(float(r3), 4)
@@ -1263,12 +1316,7 @@ def evaluate_clip(
                         ],
                     }
                 )
-    elif (
-        rebalance_due
-        and held_btc
-        and cfg.cash_when_no_alt
-        and not want_alt
-    ):
+    elif rebalance_due and held_btc and cfg.cash_when_no_alt and not want_alt:
         exits.append({"base": held_btc, "reason": "cash_no_alt", "role": "btc"})
     # Conservative: assume exits free cash after they fill; entries size from equity.
     skip_btc_buy = cfg.cash_when_no_alt and not want_alt
@@ -1299,9 +1347,9 @@ def evaluate_clip(
                             else f"excess={float(top.get('excess') or 0):.3f}"
                         ),
                         f"frac={cfg.alt_frac:.2f}",
-                        str(top.get("kind") or mode) if mode == "news_momo" else (
-                            mode if mode != "weekly_rs" else "weekly_rs"
-                        ),
+                        str(top.get("kind") or mode)
+                        if mode == "news_momo"
+                        else (mode if mode != "weekly_rs" else "weekly_rs"),
                     ],
                 }
             )
@@ -1376,9 +1424,8 @@ def evaluate_clip(
         elif mode == "top_day":
             gate = "top_day"
         else:
-            gate = (
-                f"r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}"
-                + ("+trend" if cfg.require_trend else "")
+            gate = f"r3≥{cfg.min_r3_pct:.0%}+xs≥{cfg.excess_floor:.0%}" + (
+                "+trend" if cfg.require_trend else ""
             )
         caption = (
             f"Daily sleeve €{cfg.book_eur:,.0f}: {alt_txt}{detail}"

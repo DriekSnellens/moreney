@@ -228,9 +228,7 @@ def test_near_high_blend_prefers_a_close_tie_and_keeps_a_wide_excess_lead():
     btc = [100 + i * 0.15 for i in range(70)]
     ohlc = {"BTC": bars(btc), "FADE": bars(fade), "PEAK": bars(peak), "LEAD": bars(lead)}
     now = datetime(2026, 6, 1, tzinfo=UTC)
-    armed = residual_full_config(
-        ClipConfig(universe=("FADE", "PEAK", "LEAD"), min_qvol_eur=1.0)
-    )
+    armed = residual_full_config(ClipConfig(universe=("FADE", "PEAK", "LEAD"), min_qvol_eur=1.0))
     out = evaluate_clip(
         ohlc,
         armed,
@@ -1324,11 +1322,9 @@ def test_reconcile_external_reserves_15m_qty(tmp_path):
     r.cash_eur = 0.0
     _seed_clip(r, base="AAA", qty=100.0, px=10.0, role="alt", hid="clip-a")
     r._other_desk_qty = (  # type: ignore[method-assign]
-        lambda base: 50.0
-        if str(base).upper() == "AAA"
-        else 20.0
-        if str(base).upper() == "LINK"
-        else 0.0
+        lambda base: (
+            50.0 if str(base).upper() == "AAA" else 20.0 if str(base).upper() == "LINK" else 0.0
+        )
     )
     closed = asyncio.run(r.reconcile_external_inventory())
     assert len(closed) == 1
@@ -1540,3 +1536,135 @@ def test_rebalance_weekday_gate_only_fires_on_target_day():
         now=datetime(2026, 6, 2, tzinfo=UTC),  # Tuesday
     )
     assert tue["rebalance_due"] is True
+
+
+def _day_rows(days: list[tuple[str, float, float, float, float]]) -> list[list[float]]:
+    """``(date, open, high, low, close)`` rows at 00:00 UTC."""
+    out = []
+    for d, o, h, lo, c in days:
+        ts = int(datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=UTC).timestamp() * 1000)
+        out.append([ts, o, h, lo, c, 1_000.0])
+    return out
+
+
+def test_close_based_alt_exit_ignores_intraday_low_and_counts_entry_day_high():
+    from bot.live.momentum_btc_rs_clip import close_based_alt_exit
+
+    rows = _day_rows(
+        [
+            ("2026-10-14", 0.141, 0.145, 0.123, 0.126),
+            ("2026-10-15", 0.126, 0.1273, 0.1145, 0.1158),  # entry day: low is -10% off the high
+            ("2026-10-16", 0.116, 0.118, 0.112, 0.117),  # in progress: must be ignored
+        ]
+    )
+    opened = rows[1][0] + 5_000  # bought 00:00:05 on the 15th
+    now = datetime(2026, 10, 16, 0, 0, 5, tzinfo=UTC)
+    reason, peak, last_close = close_based_alt_exit(
+        rows, entry=0.126, opened_ms=opened, peak=0.1266, trail_pct=0.10, now=now
+    )
+    assert peak == pytest.approx(0.1273)  # entry-day high, above the tick-seeded peak
+    assert last_close == pytest.approx(0.1158)
+    assert reason == ""  # 0.1158 > 0.9 * 0.1273; the 0.1145 wick does not count
+    # A close at or below 90% of the peak sells.
+    rows[1][4] = 0.1145
+    reason, _peak, _c = close_based_alt_exit(
+        rows, entry=0.126, opened_ms=opened, peak=0.1266, trail_pct=0.10, now=now
+    )
+    assert reason == "alt_trail"
+
+
+def test_close_based_alt_exit_needs_a_completed_day_and_honours_the_lock():
+    from bot.live.momentum_btc_rs_clip import close_based_alt_exit
+
+    rows = _day_rows([("2026-10-15", 1.0, 1.15, 0.95, 1.07)])
+    opened = rows[0][0] + 5_000
+    # Same day, bar still open: nothing can trigger.
+    reason, peak, last_close = close_based_alt_exit(
+        rows,
+        entry=1.0,
+        opened_ms=opened,
+        peak=0.0,
+        trail_pct=0.10,
+        lock_arm_pct=0.12,
+        lock_floor_pct=0.06,
+        now=datetime(2026, 10, 15, 12, 0, tzinfo=UTC),
+    )
+    assert (reason, peak, last_close) == ("", 1.0, 0.0)
+    # Next window: peak +15% armed the lock (trail sits at 1.035), close +7% is
+    # above the +6% floor -> hold.
+    now = datetime(2026, 10, 16, 0, 0, 5, tzinfo=UTC)
+    reason, peak, last_close = close_based_alt_exit(
+        rows,
+        entry=1.0,
+        opened_ms=opened,
+        peak=0.0,
+        trail_pct=0.10,
+        lock_arm_pct=0.12,
+        lock_floor_pct=0.06,
+        now=now,
+    )
+    assert reason == "" and peak == pytest.approx(1.15) and last_close == pytest.approx(1.07)
+    rows[0][4] = 1.05
+    reason, _p, _c = close_based_alt_exit(
+        rows,
+        entry=1.0,
+        opened_ms=opened,
+        peak=0.0,
+        trail_pct=0.10,
+        lock_arm_pct=0.12,
+        lock_floor_pct=0.06,
+        now=now,
+    )
+    assert reason == "alt_lock"
+
+
+def test_residual_full_pack_exits_on_close_not_on_ticks(tmp_path):
+    import asyncio
+
+    from bot.live.momentum_btc_rs_clip_runner import BtcRsClipPaperRunner
+
+    cfg = residual_full_config(ClipConfig(book_eur=20_000.0))
+    assert cfg.exit_on_close is True
+    r = BtcRsClipPaperRunner(
+        cfg,
+        state_path=str(tmp_path / "s.json"),
+        ledger_path=str(tmp_path / "l.jsonl"),
+        dry_run=True,
+    )
+    rows = _day_rows(
+        [
+            ("2026-10-14", 10.0, 10.2, 9.9, 10.0),
+            ("2026-10-15", 10.0, 10.5, 8.5, 9.8),
+            ("2026-10-16", 9.8, 9.9, 9.7, 9.8),
+        ]
+    )
+    r.positions = [
+        ClipPosition(
+            base="AAA",
+            entry_price=10.0,
+            notional_eur=5_000.0,
+            qty=500.0,
+            opened_ms=rows[1][0] + 5_000,
+            venue="paper",
+            role="alt",
+            peak_px=10.0,
+        )
+    ]
+    # A tick 12% below the peak no longer sells this pack.
+    r.marks = {"AAA": 8.8}
+    assert asyncio.run(r.manage_alt_trail()) == []
+    assert r.positions
+    # Decision window on the 16th: close 9.8 is above 0.9 * 10.5 -> hold, peak ratchets.
+    now = datetime(2026, 10, 16, 0, 0, 5, tzinfo=UTC)
+    out = asyncio.run(r.close_based_exits({"AAA": rows}, now=now, execute=True))
+    assert out == [] and r.positions[0].peak_px == pytest.approx(10.5)
+    # Close at 9.4 breaches the trail: outside the window only the peak moves ...
+    rows[1][4] = 9.4
+    before = r.last_rebalance_ms
+    out = asyncio.run(r.close_based_exits({"AAA": rows}, now=now, execute=False))
+    assert out == [] and r.positions
+    # ... inside the window it sells with the replay reason.
+    out = asyncio.run(r.close_based_exits({"AAA": rows}, now=now, execute=True))
+    assert out and out[0]["reason"] == "alt_trail" and out[0]["close"] == pytest.approx(9.4)
+    assert r.positions == []
+    assert r.last_rebalance_ms == before  # decide() restarts the clock, not the helper
