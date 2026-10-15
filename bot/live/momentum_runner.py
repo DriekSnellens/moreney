@@ -495,46 +495,95 @@ class CandleFeed:
             type(self)._snap = (time.time(), prices)
             return prices
 
-    async def _fetch_all_tickers(self) -> dict[str, float]:
-        url = f"{self._base_url}/ticker/price"
+    async def _get_rows(self, path: str, params: dict[str, str] | None = None) -> list[Any]:
         client = await self._client()
-        resp = await client.get(url)
+        resp = await client.get(f"{self._base_url}/{path}", params=params)
         resp.raise_for_status()
         payload = resp.json()
-        rows = payload if isinstance(payload, list) else [payload]
-        out: dict[str, float] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            market = str(row.get("market") or "")
-            if not market.endswith("-EUR"):
-                continue
-            try:
-                price = float(row.get("price") or 0)
-            except (TypeError, ValueError):
-                continue
-            if price > 0:
-                out[market[:-4]] = price
-        return out
+        return payload if isinstance(payload, list) else [payload]
+
+    async def _fetch_all_tickers(self) -> dict[str, float]:
+        """Live marks for every EUR market: order-book mid, ``/ticker/price`` as fallback.
+
+        Bitvavo's ``/ticker/price`` can lag the book by hours on thinner markets,
+        which froze marks (and the equity curve) while the real price moved.
+        """
+        book_rows, price_rows = await asyncio.gather(
+            self._get_rows("ticker/book"),
+            self._get_rows("ticker/price"),
+            return_exceptions=True,
+        )
+        if isinstance(book_rows, BaseException) and isinstance(price_rows, BaseException):
+            raise price_rows
+        return merge_marks(
+            book_rows if not isinstance(book_rows, BaseException) else [],
+            price_rows if not isinstance(price_rows, BaseException) else [],
+        )
 
     async def _last_price_one(self, base: str) -> float | None:
         now = time.time()
         hit = self._ticker_cache.get(base)
         if hit and now - hit[0] < self._ticker_ttl:
             return hit[1]
-        url = f"{self._base_url}/ticker/price"
+        params = {"market": f"{base}-EUR"}
         try:
-            client = await self._client()
-            resp = await client.get(url, params={"market": f"{base}-EUR"})
-            resp.raise_for_status()
-            payload = resp.json()
-            price = float(payload["price"] if isinstance(payload, dict) else payload[0]["price"])
+            book_rows = await self._get_rows("ticker/book", params)
         except Exception:  # noqa: BLE001
-            return None
-        if price <= 0:
+            book_rows = []
+        try:
+            price_rows = await self._get_rows("ticker/price", params)
+        except Exception:  # noqa: BLE001
+            price_rows = []
+        price = merge_marks(book_rows, price_rows).get(base)
+        if not price or price <= 0:
             return None
         self._ticker_cache[base] = (now, price)
         return price
+
+
+def merge_marks(
+    book_rows: Sequence[Any],
+    price_rows: Sequence[Any],
+    *,
+    max_spread: float = 0.10,
+) -> dict[str, float]:
+    """Base → mark for ``*-EUR`` markets.
+
+    The mid of the best bid/ask is the live market; ``/ticker/price`` (last
+    trade, can be stale for hours) only fills in markets without a usable book
+    (missing side, crossed, or spread above ``max_spread``).
+    """
+    out: dict[str, float] = {}
+    for row in book_rows:
+        if not isinstance(row, dict):
+            continue
+        market = str(row.get("market") or "")
+        if not market.endswith("-EUR"):
+            continue
+        try:
+            bid = float(row.get("bid") or 0)
+            ask = float(row.get("ask") or 0)
+        except (TypeError, ValueError):
+            continue
+        if bid <= 0 or ask <= 0 or ask < bid:
+            continue
+        mid = (bid + ask) / 2.0
+        if (ask - bid) / mid > max_spread:
+            continue
+        out[market[:-4]] = mid
+    for row in price_rows:
+        if not isinstance(row, dict):
+            continue
+        market = str(row.get("market") or "")
+        if not market.endswith("-EUR") or market[:-4] in out:
+            continue
+        try:
+            price = float(row.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            out[market[:-4]] = price
+    return out
 
 
 # ---------------------------------------------------------------------------

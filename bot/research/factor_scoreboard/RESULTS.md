@@ -98,3 +98,169 @@ thousands and why none of them is taken as evidence.
 4. Fear & Greed and funding are available as causal daily series now (`external.py`). They did not
    earn a place in the residual sleeve. They remain candidates for the news/momentum sleeve once that
    sleeve has a long enough pick history to test against.
+
+## Participation grid (2026-10-14): can the desk take more of the market?
+
+Question: the market shows more opportunities than the desk takes; does holding more names,
+re-ranking faster or lowering the floor capture them? Same windows and fill model as above
+(full 2024-03-16 → 2026-10-14, IS → 2025-12-31, OOS 2026). Baseline = the live pack.
+
+| Variant | Full PnL | Full DD | IS PnL | OOS PnL | trades |
+|---|---:|---:|---:|---:|---:|
+| **baseline (1 alt, 7d clock, floor 0.035)** | **+393,195** | 31.2% | +151,798 | +36,575 | 98 |
+| 2 alts (half size each) | +30,795 | 41.8% | +14,830 | +9,777 | 166 |
+| 3 alts | +20,551 | 34.4% | +12,027 | +5,697 | 196 |
+| 4 alts | +17,326 | 31.8% | +9,803 | +5,346 | 220 |
+| 2 alts, floor 0.02 / 0.05 | +22,105 / +19,055 | 44–47% | +9.8k / +7.2k | +8.7k / +9.1k | 178 / 158 |
+| 3 alts, floor 0.05 | −1,510 | 46.1% | +4,818 | −5,003 | 192 |
+| clock 1d | +21,154 | 79.9% | −3,201 | +27,871 | 337 |
+| clock 2d | +8,569 | 67.1% | −2,690 | +12,588 | 226 |
+| clock 3d | +23,512 | 61.9% | −4,146 | +33,838 | 180 |
+| clock 5d | +102,754 | 34.7% | +22,745 | +40,544 | 119 |
+| clock 10d | −2,178 | 52.4% | −3,695 | +1,745 | 78 |
+| clock 14d | +32,876 | 43.8% | +19,800 | +7,089 | 59 |
+| 2 alts, 5d / 3 alts, 5d | +34,376 / +61,236 | 37% | +6.4k / +26.7k | +21.7k / +16.4k | 196 / 235 |
+| floor 0.00 / 0.02 / 0.05 (1 alt) | +288k / +323k / +381k | 33–40% | +132k / +152k / +152k | +26.8k / +26.8k / +34.0k | 106 / 102 / 96 |
+
+Reading: every way of "taking more" (more names, faster clock, lower floor) takes less. Splitting
+the book over two names cuts the full path by 92%; a daily or 3-day clock turns the 2024–25 book
+negative with 60–80% drawdowns. Concentration in one name on a weekly clock *is* the edge: the
+return comes from riding the single strongest name for weeks, and every dilution or extra re-rank
+sells it early. The clock is also sharp (5d +103k, 7d +393k, 10d −2k on the full path), which is
+the known path-dependence of a one-name compounding book; on the fresh 2026 book clocks 1–7d are
+all positive (+28k…+41k) and 10–14d are the weak ones. Nothing here is armed; the 7-day clock stays.
+
+The capacity that is left on the table is not in the ranking. On 2026-10-14 the live desk ranked
+ATOM first (excess +13.5% vs BTC over 10d, score 0.143 vs floor 0.035) with €0 EUR available; the
+modelled 2026 book is +€36.6k while live realized is −€1.1k. Funding the desk on every signal is
+the lever; widening the net is not.
+
+## Leverage ladder (2026-10-14): is the armed pack "optimal" in a bull, and what does leverage add?
+
+Reproduce: `.venv/bin/python -m bot.research.factor_scoreboard.leverage`. The baseline's 49 round
+trips (wet next-open fills) are re-priced as a USDT-margined perp long at leverage L: 0.05% fee +
+0.05% slip per side instead of the 0.25% spot fee, funding paid on the full notional (Binance
+daily-mean proxy, 3 settlements/day), cross-margin liquidation when the worst intraday low of a
+hold breaches 1/L − 2%. Exits are unchanged (10% trail, +12%/+6% lock), so this measures leverage
+on the pack *as armed*, not a re-optimised leveraged pack. The spot 1x reconstruction (+€398k)
+matches the engine (+€393k).
+
+Compounded €20k from 2024-03-16:
+
+| variant | total | maxDD | 2024 | 2025 | 2026 | liq | worst intraday | funding | fees |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| spot 1x (live) | +398,025 | 31.2% | +134,279 | +19,038 | +244,708 | 0 | −25.9% | 0 | 34,213 |
+| perp 1x | +440,172 | 29.7% | +137,842 | +24,033 | +278,297 | 0 | −25.9% | 5,145 | 14,473 |
+| perp 1.25x | +769,255 | 35.8% | +215,331 | +39,387 | +514,538 | 0 | −25.9% | 9,382 | 27,475 |
+| perp 1.5x | +1,243,853 | 41.5% | +320,062 | +58,723 | +865,068 | 0 | −25.9% | 15,971 | 48,333 |
+| perp 2x | +2,692,097 | 52.0% | +636,855 | +101,327 | +1,953,915 | 0 | −25.9% | 39,116 | 125,371 |
+| perp 3x | +6,820,475 | 69.1% | +1,903,207 | +24,829 | +4,892,439 | 0 | −25.9% | 137,796 | 499,398 |
+| perp 5x | −19,269 | 99.9% | +330,520 | −342,836 | −6,954 | 3 | −25.9% | | |
+
+Fresh €20k each calendar year (positions straddling a year boundary are skipped, so 2025 reads
++2.5k here vs +4.2k in the full engine):
+
+| variant | 2024 | DD | 2025 | DD | 2026 | DD |
+|---|---:|---:|---:|---:|---:|---:|
+| spot 1x | +134,279 | 24.9% | +2,468 | 24.5% | +28,238 | 31.2% |
+| perp 1x | +137,842 | 24.9% | +3,045 | 23.6% | +30,603 | 29.7% |
+| perp 1.25x | +215,331 | 30.0% | +3,347 | 28.8% | +37,459 | 35.8% |
+| perp 1.5x | +320,062 | 34.8% | +3,454 | 33.7% | +43,385 | 41.5% |
+| perp 2x | +636,855 | 43.4% | +3,085 | 42.9% | +51,542 | 52.0% |
+| perp 3x | +1,903,207 | 57.6% | +258 | 58.9% | +50,229 | 69.1% |
+
+Reading:
+
+1. **Perps at 1x already beat spot**: the long leg costs 0.10% a side instead of 0.25% and the
+   funding paid (~€5k over 2.6y) is a third of the fee saving (~€20k). +€440k vs +€398k, lower DD.
+   This is a venue question (OKX USDT-margined, EUR/USDT exposure, different depth), not a
+   strategy question.
+2. **Leverage is a bull-only multiplier.** 1.5x turns 2024 from +€134k into +€320k and lifts DD
+   from 25% to 35%; in 2025 it adds nothing (+€3.5k vs +€2.5k) while DD goes 24% → 34%. 2x–3x
+   compound to numbers that the wet fill model cannot support (clips of €1M+ in desk alts) and
+   carry 43–69% drawdowns. 5x is liquidated three times.
+3. The worst intraday excursion in any hold was −25.9%; the liquidation line is −31% at 3x and
+   −23% at 4x. The 10% close-to-close trail does not protect against gaps, so anything above 2x
+   is one bad night from zero.
+4. On "optimal in a bull": among ~1,400 packs and ~45 overlays no setting beats the armed pack
+   robustly; the untested dimensions were venue (perps) and leverage, and both are now measured.
+   If anything is ever changed for the bull case it is 1.25–1.5x on perps with the same exits,
+   gated by a maximum intraday-gap budget — after a live paper period on OKX. Not armed.
+
+### Bitvavo margin instead of OKX perps (checked 2026-10-14)
+
+Bitvavo has no perpetuals. Under MiCA it offers **Margin Short / Margin Long** on its regular spot
+markets (up to 5x for NL/DE users, 10x advertised, assessment test required), app and Pro web only:
+"Margin trading is not yet available over the API" ([help center](https://support.bitvavo.com/hc/en-us/articles/47112628358289-How-do-I-open-manage-and-close-a-margin-position));
+the API only exposes `GET /positions` and net liquidation. Costs: normal spot trading fee per side
+(0.25% at our tier, scaled by L), borrowing 0.0023%/hour ≈ 0.055%/day ≈ 20%/yr on the borrowed
+amount, 2% liquidation fee ([fees](https://bitvavo.com/en/fees)). 12 of the 16 desk names are
+marginable; ARB, ATOM, OP and UNI are not (11 of the 49 baseline round trips).
+
+Same ladder with Bitvavo margin economics (spot fee × L, borrow on (L−1)·E, no funding), fresh €20k
+per year, non-marginable names assumed tradable for comparability:
+
+| variant | 2024 | DD | 2025 | DD | 2026 | DD |
+|---|---:|---:|---:|---:|---:|---:|
+| spot 1x | +134,279 | 24.9% | +2,468 | 24.5% | +28,238 | 31.2% |
+| Bitvavo margin 1.5x | +299,476 | 35.3% | +1,978 | 35.4% | +37,215 | 44.1% |
+| Bitvavo margin 2x | +573,905 | 44.3% | +780 | 45.2% | +41,034 | 55.2% |
+| Bitvavo margin 3x | +1,591,774 | 59.2% | −3,244 | 61.7% | +32,900 | 72.7% |
+| OKX perp 1.5x (ref.) | +320,062 | 34.8% | +3,454 | 33.7% | +43,385 | 41.5% |
+
+Reading: Bitvavo margin keeps the 0.25% fee drag (fees €105k vs €48k on perps at 1.5x over the
+full path) and charges ~20%/yr on the borrowed leg, so in a bear year leverage *costs* money
+(2025: +€2.0k at 1.5x vs +€2.5k unlevered, −€3.2k at 3x). In bull years it multiplies the PnL
+roughly in proportion to L, with the same 35–60% drawdowns as perps. Not usable by the bot until
+Bitvavo opens margin on the API; nothing armed.
+
+### What is realistic on OKX perps (bootstrap, 2026-10-14)
+
+OKX serves EEA retail through MiFID-regulated **X-Perps** (expiry perps with funding, up to 10x,
+2 bps maker / 5 bps taker, negative-balance protection, appropriateness test required). Resampling
+the 49 round trips (19 per year) 20,000 times, one-year PnL on a fresh €20k:
+
+| variant | p5 | p25 | median | p75 | p95 | P(losing year) | median maxDD | p95 maxDD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| spot 1x (live) | −1,381 | +15,983 | +41,150 | +87,881 | +250,970 | 6.3% | 23.7% | 44.5% |
+| perp 1x | −452 | +17,062 | +43,285 | +92,859 | +261,458 | 5.5% | 22.7% | 42.9% |
+| perp 1.25x | −1,112 | +21,640 | +57,743 | +134,462 | +439,438 | 5.9% | 27.9% | 51.2% |
+| perp 1.5x | −2,038 | +25,282 | +73,729 | +188,195 | +695,967 | 6.3% | 32.7% | 58.0% |
+| perp 2x | −4,667 | +30,206 | +104,070 | +308,735 | +1,534,607 | 7.9% | 42.4% | 70.5% |
+| perp 3x | −10,814 | +30,022 | +158,744 | +648,362 | +5,242,603 | 11.6% | 59.3% | 86.6% |
+
+Regime-conditional (resample only within that year's trips), median one-year PnL on €20k:
+
+| year | perp 1x | perp 1.5x | P(loss) 1x / 1.5x |
+|---|---:|---:|---:|
+| 2024 bull (18 trips) | +128,824 (p25 +66k, p75 +249k) | +300,354 (p25 +134k, p75 +688k) | 0.1% / 0.2% |
+| 2025 bear (14 trips) | +2,832 (p25 −2.4k, p75 +9.7k) | +3,277 (p25 −4.2k, p75 +14.5k) | 37% / 40% |
+| 2026 sideways (17 trips) | +27,279 (p25 +6.5k, p75 +69k) | +38,725 (p25 +6.6k, p75 +119k) | 15% / 18% |
+
+The unconditional table is bull-weighted (two of the 2.6 sampled years were good) and treats
+trips as independent, so it is an upper-ish bound. The regime table is the planning number: a
+bear year is a coin flip around zero at any leverage, a sideways year is +€6k–70k, a bull year
+is where leverage pays. Between 1x and 1.5x the median rises ~70% and the median drawdown
+~10 points; beyond 1.5x the drawdown grows faster than the median.
+
+### Trail width sweep (2026-10-14): "everyone trails 10%, so trail 8%?"
+
+Live knobs, only the alt trail changed (lock +12%/+6% kept; without the lock every row is within
+€3k of the one shown):
+
+| trail | full PnL | full DD | IS PnL | IS DD | OOS PnL | OOS DD |
+|---|---:|---:|---:|---:|---:|---:|
+| 6% | +55,629 | 28.7% | +31,237 | 22.7% | +11,078 | 27.8% |
+| 7% | +141,222 | 30.6% | +52,295 | 27.2% | +28,967 | 18.7% |
+| 8% | +89,782 | 29.5% | +76,790 | 23.1% | +5,224 | 26.7% |
+| 9% | +292,554 | 31.1% | +142,869 | 24.8% | +24,644 | 26.7% |
+| **10% (live)** | **+393,195** | 31.2% | **+151,798** | 24.8% | **+36,575** | 26.7% |
+| 11% | +73,010 | 48.5% | +40,684 | 41.7% | +12,436 | 27.9% |
+| 12% | +51,582 | 47.5% | +18,803 | 45.4% | +18,055 | 28.3% |
+| 15% | +63,316 | 60.9% | +19,796 | 58.1% | +21,828 | 30.6% |
+
+Tighter trails sell normal alt noise (5–8% daily ranges) and miss the rides; wider trails give
+back the rides and double the drawdown. 10% is a sharp peak (9% −25%, 11% −81% on the full path),
+which says the trail is a noisy parameter on a one-name compounding book, not an edge in itself.
+Cosmetic de-crowding moves (8%, 9.5%, 10.5%) are not supported by this tape; the exits stay on
+daily closes with no resting stop orders in the book.
