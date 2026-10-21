@@ -44,6 +44,9 @@ class BankSpec:
     min_qvol_eur: float = 15_000.0
     cooldown_bars: int = 1
     risk_off_blocks_entry: bool = True
+    trail_pct: float = 0.0
+    lock_arm: float = 0.0
+    lock_keep: float = 0.0
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
 
 
@@ -53,6 +56,9 @@ class Leg:
     entry: float
     partial: bool = False
     stop_floor: float = 0.0
+    floor_reason: str = "be_stop"
+    # Highest high seen on bars before the one being judged.
+    peak: float = 0.0
 
 
 def level_exit(
@@ -64,13 +70,16 @@ def level_exit(
     tp_pct: float,
     stop_pct: float,
     stop_floor: float = 0.0,
+    stop_floor_reason: str = "be_stop",
+    trail_px: float = 0.0,
     want_tp: bool = True,
 ) -> tuple[str, float] | None:
     """First structural exit inside one bar, before fees.
 
     ``None`` means the bar did not trade through a level. A gap through a
-    level fills at the open. When the stop and the target both print, the
-    stop is booked.
+    level fills at the open. When several stops are live, the highest one
+    is booked. When that stop and the target both print, the stop is booked.
+    ``trail_px`` is the retrace from a peak already known before this bar.
     """
     if entry <= 0 or open_ <= 0:
         return None
@@ -78,7 +87,9 @@ def level_exit(
     if stop_pct > 0:
         stops.append((entry * (1.0 - stop_pct), "stop"))
     if stop_floor > 0:
-        stops.append((stop_floor, "be_stop"))
+        stops.append((stop_floor, stop_floor_reason))
+    if trail_px > 0:
+        stops.append((trail_px, "trail"))
     stop_px = 0.0
     stop_reason = "stop"
     if stops:
@@ -227,7 +238,7 @@ def run_momentum_bank(
             spent = book.buy(base, "mom", notional, px, model.fee_side, opened_ms=ts)
             if spent <= 0:
                 continue
-            legs[base] = Leg(base=base, entry=px)
+            legs[base] = Leg(base=base, entry=px, peak=px)
             trades.append(
                 {
                     "ts": ts,
@@ -248,6 +259,12 @@ def run_momentum_bank(
             lot = book.lots.get(base)
             if row is None or lot is None:
                 continue
+            if spec.lock_arm > 0 and leg.peak >= leg.entry * (1.0 + spec.lock_arm):
+                lock_px = leg.entry * (1.0 + spec.lock_keep)
+                if lock_px > leg.stop_floor:
+                    leg.stop_floor = lock_px
+                    leg.floor_reason = "lock"
+            trail_px = leg.peak * (1.0 - spec.trail_pct) if spec.trail_pct > 0 else 0.0
             hit = level_exit(
                 entry=leg.entry,
                 open_=float(row[1]),
@@ -256,9 +273,12 @@ def run_momentum_bank(
                 tp_pct=spec.tp_pct,
                 stop_pct=spec.stop_pct,
                 stop_floor=leg.stop_floor,
+                stop_floor_reason=leg.floor_reason,
+                trail_px=trail_px,
                 want_tp=not leg.partial,
             )
             if hit is None:
+                leg.peak = max(leg.peak, float(row[2]))
                 continue
             reason, raw = hit
             if reason == "tp" and spec.partial_frac > 0 and not leg.partial:
@@ -266,7 +286,11 @@ def run_momentum_bank(
                 kept = legs.get(base)
                 if kept is not None:
                     kept.partial = True
-                    kept.stop_floor = kept.entry * (1.0 + model.fee_side * 2.0)
+                    kept.peak = max(kept.peak, float(row[2]))
+                    be = kept.entry * (1.0 + model.fee_side * 2.0)
+                    if be > kept.stop_floor:
+                        kept.stop_floor = be
+                        kept.floor_reason = "be_stop"
             else:
                 _sell(base, ts, raw, lot.qty, reason, i)
 
@@ -325,6 +349,8 @@ def run_momentum_bank(
         "reasons": reasons,
         "n_tp": closes_n,
         "n_stop": reasons.get("stop", 0) + reasons.get("be_stop", 0),
+        "n_trail": reasons.get("trail", 0),
+        "n_lock": reasons.get("lock", 0),
         "n_fail": reasons.get("momentum_fail", 0),
         "n_entries": reasons.get("momentum", 0),
         "year_pnl": year_pnl([d for d, _ in curve], [v for _, v in curve], book_eur),
@@ -403,4 +429,45 @@ def default_bank_specs() -> list[BankSpec]:
         specs.append(BankSpec(name=f"bank_w_{tag}_tp4", tp_pct=0.04, stop_pct=0.0, **held))
         specs.append(BankSpec(name=f"bank_w_{tag}_s8", tp_pct=0.0, stop_pct=0.08, **held))
         specs.append(BankSpec(name=f"bank_w_{tag}_tp4s8", tp_pct=0.04, stop_pct=0.08, **held))
+    # Structural bank on a rise that is still being followed: trail from the
+    # prior peak, and a lock that raises the floor once that peak has armed.
+    # 0.5% keep matches one Bitvavo taker round trip.
+    fee_keep = 0.005
+    for floor, tag, base in (
+        (0.04, "f4", week),
+        (0.08, "f8", week),
+        (0.04, "f4", day),
+    ):
+        held = _floored(base, floor)
+        prefix = "bank_w" if base is week else "bank_d"
+        specs.append(
+            BankSpec(
+                name=f"{prefix}_{tag}_trail10",
+                tp_pct=0.0,
+                stop_pct=0.0,
+                trail_pct=0.10,
+                **held,
+            )
+        )
+        specs.append(
+            BankSpec(
+                name=f"{prefix}_{tag}_lock",
+                tp_pct=0.0,
+                stop_pct=0.0,
+                trail_pct=0.10,
+                lock_arm=0.12,
+                lock_keep=0.06,
+                **held,
+            )
+        )
+        specs.append(
+            BankSpec(
+                name=f"{prefix}_{tag}_ratchet",
+                tp_pct=0.0,
+                stop_pct=0.0,
+                lock_arm=0.02,
+                lock_keep=fee_keep,
+                **held,
+            )
+        )
     return specs

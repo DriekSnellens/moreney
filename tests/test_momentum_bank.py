@@ -87,6 +87,49 @@ def test_both_levels_in_one_bar_book_the_stop() -> None:
     assert row["pnl_eur"] < 0
 
 
+def test_trail_uses_the_prior_peak_and_fills_at_the_trail() -> None:
+    armed = level_exit(
+        entry=100.0,
+        open_=110.0,
+        high=112.0,
+        low=90.0,
+        tp_pct=0.0,
+        stop_pct=0.0,
+        trail_px=99.0,
+    )
+    assert armed is not None and armed[0] == "trail" and abs(armed[1] - 99.0) < 1e-9
+    # This bar's high is not a peak yet, so a 10% trail from entry stays at 90.
+    fresh = level_exit(
+        entry=100.0,
+        open_=100.0,
+        high=140.0,
+        low=95.0,
+        tp_pct=0.0,
+        stop_pct=0.0,
+        trail_px=90.0,
+    )
+    assert fresh is None
+
+
+def test_a_lock_banks_the_giveback_above_the_entry() -> None:
+    start = datetime(2024, 6, 3, tzinfo=UTC)
+    btc = [100 + i * 0.2 for i in range(8)]
+    alt = [100, 100, 110, 112, 140, 115, 114, 113]
+    ohlc = {"BTC": _bars(start, btc), "AAA": _bars(start, alt)}
+    row = run_momentum_bank(
+        ohlc,
+        _spec(tp_pct=0.0, stop_pct=0.0, trail_pct=0.0, lock_arm=0.12, lock_keep=0.06),
+        start="2024-06-03",
+        end="2024-06-06",
+        book_eur=10_000.0,
+        keep_trades=True,
+    )
+    sells = [t for t in row["trades"] if t["side"] == "sell"]
+    assert sells and sells[0]["reason"] == "lock"
+    buy = next(t for t in row["trades"] if t["side"] == "buy")
+    assert sells[0]["px"] > buy["px"] * 1.04
+
+
 def test_a_hold_does_not_bank_a_wick_through_a_round_level() -> None:
     start = datetime(2024, 6, 3, tzinfo=UTC)
     btc = [100, 101, 102, 103, 104, 105]

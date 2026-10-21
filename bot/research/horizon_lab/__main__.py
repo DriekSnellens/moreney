@@ -66,9 +66,13 @@ def _write_md(path: Path, header: str, sections: list[tuple[str, list[dict[str, 
         lines.append("")
         head = "| variant | PnL | DD | green W | red W | worst W | trades |"
         rule = "|---|---:|---:|---:|---:|---:|---:|"
+        harvest = any("n_trail" in row for row in rows)
         if exits:
             head += " tp | stop | fail |"
             rule += "---:|---:|---:|"
+        if harvest:
+            head += " trail | lock |"
+            rule += "---:|---:|"
         head += " 2024 | 2025 | 2026 |"
         rule += "---:|---:|---:|"
         lines.append(head)
@@ -85,6 +89,8 @@ def _write_md(path: Path, header: str, sections: list[tuple[str, list[dict[str, 
             )
             if exits:
                 line += f" {row.get('n_tp', 0)} | {row.get('n_stop', 0)} | {row.get('n_fail', 0)} |"
+            if harvest:
+                line += f" {row.get('n_trail', 0)} | {row.get('n_lock', 0)} |"
             line += (
                 f" {y.get('2024', 0):,.0f} | {y.get('2025', 0):,.0f} | {y.get('2026', 0):,.0f} |"
             )
@@ -147,14 +153,27 @@ different simulator.
    stop on the 4% and 8% entries is negative in-sample and in 2026. The
    3% floor plus a 5% stop (`bank_w_follow`) is negative too (−€4.5k IS,
    −€1.2k OOS).
+6. **A trail or a lock on that same 7-day rise gives the trend back.**
+   The live 10% trail on the 4% entry (`bank_w_f4_trail10`) is −€15.3k
+   in-sample and −€13.4k on a fresh 2026 book. 70 of 106 in-sample sells
+   are the trail. The 8% entry is the same shape. The live lock, arm
+   +12% and keep +6%, does not repair it. A ratchet that lifts the floor
+   to +0.5% once the prior peak is +2% — one taker round trip — is the
+   least bad bank and still loses: `bank_w_f8_ratchet` is −€0.6k
+   in-sample and −€5.1k in 2026, and the sells are the lock. The 2024
+   rise the plain hold kept (+€49k at the 4% floor) is −€10k once the
+   trail is on.
 
 ## Verdict
 
-Nothing armed. The book already ranks what is rising. Banking that rise
-at a fixed level inside the 4h bar loses after Bitvavo taker fees: the
-win rate sits under the fee-adjusted breakeven and a €20k book goes to
-zero. Holding a 7-day riser until the rise dies stays above zero only as
-a 2024 profit that 2025 largely gives back, with a fresh 2026 result of
+Nothing armed. The book already ranks what is rising, every 4h bar.
+Banking that rise loses after Bitvavo taker fees. A fixed target sits
+under the fee-adjusted breakeven and a €20k book goes to zero. A 10%
+trail, the live +12%/+6% lock, and a ratchet that protects one round
+trip once the peak is +2% are negative on the same 7-day entries, in
+sample and in 2026. The trail is what cuts the 2024 rise the hold kept.
+Holding a 7-day riser until the rise dies stays above zero only as a
+2024 profit that 2025 largely gives back, with a fresh 2026 result of
 a few thousand euros and a drawdown past 70%. That is a smaller, rougher
 book than the armed residual trail over the same dates. Day trading flat
 by the next UTC open loses the same fees. A shorter residual clock gives
@@ -256,7 +275,8 @@ def main() -> None:
                         got.append(row)
                         print(
                             f"{_line(row)}  tp={row.get('n_tp', 0)} "
-                            f"stop={row.get('n_stop', 0)} fail={row.get('n_fail', 0)}"
+                            f"stop={row.get('n_stop', 0)} fail={row.get('n_fail', 0)} "
+                            f"trail={row.get('n_trail', 0)} lock={row.get('n_lock', 0)}"
                         )
                     bank_rows[label] = got
                 payload["bank"] = bank_rows
@@ -301,7 +321,10 @@ def main() -> None:
                 "print in one bar the stop is booked. `hold` has no target and",
                 "no stop and sells the next open once the lookback return is no",
                 "longer positive. `bank_w_follow` is that 7-day hold plus a 5%",
-                "stop. Fills are wet Bitvavo taker, €20k compounding.",
+                "stop. A trail sells inside the bar when the low trades through",
+                "a retrace from the prior peak. A lock raises that floor once",
+                "the prior peak has reached the arm. Fills are wet Bitvavo",
+                "taker, €20k compounding.",
                 "`baseline_from_4h_start` is the armed residual pack on daily",
                 "bars from the same start date (printed in the run log).",
                 "",
