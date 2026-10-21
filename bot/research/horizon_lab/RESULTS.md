@@ -15,6 +15,18 @@ UTC session, round-tripped even when the leader does not change.
 through +8%. The 4h book enters once per UTC day and is sold on the
 first open of the next date.
 
+Bank rows are a 4h momentum book on the same desk universe.
+Entry is the next open after a close whose own lookback return
+is positive and whose excess versus BTC clears the floor. A
+target fills at the target when the high trades through it. A
+stop fills at the stop when the low trades through it; if both
+print in one bar the stop is booked. `hold` has no target and
+no stop and sells the next open once the lookback return is no
+longer positive. `bank_w_follow` is that 7-day hold plus a 5%
+stop. Fills are wet Bitvavo taker, €20k compounding.
+`baseline_from_4h_start` is the armed residual pack on daily
+bars from the same start date (printed in the run log).
+
 Daily tape through 2026-10-03.
 Reproduce: `.venv/bin/python -m bot.research.horizon_lab --no-fresh`
 
@@ -103,6 +115,94 @@ Reproduce: `.venv/bin/python -m bot.research.horizon_lab --no-fresh`
 | day4h_open_f35 | -9,962 | 54.5% | 19% | 45% | -24.9% | 85 | 0 | 0 | -9,962 |
 | day4h_utc_f35_n2 | -14,115 | 71.2% | 17% | 48% | -23.0% | 81 | 0 | 0 | -14,115 |
 
+## Bank full
+
+| variant | PnL | DD | green W | red W | worst W | trades | tp | stop | fail | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| bank_d_tp2_s2 | -19,999 | 100.0% | 5% | 58% | -40.4% | 1118 | 452 | 595 | 71 | -19,766 | -227 | -7 |
+| bank_d_tp3_s2 | -19,996 | 100.0% | 8% | 58% | -36.8% | 1053 | 351 | 609 | 93 | -19,467 | -485 | -43 |
+| bank_d_tp3_s3 | -19,985 | 99.9% | 13% | 54% | -33.5% | 903 | 381 | 381 | 141 | -19,171 | -738 | -76 |
+| bank_d_tp4_s3 | -19,961 | 99.8% | 14% | 53% | -38.7% | 788 | 267 | 352 | 169 | -19,113 | -760 | -87 |
+| bank_d_tp6_s4 | -19,925 | 99.6% | 14% | 52% | -37.2% | 600 | 158 | 221 | 221 | -18,073 | -1,671 | -180 |
+| bank_d_follow | -18,944 | 95.3% | 18% | 48% | -27.1% | 363 | 0 | 121 | 242 | -15,418 | -2,692 | -834 |
+| bank_d_tp3_part | -18,866 | 94.8% | 20% | 46% | -23.7% | 664 | 203 | 287 | 174 | -14,280 | -3,875 | -710 |
+| bank_d_tp3_n2 | -19,978 | 99.9% | 8% | 58% | -27.4% | 1536 | 598 | 635 | 303 | -19,047 | -837 | -94 |
+| bank_w_tp4_s3 | -19,941 | 99.7% | 15% | 49% | -29.4% | 730 | 287 | 415 | 28 | -18,422 | -1,281 | -238 |
+| bank_w_tp6_s4 | -19,829 | 99.2% | 17% | 48% | -26.4% | 447 | 150 | 246 | 51 | -17,322 | -2,243 | -263 |
+| bank_w_follow | -5,071 | 76.4% | 28% | 37% | -32.0% | 124 | 0 | 55 | 69 | 3,919 | -8,382 | -608 |
+| bank_d_tp3_norisk | -19,999 | 100.0% | 8% | 57% | -32.8% | 1046 | 404 | 452 | 190 | -19,859 | -140 | 0 |
+| bank_w_f3_hold | 15,440 | 81.7% | 31% | 35% | -35.2% | 91 | 0 | 0 | 91 | 42,182 | -31,539 | 4,797 |
+| bank_w_f4_hold | 19,655 | 79.9% | 31% | 35% | -35.3% | 84 | 0 | 0 | 84 | 49,129 | -26,916 | -2,559 |
+| bank_w_f6_hold | 22,766 | 78.8% | 30% | 34% | -35.4% | 74 | 0 | 0 | 74 | 58,259 | -30,369 | -5,125 |
+| bank_w_f8_hold | 29,428 | 75.5% | 30% | 34% | -35.5% | 64 | 0 | 0 | 64 | 69,482 | -32,497 | -7,557 |
+| bank_d_f4_hold | -15,664 | 84.9% | 18% | 46% | -22.6% | 229 | 0 | 0 | 229 | -5,056 | -9,379 | -1,229 |
+| bank_w_f4_tp4 | -16,273 | 83.5% | 28% | 38% | -22.7% | 237 | 153 | 0 | 84 | -8,187 | -5,919 | -2,167 |
+| bank_w_f4_s8 | -11,103 | 82.4% | 27% | 38% | -38.5% | 98 | 0 | 31 | 67 | -6,779 | -2,259 | -2,065 |
+| bank_w_f4_tp4s8 | -18,906 | 95.0% | 21% | 44% | -20.8% | 370 | 228 | 96 | 46 | -12,870 | -5,007 | -1,029 |
+| bank_d_f8_hold | -13,019 | 78.0% | 18% | 39% | -21.8% | 144 | 0 | 0 | 144 | -2,046 | -5,445 | -5,528 |
+| bank_w_f8_tp4 | -12,535 | 77.7% | 26% | 37% | -20.0% | 203 | 144 | 0 | 59 | 5,518 | -13,085 | -4,969 |
+| bank_w_f8_s8 | -8,445 | 75.4% | 28% | 34% | -38.9% | 78 | 0 | 28 | 50 | -3,291 | -4,698 | -457 |
+| bank_w_f8_tp4s8 | -18,084 | 93.0% | 23% | 38% | -22.6% | 323 | 208 | 88 | 27 | -8,784 | -7,005 | -2,294 |
+
+## Bank is
+
+| variant | PnL | DD | green W | red W | worst W | trades | tp | stop | fail | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| bank_d_tp2_s2 | -19,992 | 100.0% | 4% | 60% | -40.4% | 804 | 315 | 450 | 39 | -19,766 | -227 | 0 |
+| bank_d_tp3_s2 | -19,952 | 99.8% | 7% | 56% | -36.8% | 696 | 233 | 415 | 48 | -19,467 | -485 | 0 |
+| bank_d_tp3_s3 | -19,909 | 99.5% | 12% | 51% | -33.5% | 596 | 250 | 268 | 78 | -19,171 | -738 | 0 |
+| bank_d_tp4_s3 | -19,874 | 99.4% | 10% | 54% | -38.7% | 511 | 164 | 247 | 100 | -19,113 | -760 | 0 |
+| bank_d_tp6_s4 | -19,744 | 98.7% | 13% | 50% | -37.2% | 386 | 100 | 154 | 132 | -18,073 | -1,671 | 0 |
+| bank_d_follow | -18,110 | 90.5% | 18% | 45% | -27.1% | 231 | 0 | 87 | 144 | -15,418 | -2,692 | 0 |
+| bank_d_tp3_part | -18,155 | 90.8% | 18% | 45% | -23.7% | 428 | 129 | 199 | 100 | -14,280 | -3,875 | 0 |
+| bank_d_tp3_n2 | -19,884 | 99.4% | 7% | 56% | -27.4% | 1007 | 386 | 451 | 170 | -19,047 | -837 | 0 |
+| bank_w_tp4_s3 | -19,703 | 98.5% | 12% | 50% | -29.4% | 469 | 179 | 271 | 19 | -18,422 | -1,281 | 0 |
+| bank_w_tp6_s4 | -19,565 | 97.8% | 13% | 49% | -24.5% | 301 | 96 | 174 | 31 | -17,322 | -2,243 | 0 |
+| bank_w_follow | -4,463 | 65.6% | 27% | 34% | -25.8% | 81 | 0 | 39 | 42 | 3,919 | -8,382 | 0 |
+| bank_d_tp3_norisk | -19,999 | 100.0% | 12% | 84% | -32.8% | 1046 | 404 | 452 | 190 | -19,859 | -140 | 0 |
+| bank_w_f3_hold | 10,643 | 73.3% | 31% | 32% | -23.5% | 60 | 0 | 0 | 60 | 42,182 | -31,539 | 0 |
+| bank_w_f4_hold | 22,213 | 65.9% | 31% | 32% | -23.6% | 53 | 0 | 0 | 53 | 49,129 | -26,916 | 0 |
+| bank_w_f6_hold | 27,891 | 62.4% | 30% | 31% | -22.0% | 46 | 0 | 0 | 46 | 58,259 | -30,369 | 0 |
+| bank_w_f8_hold | 36,985 | 56.9% | 29% | 31% | -22.0% | 39 | 0 | 0 | 39 | 69,482 | -32,497 | 0 |
+| bank_d_f4_hold | -14,436 | 80.6% | 16% | 46% | -22.3% | 153 | 0 | 0 | 153 | -5,056 | -9,379 | 0 |
+| bank_w_f4_tp4 | -14,106 | 71.9% | 27% | 34% | -22.7% | 148 | 93 | 0 | 55 | -8,187 | -5,919 | 0 |
+| bank_w_f4_s8 | -9,038 | 65.4% | 26% | 36% | -20.9% | 59 | 0 | 20 | 39 | -6,779 | -2,259 | 0 |
+| bank_w_f4_tp4s8 | -17,877 | 89.4% | 19% | 43% | -20.8% | 245 | 151 | 69 | 25 | -12,870 | -5,007 | 0 |
+| bank_d_f8_hold | -7,491 | 60.5% | 18% | 39% | -17.8% | 94 | 0 | 0 | 94 | -2,046 | -5,445 | 0 |
+| bank_w_f8_tp4 | -7,566 | 62.8% | 26% | 32% | -17.8% | 130 | 92 | 0 | 38 | 5,518 | -13,085 | 0 |
+| bank_w_f8_s8 | -7,989 | 63.9% | 26% | 32% | -22.1% | 48 | 0 | 19 | 29 | -3,291 | -4,698 | 0 |
+| bank_w_f8_tp4s8 | -15,789 | 84.6% | 20% | 37% | -22.6% | 215 | 140 | 61 | 14 | -8,784 | -7,005 | 0 |
+
+## Bank oos
+
+| variant | PnL | DD | green W | red W | worst W | trades | tp | stop | fail | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| bank_d_tp2_s2 | -19,846 | 99.2% | 2% | 69% | -38.1% | 426 | 159 | 232 | 35 | 0 | 0 | -19,846 |
+| bank_d_tp3_s2 | -19,658 | 98.4% | 5% | 67% | -34.4% | 365 | 109 | 215 | 41 | 0 | 0 | -19,658 |
+| bank_d_tp3_s3 | -18,990 | 95.2% | 7% | 64% | -26.4% | 308 | 127 | 121 | 60 | 0 | 0 | -18,990 |
+| bank_d_tp4_s3 | -18,365 | 92.5% | 12% | 60% | -26.0% | 281 | 102 | 117 | 62 | 0 | 0 | -18,365 |
+| bank_d_tp6_s4 | -18,446 | 93.0% | 14% | 57% | -29.8% | 220 | 59 | 78 | 83 | 0 | 0 | -18,446 |
+| bank_d_follow | -14,836 | 77.9% | 19% | 52% | -25.9% | 133 | 0 | 36 | 97 | 0 | 0 | -14,836 |
+| bank_d_tp3_part | -14,838 | 76.4% | 17% | 55% | -17.1% | 239 | 73 | 99 | 67 | 0 | 0 | -14,838 |
+| bank_d_tp3_n2 | -18,511 | 92.8% | 2% | 69% | -20.7% | 528 | 203 | 200 | 125 | 0 | 0 | -18,511 |
+| bank_w_tp4_s3 | -19,134 | 95.8% | 17% | 50% | -29.6% | 259 | 93 | 155 | 11 | 0 | 0 | -19,134 |
+| bank_w_tp6_s4 | -16,927 | 85.3% | 14% | 52% | -28.7% | 147 | 50 | 79 | 18 | 0 | 0 | -16,927 |
+| bank_w_follow | -1,183 | 38.9% | 29% | 40% | -32.2% | 43 | 0 | 16 | 27 | 0 | 0 | -1,183 |
+| bank_d_tp3_norisk | -19,753 | 98.8% | 12% | 88% | -28.6% | 497 | 198 | 179 | 120 | 0 | 0 | -19,753 |
+| bank_w_f3_hold | 5,307 | 40.0% | 31% | 40% | -35.1% | 31 | 0 | 0 | 31 | 0 | 0 | 5,307 |
+| bank_w_f4_hold | 2,174 | 39.9% | 33% | 38% | -35.0% | 31 | 0 | 0 | 31 | 0 | 0 | 2,174 |
+| bank_w_f6_hold | 1,150 | 40.0% | 31% | 40% | -35.0% | 28 | 0 | 0 | 28 | 0 | 0 | 1,150 |
+| bank_w_f8_hold | 788 | 40.0% | 31% | 40% | -35.0% | 25 | 0 | 0 | 25 | 0 | 0 | 788 |
+| bank_d_f4_hold | -9,162 | 52.3% | 24% | 43% | -24.5% | 76 | 0 | 0 | 76 | 0 | 0 | -9,162 |
+| bank_w_f4_tp4 | -9,964 | 52.2% | 21% | 50% | -20.1% | 89 | 59 | 0 | 30 | 0 | 0 | -9,964 |
+| bank_w_f4_s8 | -6,758 | 52.8% | 29% | 40% | -39.0% | 40 | 0 | 12 | 28 | 0 | 0 | -6,758 |
+| bank_w_f4_tp4s8 | -14,334 | 72.9% | 17% | 50% | -19.0% | 129 | 78 | 29 | 22 | 0 | 0 | -14,334 |
+| bank_d_f8_hold | -9,762 | 54.0% | 19% | 38% | -22.6% | 50 | 0 | 0 | 50 | 0 | 0 | -9,762 |
+| bank_w_f8_tp4 | -8,961 | 46.0% | 21% | 50% | -20.2% | 73 | 52 | 0 | 21 | 0 | 0 | -8,961 |
+| bank_w_f8_s8 | -1,974 | 44.9% | 31% | 36% | -39.5% | 30 | 0 | 9 | 21 | 0 | 0 | -1,974 |
+| bank_w_f8_tp4s8 | -13,855 | 69.9% | 19% | 48% | -21.0% | 116 | 73 | 31 | 12 | 0 | 0 | -13,855 |
+
+
 ## Reading
 
 `week_age_cut` matches the armed residual pack to the euro (same PnL, same
@@ -134,14 +234,39 @@ different simulator.
    through 2025; only 2026 moves, and by one further hold. Drawdown on the
    full path is worse (33.7% versus 31.2%). Green weeks do not improve
    (31% versus 32%).
+4. **Taking the level while the bar is printing gives the rise back to
+   fees.** A round trip is about 0.5% plus impact. A +3% target against a
+   −3% stop needs about 58% of the decisive trades to hit the target
+   before it breaks even. `bank_d_tp3_s3` prints 381 targets and 381
+   stops and finishes at −€19,985. Every tight target on a 24h rise —
+   partial, two names, or the BTC filter off — compounds €20k toward zero,
+   in-sample and in 2026. A 24h hold with no target and no stop is still
+   negative (`bank_d_f4_hold` −€14.4k IS / −€9.2k OOS, `bank_d_f8_hold`
+   −€7.5k / −€9.8k).
+5. **A 7-day hold until the rise dies is the only line above zero, and it
+   is a 2024 windfall with a deep giveback.** No target, no stop, sell the
+   next open once the lookback return is no longer positive. Floors 3%,
+   4%, 6% and 8% are positive on the full path (+€15k to +€29k) and on a
+   fresh 2026 book (+€5.3k, +€2.2k, +€1.2k, +€0.8k). The in-sample gain
+   grows as the floor rises (+€11k to +€37k) while the fresh 2026 book
+   shrinks, and 2025 loses €27k–€32k at every floor. Drawdown on the full
+   path is 76–82%, worst week about −35%, green weeks about 30%. From the
+   same 2024-06-01 start the armed residual pack is +€389,590 at 30.6%
+   drawdown (2024 +€104k, 2025 +€17k, 2026 +€269k). A +4% target or an 8%
+   stop on the 4% and 8% entries is negative in-sample and in 2026. The
+   3% floor plus a 5% stop (`bank_w_follow`) is negative too (−€4.5k IS,
+   −€1.2k OOS).
 
 ## Verdict
 
-Nothing armed. Day trading on this tape, flat by the next UTC open, does
-not survive Bitvavo taker fees. Forcing the residual book to act like a
-week time-box gives back the trends that pay it. Leaving a name that has
-already closed through the runner arm on the trail, instead of rotating
-it on the clock, is a generic rule and it does not lose — but the extra
-euros are two holds, and the share of green weeks does not rise. The live
-pack stays the 7-day residual with the 10% trail.
-
+Nothing armed. The book already ranks what is rising. Banking that rise
+at a fixed level inside the 4h bar loses after Bitvavo taker fees: the
+win rate sits under the fee-adjusted breakeven and a €20k book goes to
+zero. Holding a 7-day riser until the rise dies stays above zero only as
+a 2024 profit that 2025 largely gives back, with a fresh 2026 result of
+a few thousand euros and a drawdown past 70%. That is a smaller, rougher
+book than the armed residual trail over the same dates. Day trading flat
+by the next UTC open loses the same fees. A shorter residual clock gives
+back the trends that pay the pack. Leaving a name that has closed through
+the runner arm on the trail is two holds, and the share of green weeks
+stays put. The live pack stays the 7-day residual with the 10% trail.

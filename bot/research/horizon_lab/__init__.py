@@ -8,4 +8,6 @@ measures the two horizons in between.
   arm, and leave a name that did on the trail.
 * Day — one UTC session, flat at the next open, unless the close itself
   cleared the runner arm and the spec graduates that lot onto the trail.
+* Bank — 4h momentum that is still rising. A target or a stop fills inside
+  the bar; a hold sells only once that rise is no longer positive.
 """

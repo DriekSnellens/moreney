@@ -19,6 +19,7 @@ from bot.research.btc_residual_mix.engine import run_btc_residual
 from bot.research.consistency_lab.engine import consistency
 from bot.research.factor_scoreboard.__main__ import load_candles
 from bot.research.factor_scoreboard.engine import LIVE_KNOBS
+from bot.research.horizon_lab.bank import default_bank_specs, run_momentum_bank
 from bot.research.horizon_lab.engine import (
     DaySpec,
     default_day_specs,
@@ -60,23 +61,34 @@ def _baseline(ohlc: dict, *, start: str, end: str, book: float) -> dict[str, Any
 def _write_md(path: Path, header: str, sections: list[tuple[str, list[dict[str, Any]]]]) -> None:
     lines = [header, ""]
     for title, rows in sections:
+        exits = any("n_tp" in row for row in rows)
         lines.append(f"## {title}")
         lines.append("")
-        lines.append(
-            "| variant | PnL | DD | green W | red W | worst W | trades | 2024 | 2025 | 2026 |"
-        )
-        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        head = "| variant | PnL | DD | green W | red W | worst W | trades |"
+        rule = "|---|---:|---:|---:|---:|---:|---:|"
+        if exits:
+            head += " tp | stop | fail |"
+            rule += "---:|---:|---:|"
+        head += " 2024 | 2025 | 2026 |"
+        rule += "---:|---:|---:|"
+        lines.append(head)
+        lines.append(rule)
         for row in rows:
             y = row.get("year_pnl") or {}
             green = row.get("green_weeks_pct", 0) * 100
             red = row.get("red_weeks_pct", 0) * 100
             worst = row.get("worst_week_pct", 0) * 100
-            lines.append(
+            line = (
                 f"| {row['strategy']} | {row['pnl_eur']:,.0f} | "
                 f"{row['max_dd_pct'] * 100:.1f}% | {green:.0f}% | {red:.0f}% | "
-                f"{worst:.1f}% | {row['n_trades']} | "
-                f"{y.get('2024', 0):,.0f} | {y.get('2025', 0):,.0f} | {y.get('2026', 0):,.0f} |"
+                f"{worst:.1f}% | {row['n_trades']} |"
             )
+            if exits:
+                line += f" {row.get('n_tp', 0)} | {row.get('n_stop', 0)} | {row.get('n_fail', 0)} |"
+            line += (
+                f" {y.get('2024', 0):,.0f} | {y.get('2025', 0):,.0f} | {y.get('2026', 0):,.0f} |"
+            )
+            lines.append(line)
         lines.append("")
     path.write_text("\n".join(lines) + "\n")
 
@@ -113,16 +125,42 @@ different simulator.
    through 2025; only 2026 moves, and by one further hold. Drawdown on the
    full path is worse (33.7% versus 31.2%). Green weeks do not improve
    (31% versus 32%).
+4. **Taking the level while the bar is printing gives the rise back to
+   fees.** A round trip is about 0.5% plus impact. A +3% target against a
+   −3% stop needs about 58% of the decisive trades to hit the target
+   before it breaks even. `bank_d_tp3_s3` prints 381 targets and 381
+   stops and finishes at −€19,985. Every tight target on a 24h rise —
+   partial, two names, or the BTC filter off — compounds €20k toward zero,
+   in-sample and in 2026. A 24h hold with no target and no stop is still
+   negative (`bank_d_f4_hold` −€14.4k IS / −€9.2k OOS, `bank_d_f8_hold`
+   −€7.5k / −€9.8k).
+5. **A 7-day hold until the rise dies is the only line above zero, and it
+   is a 2024 windfall with a deep giveback.** No target, no stop, sell the
+   next open once the lookback return is no longer positive. Floors 3%,
+   4%, 6% and 8% are positive on the full path (+€15k to +€29k) and on a
+   fresh 2026 book (+€5.3k, +€2.2k, +€1.2k, +€0.8k). The in-sample gain
+   grows as the floor rises (+€11k to +€37k) while the fresh 2026 book
+   shrinks, and 2025 loses €27k–€32k at every floor. Drawdown on the full
+   path is 76–82%, worst week about −35%, green weeks about 30%. From the
+   same 2024-06-01 start the armed residual pack is +€389,590 at 30.6%
+   drawdown (2024 +€104k, 2025 +€17k, 2026 +€269k). A +4% target or an 8%
+   stop on the 4% and 8% entries is negative in-sample and in 2026. The
+   3% floor plus a 5% stop (`bank_w_follow`) is negative too (−€4.5k IS,
+   −€1.2k OOS).
 
 ## Verdict
 
-Nothing armed. Day trading on this tape, flat by the next UTC open, does
-not survive Bitvavo taker fees. Forcing the residual book to act like a
-week time-box gives back the trends that pay it. Leaving a name that has
-already closed through the runner arm on the trail, instead of rotating
-it on the clock, is a generic rule and it does not lose — but the extra
-euros are two holds, and the share of green weeks does not rise. The live
-pack stays the 7-day residual with the 10% trail.
+Nothing armed. The book already ranks what is rising. Banking that rise
+at a fixed level inside the 4h bar loses after Bitvavo taker fees: the
+win rate sits under the fee-adjusted breakeven and a €20k book goes to
+zero. Holding a 7-day riser until the rise dies stays above zero only as
+a 2024 profit that 2025 largely gives back, with a fresh 2026 result of
+a few thousand euros and a drawdown past 70%. That is a smaller, rougher
+book than the armed residual trail over the same dates. Day trading flat
+by the next UTC open loses the same fees. A shorter residual clock gives
+back the trends that pay the pack. Leaving a name that has closed through
+the runner arm on the trail is two holds, and the share of green weeks
+stays put. The live pack stays the 7-day residual with the 10% trail.
 """
 
 
@@ -197,6 +235,32 @@ def main() -> None:
             payload["h4_end"] = h4_end
             payload["h4"] = h4_rows
 
+            bank_specs = [s for s in default_bank_specs() if not only or s.name in only]
+            same = _baseline(ohlc, start=args.start_4h, end=end, book=args.book)
+            same["strategy"] = "baseline_from_4h_start"
+            payload["baseline_from_4h_start"] = {
+                k: v for k, v in same.items() if k != "curve"
+            }
+            print(f"\nbank vs residual from {args.start_4h}")
+            print(_line(same))
+            if bank_specs:
+                print(f"\n4h momentum bank {args.start_4h} → {h4_end}")
+                bank_rows: dict[str, list[dict[str, Any]]] = {}
+                for label, start, stop in h4_windows:
+                    print(f"\n== bank {label} {start} → {stop} ==")
+                    got = []
+                    for spec in bank_specs:
+                        row = run_momentum_bank(
+                            h4, spec, start=start, end=stop, book_eur=args.book
+                        )
+                        got.append(row)
+                        print(
+                            f"{_line(row)}  tp={row.get('n_tp', 0)} "
+                            f"stop={row.get('n_stop', 0)} fail={row.get('n_fail', 0)}"
+                        )
+                    bank_rows[label] = got
+                payload["bank"] = bank_rows
+
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=1, default=str))
@@ -204,6 +268,9 @@ def main() -> None:
 
     sections = [(f"Daily {label}", rows) for label, rows in payload["windows"].items()]
     sections += [(f"4h {label}", rows) for label, rows in h4_rows.items()]
+    sections += [
+        (f"Bank {label}", rows) for label, rows in payload.get("bank", {}).items()
+    ]
     md = Path(args.md)
     _write_md(
         md,
@@ -225,6 +292,18 @@ def main() -> None:
                 "`day_graduate` leaves that lot on the trail once the session closes",
                 "through +8%. The 4h book enters once per UTC day and is sold on the",
                 "first open of the next date.",
+                "",
+                "Bank rows are a 4h momentum book on the same desk universe.",
+                "Entry is the next open after a close whose own lookback return",
+                "is positive and whose excess versus BTC clears the floor. A",
+                "target fills at the target when the high trades through it. A",
+                "stop fills at the stop when the low trades through it; if both",
+                "print in one bar the stop is booked. `hold` has no target and",
+                "no stop and sells the next open once the lookback return is no",
+                "longer positive. `bank_w_follow` is that 7-day hold plus a 5%",
+                "stop. Fills are wet Bitvavo taker, €20k compounding.",
+                "`baseline_from_4h_start` is the armed residual pack on daily",
+                "bars from the same start date (printed in the run log).",
                 "",
                 f"Daily tape through {end}.",
                 "Reproduce: `.venv/bin/python -m bot.research.horizon_lab --no-fresh`",
