@@ -130,6 +130,32 @@ def test_a_lock_banks_the_giveback_above_the_entry() -> None:
     assert sells[0]["px"] > buy["px"] * 1.04
 
 
+def test_a_one_day_fall_sells_while_the_longer_rise_is_kept() -> None:
+    start = datetime(2024, 6, 3, tzinfo=UTC)
+    btc = [100 + i * 0.2 for i in range(8)]
+    alt = [100, 100, 100, 130, 140, 125, 124]
+    ohlc = {"BTC": _bars(start, btc), "AAA": _bars(start, alt)}
+    common = dict(lookback=4, tp_pct=0.0, stop_pct=0.0, btc_sma_bars=3)
+    sold = run_momentum_bank(
+        ohlc,
+        _spec(fail_lookback=2, **common),
+        start="2024-06-03",
+        end="2024-06-06",
+        book_eur=10_000.0,
+        keep_trades=True,
+    )
+    assert any(t["reason"] == "momentum_fail" for t in sold["trades"] if t["side"] == "sell")
+    held = run_momentum_bank(
+        ohlc,
+        _spec(fail_lookback=0, **common),
+        start="2024-06-03",
+        end="2024-06-06",
+        book_eur=10_000.0,
+        keep_trades=True,
+    )
+    assert held["end_hold"] == "AAA"
+
+
 def test_a_hold_does_not_bank_a_wick_through_a_round_level() -> None:
     start = datetime(2024, 6, 3, tzinfo=UTC)
     btc = [100, 101, 102, 103, 104, 105]

@@ -163,23 +163,35 @@ different simulator.
    in-sample and −€5.1k in 2026, and the sells are the lock. The 2024
    rise the plain hold kept (+€49k at the 4% floor) is −€10k once the
    trail is on.
+7. **Selling the first down day churns the fees. Half off at +12% is the
+   one bank that stays above zero, and it is still the small book.**
+   `bank_w_f4_fall1d` enters on the 7-day rise and sells when the last
+   day is no longer rising: −€18.1k in-sample, −€16.1k in 2026. A lock
+   to +6% after +12%, with no trail, makes the fresh 2026 book negative
+   (−€3.4k at 4%, −€1.8k at 8%). A floor at +0.5% after +12% stays thin
+   and under the plain hold. Selling half at +12% and riding the rest
+   (`bank_w_f4_half12`) is +€14.7k in-sample at 56% drawdown and +€2.8k
+   on a fresh 2026 book at 28% drawdown. The plain hold was +€22.2k and
+   +€2.2k at 66% and 40%. The half gives back about €7k in-sample to
+   add €0.7k in 2026, and 2025 is still −€12k. The 8% floor is the same
+   shape with +€1.1k in 2026. Green weeks stay about 33%.
 
 ## Verdict
 
-Nothing armed. The book already ranks what is rising, every 4h bar.
-Banking that rise loses after Bitvavo taker fees. A fixed target sits
-under the fee-adjusted breakeven and a €20k book goes to zero. A 10%
-trail, the live +12%/+6% lock, and a ratchet that protects one round
-trip once the peak is +2% are negative on the same 7-day entries, in
-sample and in 2026. The trail is what cuts the 2024 rise the hold kept.
-Holding a 7-day riser until the rise dies stays above zero only as a
-2024 profit that 2025 largely gives back, with a fresh 2026 result of
-a few thousand euros and a drawdown past 70%. That is a smaller, rougher
-book than the armed residual trail over the same dates. Day trading flat
-by the next UTC open loses the same fees. A shorter residual clock gives
-back the trends that pay the pack. Leaving a name that has closed through
-the runner arm on the trail is two holds, and the share of green weeks
-stays put. The live pack stays the 7-day residual with the 10% trail.
+Nothing armed. The book already ranks what is rising, every 4h bar, and
+it sells when that rise dies. Selling because the last day turned down
+pays the taker fee on the way out and on the way back in, and the book
+goes to zero. A fixed target, a 10% trail and a tight lock do the same.
+Taking half off at +12% and leaving the rest until the rise dies is the
+one structural bank that stays positive after fees and cuts the
+drawdown. It gives back more in-sample than it adds in 2026, 2025 is
+still a five-figure loss, and a fresh 2026 book is a few thousand euros.
+From the same 2024-06-01 start the armed residual pack is +€389,590 at
+30.6% drawdown. Day trading flat by the next UTC open loses the same
+fees. A shorter residual clock gives back the trends that pay the pack.
+Leaving a name that has closed through the runner arm on the trail is
+two holds, and the share of green weeks stays put. The live pack stays
+the 7-day residual with the 10% trail.
 """
 
 
@@ -323,7 +335,10 @@ def main() -> None:
                 "longer positive. `bank_w_follow` is that 7-day hold plus a 5%",
                 "stop. A trail sells inside the bar when the low trades through",
                 "a retrace from the prior peak. A lock raises that floor once",
-                "the prior peak has reached the arm. Fills are wet Bitvavo",
+                "the prior peak has reached the arm. `arm12` is that lock with no",
+                "trail. `half12` sells half at +12% and leaves the rest on a",
+                "fee floor. `fall1d` enters on the 7-day rise and sells once",
+                "the last day is no longer rising. Fills are wet Bitvavo",
                 "taker, €20k compounding.",
                 "`baseline_from_4h_start` is the armed residual pack on daily",
                 "bars from the same start date (printed in the run log).",

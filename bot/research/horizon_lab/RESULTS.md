@@ -25,7 +25,10 @@ no stop and sells the next open once the lookback return is no
 longer positive. `bank_w_follow` is that 7-day hold plus a 5%
 stop. A trail sells inside the bar when the low trades through
 a retrace from the prior peak. A lock raises that floor once
-the prior peak has reached the arm. Fills are wet Bitvavo
+the prior peak has reached the arm. `arm12` is that lock with no
+trail. `half12` sells half at +12% and leaves the rest on a
+fee floor. `fall1d` enters on the 7-day rise and sells once
+the last day is no longer rising. Fills are wet Bitvavo
 taker, €20k compounding.
 `baseline_from_4h_start` is the armed residual pack on daily
 bars from the same start date (printed in the run log).
@@ -155,6 +158,14 @@ Reproduce: `.venv/bin/python -m bot.research.horizon_lab --no-fresh`
 | bank_d_f4_trail10 | -17,249 | 87.0% | 19% | 45% | -22.7% | 257 | 0 | 0 | 200 | 57 | 0 | -11,336 | -5,642 | -272 |
 | bank_d_f4_lock | -17,691 | 88.6% | 18% | 46% | -22.7% | 265 | 0 | 0 | 197 | 53 | 15 | -11,792 | -5,425 | -474 |
 | bank_d_f4_ratchet | -16,777 | 84.0% | 22% | 42% | -31.8% | 324 | 0 | 0 | 162 | 0 | 162 | -11,163 | -4,560 | -1,054 |
+| bank_w_f4_arm12 | -1,305 | 87.5% | 27% | 40% | -33.5% | 102 | 0 | 0 | 82 | 0 | 20 | 38,270 | -35,115 | -4,460 |
+| bank_w_f4_armfee | 13,931 | 82.1% | 31% | 36% | -23.7% | 91 | 0 | 0 | 77 | 0 | 14 | 57,871 | -38,004 | -5,936 |
+| bank_w_f4_half12 | 13,108 | 68.0% | 33% | 34% | -20.9% | 123 | 32 | 14 | 77 | 0 | 0 | 26,830 | -12,083 | -1,639 |
+| bank_w_f4_fall1d | -19,177 | 96.0% | 20% | 44% | -36.7% | 462 | 0 | 0 | 462 | 0 | 0 | -9,678 | -8,378 | -1,120 |
+| bank_w_f8_arm12 | 12,975 | 83.6% | 27% | 38% | -33.9% | 80 | 0 | 0 | 62 | 0 | 18 | 61,410 | -44,400 | -4,034 |
+| bank_w_f8_armfee | 18,301 | 77.9% | 29% | 36% | -23.9% | 71 | 0 | 0 | 58 | 0 | 13 | 47,630 | -26,072 | -3,258 |
+| bank_w_f8_half12 | 14,530 | 66.7% | 30% | 34% | -18.2% | 98 | 27 | 13 | 58 | 0 | 0 | 27,771 | -12,394 | -847 |
+| bank_w_f8_fall1d | -19,035 | 95.4% | 19% | 42% | -37.1% | 383 | 0 | 0 | 383 | 0 | 0 | -9,867 | -8,001 | -1,166 |
 
 ## Bank is
 
@@ -193,6 +204,14 @@ Reproduce: `.venv/bin/python -m bot.research.horizon_lab --no-fresh`
 | bank_d_f4_trail10 | -16,978 | 84.9% | 16% | 46% | -22.7% | 172 | 0 | 0 | 135 | 37 | 0 | -11,336 | -5,642 | 0 |
 | bank_d_f4_lock | -17,217 | 86.1% | 14% | 48% | -22.7% | 176 | 0 | 0 | 133 | 34 | 9 | -11,792 | -5,425 | 0 |
 | bank_d_f4_ratchet | -15,723 | 78.6% | 19% | 43% | -23.0% | 212 | 0 | 0 | 107 | 0 | 105 | -11,163 | -4,560 | 0 |
+| bank_w_f4_arm12 | 3,155 | 78.8% | 27% | 37% | -27.7% | 66 | 0 | 0 | 53 | 0 | 13 | 38,270 | -35,115 | 0 |
+| bank_w_f4_armfee | 19,867 | 71.6% | 31% | 33% | -23.7% | 57 | 0 | 0 | 48 | 0 | 9 | 57,871 | -38,004 | 0 |
+| bank_w_f4_half12 | 14,747 | 55.7% | 33% | 31% | -20.9% | 76 | 19 | 9 | 48 | 0 | 0 | 26,830 | -12,083 | 0 |
+| bank_w_f4_fall1d | -18,057 | 90.3% | 16% | 46% | -29.2% | 283 | 0 | 0 | 283 | 0 | 0 | -9,678 | -8,378 | 0 |
+| bank_w_f8_arm12 | 17,009 | 73.9% | 27% | 33% | -19.8% | 49 | 0 | 0 | 38 | 0 | 11 | 61,410 | -44,400 | 0 |
+| bank_w_f8_armfee | 21,559 | 64.8% | 27% | 33% | -19.5% | 44 | 0 | 0 | 35 | 0 | 9 | 47,630 | -26,072 | 0 |
+| bank_w_f8_half12 | 15,377 | 54.5% | 30% | 31% | -18.2% | 61 | 17 | 9 | 35 | 0 | 0 | 27,771 | -12,394 | 0 |
+| bank_w_f8_fall1d | -17,868 | 89.6% | 16% | 42% | -22.5% | 235 | 0 | 0 | 235 | 0 | 0 | -9,867 | -8,001 | 0 |
 
 ## Bank oos
 
@@ -231,6 +250,14 @@ Reproduce: `.venv/bin/python -m bot.research.horizon_lab --no-fresh`
 | bank_d_f4_trail10 | -9,155 | 58.3% | 24% | 43% | -24.4% | 85 | 0 | 0 | 65 | 20 | 0 | 0 | 0 | -9,155 |
 | bank_d_f4_lock | -10,414 | 60.3% | 24% | 43% | -24.1% | 89 | 0 | 0 | 64 | 19 | 6 | 0 | 0 | -10,414 |
 | bank_d_f4_ratchet | -12,504 | 68.0% | 26% | 40% | -37.1% | 117 | 0 | 0 | 57 | 0 | 60 | 0 | 0 | -12,504 |
+| bank_w_f4_arm12 | -3,446 | 41.5% | 29% | 43% | -33.5% | 36 | 0 | 0 | 29 | 0 | 7 | 0 | 0 | -3,446 |
+| bank_w_f4_armfee | 1,161 | 33.3% | 33% | 38% | -23.3% | 33 | 0 | 0 | 29 | 0 | 4 | 0 | 0 | 1,161 |
+| bank_w_f4_half12 | 2,840 | 27.8% | 33% | 38% | -18.4% | 46 | 13 | 4 | 29 | 0 | 0 | 0 | 0 | 2,840 |
+| bank_w_f4_fall1d | -16,123 | 81.2% | 26% | 40% | -40.1% | 179 | 0 | 0 | 179 | 0 | 0 | 0 | 0 | -16,123 |
+| bank_w_f8_arm12 | -1,830 | 40.5% | 29% | 43% | -33.5% | 31 | 0 | 0 | 24 | 0 | 7 | 0 | 0 | -1,830 |
+| bank_w_f8_armfee | 646 | 34.9% | 31% | 40% | -23.4% | 27 | 0 | 0 | 23 | 0 | 4 | 0 | 0 | 646 |
+| bank_w_f8_half12 | 1,092 | 28.6% | 31% | 40% | -17.4% | 37 | 10 | 4 | 23 | 0 | 0 | 0 | 0 | 1,092 |
+| bank_w_f8_fall1d | -15,125 | 76.2% | 24% | 43% | -40.4% | 148 | 0 | 0 | 148 | 0 | 0 | 0 | 0 | -15,125 |
 
 
 ## Reading
@@ -296,20 +323,32 @@ different simulator.
    in-sample and −€5.1k in 2026, and the sells are the lock. The 2024
    rise the plain hold kept (+€49k at the 4% floor) is −€10k once the
    trail is on.
+7. **Selling the first down day churns the fees. Half off at +12% is the
+   one bank that stays above zero, and it is still the small book.**
+   `bank_w_f4_fall1d` enters on the 7-day rise and sells when the last
+   day is no longer rising: −€18.1k in-sample, −€16.1k in 2026. A lock
+   to +6% after +12%, with no trail, makes the fresh 2026 book negative
+   (−€3.4k at 4%, −€1.8k at 8%). A floor at +0.5% after +12% stays thin
+   and under the plain hold. Selling half at +12% and riding the rest
+   (`bank_w_f4_half12`) is +€14.7k in-sample at 56% drawdown and +€2.8k
+   on a fresh 2026 book at 28% drawdown. The plain hold was +€22.2k and
+   +€2.2k at 66% and 40%. The half gives back about €7k in-sample to
+   add €0.7k in 2026, and 2025 is still −€12k. The 8% floor is the same
+   shape with +€1.1k in 2026. Green weeks stay about 33%.
 
 ## Verdict
 
-Nothing armed. The book already ranks what is rising, every 4h bar.
-Banking that rise loses after Bitvavo taker fees. A fixed target sits
-under the fee-adjusted breakeven and a €20k book goes to zero. A 10%
-trail, the live +12%/+6% lock, and a ratchet that protects one round
-trip once the peak is +2% are negative on the same 7-day entries, in
-sample and in 2026. The trail is what cuts the 2024 rise the hold kept.
-Holding a 7-day riser until the rise dies stays above zero only as a
-2024 profit that 2025 largely gives back, with a fresh 2026 result of
-a few thousand euros and a drawdown past 70%. That is a smaller, rougher
-book than the armed residual trail over the same dates. Day trading flat
-by the next UTC open loses the same fees. A shorter residual clock gives
-back the trends that pay the pack. Leaving a name that has closed through
-the runner arm on the trail is two holds, and the share of green weeks
-stays put. The live pack stays the 7-day residual with the 10% trail.
+Nothing armed. The book already ranks what is rising, every 4h bar, and
+it sells when that rise dies. Selling because the last day turned down
+pays the taker fee on the way out and on the way back in, and the book
+goes to zero. A fixed target, a 10% trail and a tight lock do the same.
+Taking half off at +12% and leaving the rest until the rise dies is the
+one structural bank that stays positive after fees and cuts the
+drawdown. It gives back more in-sample than it adds in 2026, 2025 is
+still a five-figure loss, and a fresh 2026 book is a few thousand euros.
+From the same 2024-06-01 start the armed residual pack is +€389,590 at
+30.6% drawdown. Day trading flat by the next UTC open loses the same
+fees. A shorter residual clock gives back the trends that pay the pack.
+Leaving a name that has closed through the runner arm on the trail is
+two holds, and the share of green weeks stays put. The live pack stays
+the 7-day residual with the 10% trail.

@@ -39,6 +39,9 @@ class BankSpec:
     n_names: int = 1
     require_rising: bool = True
     fail_when_flat: bool = True
+    # 0 uses ``lookback``. A shorter window sells when the recent tape falls
+    # while the entry horizon is still rising.
+    fail_lookback: int = 0
     sma_bars: int = 0
     btc_sma_bars: int = 300
     min_qvol_eur: float = 15_000.0
@@ -304,10 +307,11 @@ def run_momentum_bank(
                 risk_on = level is not None and float(btc_win[-1]) > level
 
         if spec.fail_when_flat:
-            need = spec.lookback + spec.skip + 1
+            fail_lb = spec.fail_lookback if spec.fail_lookback > 0 else spec.lookback
+            need = fail_lb + spec.skip + 1
             for base in list(legs):
                 window = _contig(closes.get(base) or [], i, need)
-                ret = None if window is None else _own_return(window, spec.lookback, spec.skip)
+                ret = None if window is None else _own_return(window, fail_lb, spec.skip)
                 if ret is not None and ret <= 0:
                     pending_sells.append((base, "momentum_fail"))
 
@@ -467,6 +471,48 @@ def default_bank_specs() -> list[BankSpec]:
                 stop_pct=0.0,
                 lock_arm=0.02,
                 lock_keep=fee_keep,
+                **held,
+            )
+        )
+    # Bank without cutting the rise: a wide lock, half off at +12%, or sell
+    # when the last day falls while the 7-day rise is still the entry.
+    for floor, tag in ((0.04, "f4"), (0.08, "f8")):
+        held = _floored(week, floor)
+        specs.append(
+            BankSpec(
+                name=f"bank_w_{tag}_arm12",
+                tp_pct=0.0,
+                stop_pct=0.0,
+                lock_arm=0.12,
+                lock_keep=0.06,
+                **held,
+            )
+        )
+        specs.append(
+            BankSpec(
+                name=f"bank_w_{tag}_armfee",
+                tp_pct=0.0,
+                stop_pct=0.0,
+                lock_arm=0.12,
+                lock_keep=fee_keep,
+                **held,
+            )
+        )
+        specs.append(
+            BankSpec(
+                name=f"bank_w_{tag}_half12",
+                tp_pct=0.12,
+                stop_pct=0.0,
+                partial_frac=0.5,
+                **held,
+            )
+        )
+        specs.append(
+            BankSpec(
+                name=f"bank_w_{tag}_fall1d",
+                tp_pct=0.0,
+                stop_pct=0.0,
+                fail_lookback=6,
                 **held,
             )
         )
