@@ -248,6 +248,85 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## A leader needs a deeper giveback before the trail sells
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| wide_15 | +83,515 | 39.9% | +21,756 | +31,701 | 32.5% | 96 |
+| wide_20 | +234,265 | 35.9% | +126,363 | +19,660 | 32.3% | 92 |
+| wide_25 | +257,067 | 37.7% | +122,498 | +24,526 | 32.4% | 92 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Open a new ride only when the qualifier count is in range
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| crowd_max_2 | +18,916 | 53.1% | -7,540 | +41,383 | 25.3% | 72 |
+| crowd_max_3 | +21,863 | 55.8% | +8,921 | +9,448 | 30.7% | 82 |
+| crowd_max_4 | +4,617 | 58.5% | -41 | +4,666 | 34.0% | 88 |
+| crowd_min_2 | +195,977 | 38.4% | +118,513 | +15,533 | 34.0% | 92 |
+| crowd_min_3 | +488,027 | 34.7% | +174,489 | +15,239 | 31.7% | 74 |
+| crowd_min_4 | +66,496 | 40.8% | +47,382 | +4,502 | 36.5% | 62 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Cancel a buy when the next open gaps down
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| gap_down_2 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| gap_down_4 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| gap_down_6 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Rotate only when the challenger leads by a set margin
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| rotate_2 | +253,984 | 33.6% | +139,693 | +18,877 | 31.7% | 102 |
+| rotate_5 | +250,554 | 33.6% | +139,693 | +17,829 | 31.7% | 100 |
+| rotate_8 | +275,634 | 33.8% | +139,693 | +21,024 | 31.8% | 98 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Open a new ride only when BTC's distance above its average is in range
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| ext_max_5 | +28,642 | 32.6% | +30,571 | +100 | 31.8% | 68 |
+| ext_max_10 | +252 | 58.9% | +14,479 | -7,965 | 53.1% | 84 |
+| ext_max_20 | +87,575 | 51.3% | +39,466 | +18,877 | 31.7% | 100 |
+| ext_min_2 | +169,881 | 34.9% | +54,360 | +35,324 | 32.0% | 86 |
+| ext_min_5 | +50,210 | 60.2% | +35,070 | +6,219 | 39.2% | 76 |
+| ext_min_10 | +19,169 | 33.9% | +13,221 | +3,694 | 24.0% | 36 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Drop a name whose own lookback return is below a floor
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| own_0 | +331,233 | 34.0% | +151,798 | +28,516 | 31.9% | 98 |
+| own_3 | +331,233 | 34.0% | +151,798 | +28,516 | 31.9% | 98 |
+| own_6 | +250,063 | 38.5% | +147,164 | +16,599 | 33.5% | 92 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Rank qualifiers by whether the excess is rising or fading
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| accel_3 | +41,584 | 35.0% | +16,787 | +14,738 | 34.2% | 106 |
+| accel_5 | +2,643 | 51.4% | -3,844 | +7,736 | 30.9% | 110 |
+| accel_10 | +35,456 | 57.4% | +4,944 | +25,080 | 28.6% | 104 |
+| decel_3 | +6,918 | 63.1% | +10,331 | -1,932 | 31.0% | 112 |
+| decel_5 | -6,552 | 63.7% | -4,446 | -2,894 | 35.4% | 110 |
+| decel_10 | -4,532 | 72.4% | -10,293 | +10,695 | 26.1% | 114 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -273,6 +352,12 @@ Selling as soon as the held name is no longer the top qualifier, with or without
 Keeping a name already held when BTC closes under its average does not change a fill on this tape. Requiring the 40-day excess to be positive as well is a little ahead on both windows, about €8k on the full path and a few hundred euros on a fresh 2026 book, and it misses the size bar. Twenty and sixty days do not come with it. Skipping a name for 14 days after a losing sell changes nothing. Twenty-eight and fifty-six days cost about €1,200.
 
 Requiring the name's own quote volume to have expanded cuts the path. At one times the prior twenty days the full path is +€186,857 and a fresh 2026 book is +€28,182. At 1.5× and 2× the book is a small gain with a much deeper drawdown. Buying only a residual that cleared the floor in the last one, two or three days loses the stake. The name that has already been above the floor is the book.
+
+A wider trail while the held name is still the leader gives the path back. Fifteen percent off the peak finishes at +€83,515. Twenty percent is +€234,265 and twenty-five is +€257,067, against +€342,074. Fresh 2026 is behind on the two wider cells. Opening a new ride only when few names clear the floor destroys the compounded path. The two-name cap is +€18,916 over the full path. Opening only when at least three names clear the floor is the first cell over the full-path size bar: +€488,027 against +€342,074, +€174,489 through 2025 against +€151,798, drawdown 34.7%. A fresh 2026 book is +€15,239 against +€30,791. Two and four names do not come with it. The count stays where it was locked. Cancelling a buy on a 2, 4 or 6 percent gap down changes no fill.
+
+Refusing a rotation unless the challenger leads by 2, 5 or 8 points of excess gives the path back. The three cells finish between +€250,554 and +€275,634 against +€342,074, and a fresh 2026 book is between +€17,829 and +€21,024. Opening a new ride only when BTC is at most 5, 10 or 20 percent above its SMA50 finishes between a few hundred euros and +€87,575. Requiring BTC to be at least 2 percent above that average is ahead on a fresh 2026 book, +€35,324 against +€30,791, and the full path is +€169,881 with the book through 2025 at +€54,360. Five and ten percent do not come with it. Dropping a name whose own 10-day return is below zero, or below 3 percent, is the same cell: +€331,233 against +€342,074, and a fresh 2026 book is +€28,516. The book through 2025 is unchanged. Six percent is further behind.
+
+Ranking the names that clear the floor by whether their excess is rising or fading gives the path back. A rising excess over 3, 5 or 10 days finishes between +€2,643 and +€41,584 against +€342,074. A fading excess finishes between −€6,552 and +€6,918. Both directions were locked before the run. The live excess rank stays.
 
 ## Verdict
 

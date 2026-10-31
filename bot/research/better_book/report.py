@@ -91,6 +91,13 @@ def render(
         "loss_ban": "Skip a name after a sell that closed under the entry",
         "vol_expand": "Buy only a name whose own volume has expanded",
         "fresh_cross": "Buy only a residual that just cleared the floor",
+        "lead_wide": "A leader needs a deeper giveback before the trail sells",
+        "crowd": "Open a new ride only when the qualifier count is in range",
+        "gap_down": "Cancel a buy when the next open gaps down",
+        "rotate_gap": "Rotate only when the challenger leads by a set margin",
+        "btc_ext": "Open a new ride only when BTC's distance above its average is in range",
+        "own_ret": "Drop a name whose own lookback return is below a floor",
+        "accel_rank": "Rank qualifiers by whether the excess is rising or fading",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -213,6 +220,43 @@ def render(
         "with a much deeper drawdown. Buying only a residual that cleared the "
         "floor in the last one, two or three days loses the stake. The name "
         "that has already been above the floor is the book."
+    )
+    lines.append("")
+    lines.append(
+        "A wider trail while the held name is still the leader gives the path "
+        "back. Fifteen percent off the peak finishes at +€83,515. Twenty percent "
+        "is +€234,265 and twenty-five is +€257,067, against +€342,074. Fresh 2026 "
+        "is behind on the two wider cells. Opening a new ride only when few names "
+        "clear the floor destroys the compounded path. The two-name cap is "
+        "+€18,916 over the full path. Opening only when at least three names "
+        "clear the floor is the first cell over the full-path size bar: "
+        "+€488,027 against +€342,074, +€174,489 through 2025 against +€151,798, "
+        "drawdown 34.7%. A fresh 2026 book is +€15,239 against +€30,791. Two and "
+        "four names do not come with it. The count stays where it was locked. "
+        "Cancelling a buy on a 2, 4 or 6 percent gap down changes no fill."
+    )
+    lines.append("")
+    lines.append(
+        "Refusing a rotation unless the challenger leads by 2, 5 or 8 points "
+        "of excess gives the path back. The three cells finish between "
+        "+€250,554 and +€275,634 against +€342,074, and a fresh 2026 book is "
+        "between +€17,829 and +€21,024. Opening a new ride only when BTC is at "
+        "most 5, 10 or 20 percent above its SMA50 finishes between a few hundred "
+        "euros and +€87,575. Requiring BTC to be at least 2 percent above that "
+        "average is ahead on a fresh 2026 book, +€35,324 against +€30,791, and "
+        "the full path is +€169,881 with the book through 2025 at +€54,360. "
+        "Five and ten percent do not come with it. Dropping a name whose own "
+        "10-day return is below zero, or below 3 percent, is the same cell: "
+        "+€331,233 against +€342,074, and a fresh 2026 book is +€28,516. The "
+        "book through 2025 is unchanged. Six percent is further behind."
+    )
+    lines.append("")
+    lines.append(
+        "Ranking the names that clear the floor by whether their excess is "
+        "rising or fading gives the path back. A rising excess over 3, 5 or "
+        "10 days finishes between +€2,643 and +€41,584 against +€342,074. A "
+        "fading excess finishes between −€6,552 and +€6,918. Both directions "
+        "were locked before the run. The live excess rank stays."
     )
     lines.append("")
     lines.append("## Verdict")

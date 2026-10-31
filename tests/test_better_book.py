@@ -15,8 +15,13 @@ from bot.research.better_book.search import largest_new_trip, round_trips
 from bot.research.btc_residual_mix.engine import (
     _scale_in_orders,
     _volume_expanded,
+    block_fresh,
     btc_risk_on,
+    crowd_alts,
+    drop_down_gaps,
     drop_gapped_buys,
+    extension_allows,
+    hold_unless_gap,
     lead_lost,
     losing_exit,
     pick_residual,
@@ -25,6 +30,7 @@ from bot.research.btc_residual_mix.engine import (
     strip_red_cut_while_leader,
     tide_alts,
     top_volume_universe,
+    widen_trail_while_leader,
 )
 from bot.research.clip_exit_lab.engine import Book, Lot, Order, _overlay_orders
 from bot.research.clip_exit_lab.policies import ExitPolicy
@@ -604,3 +610,154 @@ def test_volume_expansion_compares_the_last_twenty_days_with_the_twenty_before()
     assert _volume_expanded(quiet + loud, 1.5) is True
     assert _volume_expanded(loud + quiet, 1.5) is False
     assert _volume_expanded(loud, 1.0) is False
+
+
+def test_a_leader_keeps_the_position_until_the_wider_giveback() -> None:
+    trail = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="alt_trail")
+    locked = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="alt_lock+alt_trail")
+    other = Order(side="sell", base="SOL", role="alt", adv=1.0, reason="alt_trail")
+    peaks = {"ETH": 100.0, "SOL": 100.0}
+    # 12% off the peak. A 20% band keeps the leader and still sells the other name.
+    held = widen_trail_while_leader(
+        [trail, other], "ETH", wide=0.20, peaks=peaks, closes={"ETH": 88.0, "SOL": 88.0}
+    )
+    assert [o.base for o in held] == ["SOL"]
+    # 22% off sells the leader too.
+    sold = widen_trail_while_leader(
+        [trail], "ETH", wide=0.20, peaks=peaks, closes={"ETH": 78.0}
+    )
+    assert len(sold) == 1
+    assert sold[0].reason == "alt_trail"
+    # The lock still sells inside the wide band.
+    banked = widen_trail_while_leader(
+        [locked], "ETH", wide=0.20, peaks=peaks, closes={"ETH": 88.0}
+    )
+    assert len(banked) == 1
+    assert banked[0].reason == "alt_lock"
+
+
+def test_crowd_gate_keeps_a_held_name_when_the_count_is_outside() -> None:
+    assert crowd_alts(("SOL",), ("ETH",), count=6, bound=3, side="max") == ("ETH",)
+    assert crowd_alts(("SOL",), (), count=6, bound=3, side="max") == ()
+    assert crowd_alts(("SOL",), ("ETH",), count=2, bound=3, side="max") == ("SOL",)
+    assert crowd_alts(("SOL",), ("ETH",), count=1, bound=3, side="min") == ("ETH",)
+    assert crowd_alts(("SOL",), ("ETH",), count=4, bound=3, side="min") == ("SOL",)
+
+
+def test_gap_down_cancels_the_buy_and_keeps_the_sell() -> None:
+    t0 = 1_704_067_200_000
+    day = 86_400_000
+    ohlc = {
+        "ETH": [
+            _bar(t0, 100.0, 100.0, 100.0, 100.0),
+            _bar(t0 + day, 94.0, 96.0, 93.0, 95.0),
+        ]
+    }
+    buy = Order(side="buy", base="ETH", role="alt", adv=1.0, notional=1_000.0, reason="residual")
+    sell = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="rotate")
+    kept = drop_down_gaps([sell, buy], ohlc, "2024-01-02", 0.04)
+    assert [o.side for o in kept] == ["sell"]
+    small = drop_down_gaps([buy], ohlc, "2024-01-02", 0.08)
+    assert len(small) == 1
+
+
+def test_a_small_lead_does_not_rotate_the_held_name() -> None:
+    excess = {"ETH": 0.10, "SOL": 0.12}
+    assert hold_unless_gap(("SOL",), ("ETH",), excess, gap=0.05) == ("ETH",)
+    assert hold_unless_gap(("SOL",), ("ETH",), excess, gap=0.02) == ("SOL",)
+    assert hold_unless_gap(("SOL",), (), excess, gap=0.05) == ("SOL",)
+    assert hold_unless_gap((), ("ETH",), excess, gap=0.05) == ()
+    # No excess on the held name: the rotation stands.
+    assert hold_unless_gap(("SOL",), ("ETH",), {"SOL": 0.20}, gap=0.05) == ("SOL",)
+
+
+def test_extension_band_blocks_a_new_name_and_keeps_a_flatten() -> None:
+    assert extension_allows(0.04, side="max", bound=0.05) is True
+    assert extension_allows(0.08, side="max", bound=0.05) is False
+    assert extension_allows(0.06, side="min", bound=0.05) is True
+    assert extension_allows(0.03, side="min", bound=0.05) is False
+    assert extension_allows(None, side="max", bound=0.05) is False
+    assert block_fresh(("SOL",), ("ETH",), allow=False) == ("ETH",)
+    assert block_fresh(("SOL",), (), allow=False) == ()
+    assert block_fresh((), ("ETH",), allow=False) == ()
+    assert block_fresh(("ETH",), ("ETH",), allow=False) == ("ETH",)
+    assert block_fresh(("SOL",), ("ETH",), allow=True) == ("SOL",)
+
+
+def test_own_return_floor_drops_a_leader_that_only_beat_btc() -> None:
+    t0 = 1_704_067_200_000
+    n = 30
+
+    def bars(closes: list[float], highs: list[float] | None = None) -> list[list[float]]:
+        out = []
+        for i, close in enumerate(closes):
+            high = close if highs is None else highs[i]
+            out.append([t0 + i * 86_400_000, close, high, close, close, 5_000_000.0])
+        return out
+
+    btc = [100.0] * n
+    btc[28] = 80.0
+    btc[29] = 80.0
+    # Fell 2% while BTC fell 20%. Near the high, so the live score ranks it first.
+    fall = [100.0] * n
+    fall[28] = 98.0
+    fall[29] = 98.0
+    # Up 1% and far under an old high, so the near-high term ranks it second.
+    rise = [100.0] * n
+    rise[28] = 101.0
+    rise[29] = 101.0
+    rise_high = [100.0] * n
+    rise_high[0] = 220.0
+    ohlc = {
+        "BTC": bars(btc),
+        "FALL": bars(fall),
+        "RISE": bars(rise, rise_high),
+    }
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.25,
+        universe=("FALL", "RISE"),
+    )
+    date = "2024-01-30"
+    raw = pick_residual(ohlc, date, **common)
+    floored = pick_residual(ohlc, date, own_floor=0.0, **common)
+    assert raw["wants"] == ["FALL"]
+    assert floored["wants"] == ["RISE"]
+
+
+def test_acceleration_rank_prefers_a_rising_excess_and_decel_the_fade() -> None:
+    t0 = 1_704_067_200_000
+    n = 40
+
+    def bars(closes: list[float]) -> list[list[float]]:
+        return [
+            [t0 + i * 86_400_000, c, c, c, c, 5_000_000.0] for i, c in enumerate(closes)
+        ]
+
+    btc = [100.0] * n
+    rise = [100.0] * n
+    rise[38] = 130.0
+    rise[39] = 130.0
+    fade = [100.0] * n
+    fade[28] = 110.0
+    fade[33] = 140.0
+    fade[38] = 130.0
+    fade[39] = 130.0
+    ohlc = {"BTC": bars(btc), "RISE": bars(rise), "FADE": bars(fade)}
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("RISE", "FADE"),
+        rank_window=5,
+    )
+    date = "2024-02-09"
+    assert pick_residual(ohlc, date, rank_mode="accel", **common)["wants"] == ["RISE"]
+    assert pick_residual(ohlc, date, rank_mode="decel", **common)["wants"] == ["FADE"]

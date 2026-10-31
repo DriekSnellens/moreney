@@ -111,6 +111,52 @@ VOL_MULTS = (1.0, 1.5, 2.0)
 # floor 1, 2 or 3 days earlier. The day count is the age of the cross,
 # not a pause fitted to a losing trade.
 CROSS_DAYS = (1, 2, 3)
+# While the held name is still the residual leader, a close has to be this
+# far under the peak before the trail sells. 15, 20 and 25 percent. A name
+# that has lost the lead keeps the live 10% trail. The lock is unchanged.
+LEAD_WIDE = (0.15, 0.20, 0.25)
+# How many desk names clear the residual floor. The live book buys the
+# leader whether one name qualifies or the whole desk does. max cells open
+# a new ride only when the count is at most 2, 3 or 4. min cells open only
+# when at least that many qualify. A name already held is left to the trail.
+CROWD = (
+    ("max", 2),
+    ("max", 3),
+    ("max", 4),
+    ("min", 2),
+    ("min", 3),
+    ("min", 4),
+)
+# A buy is cancelled when the next open gaps down more than this versus
+# the signal close. 2, 4 and 6 percent. Gap-up cancels at 3 percent and
+# above changed no fill. Sells still fill.
+GAP_DOWNS = (0.02, 0.04, 0.06)
+# The live book rotates on the clock when a different name ranks first,
+# even if the excess lead is a tenth of a percent. These cells keep the
+# held name unless the challenger's excess is ahead by 2, 5 or 8 points.
+# A fresh open from cash, and a flatten to cash, stay as they are.
+ROTATE_GAPS = (0.02, 0.05, 0.08)
+# Distance of the BTC close above its SMA50. max cells open a new ride
+# only when that distance is at most 5, 10 or 20 percent. min cells open
+# only when it is at least 2, 5 or 10 percent. A held name stays. A
+# flatten to cash stays cash.
+BTC_EXT = (
+    ("max", 0.05),
+    ("max", 0.10),
+    ("max", 0.20),
+    ("min", 0.02),
+    ("min", 0.05),
+    ("min", 0.10),
+)
+# Dropping a name whose own 10-day return is below 0, 3 or 6 percent.
+# The rank among the names that pass stays the live score. If none pass,
+# the book stays in cash.
+OWN_FLOORS = (0.0, 0.03, 0.06)
+# Among names that already clear the floor, rank by how much the excess
+# changed over 3, 5 or 10 days. accel prefers a rising excess. decel
+# prefers a fading one. Both directions are in the family. The floor,
+# the SMA and the exit stay live.
+ACCEL_WINDOWS = (3, 5, 10)
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

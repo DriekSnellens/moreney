@@ -7,20 +7,27 @@ from dataclasses import replace
 from typing import Any
 
 from bot.research.better_book.bar import (
+    ACCEL_WINDOWS,
     AGREE_DAYS,
     BETA_WINDOWS,
+    BTC_EXT,
     BTC_VETO_GAPS,
     CROSS_DAYS,
+    CROWD,
     GAP_CAPS,
+    GAP_DOWNS,
     GREEN_PAUSES,
     IR_WINDOWS,
     KEEP_RIDES,
     LEAD_EXITS,
+    LEAD_WIDE,
     LOSS_BANS,
+    OWN_FLOORS,
     RANK_SLOTS,
     REARM_MODES,
     RED_CUT_DAYS,
     RED_LEADER_DAYS,
+    ROTATE_GAPS,
     RUNNER_ARMS,
     RUNNER_TRAILS,
     SCALE_ARMS,
@@ -62,6 +69,14 @@ def _run(
     agree_days: int = 0,
     vol_mult: float = 0.0,
     cross_days: int = 0,
+    lead_wide: float = 0.0,
+    crowd_side: str = "",
+    crowd_n: int = 0,
+    gap_down: float | None = None,
+    rotate_gap: float = 0.0,
+    btc_ext_side: str = "",
+    btc_ext: float = 0.0,
+    own_floor: float | None = None,
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -95,6 +110,14 @@ def _run(
             agree_days=agree_days,
             vol_mult=vol_mult,
             cross_days=cross_days,
+            lead_wide=lead_wide,
+            crowd_side=crowd_side,
+            crowd_n=crowd_n,
+            gap_down=gap_down,
+            rotate_gap=rotate_gap,
+            btc_ext_side=btc_ext_side,
+            btc_ext=btc_ext,
+            own_floor=own_floor,
             **knobs,
         )
         out[tag] = {
@@ -252,6 +275,36 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         {"name": f"vol_{int(round(mult * 100))}", "vol_mult": mult} for mult in VOL_MULTS
     ]
     fresh = [{"name": f"cross_{days}", "cross_days": days} for days in CROSS_DAYS]
+    wide = [
+        {"name": f"wide_{int(round(width * 100))}", "lead_wide": width} for width in LEAD_WIDE
+    ]
+    crowd = [
+        {"name": f"crowd_{side}_{n}", "crowd_side": side, "crowd_n": n} for side, n in CROWD
+    ]
+    down = [{"name": f"gap_down_{int(round(cap * 100))}", "gap_down": cap} for cap in GAP_DOWNS]
+    rotate = [
+        {"name": f"rotate_{int(round(gap * 100))}", "rotate_gap": gap} for gap in ROTATE_GAPS
+    ]
+    ext = [
+        {
+            "name": f"ext_{side}_{int(round(bound * 100))}",
+            "btc_ext_side": side,
+            "btc_ext": bound,
+        }
+        for side, bound in BTC_EXT
+    ]
+    own = [
+        {"name": f"own_{int(round(floor * 100))}", "own_floor": floor} for floor in OWN_FLOORS
+    ]
+    accel = [
+        {
+            "name": f"{mode}_{window}",
+            "rank_mode": mode,
+            "rank_window": window,
+        }
+        for mode in ("accel", "decel")
+        for window in ACCEL_WINDOWS
+    ]
     return [
         ("scale_in", scale),
         ("runner", runner),
@@ -274,6 +327,13 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         ("loss_ban", banned),
         ("vol_expand", vol),
         ("fresh_cross", fresh),
+        ("lead_wide", wide),
+        ("crowd", crowd),
+        ("gap_down", down),
+        ("rotate_gap", rotate),
+        ("btc_ext", ext),
+        ("own_ret", own),
+        ("accel_rank", accel),
     ]
 
 

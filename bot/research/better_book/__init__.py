@@ -55,6 +55,23 @@ Families, each fixed before its own tape run:
   2.0 times the 20 days before. The rank among names that pass stays live.
 * fresh cross: buy only when the excess was still at or below the floor
   1, 2 or 3 days earlier.
+* lead wide: while a name is still the residual leader, the trail waits
+  for a 15, 20 or 25 percent giveback from the peak. A name that has lost
+  the lead keeps the live 10 percent trail. The lock is unchanged.
+* crowd: a new ride opens only when at most 2, 3 or 4 names clear the
+  floor, or only when at least that many do. A held name stays on the trail.
+* gap down: cancel an alt buy when the next open is more than 2, 4 or 6
+  percent under the signal close.
+* rotate gap: keep the held name unless the challenger's excess leads by
+  2, 5 or 8 points. A fresh open and a flatten to cash are unchanged.
+* BTC extension: a new ride opens only when BTC is at most 5, 10 or 20
+  percent above its SMA50, or only when it is at least 2, 5 or 10 percent
+  above. A held name stays. A flatten to cash stays cash.
+* own return: drop a name whose own 10-day return is below 0, 3 or 6
+  percent. The rank among the names that pass stays the live score.
+* acceleration: among names that clear the floor, rank by the change in
+  excess over 3, 5 or 10 days. One side prefers a rising excess, the
+  other a fading excess. The exit stays the live trail.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

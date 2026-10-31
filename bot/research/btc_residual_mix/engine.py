@@ -87,6 +87,26 @@ def rearm_after_exit(
     return False
 
 
+def drop_down_gaps(
+    orders: Sequence[Order],
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    date: str,
+    cap: float,
+) -> list[Order]:
+    """Cancel an alt buy when the open has gapped down through the cap.
+
+    Sells still fill. The book then waits for the clock it already set.
+    """
+    kept: list[Order] = []
+    for order in orders:
+        if order.side == "buy" and order.role == "alt":
+            gap = open_gap(ohlc, order.base, date)
+            if gap is not None and gap < -float(cap) - 1e-12:
+                continue
+        kept.append(order)
+    return kept
+
+
 def tide_alts(
     next_alts: Sequence[str],
     held_alts: Sequence[str],
@@ -159,6 +179,138 @@ def lead_lost(
     if mode == "floor":
         return excess is None or float(excess) <= float(floor) + 1e-12
     return False
+
+
+def widen_trail_while_leader(
+    orders: Sequence[Order],
+    leader: str,
+    *,
+    wide: float,
+    peaks: Mapping[str, float],
+    closes: Mapping[str, float],
+) -> list[Order]:
+    """Hold a leader through the 10% trail until the close is ``wide`` off the peak.
+
+    A name that is not the leader keeps the live trail. A lock on the same
+    order still sells.
+    """
+    if wide <= 0 or not leader:
+        return list(orders)
+    kept: list[Order] = []
+    for order in orders:
+        parts = [part for part in str(order.reason).split("+") if part]
+        peak = float(peaks.get(order.base) or 0.0)
+        close = float(closes.get(order.base) or 0.0)
+        off = 1.0 - close / peak if peak > 0 and close > 0 else 0.0
+        if (
+            order.side == "sell"
+            and order.base == leader
+            and "alt_trail" in parts
+            and off < float(wide) - 1e-12
+        ):
+            rest = [part for part in parts if part != "alt_trail"]
+            if not rest:
+                continue
+            order = Order(
+                side=order.side,
+                base=order.base,
+                role=order.role,
+                adv=order.adv,
+                qty=order.qty,
+                notional=order.notional,
+                reason="+".join(rest),
+                keep_entry=order.keep_entry,
+                same_bar_px=order.same_bar_px,
+            )
+        kept.append(order)
+    return kept
+
+
+def crowd_alts(
+    next_alts: Sequence[str],
+    held_alts: Sequence[str],
+    *,
+    count: int,
+    bound: int,
+    side: str,
+) -> tuple[str, ...]:
+    """Open a new ride only when the qualifier count is on the allowed side.
+
+    A name already held stays. ``max`` allows the open when the count is at
+    most ``bound``. ``min`` allows it when the count is at least ``bound``.
+    """
+    if side == "max":
+        ok = count <= int(bound)
+    elif side == "min":
+        ok = count >= int(bound)
+    else:
+        ok = True
+    if ok:
+        return tuple(next_alts)
+    return tuple(held_alts)
+
+
+def hold_unless_gap(
+    next_alts: Sequence[str],
+    held_alts: Sequence[str],
+    excess: Mapping[str, float],
+    *,
+    gap: float,
+) -> tuple[str, ...]:
+    """Keep the held name unless the challenger's excess leads by ``gap``.
+
+    A fresh open and a flatten to cash are unchanged. A held name with no
+    excess is not protected: the rotation stands.
+    """
+    if gap <= 0 or not next_alts or not held_alts:
+        return tuple(next_alts)
+    leaving = [base for base in held_alts if base not in next_alts]
+    if not leaving:
+        return tuple(next_alts)
+    held_xs = excess.get(leaving[0])
+    chal_xs = excess.get(str(next_alts[0]))
+    if held_xs is None or chal_xs is None:
+        return tuple(next_alts)
+    if float(chal_xs) - float(held_xs) + 1e-12 < float(gap):
+        return tuple(held_alts)
+    return tuple(next_alts)
+
+
+def block_fresh(
+    next_alts: Sequence[str],
+    held_alts: Sequence[str],
+    *,
+    allow: bool,
+) -> tuple[str, ...]:
+    """Block a new name when ``allow`` is false. A flatten to cash stays cash.
+
+    A name that is already the next target is kept. A rotation into someone
+    else sticks with the held name. A fresh open becomes cash.
+    """
+    if allow:
+        return tuple(next_alts)
+    held = tuple(held_alts)
+    stayed = tuple(base for base in next_alts if base in set(held))
+    if stayed:
+        return stayed
+    if next_alts and held:
+        return held
+    return ()
+
+
+def extension_allows(dist: float | None, *, side: str, bound: float) -> bool:
+    """Whether BTC's distance above its SMA is on the allowed side of ``bound``.
+
+    ``max`` allows a distance at or under the bound. ``min`` allows a
+    distance at or over it. A missing distance does not allow a new open.
+    """
+    if dist is None:
+        return False
+    if side == "max":
+        return float(dist) <= float(bound) + 1e-12
+    if side == "min":
+        return float(dist) + 1e-12 >= float(bound)
+    return True
 
 
 def ride_to_keep(mode: str, *, green: bool, is_leader: bool) -> bool:
@@ -348,6 +500,7 @@ def pick_residual(
     agree_days: int = 0,
     vol_mult: float = 0.0,
     cross_days: int = 0,
+    own_floor: float | None = None,
 ) -> dict[str, Any]:
     ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
@@ -373,6 +526,10 @@ def pick_residual(
             prior_xs = rs_excess(prior_alt, prior_btc, lb=lookback_days, skip=skip_days)
             if prior_xs is None or prior_xs > excess_floor:
                 continue
+        if own_floor is not None:
+            own = _window_return(cl, lookback_days, skip_days)
+            if own is None or own + 1e-12 < float(own_floor):
+                continue
         if require_alt_sma:
             s = sma(cl, sma_n)
             last_px = float(cl[-1]) if cl else 0.0
@@ -393,6 +550,14 @@ def pick_residual(
             vol = _spread_vol(cl, btc_c, int(rank_window), skip_days)
             if vol is not None and vol > 0:
                 score = score / vol
+        if rank_mode in ("accel", "decel"):
+            prior_alt = cl[: -int(rank_window)] if len(cl) > int(rank_window) else []
+            prior_btc = btc_c[: -int(rank_window)] if len(btc_c) > int(rank_window) else []
+            prior_xs = rs_excess(prior_alt, prior_btc, lb=lookback_days, skip=skip_days)
+            if prior_xs is None:
+                continue
+            delta = float(xs) - float(prior_xs)
+            score = delta if rank_mode == "accel" else -delta
         ranked.append(
             {
                 "base": base,
@@ -771,6 +936,14 @@ def run_btc_residual(
     agree_days: int = 0,
     vol_mult: float = 0.0,
     cross_days: int = 0,
+    lead_wide: float = 0.0,
+    crowd_side: str = "",
+    crowd_n: int = 0,
+    gap_down: float | None = None,
+    rotate_gap: float = 0.0,
+    btc_ext_side: str = "",
+    btc_ext: float = 0.0,
+    own_floor: float | None = None,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -827,6 +1000,8 @@ def run_btc_residual(
         if model.delay_next_open and pending:
             if gap_cap is not None and float(gap_cap) > 0:
                 pending = drop_gapped_buys(pending, ohlc, date, float(gap_cap))
+            if gap_down is not None and float(gap_down) > 0:
+                pending = drop_down_gaps(pending, ohlc, date, float(gap_down))
             if pending:
                 fills = _apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms)
                 trades.extend(fills)
@@ -914,6 +1089,37 @@ def run_btc_residual(
                             reason="alt_lead_exit",
                         )
                     )
+            if lead_wide > 0:
+                sleeve = (
+                    top_volume_universe(ohlc, date, universe_top_n)
+                    if universe_top_n > 0
+                    else DEFAULT_UNIVERSE
+                )
+                wide_pick = pick_residual(
+                    ohlc,
+                    date,
+                    universe=sleeve,
+                    excess_floor=excess_floor,
+                    lookback_days=lookback_days,
+                    skip_days=skip_days,
+                    n_alts=1,
+                    require_alt_sma=require_alt_sma,
+                    sma_n=sma_n,
+                    near_high_weight=near_high_weight,
+                    rank_mode=rank_mode,
+                    rank_window=rank_window,
+                )
+                wide_wants = list(wide_pick.get("wants") or [])
+                wide_leader = wide_wants[0] if wide_wants else ""
+                wide_closes = _px_map(ohlc, date, field=4)
+                wide_peaks = {lot.base: lot.peak_px for lot in book.lots.values()}
+                overlay = widen_trail_while_leader(
+                    overlay,
+                    wide_leader,
+                    wide=lead_wide,
+                    peaks=wide_peaks,
+                    closes=wide_closes,
+                )
             overlay_sold = {o.base for o in overlay if o.side == "sell"}
             n_overlay += sum(1 for o in overlay if o.side == "sell")
             for o in overlay:
@@ -999,6 +1205,7 @@ def run_btc_residual(
                 agree_days=agree_days,
                 vol_mult=vol_mult,
                 cross_days=cross_days,
+                own_floor=own_floor,
             )
             winners = list(pick_now.get("wants") or [])
             if winners:
@@ -1042,6 +1249,7 @@ def run_btc_residual(
                 agree_days=agree_days,
                 vol_mult=vol_mult,
                 cross_days=cross_days,
+                own_floor=own_floor,
                 exclude_bases=sorted(active_bans) or None,
             )
             if alt_allow is not None and date in alt_allow:
@@ -1096,6 +1304,45 @@ def run_btc_residual(
                         kept.append(base)
                 if kept:
                     next_alts = tuple(kept)
+                    next_btc = ""
+            if crowd_side and crowd_n > 0:
+                n_qual = sum(
+                    1
+                    for value in (pick.get("excess") or {}).values()
+                    if float(value) > float(excess_floor) + 1e-12
+                )
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                next_alts = crowd_alts(
+                    next_alts,
+                    held_alts,
+                    count=n_qual,
+                    bound=int(crowd_n),
+                    side=crowd_side,
+                )
+                if not next_alts:
+                    next_btc = ""
+            if rotate_gap > 0:
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                next_alts = hold_unless_gap(
+                    next_alts,
+                    held_alts,
+                    dict(pick.get("excess") or {}),
+                    gap=float(rotate_gap),
+                )
+                if not next_alts:
+                    next_btc = ""
+            if btc_ext_side:
+                dist = last / s50 - 1.0 if s50 and s50 > 0 and last > 0 else None
+                allow = extension_allows(dist, side=btc_ext_side, bound=float(btc_ext))
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                next_alts = block_fresh(next_alts, held_alts, allow=allow)
+                if not next_alts:
                     next_btc = ""
             changed = (next_btc != want_btc) or (next_alts != want_alts) or not held
             if changed and (next_btc or next_alts or held):
