@@ -305,6 +305,91 @@ def _spike_reclaim_orders(
     return buys
 
 
+def _mark_scale_open(
+    book: Book,
+    fills: Sequence[Mapping[str, Any]],
+    *,
+    starter_frac: float,
+    add_arm_pct: float,
+) -> None:
+    """Remember a starter buy, and close the flag once the add fills."""
+    if add_arm_pct <= 0 or not (0.0 < starter_frac < 1.0):
+        return
+    for fill in fills:
+        lot = book.lots.get(str(fill.get("base") or ""))
+        if lot is None:
+            continue
+        if fill.get("side") == "buy" and fill.get("reason") == "residual":
+            lot.scale_open = True
+        elif fill.get("side") == "buy" and fill.get("reason") == "scale_in":
+            lot.scale_open = False
+
+
+def _scale_in_orders(
+    book: Book,
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    date: str,
+    *,
+    add_arm_pct: float,
+    alt_frac: float,
+    excess_floor: float,
+    lookback_days: int,
+    skip_days: int,
+    n_alts: int,
+    require_alt_sma: bool,
+    sma_n: int,
+    near_high_weight: float,
+    skip_bases: set[str],
+) -> list[Order]:
+    """Add the rest of the sleeve once the starter is through the arm.
+
+    The name must still be the residual leader on this close. The order
+    fills next open. Entry price is left on the first fill.
+    """
+    if add_arm_pct <= 0:
+        return []
+    closes = _px_map(ohlc, date, field=4)
+    pick = pick_residual(
+        ohlc,
+        date,
+        excess_floor=excess_floor,
+        lookback_days=lookback_days,
+        skip_days=skip_days,
+        n_alts=n_alts,
+        require_alt_sma=require_alt_sma,
+        sma_n=sma_n,
+        near_high_weight=near_high_weight,
+    )
+    leaders = {str(b) for b in (pick.get("wants") or [])}
+    orders: list[Order] = []
+    eq = book.mark(closes)
+    for lot in book.lots.values():
+        if lot.role != "alt" or not lot.scale_open or lot.base in skip_bases:
+            continue
+        if lot.base not in leaders or lot.entry_px <= 0:
+            continue
+        close = float(closes.get(lot.base) or 0.0)
+        if close <= 0 or close / lot.entry_px - 1.0 < add_arm_pct:
+            continue
+        held = lot.qty * close
+        add_n = eq * max(0.0, alt_frac) - held
+        if add_n < 50.0:
+            lot.scale_open = False
+            continue
+        orders.append(
+            Order(
+                side="buy",
+                base=lot.base,
+                role="alt",
+                adv=_adv(ohlc, lot.base, date),
+                notional=add_n,
+                reason="scale_in",
+                keep_entry=True,
+            )
+        )
+    return orders
+
+
 def run_btc_residual(
     ohlc: Mapping[str, Sequence[Sequence[float]]],
     *,
@@ -336,6 +421,8 @@ def run_btc_residual(
     entry_gate: Callable[[str, str], bool] | None = None,
     alt_size_scale: Callable[[str, str], float] | None = None,
     exit_cooldown_days: int | None = None,
+    starter_frac: float = 1.0,
+    add_arm_pct: float = 0.0,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -353,6 +440,11 @@ def run_btc_residual(
 
     ``immediate_rebuy``: after a trail/overlay sell, queue a next-open buy of
     the best qualifying alt **excluding** just-sold bases (no 7d cash wait).
+
+    ``starter_frac`` < 1 with ``add_arm_pct`` > 0 buys that fraction first and
+    adds the rest, once, when the close is that far above the first fill and
+    the name is still the residual leader. The add does not move the entry
+    the lock uses, and it does not restart the week clock.
     """
     name = strategy or f"btc{int(btc_frac * 100)}_res_f{flatten}"
     dates = [bar_date(r) for r in (ohlc.get("BTC") or [])]
@@ -386,6 +478,7 @@ def run_btc_residual(
         if model.delay_next_open and pending:
             fills = _apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms)
             trades.extend(fills)
+            _mark_scale_open(book, fills, starter_frac=starter_frac, add_arm_pct=add_arm_pct)
             for fill in fills:
                 if fill.get("reason") == "alt_reclaim":
                     lot = book.lots.get(str(fill["base"]))
@@ -410,6 +503,14 @@ def run_btc_residual(
                 else:
                     wait = max(0, int(exit_cooldown_days))
                     last_reb = now_ms - (int(rebalance_days) - wait) * DAY_MS
+            # A touch stop traded during the bar. Book it at that price now
+            # so the next-open queue does not sell the same lot again.
+            same_bar = [o for o in overlay if o.side == "sell" and o.same_bar_px > 0]
+            if same_bar:
+                trades.extend(
+                    _apply_orders(book, same_bar, ohlc, date, model, opened_ms=now_ms)
+                )
+                overlay = [o for o in overlay if o not in same_bar]
         btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
@@ -458,10 +559,7 @@ def run_btc_residual(
                 want_btc = ""
                 last_reb = now_ms
         age_due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
-        if wd_pin is not None:
-            due = age_due and now.weekday() == wd_pin
-        else:
-            due = age_due
+        due = age_due and now.weekday() == wd_pin if wd_pin is not None else age_due
         if due and len(btc_c) >= need:
             pick = pick_residual(
                 ohlc,
@@ -536,6 +634,8 @@ def run_btc_residual(
                     notion = (eq if not next_btc else eq * alt_frac) / split
                     if alt_size_scale is not None:
                         notion *= max(0.0, min(1.0, float(alt_size_scale(date, alt))))
+                    if add_arm_pct > 0 and 0.0 < starter_frac < 1.0:
+                        notion *= starter_frac
                     if notion <= 0:
                         continue
                     orders.append(
@@ -554,8 +654,10 @@ def run_btc_residual(
                     if model.delay_next_open:
                         pending = merged
                     else:
-                        trades.extend(
-                            _apply_orders(book, merged, ohlc, date, model, opened_ms=now_ms)
+                        filled = _apply_orders(book, merged, ohlc, date, model, opened_ms=now_ms)
+                        trades.extend(filled)
+                        _mark_scale_open(
+                            book, filled, starter_frac=starter_frac, add_arm_pct=add_arm_pct
                         )
                     overlay = []
             want_btc, want_alts = next_btc, next_alts
@@ -599,6 +701,33 @@ def run_btc_residual(
                             lot = book.lots.get(str(fill["base"]))
                             if lot is not None:
                                 lot.spike_done = True
+        if add_arm_pct > 0 and 0.0 < starter_frac < 1.0 and risk_on:
+            busy = {o.base for o in pending if o.side == "sell"}
+            busy |= overlay_sold
+            adds = _scale_in_orders(
+                book,
+                ohlc,
+                date,
+                add_arm_pct=add_arm_pct,
+                alt_frac=alt_frac,
+                excess_floor=excess_floor,
+                lookback_days=lookback_days,
+                skip_days=skip_days,
+                n_alts=n_alts,
+                require_alt_sma=require_alt_sma,
+                sma_n=sma_n,
+                near_high_weight=near_high_weight,
+                skip_bases=busy | {o.base for o in pending},
+            )
+            if adds:
+                if model.delay_next_open:
+                    pending = list(pending) + adds
+                else:
+                    filled = _apply_orders(book, adds, ohlc, date, model, opened_ms=now_ms)
+                    trades.extend(filled)
+                    _mark_scale_open(
+                        book, filled, starter_frac=starter_frac, add_arm_pct=add_arm_pct
+                    )
         px = _px_map(ohlc, date, field=4)
         equity.append(book.mark(px))
         eq_dates.append(date)
