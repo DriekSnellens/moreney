@@ -327,6 +327,66 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## Rank the same score on a one- to four-week excess window
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| form_7 | +71,098 | 44.9% | +39,218 | +13,235 | 24.1% | 104 |
+| form_14 | +129,498 | 50.0% | +59,038 | +20,770 | 33.4% | 98 |
+| form_21 | +16,896 | 51.2% | +15,845 | +1,121 | 41.4% | 104 |
+| form_28 | +27,634 | 50.3% | +27,309 | +805 | 40.1% | 102 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Rank qualifiers by their largest recent day
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| max_high_5 | +72,436 | 38.4% | +12,236 | +39,148 | 26.7% | 104 |
+| max_high_10 | +44,698 | 27.2% | +11,913 | +21,926 | 26.7% | 104 |
+| max_high_20 | +36,525 | 47.1% | +8,704 | +20,249 | 26.7% | 100 |
+| max_low_5 | -16,592 | 83.8% | -16,183 | -4,436 | 39.6% | 110 |
+| max_low_10 | -15,574 | 86.4% | -16,055 | -388 | 38.1% | 112 |
+| max_low_20 | -11,343 | 70.8% | -11,504 | -388 | 38.1% | 112 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Rank qualifiers by how much they trade
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| liq_high_10 | -5,556 | 53.9% | -8,341 | +4,421 | 24.6% | 110 |
+| liq_high_20 | -3,484 | 50.0% | -6,624 | +4,421 | 24.6% | 108 |
+| liq_high_40 | -5,299 | 57.2% | -8,557 | +5,310 | 23.5% | 110 |
+| liq_low_10 | -12,054 | 62.3% | -11,613 | -2,113 | 36.1% | 108 |
+| liq_low_20 | -12,054 | 62.3% | -11,613 | -2,113 | 36.1% | 108 |
+| liq_low_40 | -5,203 | 57.0% | -10,643 | +10,006 | 26.8% | 106 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Skip a new ride while the book's equity is under its own average
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| eq_20 | +264,362 | 29.1% | +115,812 | +24,550 | 27.7% | 70 |
+| eq_40 | +22,551 | 30.3% | +12,858 | -3,748 | 36.7% | 62 |
+| eq_60 | -420 | 34.7% | -1,750 | -1,872 | 29.2% | 44 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Buy a qualifier only if it did or did not just print a high
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| break_above_1 | -402 | 43.8% | -7,116 | +10,030 | 33.6% | 74 |
+| break_above_2 | +8,162 | 42.6% | -2,755 | +12,566 | 30.8% | 58 |
+| break_above_3 | +8,162 | 42.6% | -2,755 | +12,566 | 30.8% | 58 |
+| break_inside_1 | +39,421 | 52.7% | +31,867 | +3,806 | 37.3% | 98 |
+| break_inside_2 | +54,687 | 47.0% | +31,867 | +10,042 | 31.6% | 100 |
+| break_inside_3 | +50,897 | 49.7% | +29,088 | +10,042 | 31.6% | 98 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -358,6 +418,10 @@ A wider trail while the held name is still the leader gives the path back. Fifte
 Refusing a rotation unless the challenger leads by 2, 5 or 8 points of excess gives the path back. The three cells finish between +€250,554 and +€275,634 against +€342,074, and a fresh 2026 book is between +€17,829 and +€21,024. Opening a new ride only when BTC is at most 5, 10 or 20 percent above its SMA50 finishes between a few hundred euros and +€87,575. Requiring BTC to be at least 2 percent above that average is ahead on a fresh 2026 book, +€35,324 against +€30,791, and the full path is +€169,881 with the book through 2025 at +€54,360. Five and ten percent do not come with it. Dropping a name whose own 10-day return is below zero, or below 3 percent, is the same cell: +€331,233 against +€342,074, and a fresh 2026 book is +€28,516. The book through 2025 is unchanged. Six percent is further behind.
 
 Ranking the names that clear the floor by whether their excess is rising or fading gives the path back. A rising excess over 3, 5 or 10 days finishes between +€2,643 and +€41,584 against +€342,074. A fading excess finishes between −€6,552 and +€6,918. Both directions were locked before the run. The live excess rank stays.
+
+Moving the same score onto a 7, 14, 21 or 28 day window gives the path back. The best of them is 14 days, +€129,498 against +€342,074, with a fresh 2026 book at +€20,770. Three and four weeks, the published peak of that band, finish at +€16,896 and +€27,634. Ranking qualifiers by their largest day prefers the spike at 5, 10 or 20 days and finishes between +€36,525 and +€72,436. The 5-day spike is ahead on a fresh 2026 book, +€39,148 against +€30,791, and the book through 2025 is +€12,236. Avoiding that spike loses the stake on every window. Ranking by quote volume, louder or quieter, finishes within a few thousand euros of flat. The 10-day residual leader stays.
+
+Sitting out a new ride while the book's own equity is under its 20-day average finishes at +€264,362 against +€342,074, and a fresh 2026 book is +€24,550. Forty and sixty days give the stake back. Buying only a qualifier that just closed above its prior 1, 2 or 3 day high finishes between a small loss and +€8,162. Buying only a qualifier that stayed inside that high finishes between +€39,421 and +€54,687. Neither side reaches the size bar.
 
 ## Verdict
 

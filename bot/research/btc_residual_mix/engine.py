@@ -408,6 +408,37 @@ def top_volume_universe(
     return tuple(base for _, base in scored[: max(1, int(n))])
 
 
+def _broke_recent_high(rows: Sequence[Sequence[float]], n: int) -> bool | None:
+    """Whether today's close is above the high of the prior ``n`` days.
+
+    Today is not part of that high. Short history returns None.
+    """
+    if n <= 0 or len(rows) < n + 1:
+        return None
+    today = float(rows[-1][4]) if len(rows[-1]) >= 5 else 0.0
+    prior = [float(r[2]) for r in rows[-(n + 1) : -1] if len(r) >= 3 and float(r[2]) > 0]
+    if today <= 0 or len(prior) < n:
+        return None
+    return today > max(prior) + 1e-12
+
+
+def _max_day_return(closes: Sequence[float], n: int, skip: int) -> float | None:
+    """Largest one-day simple return over the last ``n`` signal days."""
+    use = list(_signal_closes(closes, skip))
+    if len(use) < n + 1 or n <= 0:
+        return None
+    window = use[-(n + 1) :]
+    best: float | None = None
+    for i in range(1, len(window)):
+        prev = float(window[i - 1])
+        if prev <= 0 or float(window[i]) <= 0:
+            return None
+        day = float(window[i]) / prev - 1.0
+        if best is None or day > best:
+            best = day
+    return best
+
+
 def _window_return(closes: Sequence[float], lb: int, skip: int) -> float | None:
     use = _signal_closes(closes, skip)
     if len(use) < lb + 1:
@@ -501,6 +532,8 @@ def pick_residual(
     vol_mult: float = 0.0,
     cross_days: int = 0,
     own_floor: float | None = None,
+    break_mode: str = "",
+    break_days: int = 0,
 ) -> dict[str, Any]:
     ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
@@ -530,6 +563,14 @@ def pick_residual(
             own = _window_return(cl, lookback_days, skip_days)
             if own is None or own + 1e-12 < float(own_floor):
                 continue
+        if break_mode in ("above", "inside") and break_days > 0:
+            broke = _broke_recent_high(rows, int(break_days))
+            if broke is None:
+                continue
+            if break_mode == "above" and not broke:
+                continue
+            if break_mode == "inside" and broke:
+                continue
         if require_alt_sma:
             s = sma(cl, sma_n)
             last_px = float(cl[-1]) if cl else 0.0
@@ -558,6 +599,16 @@ def pick_residual(
                 continue
             delta = float(xs) - float(prior_xs)
             score = delta if rank_mode == "accel" else -delta
+        if rank_mode in ("max_high", "max_low"):
+            spike = _max_day_return(cl, int(rank_window), skip_days)
+            if spike is None:
+                continue
+            score = spike if rank_mode == "max_high" else -spike
+        if rank_mode in ("liq_high", "liq_low"):
+            level = quote_vol(rows, int(rank_window))
+            if level <= 0:
+                continue
+            score = level if rank_mode == "liq_high" else -level
         ranked.append(
             {
                 "base": base,
@@ -944,6 +995,9 @@ def run_btc_residual(
     btc_ext_side: str = "",
     btc_ext: float = 0.0,
     own_floor: float | None = None,
+    equity_sma: int = 0,
+    break_mode: str = "",
+    break_days: int = 0,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -1206,6 +1260,8 @@ def run_btc_residual(
                 vol_mult=vol_mult,
                 cross_days=cross_days,
                 own_floor=own_floor,
+                break_mode=break_mode,
+                break_days=break_days,
             )
             winners = list(pick_now.get("wants") or [])
             if winners:
@@ -1250,6 +1306,8 @@ def run_btc_residual(
                 vol_mult=vol_mult,
                 cross_days=cross_days,
                 own_floor=own_floor,
+                break_mode=break_mode,
+                break_days=break_days,
                 exclude_bases=sorted(active_bans) or None,
             )
             if alt_allow is not None and date in alt_allow:
@@ -1342,6 +1400,17 @@ def run_btc_residual(
                     b for b, role in held.items() if role == "alt" and b not in overlay_sold
                 ]
                 next_alts = block_fresh(next_alts, held_alts, allow=allow)
+                if not next_alts:
+                    next_btc = ""
+            if equity_sma > 0:
+                allow_eq = True
+                if len(equity) >= int(equity_sma):
+                    window = equity[-int(equity_sma) :]
+                    allow_eq = eq + 1e-9 >= sum(window) / float(len(window))
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                next_alts = block_fresh(next_alts, held_alts, allow=allow_eq)
                 if not next_alts:
                     next_btc = ""
             changed = (next_btc != want_btc) or (next_alts != want_alts) or not held

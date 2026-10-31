@@ -10,10 +10,13 @@ from bot.research.better_book.bar import (
     ACCEL_WINDOWS,
     AGREE_DAYS,
     BETA_WINDOWS,
+    BREAK_DAYS,
     BTC_EXT,
     BTC_VETO_GAPS,
     CROSS_DAYS,
     CROWD,
+    EQUITY_SMA,
+    FORM_DAYS,
     GAP_CAPS,
     GAP_DOWNS,
     GREEN_PAUSES,
@@ -21,7 +24,9 @@ from bot.research.better_book.bar import (
     KEEP_RIDES,
     LEAD_EXITS,
     LEAD_WIDE,
+    LIQ_WINDOWS,
     LOSS_BANS,
+    MAX_WINDOWS,
     OWN_FLOORS,
     RANK_SLOTS,
     REARM_MODES,
@@ -77,6 +82,10 @@ def _run(
     btc_ext_side: str = "",
     btc_ext: float = 0.0,
     own_floor: float | None = None,
+    lookback_days: int = 0,
+    equity_sma: int = 0,
+    break_mode: str = "",
+    break_days: int = 0,
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -84,6 +93,8 @@ def _run(
     knobs = dict(LIVE_KNOBS)
     if policy is not None:
         knobs["policy"] = policy
+    if lookback_days > 0:
+        knobs["lookback_days"] = int(lookback_days)
     out: Cell = {"name": name, "family": ""}
     for tag, start, end in windows:
         row = run_btc_residual(
@@ -118,6 +129,9 @@ def _run(
             btc_ext_side=btc_ext_side,
             btc_ext=btc_ext,
             own_floor=own_floor,
+            equity_sma=equity_sma,
+            break_mode=break_mode,
+            break_days=break_days,
             **knobs,
         )
         out[tag] = {
@@ -305,6 +319,37 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         for mode in ("accel", "decel")
         for window in ACCEL_WINDOWS
     ]
+    formed = [
+        {"name": f"form_{days}", "lookback_days": days} for days in FORM_DAYS
+    ]
+    spiked = [
+        {
+            "name": f"{mode}_{window}",
+            "rank_mode": mode,
+            "rank_window": window,
+        }
+        for mode in ("max_high", "max_low")
+        for window in MAX_WINDOWS
+    ]
+    liquid = [
+        {
+            "name": f"{mode}_{window}",
+            "rank_mode": mode,
+            "rank_window": window,
+        }
+        for mode in ("liq_high", "liq_low")
+        for window in LIQ_WINDOWS
+    ]
+    curve = [{"name": f"eq_{n}", "equity_sma": n} for n in EQUITY_SMA]
+    broken = [
+        {
+            "name": f"break_{mode}_{days}",
+            "break_mode": mode,
+            "break_days": days,
+        }
+        for mode in ("above", "inside")
+        for days in BREAK_DAYS
+    ]
     return [
         ("scale_in", scale),
         ("runner", runner),
@@ -334,6 +379,11 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         ("btc_ext", ext),
         ("own_ret", own),
         ("accel_rank", accel),
+        ("formation", formed),
+        ("max_rank", spiked),
+        ("liq_rank", liquid),
+        ("equity_curve", curve),
+        ("breakout", broken),
     ]
 
 

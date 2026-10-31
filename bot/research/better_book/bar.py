@@ -157,6 +157,27 @@ OWN_FLOORS = (0.0, 0.03, 0.06)
 # prefers a fading one. Both directions are in the family. The floor,
 # the SMA and the exit stay live.
 ACCEL_WINDOWS = (3, 5, 10)
+# One- to four-week formation. Published crypto momentum is strongest
+# around three weeks and fades by eight. These cells keep the live score,
+# the 3.5% floor, the SMA and the trail, and change only the excess
+# window to 7, 14, 21 or 28 days. The one-day skip stays.
+FORM_DAYS = (7, 14, 21, 28)
+# Largest one-day return over 5, 10 or 20 days, among names that already
+# clear the residual floor. max_high prefers the spike. max_low avoids it.
+# The two sides are the published disagreement, locked before the run.
+MAX_WINDOWS = (5, 10, 20)
+# Quote volume inside the fixed desk, over 10, 20 or 40 days. liq_low
+# buys the quieter qualifier. liq_high buys the louder one. The residual
+# floor still binds. The universe does not change.
+LIQ_WINDOWS = (10, 20, 40)
+# Sit out a new ride while the book's own equity is under its 20, 40 or
+# 60 day average. A name already held stays on the trail. A flat book
+# rechecks every day. The window is the whole grid, locked before the run.
+EQUITY_SMA = (20, 40, 60)
+# A qualifier has to have just printed a high, or it has to have stayed
+# inside the recent high. 1, 2 or 3 days. Both sides. The rank among the
+# names that pass stays the live score.
+BREAK_DAYS = (1, 2, 3)
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

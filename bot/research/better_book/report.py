@@ -98,6 +98,11 @@ def render(
         "btc_ext": "Open a new ride only when BTC's distance above its average is in range",
         "own_ret": "Drop a name whose own lookback return is below a floor",
         "accel_rank": "Rank qualifiers by whether the excess is rising or fading",
+        "formation": "Rank the same score on a one- to four-week excess window",
+        "max_rank": "Rank qualifiers by their largest recent day",
+        "liq_rank": "Rank qualifiers by how much they trade",
+        "equity_curve": "Skip a new ride while the book's equity is under its own average",
+        "breakout": "Buy a qualifier only if it did or did not just print a high",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -257,6 +262,29 @@ def render(
         "10 days finishes between +€2,643 and +€41,584 against +€342,074. A "
         "fading excess finishes between −€6,552 and +€6,918. Both directions "
         "were locked before the run. The live excess rank stays."
+    )
+    lines.append("")
+    lines.append(
+        "Moving the same score onto a 7, 14, 21 or 28 day window gives the "
+        "path back. The best of them is 14 days, +€129,498 against +€342,074, "
+        "with a fresh 2026 book at +€20,770. Three and four weeks, the "
+        "published peak of that band, finish at +€16,896 and +€27,634. Ranking "
+        "qualifiers by their largest day prefers the spike at 5, 10 or 20 days "
+        "and finishes between +€36,525 and +€72,436. The 5-day spike is ahead "
+        "on a fresh 2026 book, +€39,148 against +€30,791, and the book through "
+        "2025 is +€12,236. Avoiding that spike loses the stake on every window. "
+        "Ranking by quote volume, louder or quieter, finishes within a few "
+        "thousand euros of flat. The 10-day residual leader stays."
+    )
+    lines.append("")
+    lines.append(
+        "Sitting out a new ride while the book's own equity is under its "
+        "20-day average finishes at +€264,362 against +€342,074, and a fresh "
+        "2026 book is +€24,550. Forty and sixty days give the stake back. "
+        "Buying only a qualifier that just closed above its prior 1, 2 or 3 "
+        "day high finishes between a small loss and +€8,162. Buying only a "
+        "qualifier that stayed inside that high finishes between +€39,421 and "
+        "+€54,687. Neither side reaches the size bar."
     )
     lines.append("")
     lines.append("## Verdict")

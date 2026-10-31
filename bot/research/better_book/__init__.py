@@ -72,6 +72,19 @@ Families, each fixed before its own tape run:
 * acceleration: among names that clear the floor, rank by the change in
   excess over 3, 5 or 10 days. One side prefers a rising excess, the
   other a fading excess. The exit stays the live trail.
+* formation: the live score on a 7, 14, 21 or 28 day excess window.
+  The floor, the skip, the SMA and the trail stay.
+* max day: among names that clear the floor, rank by the largest one-day
+  return over 5, 10 or 20 days. One side prefers the spike, the other
+  avoids it.
+* liquidity: among names that clear the floor, rank by quote volume over
+  10, 20 or 40 days. One side buys the quieter name, the other the louder
+  one. The desk does not change.
+* equity curve: a new ride waits while the book's own equity is under its
+  20, 40 or 60 day average. A held name stays on the trail.
+* breakout: a qualifier must have closed above the prior 1, 2 or 3 day
+  high, or it must have stayed inside that high. The rank among the names
+  that pass stays the live score.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

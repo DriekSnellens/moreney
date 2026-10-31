@@ -13,6 +13,7 @@ from bot.research.better_book.bar import (
 )
 from bot.research.better_book.search import largest_new_trip, round_trips
 from bot.research.btc_residual_mix.engine import (
+    _broke_recent_high,
     _scale_in_orders,
     _volume_expanded,
     block_fresh,
@@ -761,3 +762,84 @@ def test_acceleration_rank_prefers_a_rising_excess_and_decel_the_fade() -> None:
     date = "2024-02-09"
     assert pick_residual(ohlc, date, rank_mode="accel", **common)["wants"] == ["RISE"]
     assert pick_residual(ohlc, date, rank_mode="decel", **common)["wants"] == ["FADE"]
+
+
+def test_max_day_rank_can_prefer_or_avoid_the_spike() -> None:
+    t0 = 1_704_067_200_000
+    n = 30
+
+    def bars(closes: list[float], volume: float = 5_000_000.0) -> list[list[float]]:
+        return [
+            [t0 + i * 86_400_000, c, c, c, c, volume] for i, c in enumerate(closes)
+        ]
+
+    btc = [100.0] * n
+    steady = [100.0] * n
+    for i in range(18, n):
+        steady[i] = 100.0 + (i - 18) * 1.2
+    spike = [100.0] * n
+    spike[26] = 130.0
+    spike[27] = 130.0
+    spike[28] = 130.0
+    spike[29] = 130.0
+    ohlc = {"BTC": bars(btc), "STEADY": bars(steady), "SPIKE": bars(spike)}
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("STEADY", "SPIKE"),
+        rank_window=10,
+    )
+    date = "2024-01-30"
+    assert pick_residual(ohlc, date, rank_mode="max_high", **common)["wants"] == ["SPIKE"]
+    assert pick_residual(ohlc, date, rank_mode="max_low", **common)["wants"] == ["STEADY"]
+
+
+def test_liquidity_rank_picks_the_quieter_or_the_louder_qualifier() -> None:
+    t0 = 1_704_067_200_000
+    n = 30
+
+    def bars(prices: list[float], volume: float) -> list[list[float]]:
+        return [
+            [t0 + i * 86_400_000, p, p, p, p, volume] for i, p in enumerate(prices)
+        ]
+
+    flat = [100.0] * n
+    rising = [100.0 + i for i in range(n)]
+    ohlc = {
+        "BTC": bars(flat, 5_000_000.0),
+        "QUIET": bars(rising, 200_000.0),
+        "LOUD": bars(rising, 2_000_000.0),
+    }
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("QUIET", "LOUD"),
+        rank_window=20,
+    )
+    date = "2024-01-30"
+    assert pick_residual(ohlc, date, rank_mode="liq_low", **common)["wants"] == ["QUIET"]
+    assert pick_residual(ohlc, date, rank_mode="liq_high", **common)["wants"] == ["LOUD"]
+
+
+def test_a_close_through_the_prior_high_is_the_breakout_side() -> None:
+    rows = [
+        [0, 100.0, 100.0, 100.0, 100.0, 1.0],
+        [1, 101.0, 104.0, 99.0, 103.0, 1.0],
+        [2, 103.0, 106.0, 102.0, 105.0, 1.0],
+    ]
+    assert _broke_recent_high(rows, 1) is True
+    assert _broke_recent_high(rows, 2) is True
+    inside = [
+        [0, 100.0, 110.0, 100.0, 100.0, 1.0],
+        [1, 100.0, 108.0, 100.0, 105.0, 1.0],
+    ]
+    assert _broke_recent_high(inside, 1) is False
+    assert _broke_recent_high(inside[:1], 1) is None
