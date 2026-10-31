@@ -77,6 +77,9 @@ def render(
         "trail_touch": "Sell at the level when the low trades it",
         "beta_rank": "Rank by excess after the alt's own BTC beta",
         "ir_rank": "Rank that excess per unit of residual volatility",
+        "rearm": "After a green exit, open the next leader before the week is up",
+        "btc_tide": "Open a new ride only while BTC's own window is up",
+        "green_pause": "After a green exit, wait longer than a week",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -132,6 +135,20 @@ def render(
         "volatility of the alt-minus-BTC residual cuts the compounded path as well. "
         "The 40-day window is a few hundred euros ahead on a fresh 2026 book and "
         "about €210k behind over the full path."
+    )
+    lines.append("")
+    lines.append(
+        "Opening the next leader sooner after a green exit loses. Waiting 14, "
+        "21 or 28 days after that same green exit also loses. A losing exit "
+        "already keeps the week; lengthening the wait only after a winner gives "
+        "the next ride away. Refusing a new ride unless BTC's own 10-day return "
+        "is positive takes the fresh 2026 book to about zero."
+    )
+    lines.append("")
+    lines.append(
+        "Re-picking the sleeve each day from the most-traded names on the whole "
+        "venue, 12, 16 or 24 of them, finishes between a small gain and a loss. "
+        "The fixed desk on that same cache is the book above."
     )
     lines.append("")
     lines.append("## Verdict")

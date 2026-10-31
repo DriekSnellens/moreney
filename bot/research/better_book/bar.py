@@ -39,6 +39,23 @@ TRAIL_HALF_FRAC = 0.50
 # IR windows: the same live score, divided by residual volatility.
 BETA_WINDOWS = (20, 40, 60)
 IR_WINDOWS = (10, 20, 40)
+# After a banked exit the live clock sits in cash for seven days.
+# These modes open the next leader early only when the exit itself was
+# a lock, or the signal close was still above the entry. A losing exit
+# keeps the full week. Not a shorter clock on every sell.
+REARM_MODES = ("lock", "green", "green_next")
+# New rides only while BTC's own lookback return clears the floor.
+# A name already held is left to the trail. 0, 2 and 5 percent.
+TIDE_FLOORS = (0.0, 0.02, 0.05)
+# Buying the next leader sooner after a green exit lost. These cells
+# wait longer than the live week, and only after a close that is still
+# above the entry. A losing exit keeps the seven-day clock.
+# 14, 21 and 28 are one, two and three extra weeks, not a fitted gap.
+GREEN_PAUSES = (14, 21, 28)
+# The live desk is a fixed list. These cells re-pick that list each day
+# as the most-traded names on the whole venue, then run the same book.
+# 60 days of history are required. 12, 16 and 24 are the width of the list.
+VOLUME_TOPS = (12, 16, 24)
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

@@ -8,11 +8,14 @@ from typing import Any
 
 from bot.research.better_book.bar import (
     BETA_WINDOWS,
+    GREEN_PAUSES,
     IR_WINDOWS,
+    REARM_MODES,
     RUNNER_ARMS,
     RUNNER_TRAILS,
     SCALE_ARMS,
     SCALE_STARTERS,
+    TIDE_FLOORS,
     TRAIL_CONFIRM,
     TRAIL_HALF_FRAC,
     TRAIL_WEEKDAYS,
@@ -35,6 +38,10 @@ def _run(
     add_arm_pct: float = 0.0,
     rank_mode: str = "excess",
     rank_window: int = 20,
+    rearm_mode: str = "",
+    btc_tide_floor: float | None = None,
+    green_pause_days: int = 0,
+    universe_top_n: int = 0,
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -55,6 +62,10 @@ def _run(
             add_arm_pct=add_arm_pct,
             rank_mode=rank_mode,
             rank_window=rank_window,
+            rearm_mode=rearm_mode,
+            btc_tide_floor=btc_tide_floor,
+            green_pause_days=green_pause_days,
+            universe_top_n=universe_top_n,
             **knobs,
         )
         out[tag] = {
@@ -165,6 +176,17 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         }
         for n in IR_WINDOWS
     ]
+    rearm = [{"name": f"rearm_{mode}", "rearm_mode": mode} for mode in REARM_MODES]
+    pause = [
+        {"name": f"pause_{days}", "green_pause_days": days} for days in GREEN_PAUSES
+    ]
+    tide = [
+        {
+            "name": f"tide_{int(floor * 100)}",
+            "btc_tide_floor": floor,
+        }
+        for floor in TIDE_FLOORS
+    ]
     return [
         ("scale_in", scale),
         ("runner", runner),
@@ -173,6 +195,9 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         ("trail_touch", touch),
         ("beta_rank", beta),
         ("ir_rank", ir),
+        ("rearm", rearm),
+        ("btc_tide", tide),
+        ("green_pause", pause),
     ]
 
 

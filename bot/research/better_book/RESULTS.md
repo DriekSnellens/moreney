@@ -108,6 +108,36 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## After a green exit, open the next leader before the week is up
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| rearm_lock | +300,814 | 42.8% | +129,462 | +30,791 | 31.9% | 104 |
+| rearm_green | +130,939 | 44.3% | +61,590 | +21,057 | 33.4% | 122 |
+| rearm_green_next | +17,266 | 51.1% | +14,668 | +2,188 | 28.4% | 124 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Open a new ride only while BTC's own window is up
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| tide_0 | +61,930 | 42.7% | +68,604 | -189 | 40.6% | 84 |
+| tide_2 | +80,861 | 42.0% | +64,728 | +5,449 | 30.7% | 76 |
+| tide_5 | +57,517 | 37.5% | +68,439 | -1,640 | 20.3% | 64 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## After a green exit, wait longer than a week
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| pause_14 | +87,817 | 37.2% | +33,820 | +22,361 | 16.2% | 82 |
+| pause_21 | +22,863 | 39.2% | +8,263 | +10,849 | 25.8% | 80 |
+| pause_28 | +28,664 | 27.7% | +24,996 | +2,325 | 27.3% | 68 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -117,6 +147,23 @@ The 10% trail has to fire on the first close through the level, and it has to se
 The bar was not loosened after these numbers. A later family has to leave the entry size and this exit alone.
 
 Changing only who is ranked first does not clear it either. The live excess treats every alt as if its BTC beta were 1. Estimating that beta on 20, 40 or 60 daily log returns leaves the fresh 2026 book on the same euros and cuts the compounded path. Dividing the live score by the volatility of the alt-minus-BTC residual cuts the compounded path as well. The 40-day window is a few hundred euros ahead on a fresh 2026 book and about €210k behind over the full path.
+
+Opening the next leader sooner after a green exit loses. Waiting 14, 21 or 28 days after that same green exit also loses. A losing exit already keeps the week; lengthening the wait only after a winner gives the next ride away. Refusing a new ride unless BTC's own 10-day return is positive takes the fresh 2026 book to about zero.
+
+Re-picking the sleeve each day from the most-traded names on the whole venue, 12, 16 or 24 of them, finishes between a small gain and a loss. The fixed desk on that same cache is the book above.
+
+## Liquid names, re-picked every day
+
+Same rules, on every Bitvavo EUR name in `data/research/bitvavo_1d_all` through 2026-10-30. Each day the book may only buy one of the most-traded names, and a name needs 60 completed days. The baseline row is the fixed desk on this same cache, not the desk cache used above.
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| vol_top_12 | +2,479 | 59.8% | +7,875 | -3,724 | 52.6% | 114 |
+| vol_top_16 | -7,875 | 80.4% | +15,752 | -13,094 | 65.5% | 124 |
+| vol_top_24 | -17,287 | 87.1% | -15,673 | -8,068 | 46.4% | 130 |
+
+Does not clear the bar. region=False margin=[].
 
 ## Verdict
 

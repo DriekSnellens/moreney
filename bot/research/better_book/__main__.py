@@ -83,8 +83,78 @@ def main() -> None:
         )
 
     text = render(payload, verdicts, asof=end, start=args.start)
-    Path(args.out).write_text(text)
+    wide = _wide_section(windows, args.book, end, args.start)
+    if wide:
+        text = text.rstrip() + "\n\n" + wide
+        print("wide universe section included")
+    Path(args.out).write_text(text + "\n")
     print(f"wrote {args.out}")
+
+
+def _wide_section(
+    windows: tuple[tuple[str, str, str], ...],
+    book: float,
+    end: str,
+    start: str,
+) -> str:
+    """Same book on the liquid names of the whole venue, when that cache exists."""
+    import json
+
+    from bot.research.better_book.bar import VOLUME_TOPS, judge_family
+    from bot.research.better_book.report import _row
+    from bot.research.better_book.search import _run
+
+    root = Path("data/research/bitvavo_1d_all")
+    if not root.is_dir():
+        return ""
+    ohlc: dict[str, list] = {}
+    for path in sorted(root.glob("*.json")):
+        ohlc[path.stem] = json.loads(path.read_text())
+    if "BTC" not in ohlc:
+        return ""
+    print(f"wide universe {len(ohlc) - 1} names, tape → {end}")
+    base = _run(ohlc, name="baseline", windows=windows, book_eur=book)
+    cells = []
+    for n in VOLUME_TOPS:
+        cell = _run(
+            ohlc,
+            name=f"vol_top_{n}",
+            windows=windows,
+            book_eur=book,
+            universe_top_n=n,
+        )
+        cell["family"] = "volume_universe"
+        cells.append(cell)
+        print(
+            f"vol_top_{n} full {cell['full']['pnl_eur']:+.0f} "
+            f"oos {cell['oos']['pnl_eur']:+.0f}"
+        )
+    verdict = judge_family("volume_universe", cells, base)
+    lines = [
+        "## Liquid names, re-picked every day",
+        "",
+        f"Same rules, on every Bitvavo EUR name in `{root}` through {end}.",
+        "Each day the book may only buy one of the most-traded names, and a",
+        "name needs 60 completed days. The baseline row is the fixed desk on",
+        "this same cache, not the desk cache used above.",
+        "",
+        "| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+        _row(base),
+    ]
+    for cell in cells:
+        lines.append(_row(cell))
+    lines.append("")
+    if verdict.cleared:
+        names = ", ".join(f"`{n}`" for n in verdict.cleared)
+        lines.append(f"Clears the bar: {names}. Not switched on.")
+    else:
+        lines.append(
+            "Does not clear the bar. "
+            f"region={verdict.region} margin={list(verdict.margin_names)}."
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

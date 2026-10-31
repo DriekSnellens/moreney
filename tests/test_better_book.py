@@ -12,8 +12,14 @@ from bot.research.better_book.bar import (
     region_ok,
 )
 from bot.research.better_book.search import largest_new_trip, round_trips
-from bot.research.btc_residual_mix.engine import _scale_in_orders, pick_residual
-from bot.research.clip_exit_lab.engine import Book, Lot, _overlay_orders
+from bot.research.btc_residual_mix.engine import (
+    _scale_in_orders,
+    pick_residual,
+    rearm_after_exit,
+    tide_alts,
+    top_volume_universe,
+)
+from bot.research.clip_exit_lab.engine import Book, Lot, Order, _overlay_orders
 from bot.research.clip_exit_lab.policies import ExitPolicy
 
 
@@ -352,3 +358,65 @@ def test_ir_rank_prefers_the_quieter_residual() -> None:
     )
     pick = pick_residual(ohlc, date, rank_mode="ir", rank_window=30, **common)
     assert pick["wants"][0] == "CALM"
+
+
+def _held(entry: float = 100.0) -> Book:
+    book = Book(0.0)
+    book.lots["ETH"] = Lot(
+        base="ETH", qty=10.0, role="alt", entry_px=entry, peak_px=entry, opened_ms=1
+    )
+    return book
+
+
+def test_rearm_only_after_a_green_close_or_a_lock() -> None:
+    full = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="alt_trail")
+    partial = Order(side="sell", base="ETH", role="alt", adv=1.0, qty=4.0, reason="alt_trail")
+    locked = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="alt_lock+alt_trail")
+    green = {"ETH": 110.0}
+    red = {"ETH": 90.0}
+    assert rearm_after_exit(_held(), [full], green, "green") is True
+    assert rearm_after_exit(_held(), [full], red, "green") is False
+    assert rearm_after_exit(_held(), [full], green, "green_next") is True
+    assert rearm_after_exit(_held(), [full], green, "lock") is False
+    assert rearm_after_exit(_held(), [locked], red, "lock") is True
+    assert rearm_after_exit(_held(), [partial], green, "green") is False
+    assert rearm_after_exit(_held(), [full], green, "") is False
+
+
+def test_top_volume_universe_skips_a_short_history() -> None:
+    t0 = 1_704_067_200_000
+    def bars(n: int, vol: float) -> list[list[float]]:
+        return [
+            [t0 + i * 86_400_000, 10.0, 10.0, 10.0, 10.0, vol] for i in range(n)
+        ]
+
+    ohlc = {
+        "BTC": bars(80, 1.0),
+        "QUIET": bars(80, 100.0),
+        "LOUD": bars(80, 10_000.0),
+        "NEW": bars(20, 50_000.0),
+    }
+    # 80 bars from 2024-01-01 ends 2024-03-20.
+    picked = top_volume_universe(ohlc, "2024-03-20", 1)
+    assert picked == ("LOUD",)
+    both = top_volume_universe(ohlc, "2024-03-20", 2)
+    assert both[0] == "LOUD"
+    assert "NEW" not in both
+
+
+def test_green_pause_is_due_only_after_the_longer_wait() -> None:
+    from bot.research.btc_residual_mix.engine import DAY_MS
+
+    now = 1_700_000_000_000
+    rebalance = 7
+    pause = 14
+    last = now + (pause - rebalance) * DAY_MS
+    assert now - last < rebalance * DAY_MS
+    assert (now + pause * DAY_MS) - last >= rebalance * DAY_MS
+    assert (now + (pause - 1) * DAY_MS) - last < rebalance * DAY_MS
+
+
+def test_tide_keeps_a_held_name_and_does_not_open_a_new_one() -> None:
+    assert tide_alts(("SOL",), ("ETH",), tide_ok=False) == ("ETH",)
+    assert tide_alts(("SOL",), (), tide_ok=False) == ()
+    assert tide_alts(("SOL",), ("ETH",), tide_ok=True) == ("SOL",)

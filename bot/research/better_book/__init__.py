@@ -20,6 +20,15 @@ Families, each fixed before its own tape run:
   daily log returns.
 * IR rank: the live score divided by the volatility of the alt-minus-BTC
   daily residual, over 10, 20 or 40 days.
+* rearm: after a lock, or after a close that is still above the entry,
+  open the next leader before the seven-day clock. A losing exit waits
+  the full week. One cell waits one day instead of buying the next open.
+* BTC tide: a new name is opened only when BTC's own lookback return is
+  at least 0, 2 or 5 percent. A name already held is left to the trail.
+* green pause: after a close that is still above the entry, the next
+  entry waits 14, 21 or 28 days. A losing exit keeps the seven-day clock.
+* liquid universe: the same book, but the sleeve is the 12, 16 or 24
+  most-traded names that day on the whole venue, each with 60 days of history.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

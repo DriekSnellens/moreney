@@ -30,6 +30,7 @@ from bot.research.clip_exit_lab.engine import (
     Order,
     _adv,
     _apply_orders,
+    _cut,
     _overlay_orders,
     _px_map,
     bar_date,
@@ -54,6 +55,78 @@ def _signal_closes(closes: Sequence[float], skip: int) -> Sequence[float]:
     if len(closes) <= skip:
         return ()
     return closes[:-skip]
+
+
+def rearm_after_exit(
+    book: Book,
+    overlay: Sequence[Order],
+    closes: Mapping[str, float],
+    mode: str,
+) -> bool:
+    """Whether this exit may open the next leader before the week is up.
+
+    ``lock`` requires the lock in the sell reason. ``green`` and
+    ``green_next`` require the signal close to be above the entry. A
+    partial sell does not count. Anything else keeps the normal week.
+    """
+    if mode not in ("lock", "green", "green_next"):
+        return False
+    for order in overlay:
+        if order.side != "sell" or order.role != "alt" or order.qty > 0:
+            continue
+        lot = book.lots.get(order.base)
+        if lot is None or lot.entry_px <= 0:
+            continue
+        if mode == "lock":
+            if "alt_lock" in (order.reason or ""):
+                return True
+            continue
+        close = float(closes.get(order.base) or 0.0)
+        if close > lot.entry_px:
+            return True
+    return False
+
+
+def tide_alts(
+    next_alts: Sequence[str],
+    held_alts: Sequence[str],
+    *,
+    tide_ok: bool,
+) -> tuple[str, ...]:
+    """Keep a held alt when BTC's own window is below the tide floor.
+
+    A flat book stays flat. Names that are not already held are not opened.
+    """
+    if tide_ok:
+        return tuple(next_alts)
+    return tuple(held_alts)
+
+
+def top_volume_universe(
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    date: str,
+    n: int,
+    *,
+    min_bars: int = 60,
+) -> tuple[str, ...]:
+    """The ``n`` names with the highest recent quote volume.
+
+    BTC is the benchmark, not a candidate. A name needs ``min_bars``
+    completed days so a new listing cannot lead on a handful of prints.
+    """
+    scored: list[tuple[float, str]] = []
+    for base, rows in ohlc.items():
+        if str(base).upper() == "BTC":
+            continue
+        end = _cut(rows, date)
+        if end < min_bars:
+            continue
+        qv = quote_vol(rows[max(0, end - 20) : end])
+        if qv <= 0:
+            continue
+        scored.append((qv, str(base)))
+    scored.sort(reverse=True)
+    return tuple(base for _, base in scored[: max(1, int(n))])
 
 
 def _window_return(closes: Sequence[float], lb: int, skip: int) -> float | None:
@@ -503,6 +576,10 @@ def run_btc_residual(
     keep_weeks: bool = False,
     keep_trades: bool = False,
     strategy: str = "",
+    rearm_mode: str = "",
+    btc_tide_floor: float | None = None,
+    green_pause_days: int = 0,
+    universe_top_n: int = 0,
     alt_allow: Mapping[str, set[str]] | None = None,
     alt_allow_mode: str = "gate",
     alt_allow_excess_override: float | None = None,
@@ -581,6 +658,7 @@ def run_btc_residual(
             pending = []
         overlay: list[Order] = []
         overlay_sold: set[str] = set()
+        rearm_hit = False
         if policy is not None:
             overlay = _overlay_orders(book, ohlc, date, policy, now_ms)
             overlay_sold = {o.base for o in overlay if o.side == "sell"}
@@ -588,14 +666,30 @@ def run_btc_residual(
             for o in overlay:
                 if o.reason:
                     overlay_reasons[o.reason] = overlay_reasons.get(o.reason, 0) + 1
+            closes_now = _px_map(ohlc, date, field=4) if overlay_sold else {}
+            if overlay_sold and rearm_mode:
+                rearm_hit = rearm_after_exit(book, overlay, closes_now, rearm_mode)
+            pause_days = int(green_pause_days or 0)
+            pause_hit = False
+            if overlay_sold and pause_days > int(rebalance_days):
+                pause_hit = rearm_after_exit(book, overlay, closes_now, "green")
             if overlay_sold:
                 want_alts = tuple(a for a in want_alts if a not in overlay_sold)
                 # Default: a trail/lock sell restarts the full week clock.
                 # ``exit_cooldown_days`` shortens that wait to the next pick.
-                if exit_cooldown_days is None:
+                # ``green_next`` shortens it only when the close is still
+                # above the entry. ``green_pause_days`` lengthens it, and
+                # only then. A losing exit keeps the full week.
+                if pause_hit:
+                    last_reb = now_ms + (pause_days - int(rebalance_days)) * DAY_MS
+                elif exit_cooldown_days is None and not (
+                    rearm_hit and rearm_mode == "green_next"
+                ):
                     last_reb = now_ms
                 else:
-                    wait = max(0, int(exit_cooldown_days))
+                    wait = 1 if rearm_hit and rearm_mode == "green_next" else max(
+                        0, int(exit_cooldown_days or 0)
+                    )
                     last_reb = now_ms - (int(rebalance_days) - wait) * DAY_MS
             # A touch stop traded during the bar. Book it at that price now
             # so the next-open queue does not sell the same lot again.
@@ -609,10 +703,16 @@ def run_btc_residual(
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
         risk_on = s50 is not None and last > s50
+        uni = (
+            top_volume_universe(ohlc, date, universe_top_n)
+            if universe_top_n > 0
+            else DEFAULT_UNIVERSE
+        )
         # Immediate rebuy after trail/overlay: same next-open as the sell, skip
         # the sold name(s). Weekly rotate path below still handles due clocks.
+        early = immediate_rebuy or (rearm_hit and rearm_mode in ("lock", "green"))
         if (
-            immediate_rebuy
+            early
             and overlay_sold
             and risk_on
             and float(btc_frac) <= 0.0
@@ -621,6 +721,7 @@ def run_btc_residual(
             pick_now = pick_residual(
                 ohlc,
                 date,
+                universe=uni,
                 excess_floor=excess_floor,
                 lookback_days=lookback_days,
                 skip_days=skip_days,
@@ -660,6 +761,7 @@ def run_btc_residual(
             pick = pick_residual(
                 ohlc,
                 date,
+                universe=uni,
                 excess_floor=excess_floor,
                 lookback_days=lookback_days,
                 skip_days=skip_days,
@@ -695,6 +797,15 @@ def run_btc_residual(
                 btc_frac=btc_frac,
                 flatten=flatten,
             )
+            if btc_tide_floor is not None:
+                r_btc = _window_return(btc_c, lookback_days, skip_days)
+                tide_ok = r_btc is not None and r_btc + 1e-12 >= float(btc_tide_floor)
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                next_alts = tide_alts(next_alts, held_alts, tide_ok=tide_ok)
+                if not tide_ok:
+                    next_btc = ""
             changed = (next_btc != want_btc) or (next_alts != want_alts) or not held
             if changed and (next_btc or next_alts or held):
                 orders: list[Order] = []
