@@ -15,6 +15,11 @@ Families, each fixed before its own tape run:
   low trades it, sell there (a gap fills at the open). One cell does this
   for the trail, one for the lock, one for both. The close rule still
   runs when the low does not reach the level.
+* beta rank: same qualifiers, but the score subtracts beta times the BTC
+  move instead of assuming beta is 1. Beta is estimated on 20, 40 or 60
+  daily log returns.
+* IR rank: the live score divided by the volatility of the alt-minus-BTC
+  daily residual, over 10, 20 or 40 days.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

@@ -88,6 +88,26 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## Rank by excess after the alt's own BTC beta
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| beta_20 | +300,127 | 33.9% | +129,096 | +30,791 | 31.9% | 102 |
+| beta_40 | +119,804 | 40.1% | +39,127 | +30,791 | 31.9% | 102 |
+| beta_60 | +119,804 | 40.1% | +39,127 | +30,791 | 31.9% | 102 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Rank that excess per unit of residual volatility
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| ir_10 | +139,052 | 40.9% | +86,462 | +13,629 | 28.0% | 102 |
+| ir_20 | +167,179 | 30.1% | +107,722 | +13,629 | 28.0% | 102 |
+| ir_40 | +131,583 | 32.9% | +43,700 | +31,421 | 31.9% | 104 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -95,6 +115,8 @@ Full size on the leader is the book. A starter of 40–60% that adds only after 
 The 10% trail has to fire on the first close through the level, and it has to sell the whole lot. Widening it after a large peak never reaches the size bar; the closest cells are the ones that almost never widen. Checking that trail on only one weekday, waiting for a second or third close, or banking half on the first pierce, all give the compounded path back. Selling when the low trades the prior-peak level is earlier than the close and does the same: the wick is not a fill you want.
 
 The bar was not loosened after these numbers. A later family has to leave the entry size and this exit alone.
+
+Changing only who is ranked first does not clear it either. The live excess treats every alt as if its BTC beta were 1. Estimating that beta on 20, 40 or 60 daily log returns leaves the fresh 2026 book on the same euros and cuts the compounded path. Dividing the live score by the volatility of the alt-minus-BTC residual cuts the compounded path as well. The 40-day window is a few hundred euros ahead on a fresh 2026 book and about €210k behind over the full path.
 
 ## Verdict
 

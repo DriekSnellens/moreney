@@ -75,6 +75,8 @@ def render(
         "weekday_trail": "Price trail on one weekday, lock every day",
         "trail_confirm": "Same 10% trail, but one close is not enough",
         "trail_touch": "Sell at the level when the low trades it",
+        "beta_rank": "Rank by excess after the alt's own BTC beta",
+        "ir_rank": "Rank that excess per unit of residual volatility",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -120,6 +122,16 @@ def render(
     lines.append(
         "The bar was not loosened after these numbers. A later family has to "
         "leave the entry size and this exit alone."
+    )
+    lines.append("")
+    lines.append(
+        "Changing only who is ranked first does not clear it either. The live "
+        "excess treats every alt as if its BTC beta were 1. Estimating that beta "
+        "on 20, 40 or 60 daily log returns leaves the fresh 2026 book on the same "
+        "euros and cuts the compounded path. Dividing the live score by the "
+        "volatility of the alt-minus-BTC residual cuts the compounded path as well. "
+        "The 40-day window is a few hundred euros ahead on a fresh 2026 book and "
+        "about €210k behind over the full path."
     )
     lines.append("")
     lines.append("## Verdict")

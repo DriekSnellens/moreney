@@ -34,6 +34,11 @@ TRAIL_HALF_FRAC = 0.50
 # Waiting for a second close gave the ride back. These cells sell when
 # the low trades the level known before the bar, which is earlier than
 # the close, not a wider trail and not a second close.
+# Rank only. Size, clock, trail and lock stay the live ones.
+# Beta windows: the live excess assumes every alt has BTC beta 1.
+# IR windows: the same live score, divided by residual volatility.
+BETA_WINDOWS = (20, 40, 60)
+IR_WINDOWS = (10, 20, 40)
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

@@ -9,6 +9,7 @@ Wet = next-open Bitvavo taker. Not armed live. No per-coin branches.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -41,7 +42,77 @@ from bot.research.clip_exit_lab.policies import ExitPolicy
 
 DAY_MS = 86_400_000
 MIN_QVOL = 80_000.0
+# Daily residual vol below this is treated as this, so a frozen print
+# cannot dominate an information-ratio rank.
+SPREAD_VOL_FLOOR = 0.005
 Flatten = Literal["all", "btc", "none", "regime"]
+
+
+def _signal_closes(closes: Sequence[float], skip: int) -> Sequence[float]:
+    if skip <= 0:
+        return closes
+    if len(closes) <= skip:
+        return ()
+    return closes[:-skip]
+
+
+def _window_return(closes: Sequence[float], lb: int, skip: int) -> float | None:
+    use = _signal_closes(closes, skip)
+    if len(use) < lb + 1:
+        return None
+    end = float(use[-1])
+    start = float(use[-1 - lb])
+    if start <= 0 or end <= 0:
+        return None
+    return end / start - 1.0
+
+
+def _log_pair(
+    alt: Sequence[float], btc: Sequence[float], n: int, skip: int
+) -> tuple[list[float], list[float]] | None:
+    """``n`` daily log returns for alt and BTC, ending on the signal close."""
+    a = list(_signal_closes(alt, skip))
+    b = list(_signal_closes(btc, skip))
+    m = min(len(a), len(b))
+    if m < n + 1:
+        return None
+    a = a[m - (n + 1) : m]
+    b = b[m - (n + 1) : m]
+    ar: list[float] = []
+    br: list[float] = []
+    for i in range(1, len(a)):
+        if min(a[i - 1], b[i - 1], a[i], b[i]) <= 0:
+            return None
+        ar.append(math.log(a[i] / a[i - 1]))
+        br.append(math.log(b[i] / b[i - 1]))
+    if len(ar) < n:
+        return None
+    return ar, br
+
+
+def _ols_beta(alt: Sequence[float], btc: Sequence[float], n: int, skip: int) -> float | None:
+    got = _log_pair(alt, btc, n, skip)
+    if got is None:
+        return None
+    ar, br = got
+    mb = sum(br) / len(br)
+    var_b = sum((x - mb) ** 2 for x in br)
+    if var_b <= 1e-12:
+        return None
+    ma = sum(ar) / len(ar)
+    cov = sum((ar[i] - ma) * (br[i] - mb) for i in range(len(ar)))
+    return cov / var_b
+
+
+def _spread_vol(alt: Sequence[float], btc: Sequence[float], n: int, skip: int) -> float | None:
+    got = _log_pair(alt, btc, n, skip)
+    if got is None:
+        return None
+    ar, br = got
+    spreads = [ar[i] - br[i] for i in range(len(ar))]
+    mean = sum(spreads) / len(spreads)
+    var = sum((x - mean) ** 2 for x in spreads) / len(spreads)
+    return max(math.sqrt(var), SPREAD_VOL_FLOOR)
 
 
 def pick_residual(
@@ -58,6 +129,8 @@ def pick_residual(
     sma_n: int = 50,
     exclude_bases: Sequence[str] | None = None,
     near_high_weight: float = 0.0,
+    rank_mode: str = "excess",
+    rank_window: int = 20,
 ) -> dict[str, Any]:
     ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
@@ -79,18 +152,29 @@ def pick_residual(
         highs = [float(r[2]) for r in rows if len(r) >= 3]
         close = float(cl[-1]) if cl else 0.0
         prox = high_proximity(highs, close)
+        score_xs = float(xs)
+        if rank_mode == "beta":
+            beta = _ols_beta(cl, btc_c, int(rank_window), skip_days)
+            r_alt = _window_return(cl, lookback_days, skip_days)
+            r_btc = _window_return(btc_c, lookback_days, skip_days)
+            if beta is not None and r_alt is not None and r_btc is not None:
+                score_xs = r_alt - beta * r_btc
+        score = residual_rank_score(score_xs, prox, weight=float(near_high_weight or 0.0))
+        if rank_mode == "ir":
+            vol = _spread_vol(cl, btc_c, int(rank_window), skip_days)
+            if vol is not None and vol > 0:
+                score = score / vol
         ranked.append(
             {
                 "base": base,
                 "excess": xs,
                 "qvol": round(qv, 0),
                 "prox60": prox,
-                "score": residual_rank_score(
-                    float(xs), prox, weight=float(near_high_weight or 0.0)
-                ),
+                "score": score,
             }
         )
-    if float(near_high_weight or 0.0) > 0:
+    use_score = rank_mode != "excess" or float(near_high_weight or 0.0) > 0
+    if use_score:
         ranked.sort(key=lambda r: float(r["score"]), reverse=True)
     else:
         ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
@@ -231,6 +315,8 @@ def _spike_reclaim_orders(
     require_alt_sma: bool,
     sma_n: int,
     near_high_weight: float = 0.0,
+    rank_mode: str = "excess",
+    rank_window: int = 20,
 ) -> list[Order]:
     """Buy a spiked alt back if price reclaims that day's high within the window."""
     days = int(policy.alt_spike_reclaim_days or 0)
@@ -286,6 +372,8 @@ def _spike_reclaim_orders(
             require_alt_sma=require_alt_sma,
             sma_n=sma_n,
             near_high_weight=near_high_weight,
+            rank_mode=rank_mode,
+            rank_window=rank_window,
         )
         if base not in (pick.get("wants") or []):
             still.append(watch)
@@ -340,6 +428,8 @@ def _scale_in_orders(
     sma_n: int,
     near_high_weight: float,
     skip_bases: set[str],
+    rank_mode: str = "excess",
+    rank_window: int = 20,
 ) -> list[Order]:
     """Add the rest of the sleeve once the starter is through the arm.
 
@@ -359,6 +449,8 @@ def _scale_in_orders(
         require_alt_sma=require_alt_sma,
         sma_n=sma_n,
         near_high_weight=near_high_weight,
+        rank_mode=rank_mode,
+        rank_window=rank_window,
     )
     leaders = {str(b) for b in (pick.get("wants") or [])}
     orders: list[Order] = []
@@ -423,6 +515,8 @@ def run_btc_residual(
     exit_cooldown_days: int | None = None,
     starter_frac: float = 1.0,
     add_arm_pct: float = 0.0,
+    rank_mode: str = "excess",
+    rank_window: int = 20,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -535,6 +629,8 @@ def run_btc_residual(
                 sma_n=sma_n,
                 exclude_bases=sorted(overlay_sold),
                 near_high_weight=near_high_weight,
+                rank_mode=rank_mode,
+                rank_window=rank_window,
             )
             winners = list(pick_now.get("wants") or [])
             if winners:
@@ -571,6 +667,8 @@ def run_btc_residual(
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
                 near_high_weight=near_high_weight,
+                rank_mode=rank_mode,
+                rank_window=rank_window,
             )
             if alt_allow is not None and date in alt_allow:
                 pick = dict(pick)
@@ -687,6 +785,8 @@ def run_btc_residual(
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
                 near_high_weight=near_high_weight,
+                rank_mode=rank_mode,
+                rank_window=rank_window,
             )
             for order in reclaim:
                 overlay_reasons[order.reason] = overlay_reasons.get(order.reason, 0) + 1
@@ -718,6 +818,8 @@ def run_btc_residual(
                 sma_n=sma_n,
                 near_high_weight=near_high_weight,
                 skip_bases=busy | {o.base for o in pending},
+                rank_mode=rank_mode,
+                rank_window=rank_window,
             )
             if adds:
                 if model.delay_next_open:

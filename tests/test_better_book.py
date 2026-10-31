@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from bot.research.better_book.bar import (
     beats_both,
     hits_margin,
@@ -10,7 +12,7 @@ from bot.research.better_book.bar import (
     region_ok,
 )
 from bot.research.better_book.search import largest_new_trip, round_trips
-from bot.research.btc_residual_mix.engine import _scale_in_orders
+from bot.research.btc_residual_mix.engine import _scale_in_orders, pick_residual
 from bot.research.clip_exit_lab.engine import Book, Lot, _overlay_orders
 from bot.research.clip_exit_lab.policies import ExitPolicy
 
@@ -277,3 +279,76 @@ def test_touch_sells_at_the_prior_peak_level_when_the_low_trades_it() -> None:
     gap = _overlay_orders(book, ohlc, "2024-01-07", touch, rows[-1][0])
     assert len(gap) == 1
     assert abs(gap[0].same_bar_px - 130.0) < 1e-9
+
+
+def _rank_tape() -> dict[str, list[list[float]]]:
+    """BTC varies. BETA is 2x BTC. ALPHA is BTC plus a small daily drift."""
+    t0 = 1_704_067_200_000
+    n = 45
+    btc_lr = [0.02 if i % 3 else -0.01 for i in range(n)]
+    btc = [100.0]
+    beta = [100.0]
+    alpha = [100.0]
+    for lr in btc_lr:
+        btc.append(btc[-1] * math.exp(lr))
+        beta.append(beta[-1] * math.exp(2.0 * lr))
+        alpha.append(alpha[-1] * math.exp(lr + 0.003))
+    # n+1 prices. Drop the seed so each series has n bars, one per return step.
+    def bars(px: list[float]) -> list[list[float]]:
+        out = []
+        for i, p in enumerate(px[1:]):
+            out.append([t0 + i * 86_400_000, p, p, p, p, 5_000_000.0])
+        return out
+
+    wild = []
+    for i in range(n):
+        shock = 0.12 if i % 2 == 0 else -0.12
+        base = alpha[i + 1]
+        wild.append(base * math.exp(shock if i < 25 else 0.0))
+    def bars_px(px: list[float]) -> list[list[float]]:
+        out = []
+        for i, p in enumerate(px):
+            out.append([t0 + i * 86_400_000, p, p * 1.01, p * 0.99, p, 5_000_000.0])
+        return out
+
+    return {
+        "BTC": bars(btc),
+        "BETA": bars(beta),
+        "ALPHA": bars(alpha),
+        "CALM": bars_px(list(alpha[1:])),
+        "WILD": bars_px(wild),
+    }
+
+
+def test_beta_rank_prefers_alpha_over_a_levered_btc_copy() -> None:
+    ohlc = _rank_tape()
+    date = "2024-02-14"
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("BETA", "ALPHA"),
+    )
+    raw = pick_residual(ohlc, date, **common)
+    adj = pick_residual(ohlc, date, rank_mode="beta", rank_window=30, **common)
+    assert raw["wants"][0] == "BETA"
+    assert adj["wants"][0] == "ALPHA"
+
+
+def test_ir_rank_prefers_the_quieter_residual() -> None:
+    ohlc = _rank_tape()
+    date = "2024-02-14"
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("CALM", "WILD"),
+    )
+    pick = pick_residual(ohlc, date, rank_mode="ir", rank_window=30, **common)
+    assert pick["wants"][0] == "CALM"

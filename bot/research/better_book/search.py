@@ -7,6 +7,8 @@ from dataclasses import replace
 from typing import Any
 
 from bot.research.better_book.bar import (
+    BETA_WINDOWS,
+    IR_WINDOWS,
     RUNNER_ARMS,
     RUNNER_TRAILS,
     SCALE_ARMS,
@@ -31,6 +33,8 @@ def _run(
     policy: ExitPolicy | None = None,
     starter_frac: float = 1.0,
     add_arm_pct: float = 0.0,
+    rank_mode: str = "excess",
+    rank_window: int = 20,
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -49,6 +53,8 @@ def _run(
             keep_trades=keep_trades,
             starter_frac=starter_frac,
             add_arm_pct=add_arm_pct,
+            rank_mode=rank_mode,
+            rank_window=rank_window,
             **knobs,
         )
         out[tag] = {
@@ -143,12 +149,30 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
             ),
         },
     ]
+    beta = [
+        {
+            "name": f"beta_{n}",
+            "rank_mode": "beta",
+            "rank_window": n,
+        }
+        for n in BETA_WINDOWS
+    ]
+    ir = [
+        {
+            "name": f"ir_{n}",
+            "rank_mode": "ir",
+            "rank_window": n,
+        }
+        for n in IR_WINDOWS
+    ]
     return [
         ("scale_in", scale),
         ("runner", runner),
         ("weekday_trail", weekly),
         ("trail_confirm", confirm),
         ("trail_touch", touch),
+        ("beta_rank", beta),
+        ("ir_rank", ir),
     ]
 
 
