@@ -80,6 +80,12 @@ def render(
         "rearm": "After a green exit, open the next leader before the week is up",
         "btc_tide": "Open a new ride only while BTC's own window is up",
         "green_pause": "After a green exit, wait longer than a week",
+        "btc_veto": "Cash on a BTC SMA break only after a deeper gap",
+        "rank_slot": "Buy a cooler qualifier than the residual leader",
+        "red_cut": "Sell a position that is still red after a few days",
+        "red_leader": "Sell a red position only after it loses the lead",
+        "gap_cap": "Cancel a buy when the next open gaps up",
+        "lead_exit": "Sell when the held name loses the residual lead",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -149,6 +155,40 @@ def render(
         "Re-picking the sleeve each day from the most-traded names on the whole "
         "venue, 12, 16 or 24 of them, finishes between a small gain and a loss. "
         "The fixed desk on that same cache is the book above."
+    )
+    lines.append("")
+    lines.append(
+        "Letting a qualifying alt stay on when BTC is 5% or 10% under its SMA50, "
+        "or ignoring that average, raises the full-path drawdown to 56–75% and "
+        "gives the euros back. Buying the second score, the third, or the "
+        "qualifier closest to the floor loses the stake or finishes a few "
+        "thousand euros down. The leader, and the cash rule on a BTC close under "
+        "its average, stay in the book."
+    )
+    lines.append("")
+    lines.append(
+        "Selling any position that is still under its entry after two days is "
+        "ahead of the fresh-2026 size bar and misses the rest of it. The "
+        "compounded path and the book through 2025 both give way. Four days is "
+        "a little ahead through 2025 and a little behind on the full path, and "
+        "it gives back fresh 2026. Six days leaves fresh 2026 unchanged. The "
+        "day count stays where it was locked."
+    )
+    lines.append("")
+    lines.append(
+        "Keeping that two-day cut only when the name has also lost the lead "
+        "is the closest cell: full path +€417,544 versus +€342,074, fresh 2026 "
+        "+€40,807 versus +€30,791, and the book through 2025 a few thousand "
+        "euros behind. That is short of 1.25× and of 1.5×, it is one cell, and "
+        "four and six days do not come with it. Cancelling a buy when the next "
+        "open gaps 3, 5 or 8 percent does not change a fill on this tape."
+    )
+    lines.append("")
+    lines.append(
+        "Selling as soon as the held name is no longer the top qualifier, "
+        "with or without a red close, or as soon as its excess falls through "
+        "the floor, gives the compounded path back. The two-day wait is what "
+        "kept that closer cell. Dropping the wait is not a find."
     )
     lines.append("")
     lines.append("## Verdict")

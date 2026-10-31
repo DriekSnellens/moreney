@@ -62,6 +62,14 @@ class ExitPolicy:
     # Same fill for the lock floor, armed off the prior peak. The close
     # lock still runs when this is false.
     alt_lock_on_touch: bool = False
+    # Sell a full lot that is still under its entry after this many days.
+    # 0 leaves the live trail and lock in charge. A close above the entry
+    # does not arm this, so a winner is not cut for being old.
+    alt_red_cut_days: int = 0
+    # When set, that red cut is dropped if the name is still the top
+    # residual qualifier. A red leader stays on the live trail. Other
+    # reasons on the same sell, such as the trail itself, still fire.
+    alt_red_cut_if_leader: bool = False
 
 
 def POLICIES() -> list[ExitPolicy]:

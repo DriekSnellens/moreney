@@ -102,6 +102,101 @@ def tide_alts(
     return tuple(held_alts)
 
 
+def strip_red_cut_while_leader(orders: Sequence[Order], leader: str) -> list[Order]:
+    """Drop a red-cut sell while that name is still the residual leader.
+
+    A trail or lock on the same order still sells. An empty leader means
+    nobody qualifies, so the red cut stands.
+    """
+    kept: list[Order] = []
+    for order in orders:
+        parts = [part for part in str(order.reason).split("+") if part]
+        if (
+            order.side == "sell"
+            and leader
+            and order.base == leader
+            and "alt_red_cut" in parts
+        ):
+            rest = [part for part in parts if part != "alt_red_cut"]
+            if not rest:
+                continue
+            order = Order(
+                side=order.side,
+                base=order.base,
+                role=order.role,
+                adv=order.adv,
+                qty=order.qty,
+                notional=order.notional,
+                reason="+".join(rest),
+                keep_entry=order.keep_entry,
+                same_bar_px=order.same_bar_px,
+            )
+        kept.append(order)
+    return kept
+
+
+def lead_lost(
+    mode: str,
+    *,
+    base: str,
+    leader: str,
+    excess: float | None,
+    close: float,
+    entry: float,
+    floor: float,
+) -> bool:
+    """Whether a held alt has lost the residual lead on this close.
+
+    ``rank`` sells when it is not the top qualifier. ``rank_red`` also
+    requires the close to be under the entry, so a green ex-leader stays.
+    ``floor`` sells when its own excess is no longer above the floor,
+    including when it dropped out of the ranked set.
+    """
+    if mode == "rank":
+        return base != leader
+    if mode == "rank_red":
+        return base != leader and entry > 0 and close < entry
+    if mode == "floor":
+        return excess is None or float(excess) <= float(floor) + 1e-12
+    return False
+
+
+def open_gap(
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    base: str,
+    date: str,
+) -> float | None:
+    """Next open versus the prior close. None when either price is missing."""
+    rows = rows_through(ohlc.get(base) or [], date)
+    if len(rows) < 2 or len(rows[-1]) < 2 or len(rows[-2]) < 5:
+        return None
+    prev = float(rows[-2][4])
+    opened = float(rows[-1][1])
+    if prev <= 0 or opened <= 0:
+        return None
+    return opened / prev - 1.0
+
+
+def drop_gapped_buys(
+    orders: Sequence[Order],
+    ohlc: Mapping[str, Sequence[Sequence[float]]],
+    date: str,
+    cap: float,
+) -> list[Order]:
+    """Cancel an alt buy when the open has already gapped through the cap.
+
+    Sells still fill. The book then waits for the clock it already set.
+    """
+    kept: list[Order] = []
+    for order in orders:
+        if order.side == "buy" and order.role == "alt":
+            gap = open_gap(ohlc, order.base, date)
+            if gap is not None and gap > float(cap) + 1e-12:
+                continue
+        kept.append(order)
+    return kept
+
+
 def top_volume_universe(
     ohlc: Mapping[str, Sequence[Sequence[float]]],
     date: str,
@@ -188,6 +283,19 @@ def _spread_vol(alt: Sequence[float], btc: Sequence[float], n: int, skip: int) -
     return max(math.sqrt(var), SPREAD_VOL_FLOOR)
 
 
+def btc_risk_on(last: float, sma_px: float | None, *, gap: float | None = None) -> bool:
+    """True when BTC is above its SMA, or not through a deeper band.
+
+    ``gap`` None is the live rule: any close under the SMA is risk-off.
+    A gap of 0.05 stays risk-on until the close is 5% under the SMA.
+    A gap of 1.0 does not fire while the close is positive.
+    """
+    if sma_px is None or sma_px <= 0 or last <= 0:
+        return False
+    band = 0.0 if gap is None else max(0.0, float(gap))
+    return last > sma_px * (1.0 - band)
+
+
 def pick_residual(
     ohlc: Mapping[str, Sequence[Sequence[float]]],
     date: str,
@@ -204,6 +312,7 @@ def pick_residual(
     near_high_weight: float = 0.0,
     rank_mode: str = "excess",
     rank_window: int = 20,
+    rank_slot: str = "",
 ) -> dict[str, Any]:
     ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
@@ -251,13 +360,25 @@ def pick_residual(
         ranked.sort(key=lambda r: float(r["score"]), reverse=True)
     else:
         ranked.sort(key=lambda r: float(r["excess"]), reverse=True)
-    alts = [
-        str(r["base"])
-        for r in ranked
-        if float(r["excess"]) > excess_floor
-    ][: max(1, int(n_alts))]
+    qualified = [str(r["base"]) for r in ranked if float(r["excess"]) > excess_floor]
+    slot = str(rank_slot or "")
+    if slot == "second":
+        alts = qualified[1:2]
+    elif slot == "third":
+        alts = qualified[2:3]
+    elif slot == "floor":
+        cool = [r for r in ranked if float(r["excess"]) > excess_floor]
+        cool.sort(key=lambda r: (float(r["excess"]), str(r["base"])))
+        alts = [str(cool[0]["base"])] if cool else []
+    else:
+        alts = qualified[: max(1, int(n_alts))]
     want = alts[0] if alts else "BTC"
-    return {"want": want, "wants": alts, "ranked": ranked[:8]}
+    return {
+        "want": want,
+        "wants": alts,
+        "ranked": ranked[:8],
+        "excess": {str(row["base"]): float(row["excess"]) for row in ranked},
+    }
 
 
 def apply_alt_allow(
@@ -594,6 +715,10 @@ def run_btc_residual(
     add_arm_pct: float = 0.0,
     rank_mode: str = "excess",
     rank_window: int = 20,
+    btc_veto_gap: float | None = None,
+    rank_slot: str = "",
+    gap_cap: float | None = None,
+    lead_exit: str = "",
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -647,20 +772,95 @@ def run_btc_residual(
         now = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=UTC)
         now_ms = int(now.timestamp() * 1000)
         if model.delay_next_open and pending:
-            fills = _apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms)
-            trades.extend(fills)
-            _mark_scale_open(book, fills, starter_frac=starter_frac, add_arm_pct=add_arm_pct)
-            for fill in fills:
-                if fill.get("reason") == "alt_reclaim":
-                    lot = book.lots.get(str(fill["base"]))
-                    if lot is not None:
-                        lot.spike_done = True
+            if gap_cap is not None and float(gap_cap) > 0:
+                pending = drop_gapped_buys(pending, ohlc, date, float(gap_cap))
+            if pending:
+                fills = _apply_orders(book, pending, ohlc, date, model, opened_ms=now_ms)
+                trades.extend(fills)
+                _mark_scale_open(book, fills, starter_frac=starter_frac, add_arm_pct=add_arm_pct)
+                for fill in fills:
+                    if fill.get("reason") == "alt_reclaim":
+                        lot = book.lots.get(str(fill["base"]))
+                        if lot is not None:
+                            lot.spike_done = True
             pending = []
         overlay: list[Order] = []
         overlay_sold: set[str] = set()
         rearm_hit = False
         if policy is not None:
             overlay = _overlay_orders(book, ohlc, date, policy, now_ms)
+            if policy.alt_red_cut_if_leader:
+                sleeve = (
+                    top_volume_universe(ohlc, date, universe_top_n)
+                    if universe_top_n > 0
+                    else DEFAULT_UNIVERSE
+                )
+                lead = pick_residual(
+                    ohlc,
+                    date,
+                    universe=sleeve,
+                    excess_floor=excess_floor,
+                    lookback_days=lookback_days,
+                    skip_days=skip_days,
+                    n_alts=1,
+                    require_alt_sma=require_alt_sma,
+                    sma_n=sma_n,
+                    near_high_weight=near_high_weight,
+                    rank_mode=rank_mode,
+                    rank_window=rank_window,
+                )
+                wants = list(lead.get("wants") or [])
+                overlay = strip_red_cut_while_leader(overlay, wants[0] if wants else "")
+            if lead_exit:
+                sleeve = (
+                    top_volume_universe(ohlc, date, universe_top_n)
+                    if universe_top_n > 0
+                    else DEFAULT_UNIVERSE
+                )
+                lead = pick_residual(
+                    ohlc,
+                    date,
+                    universe=sleeve,
+                    excess_floor=excess_floor,
+                    lookback_days=lookback_days,
+                    skip_days=skip_days,
+                    n_alts=1,
+                    require_alt_sma=require_alt_sma,
+                    sma_n=sma_n,
+                    near_high_weight=near_high_weight,
+                    rank_mode=rank_mode,
+                    rank_window=rank_window,
+                )
+                wants = list(lead.get("wants") or [])
+                leader = wants[0] if wants else ""
+                excess_by = dict(lead.get("excess") or {})
+                closes = _px_map(ohlc, date, field=4)
+                selling = {o.base for o in overlay if o.side == "sell"}
+                for lot in list(book.lots.values()):
+                    if lot.role != "alt" or lot.base in selling:
+                        continue
+                    close = float(closes.get(lot.base) or 0.0)
+                    if close <= 0:
+                        continue
+                    if not lead_lost(
+                        lead_exit,
+                        base=lot.base,
+                        leader=leader,
+                        excess=excess_by.get(lot.base),
+                        close=close,
+                        entry=lot.entry_px,
+                        floor=excess_floor,
+                    ):
+                        continue
+                    overlay.append(
+                        Order(
+                            side="sell",
+                            base=lot.base,
+                            role="alt",
+                            adv=_adv(ohlc, lot.base, date),
+                            reason="alt_lead_exit",
+                        )
+                    )
             overlay_sold = {o.base for o in overlay if o.side == "sell"}
             n_overlay += sum(1 for o in overlay if o.side == "sell")
             for o in overlay:
@@ -702,7 +902,7 @@ def run_btc_residual(
         btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
-        risk_on = s50 is not None and last > s50
+        risk_on = btc_risk_on(last, s50, gap=btc_veto_gap)
         uni = (
             top_volume_universe(ohlc, date, universe_top_n)
             if universe_top_n > 0
@@ -732,6 +932,7 @@ def run_btc_residual(
                 near_high_weight=near_high_weight,
                 rank_mode=rank_mode,
                 rank_window=rank_window,
+                rank_slot=rank_slot,
             )
             winners = list(pick_now.get("wants") or [])
             if winners:
@@ -771,6 +972,7 @@ def run_btc_residual(
                 near_high_weight=near_high_weight,
                 rank_mode=rank_mode,
                 rank_window=rank_window,
+                rank_slot=rank_slot,
             )
             if alt_allow is not None and date in alt_allow:
                 pick = dict(pick)

@@ -29,6 +29,21 @@ Families, each fixed before its own tape run:
   entry waits 14, 21 or 28 days. A losing exit keeps the seven-day clock.
 * liquid universe: the same book, but the sleeve is the 12, 16 or 24
   most-traded names that day on the whole venue, each with 60 days of history.
+* BTC veto: the live book cashes a qualifying alt when BTC closes under
+  its SMA50. These cells require a 5% or 10% break, or they drop the veto.
+  The alt's own SMA50 stays.
+* rank slot: among names that clear the floor, buy the second score, the
+  third, or the smallest raw excess. An empty slot stays in cash.
+* red cut: sell only while the close is still under the entry, after 2, 4
+  or 6 days. A green position keeps the live trail and lock.
+* red leader: the same 2, 4 and 6 day grid, but the sell is dropped while
+  the name is still the residual leader. A red leader stays on the trail.
+* gap cap: cancel an alt buy when the next open is more than 3, 5 or 8
+  percent above the signal close. Sells still fill, and the book waits
+  for the clock it already set.
+* lead exit: no day count. Sell when the held name is no longer the top
+  qualifier, when that is also a red close, or when its excess is no
+  longer above the floor. The trail and the lock still run.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

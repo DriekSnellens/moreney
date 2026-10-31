@@ -138,6 +138,66 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## Cash on a BTC SMA break only after a deeper gap
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| veto_5 | +114,322 | 55.8% | +62,628 | +12,682 | 31.6% | 116 |
+| veto_10 | -157 | 68.5% | -5,787 | +6,824 | 34.0% | 122 |
+| veto_off | +48,407 | 74.5% | +35,465 | +13,255 | 33.7% | 126 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Buy a cooler qualifier than the residual leader
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| slot_second | -3,715 | 65.2% | +2,261 | -5,301 | 47.5% | 92 |
+| slot_third | -6,065 | 42.1% | +1,278 | -6,881 | 38.1% | 76 |
+| slot_floor | -9,489 | 67.7% | -11,653 | +4,160 | 34.2% | 110 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Sell a position that is still red after a few days
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| red_2 | +227,070 | 33.5% | +56,817 | +48,308 | 32.1% | 98 |
+| red_4 | +333,913 | 34.1% | +160,358 | +25,402 | 31.8% | 94 |
+| red_6 | +298,190 | 34.5% | +122,451 | +30,791 | 31.9% | 96 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Sell a red position only after it loses the lead
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| red_lead_2 | +417,544 | 34.4% | +148,310 | +40,807 | 32.0% | 98 |
+| red_lead_4 | +333,913 | 34.1% | +160,358 | +25,402 | 31.8% | 94 |
+| red_lead_6 | +298,190 | 34.5% | +122,451 | +30,791 | 31.9% | 96 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Cancel a buy when the next open gaps up
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| gap_3 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| gap_5 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| gap_8 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Sell when the held name loses the residual lead
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| lead_rank | +66,224 | 44.9% | +39,365 | +11,053 | 36.0% | 108 |
+| lead_rank_red | +258,057 | 39.7% | +144,236 | +18,839 | 33.3% | 102 |
+| lead_floor | +245,715 | 39.1% | +105,885 | +28,619 | 23.0% | 102 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -152,9 +212,24 @@ Opening the next leader sooner after a green exit loses. Waiting 14, 21 or 28 da
 
 Re-picking the sleeve each day from the most-traded names on the whole venue, 12, 16 or 24 of them, finishes between a small gain and a loss. The fixed desk on that same cache is the book above.
 
+Letting a qualifying alt stay on when BTC is 5% or 10% under its SMA50, or ignoring that average, raises the full-path drawdown to 56–75% and gives the euros back. Buying the second score, the third, or the qualifier closest to the floor loses the stake or finishes a few thousand euros down. The leader, and the cash rule on a BTC close under its average, stay in the book.
+
+Selling any position that is still under its entry after two days is ahead of the fresh-2026 size bar and misses the rest of it. The compounded path and the book through 2025 both give way. Four days is a little ahead through 2025 and a little behind on the full path, and it gives back fresh 2026. Six days leaves fresh 2026 unchanged. The day count stays where it was locked.
+
+Keeping that two-day cut only when the name has also lost the lead is the closest cell: full path +€417,544 versus +€342,074, fresh 2026 +€40,807 versus +€30,791, and the book through 2025 a few thousand euros behind. That is short of 1.25× and of 1.5×, it is one cell, and four and six days do not come with it. Cancelling a buy when the next open gaps 3, 5 or 8 percent does not change a fill on this tape.
+
+Selling as soon as the held name is no longer the top qualifier, with or without a red close, or as soon as its excess falls through the floor, gives the compounded path back. The two-day wait is what kept that closer cell. Dropping the wait is not a find.
+
+## Verdict
+
+Nothing cleared the pre-registered bar. The live residual pack stays the book. Nothing is armed.
+
 ## Liquid names, re-picked every day
 
-Same rules, on every Bitvavo EUR name in `data/research/bitvavo_1d_all` through 2026-10-30. Each day the book may only buy one of the most-traded names, and a name needs 60 completed days. The baseline row is the fixed desk on this same cache, not the desk cache used above.
+Same rules, on every Bitvavo EUR name in `data/research/bitvavo_1d_all` through 2026-10-30.
+Each day the book may only buy one of the most-traded names, and a
+name needs 60 completed days. The baseline row is the fixed desk on
+this same cache, not the desk cache used above.
 
 | variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
 |---|---:|---:|---:|---:|---:|---:|
@@ -165,6 +240,3 @@ Same rules, on every Bitvavo EUR name in `data/research/bitvavo_1d_all` through 
 
 Does not clear the bar. region=False margin=[].
 
-## Verdict
-
-Nothing cleared the pre-registered bar. The live residual pack stays the book. Nothing is armed.

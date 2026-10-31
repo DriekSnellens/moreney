@@ -14,8 +14,12 @@ from bot.research.better_book.bar import (
 from bot.research.better_book.search import largest_new_trip, round_trips
 from bot.research.btc_residual_mix.engine import (
     _scale_in_orders,
+    btc_risk_on,
+    drop_gapped_buys,
+    lead_lost,
     pick_residual,
     rearm_after_exit,
+    strip_red_cut_while_leader,
     tide_alts,
     top_volume_universe,
 )
@@ -420,3 +424,128 @@ def test_tide_keeps_a_held_name_and_does_not_open_a_new_one() -> None:
     assert tide_alts(("SOL",), ("ETH",), tide_ok=False) == ("ETH",)
     assert tide_alts(("SOL",), (), tide_ok=False) == ()
     assert tide_alts(("SOL",), ("ETH",), tide_ok=True) == ("SOL",)
+
+
+def test_btc_veto_gap_ignores_a_shallow_dip() -> None:
+    assert btc_risk_on(99.0, 100.0) is False
+    assert btc_risk_on(99.0, 100.0, gap=0.05) is True
+    assert btc_risk_on(94.0, 100.0, gap=0.05) is False
+    assert btc_risk_on(50.0, 100.0, gap=1.0) is True
+    assert btc_risk_on(100.0, None) is False
+
+
+def _slot_tape() -> dict[str, list[list[float]]]:
+    t0 = 1_704_067_200_000
+    n = 40
+
+    def climb(end: float) -> list[list[float]]:
+        out = []
+        for i in range(n):
+            px = 100.0 + (end - 100.0) * i / (n - 1)
+            out.append([t0 + i * 86_400_000, px, px, px, px, 5_000_000.0])
+        return out
+
+    return {
+        "BTC": climb(100.0),
+        "HOT": climb(180.0),
+        "MID": climb(140.0),
+        "COOL": climb(115.0),
+    }
+
+
+def test_rank_slot_buys_a_cooler_qualifier_and_not_the_leader() -> None:
+    ohlc = _slot_tape()
+    date = "2024-02-09"
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("HOT", "MID", "COOL"),
+    )
+    assert pick_residual(ohlc, date, **common)["wants"] == ["HOT"]
+    assert pick_residual(ohlc, date, rank_slot="second", **common)["wants"] == ["MID"]
+    assert pick_residual(ohlc, date, rank_slot="third", **common)["wants"] == ["COOL"]
+    assert pick_residual(ohlc, date, rank_slot="floor", **common)["wants"] == ["COOL"]
+    alone = dict(common)
+    alone["universe"] = ("HOT",)
+    assert pick_residual(ohlc, date, rank_slot="second", **alone)["wants"] == []
+
+
+def test_red_cut_sells_only_a_position_still_under_its_entry() -> None:
+    t0 = 1_704_067_200_000
+    day = 86_400_000
+    rows = [_bar(t0 + i * day, 100.0, 100.0, 100.0, 90.0) for i in range(6)]
+    ohlc = {"ETH": rows}
+    book = Book(0.0)
+    book.lots["ETH"] = Lot(
+        base="ETH", qty=10.0, role="alt", entry_px=100.0, peak_px=100.0, opened_ms=t0
+    )
+    policy = ExitPolicy(name="red", alt_red_cut_days=4)
+    # Four days later the close is still under the entry.
+    late = _overlay_orders(book, ohlc, "2024-01-05", policy, t0 + 4 * day)
+    assert len(late) == 1
+    assert late[0].reason == "alt_red_cut"
+    early = _overlay_orders(book, ohlc, "2024-01-03", policy, t0 + 2 * day)
+    assert early == []
+    rows[-1] = _bar(t0 + 5 * day, 100.0, 110.0, 100.0, 105.0)
+    book.lots["ETH"].peak_px = 100.0
+    green = _overlay_orders(book, ohlc, "2024-01-06", policy, t0 + 5 * day)
+    assert green == []
+
+
+def test_red_cut_stays_while_the_name_is_still_the_leader() -> None:
+    cut = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="alt_red_cut")
+    both = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="alt_trail+alt_red_cut")
+    other = Order(side="sell", base="SOL", role="alt", adv=1.0, reason="alt_red_cut")
+    kept = strip_red_cut_while_leader([cut, both, other], "ETH")
+    assert [o.base for o in kept] == ["ETH", "SOL"]
+    assert kept[0].reason == "alt_trail"
+    assert kept[1].reason == "alt_red_cut"
+    still = strip_red_cut_while_leader([cut], "")
+    assert len(still) == 1
+    assert still[0].reason == "alt_red_cut"
+
+
+def test_gap_cap_cancels_the_buy_and_keeps_the_sell() -> None:
+    t0 = 1_704_067_200_000
+    day = 86_400_000
+    # Prior close 100, next open 106 is a 6% gap.
+    ohlc = {
+        "ETH": [
+            _bar(t0, 100.0, 100.0, 100.0, 100.0),
+            _bar(t0 + day, 106.0, 108.0, 105.0, 107.0),
+        ]
+    }
+    buy = Order(side="buy", base="ETH", role="alt", adv=1.0, notional=1_000.0, reason="residual")
+    sell = Order(side="sell", base="ETH", role="alt", adv=1.0, reason="rotate")
+    kept = drop_gapped_buys([sell, buy], ohlc, "2024-01-02", 0.05)
+    assert [o.side for o in kept] == ["sell"]
+    small = drop_gapped_buys([buy], ohlc, "2024-01-02", 0.08)
+    assert len(small) == 1
+
+
+def test_lead_lost_keeps_a_green_leader_and_a_green_ex_leader_on_the_red_rule() -> None:
+    assert lead_lost(
+        "rank", base="ETH", leader="ETH", excess=0.05, close=90.0, entry=100.0, floor=0.035
+    ) is False
+    assert lead_lost(
+        "rank", base="ETH", leader="SOL", excess=0.05, close=110.0, entry=100.0, floor=0.035
+    ) is True
+    assert lead_lost(
+        "rank_red", base="ETH", leader="SOL", excess=0.05, close=110.0, entry=100.0, floor=0.035
+    ) is False
+    assert lead_lost(
+        "rank_red", base="ETH", leader="SOL", excess=0.05, close=90.0, entry=100.0, floor=0.035
+    ) is True
+    assert lead_lost(
+        "floor", base="ETH", leader="ETH", excess=0.02, close=110.0, entry=100.0, floor=0.035
+    ) is True
+    assert lead_lost(
+        "floor", base="ETH", leader="", excess=None, close=110.0, entry=100.0, floor=0.035
+    ) is True
+    assert lead_lost(
+        "", base="ETH", leader="SOL", excess=0.01, close=90.0, entry=100.0, floor=0.035
+    ) is False

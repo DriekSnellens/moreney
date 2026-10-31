@@ -527,6 +527,15 @@ def _overlay_orders(
             age = (now_ms - lot.opened_ms) / DAY_MS
             if age >= policy.alt_max_days:
                 reasons.append("alt_time")
+        if (
+            policy.alt_red_cut_days > 0
+            and lot.opened_ms > 0
+            and lot.entry_px > 0
+            and close < lot.entry_px
+        ):
+            age = (now_ms - lot.opened_ms) / DAY_MS
+            if age >= policy.alt_red_cut_days:
+                reasons.append("alt_red_cut")
         if policy.alt_min_excess is not None:
             xs = rs_excess(closes_of(rows), btc_c, lb=20, skip=1)
             if xs is not None and xs < policy.alt_min_excess:

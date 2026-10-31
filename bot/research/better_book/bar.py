@@ -56,6 +56,36 @@ GREEN_PAUSES = (14, 21, 28)
 # as the most-traded names on the whole venue, then run the same book.
 # 60 days of history are required. 12, 16 and 24 are the width of the list.
 VOLUME_TOPS = (12, 16, 24)
+# The live book goes to cash when BTC closes under its SMA50, even if an
+# alt still clears the residual floor and its own SMA50. These cells
+# require a deeper break, or they drop that veto. The alt's own SMA stays.
+# 5% and 10% are round distances. veto_off does not fire while price is positive.
+BTC_VETO_GAPS = (
+    ("veto_5", 0.05),
+    ("veto_10", 0.10),
+    ("veto_off", 1.0),
+)
+# The live book buys the highest score among names that clear the floor.
+# These cells buy a cooler qualifier and do not fall back to the leader
+# when that slot is empty. "floor" is the smallest raw excess still above it.
+RANK_SLOTS = ("second", "third", "floor")
+# A fixed hold cuts winners. These cells sell only while the close is still
+# under the entry, after 2, 4 or 6 days. A green position keeps the live trail.
+RED_CUT_DAYS = (2, 4, 6)
+# The two-day red cut beat the fresh-2026 size bar and missed the compounded
+# path. These cells keep that same 2, 4 and 6 day grid, and they sell only
+# when the name is also no longer the residual leader. A red leader stays
+# on the trail. The day count is not moved.
+RED_LEADER_DAYS = (2, 4, 6)
+# A buy queued at the close is cancelled when the next open gaps up more
+# than this versus that close. 3, 5 and 8 percent. Sells still fill.
+GAP_CAPS = (0.03, 0.05, 0.08)
+# The two-day cut that also requires a lost lead is one cell and misses
+# the size bar. These cells drop the day count. They sell when the held
+# name is no longer the top qualifier, when that is true and the close is
+# under the entry, or when its own excess is no longer above the floor.
+# The trail and the lock still run. The clock after the sell is the live week.
+LEAD_EXITS = ("rank", "rank_red", "floor")
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

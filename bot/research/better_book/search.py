@@ -8,9 +8,15 @@ from typing import Any
 
 from bot.research.better_book.bar import (
     BETA_WINDOWS,
+    BTC_VETO_GAPS,
+    GAP_CAPS,
     GREEN_PAUSES,
     IR_WINDOWS,
+    LEAD_EXITS,
+    RANK_SLOTS,
     REARM_MODES,
+    RED_CUT_DAYS,
+    RED_LEADER_DAYS,
     RUNNER_ARMS,
     RUNNER_TRAILS,
     SCALE_ARMS,
@@ -42,6 +48,10 @@ def _run(
     btc_tide_floor: float | None = None,
     green_pause_days: int = 0,
     universe_top_n: int = 0,
+    btc_veto_gap: float | None = None,
+    rank_slot: str = "",
+    gap_cap: float | None = None,
+    lead_exit: str = "",
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -66,6 +76,10 @@ def _run(
             btc_tide_floor=btc_tide_floor,
             green_pause_days=green_pause_days,
             universe_top_n=universe_top_n,
+            btc_veto_gap=btc_veto_gap,
+            rank_slot=rank_slot,
+            gap_cap=gap_cap,
+            lead_exit=lead_exit,
             **knobs,
         )
         out[tag] = {
@@ -187,6 +201,35 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         }
         for floor in TIDE_FLOORS
     ]
+    veto = [{"name": name, "btc_veto_gap": gap} for name, gap in BTC_VETO_GAPS]
+    slot = [{"name": f"slot_{name}", "rank_slot": name} for name in RANK_SLOTS]
+    red = [
+        {
+            "name": f"red_{days}",
+            "policy": replace(
+                LIVE_POLICY,
+                name=f"red_{days}",
+                alt_red_cut_days=days,
+            ),
+        }
+        for days in RED_CUT_DAYS
+    ]
+    red_lead = [
+        {
+            "name": f"red_lead_{days}",
+            "policy": replace(
+                LIVE_POLICY,
+                name=f"red_lead_{days}",
+                alt_red_cut_days=days,
+                alt_red_cut_if_leader=True,
+            ),
+        }
+        for days in RED_LEADER_DAYS
+    ]
+    gap = [
+        {"name": f"gap_{int(round(cap * 100))}", "gap_cap": cap} for cap in GAP_CAPS
+    ]
+    exited = [{"name": f"lead_{mode}", "lead_exit": mode} for mode in LEAD_EXITS]
     return [
         ("scale_in", scale),
         ("runner", runner),
@@ -198,6 +241,12 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         ("rearm", rearm),
         ("btc_tide", tide),
         ("green_pause", pause),
+        ("btc_veto", veto),
+        ("rank_slot", slot),
+        ("red_cut", red),
+        ("red_leader", red_lead),
+        ("gap_cap", gap),
+        ("lead_exit", exited),
     ]
 
 
