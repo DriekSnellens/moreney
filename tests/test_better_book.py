@@ -14,11 +14,14 @@ from bot.research.better_book.bar import (
 from bot.research.better_book.search import largest_new_trip, round_trips
 from bot.research.btc_residual_mix.engine import (
     _scale_in_orders,
+    _volume_expanded,
     btc_risk_on,
     drop_gapped_buys,
     lead_lost,
+    losing_exit,
     pick_residual,
     rearm_after_exit,
+    ride_to_keep,
     strip_red_cut_while_leader,
     tide_alts,
     top_volume_universe,
@@ -549,3 +552,55 @@ def test_lead_lost_keeps_a_green_leader_and_a_green_ex_leader_on_the_red_rule() 
     assert lead_lost(
         "", base="ETH", leader="SOL", excess=0.01, close=90.0, entry=100.0, floor=0.035
     ) is False
+
+
+def test_keep_ride_does_not_open_a_new_name_and_needs_the_asked_state() -> None:
+    assert ride_to_keep("green", green=True, is_leader=False) is True
+    assert ride_to_keep("leader", green=False, is_leader=True) is True
+    assert ride_to_keep("both", green=True, is_leader=False) is False
+    assert ride_to_keep("both", green=True, is_leader=True) is True
+    assert ride_to_keep("", green=True, is_leader=True) is False
+
+
+def test_losing_exit_is_a_close_under_the_entry() -> None:
+    assert losing_exit(90.0, 100.0) is True
+    assert losing_exit(110.0, 100.0) is False
+    assert losing_exit(0.0, 100.0) is False
+
+
+def test_agree_skips_a_bounce_whose_longer_excess_is_negative() -> None:
+    t0 = 1_704_067_200_000
+    n = 80
+
+    def bars(prices: list[float]) -> list[list[float]]:
+        return [
+            [t0 + i * 86_400_000, p, p, p, p, 5_000_000.0] for i, p in enumerate(prices)
+        ]
+
+    btc = [100.0] * n
+    steady = [100.0 * (1.004 ** i) for i in range(n)]
+    bounce = [200.0 - 1.5 * i for i in range(70)]
+    bounce.extend([95.0 + 2.0 * (i - 69) for i in range(70, n)])
+    ohlc = {"BTC": bars(btc), "STEADY": bars(steady), "BOUNCE": bars(bounce)}
+    date = "2024-03-20"
+    common = dict(
+        excess_floor=0.0,
+        lookback_days=10,
+        skip_days=1,
+        n_alts=1,
+        require_alt_sma=False,
+        near_high_weight=0.0,
+        universe=("BOUNCE", "STEADY"),
+    )
+    raw = pick_residual(ohlc, date, **common)
+    agreed = pick_residual(ohlc, date, agree_days=40, **common)
+    assert raw["wants"] == ["BOUNCE"]
+    assert agreed["wants"] == ["STEADY"]
+
+
+def test_volume_expansion_compares_the_last_twenty_days_with_the_twenty_before() -> None:
+    quiet = [[0, 1, 1, 1, 10.0, 100.0] for _ in range(20)]
+    loud = [[0, 1, 1, 1, 10.0, 400.0] for _ in range(20)]
+    assert _volume_expanded(quiet + loud, 1.5) is True
+    assert _volume_expanded(loud + quiet, 1.5) is False
+    assert _volume_expanded(loud, 1.0) is False

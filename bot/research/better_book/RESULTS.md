@@ -198,6 +198,56 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## Keep a held name when BTC closes under its average
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| keep_green | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| keep_leader | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| keep_both | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Require the longer residual to be positive too
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| agree_20 | +290,255 | 36.0% | +123,845 | +30,791 | 31.9% | 100 |
+| agree_40 | +350,425 | 34.1% | +153,446 | +31,078 | 31.9% | 96 |
+| agree_60 | +115,801 | 50.5% | +78,807 | +9,593 | 31.6% | 92 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Skip a name after a sell that closed under the entry
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| ban_14 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+| ban_28 | +340,848 | 34.1% | +151,125 | +30,791 | 31.9% | 100 |
+| ban_56 | +340,848 | 34.1% | +151,125 | +30,791 | 31.9% | 100 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Buy only a name whose own volume has expanded
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| vol_100 | +186,857 | 32.3% | +75,236 | +28,182 | 30.4% | 92 |
+| vol_150 | +29,917 | 66.1% | +10,993 | +12,565 | 28.4% | 74 |
+| vol_200 | +66,910 | 64.2% | +32,755 | +13,622 | 24.1% | 58 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Buy only a residual that just cleared the floor
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| cross_1 | -6,633 | 50.6% | -9,479 | +5,153 | 16.7% | 52 |
+| cross_2 | -204 | 46.5% | +5,387 | -4,308 | 40.6% | 66 |
+| cross_3 | -10,641 | 62.1% | -4,798 | -7,783 | 53.8% | 74 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -219,6 +269,10 @@ Selling any position that is still under its entry after two days is ahead of th
 Keeping that two-day cut only when the name has also lost the lead is the closest cell: full path +€417,544 versus +€342,074, fresh 2026 +€40,807 versus +€30,791, and the book through 2025 a few thousand euros behind. That is short of 1.25× and of 1.5×, it is one cell, and four and six days do not come with it. Cancelling a buy when the next open gaps 3, 5 or 8 percent does not change a fill on this tape.
 
 Selling as soon as the held name is no longer the top qualifier, with or without a red close, or as soon as its excess falls through the floor, gives the compounded path back. The two-day wait is what kept that closer cell. Dropping the wait is not a find.
+
+Keeping a name already held when BTC closes under its average does not change a fill on this tape. Requiring the 40-day excess to be positive as well is a little ahead on both windows, about €8k on the full path and a few hundred euros on a fresh 2026 book, and it misses the size bar. Twenty and sixty days do not come with it. Skipping a name for 14 days after a losing sell changes nothing. Twenty-eight and fifty-six days cost about €1,200.
+
+Requiring the name's own quote volume to have expanded cuts the path. At one times the prior twenty days the full path is +€186,857 and a fresh 2026 book is +€28,182. At 1.5× and 2× the book is a small gain with a much deeper drawdown. Buying only a residual that cleared the floor in the last one, two or three days loses the stake. The name that has already been above the floor is the book.
 
 ## Verdict
 

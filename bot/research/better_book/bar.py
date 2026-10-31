@@ -86,6 +86,31 @@ GAP_CAPS = (0.03, 0.05, 0.08)
 # under the entry, or when its own excess is no longer above the floor.
 # The trail and the lock still run. The clock after the sell is the live week.
 LEAD_EXITS = ("rank", "rank_red", "floor")
+# Dropping the BTC SMA veto, or waiting for a deep break, raised the
+# drawdown and gave the path back. These cells leave that veto on for a
+# new ride. They keep a name already held when BTC closes under the
+# average: if the close is above the entry, if the name is still the
+# residual leader, or both. A flat book stays flat.
+KEEP_RIDES = ("green", "leader", "both")
+# The live rank is a 10-day excess. These cells also require that name's
+# excess over 20, 40 or 60 days to be positive. The rank among the names
+# that agree stays the live score. If none agree, the book stays in cash.
+AGREE_DAYS = (20, 40, 60)
+# After a sell whose close is under the entry, that name is skipped for
+# 14, 28 or 56 days. A different leader can still be bought on the clock.
+# A sell that is still above the entry does not start the ban.
+LOSS_BANS = (14, 28, 56)
+# The live book buys the residual leader even when its own recent trading
+# is quieter than the twenty days before. These cells keep a name only
+# when the last twenty days of quote volume are at least 1.0, 1.5 or 2.0
+# times the twenty days before that. The rank among the names that pass
+# stays the live score.
+VOL_MULTS = (1.0, 1.5, 2.0)
+# The live book can buy a name that has already been above the floor for
+# days. These cells buy only when the excess was still at or below the
+# floor 1, 2 or 3 days earlier. The day count is the age of the cross,
+# not a pause fitted to a losing trade.
+CROSS_DAYS = (1, 2, 3)
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

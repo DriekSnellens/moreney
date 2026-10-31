@@ -44,6 +44,17 @@ Families, each fixed before its own tape run:
 * lead exit: no day count. Sell when the held name is no longer the top
   qualifier, when that is also a red close, or when its excess is no
   longer above the floor. The trail and the lock still run.
+* keep ride: a new ride still waits for BTC to close above its SMA50.
+  A name already held is kept through that cash day if the close is
+  above the entry, if it is still the residual leader, or both.
+* agree: the 10-day residual leader must also have a positive excess
+  over 20, 40 or 60 days. If nobody agrees, the book stays in cash.
+* loss ban: after a sell whose close is under the entry, that name is
+  skipped for 14, 28 or 56 days. A different leader can still be bought.
+* volume: the last 20 days of quote volume must be at least 1.0, 1.5 or
+  2.0 times the 20 days before. The rank among names that pass stays live.
+* fresh cross: buy only when the excess was still at or below the floor
+  1, 2 or 3 days earlier.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

@@ -161,6 +161,38 @@ def lead_lost(
     return False
 
 
+def ride_to_keep(mode: str, *, green: bool, is_leader: bool) -> bool:
+    """Keep a held alt through a BTC SMA cash day. A new name is not opened.
+
+    ``green`` is a close above the entry. ``leader`` is still the top
+    residual qualifier. ``both`` needs the two. Anything else keeps the
+    live cash rule.
+    """
+    if mode == "green":
+        return green
+    if mode == "leader":
+        return is_leader
+    if mode == "both":
+        return green and is_leader
+    return False
+
+
+def _volume_expanded(rows: Sequence[Sequence[float]], mult: float) -> bool:
+    """Last 20 days of quote volume versus the 20 days before that."""
+    if len(rows) < 40 or mult <= 0:
+        return False
+    recent = quote_vol(rows[-20:])
+    prior = quote_vol(rows[-40:-20])
+    if prior <= 0:
+        return False
+    return recent + 1e-9 >= float(mult) * prior
+
+
+def losing_exit(close: float, entry: float) -> bool:
+    """A full sell whose signal close is under the entry."""
+    return entry > 0 and close > 0 and close < entry
+
+
 def open_gap(
     ohlc: Mapping[str, Sequence[Sequence[float]]],
     base: str,
@@ -313,6 +345,9 @@ def pick_residual(
     rank_mode: str = "excess",
     rank_window: int = 20,
     rank_slot: str = "",
+    agree_days: int = 0,
+    vol_mult: float = 0.0,
+    cross_days: int = 0,
 ) -> dict[str, Any]:
     ban = {str(b).upper() for b in (exclude_bases or ())}
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
@@ -326,6 +361,18 @@ def pick_residual(
         qv = quote_vol(rows)
         if xs is None or qv < min_qvol_eur:
             continue
+        if agree_days > int(lookback_days):
+            long_xs = rs_excess(cl, btc_c, lb=int(agree_days), skip=skip_days)
+            if long_xs is None or long_xs <= 0:
+                continue
+        if vol_mult > 0 and not _volume_expanded(rows, vol_mult):
+            continue
+        if cross_days > 0:
+            prior_alt = cl[: -int(cross_days)] if len(cl) > int(cross_days) else []
+            prior_btc = btc_c[: -int(cross_days)] if len(btc_c) > int(cross_days) else []
+            prior_xs = rs_excess(prior_alt, prior_btc, lb=lookback_days, skip=skip_days)
+            if prior_xs is None or prior_xs > excess_floor:
+                continue
         if require_alt_sma:
             s = sma(cl, sma_n)
             last_px = float(cl[-1]) if cl else 0.0
@@ -719,6 +766,11 @@ def run_btc_residual(
     rank_slot: str = "",
     gap_cap: float | None = None,
     lead_exit: str = "",
+    keep_ride: str = "",
+    loss_ban_days: int = 0,
+    agree_days: int = 0,
+    vol_mult: float = 0.0,
+    cross_days: int = 0,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -751,6 +803,7 @@ def run_btc_residual(
     holds: list[str] = []
     trades: list[dict[str, Any]] = []
     last_reb = 0
+    loss_bans: dict[str, int] = {}
     want_btc = ""
     want_alts: tuple[str, ...] = ()
     n_rotate = 0
@@ -867,6 +920,15 @@ def run_btc_residual(
                 if o.reason:
                     overlay_reasons[o.reason] = overlay_reasons.get(o.reason, 0) + 1
             closes_now = _px_map(ohlc, date, field=4) if overlay_sold else {}
+            if loss_ban_days > 0 and overlay_sold:
+                for order in overlay:
+                    if order.side != "sell" or order.qty > 0:
+                        continue
+                    lot = book.lots.get(order.base)
+                    close = float(closes_now.get(order.base) or 0.0)
+                    entry = lot.entry_px if lot is not None else 0.0
+                    if losing_exit(close, entry):
+                        loss_bans[order.base] = now_ms + int(loss_ban_days) * DAY_MS
             if overlay_sold and rearm_mode:
                 rearm_hit = rearm_after_exit(book, overlay, closes_now, rearm_mode)
             pause_days = int(green_pause_days or 0)
@@ -908,6 +970,7 @@ def run_btc_residual(
             if universe_top_n > 0
             else DEFAULT_UNIVERSE
         )
+        active_bans = {base for base, until in loss_bans.items() if until > now_ms}
         # Immediate rebuy after trail/overlay: same next-open as the sell, skip
         # the sold name(s). Weekly rotate path below still handles due clocks.
         early = immediate_rebuy or (rearm_hit and rearm_mode in ("lock", "green"))
@@ -928,11 +991,14 @@ def run_btc_residual(
                 n_alts=n_alts,
                 require_alt_sma=require_alt_sma,
                 sma_n=sma_n,
-                exclude_bases=sorted(overlay_sold),
+                exclude_bases=sorted(set(overlay_sold) | active_bans),
                 near_high_weight=near_high_weight,
                 rank_mode=rank_mode,
                 rank_window=rank_window,
                 rank_slot=rank_slot,
+                agree_days=agree_days,
+                vol_mult=vol_mult,
+                cross_days=cross_days,
             )
             winners = list(pick_now.get("wants") or [])
             if winners:
@@ -973,6 +1039,10 @@ def run_btc_residual(
                 rank_mode=rank_mode,
                 rank_window=rank_window,
                 rank_slot=rank_slot,
+                agree_days=agree_days,
+                vol_mult=vol_mult,
+                cross_days=cross_days,
+                exclude_bases=sorted(active_bans) or None,
             )
             if alt_allow is not None and date in alt_allow:
                 pick = dict(pick)
@@ -1007,6 +1077,25 @@ def run_btc_residual(
                 ]
                 next_alts = tide_alts(next_alts, held_alts, tide_ok=tide_ok)
                 if not tide_ok:
+                    next_btc = ""
+            if keep_ride and not risk_on:
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                leader = str((pick.get("wants") or [""])[0])
+                kept = []
+                for base in held_alts:
+                    lot = book.lots.get(base)
+                    close = float(px.get(base) or 0.0)
+                    entry = lot.entry_px if lot is not None else 0.0
+                    if ride_to_keep(
+                        keep_ride,
+                        green=entry > 0 and close > entry,
+                        is_leader=base == leader and leader != "",
+                    ):
+                        kept.append(base)
+                if kept:
+                    next_alts = tuple(kept)
                     next_btc = ""
             changed = (next_btc != want_btc) or (next_alts != want_alts) or not held
             if changed and (next_btc or next_alts or held):

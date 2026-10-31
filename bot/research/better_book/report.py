@@ -86,6 +86,11 @@ def render(
         "red_leader": "Sell a red position only after it loses the lead",
         "gap_cap": "Cancel a buy when the next open gaps up",
         "lead_exit": "Sell when the held name loses the residual lead",
+        "keep_ride": "Keep a held name when BTC closes under its average",
+        "agree": "Require the longer residual to be positive too",
+        "loss_ban": "Skip a name after a sell that closed under the entry",
+        "vol_expand": "Buy only a name whose own volume has expanded",
+        "fresh_cross": "Buy only a residual that just cleared the floor",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -189,6 +194,25 @@ def render(
         "with or without a red close, or as soon as its excess falls through "
         "the floor, gives the compounded path back. The two-day wait is what "
         "kept that closer cell. Dropping the wait is not a find."
+    )
+    lines.append("")
+    lines.append(
+        "Keeping a name already held when BTC closes under its average does "
+        "not change a fill on this tape. Requiring the 40-day excess to be "
+        "positive as well is a little ahead on both windows, about €8k on the "
+        "full path and a few hundred euros on a fresh 2026 book, and it misses "
+        "the size bar. Twenty and sixty days do not come with it. Skipping a "
+        "name for 14 days after a losing sell changes nothing. Twenty-eight "
+        "and fifty-six days cost about €1,200."
+    )
+    lines.append("")
+    lines.append(
+        "Requiring the name's own quote volume to have expanded cuts the path. "
+        "At one times the prior twenty days the full path is +€186,857 and a "
+        "fresh 2026 book is +€28,182. At 1.5× and 2× the book is a small gain "
+        "with a much deeper drawdown. Buying only a residual that cleared the "
+        "floor in the last one, two or three days loses the stake. The name "
+        "that has already been above the floor is the book."
     )
     lines.append("")
     lines.append("## Verdict")

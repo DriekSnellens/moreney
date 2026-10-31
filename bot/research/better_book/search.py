@@ -7,12 +7,16 @@ from dataclasses import replace
 from typing import Any
 
 from bot.research.better_book.bar import (
+    AGREE_DAYS,
     BETA_WINDOWS,
     BTC_VETO_GAPS,
+    CROSS_DAYS,
     GAP_CAPS,
     GREEN_PAUSES,
     IR_WINDOWS,
+    KEEP_RIDES,
     LEAD_EXITS,
+    LOSS_BANS,
     RANK_SLOTS,
     REARM_MODES,
     RED_CUT_DAYS,
@@ -25,6 +29,7 @@ from bot.research.better_book.bar import (
     TRAIL_CONFIRM,
     TRAIL_HALF_FRAC,
     TRAIL_WEEKDAYS,
+    VOL_MULTS,
 )
 from bot.research.clip_exit_lab.policies import ExitPolicy
 from bot.research.factor_scoreboard.engine import LIVE_KNOBS, LIVE_POLICY
@@ -52,6 +57,11 @@ def _run(
     rank_slot: str = "",
     gap_cap: float | None = None,
     lead_exit: str = "",
+    keep_ride: str = "",
+    loss_ban_days: int = 0,
+    agree_days: int = 0,
+    vol_mult: float = 0.0,
+    cross_days: int = 0,
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -80,6 +90,11 @@ def _run(
             rank_slot=rank_slot,
             gap_cap=gap_cap,
             lead_exit=lead_exit,
+            keep_ride=keep_ride,
+            loss_ban_days=loss_ban_days,
+            agree_days=agree_days,
+            vol_mult=vol_mult,
+            cross_days=cross_days,
             **knobs,
         )
         out[tag] = {
@@ -230,6 +245,13 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         {"name": f"gap_{int(round(cap * 100))}", "gap_cap": cap} for cap in GAP_CAPS
     ]
     exited = [{"name": f"lead_{mode}", "lead_exit": mode} for mode in LEAD_EXITS]
+    kept = [{"name": f"keep_{mode}", "keep_ride": mode} for mode in KEEP_RIDES]
+    agree = [{"name": f"agree_{days}", "agree_days": days} for days in AGREE_DAYS]
+    banned = [{"name": f"ban_{days}", "loss_ban_days": days} for days in LOSS_BANS]
+    vol = [
+        {"name": f"vol_{int(round(mult * 100))}", "vol_mult": mult} for mult in VOL_MULTS
+    ]
+    fresh = [{"name": f"cross_{days}", "cross_days": days} for days in CROSS_DAYS]
     return [
         ("scale_in", scale),
         ("runner", runner),
@@ -247,6 +269,11 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         ("red_leader", red_lead),
         ("gap_cap", gap),
         ("lead_exit", exited),
+        ("keep_ride", kept),
+        ("agree", agree),
+        ("loss_ban", banned),
+        ("vol_expand", vol),
+        ("fresh_cross", fresh),
     ]
 
 
