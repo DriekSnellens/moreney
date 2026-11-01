@@ -178,6 +178,22 @@ EQUITY_SMA = (20, 40, 60)
 # inside the recent high. 1, 2 or 3 days. Both sides. The rank among the
 # names that pass stays the live score.
 BREAK_DAYS = (1, 2, 3)
+# A close this far under the entry sells, the same day. 5, 8 and 12
+# percent. The 10% trail and the lock still run, so a winner is not cut
+# for being old. The grid is locked before the run.
+STOP_PCTS = (0.05, 0.08, 0.12)
+# How many days BTC has closed above its SMA50. wait cells open a new
+# ride only once that streak is at least 2, 4 or 8 days. fresh cells open
+# only while the streak is still within that bound. A held name stays.
+# A flatten to cash stays cash.
+RECLAIM = (
+    ("wait", 2),
+    ("wait", 4),
+    ("wait", 8),
+    ("fresh", 2),
+    ("fresh", 4),
+    ("fresh", 8),
+)
 
 
 def _pnl(row: Mapping[str, Any], window: str) -> float:

@@ -1,6 +1,6 @@
 # Better than the live residual pack
 
-asof `2026-10-30`. Wet Bitvavo next-open, book €20,000, desk 16, 2024-03-16 → 2026-10-30.
+asof `2026-10-31`. Wet Bitvavo next-open, book €20,000, desk 16, 2024-03-16 → 2026-10-31.
 Baseline is the armed pack (10d skip-1, floor 3.5%, own SMA50, cash when none
 qualify, 7-day clock, near-high 0.25, trail 10%, lock +12%/+6%). IS runs that
 book through 2025-12-31. OOS is a fresh €20k book from 2026-01-01.
@@ -387,6 +387,29 @@ Does not clear the bar: the cells do not form a region above the baseline on bot
 
 Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
 
+## Sell the same day a close is through a loss from the entry
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| stop_5 | +151,714 | 37.7% | +30,172 | +53,018 | 26.7% | 104 |
+| stop_8 | +320,299 | 34.0% | +139,934 | +30,791 | 31.9% | 100 |
+| stop_12 | +342,074 | 34.1% | +151,798 | +30,791 | 31.9% | 100 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
+## Open a new ride only while BTC's time above its average is in range
+
+| variant | full PnL | full DD | IS PnL | fresh 2026 | 2026 DD | trades |
+|---|---:|---:|---:|---:|---:|---:|
+| reclaim_wait_2 | +110,380 | 47.1% | +53,622 | +18,586 | 31.7% | 98 |
+| reclaim_wait_4 | +25,267 | 80.0% | +12,855 | +8,122 | 41.4% | 88 |
+| reclaim_wait_8 | +32,323 | 76.8% | +10,653 | +14,700 | 31.7% | 78 |
+| reclaim_fresh_2 | +52,652 | 18.2% | +26,550 | +11,755 | 12.3% | 32 |
+| reclaim_fresh_4 | +40,294 | 21.6% | +26,550 | +6,445 | 21.0% | 34 |
+| reclaim_fresh_8 | +40,695 | 19.6% | +28,232 | +5,992 | 19.2% | 48 |
+
+Does not clear the bar: the cells do not form a region above the baseline on both windows; no cell reaches the size bar.
+
 ## Reading
 
 Full size on the leader is the book. A starter of 40–60% that adds only after the close is through an arm keeps about a quarter to three-fifths of the full path, with a lower drawdown that does not pay for the lost euros.
@@ -423,13 +446,15 @@ Moving the same score onto a 7, 14, 21 or 28 day window gives the path back. The
 
 Sitting out a new ride while the book's own equity is under its 20-day average finishes at +€264,362 against +€342,074, and a fresh 2026 book is +€24,550. Forty and sixty days give the stake back. Buying only a qualifier that just closed above its prior 1, 2 or 3 day high finishes between a small loss and +€8,162. Buying only a qualifier that stayed inside that high finishes between +€39,421 and +€54,687. Neither side reaches the size bar.
 
+A close 5 percent under the entry sells the same day and finishes at +€151,714 against +€342,074. A fresh 2026 book is +€53,018, ahead of the fresh size bar, and the book through 2025 is +€30,172. Eight percent leaves fresh 2026 unchanged and costs about €22k on the full path. Twelve percent changes no fill. Opening a new ride only after BTC has spent 2, 4 or 8 days above its average, or only during those first days, finishes between +€25,267 and +€110,380. The day count and the loss level stay where they were locked.
+
 ## Verdict
 
 Nothing cleared the pre-registered bar. The live residual pack stays the book. Nothing is armed.
 
 ## Liquid names, re-picked every day
 
-Same rules, on every Bitvavo EUR name in `data/research/bitvavo_1d_all` through 2026-10-30.
+Same rules, on every Bitvavo EUR name in `data/research/bitvavo_1d_all` through 2026-10-31.
 Each day the book may only buy one of the most-traded names, and a
 name needs 60 completed days. The baseline row is the fixed desk on
 this same cache, not the desk cache used above.

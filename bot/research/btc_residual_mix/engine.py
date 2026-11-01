@@ -276,6 +276,25 @@ def hold_unless_gap(
     return tuple(next_alts)
 
 
+def advance_risk_streak(streak: int, risk_on: bool) -> int:
+    """Consecutive closes BTC has spent on the risk-on side of its average."""
+    return streak + 1 if risk_on else 0
+
+
+def reclaim_allows(streak: int, *, side: str, bound: int) -> bool:
+    """Whether a new ride may open given the BTC risk-on streak.
+
+    ``wait`` needs the streak to have reached ``bound``. ``fresh`` allows
+    it only while the streak is still within ``bound``. A flat streak
+    allows neither.
+    """
+    if side == "wait":
+        return streak >= int(bound)
+    if side == "fresh":
+        return 0 < streak <= int(bound)
+    return True
+
+
 def block_fresh(
     next_alts: Sequence[str],
     held_alts: Sequence[str],
@@ -998,6 +1017,8 @@ def run_btc_residual(
     equity_sma: int = 0,
     break_mode: str = "",
     break_days: int = 0,
+    reclaim_side: str = "",
+    reclaim_n: int = 0,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -1045,6 +1066,16 @@ def run_btc_residual(
         if rebalance_weekday is not None and int(rebalance_weekday) >= 0
         else None
     )
+    risk_streak = 0
+    for date in dates:
+        if date >= start:
+            break
+        prior = closes_of(rows_through(ohlc.get("BTC") or [], date))
+        prior_sma = sma(prior, sma_n)
+        prior_last = float(prior[-1]) if prior else 0.0
+        risk_streak = advance_risk_streak(
+            risk_streak, btc_risk_on(prior_last, prior_sma, gap=btc_veto_gap)
+        )
 
     for date in dates:
         if date < start or date > end:
@@ -1225,6 +1256,7 @@ def run_btc_residual(
         s50 = sma(btc_c, sma_n)
         last = float(btc_c[-1]) if btc_c else 0.0
         risk_on = btc_risk_on(last, s50, gap=btc_veto_gap)
+        risk_streak = advance_risk_streak(risk_streak, risk_on)
         uni = (
             top_volume_universe(ohlc, date, universe_top_n)
             if universe_top_n > 0
@@ -1411,6 +1443,16 @@ def run_btc_residual(
                     b for b, role in held.items() if role == "alt" and b not in overlay_sold
                 ]
                 next_alts = block_fresh(next_alts, held_alts, allow=allow_eq)
+                if not next_alts:
+                    next_btc = ""
+            if reclaim_side and reclaim_n > 0:
+                allow_reclaim = reclaim_allows(
+                    risk_streak, side=reclaim_side, bound=int(reclaim_n)
+                )
+                held_alts = [
+                    b for b, role in held.items() if role == "alt" and b not in overlay_sold
+                ]
+                next_alts = block_fresh(next_alts, held_alts, allow=allow_reclaim)
                 if not next_alts:
                     next_btc = ""
             changed = (next_btc != want_btc) or (next_alts != want_alts) or not held

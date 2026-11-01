@@ -85,6 +85,11 @@ Families, each fixed before its own tape run:
 * breakout: a qualifier must have closed above the prior 1, 2 or 3 day
   high, or it must have stayed inside that high. The rank among the names
   that pass stays the live score.
+* hard stop: a close 5, 8 or 12 percent under the entry sells that day.
+  The trail and the lock still run.
+* reclaim: a new ride opens only after BTC has closed above its SMA50 for
+  2, 4 or 8 days, or only while that streak is still inside the bound.
+  A held name stays.
 
 A family is a find only when ``bar.judge_family`` says so. Nothing in
 this package is wired into the live clip.

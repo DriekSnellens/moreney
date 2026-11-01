@@ -103,6 +103,8 @@ def render(
         "liq_rank": "Rank qualifiers by how much they trade",
         "equity_curve": "Skip a new ride while the book's equity is under its own average",
         "breakout": "Buy a qualifier only if it did or did not just print a high",
+        "hard_stop": "Sell the same day a close is through a loss from the entry",
+        "reclaim": "Open a new ride only while BTC's time above its average is in range",
     }
     by_name = {v.name: v for v in verdicts}
     for family, cells in payload["families"].items():
@@ -285,6 +287,17 @@ def render(
         "day high finishes between a small loss and +€8,162. Buying only a "
         "qualifier that stayed inside that high finishes between +€39,421 and "
         "+€54,687. Neither side reaches the size bar."
+    )
+    lines.append("")
+    lines.append(
+        "A close 5 percent under the entry sells the same day and finishes "
+        "at +€151,714 against +€342,074. A fresh 2026 book is +€53,018, ahead "
+        "of the fresh size bar, and the book through 2025 is +€30,172. Eight "
+        "percent leaves fresh 2026 unchanged and costs about €22k on the full "
+        "path. Twelve percent changes no fill. Opening a new ride only after "
+        "BTC has spent 2, 4 or 8 days above its average, or only during those "
+        "first days, finishes between +€25,267 and +€110,380. The day count "
+        "and the loss level stay where they were locked."
     )
     lines.append("")
     lines.append("## Verdict")

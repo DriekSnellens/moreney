@@ -30,6 +30,7 @@ from bot.research.better_book.bar import (
     OWN_FLOORS,
     RANK_SLOTS,
     REARM_MODES,
+    RECLAIM,
     RED_CUT_DAYS,
     RED_LEADER_DAYS,
     ROTATE_GAPS,
@@ -37,6 +38,7 @@ from bot.research.better_book.bar import (
     RUNNER_TRAILS,
     SCALE_ARMS,
     SCALE_STARTERS,
+    STOP_PCTS,
     TIDE_FLOORS,
     TRAIL_CONFIRM,
     TRAIL_HALF_FRAC,
@@ -86,6 +88,8 @@ def _run(
     equity_sma: int = 0,
     break_mode: str = "",
     break_days: int = 0,
+    reclaim_side: str = "",
+    reclaim_n: int = 0,
     keep_trades: bool = False,
 ) -> Cell:
     from bot.research.btc_residual_mix.engine import run_btc_residual
@@ -132,6 +136,8 @@ def _run(
             equity_sma=equity_sma,
             break_mode=break_mode,
             break_days=break_days,
+            reclaim_side=reclaim_side,
+            reclaim_n=reclaim_n,
             **knobs,
         )
         out[tag] = {
@@ -350,6 +356,21 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         for mode in ("above", "inside")
         for days in BREAK_DAYS
     ]
+    stopped = [
+        {
+            "name": f"stop_{int(round(pct * 100))}",
+            "policy": replace(
+                LIVE_POLICY,
+                name=f"stop_{int(round(pct * 100))}",
+                alt_stop_pct=pct,
+            ),
+        }
+        for pct in STOP_PCTS
+    ]
+    reclaimed = [
+        {"name": f"reclaim_{side}_{n}", "reclaim_side": side, "reclaim_n": n}
+        for side, n in RECLAIM
+    ]
     return [
         ("scale_in", scale),
         ("runner", runner),
@@ -384,6 +405,8 @@ def families() -> list[tuple[str, list[dict[str, Any]]]]:
         ("liq_rank", liquid),
         ("equity_curve", curve),
         ("breakout", broken),
+        ("hard_stop", stopped),
+        ("reclaim", reclaimed),
     ]
 
 

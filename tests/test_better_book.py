@@ -27,6 +27,7 @@ from bot.research.btc_residual_mix.engine import (
     losing_exit,
     pick_residual,
     rearm_after_exit,
+    reclaim_allows,
     ride_to_keep,
     strip_red_cut_while_leader,
     tide_alts,
@@ -843,3 +844,43 @@ def test_a_close_through_the_prior_high_is_the_breakout_side() -> None:
     ]
     assert _broke_recent_high(inside, 1) is False
     assert _broke_recent_high(inside[:1], 1) is None
+
+
+def test_a_hard_stop_sells_a_close_through_the_loss_and_leaves_a_small_dip() -> None:
+    t0 = 1_704_067_200_000
+    rows = [
+        [t0 + i * 86_400_000, 100.0, 100.0, 100.0, 100.0, 1_000_000.0] for i in range(5)
+    ]
+    rows.append([t0 + 5 * 86_400_000, 100.0, 100.0, 94.0, 94.0, 1_000_000.0])
+    ohlc = {"ETH": rows}
+    date = "2024-01-06"
+    now_ms = int(rows[-1][0])
+    policy = ExitPolicy(
+        name="s",
+        alt_trail_pct=0.10,
+        alt_lock_arm_pct=0.12,
+        alt_lock_floor_pct=0.06,
+        alt_stop_pct=0.05,
+    )
+
+    def hold() -> Book:
+        book = Book(0.0)
+        book.lots["ETH"] = Lot(
+            base="ETH", qty=10.0, role="alt", entry_px=100.0, peak_px=100.0, opened_ms=now_ms
+        )
+        return book
+
+    sold = _overlay_orders(hold(), ohlc, date, policy, now_ms)
+    assert any(order.reason == "alt_stop" for order in sold)
+    rows[-1][3] = 96.0
+    rows[-1][4] = 96.0
+    assert _overlay_orders(hold(), ohlc, date, policy, now_ms) == []
+
+
+def test_reclaim_gate_waits_for_a_streak_or_keeps_only_the_fresh_days() -> None:
+    assert reclaim_allows(1, side="wait", bound=4) is False
+    assert reclaim_allows(4, side="wait", bound=4) is True
+    assert reclaim_allows(2, side="fresh", bound=4) is True
+    assert reclaim_allows(9, side="fresh", bound=4) is False
+    assert reclaim_allows(0, side="fresh", bound=4) is False
+    assert reclaim_allows(0, side="wait", bound=4) is False
