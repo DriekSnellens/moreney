@@ -69,6 +69,12 @@ class Lot:
     peak_px: float = 0.0
     partial_done: bool = False
     spike_done: bool = False
+    # Starter lot waiting for a scale-in add. The add must not rewrite entry.
+    scale_open: bool = False
+    # Consecutive completed closes sitting through the price trail.
+    trail_streak: int = 0
+    # A first-pierce partial has already been booked on this lot.
+    trail_banked: bool = False
 
 
 @dataclass
@@ -80,6 +86,11 @@ class Order:
     qty: float = 0.0
     notional: float = 0.0
     reason: str = ""
+    # Scale-in adds shares. Leave the original entry so the lock still
+    # refers to the first fill. Cash accounting does not use entry_px.
+    keep_entry: bool = False
+    # Sell at this price on the signal bar. 0 keeps the model's next-open fill.
+    same_bar_px: float = 0.0
 
 
 def bar_date(row: Sequence[float]) -> str:
@@ -256,6 +267,7 @@ class Book:
         fee_side: float,
         *,
         opened_ms: int,
+        keep_entry: bool = False,
     ) -> float:
         if px <= 0 or notional <= 0:
             return 0.0
@@ -271,7 +283,8 @@ class Book:
         prev = self.lots.get(base)
         if prev:
             new_qty = prev.qty + qty
-            prev.entry_px = (prev.entry_px * prev.qty + px * qty) / new_qty if new_qty else px
+            if not keep_entry and new_qty > 0:
+                prev.entry_px = (prev.entry_px * prev.qty + px * qty) / new_qty
             prev.qty = new_qty
             prev.role = role
             prev.peak_px = max(prev.peak_px, px)
@@ -322,7 +335,7 @@ def _apply_orders(
         lot = book.lots.get(order.base)
         if row is None or lot is None:
             continue
-        ref = float(row[ref_i])
+        ref = order.same_bar_px if order.same_bar_px > 0 else float(row[ref_i])
         take = order.qty if order.qty > 0 else lot.qty
         notion = take * ref
         px = fill_px(ref, "sell", notional=notion, adv=order.adv, model=model)
@@ -347,7 +360,13 @@ def _apply_orders(
         ref = float(row[ref_i])
         px = fill_px(ref, "buy", notional=order.notional, adv=order.adv, model=model)
         spent = book.buy(
-            order.base, order.role, order.notional, px, model.fee_side, opened_ms=opened_ms
+            order.base,
+            order.role,
+            order.notional,
+            px,
+            model.fee_side,
+            opened_ms=opened_ms,
+            keep_entry=order.keep_entry,
         )
         if spent > 0:
             fills.append(
@@ -364,6 +383,26 @@ def _apply_orders(
     return fills
 
 
+def _touch_fill(
+    *,
+    open_: float,
+    low: float,
+    levels: Sequence[tuple[float, str]],
+) -> tuple[float, str] | None:
+    """Highest stop the bar actually traded, or None.
+
+    The level has to be known before the bar. A gap through it fills at
+    the open; otherwise the fill is the level itself.
+    """
+    if open_ <= 0 or low <= 0:
+        return None
+    hit = [(px, reason) for px, reason in levels if px > 0 and low <= px]
+    if not hit:
+        return None
+    level, reason = max(hit, key=lambda item: item[0])
+    return (open_ if open_ <= level else level), reason
+
+
 def _overlay_orders(
     book: Book,
     ohlc: Mapping[str, Sequence[Sequence[float]]],
@@ -374,6 +413,8 @@ def _overlay_orders(
     orders: list[Order] = []
     close_px = _px_map(ohlc, date, field=4)
     high_px = _px_map(ohlc, date, field=2)
+    low_px = _px_map(ohlc, date, field=3)
+    open_px = _px_map(ohlc, date, field=1)
     btc_c = closes_of(rows_through(ohlc.get("BTC") or [], date))
     fold_eur = 0.0
     for lot in list(book.lots.values()):
@@ -383,6 +424,8 @@ def _overlay_orders(
         if close <= 0:
             continue
         high = float(high_px.get(lot.base) or close)
+        low = float(low_px.get(lot.base) or close)
+        open_ = float(open_px.get(lot.base) or close)
         prev_peak = lot.peak_px
         lot.peak_px = max(lot.peak_px, high, close)
         fresh_high = high > 0 and high + 1e-12 >= prev_peak
@@ -402,7 +445,79 @@ def _overlay_orders(
             reasons.append("alt_tp")
         if policy.alt_stop_pct > 0 and ret <= -policy.alt_stop_pct:
             reasons.append("alt_stop")
-        if policy.alt_trail_pct > 0 and peak_dd >= policy.alt_trail_pct:
+        trail = float(policy.alt_trail_pct or 0.0)
+        if (
+            policy.alt_runner_arm_pct > 0
+            and policy.alt_runner_trail_pct > 0
+            and peak_ret >= policy.alt_runner_arm_pct
+        ):
+            trail = float(policy.alt_runner_trail_pct)
+        # Touch uses the peak known before this bar. Today's high can raise
+        # the close-based trail below, which is the live rule, not this one.
+        touch_levels: list[tuple[float, str]] = []
+        if policy.alt_trail_on_touch and trail > 0 and prev_peak > 0:
+            touch_levels.append((prev_peak * (1.0 - trail), "alt_trail_touch"))
+        prior_ret = prev_peak / lot.entry_px - 1.0 if lot.entry_px > 0 and prev_peak > 0 else 0.0
+        if (
+            policy.alt_lock_on_touch
+            and policy.alt_lock_arm_pct > 0
+            and lot.entry_px > 0
+            and prior_ret >= policy.alt_lock_arm_pct
+        ):
+            touch_levels.append(
+                (lot.entry_px * (1.0 + policy.alt_lock_floor_pct), "alt_lock_touch")
+            )
+        touched = _touch_fill(open_=open_, low=low, levels=touch_levels) if touch_levels else None
+        if touched is not None:
+            fill_at, touch_reason = touched
+            orders.append(
+                Order(
+                    side="sell",
+                    base=lot.base,
+                    role="alt",
+                    adv=_adv(ohlc, lot.base, date),
+                    same_bar_px=fill_at,
+                    reason=touch_reason,
+                )
+            )
+            continue
+        trail_days = tuple(policy.alt_trail_weekdays or ())
+        trail_day_ok = True
+        if trail_days:
+            wd = datetime.fromtimestamp(now_ms / 1000, UTC).weekday()
+            trail_day_ok = wd in trail_days
+        pierced = trail > 0 and trail_day_ok and peak_dd >= trail
+        if pierced:
+            lot.trail_streak += 1
+        else:
+            lot.trail_streak = 0
+        need = max(1, int(policy.alt_trail_confirm or 1))
+        first_frac = float(policy.alt_trail_first_frac or 0.0)
+        # Bank a slice on the first pierce, then let a second close decide
+        # the rest. A close back above the level clears the streak; the
+        # next single pierce then sells whatever is left.
+        if (
+            pierced
+            and first_frac > 0.0
+            and need >= 2
+            and not lot.trail_banked
+            and lot.trail_streak == 1
+            and not reasons
+        ):
+            orders.append(
+                Order(
+                    side="sell",
+                    base=lot.base,
+                    role="alt",
+                    adv=_adv(ohlc, lot.base, date),
+                    qty=lot.qty * min(first_frac, 0.99),
+                    reason="alt_trail_half",
+                )
+            )
+            lot.trail_banked = True
+            continue
+        full_need = 1 if lot.trail_banked else need
+        if pierced and lot.trail_streak >= full_need:
             reasons.append("alt_trail")
         if policy.alt_atr_k > 0:
             atr = _atr14(rows)
@@ -412,6 +527,15 @@ def _overlay_orders(
             age = (now_ms - lot.opened_ms) / DAY_MS
             if age >= policy.alt_max_days:
                 reasons.append("alt_time")
+        if (
+            policy.alt_red_cut_days > 0
+            and lot.opened_ms > 0
+            and lot.entry_px > 0
+            and close < lot.entry_px
+        ):
+            age = (now_ms - lot.opened_ms) / DAY_MS
+            if age >= policy.alt_red_cut_days:
+                reasons.append("alt_red_cut")
         if policy.alt_min_excess is not None:
             xs = rs_excess(closes_of(rows), btc_c, lb=20, skip=1)
             if xs is not None and xs < policy.alt_min_excess:
