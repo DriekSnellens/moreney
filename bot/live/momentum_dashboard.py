@@ -4167,6 +4167,7 @@ def render_momentum_dashboard(
     moonshot: Mapping[str, Any] | None = None,
     show_moonshot: bool = False,
     moonshot_ledger_rows: Sequence[Mapping[str, Any]] | None = None,
+    alphai_outlook: Mapping[str, Any] | None = None,
 ) -> HTMLResponse:
     del volatile, volatile_ledger_rows, show_volatile
     del short_weakest, short_weakest_ledger_rows, show_short_weakest
@@ -4248,7 +4249,10 @@ def render_momentum_dashboard(
         if preview
         else ""
     )
+    from bot.integrations.alphai.outlook import render_alphai_outlook
+
     moonshot_html = _moonshot_panel(moonshot) if moonshot_on else ""
+    outlook_html = render_alphai_outlook(alphai_outlook)
     earnings_html = _earnings_masthead(
         earnings,
         pill=pill,
@@ -4373,6 +4377,7 @@ def render_momentum_dashboard(
     <nav class="side-nav">
       <div class="label">Desk</div>
       <a class="active" href="/live/momentum#clip">Desk</a>
+      <a href="/live/momentum#alphai-outlook">AlphaI</a>
       {"<a href=\"/live/momentum#moonshot\">MoonShot</a>" if moonshot_html else ""}
       <a href="/live/momentum#open-pos">Bags</a>
       {('<a href="/live/momentum#core-15m">15m</a>' if core_live else "")}
@@ -4437,6 +4442,7 @@ def render_momentum_dashboard(
 {topbar}
 <div class="wrap">
 {earnings_html}
+{outlook_html}
 {visual}
 {moonshot_html}
 {sat}

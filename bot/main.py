@@ -48,6 +48,7 @@ from bot.live.dashboard_history import (
     metrics_from_payload,
     record_snapshot,
 )
+from bot.integrations.alphai.outlook import holding_bases, refresh_outlook
 from bot.live.dashboard import render_live_dashboard
 from bot.live.pwa_assets import ICON_SVG, MANIFEST_JSON, SERVICE_WORKER_JS
 from bot.live.production_flags import PRODUCTION_EXECUTION_ENABLED
@@ -1093,7 +1094,15 @@ async def live_dashboard(_: None = Depends(require_dashboard_access)) -> HTMLRes
     )
     if target:
         return RedirectResponse(url=target, status_code=303)
-    return render_live_dashboard(await _live_dashboard_payload())
+    payload = await _live_dashboard_payload()
+    holdings = ((payload.get("session") or {}).get("bridge") or {}).get("portfolio_holdings") or []
+    bases = [
+        str(row.get("base") or "").upper()
+        for row in holdings
+        if isinstance(row, dict) and row.get("base")
+    ]
+    payload["alphai_outlook"] = await asyncio.to_thread(refresh_outlook, settings, bases)
+    return render_live_dashboard(payload)
 
 
 @app.get("/live/dashboard/legacy", response_class=HTMLResponse, response_model=None)
@@ -1242,6 +1251,15 @@ async def live_momentum_dashboard(
         short_status=short_status if show_short_weakest else None,
         donchian_status=donchian_status if show_donchian else None,
     )
+    outlook = await asyncio.to_thread(
+        refresh_outlook,
+        settings,
+        holding_bases(
+            clip_status if show_clip else None,
+            moonshot_status if show_moonshot else None,
+            status,
+        ),
+    )
     return render_momentum_dashboard(
         status,
         ledger["rows"],
@@ -1266,6 +1284,7 @@ async def live_momentum_dashboard(
         moonshot=moonshot_status if show_moonshot else None,
         show_moonshot=show_moonshot,
         moonshot_ledger_rows=moonshot_ledger if show_moonshot else None,
+        alphai_outlook=outlook,
     )
 
 
