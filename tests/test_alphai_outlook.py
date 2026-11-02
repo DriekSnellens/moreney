@@ -104,6 +104,14 @@ def test_fresh_cache_does_not_call_alphai(tmp_path) -> None:
         allow_network=True,
     )
     assert got["portfolio"][0]["base"] == "SOL"
+    empty = refresh_outlook(
+        object(),
+        [],
+        path=path,
+        client=_Client(),
+        allow_network=True,
+    )
+    assert empty["portfolio"] == []
 
 
 def test_momentum_dashboard_shows_the_outlook_panel() -> None:

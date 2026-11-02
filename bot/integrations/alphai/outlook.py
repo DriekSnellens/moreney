@@ -262,9 +262,17 @@ def refresh_outlook(
     held = [str(base).upper() for base in portfolio if str(base).strip()]
     cached = _read_cache(path)
     if cached and _fresh(cached, now=instant, portfolio=held):
-        view = cached.get("view")
-        if isinstance(view, dict):
-            return view
+        sentiment = cached.get("sentiment") if isinstance(cached.get("sentiment"), dict) else {}
+        report = load_daily_recommendations(str(
+            getattr(settings, "alphai_daily_recommendations_path", None)
+            or "data/alphai/daily_recommendations.json"
+        ))
+        return build_outlook(
+            sentiment=sentiment,
+            report=report if isinstance(report, dict) else None,
+            portfolio=held,
+            fetched_at=str(cached.get("fetched_at") or ""),
+        )
     network = allow_network
     if network is None:
         network = "PYTEST_CURRENT_TEST" not in os.environ
