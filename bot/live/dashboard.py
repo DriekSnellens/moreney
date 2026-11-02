@@ -949,8 +949,12 @@ def render_live_dashboard(payload: dict[str, Any]) -> HTMLResponse:
         cap_util=eq_diag.get("capital_utilization_pct"),
         esc=_esc,
     )
+    from bot.integrations.alphai.outlook import render_alphai_outlook
+
+    outlook_html = render_alphai_outlook(payload.get("alphai_outlook"))
     command_center_html = (
         f"<section class='command-stack' aria-label='Intelligence command center'>"
+        f"{outlook_html}"
         f"{daily_picks_html}"
         f"<div class='command-grid'>{alphai_html}{operator_html}</div>"
         f"</section>"

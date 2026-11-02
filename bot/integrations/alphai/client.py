@@ -56,17 +56,27 @@ class AlphaIClient:
             method=method,
             headers={"Authorization": f"Bearer {self._api_key}"},
         )
-        try:
-            with urlopen(req, timeout=self._timeout) as resp:
-                self.last_rate_limit = AlphaIRateLimit(
-                    _int_header(resp.headers.get("X-RateLimit-Limit")),
-                    _int_header(resp.headers.get("X-RateLimit-Remaining")),
-                    _int_header(resp.headers.get("X-RateLimit-Reset")),
-                )
-                body = resp.read()
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"AlphaI HTTP {exc.code}: {detail}") from exc
+        delay = 2.0
+        for attempt in range(3):
+            try:
+                with urlopen(req, timeout=self._timeout) as resp:
+                    self.last_rate_limit = AlphaIRateLimit(
+                        _int_header(resp.headers.get("X-RateLimit-Limit")),
+                        _int_header(resp.headers.get("X-RateLimit-Remaining")),
+                        _int_header(resp.headers.get("X-RateLimit-Reset")),
+                    )
+                    body = resp.read()
+                break
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:500]
+                if exc.code == 429 and attempt < 2:
+                    retry = _int_header(exc.headers.get("Retry-After"))
+                    time.sleep(min(float(retry or delay), 30.0))
+                    delay *= 2
+                    continue
+                raise RuntimeError(f"AlphaI HTTP {exc.code}: {detail}") from exc
+        else:
+            raise RuntimeError("AlphaI HTTP 429: retries exhausted")
         if not body:
             return None
         return json.loads(body.decode("utf-8"))
@@ -86,6 +96,44 @@ class AlphaIClient:
             raise
         return data if isinstance(data, dict) else None
 
+    def sentiment_summary(self, ticker: str) -> dict[str, Any]:
+        """Seven UTC days of bullish, neutral and bearish counts for one ticker.
+
+        The window is always the last seven days, including today. It is not a
+        historical series.
+        """
+        data = self._request("GET", f"/api/symbols/{ticker}/sentiment-summary/")
+        if not isinstance(data, dict):
+            raise RuntimeError("unexpected sentiment-summary payload")
+        return data
+
+    def signals_snapshot(
+        self,
+        *,
+        market: str = "crypto",
+        window: str = "24h",
+        limit: int = 50,
+        tickers: str | None = None,
+        sentiment: str | None = None,
+        sort: str | None = None,
+    ) -> dict[str, Any]:
+        """Radar: unusual news activity. Not a price forecast or a backtest."""
+        params: dict[str, Any] = {
+            "market": market,
+            "window": window,
+            "limit": limit,
+        }
+        if tickers:
+            params["tickers"] = tickers
+        if sentiment:
+            params["sentiment"] = sentiment
+        if sort:
+            params["sort"] = sort
+        data = self._request("GET", "/api/signals/snapshot/", params=params)
+        if not isinstance(data, dict):
+            raise RuntimeError("unexpected /api/signals/snapshot/ payload")
+        return data
+
     def list_news(
         self,
         *,
@@ -95,6 +143,8 @@ class AlphaIClient:
         page_size: int = 20,
         cursor: str | None = None,
         sort: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
         collapse_story: bool = True,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"page_size": page_size}
@@ -111,6 +161,10 @@ class AlphaIClient:
             params["cursor"] = cursor
         if sort:
             params["sort"] = sort
+        if from_date:
+            params["from_date"] = from_date
+        if to_date:
+            params["to_date"] = to_date
         if collapse_story:
             params["collapse"] = "story"
         data = self._request("GET", "/api/news/", params=params)
