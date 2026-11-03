@@ -86,6 +86,17 @@ class AlphaIClient:
             raise
         return data if isinstance(data, dict) else None
 
+    def sentiment_summary(self, ticker: str) -> dict[str, Any]:
+        """Seven-day bullish, neutral and bearish counts. Today is included.
+
+        AlphaI documents this rollup as news counts, not a price forecast.
+        Insider filing rows are excluded by the endpoint itself.
+        """
+        data = self._request("GET", f"/api/symbols/{ticker}/sentiment-summary/")
+        if not isinstance(data, dict):
+            raise RuntimeError("unexpected sentiment-summary payload")
+        return data
+
     def list_news(
         self,
         *,
