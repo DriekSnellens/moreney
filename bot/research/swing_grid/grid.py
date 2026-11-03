@@ -29,6 +29,9 @@ BOUNCE_10 = 0.10
 STOP_THROUGH = 0.02
 SHALLOW_MAX = 0.04
 HOLD_SESSIONS = 3
+EARLY_BARS = 16
+PRIOR_FRAC = 0.50
+ROOM = 0.003
 IMPACT_K = 0.02
 IMPACT_CAP = 0.03
 MAKER = float(VENUE_MAKER_FEE["bitvavo"])
@@ -43,6 +46,10 @@ MODES = (
     "stop5",
     "shallow5",
     "hold3",
+    "liquid5",
+    "early5",
+    "reclaim",
+    "prior",
     "hold",
     "oracle",
 )
@@ -183,6 +190,7 @@ def choose_name(
     day: str,
     equity: float,
     universe: Sequence[str],
+    rank: str = "chop",
 ) -> Choice | None:
     """Pick from sessions strictly before ``day``. Today's range is not an input."""
     rung = equity / 2.0
@@ -215,9 +223,9 @@ def choose_name(
             mid=prior[-1].close,
             adv=adv,
         )
-        rank = (chop, base)
-        if best is None or rank[0] > best[0] or (rank[0] == best[0] and rank[1] < best[1]):
-            best = (chop, base, choice)
+        score = adv if rank == "liquid" else chop
+        if best is None or score > best[0] or (score == best[0] and base < best[1]):
+            best = (score, base, choice)
     return None if best is None else best[2]
 
 
@@ -354,7 +362,15 @@ def _run_retest(session: Session, choice: Choice, equity: float) -> DayOut:
     return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
 
 
-def _run_bounce(session: Session, choice: Choice, equity: float, target: float) -> DayOut:
+def _run_bounce(
+    session: Session,
+    choice: Choice,
+    equity: float,
+    target: float,
+    *,
+    entry_through: int = 10**9,
+    sell_at_open: bool = False,
+) -> DayOut:
     """Bid 1% above the low already printed. Sell ``target`` above the fill."""
     cash = equity
     qty = 0.0
@@ -368,13 +384,14 @@ def _run_bounce(session: Session, choice: Choice, equity: float, target: float) 
     flattens = 0
     last = len(session.bars) - 1
     for bi, (open_, high, low, close) in enumerate(session.bars):
-        if qty == 0 and not entered and bi >= 1:
+        if qty == 0 and not entered and 1 <= bi <= entry_through:
             printed_low = min(bar[2] for bar in session.bars[:bi])
             buy_px = printed_low * (1.0 + CUSHION)
-            if printed_low > 0 and buy_px < open_ and low <= buy_px:
+            blocked = sell_at_open and buy_px * (1.0 + ROOM) >= session.open
+            if printed_low > 0 and not blocked and buy_px < open_ and low <= buy_px:
                 cash, qty, cost = _buy_maker(cash, equity, buy_px)
                 if qty > 0:
-                    sell_px = buy_px * (1.0 + target)
+                    sell_px = session.open if sell_at_open else buy_px * (1.0 + target)
                     bought_on = bi
                     entered = True
                 else:
@@ -606,6 +623,43 @@ def _marked(cash: float, pos: _Hold | None) -> float:
     return cash + proceeds
 
 
+def _run_prior(session: Session, choice: Choice, equity: float) -> DayOut:
+    """Buy halfway down yesterday's range. Sell a return to yesterday's close."""
+    buy_px = choice.mid * (1.0 - PRIOR_FRAC * choice.range_frac)
+    sell_px = choice.mid
+    if not (0 < buy_px < session.open and sell_px >= buy_px * (1.0 + ROOM)):
+        return DayOut(equity, False, 0.0, 0.0, 0, 0)
+    cash = equity
+    qty = 0.0
+    cost = 0.0
+    bought_on = -1
+    entered = False
+    maker_pnl = 0.0
+    flatten_pnl = 0.0
+    maker_exits = 0
+    flattens = 0
+    last = len(session.bars) - 1
+    for bi, (open_, high, low, close) in enumerate(session.bars):
+        if qty == 0 and not entered and buy_px < open_ and low <= buy_px:
+            cash, qty, cost = _buy_maker(cash, equity, buy_px)
+            if qty > 0:
+                bought_on = bi
+                entered = True
+            else:
+                qty = 0.0
+        elif qty > 0 and bi > bought_on and high >= sell_px:
+            cash, proceeds = _sell_maker(cash, qty, sell_px)
+            maker_pnl += proceeds - cost
+            maker_exits += 1
+            qty = 0.0
+        if bi == last and qty > 0:
+            cash, proceeds, _px = _flatten(cash, qty, close, choice.adv)
+            flatten_pnl += proceeds - cost
+            flattens += 1
+            qty = 0.0
+    return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
+
+
 def _run_hold(session: Session, choice: Choice, equity: float) -> DayOut:
     slip_in = _impact(equity, choice.adv)
     buy_px = session.open * (1.0 + slip_in)
@@ -640,6 +694,12 @@ def run_session(session: Session, choice: Choice, equity: float, mode: str) -> D
         return _run_stop(session, choice, equity)
     if mode == "shallow5":
         return _run_shallow(session, choice, equity)
+    if mode == "early5":
+        return _run_bounce(session, choice, equity, BOUNCE_5, entry_through=EARLY_BARS)
+    if mode == "reclaim":
+        return _run_bounce(session, choice, equity, BOUNCE_5, sell_at_open=True)
+    if mode == "prior":
+        return _run_prior(session, choice, equity)
     if mode == "hold":
         return _run_hold(session, choice, equity)
     if mode == "oracle":
@@ -778,13 +838,15 @@ def simulate(
         base: {session.day: session for session in sessions}
         for base, sessions in by_base.items()
     }
+    rank = "liquid" if mode == "liquid5" else "chop"
+    play = "bounce5" if mode == "liquid5" else mode
     for day in days:
-        choice = choose_name(by_base, day, equity, universe)
+        choice = choose_name(by_base, day, equity, universe, rank)
         if choice is None:
             continue
         selected += 1
         picks[choice.base] += 1
-        out = run_session(index[choice.base][day], choice, equity, mode)
+        out = run_session(index[choice.base][day], choice, equity, play)
         day_pnl = out.end_equity - equity
         if abs(day_pnl) >= abs(largest):
             largest = day_pnl

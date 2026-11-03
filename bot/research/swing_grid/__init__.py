@@ -60,6 +60,18 @@ locked before the run, each changing one lever:
 - ``hold3``: the same bid and 5% sell, kept for up to three sessions
   instead of sold at the first close. Still flat after the third close.
 
+The fourth replay changes the name or the target, not the stop. Locked
+before that run:
+
+- ``liquid5``: the same 1% bid and 5% sell, on the name with the highest
+  median turnover among those that clear the chop floor.
+- ``early5``: the same bid and sell, and the bid expires after the first
+  16 quarter-hours.
+- ``reclaim``: the same bid, sold at the session open when that open is
+  far enough above the bid to clear the maker round trip.
+- ``prior``: the buy is set at the open, halfway down the prior five-day
+  range, and the sell is the prior close.
+
 Book €20,000, compounding, long only. Report the full path, the path
 before 2026, and 2026, each restarted at €20,000. Nothing is wired into
 the live book.

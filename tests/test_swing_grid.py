@@ -8,6 +8,7 @@ from bot.research.swing_grid.grid import (  # noqa: I001
     BOUNCE_10,
     CAPACITY,
     CUSHION,
+    EARLY_BARS,
     HOLD_SESSIONS,
     LOOKBACK,
     MAKER,
@@ -15,9 +16,11 @@ from bot.research.swing_grid.grid import (  # noqa: I001
     MIN_BARS,
     MIN_CHOP,
     MIN_QUOTE_EUR,
+    PRIOR_FRAC,
     RETEST_INNER,
     RETEST_MIN_RANGE,
     RETEST_WARMUP,
+    ROOM,
     RUNG_FRACS,
     SHALLOW_MAX,
     STOP_THROUGH,
@@ -49,6 +52,9 @@ def test_thresholds_stay_locked() -> None:
     assert STOP_THROUGH == 0.02
     assert SHALLOW_MAX == 0.04
     assert HOLD_SESSIONS == 3
+    assert EARLY_BARS == 16
+    assert PRIOR_FRAC == 0.50
+    assert ROOM == 0.003
     assert BOOK_EUR == 20_000.0
 
 
@@ -326,6 +332,57 @@ def test_hold_can_sell_the_target_on_a_later_session() -> None:
     cash, pos, made, exits, forced = _advance_hold(third, pos, cash)
     assert pos is None and exits == 1 and made > 0 and forced == 0.0
     assert cash > BOOK_EUR
+
+
+def test_liquid_rank_prefers_turnover_over_chop() -> None:
+    wild = [_session(f"2026-01-0{i}", 100, 120, 80, 100, quote=200_000) for i in range(1, 7)]
+    calm = [_session(f"2026-01-0{i}", 100, 106, 98, 100, quote=5_000_000) for i in range(1, 7)]
+    book = {"AAA": wild, "BBB": calm}
+    chop = choose_name(book, "2026-01-06", BOOK_EUR, ("AAA", "BBB"))
+    liquid = choose_name(book, "2026-01-06", BOOK_EUR, ("AAA", "BBB"), "liquid")
+    assert chop is not None and chop.base == "AAA"
+    assert liquid is not None and liquid.base == "BBB"
+
+
+def test_early_bid_expires_and_reclaim_sells_the_open() -> None:
+    late = [(110.0, 110.0, 110.0, 110.0) for _ in range(20)]
+    late[0] = (110.0, 110.0, 100.0, 108.0)
+    late[18] = (108.0, 108.0, 101.0, 105.0)
+    missed = _session("2026-01-06", 110, 110, 100, 105, bars=tuple(late))
+    assert run_session(missed, _choice(), BOOK_EUR, "early5").filled is False
+    bars = [
+        (100.0, 100.0, 90.0, 95.0),
+        (96.0, 96.0, 90.5, 94.0),
+        (94.0, 96.0, 94.0, 95.0),
+        (95.0, 101.0, 95.0, 100.0),
+    ]
+    session = _session("2026-01-06", 100, 101, 90, 100, bars=tuple(bars))
+    out = run_session(session, _choice(), BOOK_EUR, "reclaim")
+    buy_px = 90.0 * (1.0 + CUSHION)
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    expected = qty * session.open * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert abs(out.end_equity - expected) < 1e-6
+    short = _session("2026-01-06", 100, 96, 90, 95, bars=tuple(bars[:3]))
+    assert run_session(short, _choice(), BOOK_EUR, "reclaim").maker_exits == 0
+
+
+def test_prior_buys_half_the_old_range_and_sells_the_old_close() -> None:
+    choice = _choice()
+    buy_px = choice.mid * (1.0 - PRIOR_FRAC * choice.range_frac)
+    assert abs(buy_px - 90.0) < 1e-9
+    bars = (
+        (100.0, 100.0, 89.0, 95.0),
+        (95.0, 100.0, 95.0, 99.0),
+    )
+    session = _session("2026-01-06", 100, 100, 89, 99, bars=bars)
+    out = run_session(session, choice, BOOK_EUR, "prior")
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    expected = qty * choice.mid * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert abs(out.end_equity - expected) < 1e-6
+    gapped = _session("2026-01-06", 80, 85, 70, 82, bars=((80.0, 85.0, 70.0, 82.0),))
+    assert run_session(gapped, choice, BOOK_EUR, "prior").filled is False
 
 
 def test_hold_pays_the_round_trip_and_oracle_uses_the_extremes() -> None:
