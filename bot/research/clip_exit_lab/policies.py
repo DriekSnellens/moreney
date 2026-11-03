@@ -39,6 +39,28 @@ class ExitPolicy:
     # The new lot is left to the trail.
     alt_spike_reclaim_days: int = 0
     fold_alt_to_btc: bool = False
+    # Once the peak gain reaches the arm, either widen the trail or hold
+    # with the trail and the lock both off. Below the arm nothing changes.
+    alt_runner_arm_pct: float = 0.0
+    alt_runner_trail_pct: float = 0.0
+    alt_runner_hold: bool = False
+
+
+def runner_exit(policy: ExitPolicy, peak_ret: float) -> tuple[float, bool]:
+    """Return the trail width, and whether the profit lock stays armed.
+
+    Below ``alt_runner_arm_pct`` the live trail width is unchanged and the
+    lock stays on. Past the arm, a wider trail replaces it and the lock
+    goes off. ``alt_runner_hold`` leaves both off.
+    """
+    armed = policy.alt_runner_arm_pct > 0 and peak_ret >= policy.alt_runner_arm_pct
+    if not armed:
+        return policy.alt_trail_pct, True
+    if policy.alt_runner_hold:
+        return 0.0, False
+    if policy.alt_runner_trail_pct > 0:
+        return policy.alt_runner_trail_pct, False
+    return policy.alt_trail_pct, True
 
 
 def POLICIES() -> list[ExitPolicy]:

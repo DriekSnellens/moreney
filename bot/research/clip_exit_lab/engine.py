@@ -23,7 +23,7 @@ from bot.live.momentum_btc_rs_clip import (
     quote_vol,
     rs_excess,
 )
-from bot.research.clip_exit_lab.policies import ExitPolicy
+from bot.research.clip_exit_lab.policies import ExitPolicy, runner_exit
 
 DAY_MS = 86_400_000
 IMPACT_K = 0.02
@@ -391,8 +391,10 @@ def _overlay_orders(
         peak_dd = 1.0 - close / lot.peak_px if lot.peak_px > 0 else 0.0
         rows = rows_through(ohlc.get(lot.base) or [], date)
         reasons: list[str] = []
+        trail_width, lock_on = runner_exit(policy, peak_ret)
         if (
-            policy.alt_lock_arm_pct > 0
+            lock_on
+            and policy.alt_lock_arm_pct > 0
             and peak_ret >= policy.alt_lock_arm_pct
             and lot.entry_px > 0
             and close <= lot.entry_px * (1.0 + policy.alt_lock_floor_pct)
@@ -402,8 +404,13 @@ def _overlay_orders(
             reasons.append("alt_tp")
         if policy.alt_stop_pct > 0 and ret <= -policy.alt_stop_pct:
             reasons.append("alt_stop")
-        if policy.alt_trail_pct > 0 and peak_dd >= policy.alt_trail_pct:
-            reasons.append("alt_trail")
+        if trail_width > 0 and peak_dd >= trail_width:
+            widened = (
+                policy.alt_runner_arm_pct > 0
+                and peak_ret >= policy.alt_runner_arm_pct
+                and trail_width != policy.alt_trail_pct
+            )
+            reasons.append("alt_runner" if widened else "alt_trail")
         if policy.alt_atr_k > 0:
             atr = _atr14(rows)
             if peak_dd >= policy.alt_atr_k * atr:

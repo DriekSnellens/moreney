@@ -174,6 +174,20 @@ def _held(book: Book) -> dict[str, str]:
     return {lot.base: lot.role for lot in book.lots.values()}
 
 
+def equity_below_ma(equity: Sequence[float], n: int) -> bool:
+    """True when the last mark is at least one cent under the recent mean.
+
+    A flat cash book is a hair under its own mean in float dust. Comparing
+    rounded cents lets the book trade again once the dip is gone.
+    """
+    if n <= 0 or len(equity) < n:
+        return False
+    window = equity[-n:]
+    last = round(float(window[-1]), 2)
+    mean = round(sum(window) / n, 2)
+    return last < mean
+
+
 def _targets(
     *,
     winner: str,
@@ -336,6 +350,7 @@ def run_btc_residual(
     entry_gate: Callable[[str, str], bool] | None = None,
     alt_size_scale: Callable[[str, str], float] | None = None,
     exit_cooldown_days: int | None = None,
+    equity_ma_block: int = 0,
 ) -> dict[str, Any]:
     """One book: BTC fraction + residual winner on the rest.
 
@@ -458,10 +473,7 @@ def run_btc_residual(
                 want_btc = ""
                 last_reb = now_ms
         age_due = last_reb <= 0 or (now_ms - last_reb) >= rebalance_days * DAY_MS
-        if wd_pin is not None:
-            due = age_due and now.weekday() == wd_pin
-        else:
-            due = age_due
+        due = age_due and now.weekday() == wd_pin if wd_pin is not None else age_due
         if due and len(btc_c) >= need:
             pick = pick_residual(
                 ohlc,
@@ -499,6 +511,11 @@ def run_btc_residual(
                 btc_frac=btc_frac,
                 flatten=flatten,
             )
+            if equity_below_ma(equity, equity_ma_block):
+                owned = {base for base, role in held.items() if role == "alt"}
+                next_alts = tuple(alt for alt in next_alts if alt in owned)
+                if not next_alts and btc_frac <= 0:
+                    next_btc = ""
             changed = (next_btc != want_btc) or (next_alts != want_alts) or not held
             if changed and (next_btc or next_alts or held):
                 orders: list[Order] = []
