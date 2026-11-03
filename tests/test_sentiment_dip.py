@@ -12,7 +12,14 @@ from bot.research.sentiment_dip.gate import (
     classify,
     tone_for,
 )
+from bot.research.sentiment_dip.percents import BIDS, OFFERS
 from bot.research.swing_grid.grid import BOOK_EUR, Session, choose_name
+
+
+def test_percent_grid_is_the_locked_set() -> None:
+    assert BIDS == (0.00, 0.01, 0.02, 0.04)
+    assert OFFERS == (0.03, 0.05, 0.08, 0.12)
+    assert (0.01, 0.05) in {(bid, offer) for bid in BIDS for offer in OFFERS}
 
 
 def test_thresholds_match_the_live_scorer() -> None:

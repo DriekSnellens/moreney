@@ -12,7 +12,16 @@ from typing import Any
 
 from bot.integrations.alphai.daily_recommendations import score_focus_bases
 from bot.integrations.alphai.parse import AlphaIHeadline
-from bot.research.swing_grid.grid import BOOK_EUR, Choice, Session, choose_name, run_session
+from bot.research.swing_grid.grid import (
+    BOOK_EUR,
+    BOUNCE_5,
+    CUSHION,
+    Choice,
+    Session,
+    choose_name,
+    run_priced_bounce,
+    run_session,
+)
 
 TONE_DAYS = 7
 BUY_SCORE = 1.0
@@ -177,6 +186,15 @@ def _rank_choice(
     return None if best is None else best[2]
 
 
+def tones_by_day(
+    grouped: Mapping[str, Sequence[AlphaIHeadline]],
+    days: Sequence[str],
+    universe: Sequence[str],
+) -> dict[str, Tone]:
+    """One tone per session day. The score does not depend on the bid or offer."""
+    return {day: tone_for(grouped, day, universe) for day in days}
+
+
 def simulate(
     books: Mapping[str, Sequence[Session]],
     grouped: Mapping[str, Sequence[AlphaIHeadline]],
@@ -185,6 +203,9 @@ def simulate(
     mode: str,
     start: str,
     end: str,
+    cushion: float = CUSHION,
+    target: float = BOUNCE_5,
+    tones: Mapping[str, Tone] | None = None,
 ) -> Run:
     days = sorted(
         {
@@ -212,6 +233,8 @@ def simulate(
     for day in days:
         if mode == "plain":
             tone = Tone(frozenset(), frozenset())
+        elif tones is not None:
+            tone = tones[day]
         else:
             tone = tone_for(grouped, day, universe)
         choice = _choice(books, day, equity, universe, tone, mode)
@@ -219,7 +242,11 @@ def simulate(
             continue
         selected += 1
         picks[choice.base] += 1
-        out = run_session(index[choice.base][day], choice, equity, "bounce5")
+        session = index[choice.base][day]
+        if cushion == CUSHION and target == BOUNCE_5:
+            out = run_session(session, choice, equity, "bounce5")
+        else:
+            out = run_priced_bounce(session, choice, equity, cushion=cushion, target=target)
         day_pnl = out.end_equity - equity
         if abs(day_pnl) >= abs(largest):
             largest = day_pnl

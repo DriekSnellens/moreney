@@ -31,4 +31,17 @@ score breaks alphabetically. Cash when no buy clears the gates.
 
 Book €20,000, compounding, Bitvavo maker and taker as in the swing lab.
 One name. Nothing is wired into the live book.
+
+The percent grid was locked after that reading, and before its own replay.
+Bids sit 0%, 1%, 2%, or 4% above the printed low. Offers sit 3%, 5%, 8%,
+or 12% above the fill. The 1% / 5% pair is the control. Fees, the one-shot
+rule, the same-bar refusal, and the close flatten stay as they are.
+``tone``, ``block``, and ``plain`` are crossed with the grid on the news
+overlap only. ``rank`` is not crossed with it. The same sixteen pairs
+also run on the full tape with no sentiment, so both periods can be
+judged. A pair is not a strategy unless the full path, the path before
+2026, and 2026 are all positive, the full path has at least 40 maker
+exits, a positive largest day is under half the full profit, and the
+full drawdown is smaller than the full return. The best cell is not
+refit. Nothing is armed.
 """

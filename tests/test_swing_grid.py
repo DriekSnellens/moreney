@@ -39,6 +39,7 @@ from bot.research.swing_grid.grid import (  # noqa: I001
     _taker_exit,
     choose_name,
     day_chop,
+    run_priced_bounce,
     run_session,
     simulate,
 )
@@ -223,6 +224,29 @@ def test_bounce_buys_above_the_printed_low_and_sells_five_percent_later() -> Non
     wider = run_session(session, _choice(), BOOK_EUR, "bounce10")
     assert wider.maker_exits == 0
     assert wider.flattens == 1
+
+
+def test_priced_bounce_uses_the_passed_distances() -> None:
+    bars = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 109.0, 100.0, 108.0),
+        (108.0, 104.0, 103.0, 103.5),
+    )
+    session = _session("2026-01-06", 110, 110, 100, 103.5, bars=bars)
+    choice = _choice()
+    at_low = run_priced_bounce(session, choice, BOOK_EUR, cushion=0.0, target=0.03)
+    assert at_low.maker_exits == 1
+    assert at_low.flattens == 0
+    wide_bid = run_priced_bounce(session, choice, BOOK_EUR, cushion=0.09, target=0.03)
+    assert wide_bid.filled is False
+    far_offer = run_priced_bounce(session, choice, BOOK_EUR, cushion=0.0, target=0.08)
+    assert far_offer.maker_exits == 0
+    assert far_offer.flattens == 1
+    same = run_priced_bounce(session, choice, BOOK_EUR, cushion=CUSHION, target=BOUNCE_5)
+    bounce = run_session(session, choice, BOOK_EUR, "bounce5")
+    assert same.end_equity == bounce.end_equity
+    assert same.maker_exits == bounce.maker_exits
+    assert same.flattens == bounce.flattens
 
 
 def test_bounce_does_not_use_the_low_of_the_fill_bar() -> None:
