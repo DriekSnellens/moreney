@@ -58,4 +58,29 @@ uses the €10,000 quote floor, ``liquid`` the €100,000 floor, and
 bids only where the seven-day count is a buy. The daily candle is not
 used for this path, because the day's high and low together would be
 the future. Nothing is armed.
+
+The break-even week was locked after that dip, and before its own
+replay. The sleeve is €10,000 in ten equal slots. A slot buys one of
+the ten strongest bullish alts at the session open, as a taker.
+Strength is the prior seven publication days: at least one bullish
+headline and more bullish headlines than bearish ones, ranked by the
+difference, then by the bullish count, then by the base. The name must
+clear the €10,000 median-quote floor. A slot that is already filled is
+not resized, and a name that leaves the ten during a week that is not
+bearish is sold at the next open.
+
+A week is bearish when those same seven days, summed across the alt
+universe, contain more bearish headlines than bullish ones. A tie is
+not bearish. A quiet week is not bearish. On a bearish week the sleeve
+buys nothing. Every open lot rests a sell at its fee-inclusive
+break-even and keeps that order until it fills, including after the
+week turns. The first 15-minute bar that trades the price fills it: a
+maker fill at break-even when the bar opens below it, or a taker at
+the open when the open is already through it. A day that never prints
+the price does not flatten. The entry day cannot be the exit.
+
+``hold`` is the control locked with the same rule. It buys the same
+ten and a bearish week changes nothing. The archive has no path before
+2026. The last day flattens leftovers, so a resting order is not
+counted as a scratch. Nothing is armed.
 """
