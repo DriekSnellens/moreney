@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from bot.research.swing_grid.grid import (
     BOOK_EUR,
+    BOUNCE_5,
+    BOUNCE_10,
     CAPACITY,
+    CUSHION,
     LOOKBACK,
+    MAKER,
     MAX_STALE_DAYS,
     MIN_BARS,
     MIN_CHOP,
@@ -33,6 +37,9 @@ def test_thresholds_stay_locked() -> None:
     assert RETEST_WARMUP == 16
     assert RETEST_INNER == 0.20
     assert RETEST_MIN_RANGE == 0.02
+    assert CUSHION == 0.01
+    assert BOUNCE_5 == 0.05
+    assert BOUNCE_10 == 0.10
     assert BOOK_EUR == 20_000.0
 
 
@@ -163,6 +170,48 @@ def test_retest_freezes_the_peak_from_completed_bars() -> None:
     assert out.maker_exits == 1
     assert out.flattens == 0
     assert out.end_equity > 21_000
+
+
+def test_bounce_buys_above_the_printed_low_and_sells_five_percent_later() -> None:
+    bars = [(110.0, 110.0, 110.0, 110.0) for _ in range(4)]
+    bars[0] = (110.0, 110.0, 100.0, 108.0)
+    bars[1] = (108.0, 109.0, 101.0, 108.0)
+    bars[2] = (104.0, 106.1, 103.0, 105.0)
+    session = _session("2026-01-06", 110, 110, 100, 105, bars=tuple(bars))
+    out = run_session(session, _choice(), BOOK_EUR, "bounce5")
+    buy_px = 100.0 * (1.0 + CUSHION)
+    sell_px = buy_px * (1.0 + BOUNCE_5)
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    expected = qty * sell_px * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert out.flattens == 0
+    assert abs(out.end_equity - expected) < 1e-6
+    # A 10% target is not reached on this tape, so the lot is closed at the last price.
+    wider = run_session(session, _choice(), BOOK_EUR, "bounce10")
+    assert wider.maker_exits == 0
+    assert wider.flattens == 1
+
+
+def test_bounce_does_not_use_the_low_of_the_fill_bar() -> None:
+    bars = (
+        (110.0, 110.0, 105.0, 108.0),
+        (100.0, 101.0, 90.0, 95.0),
+    )
+    session = _session("2026-01-06", 110, 110, 90, 95, bars=bars)
+    out = run_session(session, _choice(), BOOK_EUR, "bounce5")
+    assert out.filled is False
+    assert out.end_equity == BOOK_EUR
+
+
+def test_bounce_does_not_sell_on_the_entry_bar() -> None:
+    bars = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 130.0, 101.0, 120.0),
+    )
+    session = _session("2026-01-06", 110, 130, 100, 120, bars=bars)
+    out = run_session(session, _choice(), BOOK_EUR, "bounce5")
+    assert out.maker_exits == 0
+    assert out.flattens == 1
 
 
 def test_hold_pays_the_round_trip_and_oracle_uses_the_extremes() -> None:

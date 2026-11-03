@@ -60,6 +60,8 @@ def _reading(runs: dict[tuple[str, str], Run]) -> str:
     oracle = runs[("oracle", "full")]
     path = runs[("path", "full")]
     retest = runs[("retest", "full")]
+    bounce5 = runs[("bounce5", "full")]
+    bounce10 = runs[("bounce10", "full")]
     return "\n".join(
         (
             "The headline is `strict`: limits from the prior five sessions, and no",
@@ -75,14 +77,21 @@ def _reading(runs: dict[tuple[str, str], Run]) -> str:
             f"finishes {_eur(path.pnl)}.",
             "`retest` buys a retest of extremes that have already printed and",
             f"finishes {_eur(retest.pnl)}.",
+            "`bounce5` bids 1% above the low already printed today and sells",
+            f"5% above that fill. Full path {_eur(bounce5.pnl)}, maker",
+            f"{_eur(bounce5.maker_pnl)}, close-outs {_eur(bounce5.flatten_pnl)}.",
+            "`bounce10` uses the same bid and sells 10% above the fill.",
+            f"Full path {_eur(bounce10.pnl)}, maker {_eur(bounce10.maker_pnl)},",
+            f"close-outs {_eur(bounce10.flatten_pnl)}.",
             "`hold` buys that same name at the open and sells the close and",
             f"finishes {_eur(hold.pnl)}.",
             "The oracle ceiling buys the day's low and sells the day's high and",
             f"finishes {_eur(oracle.pnl)}.",
             "That ceiling uses the session extremes and is not a strategy.",
             "",
-            "Nothing is armed. The rungs, lookback, chop floor, and retest band",
-            "were locked before this run and are not retuned to it.",
+            "Nothing is armed. The first cells were locked before their replay.",
+            "The 1% cushion and the 5% and 10% sells were locked before the",
+            "second replay. None of those numbers were moved after the result.",
         )
     )
 

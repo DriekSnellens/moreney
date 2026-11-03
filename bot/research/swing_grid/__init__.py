@@ -39,6 +39,14 @@ Cells, also locked before the run:
 - oracle: not tradable. Buy the session low and sell the session high,
   maker both sides. A ceiling, not a candidate.
 
+A follow-up specified the order the first replay did not test. Locked
+before that second replay, and not fit to it: once a 15-minute bar has
+closed, the buy sits 1% above the lowest low of the completed bars. That
+is around the trough already printed, and the order does not use a lower
+low from the bar that fills it. One full-book lot per session. The sell
+is 5% or 10% above the fill. Cells ``bounce5`` and ``bounce10``. A same-bar
+round trip does not count. Leftover inventory is sold at the session close.
+
 Book €20,000, compounding, long only, flat by the close. Report the full
 path, the path before 2026, and 2026, each restarted at €20,000. Nothing
 is wired into the live book.

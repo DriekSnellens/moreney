@@ -23,11 +23,14 @@ CAPACITY = 0.10
 RETEST_WARMUP = 16
 RETEST_INNER = 0.20
 RETEST_MIN_RANGE = 0.02
+CUSHION = 0.01
+BOUNCE_5 = 0.05
+BOUNCE_10 = 0.10
 IMPACT_K = 0.02
 IMPACT_CAP = 0.03
 MAKER = float(VENUE_MAKER_FEE["bitvavo"])
 TAKER = float(VENUE_TAKER_FEE["bitvavo"])
-MODES = ("strict", "path", "retest", "hold", "oracle")
+MODES = ("strict", "path", "retest", "bounce5", "bounce10", "hold", "oracle")
 
 Bar = tuple[float, float, float, float]
 
@@ -336,6 +339,44 @@ def _run_retest(session: Session, choice: Choice, equity: float) -> DayOut:
     return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
 
 
+def _run_bounce(session: Session, choice: Choice, equity: float, target: float) -> DayOut:
+    """Bid 1% above the low already printed. Sell ``target`` above the fill."""
+    cash = equity
+    qty = 0.0
+    cost = 0.0
+    sell_px = 0.0
+    bought_on = -1
+    entered = False
+    maker_pnl = 0.0
+    flatten_pnl = 0.0
+    maker_exits = 0
+    flattens = 0
+    last = len(session.bars) - 1
+    for bi, (open_, high, low, close) in enumerate(session.bars):
+        if qty == 0 and not entered and bi >= 1:
+            printed_low = min(bar[2] for bar in session.bars[:bi])
+            buy_px = printed_low * (1.0 + CUSHION)
+            if printed_low > 0 and buy_px < open_ and low <= buy_px:
+                cash, qty, cost = _buy_maker(cash, equity, buy_px)
+                if qty > 0:
+                    sell_px = buy_px * (1.0 + target)
+                    bought_on = bi
+                    entered = True
+                else:
+                    qty = 0.0
+        elif qty > 0 and bi > bought_on and high >= sell_px:
+            cash, proceeds = _sell_maker(cash, qty, sell_px)
+            maker_pnl += proceeds - cost
+            maker_exits += 1
+            qty = 0.0
+        if bi == last and qty > 0:
+            cash, proceeds, _px = _flatten(cash, qty, close, choice.adv)
+            flatten_pnl += proceeds - cost
+            flattens += 1
+            qty = 0.0
+    return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
+
+
 def _run_hold(session: Session, choice: Choice, equity: float) -> DayOut:
     slip_in = _impact(equity, choice.adv)
     buy_px = session.open * (1.0 + slip_in)
@@ -360,6 +401,10 @@ def run_session(session: Session, choice: Choice, equity: float, mode: str) -> D
         return _run_grid(session, choice, equity, mode)
     if mode == "retest":
         return _run_retest(session, choice, equity)
+    if mode == "bounce5":
+        return _run_bounce(session, choice, equity, BOUNCE_5)
+    if mode == "bounce10":
+        return _run_bounce(session, choice, equity, BOUNCE_10)
     if mode == "hold":
         return _run_hold(session, choice, equity)
     if mode == "oracle":
