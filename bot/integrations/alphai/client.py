@@ -86,6 +86,29 @@ class AlphaIClient:
             raise
         return data if isinstance(data, dict) else None
 
+    def signals_snapshot(
+        self,
+        *,
+        market: str = "crypto",
+        window: str = "24h",
+        limit: int = 50,
+        tickers: str | None = None,
+        sentiment: str | None = None,
+        sort: str | None = None,
+    ) -> dict[str, Any]:
+        """Radar: unusual news activity. Not a price forecast or a backtest."""
+        params: dict[str, Any] = {"market": market, "window": window, "limit": limit}
+        if tickers:
+            params["tickers"] = tickers
+        if sentiment:
+            params["sentiment"] = sentiment
+        if sort:
+            params["sort"] = sort
+        data = self._request("GET", "/api/signals/snapshot/", params=params)
+        if not isinstance(data, dict):
+            raise RuntimeError("unexpected /api/signals/snapshot/ payload")
+        return data
+
     def list_news(
         self,
         *,
