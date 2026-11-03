@@ -46,4 +46,16 @@ the desk floor of €100,000, on that same wide universe. Capacity, the
 seven-day count, the four-name cap, and the taker costs stay as above.
 The desk names are repeated on the daily tape as the control. Nothing
 is armed.
+
+The 7% dip was locked after that reading, and before its own replay.
+The bid is 1% above the low already printed on completed 15-minute
+bars. The offer is 7% above the fill. A same-bar round trip does not
+count. Anything still open goes out at the session close as a taker.
+The sleeve is €10,000, split equally across every eligible alt that
+day, and a slice above 10% of median quote volume is clipped. ``listed``
+uses the €10,000 quote floor, ``liquid`` the €100,000 floor, and
+``desk`` the sixteen large names. ``tone`` keeps the listed floor and
+bids only where the seven-day count is a buy. The daily candle is not
+used for this path, because the day's high and low together would be
+the future. Nothing is armed.
 """
