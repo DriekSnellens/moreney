@@ -325,6 +325,7 @@ def run_btc_residual(
     keep_curve: bool = False,
     keep_weeks: bool = False,
     keep_trades: bool = False,
+    keep_holds: bool = False,
     strategy: str = "",
     alt_allow: Mapping[str, set[str]] | None = None,
     alt_allow_mode: str = "gate",
@@ -645,6 +646,11 @@ def run_btc_residual(
     }
     if keep_curve:
         out["curve"] = [[d, round(v, 2)] for d, v in zip(eq_dates, equity, strict=False)]
+    if keep_holds:
+        out["holds"] = [
+            {"date": day, "hold": held_name, "equity": round(mark, 2)}
+            for day, held_name, mark in zip(eq_dates, holds, equity, strict=False)
+        ]
     return out
 
 
