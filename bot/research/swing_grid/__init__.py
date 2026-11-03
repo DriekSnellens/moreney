@@ -72,7 +72,65 @@ before that run:
 - ``prior``: the buy is set at the open, halfway down the prior five-day
   range, and the sell is the prior close.
 
-Book €20,000, compounding, long only. Report the full path, the path
-before 2026, and 2026, each restarted at €20,000. Nothing is wired into
-the live book.
+The fifth replay only fades a dip when the larger trend is up, or when
+today has not already exceeded a normal range, plus one tight round trip
+on the busiest name. Locked before that run:
+
+- ``sma_bounce``: bounce5, and only a name whose prior close is above its
+  own 20-session average.
+- ``sma_reclaim``: the reclaim sell, with that same average.
+- ``sma_prior``: the prior-close sell, with that same average.
+- ``quiet5``: bounce5, and no bid once today's range already exceeds the
+  prior five-day average range.
+- ``clip``: on the busiest name, buy 0.5% under the open and sell 0.5%
+  above the fill. 0.5% is the round trip that still clears the 0.30%
+  maker cost.
+
+The sixth replay changes the fill, the scale of the exit, or which rung
+rests. Locked before that run:
+
+- ``double5``: the first trade back to within 1% of a completed-bar low
+  is a test and is not a buy. A later bar that trades back to within 1%
+  of that same low, without printing more than 0.5% through it, buys at
+  1% above that low. A break of more than 0.5% resets the count. The
+  0.5% break is half the cushion: a wick larger than that is a new low.
+  Sell 5% above the fill. Flat at the close. One shot.
+- ``scale``: the bounce5 entry. Sell half at 2% and the rest at 5%.
+  2% is about six times the 0.30% maker round trip, so the first sale
+  clears that cost. Flat the remainder at the close.
+- ``shallow_rung``: the strict grid's 0.35 rung only. The 0.70 rung is
+  the buy that catches a breakdown. Notional stays half the book.
+
+The seventh replay does not move that rung. The daily flatten is what
+gives a maker round trip back, a stop was already worse, and the printed
+low is not the only reference. Locked before the run:
+
+- ``scratch``: the bounce5 entry and 5% sell. Once 64 bars have closed
+  (two-thirds of a 96-bar day) that sell is replaced by a maker sell at
+  the fill. A session that never reaches bar 64 does not scratch. Still
+  flat at the close if the scratch does not print.
+- ``vwap``: after four completed bars, buy 1% under their volume-weighted
+  typical price and sell that same price. 1% is about three times the
+  0.30% maker round trip. The bar being traded is not in the average.
+  One full-book shot. Flat at the close.
+- ``carry``: the strict two-rung grid, and inventory is not sold at the
+  close. The paired sell stays working on later sessions. No new name
+  while a lot is open. Leftovers are sold at the last close of the window.
+
+The eighth replay keeps those distances and changes which dip is taken.
+Locked before the run:
+
+- ``mid_exit``: buy the 0.35 rung and sell the prior close, not the
+  upper rung. Half the book. The far side of the range is a breakaway,
+  so the exit is the reference price that already traded.
+- ``second_day``: bounce5 only when the prior session's low is below
+  the low of the session before it. The first down day is the break.
+  The buy is the next session.
+
+A cell is convincing only when the full path, the path before 2026, and
+2026 are all positive, the full path has at least 40 completed sells, the
+largest day is under half of that profit when that day is a gain, and the
+full-path drawdown is smaller than the full-path return. Otherwise it is
+not a strategy. Nothing is wired into the live book.
+Book €20,000, compounding, long only. Each window restarts at €20,000.
 """

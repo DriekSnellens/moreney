@@ -32,6 +32,14 @@ HOLD_SESSIONS = 3
 EARLY_BARS = 16
 PRIOR_FRAC = 0.50
 ROOM = 0.003
+SMA_WINDOW = 20
+CLIP = 0.005
+DOUBLE_BREAK = 0.005
+SCALE_FIRST = 0.02
+SHALLOW_RUNG = 0.35
+SCRATCH_AFTER = 64
+VWAP_WARMUP = 4
+VWAP_BAND = 0.01
 IMPACT_K = 0.02
 IMPACT_CAP = 0.03
 MAKER = float(VENUE_MAKER_FEE["bitvavo"])
@@ -50,6 +58,19 @@ MODES = (
     "early5",
     "reclaim",
     "prior",
+    "sma_bounce",
+    "sma_reclaim",
+    "sma_prior",
+    "quiet5",
+    "clip",
+    "double5",
+    "scale",
+    "shallow_rung",
+    "scratch",
+    "vwap",
+    "carry",
+    "mid_exit",
+    "second_day",
     "hold",
     "oracle",
 )
@@ -66,6 +87,7 @@ class Session:
     close: float
     quote: float
     bars: tuple[Bar, ...]
+    volumes: tuple[float, ...] = ()
 
     @property
     def n_bars(self) -> int:
@@ -137,17 +159,24 @@ def _usable(session: Session) -> bool:
     )
 
 
-_INDEX: dict[int, tuple[list[Session], dict[str, Session]]] = {}
+_INDEX: dict[tuple[int, int, int, int], tuple[list[Session], dict[str, Session]]] = {}
 
 
 def _index(sessions: Sequence[Session]) -> tuple[list[Session], dict[str, Session]]:
-    """Usable sessions, sorted, plus every session by day. Keyed by list identity."""
-    hit = _INDEX.get(id(sessions))
+    """Usable sessions, sorted, plus every session by day.
+
+    The key includes the first and last session, not only the list id.
+    A freed list can be recycled under the same id with different rows.
+    """
+    if not sessions:
+        return [], {}
+    stamp = (id(sessions), len(sessions), id(sessions[0]), id(sessions[-1]))
+    hit = _INDEX.get(stamp)
     if hit is None:
         usable = [row for row in sessions if _usable(row)]
         usable.sort(key=lambda row: row.day)
         hit = (usable, {row.day: row for row in sessions})
-        _INDEX[id(sessions)] = hit
+        _INDEX[stamp] = hit
     return hit
 
 
@@ -180,6 +209,7 @@ def sessions_from_rows(rows: Sequence[Sequence[float]]) -> list[Session]:
                 close=packed[-1][3],
                 quote=quote,
                 bars=packed,
+                volumes=tuple(float(bar[5]) for bar in bars),
             )
         )
     return out
@@ -191,6 +221,8 @@ def choose_name(
     equity: float,
     universe: Sequence[str],
     rank: str = "chop",
+    above_sma: bool = False,
+    lower_low: bool = False,
 ) -> Choice | None:
     """Pick from sessions strictly before ``day``. Today's range is not an input."""
     rung = equity / 2.0
@@ -210,6 +242,15 @@ def choose_name(
         if len(prior) < LOOKBACK:
             continue
         if _gap_days(prior[-1].day, day) > MAX_STALE_DAYS:
+            continue
+        if above_sma:
+            trail = usable[:cut][-SMA_WINDOW:]
+            if len(trail) < SMA_WINDOW:
+                continue
+            sma = sum(row.close for row in trail) / SMA_WINDOW
+            if prior[-1].close <= sma:
+                continue
+        if lower_low and not prior[-1].low < prior[-2].low:
             continue
         chop = sum(day_chop(row.open, row.high, row.low, row.close) for row in prior) / LOOKBACK
         span = sum(day_range(row.open, row.high, row.low) for row in prior) / LOOKBACK
@@ -257,14 +298,21 @@ class _Lot:
     notional: float
 
 
-def _run_grid(session: Session, choice: Choice, equity: float, mode: str) -> DayOut:
-    buys = tuple(choice.mid * (1.0 - frac * choice.range_frac) for frac in RUNG_FRACS)
-    sells = tuple(choice.mid * (1.0 + frac * choice.range_frac) for frac in RUNG_FRACS)
+def _run_grid(
+    session: Session,
+    choice: Choice,
+    equity: float,
+    mode: str,
+    fracs: tuple[float, ...] = RUNG_FRACS,
+) -> DayOut:
+    buys = tuple(choice.mid * (1.0 - frac * choice.range_frac) for frac in fracs)
+    sells = tuple(choice.mid * (1.0 + frac * choice.range_frac) for frac in fracs)
     active = [
         i
         for i, buy in enumerate(buys)
         if 0 < buy < session.open and sells[i] > buy
     ]
+    # Half the book per rung. A one-rung cell keeps that size.
     notional = equity / 2.0
     cash = equity
     held: dict[int, _Lot | None] = {i: None for i in active}
@@ -370,12 +418,15 @@ def _run_bounce(
     *,
     entry_through: int = 10**9,
     sell_at_open: bool = False,
+    quiet: bool = False,
+    scratch_after: int | None = None,
 ) -> DayOut:
     """Bid 1% above the low already printed. Sell ``target`` above the fill."""
     cash = equity
     qty = 0.0
     cost = 0.0
     sell_px = 0.0
+    buy_px_fill = 0.0
     bought_on = -1
     entered = False
     maker_pnl = 0.0
@@ -387,20 +438,29 @@ def _run_bounce(
         if qty == 0 and not entered and 1 <= bi <= entry_through:
             printed_low = min(bar[2] for bar in session.bars[:bi])
             buy_px = printed_low * (1.0 + CUSHION)
-            blocked = sell_at_open and buy_px * (1.0 + ROOM) >= session.open
+            wide = False
+            if quiet and session.open > 0:
+                printed_high = max(bar[1] for bar in session.bars[:bi])
+                wide = (printed_high - printed_low) / session.open > choice.range_frac
+            blocked = wide or (sell_at_open and buy_px * (1.0 + ROOM) >= session.open)
             if printed_low > 0 and not blocked and buy_px < open_ and low <= buy_px:
                 cash, qty, cost = _buy_maker(cash, equity, buy_px)
                 if qty > 0:
                     sell_px = session.open if sell_at_open else buy_px * (1.0 + target)
+                    buy_px_fill = buy_px
                     bought_on = bi
                     entered = True
                 else:
                     qty = 0.0
-        elif qty > 0 and bi > bought_on and high >= sell_px:
-            cash, proceeds = _sell_maker(cash, qty, sell_px)
-            maker_pnl += proceeds - cost
-            maker_exits += 1
-            qty = 0.0
+        elif qty > 0 and bi > bought_on:
+            working = sell_px
+            if scratch_after is not None and bi >= scratch_after:
+                working = buy_px_fill
+            if high >= working:
+                cash, proceeds = _sell_maker(cash, qty, working)
+                maker_pnl += proceeds - cost
+                maker_exits += 1
+                qty = 0.0
         if bi == last and qty > 0:
             cash, proceeds, _px = _flatten(cash, qty, close, choice.adv)
             flatten_pnl += proceeds - cost
@@ -623,11 +683,34 @@ def _marked(cash: float, pos: _Hold | None) -> float:
     return cash + proceeds
 
 
+def _run_clip(session: Session, choice: Choice, equity: float) -> DayOut:
+    """One buy 0.5% under the open, sold 0.5% above the fill."""
+    buy_px = session.open * (1.0 - CLIP)
+    return _run_limits(session, choice, equity, buy_px, buy_px * (1.0 + CLIP))
+
+
 def _run_prior(session: Session, choice: Choice, equity: float) -> DayOut:
     """Buy halfway down yesterday's range. Sell a return to yesterday's close."""
     buy_px = choice.mid * (1.0 - PRIOR_FRAC * choice.range_frac)
-    sell_px = choice.mid
-    if not (0 < buy_px < session.open and sell_px >= buy_px * (1.0 + ROOM)):
+    return _run_limits(session, choice, equity, buy_px, choice.mid)
+
+
+def _run_mid_exit(session: Session, choice: Choice, equity: float) -> DayOut:
+    """Buy the shallow rung. Sell the prior close, not the upper rung."""
+    buy_px = choice.mid * (1.0 - SHALLOW_RUNG * choice.range_frac)
+    return _run_limits(session, choice, equity, buy_px, choice.mid, equity / 2.0)
+
+
+def _run_limits(
+    session: Session,
+    choice: Choice,
+    equity: float,
+    buy_px: float,
+    sell_px: float,
+    notional: float | None = None,
+) -> DayOut:
+    size = equity if notional is None else notional
+    if size <= 0 or not (0 < buy_px < session.open and sell_px >= buy_px * (1.0 + ROOM)):
         return DayOut(equity, False, 0.0, 0.0, 0, 0)
     cash = equity
     qty = 0.0
@@ -641,7 +724,7 @@ def _run_prior(session: Session, choice: Choice, equity: float) -> DayOut:
     last = len(session.bars) - 1
     for bi, (open_, high, low, close) in enumerate(session.bars):
         if qty == 0 and not entered and buy_px < open_ and low <= buy_px:
-            cash, qty, cost = _buy_maker(cash, equity, buy_px)
+            cash, qty, cost = _buy_maker(cash, size, buy_px)
             if qty > 0:
                 bought_on = bi
                 entered = True
@@ -679,9 +762,156 @@ def _run_oracle(session: Session, equity: float) -> DayOut:
     return DayOut(proceeds, True, proceeds - equity, 0.0, 1, 0)
 
 
+def _run_vwap(session: Session, choice: Choice, equity: float) -> DayOut:
+    """Buy 1% under the VWAP of completed bars. Sell that frozen VWAP."""
+    if len(session.volumes) != len(session.bars):
+        return DayOut(equity, False, 0.0, 0.0, 0, 0)
+    cash = equity
+    qty = 0.0
+    cost = 0.0
+    sell_px = 0.0
+    bought_on = -1
+    entered = False
+    maker_pnl = 0.0
+    flatten_pnl = 0.0
+    maker_exits = 0
+    flattens = 0
+    weighted = 0.0
+    volume = 0.0
+    last = len(session.bars) - 1
+    for bi, (open_, high, low, close) in enumerate(session.bars):
+        if qty > 0 and bi > bought_on and high >= sell_px:
+            cash, proceeds = _sell_maker(cash, qty, sell_px)
+            maker_pnl += proceeds - cost
+            maker_exits += 1
+            qty = 0.0
+        elif qty == 0 and not entered and bi >= VWAP_WARMUP and volume > 0:
+            vwap = weighted / volume
+            buy_px = vwap * (1.0 - VWAP_BAND)
+            if (
+                buy_px > 0
+                and buy_px < open_
+                and low <= buy_px
+                and vwap >= buy_px * (1.0 + ROOM)
+            ):
+                cash, qty, cost = _buy_maker(cash, equity, buy_px)
+                if qty > 0:
+                    sell_px = vwap
+                    bought_on = bi
+                    entered = True
+                else:
+                    qty = 0.0
+        if bi == last and qty > 0:
+            cash, proceeds, _px = _flatten(cash, qty, close, choice.adv)
+            flatten_pnl += proceeds - cost
+            flattens += 1
+            qty = 0.0
+        size = session.volumes[bi]
+        if size > 0:
+            typical = (high + low + close) / 3.0
+            weighted += typical * size
+            volume += size
+    return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
+
+
+def _run_double(session: Session, choice: Choice, equity: float) -> DayOut:
+    """Buy the second test of one low. A break of more than 0.5% starts over."""
+    cash = equity
+    qty = 0.0
+    cost = 0.0
+    sell_px = 0.0
+    bought_on = -1
+    entered = False
+    ref: float | None = None
+    tests = 0
+    maker_pnl = 0.0
+    flatten_pnl = 0.0
+    maker_exits = 0
+    flattens = 0
+    last = len(session.bars) - 1
+    for bi, (open_, high, low, close) in enumerate(session.bars):
+        if qty > 0 and bi > bought_on and high >= sell_px:
+            cash, proceeds = _sell_maker(cash, qty, sell_px)
+            maker_pnl += proceeds - cost
+            maker_exits += 1
+            qty = 0.0
+        elif qty == 0 and not entered and ref is not None and ref > 0:
+            buy_px = ref * (1.0 + CUSHION)
+            if low < ref * (1.0 - DOUBLE_BREAK):
+                ref = low
+                tests = 0
+            elif low <= buy_px:
+                if tests < 1:
+                    tests = 1
+                elif buy_px < open_:
+                    cash, qty, cost = _buy_maker(cash, equity, buy_px)
+                    if qty > 0:
+                        sell_px = buy_px * (1.0 + BOUNCE_5)
+                        bought_on = bi
+                        entered = True
+                    else:
+                        qty = 0.0
+        if bi == last and qty > 0:
+            cash, proceeds, _px = _flatten(cash, qty, close, choice.adv)
+            flatten_pnl += proceeds - cost
+            flattens += 1
+            qty = 0.0
+        if ref is None and low > 0:
+            ref = low
+    return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
+
+
+def _run_scale(session: Session, choice: Choice, equity: float) -> DayOut:
+    """Bounce entry. Sell half at 2% and the rest at 5%."""
+    cash = equity
+    lots: list[tuple[float, float, float]] = []
+    bought_on = -1
+    entered = False
+    maker_pnl = 0.0
+    flatten_pnl = 0.0
+    maker_exits = 0
+    flattens = 0
+    last = len(session.bars) - 1
+    for bi, (open_, high, low, close) in enumerate(session.bars):
+        if lots and bi > bought_on:
+            kept: list[tuple[float, float, float]] = []
+            for lot_qty, lot_cost, lot_px in lots:
+                if high >= lot_px:
+                    cash, proceeds = _sell_maker(cash, lot_qty, lot_px)
+                    maker_pnl += proceeds - lot_cost
+                    maker_exits += 1
+                else:
+                    kept.append((lot_qty, lot_cost, lot_px))
+            lots = kept
+        if not lots and not entered and bi >= 1:
+            printed_low = min(bar[2] for bar in session.bars[:bi])
+            buy_px = printed_low * (1.0 + CUSHION)
+            if printed_low > 0 and buy_px < open_ and low <= buy_px:
+                cash, qty, cost = _buy_maker(cash, equity, buy_px)
+                if qty > 0:
+                    half_qty = qty / 2.0
+                    half_cost = cost / 2.0
+                    lots = [
+                        (half_qty, half_cost, buy_px * (1.0 + SCALE_FIRST)),
+                        (half_qty, half_cost, buy_px * (1.0 + BOUNCE_5)),
+                    ]
+                    bought_on = bi
+                    entered = True
+        if bi == last and lots:
+            qty = sum(lot[0] for lot in lots)
+            cost = sum(lot[1] for lot in lots)
+            cash, proceeds, _px = _flatten(cash, qty, close, choice.adv)
+            flatten_pnl += proceeds - cost
+            flattens += 1
+            lots = []
+    return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
+
+
 def run_session(session: Session, choice: Choice, equity: float, mode: str) -> DayOut:
     if mode in {"strict", "path"}:
         return _run_grid(session, choice, equity, mode)
+    if mode == "shallow_rung":
+        return _run_grid(session, choice, equity, "strict", (SHALLOW_RUNG,))
     if mode == "retest":
         return _run_retest(session, choice, equity)
     if mode == "bounce5":
@@ -700,11 +930,203 @@ def run_session(session: Session, choice: Choice, equity: float, mode: str) -> D
         return _run_bounce(session, choice, equity, BOUNCE_5, sell_at_open=True)
     if mode == "prior":
         return _run_prior(session, choice, equity)
+    if mode == "quiet5":
+        return _run_bounce(session, choice, equity, BOUNCE_5, quiet=True)
+    if mode == "clip":
+        return _run_clip(session, choice, equity)
+    if mode == "double5":
+        return _run_double(session, choice, equity)
+    if mode == "scale":
+        return _run_scale(session, choice, equity)
+    if mode == "scratch":
+        return _run_bounce(session, choice, equity, BOUNCE_5, scratch_after=SCRATCH_AFTER)
+    if mode == "vwap":
+        return _run_vwap(session, choice, equity)
+    if mode == "mid_exit":
+        return _run_mid_exit(session, choice, equity)
+    if mode == "second_day":
+        return _run_bounce(session, choice, equity, BOUNCE_5)
     if mode == "hold":
         return _run_hold(session, choice, equity)
     if mode == "oracle":
         return _run_oracle(session, equity)
     raise ValueError(mode)
+
+
+@dataclass
+class _Open:
+    qty: float
+    notional: float
+    sell_px: float
+
+
+@dataclass
+class _Bag:
+    base: str
+    adv: float
+    lots: list[_Open]
+    last_close: float
+
+
+def _mark_bag(cash: float, bag: _Bag | None) -> float:
+    if bag is None or not bag.lots:
+        return cash
+    qty = sum(lot.qty for lot in bag.lots)
+    proceeds, _px = _taker_exit(qty, bag.last_close, bag.adv)
+    return cash + proceeds
+
+
+def _enter_carry(
+    session: Session, choice: Choice, equity: float
+) -> tuple[float, _Bag | None, float, int]:
+    """Strict grid with no close-out. Leftover lots stay open."""
+    buys = tuple(choice.mid * (1.0 - frac * choice.range_frac) for frac in RUNG_FRACS)
+    sells = tuple(choice.mid * (1.0 + frac * choice.range_frac) for frac in RUNG_FRACS)
+    active = [
+        i for i, buy in enumerate(buys) if 0 < buy < session.open and sells[i] > buy
+    ]
+    notional = equity / 2.0
+    cash = equity
+    held: dict[int, _Lot | None] = {i: None for i in active}
+    maker_pnl = 0.0
+    maker_exits = 0
+    for bi, (_open, high, low, _close) in enumerate(session.bars):
+        for i in active:
+            lot = held[i]
+            if lot is None or lot.bar == bi or high < sells[i]:
+                continue
+            cash, proceeds = _sell_maker(cash, lot.qty, sells[i])
+            maker_pnl += proceeds - lot.notional
+            maker_exits += 1
+            held[i] = None
+        for i in active:
+            if held[i] is not None or low > buys[i]:
+                continue
+            cash, qty, spent = _buy_maker(cash, notional, buys[i])
+            if qty > 0:
+                held[i] = _Lot(bi, qty, spent)
+    lots = [
+        _Open(lot.qty, lot.notional, sells[i])
+        for i, lot in held.items()
+        if lot is not None
+    ]
+    if not lots:
+        return cash, None, maker_pnl, maker_exits
+    return cash, _Bag(choice.base, choice.adv, lots, session.close), maker_pnl, maker_exits
+
+
+def _advance_carry(
+    session: Session, bag: _Bag, cash: float
+) -> tuple[float, _Bag | None, float, int]:
+    """Work paired sells. A fill from an earlier session may sell on any bar."""
+    if not session.bars:
+        return cash, bag, 0.0, 0
+    maker_pnl = 0.0
+    maker_exits = 0
+    lots = list(bag.lots)
+    last_close = bag.last_close
+    for _open, high, _low, close in session.bars:
+        last_close = close
+        kept: list[_Open] = []
+        for lot in lots:
+            if high >= lot.sell_px:
+                cash, proceeds = _sell_maker(cash, lot.qty, lot.sell_px)
+                maker_pnl += proceeds - lot.notional
+                maker_exits += 1
+            else:
+                kept.append(lot)
+        lots = kept
+    if not lots:
+        return cash, None, maker_pnl, maker_exits
+    return cash, _Bag(bag.base, bag.adv, lots, last_close), maker_pnl, maker_exits
+
+
+def _simulate_carry(
+    by_base: Mapping[str, Sequence[Session]],
+    *,
+    universe: Sequence[str],
+    start: str,
+    end: str,
+) -> Run:
+    """Strict rungs. Paired sells stay working until they fill or the window ends."""
+    days = sorted(
+        {
+            session.day
+            for base in universe
+            for session in by_base.get(base, ())
+            if start <= session.day <= end
+        }
+    )
+    index = {
+        base: {session.day: session for session in sessions}
+        for base, sessions in by_base.items()
+    }
+    cash = BOOK_EUR
+    bag: _Bag | None = None
+    peak = BOOK_EUR
+    max_dd = 0.0
+    selected = 0
+    filled = 0
+    maker_exits = 0
+    flattens = 0
+    maker_pnl = 0.0
+    flatten_pnl = 0.0
+    largest = 0.0
+    picks: Counter[str] = Counter()
+    for day in days:
+        mark = _mark_bag(cash, bag)
+        traded = False
+        if bag is not None:
+            session = index.get(bag.base, {}).get(day)
+            if session is not None:
+                cash, bag, made, exits = _advance_carry(session, bag, cash)
+                maker_pnl += made
+                maker_exits += exits
+                traded = exits > 0
+        else:
+            choice = choose_name(by_base, day, cash, universe)
+            if choice is not None:
+                selected += 1
+                picks[choice.base] += 1
+                cash, bag, made, exits = _enter_carry(
+                    index[choice.base][day], choice, cash
+                )
+                maker_pnl += made
+                maker_exits += exits
+                traded = exits > 0 or bag is not None
+        if traded:
+            filled += 1
+        end_mark = _mark_bag(cash, bag)
+        day_pnl = end_mark - mark
+        if abs(day_pnl) >= abs(largest):
+            largest = day_pnl
+        peak = max(peak, end_mark)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - end_mark) / peak)
+    if bag is not None and bag.lots:
+        qty = sum(lot.qty for lot in bag.lots)
+        cost = sum(lot.notional for lot in bag.lots)
+        proceeds, _px = _taker_exit(qty, bag.last_close, bag.adv)
+        cash += proceeds
+        flatten_pnl += proceeds - cost
+        flattens += 1
+    return Run(
+        mode="carry",
+        start=days[0] if days else start,
+        end=days[-1] if days else end,
+        pnl=cash - BOOK_EUR,
+        end_equity=cash,
+        max_dd=max_dd,
+        days=len(days),
+        selected=selected,
+        filled=filled,
+        maker_exits=maker_exits,
+        flattens=flattens,
+        maker_pnl=maker_pnl,
+        flatten_pnl=flatten_pnl,
+        largest_day=largest,
+        picks=tuple(picks.most_common()),
+    )
 
 
 def _simulate_hold3(
@@ -815,6 +1237,8 @@ def simulate(
 ) -> Run:
     if mode == "hold3":
         return _simulate_hold3(by_base, universe=universe, start=start, end=end)
+    if mode == "carry":
+        return _simulate_carry(by_base, universe=universe, start=start, end=end)
     days = sorted(
         {
             session.day
@@ -838,10 +1262,25 @@ def simulate(
         base: {session.day: session for session in sessions}
         for base, sessions in by_base.items()
     }
-    rank = "liquid" if mode == "liquid5" else "chop"
-    play = "bounce5" if mode == "liquid5" else mode
+    rank = "liquid" if mode in {"liquid5", "clip"} else "chop"
+    above = mode in {"sma_bounce", "sma_reclaim", "sma_prior"}
+    play = {
+        "liquid5": "bounce5",
+        "sma_bounce": "bounce5",
+        "sma_reclaim": "reclaim",
+        "sma_prior": "prior",
+        "second_day": "bounce5",
+    }.get(mode, mode)
     for day in days:
-        choice = choose_name(by_base, day, equity, universe, rank)
+        choice = choose_name(
+            by_base,
+            day,
+            equity,
+            universe,
+            rank,
+            above_sma=above,
+            lower_low=mode == "second_day",
+        )
         if choice is None:
             continue
         selected += 1

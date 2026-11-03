@@ -7,7 +7,9 @@ from bot.research.swing_grid.grid import (  # noqa: I001
     BOUNCE_5,
     BOUNCE_10,
     CAPACITY,
+    CLIP,
     CUSHION,
+    DOUBLE_BREAK,
     EARLY_BARS,
     HOLD_SESSIONS,
     LOOKBACK,
@@ -22,8 +24,14 @@ from bot.research.swing_grid.grid import (  # noqa: I001
     RETEST_WARMUP,
     ROOM,
     RUNG_FRACS,
+    SCALE_FIRST,
+    SCRATCH_AFTER,
     SHALLOW_MAX,
+    SHALLOW_RUNG,
+    SMA_WINDOW,
     STOP_THROUGH,
+    VWAP_BAND,
+    VWAP_WARMUP,
     Choice,
     Session,
     _advance_hold,
@@ -32,6 +40,7 @@ from bot.research.swing_grid.grid import (  # noqa: I001
     choose_name,
     day_chop,
     run_session,
+    simulate,
 )
 
 
@@ -55,6 +64,14 @@ def test_thresholds_stay_locked() -> None:
     assert EARLY_BARS == 16
     assert PRIOR_FRAC == 0.50
     assert ROOM == 0.003
+    assert SMA_WINDOW == 20
+    assert CLIP == 0.005
+    assert DOUBLE_BREAK == 0.005
+    assert SCALE_FIRST == 0.02
+    assert SHALLOW_RUNG == 0.35
+    assert SCRATCH_AFTER == 64
+    assert VWAP_WARMUP == 4
+    assert VWAP_BAND == 0.01
     assert BOOK_EUR == 20_000.0
 
 
@@ -75,6 +92,7 @@ def _session(
     quote: float = 1_000_000.0,
     n: int = MIN_BARS,
     bars: tuple[tuple[float, float, float, float], ...] | None = None,
+    volumes: tuple[float, ...] = (),
 ) -> Session:
     if bars is None:
         pad = [(close, close, close, close) for _ in range(n)]
@@ -83,7 +101,7 @@ def _session(
         pad[2] = (open_, open_, low, open_)
         pad[-1] = (close, close, close, close)
         bars = tuple(pad)
-    return Session(day, open_, high, low, close, quote, bars)
+    return Session(day, open_, high, low, close, quote, bars, volumes)
 
 
 def _priors(base_day: str = "2026-01-0") -> list[Session]:
@@ -383,6 +401,266 @@ def test_prior_buys_half_the_old_range_and_sells_the_old_close() -> None:
     assert abs(out.end_equity - expected) < 1e-6
     gapped = _session("2026-01-06", 80, 85, 70, 82, bars=((80.0, 85.0, 70.0, 82.0),))
     assert run_session(gapped, choice, BOOK_EUR, "prior").filled is False
+
+
+def _trend_book() -> dict[str, list[Session]]:
+    up: list[Session] = []
+    flat: list[Session] = []
+    for offset in range(1, 22):
+        day = f"2026-01-{offset:02d}"
+        close = 100.0 if offset < 20 else 130.0
+        up.append(_session(day, close, close * 1.05, close * 0.95, close))
+        flat.append(_session(day, 100, 105, 95, 100))
+    return {"UP": up, "FLAT": flat}
+
+
+def test_sma_filter_keeps_only_a_close_above_its_average() -> None:
+    book = _trend_book()
+    kept = choose_name(book, "2026-01-21", BOOK_EUR, ("FLAT", "UP"), above_sma=True)
+    assert kept is not None and kept.base == "UP"
+    blocked = choose_name({"FLAT": book["FLAT"]}, "2026-01-21", BOOK_EUR, ("FLAT",), above_sma=True)
+    assert blocked is None
+
+
+def test_quiet_day_skips_a_range_that_is_already_wide() -> None:
+    choice = Choice("AAA", 0.10, 0.02, 100.0, 1_000_000.0)
+    bars = (
+        (100.0, 110.0, 90.0, 100.0),
+        (100.0, 100.0, 90.5, 95.0),
+    )
+    session = _session("2026-01-06", 100, 110, 90, 95, bars=bars)
+    assert run_session(session, choice, BOOK_EUR, "bounce5").filled is True
+    assert run_session(session, choice, BOOK_EUR, "quiet5").filled is False
+
+
+def test_clip_buys_under_the_open_and_sells_half_a_percent_higher() -> None:
+    bars = (
+        (100.0, 100.0, 99.4, 99.7),
+        (99.7, 100.2, 99.6, 100.0),
+    )
+    session = _session("2026-01-06", 100, 100.2, 99.4, 100, bars=bars)
+    out = run_session(session, _choice(), BOOK_EUR, "clip")
+    buy_px = 100.0 * (1.0 - CLIP)
+    sell_px = buy_px * (1.0 + CLIP)
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    expected = qty * sell_px * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert abs(out.end_equity - expected) < 1e-6
+
+
+def test_double_buys_the_second_test_and_a_break_resets_the_count() -> None:
+    choice = _choice()
+    bars = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 108.0, 100.5, 105.0),
+        (106.0, 106.0, 100.8, 104.0),
+        (104.0, 107.0, 103.0, 106.0),
+    )
+    session = _session("2026-01-06", 110, 110, 100, 106, bars=bars)
+    out = run_session(session, choice, BOOK_EUR, "double5")
+    buy_px = 100.0 * (1.0 + CUSHION)
+    sell_px = buy_px * (1.0 + BOUNCE_5)
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    expected = qty * sell_px * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert abs(out.end_equity - expected) < 1e-6
+    first = _session("2026-01-06", 110, 110, 100, 105, bars=bars[:2])
+    assert run_session(first, choice, BOOK_EUR, "double5").filled is False
+    reset = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 108.0, 100.5, 105.0),
+        (105.0, 105.0, 99.0, 100.0),
+        (100.0, 100.0, 99.5, 99.8),
+    )
+    broken = _session("2026-01-06", 110, 110, 99, 99.8, bars=reset)
+    assert run_session(broken, choice, BOOK_EUR, "double5").filled is False
+    ref = 99.0
+    buy_px = ref * (1.0 + CUSHION)
+    sell_px = buy_px * (1.0 + BOUNCE_5)
+    second = reset + (
+        (102.0, 102.0, 99.9, 101.0),
+        (101.0, 106.0, 100.0, 105.0),
+    )
+    filled = _session("2026-01-06", 110, 110, 99, 105, bars=second)
+    again = run_session(filled, choice, BOOK_EUR, "double5")
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    assert again.maker_exits == 1
+    assert abs(again.end_equity - qty * sell_px * (1.0 - MAKER)) < 1e-6
+
+
+def test_scale_sells_half_at_two_percent_and_the_rest_at_five() -> None:
+    choice = _choice()
+    buy_px = 100.0 * (1.0 + CUSHION)
+    first_px = buy_px * (1.0 + SCALE_FIRST)
+    second_px = buy_px * (1.0 + BOUNCE_5)
+    bars = (
+        (100.0, 100.0, 100.0, 100.0),
+        (110.0, 110.0, 100.5, 105.0),
+        (105.0, 104.0, 103.0, 103.5),
+        (103.5, 107.0, 103.0, 106.0),
+    )
+    session = _session("2026-01-06", 100, 110, 100, 106, bars=bars)
+    out = run_session(session, choice, BOOK_EUR, "scale")
+    half = BOOK_EUR * (1.0 - MAKER) / buy_px / 2.0
+    expected = half * first_px * (1.0 - MAKER) + half * second_px * (1.0 - MAKER)
+    assert out.maker_exits == 2
+    assert out.flattens == 0
+    assert abs(out.end_equity - expected) < 1e-6
+    same_bar = _session(
+        "2026-01-06",
+        100,
+        120,
+        100,
+        115,
+        bars=((100.0, 100.0, 100.0, 100.0), (110.0, 120.0, 100.5, 115.0)),
+    )
+    held = run_session(same_bar, choice, BOOK_EUR, "scale")
+    assert held.maker_exits == 0
+    assert held.flattens == 1
+
+
+def test_shallow_rung_keeps_half_the_book_and_skips_the_deep_bid() -> None:
+    choice = _choice()
+    bars = (
+        (100.0, 101.0, 92.0, 100.0),
+        (100.0, 108.0, 99.0, 107.0),
+    )
+    session = _session("2026-01-06", 100, 108, 92, 107, bars=bars)
+    shallow = run_session(session, choice, BOOK_EUR, "shallow_rung")
+    strict = run_session(session, choice, BOOK_EUR, "strict")
+    buy_px = 100.0 * (1.0 - SHALLOW_RUNG * choice.range_frac)
+    sell_px = 100.0 * (1.0 + SHALLOW_RUNG * choice.range_frac)
+    qty = (BOOK_EUR / 2.0) * (1.0 - MAKER) / buy_px
+    expected = BOOK_EUR / 2.0 + qty * sell_px * (1.0 - MAKER)
+    assert shallow.maker_exits == 1
+    assert shallow.flattens == 0
+    assert abs(shallow.end_equity - expected) < 1e-6
+    assert abs(shallow.end_equity - strict.end_equity) < 1e-6
+    gap = _session("2026-01-06", 90, 100, 80, 95, bars=((90.0, 100.0, 80.0, 95.0),))
+    assert run_session(gap, choice, BOOK_EUR, "shallow_rung").filled is False
+    assert run_session(gap, choice, BOOK_EUR, "strict").filled is True
+
+
+def test_scratch_sells_the_fill_after_64_bars_and_not_before() -> None:
+    choice = _choice()
+    bars = [(104.0, 104.0, 103.0, 103.5) for _ in range(SCRATCH_AFTER + 1)]
+    bars[0] = (110.0, 110.0, 100.0, 108.0)
+    bars[1] = (108.0, 108.0, 100.5, 105.0)
+    bars[SCRATCH_AFTER] = (100.5, 102.0, 100.2, 101.5)
+    session = _session("2026-01-06", 110, 110, 100, 101.5, bars=tuple(bars))
+    out = run_session(session, choice, BOOK_EUR, "scratch")
+    buy_px = 100.0 * (1.0 + CUSHION)
+    expected = BOOK_EUR * (1.0 - MAKER) * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert out.flattens == 0
+    assert abs(out.end_equity - expected) < 1e-6
+    assert run_session(session, choice, BOOK_EUR, "bounce5").maker_exits == 0
+    early = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 108.0, 100.5, 105.0),
+        (105.0, 107.0, 104.0, 106.0),
+    )
+    hit = _session("2026-01-06", 110, 110, 100, 106, bars=early)
+    sold = run_session(hit, choice, BOOK_EUR, "scratch")
+    sell_px = buy_px * (1.0 + BOUNCE_5)
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    assert sold.maker_exits == 1
+    assert abs(sold.end_equity - qty * sell_px * (1.0 - MAKER)) < 1e-6
+
+
+def test_vwap_buys_under_completed_bars_and_ignores_the_fill_bar() -> None:
+    choice = _choice()
+    bars = [(100.0, 100.0, 100.0, 100.0) for _ in range(VWAP_WARMUP + 2)]
+    bars[VWAP_WARMUP] = (100.0, 100.0, 90.0, 90.0)
+    bars[VWAP_WARMUP + 1] = (99.0, 100.0, 98.0, 100.0)
+    volumes = tuple(1.0 for _ in bars)
+    volumes = volumes[:VWAP_WARMUP] + (1_000.0,) + volumes[VWAP_WARMUP + 1 :]
+    session = _session(
+        "2026-01-06", 100, 100, 90, 100, bars=tuple(bars), volumes=volumes
+    )
+    out = run_session(session, choice, BOOK_EUR, "vwap")
+    buy_px = 100.0 * (1.0 - VWAP_BAND)
+    qty = BOOK_EUR * (1.0 - MAKER) / buy_px
+    expected = qty * 100.0 * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert abs(out.end_equity - expected) < 1e-6
+    short = _session(
+        "2026-01-06",
+        100,
+        100,
+        90,
+        90,
+        bars=tuple(bars[: VWAP_WARMUP + 1]),
+        volumes=volumes[: VWAP_WARMUP + 1],
+    )
+    assert run_session(short, choice, BOOK_EUR, "vwap").maker_exits == 0
+
+
+def test_carry_keeps_the_paired_sell_and_flattens_at_the_window() -> None:
+    quiet = tuple((95.0, 96.0, 94.0, 95.0) for _ in range(MIN_BARS - 1))
+    entry = _session(
+        "2026-01-06",
+        100,
+        101,
+        92,
+        95,
+        bars=((100.0, 101.0, 92.0, 95.0), *quiet),
+    )
+    later = _session("2026-01-07", 95, 108, 94, 107, bars=((95.0, 108.0, 94.0, 107.0),))
+    book = {"AAA": [*_priors(), entry, later]}
+    carried = simulate(book, universe=("AAA",), start="2026-01-06", end="2026-01-07", mode="carry")
+    buy_px = 100.0 * (1.0 - 0.35 * 0.20)
+    sell_px = 100.0 * (1.0 + 0.35 * 0.20)
+    qty = (BOOK_EUR / 2.0) * (1.0 - MAKER) / buy_px
+    expected = BOOK_EUR / 2.0 + qty * sell_px * (1.0 - MAKER)
+    assert carried.maker_exits == 1
+    assert carried.flattens == 0
+    assert abs(carried.end_equity - expected) < 1e-6
+    one = simulate(book, universe=("AAA",), start="2026-01-06", end="2026-01-06", mode="carry")
+    strict = simulate(book, universe=("AAA",), start="2026-01-06", end="2026-01-06", mode="strict")
+    assert one.flattens == 1 and one.maker_exits == 0
+    assert abs(one.end_equity - strict.end_equity) < 1e-6
+    assert carried.end_equity > strict.end_equity
+
+
+def test_mid_exit_sells_the_prior_close_with_half_the_book() -> None:
+    choice = _choice()
+    bars = (
+        (100.0, 101.0, 92.0, 96.0),
+        (96.0, 101.0, 95.0, 100.0),
+    )
+    session = _session("2026-01-06", 100, 101, 92, 100, bars=bars)
+    out = run_session(session, choice, BOOK_EUR, "mid_exit")
+    buy_px = choice.mid * (1.0 - SHALLOW_RUNG * choice.range_frac)
+    qty = (BOOK_EUR / 2.0) * (1.0 - MAKER) / buy_px
+    expected = BOOK_EUR / 2.0 + qty * choice.mid * (1.0 - MAKER)
+    assert out.maker_exits == 1
+    assert abs(out.end_equity - expected) < 1e-6
+    assert run_session(session, choice, BOOK_EUR, "shallow_rung").maker_exits == 0
+
+
+def test_second_day_needs_a_lower_low_and_then_buys_the_bounce() -> None:
+    def row(day: str, low: float) -> Session:
+        return _session(day, 100, 110, low, 100)
+
+    today = _session("2026-01-06", 100, 110, 90, 100)
+    down = [row(f"2026-01-0{i}", 90 if i < 5 else 80) for i in range(1, 6)]
+    flat = [row(f"2026-01-0{i}", 90) for i in range(1, 6)]
+    kept = choose_name({"AAA": [*down, today]}, "2026-01-06", BOOK_EUR, ("AAA",), lower_low=True)
+    blocked = choose_name(
+        {"AAA": [*flat, today]}, "2026-01-06", BOOK_EUR, ("AAA",), lower_low=True
+    )
+    assert kept is not None and kept.base == "AAA"
+    assert blocked is None
+    bars = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 108.0, 100.5, 105.0),
+        (105.0, 107.0, 104.0, 106.0),
+    )
+    tape = _session("2026-01-06", 110, 110, 100, 106, bars=bars)
+    assert run_session(tape, _choice(), BOOK_EUR, "second_day") == run_session(
+        tape, _choice(), BOOK_EUR, "bounce5"
+    )
 
 
 def test_hold_pays_the_round_trip_and_oracle_uses_the_extremes() -> None:

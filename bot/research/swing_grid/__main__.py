@@ -11,7 +11,7 @@ from pathlib import Path
 
 from bot.live.momentum_desk import DEFAULT_UNIVERSE
 from bot.research.swing_grid.bars import ensure_candles
-from bot.research.swing_grid.grid import MODES, Run, sessions_from_rows, simulate
+from bot.research.swing_grid.grid import BOOK_EUR, MODES, Run, sessions_from_rows, simulate
 
 OUT = Path(__file__).with_name("RESULTS.md")
 CACHE = Path("data/research/swing_grid/15m")
@@ -52,6 +52,46 @@ def _line(label: str, run: Run) -> str:
         f"{run.selected} | {run.filled} | {run.maker_exits} | {run.flattens} | "
         f"{_eur(run.maker_pnl)} | {_eur(run.flatten_pnl)} | {_eur(run.largest_day)} |"
     )
+
+
+def _window_line(runs: dict[tuple[str, str], Run], mode: str, text: str) -> str:
+    full = runs[(mode, "full")]
+    pre = runs[(mode, "before 2026")]
+    year = runs[(mode, "2026")]
+    return (
+        f"`{mode}` {text} {_eur(full.pnl)} full, {_eur(pre.pnl)} before 2026, "
+        f"{_eur(year.pnl)} in 2026."
+    )
+
+
+def _convincing(runs: dict[tuple[str, str], Run]) -> str:
+    """Bar locked before this replay. A pass needs both periods and the full path.
+
+    The oracle buys the session low and sells the session high. It is a
+    ceiling, not a candidate, so it cannot clear the bar.
+    """
+    passed: list[str] = []
+    for mode in MODES:
+        if mode == "oracle":
+            continue
+        full = runs[(mode, "full")]
+        pre = runs[(mode, "before 2026")]
+        year = runs[(mode, "2026")]
+        one_day = full.largest_day <= 0 or full.largest_day < 0.5 * full.pnl
+        drawdown = full.max_dd < (full.pnl / BOOK_EUR) if full.pnl > 0 else False
+        if (
+            full.pnl > 0
+            and pre.pnl > 0
+            and year.pnl > 0
+            and full.maker_exits >= 40
+            and one_day
+            and drawdown
+        ):
+            passed.append(mode)
+    if not passed:
+        return "No cell clears the locked bar for a convincing profit."
+    names = ", ".join(f"`{mode}`" for mode in passed)
+    return f"Cells that clear the locked bar: {names}."
 
 
 def _reading(runs: dict[tuple[str, str], Run]) -> str:
@@ -116,6 +156,24 @@ def _reading(runs: dict[tuple[str, str], Run]) -> str:
             f"{_eur(runs[('prior', 'full')].pnl)} full,",
             f"{_eur(runs[('prior', 'before 2026')].pnl)} before 2026,",
             f"{_eur(runs[('prior', '2026')].pnl)} in 2026.",
+            _window_line(runs, "sma_bounce", "bounce5 only above the 20-session average."),
+            _window_line(runs, "sma_reclaim", "reclaim only above that average."),
+            _window_line(runs, "sma_prior", "prior-close sell only above that average."),
+            _window_line(runs, "quiet5", "no bid once today already exceeds a normal range."),
+            _window_line(
+                runs, "clip", "0.5% under the open on the busiest name, sold 0.5% higher."
+            ),
+            _window_line(runs, "double5", "buys the second test of the same low, sold 5% higher."),
+            _window_line(runs, "scale", "sells half at 2% and the rest at 5%."),
+            _window_line(runs, "shallow_rung", "rests only the 0.35 rung, still at half the book."),
+            _window_line(runs, "scratch", "replaces the 5% sell with the fill after 64 bars."),
+            _window_line(runs, "vwap", "buys 1% under the completed-bar VWAP and sells it."),
+            _window_line(
+                runs, "carry", "keeps the strict grid's paired sell working past the close."
+            ),
+            _window_line(runs, "mid_exit", "buys the 0.35 rung and sells the prior close."),
+            _window_line(runs, "second_day", "bounce5 only after a lower low than the day before."),
+            _convincing(runs),
             "`hold` buys that same name at the open and sells the close and",
             f"finishes {_eur(hold.pnl)}.",
             "The oracle ceiling buys the day's low and sells the day's high and",
