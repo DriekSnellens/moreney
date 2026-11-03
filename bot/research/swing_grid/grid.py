@@ -420,8 +420,13 @@ def _run_bounce(
     sell_at_open: bool = False,
     quiet: bool = False,
     scratch_after: int | None = None,
+    cushion: float | None = None,
 ) -> DayOut:
-    """Bid 1% above the low already printed. Sell ``target`` above the fill."""
+    """Bid above the low already printed. Sell ``target`` above the fill.
+
+    ``cushion`` defaults to the locked 1%. Passing 0 bids at the printed low.
+    """
+    gap = CUSHION if cushion is None else cushion
     cash = equity
     qty = 0.0
     cost = 0.0
@@ -437,7 +442,7 @@ def _run_bounce(
     for bi, (open_, high, low, close) in enumerate(session.bars):
         if qty == 0 and not entered and 1 <= bi <= entry_through:
             printed_low = min(bar[2] for bar in session.bars[:bi])
-            buy_px = printed_low * (1.0 + CUSHION)
+            buy_px = printed_low * (1.0 + gap)
             wide = False
             if quiet and session.open > 0:
                 printed_high = max(bar[1] for bar in session.bars[:bi])
@@ -905,6 +910,18 @@ def _run_scale(session: Session, choice: Choice, equity: float) -> DayOut:
             flattens += 1
             lots = []
     return DayOut(cash, maker_exits + flattens > 0, maker_pnl, flatten_pnl, maker_exits, flattens)
+
+
+def run_priced_bounce(
+    session: Session,
+    choice: Choice,
+    equity: float,
+    *,
+    cushion: float,
+    target: float,
+) -> DayOut:
+    """The locked bounce, with the bid and offer distances passed in."""
+    return _run_bounce(session, choice, equity, target, cushion=cushion)
 
 
 def run_session(session: Session, choice: Choice, equity: float, mode: str) -> DayOut:
