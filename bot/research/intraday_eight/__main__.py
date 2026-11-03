@@ -14,7 +14,7 @@ import numpy as np
 from bot.research.btc_residual_mix.engine import run_btc_residual
 from bot.research.factor_scoreboard.__main__ import load_candles
 from bot.research.factor_scoreboard.engine import LIVE_KNOBS
-from bot.research.intraday_eight.book import BookResult, run_book
+from bot.research.intraday_eight.book import BookResult, Edge, measure, run_book
 from bot.research.intraday_eight.indicators import median_daily_quote
 from bot.research.intraday_eight.strategies import (
     SCANNERS,
@@ -36,9 +36,6 @@ NOT_ALT = frozenset(
         "DAI", "FRAX", "TUSD", "USDE", "FDUSD", "PYUSD",
     }
 )
-BOTH = ("ema_pullback", "sweep", "orb", "squeeze", "supertrend")
-
-
 def _ts(day: str) -> int:
     return int(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC).timestamp() * 1000)
 
@@ -125,13 +122,34 @@ def _eur(value: float) -> str:
     return "€0"
 
 
-def _line(name: str, mode: str, result: BookResult) -> str:
-    years = result.year_pnl
-    win = 100.0 * result.wins / result.trades if result.trades else 0.0
+def _pct(value: float) -> str:
+    return f"{100 * value:+.2f}%"
+
+
+def _win(edge: Edge) -> str:
+    if edge.trades == 0:
+        return "—"
+    return f"{100 * edge.wins / edge.trades:.0f}%"
+
+
+def _hole(value: float) -> str:
+    return f"€{int(round(value)):,.0f}"
+
+
+def _reasons(edge: Edge) -> str:
+    if not edge.reasons:
+        return "none"
+    return ", ".join(f"{name} {count}" for name, count in sorted(edge.reasons.items()))
+
+
+def _line(name: str, edge: Edge, account: BookResult) -> str:
+    years = edge.year_pnl
     return (
-        f"| {name} | {mode} | {_eur(result.pnl)} | {100 * result.max_dd:.1f}% | "
+        f"| {name} | {edge.trades} | {_win(edge)} | {_pct(edge.avg_net)} | "
+        f"{edge.profit_factor:.2f} | {_eur(edge.pnl)} | {_hole(edge.hole)} | "
         f"{_eur(years.get('2024', 0))} | {_eur(years.get('2025', 0))} | "
-        f"{_eur(years.get('2026', 0))} | {result.trades} | {win:.0f}% |"
+        f"{_eur(years.get('2026', 0))} | {_eur(account.pnl)} | "
+        f"{100 * account.max_dd:.1f}% |"
     )
 
 
@@ -144,60 +162,99 @@ def _beats(result: BookResult, live: dict) -> bool:
     return True
 
 
+def _measure_row(
+    label: str,
+    trades: list[Trade],
+    mode: str,
+    start_ts: int,
+    end_ts: int,
+) -> tuple[str, Edge, BookResult]:
+    edge = measure(trades, mode=mode, start_ts=start_ts, end_ts=end_ts)
+    account = run_book(
+        trades, mode=mode, book=BOOK, start_ts=start_ts, end_ts=end_ts, compound=False
+    )
+    print(
+        f"{label} avg {_pct(edge.avg_net)} signals {_eur(edge.pnl)} "
+        f"account {_eur(account.pnl)} {_reasons(edge)}",
+        flush=True,
+    )
+    return label, edge, account
+
+
 def main() -> None:
     start_ts, end_ts = _ts(START), _ts(END) + 86_400_000
     ohlc = load_candles(CANDLES, merge_fresh=False)
-    live = run_btc_residual(
-        ohlc, start=START, end=END, book_eur=BOOK, **LIVE_KNOBS
-    )
+    live = run_btc_residual(ohlc, start=START, end=END, book_eur=BOOK, **LIVE_KNOBS)
     print(f"live {_eur(live['pnl_eur'])}", flush=True)
     books, used = _scan()
-    rows: list[tuple[str, str, BookResult]] = []
+    rows: list[tuple[str, Edge, BookResult]] = []
     for name, trades in books.items():
-        spot = run_book(trades, mode="spot_long", book=BOOK, start_ts=start_ts, end_ts=end_ts)
-        rows.append((name, "spot long", spot))
-        print(f"{name} spot {_eur(spot.pnl)} n={spot.trades}", flush=True)
-        if name in BOTH or name == "funding":
-            perp = run_book(trades, mode="perp", book=BOOK, start_ts=start_ts, end_ts=end_ts)
-            label = "perp both" if name in BOTH else "perp long"
-            rows.append((name, label, perp))
-            print(f"{name} {label} {_eur(perp.pnl)} n={perp.trades}", flush=True)
-    better = [name for name, _mode, result in rows if _beats(result, live)]
-    text = _render(live, used, rows, better)
+        longs = [trade for trade in trades if trade.side > 0]
+        shorts = [trade for trade in trades if trade.side < 0]
+        rows.append(_measure_row(f"{name} long", longs, "spot_long", start_ts, end_ts))
+        if name == "funding":
+            rows.append(_measure_row("funding perp", longs, "perp", start_ts, end_ts))
+        if shorts:
+            rows.append(_measure_row(f"{name} short", shorts, "perp", start_ts, end_ts))
+    text = _render(live, used, rows)
     OUT.write_text(text, encoding="utf-8")
     print(text)
     print(f"wrote {OUT}", flush=True)
 
 
-def _render(
-    live: dict,
-    used: int,
-    rows: list[tuple[str, str, BookResult]],
-    better: list[str],
-) -> str:
+def _render(live: dict, used: int, rows: list[tuple[str, Edge, BookResult]]) -> str:
+    better = [name for name, _edge, account in rows if _beats(account, live)]
+    live_years = live["year_pnl"]
     lines = [
         "# Eight intraday books",
         "",
-        f"15-minute bars, {START} through {END}. {used} alts with a median",
-        f"daily quote of at least €{MIN_DAILY_QUOTE:,.0f}. Four slots of a €20,000 book.",
-        "Longs on the spot book pay the Bitvavo taker and square-root impact.",
-        "Shorts are on the perp book only (0.05% fee and 0.05% slip per side).",
-        "There is no open-interest series. Funding is the Binance cache for the",
-        "names that have it. Rules are the package docstring. Nothing is armed.",
+        "The earlier table showed the same 99.9% drawdown because each book",
+        "spent the €20,000. A drawdown cannot pass 100%, and a later year",
+        "prints €0 once the stake is gone. That number is the ruined account,",
+        "not the tactic.",
         "",
-        "| book | venue | pnl | max DD | 2024 | 2025 | 2026 | trades | win |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        f"Window {START} through {END}. {used} alts with a median daily quote",
+        f"of at least €{MIN_DAILY_QUOTE:,.0f}. The live residual on this window",
+        f"is {_eur(live['pnl_eur'])} with a {100 * live['max_dd_pct']:.1f}% drawdown",
         (
-            f"| live residual | spot | {_eur(live['pnl_eur'])} | {100 * live['max_dd_pct']:.1f}% | "
-            f"{_eur(live['year_pnl'].get('2024', 0))} | {_eur(live['year_pnl'].get('2025', 0))} | "
-            f"{_eur(live['year_pnl'].get('2026', 0))} | {live['n_trades']} |  |"
+            f"({_eur(live_years.get('2024', 0))} / {_eur(live_years.get('2025', 0))} / "
+            f"{_eur(live_years.get('2026', 0))}, {live['n_trades']} trades)."
         ),
+        "",
+        "VWAP bids the lower band known at the prior close, for the next bar",
+        "only, and offers that session VWAP. The EMA book bids EMA 9 the bar",
+        "after the close confirms the trend. Both rest a limit: a fill at the",
+        "limit pays the Bitvavo maker (0.15%) and a stop or a cross pays the",
+        "taker plus impact. The sweep uses the prior UTC day's high and low,",
+        "enters on the next open, and aims at the other side of that range.",
+        "Opening-range, squeeze, RSI/MACD and Supertrend still enter on the",
+        "next open, because the rule is a close breaking a level. Funding is",
+        "priced on the perp, where the funding cashflow is real; the spot row",
+        "is the price leg only. Shorts are not on the Bitvavo spot book.",
+        "",
+        "Each signal below is a fixed €5,000. The sum does not stop at zero",
+        "and it is not one account: overlapping names each get €5,000. The",
+        "hole is the deepest peak-to-trough of that euro sum. The account is",
+        "one €20,000 book with four fixed €5,000 slots, and it stops taking",
+        "trades when the cash cannot fund a slot. A tactic that loses on",
+        "the average therefore spends the book down to just under €5,000,",
+        "so the account loss sits near €15,000. That is the slot floor,",
+        "not a shared drawdown. Read the average and the sum.",
+        "Parameters were locked before this replay. Nothing is armed.",
+        "",
+        "| book | trades | win | avg net | pf | sum | hole | 2024 | 2025 | 2026 | account | DD |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    lines.extend(_line(name, mode, result) for name, mode, result in rows)
+    lines.extend(_line(name, edge, account) for name, edge, account in rows)
+    lines.append("")
+    lines.append("Exits:")
+    lines.append("")
+    for name, edge, _account in rows:
+        lines.append(f"- {name}: {_reasons(edge)}")
     lines.extend(
         [
             "",
-            "Better than live: " + (", ".join(better) if better else "none") + ".",
+            "Better than the live residual: " + (", ".join(better) if better else "none") + ".",
             "",
             "Reproduce: `python -m bot.research.intraday_eight`",
             "",

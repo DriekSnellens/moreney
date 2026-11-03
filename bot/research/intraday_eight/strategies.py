@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from bot.research.intraday_eight.exits import walk_exit
+from bot.research.intraday_eight.exits import resting_limit, walk_exit
 from bot.research.intraday_eight.indicators import (
     adx,
     atr,
@@ -23,7 +23,6 @@ from bot.research.intraday_eight.indicators import (
     rolling_extreme,
     rsi,
     session_vwap,
-    shift_extreme,
     sma,
     supertrend,
 )
@@ -32,7 +31,6 @@ WARMUP = 250
 ADX_TREND = 25.0
 ATR_STOP = 1.5
 TRAIL_ATR = 3.0
-SWEEP_BARS = 16
 ORB_BARS = 2
 SQUEEZE_LOOKBACK = 120
 FUNDING_Z = 90
@@ -51,6 +49,8 @@ class Trade:
     score: float
     reason: str
     funding_sum: float = 0.0
+    entry_kind: str = "taker"
+    exit_kind: str = "taker"
 
 
 def _day_bounds(ts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -76,11 +76,15 @@ def _emit(
     score: float,
     reason: str,
     funding_sum: float = 0.0,
+    entry_kind: str = "taker",
+    exit_kind: str | None = None,
 ) -> Trade | None:
     if entry_px <= 0 or exit_px <= 0 or not np.isfinite(adv) or adv <= 0:
         return None
-    if fill_i < entry or int(ts[fill_i]) <= int(ts[entry]):
+    if fill_i < entry:
         return None
+    if exit_kind is None:
+        exit_kind = "maker" if reason == "target" else "taker"
     return Trade(
         base=base,
         side=side,
@@ -92,6 +96,8 @@ def _emit(
         score=float(score),
         reason=reason,
         funding_sum=float(funding_sum),
+        entry_kind=entry_kind,
+        exit_kind=exit_kind,
     )
 
 
@@ -104,45 +110,52 @@ def vwap_mean_reversion(
     close: np.ndarray,
     volume: np.ndarray,
 ) -> list[Trade]:
-    """Buy a stretch below session VWAP. Sell the return. Skip strong trends."""
+    """Bid the lower band. Offer the VWAP. Skip strong trends.
+
+    The bid is the band known at the close. It is live on the next bar only,
+    so a bar that merely closes below the band is not bought at the next open.
+    """
     vwap, std, _day = session_vwap(ts, high, low, close, volume)
     strength = rsi(close)
     trend = adx(high, low, close)
     pos = day_position(ts)
     swing = rolling_extreme(low, 8, highest=False)
+    offer = prev(vwap)
     _day, nxt = _day_bounds(ts)
-    adv = quote_adv(close, volume)
-    back = close >= vwap
+    adv = quote_adv(ts, close, volume)
     out: list[Trade] = []
     i = WARMUP
     n = len(close)
     while i < n - 1:
-        band = vwap[i] - 2.0 * std[i]
+        band = float(vwap[i] - 2.0 * std[i])
+        entry = i + 1
         tradable = (
             pos[i] >= 8
             and np.isfinite(band)
             and std[i] > 0
-            and close[i] < band
             and np.isfinite(strength[i])
             and strength[i] < 30
             and np.isfinite(trend[i])
             and trend[i] <= ADX_TREND
             and np.isfinite(swing[i])
+            and float(swing[i]) < band
+            and entry < n
+            and int(nxt[i]) > entry
         )
-        entry = i + 1
-        if not tradable or nxt[i] <= entry or entry >= n:
+        if not tradable:
             i += 1
             continue
-        stop = float(swing[i])
-        if not stop < open_[entry]:
+        managed = resting_limit(
+            open_, high, low, close, entry, entry + 1, int(nxt[entry]),
+            band, float(swing[i]), 1, offer, None,
+        )
+        if managed is None:
             i += 1
             continue
-        fill_i, price, reason = walk_exit(
-            open_, high, low, close, entry, stop, None, int(nxt[entry]), 1, back
-        )
+        entry_i, entry_px, fill_i, price, reason = managed
         trade = _emit(
-            base, ts, 1, entry, fill_i, float(open_[entry]), price, float(adv[i]),
-            float(band - close[i]), reason,
+            base, ts, 1, entry_i, fill_i, entry_px, price, float(adv[i]),
+            float(vwap[i] - band), reason, entry_kind="maker",
         )
         if trade is None:
             i += 1
@@ -161,37 +174,62 @@ def ema_pullback(
     close: np.ndarray,
     volume: np.ndarray,
 ) -> list[Trade]:
-    """Touch of EMA 9/21 inside an EMA 200 trend, with RSI turning."""
+    """After the trend and the RSI turn are closed, bid the EMA 9.
+
+    The next bar has to trade back to that EMA. The stop sits 1.5 ATR under
+    the bid. A cross of EMA 9 through EMA 21 sells on the next open.
+    """
     fast, slow, anchor = ema(close, 9), ema(close, 21), ema(close, 200)
     strength = rsi(close)
     width = atr(high, low, close)
     was = prev(strength)
     was2 = prev(strength, 2)
-    turn_up = (strength > was) & (was <= was2)
-    turn_dn = (strength < was) & (was >= was2)
+    turn_up = (strength > was) & (was <= was2) & (strength < 55)
+    turn_dn = (strength < was) & (was >= was2) & (strength > 45)
     fast_was, slow_was = prev(fast), prev(slow)
     lose_long = (fast < slow) & (fast_was >= slow_was)
     lose_short = (fast > slow) & (fast_was <= slow_was)
-    adv = quote_adv(close, volume)
-    long = (
-        (close > anchor)
-        & (fast > slow)
-        & (low <= fast)
-        & (close >= slow)
-        & turn_up
-        & (strength < 55)
-    )
-    short = (
-        (close < anchor)
-        & (fast < slow)
-        & (high >= fast)
-        & (close <= slow)
-        & turn_dn
-        & (strength > 45)
-    )
-    return _stop_signals(
-        base, ts, open_, high, low, close, adv, width, long, short, lose_long, lose_short
-    )
+    adv = quote_adv(ts, close, volume)
+    out: list[Trade] = []
+    i = WARMUP
+    n = len(close)
+    while i < n - 1:
+        side = 0
+        if close[i] > anchor[i] and fast[i] > slow[i] and bool(turn_up[i]):
+            side = 1
+        elif close[i] < anchor[i] and fast[i] < slow[i] and bool(turn_dn[i]):
+            side = -1
+        entry = i + 1
+        if side == 0 or not np.isfinite(width[i]) or width[i] <= 0 or entry >= n:
+            i += 1
+            continue
+        limit = float(fast[i])
+        stop = float(limit - side * ATR_STOP * width[i])
+        if side > 0 and not stop < limit:
+            i += 1
+            continue
+        if side < 0 and not stop > limit:
+            i += 1
+            continue
+        signal = lose_long if side > 0 else lose_short
+        managed = resting_limit(
+            open_, high, low, close, entry, entry + 1, n,
+            limit, stop, side, None, signal,
+        )
+        if managed is None:
+            i += 1
+            continue
+        entry_i, entry_px, fill_i, price, reason = managed
+        trade = _emit(
+            base, ts, side, entry_i, fill_i, entry_px, price, float(adv[i]),
+            float(abs(close[i] - limit)), reason, entry_kind="maker",
+        )
+        if trade is None:
+            i += 1
+            continue
+        out.append(trade)
+        i = fill_i + 1
+    return out
 
 
 def _stop_signals(
@@ -240,6 +278,25 @@ def _stop_signals(
     return out
 
 
+def _prior_day_range(
+    ts: np.ndarray, high: np.ndarray, low: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    day = ts // 86_400_000
+    cuts = np.flatnonzero(np.diff(day)) + 1
+    starts = np.concatenate(([0], cuts))
+    ends = np.concatenate((cuts, [len(ts)]))
+    prior_high = np.full(len(ts), np.nan)
+    prior_low = np.full(len(ts), np.nan)
+    yesterday_high = np.nan
+    yesterday_low = np.nan
+    for start, end in zip(starts, ends, strict=False):
+        prior_high[start:end] = yesterday_high
+        prior_low[start:end] = yesterday_low
+        yesterday_high = float(np.max(high[start:end]))
+        yesterday_low = float(np.min(low[start:end]))
+    return prior_high, prior_low
+
+
 def liquidity_sweep(
     base: str,
     ts: np.ndarray,
@@ -249,10 +306,9 @@ def liquidity_sweep(
     close: np.ndarray,
     volume: np.ndarray,
 ) -> list[Trade]:
-    """A wick through the prior 16-bar extreme that closes back inside."""
-    prior_high = shift_extreme(high, SWEEP_BARS, highest=True)
-    prior_low = shift_extreme(low, SWEEP_BARS, highest=False)
-    adv = quote_adv(close, volume)
+    """A wick through the prior UTC day's high or low that closes back inside."""
+    prior_high, prior_low = _prior_day_range(ts, high, low)
+    adv = quote_adv(ts, close, volume)
     out: list[Trade] = []
     i = WARMUP
     n = len(close)
@@ -286,7 +342,7 @@ def liquidity_sweep(
             i += 1
             continue
         fill_i, price, reason = walk_exit(
-            open_, high, low, close, entry, stop, target, min(n, entry + SWEEP_BARS), side, None
+            open_, high, low, close, entry, stop, target, min(n, entry + 96), side, None
         )
         trade = _emit(
             base, ts, side, entry, fill_i, entry_px, price, float(adv[i]),
@@ -312,7 +368,7 @@ def opening_range_breakout(
     """Break of the first 30 minutes of the UTC day, with a volume filter."""
     width = atr(high, low, close)
     average = sma(volume, 20)
-    adv = quote_adv(close, volume)
+    adv = quote_adv(ts, close, volume)
     _day, nxt = _day_bounds(ts)
     pos = day_position(ts)
     out: list[Trade] = []
@@ -383,7 +439,7 @@ def bollinger_squeeze(
     exit_long = close < mid
     exit_short = close > mid
     return _stop_signals(
-        base, ts, open_, high, low, close, quote_adv(close, volume),
+        base, ts, open_, high, low, close, quote_adv(ts, close, volume),
         atr(high, low, close), long, short, exit_long, exit_short,
     )
 
@@ -404,7 +460,7 @@ def rsi_macd(
     strength = rsi(close)
     average = sma(volume, 20)
     width = atr(high, low, close)
-    adv = quote_adv(close, volume)
+    adv = quote_adv(ts, close, volume)
     long = cross_up & (strength > 50) & np.isfinite(average) & (volume > average)
     return _trail_signals(
         base, ts, open_, high, low, close, adv, width, long, None, cross_dn, None
@@ -423,7 +479,7 @@ def supertrend_adx(
     """Supertrend flip while ADX is above 25. The line is the stop."""
     direction, line = supertrend(high, low, close)
     trend = adx(high, low, close)
-    adv = quote_adv(close, volume)
+    adv = quote_adv(ts, close, volume)
     was = prev(direction)
     flip_up = (direction > 0) & (was < 0) & (trend > ADX_TREND)
     flip_dn = (direction < 0) & (was > 0) & (trend > ADX_TREND)
@@ -594,7 +650,7 @@ def funding_momentum(
     long = (mapped < FUNDING_EXTREME) & (close > slow) & (strength > 50)
     calm = mapped > 0
     return _trail_signals(
-        base, ts, open_, high, low, close, quote_adv(close, volume),
+        base, ts, open_, high, low, close, quote_adv(ts, close, volume),
         atr(high, low, close), long, None, calm, None, fund_ts, fund_rate,
     )
 

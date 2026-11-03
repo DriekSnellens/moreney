@@ -203,11 +203,30 @@ def day_position(ts: Array) -> Array:
     return index - start
 
 
-def quote_adv(close: Array, volume: Array, bars: int = 20 * 96) -> Array:
+def quote_adv(ts: Array, close: Array, volume: Array, days: int = 20) -> Array:
+    """Mean daily quote of the previous completed UTC days.
+
+    This is the same unit the live book passes into the impact model.
+    A single 15-minute bar is not a day's turnover.
+    """
+    n = len(close)
+    out = np.full(n, np.nan)
+    if n == 0 or days <= 0:
+        return out
+    day = ts.astype(np.int64) // 86_400_000
     quote = close * volume
-    rolled = sma(quote, bars)
-    out = np.full(len(close), np.nan)
-    out[1:] = rolled[:-1]
+    cuts = np.flatnonzero(np.diff(day)) + 1
+    starts = np.concatenate(([0], cuts)).astype(int)
+    sums = np.add.reduceat(quote, starts)
+    totals = np.cumsum(sums)
+    for index, start in enumerate(starts):
+        if index < days:
+            continue
+        end = int(starts[index + 1]) if index + 1 < len(starts) else n
+        prior = float(totals[index - 1])
+        if index - days - 1 >= 0:
+            prior -= float(totals[index - days - 1])
+        out[start:end] = prior / days
     return out
 
 
