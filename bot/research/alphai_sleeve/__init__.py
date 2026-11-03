@@ -35,4 +35,15 @@ collectors expanded in June 2026 and that earlier months are sparse, so
 there is no path before 2026 for the news cells. ``chop`` and ``book``
 are also run on the full tape, because they do not need the archive.
 Nothing is wired into the live book.
+
+The alt-market run was locked after that desk reading, and before its
+own replay. The universe is every Bitvavo market quoted in EUR and
+marked trading, except BTC and the cash pegs EURC, EURCV, EUROP, USDC,
+USDCV, USDT, DAI, FRAX, TUSD, USDE, FDUSD, PYUSD, USD and EUR. The tape
+is the daily candle, not the fifteen-minute desk cache. A listed name
+needs a five-day median quote of at least €10,000. A liquid name uses
+the desk floor of €100,000, on that same wide universe. Capacity, the
+seven-day count, the four-name cap, and the taker costs stay as above.
+The desk names are repeated on the daily tape as the control. Nothing
+is armed.
 """

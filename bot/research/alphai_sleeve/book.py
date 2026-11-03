@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import statistics
@@ -173,25 +174,26 @@ def _chop(session: Session) -> float:
     return span / session.open
 
 
-def _prior(sessions: Sequence[Session], day: str) -> tuple[float, float] | None:
-    """Median quote and mean chop from the five usable sessions before ``day``."""
-    usable = [
+def usable_sessions(sessions: Sequence[Session], min_bars: int) -> list[Session]:
+    rows = [
         session
         for session in sessions
-        if (
-            session.day < day
-            and session.n_bars >= MIN_BARS
-            and session.open > 0
-            and session.quote > 0
-        )
+        if session.n_bars >= min_bars and session.open > 0 and session.quote > 0
     ]
-    if len(usable) < LOOKBACK:
+    rows.sort(key=lambda session: session.day)
+    return rows
+
+
+def _prior(usable: Sequence[Session], day: str, min_quote: float) -> tuple[float, float] | None:
+    """Median quote and mean chop from the five usable sessions before ``day``."""
+    cut = bisect.bisect_left(usable, day, key=lambda session: session.day)
+    if cut < LOOKBACK:
         return None
-    window = usable[-LOOKBACK:]
+    window = usable[cut - LOOKBACK : cut]
     if _gap(window[-1].day, day) > MAX_STALE_DAYS:
         return None
     adv = float(statistics.median(session.quote for session in window))
-    if adv < MIN_QUOTE_EUR:
+    if adv < min_quote:
         return None
     chop = sum(_chop(session) for session in window) / LOOKBACK
     return adv, chop
@@ -239,24 +241,25 @@ def tone_names(counts: Mapping[str, tuple[int, int]]) -> list[str]:
 
 
 def _ranked(
-    books: Mapping[str, Sequence[Session]],
+    usable: Mapping[str, Sequence[Session]],
     day: str,
     universe: Sequence[str],
     mode: str,
+    min_quote: float,
 ) -> list[str]:
     if mode == "book":
         return [
             base
             for base in universe
-            if base in books and _prior(books[base], day) is not None
+            if base in usable and _prior(usable[base], day, min_quote) is not None
         ]
     if mode == "chop":
         scored: list[tuple[float, str]] = []
         for base in universe:
-            sessions = books.get(base)
+            sessions = usable.get(base)
             if not sessions:
                 continue
-            prior = _prior(sessions, day)
+            prior = _prior(sessions, day, min_quote)
             if prior is None or prior[1] < MIN_CHOP:
                 continue
             scored.append((-prior[1], base))
@@ -312,7 +315,10 @@ def simulate(
     mode: str,
     start: str,
     end: str,
+    min_bars: int = MIN_BARS,
+    min_quote: float = MIN_QUOTE_EUR,
 ) -> Run:
+    usable = {base: usable_sessions(sessions, min_bars) for base, sessions in books.items()}
     index = {
         base: {session.day: session for session in sessions}
         for base, sessions in books.items()
@@ -320,8 +326,8 @@ def simulate(
     days = sorted(
         {
             session.day
-            for sessions in books.values()
-            for session in sessions
+            for base in universe
+            for session in books.get(base, ())
             if start <= session.day <= end
         }
     )
@@ -343,13 +349,13 @@ def simulate(
         if mode in {"four", "all"}:
             ranked = tone_names(counts_for(grouped, day, universe))
         else:
-            ranked = _ranked(books, day, universe, mode)
+            ranked = _ranked(usable, day, universe, mode, min_quote)
         chosen: list[tuple[str, float]] = []
         for base in ranked:
-            sessions = books.get(base)
+            sessions = usable.get(base)
             if sessions is None or base not in prices:
                 continue
-            prior = _prior(sessions, day)
+            prior = _prior(sessions, day, min_quote)
             if prior is None:
                 continue
             chosen.append((base, prior[0]))

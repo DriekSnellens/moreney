@@ -14,6 +14,39 @@ from bot.research.alphai_sleeve.book import (
     simulate,
     tone_names,
 )
+from bot.research.alphai_sleeve.universe import NOT_ALT, alt_bases
+
+
+def test_the_alt_universe_drops_bitcoin_and_cash_pegs() -> None:
+    rows = [
+        {"base": "BTC", "quote": "EUR", "status": "trading"},
+        {"base": "USDC", "quote": "EUR", "status": "trading"},
+        {"base": "PEPE", "quote": "EUR", "status": "trading"},
+        {"base": "ETH", "quote": "EUR", "status": "halted"},
+        {"base": "SOL", "quote": "USD", "status": "trading"},
+        {"base": "WIF", "quote": "EUR", "status": "trading"},
+    ]
+    assert "BTC" in NOT_ALT
+    assert "USDC" in NOT_ALT
+    assert alt_bases(rows) == ("PEPE", "WIF")
+
+
+def test_a_daily_bar_clears_the_listed_floor() -> None:
+    days = [f"2026-09-{offset:02d}" for offset in range(1, 10)]
+    books = {"PEPE": [Session(day, 1.0, 1.0, 1.0, 1.0, 50_000.0, 1) for day in days]}
+    grouped = {"2026-09-07": [_headline("2026-09-07", "PEPE-USD", "positive")]}
+    run = simulate(
+        books,
+        grouped,
+        universe=("PEPE",),
+        mode="all",
+        start="2026-09-08",
+        end="2026-09-08",
+        min_bars=1,
+        min_quote=10_000.0,
+    )
+    assert run.buys == 1
+    assert run.end_equity < SLEEVE_EUR
 
 
 def test_the_sleeve_constants_stay_locked() -> None:
