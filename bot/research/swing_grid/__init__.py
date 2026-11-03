@@ -47,7 +47,20 @@ low from the bar that fills it. One full-book lot per session. The sell
 is 5% or 10% above the fill. Cells ``bounce5`` and ``bounce10``. A same-bar
 round trip does not count. Leftover inventory is sold at the session close.
 
-Book €20,000, compounding, long only, flat by the close. Report the full
-path, the path before 2026, and 2026, each restarted at €20,000. Nothing
-is wired into the live book.
+The third replay asks which change to that bid is profitable. Four cells,
+locked before the run, each changing one lever:
+
+- ``confirm5``: the low must be held by a later bar that closes back above
+  it before the bid exists. Sell 5% above the fill. Flat at the close.
+- ``stop5``: the same bid and 5% sell, but a later bar that trades 2%
+  through the low that set the bid is a taker stop. A bar that touches
+  both the stop and the target takes the stop.
+- ``shallow5``: the same bid and 5% sell, and no bid once the low is more
+  than 4% under the session open.
+- ``hold3``: the same bid and 5% sell, kept for up to three sessions
+  instead of sold at the first close. Still flat after the third close.
+
+Book €20,000, compounding, long only. Report the full path, the path
+before 2026, and 2026, each restarted at €20,000. Nothing is wired into
+the live book.
 """

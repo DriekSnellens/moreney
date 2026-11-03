@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from bot.research.swing_grid.grid import (
+from bot.research.swing_grid.grid import (  # noqa: I001
     BOOK_EUR,
     BOUNCE_5,
     BOUNCE_10,
     CAPACITY,
     CUSHION,
+    HOLD_SESSIONS,
     LOOKBACK,
     MAKER,
     MAX_STALE_DAYS,
@@ -18,8 +19,13 @@ from bot.research.swing_grid.grid import (
     RETEST_MIN_RANGE,
     RETEST_WARMUP,
     RUNG_FRACS,
+    SHALLOW_MAX,
+    STOP_THROUGH,
     Choice,
     Session,
+    _advance_hold,
+    _enter_hold_day,
+    _taker_exit,
     choose_name,
     day_chop,
     run_session,
@@ -40,6 +46,9 @@ def test_thresholds_stay_locked() -> None:
     assert CUSHION == 0.01
     assert BOUNCE_5 == 0.05
     assert BOUNCE_10 == 0.10
+    assert STOP_THROUGH == 0.02
+    assert SHALLOW_MAX == 0.04
+    assert HOLD_SESSIONS == 3
     assert BOOK_EUR == 20_000.0
 
 
@@ -212,6 +221,111 @@ def test_bounce_does_not_sell_on_the_entry_bar() -> None:
     out = run_session(session, _choice(), BOOK_EUR, "bounce5")
     assert out.maker_exits == 0
     assert out.flattens == 1
+
+
+def test_confirm_waits_for_a_bar_that_holds_the_low() -> None:
+    early = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 109.0, 100.0, 104.0),
+    )
+    session = _session("2026-01-06", 110, 110, 100, 104, bars=early)
+    assert run_session(session, _choice(), BOOK_EUR, "confirm5").filled is False
+    bars = [
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 109.0, 101.0, 104.0),
+        (104.0, 105.0, 101.0, 103.0),
+        (103.0, 107.0, 103.0, 106.0),
+    ]
+    # Bar 2 is the first bar allowed to buy. A new low on that path must cancel it.
+    broke = list(bars)
+    broke[2] = (104.0, 104.0, 95.0, 96.0)
+    broke[3] = (102.0, 103.0, 100.0, 101.0)
+    cancelled = _session("2026-01-06", 110, 110, 95, 101, bars=tuple(broke))
+    assert run_session(cancelled, _choice(), BOOK_EUR, "confirm5").filled is False
+    held = _session("2026-01-06", 110, 110, 100, 106, bars=tuple(bars))
+    out = run_session(held, _choice(), BOOK_EUR, "confirm5")
+    assert out.maker_exits == 1
+    assert out.end_equity > BOOK_EUR
+
+
+def test_stop_exits_through_the_low_and_ignores_a_later_crash() -> None:
+    bars = (
+        (110.0, 110.0, 100.0, 108.0),
+        (108.0, 109.0, 101.0, 104.0),
+        (100.0, 100.0, 97.0, 99.0),
+        (90.0, 90.0, 80.0, 85.0),
+    )
+    session = _session("2026-01-06", 110, 110, 80, 85, bars=bars)
+    out = run_session(session, _choice(), BOOK_EUR, "stop5")
+    qty = BOOK_EUR * (1.0 - MAKER) / 101.0
+    proceeds, _px = _taker_exit(qty, 98.0, 1_000_000.0)
+    assert out.maker_exits == 0
+    assert out.flattens == 1
+    assert abs(out.end_equity - proceeds) < 1e-6
+    both = (
+        bars[0],
+        bars[1],
+        (100.0, 120.0, 97.0, 110.0),
+    )
+    spanned = _session("2026-01-06", 110, 120, 97, 110, bars=both)
+    stopped = run_session(spanned, _choice(), BOOK_EUR, "stop5")
+    assert stopped.maker_exits == 0
+    assert stopped.flattens == 1
+
+
+def test_shallow_skips_a_dump_and_takes_a_small_dip() -> None:
+    dump = (
+        (100.0, 100.0, 90.0, 92.0),
+        (92.0, 93.0, 91.0, 92.0),
+    )
+    crashed = _session("2026-01-06", 100, 100, 90, 92, bars=dump)
+    assert run_session(crashed, _choice(), BOOK_EUR, "shallow5").filled is False
+    dip = (
+        (100.0, 100.0, 97.0, 98.0),
+        (99.0, 99.0, 97.5, 98.0),
+        (98.0, 104.0, 98.0, 103.0),
+    )
+    small = _session("2026-01-06", 100, 104, 97, 103, bars=dip)
+    out = run_session(small, _choice(), BOOK_EUR, "shallow5")
+    assert out.maker_exits == 1
+    assert out.end_equity > BOOK_EUR
+
+
+def test_hold_can_sell_the_target_on_a_later_session() -> None:
+    first = _session(
+        "2026-01-06",
+        110,
+        110,
+        100,
+        103,
+        bars=(
+            (110.0, 110.0, 100.0, 108.0),
+            (108.0, 108.0, 101.0, 103.0),
+        ),
+    )
+    cash, pos, _pnl, exits = _enter_hold_day(first, BOOK_EUR, 1_000_000.0, "AAA")
+    assert exits == 0 and pos is not None and pos.seen == 1
+    second = _session(
+        "2026-01-07",
+        103,
+        104,
+        102,
+        103,
+        bars=((103.0, 104.0, 102.0, 103.0),),
+    )
+    cash, pos, _made, exits, forced = _advance_hold(second, pos, cash)
+    assert pos is not None and exits == 0 and forced == 0.0
+    third = _session(
+        "2026-01-08",
+        103,
+        107,
+        103,
+        106,
+        bars=((103.0, 107.0, 103.0, 106.0),),
+    )
+    cash, pos, made, exits, forced = _advance_hold(third, pos, cash)
+    assert pos is None and exits == 1 and made > 0 and forced == 0.0
+    assert cash > BOOK_EUR
 
 
 def test_hold_pays_the_round_trip_and_oracle_uses_the_extremes() -> None:
