@@ -9,9 +9,12 @@ A name qualifies when the prior session fell at least 8%, BTC on that
 same session fell less than 3%, and the five prior sessions have a
 median quote of at least €100,000. The most negative names are taken.
 Each one gets one quarter of the idle equity. The buy is the next open.
-A resting sell at 6% above that open fills when a later high trades it.
-Otherwise the lot is sold on the open of the fourth session. If the
-live book wants the cash back, the lot is sold on that open first.
+Two exits, locked before either replay. ``target`` rests a sell 6% above
+the open and otherwise sells on the fourth session. ``stop`` rests a
+sell 6% under the open and does not cap the winner: the lot stays until
+that stop, or until the live book wants the cash back. A session that
+opens through the stop fills at the open. If the live book wants the
+cash, the lot is sold on that open first.
 
 Both sides pay the Bitvavo taker and the square-root impact. The desk
 names, BTC, and the cash pegs are not eligible. Rules above were locked

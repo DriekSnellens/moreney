@@ -35,6 +35,7 @@ NOT_ALT = frozenset(
 DROP = 0.08
 BTC_FLOOR = -0.03
 TARGET = 0.06
+STOP = 0.06
 HOLD_SESSIONS = 3
 MAX_NAMES = 4
 MIN_QUOTE = 100_000.0
@@ -72,7 +73,26 @@ class Result:
     target_exits: int
     time_exits: int
     forced_exits: int
+    stop_exits: int = 0
+    gap_exits: int = 0
+    avg_net: dict[str, float] = field(default_factory=dict)
     names: tuple[tuple[str, float], ...] = field(default_factory=tuple)
+
+
+def stop_fill(entry_open: float, bar: Bar) -> tuple[float, str] | None:
+    """Resting stop 6% under the entry open.
+
+    A session that opens through the stop fills at that open. A session
+    that only trades through it on the low fills at the stop, not at the low.
+    """
+    if entry_open <= 0:
+        return None
+    stop = entry_open * (1.0 - STOP)
+    if bar[0] <= stop:
+        return bar[0], "gap"
+    if bar[2] <= stop:
+        return stop, "stop"
+    return None
 
 
 def qualifies(ret: float, btc_ret: float, quote: float, base: str) -> bool:
@@ -183,14 +203,22 @@ def simulate(
     btc_close: Mapping[str, float],
     *,
     book_eur: float = 20_000.0,
+    exit_mode: str = "target",
 ) -> Result:
-    """Stack the idle book on the live equity path. Live days are untouched."""
+    """Stack the idle book on the live equity path. Live days are untouched.
+
+    ``target`` sells at +6% or on the fourth session. ``stop`` sells at -6%
+    and otherwise holds, so a winner has no price ceiling.
+    """
+    if exit_mode not in {"target", "stop"}:
+        raise ValueError(exit_mode)
     equity = book_eur
     peak = equity
     max_dd = 0.0
     lots: dict[str, _Lot] = {}
     realized: dict[str, float] = {}
-    buys = targets = times = forced = 0
+    buys = targets = times = forced = stops = gaps = 0
+    net_sum: dict[str, float] = {}
     year_end: dict[str, float] = {}
     indexed = _indexed(alts)
     histories = {base: tuple((day, bar[4]) for day, bar in rows) for base, rows in indexed.items()}
@@ -207,14 +235,20 @@ def simulate(
         return value
 
     def _close(lot: _Lot, ref: float, reason: str) -> None:
-        nonlocal equity, targets, times, forced
+        nonlocal equity, targets, times, forced, stops, gaps
         proceeds = _sell_proceeds(lot.qty, ref, lot.adv)
         realized[lot.base] = realized.get(lot.base, 0.0) + proceeds - lot.cost
         equity += proceeds
+        if lot.cost > 0:
+            net_sum[reason] = net_sum.get(reason, 0.0) + proceeds / lot.cost - 1.0
         if reason == "target":
             targets += 1
         elif reason == "time":
             times += 1
+        elif reason == "stop":
+            stops += 1
+        elif reason == "gap":
+            gaps += 1
         else:
             forced += 1
 
@@ -231,29 +265,42 @@ def simulate(
                 equity *= day.equity / prev_equity
             marked = equity
         else:
+            closed_today: set[str] = set()
             for base, lot in list(lots.items()):
                 now_i = pos.get(base, {}).get(day.date)
                 row = dict(indexed.get(base, [])).get(day.date)
-                if now_i is None or row is None:
-                    continue
-                if now_i - lot.entry_i >= HOLD_SESSIONS:
-                    _close(lot, row[0], "time")
-                    lots.pop(base, None)
-            for base, lot in list(lots.items()):
-                row = dict(indexed.get(base, [])).get(day.date)
                 if row is None:
                     continue
-                limit = lot.entry_open * (1.0 + TARGET)
-                if row[1] >= limit:
-                    _close(lot, limit, "target")
+                if exit_mode == "stop":
+                    filled = stop_fill(lot.entry_open, row)
+                    if filled is None:
+                        continue
+                    _close(lot, filled[0], filled[1])
                     lots.pop(base, None)
+                    closed_today.add(base)
+                    continue
+                if now_i is None or now_i - lot.entry_i < HOLD_SESSIONS:
+                    continue
+                _close(lot, row[0], "time")
+                lots.pop(base, None)
+                closed_today.add(base)
+            if exit_mode != "stop":
+                for base, lot in list(lots.items()):
+                    row = dict(indexed.get(base, [])).get(day.date)
+                    if row is None:
+                        continue
+                    limit = lot.entry_open * (1.0 + TARGET)
+                    if row[1] >= limit:
+                        _close(lot, limit, "target")
+                        lots.pop(base, None)
+                        closed_today.add(base)
             free = MAX_NAMES - len(lots)
             book_value = _mark_open(equity, lots, indexed, day.date)
             if free > 0 and book_value > 0:
                 candidates: list[tuple[str, float, float]] = []
                 btc_ret = _btc_return_before(btc_close, day.date)
                 for base, rows in indexed.items():
-                    if base in lots or btc_ret is None:
+                    if base in lots or base in closed_today or btc_ret is None:
                         continue
                     prior = _prior_quote(histories[base], day.date)
                     now = pos[base].get(day.date)
@@ -279,9 +326,14 @@ def simulate(
                     equity -= cost
                     lots[base] = _Lot(base, qty, row[0], pos[base][day.date], advs[base], cost)
                     buys += 1
-                    limit = row[0] * (1.0 + TARGET)
-                    if row[1] >= limit:
-                        _close(lots.pop(base), limit, "target")
+                    if exit_mode == "stop":
+                        filled = stop_fill(row[0], row)
+                        if filled is not None:
+                            _close(lots.pop(base), filled[0], filled[1])
+                    else:
+                        limit = row[0] * (1.0 + TARGET)
+                        if row[1] >= limit:
+                            _close(lots.pop(base), limit, "target")
             marked = _mark(day.date)
         peak = max(peak, marked)
         if peak > 0:
@@ -305,6 +357,19 @@ def simulate(
         target_exits=targets,
         time_exits=times,
         forced_exits=forced,
+        stop_exits=stops,
+        gap_exits=gaps,
+        avg_net={
+            reason: net_sum[reason] / count
+            for reason, count in (
+                ("target", targets),
+                ("time", times),
+                ("forced", forced),
+                ("stop", stops),
+                ("gap", gaps),
+            )
+            if count
+        },
         names=tuple((base, pnl) for base, pnl in names if abs(pnl) > 1e-6),
     )
 

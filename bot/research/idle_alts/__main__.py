@@ -73,10 +73,12 @@ def main() -> None:
     print(f"alts {len(listed)}", flush=True)
     books = load_alt_sessions(DAILY, listed)
     print(f"loaded {len(books)}", flush=True)
-    combined = simulate(holds, books, _btc_closes(ohlc), book_eur=BOOK)
+    btc = _btc_closes(ohlc)
+    capped = simulate(holds, books, btc, book_eur=BOOK, exit_mode="target")
+    stopped = simulate(holds, books, btc, book_eur=BOOK, exit_mode="stop")
     live_years = {year: float(pnl) for year, pnl in live["year_pnl"].items()}
-    better = beats_live(combined, float(live["pnl_eur"]), float(live["max_dd_pct"]), live_years)
-    text = _render(live, control, combined, better)
+    better = beats_live(stopped, float(live["pnl_eur"]), float(live["max_dd_pct"]), live_years)
+    text = _render(live, control, capped, stopped, better)
     OUT.write_text(text, encoding="utf-8")
     print(text)
     print(f"wrote {OUT}", flush=True)
@@ -90,14 +92,35 @@ def _book_line(name: str, pnl: float, dd: float, years: dict, buys: int) -> str:
     )
 
 
-def _render(live: dict, control, combined, better: bool) -> str:
+def _pct(value: float) -> str:
+    return f"{value * 100:+.1f}%"
+
+
+def _exit_line(run) -> str:
+    parts = []
+    if run.target_exits:
+        parts.append(f"{run.target_exits} at +6% ({_pct(run.avg_net['target'])})")
+    if run.time_exits:
+        parts.append(f"{run.time_exits} on the fourth session ({_pct(run.avg_net['time'])})")
+    if run.stop_exits:
+        parts.append(f"{run.stop_exits} at -6% ({_pct(run.avg_net['stop'])})")
+    if run.gap_exits:
+        parts.append(f"{run.gap_exits} gapped through the stop ({_pct(run.avg_net['gap'])})")
+    if run.forced_exits:
+        parts.append(f"{run.forced_exits} handed back ({_pct(run.avg_net['forced'])})")
+    return ", ".join(part for part in parts if part)
+
+
+def _render(live: dict, control, capped, stopped, better: bool) -> str:
     return "\n".join(
         [
             "# Idle alts",
             "",
             "The live book is unchanged. On days it is flat at both closes,",
             "idle euros can buy up to four non-desk alts after an 8% drop",
-            "that BTC did not share. Rules are the package docstring.",
+            "that BTC did not share. `capped` sells at +6% or on the fourth",
+            "session. `stop` sells 6% under the entry and lets a winner run",
+            "until the live book wants the cash. Rules were locked before the replay.",
             "",
             "| book | pnl | max DD | 2024 | 2025 | 2026 | buys |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -109,21 +132,15 @@ def _render(live: dict, control, combined, better: bool) -> str:
                 live["n_trades"],
             ),
             _book_line("control, no alts", control.pnl, control.max_dd, control.year_pnl, 0),
-            _book_line(
-                "live + idle alts",
-                combined.pnl,
-                combined.max_dd,
-                combined.year_pnl,
-                combined.buys,
-            ),
+            _book_line("capped profit", capped.pnl, capped.max_dd, capped.year_pnl, capped.buys),
+            _book_line("stopped loss", stopped.pnl, stopped.max_dd, stopped.year_pnl, stopped.buys),
             "",
-            (
-                f"Idle exits: {combined.target_exits} at +6%, "
-                f"{combined.time_exits} on the fourth session, "
-                f"{combined.forced_exits} because the live book took the cash back."
-            ),
+            f"Capped exits: {_exit_line(capped)}.",
+            f"Stopped exits: {_exit_line(stopped)}.",
             "",
-            "Better than live." if better else "Not better than live.",
+            "The stopped book is better than live."
+            if better
+            else "The stopped book is not better than live.",
             "Nothing is armed.",
             "",
             "Reproduce: `python -m bot.research.idle_alts`",

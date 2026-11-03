@@ -8,6 +8,7 @@ from bot.research.idle_alts.engine import (
     pick_names,
     qualifies,
     simulate,
+    stop_fill,
 )
 
 
@@ -27,6 +28,33 @@ def test_a_live_day_does_not_buy_the_tail() -> None:
     run = simulate(_holds("alt:NEAR"), _tape(), _btc(), book_eur=20_000.0)
     assert run.buys == 0
     assert run.pnl == 0.0
+
+
+def test_the_stop_fills_at_the_bound_and_a_gap_fills_at_the_open() -> None:
+    assert stop_fill(100.0, (100.0, 101.0, 80.0, 90.0, 1.0)) == (94.0, "stop")
+    assert stop_fill(100.0, (90.0, 95.0, 88.0, 92.0, 1.0)) == (90.0, "gap")
+    assert stop_fill(100.0, (100.0, 180.0, 97.0, 170.0, 1.0)) is None
+
+
+def test_a_stop_sells_at_the_bound_not_at_the_low() -> None:
+    tape = _tape()
+    tape["PEPE"]["2026-09-02"] = (90.0, 91.0, 70.0, 85.0, 1_000_000_000.0)
+    run = simulate(_holds("cash"), tape, _btc(), book_eur=20_000.0, exit_mode="stop")
+    assert run.buys == 1
+    assert run.stop_exits == 1
+    assert -500.0 < run.pnl < -200.0
+
+
+def test_a_winner_is_not_sold_just_because_it_is_up() -> None:
+    tape = _tape()
+    tape["PEPE"]["2026-09-02"] = (90.0, 160.0, 89.0, 150.0, 1_000_000_000.0)
+    for offset in range(3, 6):
+        tape["PEPE"][f"2026-09-{offset:02d}"] = (150.0, 155.0, 140.0, 150.0, 1_000_000_000.0)
+    run = simulate(_holds("cash"), tape, _btc(), book_eur=20_000.0, exit_mode="stop")
+    assert run.buys == 1
+    assert run.stop_exits == 0
+    assert run.target_exits == 0
+    assert run.pnl > 1_000.0
 
 
 def test_one_drop_uses_one_slot_and_sells_at_the_target_not_the_high() -> None:
