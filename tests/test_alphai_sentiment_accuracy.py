@@ -263,3 +263,51 @@ def test_per_coin_flat_names_dilute_the_day() -> None:
     assert path.choice_votes.get("with_label") == 1
     assert path.choice_votes.get("flat") == 1
     assert abs(path.end_eur - 20_000.0 * 1.10) < 1e-6
+
+
+def _outcome(entry: int, exit_ms: int, base: str, side: int, strategy: str, net: float):
+    from bot.research.alphai_sentiment_accuracy.search import Outcome
+
+    return Outcome(entry, exit_ms, base, side, strategy, net)
+
+
+def test_search_ignores_a_trade_that_has_not_exited() -> None:
+    from bot.research.alphai_sentiment_accuracy.search import choose_side
+
+    done = [_outcome(0, 10, f"C{i}", 1, "long 24h", 0.02) for i in range(20)]
+    done += [_outcome(0, 10, f"C{i}", 1, "short 24h", -0.01) for i in range(20)]
+    later = _outcome(100, 110, "Z", 1, "short 24h", 0.50)
+    assert choose_side([*done, later], 1, 100) == "long 24h"
+
+
+def test_each_sentiment_can_pick_its_own_strategy() -> None:
+    from bot.research.alphai_sentiment_accuracy.search import choose_side
+
+    rows = []
+    for i in range(20):
+        rows.append(_outcome(0, 10, f"B{i}", 1, "long 24h", -0.02))
+        rows.append(_outcome(0, 10, f"B{i}", 1, "short 24h", -0.03))
+        rows.append(_outcome(0, 10, f"S{i}", -1, "long 24h", -0.05))
+        rows.append(_outcome(0, 10, f"S{i}", -1, "short 24h", 0.04))
+    assert choose_side(rows, 1, 10) == "flat"
+    assert choose_side(rows, -1, 10) == "short 24h"
+
+
+def test_frozen_map_does_not_learn_the_second_half() -> None:
+    from bot.research.alphai_sentiment_accuracy.search import frozen_trades, time_cut
+
+    train = []
+    for i in range(20):
+        train.append(_outcome(0, 10, f"C{i}", 1, "long 24h", 0.02))
+        train.append(_outcome(0, 10, f"C{i}", 1, "short 24h", -0.01))
+    later = [
+        _outcome(200, 210, "Z", 1, "long 24h", -0.04),
+        _outcome(200, 210, "Z", 1, "short 24h", 0.50),
+    ]
+    cut = time_cut([0, 200])
+    assert cut == 100
+    mapping, deployed = frozen_trades([*train, *later], cut)
+    assert mapping[1] == "long 24h"
+    assert len(deployed) == 1
+    assert deployed[0].strategy == "long 24h"
+    assert abs(deployed[0].net - (-0.04)) < 1e-12
