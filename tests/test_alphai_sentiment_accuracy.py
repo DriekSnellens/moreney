@@ -311,3 +311,57 @@ def test_frozen_map_does_not_learn_the_second_half() -> None:
     assert len(deployed) == 1
     assert deployed[0].strategy == "long 24h"
     assert abs(deployed[0].net - (-0.04)) < 1e-12
+
+
+def test_combo_exits_match_the_single_walk() -> None:
+    from bot.research.alphai_sentiment_accuracy.grid import STOPS, TRAILS, path_exits
+    from bot.research.alphai_sentiment_accuracy.payoff import FEE, walk_exit
+
+    n = 24
+    ts = np.arange(n, dtype=np.int64) * BAR_MS
+    opens = np.full(n, 100.0)
+    highs = np.full(n, 101.0)
+    lows = np.full(n, 99.0)
+    closes = np.full(n, 100.0)
+    highs[1] = 130.0
+    closes[1] = 128.0
+    lows[2] = 100.0
+    closes[2] = 110.0
+    opens[3] = 112.0
+    opens[5] = 80.0
+    lows[5] = 79.0
+    closes[5] = 85.0
+    highs[6] = 140.0
+    opens[16] = 105.0
+    for side in (1, -1):
+        got = path_exits(ts, opens, highs, lows, closes, 0, 16, side, FEE)
+        assert got is not None
+        k = 0
+        for stop in STOPS:
+            for trail in TRAILS:
+                fill = walk_exit(ts, opens, highs, lows, closes, 0, side, stop, trail, 16, FEE)
+                assert fill is not None
+                assert abs(got[k][0] - fill.net) < 1e-9
+                assert got[k][1] == fill.exit_ms
+                k += 1
+
+
+def test_breadth_ignores_the_headline_itself_and_later_news() -> None:
+    from bot.research.alphai_sentiment_accuracy.grid import trailing_breadth_codes
+
+    event_ms = np.array([0, 10, 20, 30, 40, 50], dtype=np.int64)
+    event_side = np.array([1, 1, 1, 1, -1, 1], dtype=np.int8)
+    codes = trailing_breadth_codes(event_ms, event_side, np.array([40, 50, 50]))
+    assert int(codes[0]) == 0
+    assert int(codes[1]) == 1
+    assert int(codes[2]) == 1
+
+
+def test_select_map_keeps_the_earlier_tie_and_requires_twenty() -> None:
+    from bot.research.alphai_sentiment_accuracy.grid import select_map
+
+    mean = np.array([[0.01, 0.02, -0.01], [0.05, 0.05, 0.0]])
+    count = np.array([[20, 20, 20], [5, 20, 20]])
+    assert list(select_map(mean, count, 20)) == [1, 1]
+    tied = np.array([[0.05, 0.05]])
+    assert int(select_map(tied, np.array([[20, 20]]), 20)[0]) == 0
