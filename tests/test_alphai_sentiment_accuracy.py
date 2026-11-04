@@ -211,3 +211,157 @@ def test_compound_does_not_spend_more_cash_than_is_free() -> None:
     assert taken == 5
     assert abs(end - 16_000.0) < 1e-6
     assert abs(max_dd - 0.20) < 1e-12
+
+
+def test_chooser_stays_flat_until_the_lookback_is_positive() -> None:
+    from bot.research.alphai_sentiment_accuracy.selector import (
+        DAY_MS,
+        Vote,
+        choose_strategy,
+        simulate,
+    )
+
+    losing = [Vote(0, f"C{i}", 1, -0.02, -0.01) for i in range(20)]
+    assert choose_strategy(losing, 20) == "flat"
+    assert choose_strategy(losing[:19], 20) == "flat"
+    later = Vote(DAY_MS, "C0", 1, 0.05, 0.05)
+    path = simulate([*losing, later], "selector")
+    assert path.n_days == 1
+    assert path.choice_days == {"flat": 1}
+    assert abs(path.end_eur - 20_000.0) < 1e-6
+
+
+def test_chooser_uses_only_votes_that_have_already_exited() -> None:
+    from bot.research.alphai_sentiment_accuracy.selector import DAY_MS, Vote, simulate
+
+    past = [Vote(0, f"C{i}", 1, -0.02, 0.02) for i in range(20)]
+    today = Vote(DAY_MS, "C0", 1, -0.04, 0.05)
+    # These longs are the day being traded. They must not flip the choice to long.
+    future = [Vote(2 * DAY_MS, f"F{i}", 1, 0.40, -0.40) for i in range(20)]
+    path = simulate([*past, today, *future], "selector")
+    assert path.n_days == 2
+    assert path.choice_days == {"flip": 2}
+    assert abs(path.end_eur - 20_000.0 * 1.05 * 0.60) < 1e-6
+    chosen = simulate([*past, today], "selector")
+    assert chosen.choice_days == {"flip": 1}
+    assert abs(chosen.end_eur - 20_000.0 * 1.05) < 1e-6
+
+
+def test_per_coin_flat_names_dilute_the_day() -> None:
+    from bot.research.alphai_sentiment_accuracy.selector import DAY_MS, Vote, simulate
+
+    past_a = [Vote(0, "A", 1, -0.10, 0.10) for _ in range(5)]
+    past_b = [Vote(0, "B", 1, 0.10, -0.10) for _ in range(5)]
+    filler = [Vote(0, "Z", 1, 0.0, 0.0) for _ in range(10)]
+    today = [
+        Vote(DAY_MS, "A", 1, 0.0, 0.20),
+        Vote(DAY_MS, "B", 1, 0.10, 0.0),
+        Vote(DAY_MS, "C", 1, 0.50, 0.50),
+    ]
+    path = simulate([*past_a, *past_b, *filler, *today], "per_coin")
+    assert path.choice_votes.get("flip") == 1
+    assert path.choice_votes.get("with_label") == 1
+    assert path.choice_votes.get("flat") == 1
+    assert abs(path.end_eur - 20_000.0 * 1.10) < 1e-6
+
+
+def _outcome(entry: int, exit_ms: int, base: str, side: int, strategy: str, net: float):
+    from bot.research.alphai_sentiment_accuracy.search import Outcome
+
+    return Outcome(entry, exit_ms, base, side, strategy, net)
+
+
+def test_search_ignores_a_trade_that_has_not_exited() -> None:
+    from bot.research.alphai_sentiment_accuracy.search import choose_side
+
+    done = [_outcome(0, 10, f"C{i}", 1, "long 24h", 0.02) for i in range(20)]
+    done += [_outcome(0, 10, f"C{i}", 1, "short 24h", -0.01) for i in range(20)]
+    later = _outcome(100, 110, "Z", 1, "short 24h", 0.50)
+    assert choose_side([*done, later], 1, 100) == "long 24h"
+
+
+def test_each_sentiment_can_pick_its_own_strategy() -> None:
+    from bot.research.alphai_sentiment_accuracy.search import choose_side
+
+    rows = []
+    for i in range(20):
+        rows.append(_outcome(0, 10, f"B{i}", 1, "long 24h", -0.02))
+        rows.append(_outcome(0, 10, f"B{i}", 1, "short 24h", -0.03))
+        rows.append(_outcome(0, 10, f"S{i}", -1, "long 24h", -0.05))
+        rows.append(_outcome(0, 10, f"S{i}", -1, "short 24h", 0.04))
+    assert choose_side(rows, 1, 10) == "flat"
+    assert choose_side(rows, -1, 10) == "short 24h"
+
+
+def test_frozen_map_does_not_learn_the_second_half() -> None:
+    from bot.research.alphai_sentiment_accuracy.search import frozen_trades, time_cut
+
+    train = []
+    for i in range(20):
+        train.append(_outcome(0, 10, f"C{i}", 1, "long 24h", 0.02))
+        train.append(_outcome(0, 10, f"C{i}", 1, "short 24h", -0.01))
+    later = [
+        _outcome(200, 210, "Z", 1, "long 24h", -0.04),
+        _outcome(200, 210, "Z", 1, "short 24h", 0.50),
+    ]
+    cut = time_cut([0, 200])
+    assert cut == 100
+    mapping, deployed = frozen_trades([*train, *later], cut)
+    assert mapping[1] == "long 24h"
+    assert len(deployed) == 1
+    assert deployed[0].strategy == "long 24h"
+    assert abs(deployed[0].net - (-0.04)) < 1e-12
+
+
+def test_combo_exits_match_the_single_walk() -> None:
+    from bot.research.alphai_sentiment_accuracy.grid import STOPS, TRAILS, path_exits
+    from bot.research.alphai_sentiment_accuracy.payoff import FEE, walk_exit
+
+    n = 24
+    ts = np.arange(n, dtype=np.int64) * BAR_MS
+    opens = np.full(n, 100.0)
+    highs = np.full(n, 101.0)
+    lows = np.full(n, 99.0)
+    closes = np.full(n, 100.0)
+    highs[1] = 130.0
+    closes[1] = 128.0
+    lows[2] = 100.0
+    closes[2] = 110.0
+    opens[3] = 112.0
+    opens[5] = 80.0
+    lows[5] = 79.0
+    closes[5] = 85.0
+    highs[6] = 140.0
+    opens[16] = 105.0
+    for side in (1, -1):
+        got = path_exits(ts, opens, highs, lows, closes, 0, 16, side, FEE)
+        assert got is not None
+        k = 0
+        for stop in STOPS:
+            for trail in TRAILS:
+                fill = walk_exit(ts, opens, highs, lows, closes, 0, side, stop, trail, 16, FEE)
+                assert fill is not None
+                assert abs(got[k][0] - fill.net) < 1e-9
+                assert got[k][1] == fill.exit_ms
+                k += 1
+
+
+def test_breadth_ignores_the_headline_itself_and_later_news() -> None:
+    from bot.research.alphai_sentiment_accuracy.grid import trailing_breadth_codes
+
+    event_ms = np.array([0, 10, 20, 30, 40, 50], dtype=np.int64)
+    event_side = np.array([1, 1, 1, 1, -1, 1], dtype=np.int8)
+    codes = trailing_breadth_codes(event_ms, event_side, np.array([40, 50, 50]))
+    assert int(codes[0]) == 0
+    assert int(codes[1]) == 1
+    assert int(codes[2]) == 1
+
+
+def test_select_map_keeps_the_earlier_tie_and_requires_twenty() -> None:
+    from bot.research.alphai_sentiment_accuracy.grid import select_map
+
+    mean = np.array([[0.01, 0.02, -0.01], [0.05, 0.05, 0.0]])
+    count = np.array([[20, 20, 20], [5, 20, 20]])
+    assert list(select_map(mean, count, 20)) == [1, 1]
+    tied = np.array([[0.05, 0.05]])
+    assert int(select_map(tied, np.array([[20, 20]]), 20)[0]) == 0
