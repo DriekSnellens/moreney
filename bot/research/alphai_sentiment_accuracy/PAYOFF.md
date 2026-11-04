@@ -110,6 +110,26 @@ the base name.
 | stop 6% to 7d, bullish only | 47 | 597 | -2373.98 | 17,626.02 |
 | stop 6% to 7d, one vote a day, both sides | 49 | 225 | +1046.96 | 21,046.96 |
 
+### €20,000 book, 4 slots, profits reinvested
+
+Same entries and the same skip rules. Equity starts at the book size.
+An open slot counts at its cost. The next slot is a quarter of equity,
+and never more than the cash that is free. A closed slot returns
+cost × (1 + net) before that size is set. Drawdown is the deepest drop
+of this equity from its peak, measured when a slot closes. A slot that
+is still open stays at cost.
+
+| book | taken | pnl € | end € | return | max DD |
+|---|---:|---:|---:|---:|---:|
+| hold 7d, both sides | 42 | +2813.72 | 22,813.72 | +14.1% | 10.9% |
+| hold 7d, bullish only | 39 | +1784.21 | 21,784.21 | +8.9% | 13.8% |
+| hold 7d, one vote a day, both sides | 42 | +5736.08 | 25,736.08 | +28.7% | 4.5% |
+| stop 6% to 7d, both sides | 52 | -1783.51 | 18,216.49 | -8.9% | 23.0% |
+| stop 6% to 7d, bullish only | 47 | -2667.59 | 17,332.41 | -13.3% | 27.3% |
+| stop 6% to 7d, one vote a day, both sides | 49 | +466.01 | 20,466.01 | +2.3% | 23.4% |
+
+Reinvesting does not flip the sign of any of these books.
+
 ### Reading
 
 Sentiment side: only `hold 7d` has a positive average net. The other locked widths do not, so that cell is not a book to trade. `hold 7d` averages +0.353% with a median of -0.089%.

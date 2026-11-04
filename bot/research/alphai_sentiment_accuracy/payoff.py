@@ -191,6 +191,66 @@ def slot_book(
     return taken, pnl
 
 
+def slot_book_compound(
+    trades: list[tuple[int, int, str, float]],
+    *,
+    n_slots: int = N_SLOTS,
+    start_eur: float = BOOK_EUR,
+) -> tuple[int, float, float]:
+    """Same slots as ``slot_book``, with the stake resized to equity.
+
+    Equity is cash plus the cost of open slots. The next slot is one quarter
+    of that equity, and never more than the free cash. A closed slot returns
+    its cost times one plus the net before the next size is chosen. The third
+    return is the deepest drop of that equity from its peak.
+    """
+    ordered = sorted(trades, key=lambda row: (row[0], row[2], row[1]))
+    open_slots: list[tuple[int, str, float, float]] = []
+    cash = float(start_eur)
+    peak = cash
+    max_dd = 0.0
+    taken = 0
+
+    def equity() -> float:
+        return cash + sum(notional for _, _, notional, _net in open_slots)
+
+    def mark() -> None:
+        nonlocal peak, max_dd
+        eq = equity()
+        if eq > peak:
+            peak = eq
+        if peak > 0.0:
+            drop = (peak - eq) / peak
+            if drop > max_dd:
+                max_dd = drop
+
+    for entry_ms, exit_ms, base, net in ordered:
+        still: list[tuple[int, str, float, float]] = []
+        for until, name, notional, held_net in open_slots:
+            if until > entry_ms:
+                still.append((until, name, notional, held_net))
+            else:
+                cash += notional * max(0.0, 1.0 + held_net)
+        open_slots = still
+        mark()
+        if any(name == base for _, name, _, _ in open_slots):
+            continue
+        if len(open_slots) >= n_slots:
+            continue
+        eq = equity()
+        if eq <= 0.0 or cash <= 0.0:
+            continue
+        notional = min(cash, eq / n_slots)
+        cash -= notional
+        open_slots.append((exit_ms, base, notional, float(net)))
+        taken += 1
+    for _until, _name, notional, held_net in open_slots:
+        cash += notional * max(0.0, 1.0 + held_net)
+    open_slots = []
+    mark()
+    return taken, cash, max_dd
+
+
 def _ohlc(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rows = json.loads(path.read_text())
     ts = np.asarray([int(r[0]) for r in rows], dtype=np.int64)
@@ -341,6 +401,19 @@ def _book_line(name: str, trades: list[tuple[int, int, str, float]]) -> str:
     taken, pnl = slot_book(trades)
     end = BOOK_EUR + pnl
     return f"| {name} | {taken} | {len(trades)} | {pnl:+.2f} | {end:,.2f} |"
+
+
+def _compound_line(
+    name: str, trades: list[tuple[int, int, str, float]]
+) -> tuple[str, float, float]:
+    fixed_pnl = slot_book(trades)[1]
+    _taken, end, max_dd = slot_book_compound(trades)
+    pnl = end - BOOK_EUR
+    line = (
+        f"| {name} | {_taken} | {pnl:+.2f} | {end:,.2f} | "
+        f"{100 * pnl / BOOK_EUR:+.1f}% | {100 * max_dd:.1f}% |"
+    )
+    return line, fixed_pnl, pnl
 
 
 def main() -> None:
@@ -548,8 +621,48 @@ def main() -> None:
                 [(row.entry_ms, row.exit_ms, row.base, row.net) for row in daily],
             )
         )
+    compound_notes: list[tuple[str, float, float]] = []
     lines += [
         "",
+        f"### €{BOOK_EUR:,.0f} book, {N_SLOTS} slots, profits reinvested",
+        "",
+        "Same entries and the same skip rules. Equity starts at the book size.",
+        "An open slot counts at its cost. The next slot is a quarter of equity,",
+        "and never more than the cash that is free. A closed slot returns",
+        "cost × (1 + net) before that size is set. Drawdown is the deepest drop",
+        "of this equity from its peak, measured when a slot closes. A slot that",
+        "is still open stays at cost.",
+        "",
+        "| book | taken | pnl € | end € | return | max DD |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for cell in CELLS:
+        if not cell.book:
+            continue
+        both = books.get(("sentiment", cell.name), [])
+        bull_rows = [row for row in both if row.label_side > 0]
+        daily_rows = books.get(("daily", cell.name), [])
+        packs = (
+            (f"{cell.name}, both sides", both),
+            (f"{cell.name}, bullish only", bull_rows),
+            (f"{cell.name}, one vote a day, both sides", daily_rows),
+        )
+        for name, dealt in packs:
+            triples = [(row.entry_ms, row.exit_ms, row.base, row.net) for row in dealt]
+            line, fixed_pnl, pnl = _compound_line(name, triples)
+            lines.append(line)
+            compound_notes.append((name, fixed_pnl, pnl))
+    flips = [
+        name
+        for name, fixed_pnl, pnl in compound_notes
+        if fixed_pnl != 0.0 and pnl != 0.0 and (fixed_pnl > 0.0) != (pnl > 0.0)
+    ]
+    if flips:
+        joined = ", ".join(f"`{name}`" for name in flips)
+        lines += ["", f"Reinvesting flips the sign of {joined}.", ""]
+    else:
+        lines += ["", "Reinvesting does not flip the sign of any of these books.", ""]
+    lines += [
         "### Reading",
         "",
         _verdict("Sentiment side", sentiment_rows),

@@ -181,3 +181,33 @@ def test_slot_book_skips_an_open_base_and_a_full_book() -> None:
     taken, pnl = slot_book(trades)
     assert taken == 5
     assert abs(pnl - (0.10 * 4 + 0.20) * 5_000.0) < 1e-6
+
+
+def test_compound_resizes_the_next_slot_after_a_win_and_a_loss() -> None:
+    from bot.research.alphai_sentiment_accuracy.payoff import slot_book_compound
+
+    taken, end, max_dd = slot_book_compound([(0, 10, "A", 0.10), (10, 20, "B", 0.10)])
+    assert taken == 2
+    assert abs(end - 21_012.5) < 1e-6
+    assert max_dd == 0.0
+    taken, end, max_dd = slot_book_compound([(0, 10, "A", -0.10), (10, 20, "B", 0.10)])
+    assert taken == 2
+    assert abs(end - 19_987.5) < 1e-6
+    assert abs(max_dd - 0.025) < 1e-12
+
+
+def test_compound_does_not_spend_more_cash_than_is_free() -> None:
+    from bot.research.alphai_sentiment_accuracy.payoff import slot_book_compound
+
+    taken, end, max_dd = slot_book_compound(
+        [
+            (0, 10, "A", -0.80),
+            (0, 20, "B", 0.0),
+            (0, 20, "C", 0.0),
+            (0, 20, "D", 0.0),
+            (10, 20, "E", 0.0),
+        ]
+    )
+    assert taken == 5
+    assert abs(end - 16_000.0) < 1e-6
+    assert abs(max_dd - 0.20) < 1e-12
