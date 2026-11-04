@@ -211,3 +211,55 @@ def test_compound_does_not_spend_more_cash_than_is_free() -> None:
     assert taken == 5
     assert abs(end - 16_000.0) < 1e-6
     assert abs(max_dd - 0.20) < 1e-12
+
+
+def test_chooser_stays_flat_until_the_lookback_is_positive() -> None:
+    from bot.research.alphai_sentiment_accuracy.selector import (
+        DAY_MS,
+        Vote,
+        choose_strategy,
+        simulate,
+    )
+
+    losing = [Vote(0, f"C{i}", 1, -0.02, -0.01) for i in range(20)]
+    assert choose_strategy(losing, 20) == "flat"
+    assert choose_strategy(losing[:19], 20) == "flat"
+    later = Vote(DAY_MS, "C0", 1, 0.05, 0.05)
+    path = simulate([*losing, later], "selector")
+    assert path.n_days == 1
+    assert path.choice_days == {"flat": 1}
+    assert abs(path.end_eur - 20_000.0) < 1e-6
+
+
+def test_chooser_uses_only_votes_that_have_already_exited() -> None:
+    from bot.research.alphai_sentiment_accuracy.selector import DAY_MS, Vote, simulate
+
+    past = [Vote(0, f"C{i}", 1, -0.02, 0.02) for i in range(20)]
+    today = Vote(DAY_MS, "C0", 1, -0.04, 0.05)
+    # These longs are the day being traded. They must not flip the choice to long.
+    future = [Vote(2 * DAY_MS, f"F{i}", 1, 0.40, -0.40) for i in range(20)]
+    path = simulate([*past, today, *future], "selector")
+    assert path.n_days == 2
+    assert path.choice_days == {"flip": 2}
+    assert abs(path.end_eur - 20_000.0 * 1.05 * 0.60) < 1e-6
+    chosen = simulate([*past, today], "selector")
+    assert chosen.choice_days == {"flip": 1}
+    assert abs(chosen.end_eur - 20_000.0 * 1.05) < 1e-6
+
+
+def test_per_coin_flat_names_dilute_the_day() -> None:
+    from bot.research.alphai_sentiment_accuracy.selector import DAY_MS, Vote, simulate
+
+    past_a = [Vote(0, "A", 1, -0.10, 0.10) for _ in range(5)]
+    past_b = [Vote(0, "B", 1, 0.10, -0.10) for _ in range(5)]
+    filler = [Vote(0, "Z", 1, 0.0, 0.0) for _ in range(10)]
+    today = [
+        Vote(DAY_MS, "A", 1, 0.0, 0.20),
+        Vote(DAY_MS, "B", 1, 0.10, 0.0),
+        Vote(DAY_MS, "C", 1, 0.50, 0.50),
+    ]
+    path = simulate([*past_a, *past_b, *filler, *today], "per_coin")
+    assert path.choice_votes.get("flip") == 1
+    assert path.choice_votes.get("with_label") == 1
+    assert path.choice_votes.get("flat") == 1
+    assert abs(path.end_eur - 20_000.0 * 1.10) < 1e-6
