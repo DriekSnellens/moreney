@@ -1,0 +1,14 @@
+---
+description: Identification studies also ship a PnL book compared with the live residual
+alwaysApply: true
+---
+
+# Identification findings ship a PnL book
+
+When a study reports precision, hit rate, or accuracy of pointing at a future move, ship a second report that trades those same picks.
+
+- Keep the picks that were locked. Do not add a score, a slice, or a coin after seeing which cell was closest.
+- Price every cell with the Bitvavo taker (0.25% each side) and impact `0.02 * sqrt(notional / quote)` capped at 3% each side. Report the cells that lose.
+- Lock position size and the exit before the run. A book is worth showing when it has at least 30 round trips, deploys a real share of the capital, ends above the starting €20,000, beats holding the sleeve, and is positive in each of 2024, 2025 and 2026.
+- Put that book next to the published live residual in `bot/research/tactic_lab/RESULTS.md` (end equity, drawdown, and each year). Say plainly whether the live book is still ahead.
+- Do not arm the research book into the live desk from the result alone.
