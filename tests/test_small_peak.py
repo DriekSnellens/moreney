@@ -14,6 +14,8 @@ from bot.research.small_peak.engine import (
     prepare,
     select_peaks,
     state_of,
+    volume_bin,
+    volume_ratio,
 )
 
 
@@ -78,6 +80,19 @@ def test_a_large_spike_is_not_a_small_peak() -> None:
 
 def test_flat_round_trip_loses_the_taker() -> None:
     assert net_long(100.0, 100.0) < 0.0
+
+
+def test_volume_ratio_uses_the_prior_day_and_ignores_the_future() -> None:
+    quote = np.ones(200)
+    assert volume_ratio(quote, np.asarray([199]))[0] == 1.0
+    quote[192:200] = 2.0
+    assert volume_ratio(quote, np.asarray([199]))[0] == 2.0
+    before = volume_ratio(quote, np.asarray([198]))[0]
+    quote[199] = 50.0
+    assert volume_ratio(quote, np.asarray([198]))[0] == before
+    assert volume_bin(0.5) == "onder 1×"
+    assert volume_bin(1.5) == "1–2×"
+    assert volume_bin(2.0) == "vanaf 2×"
 
 
 def test_news_at_the_entry_is_not_yet_visible() -> None:
