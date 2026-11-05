@@ -86,6 +86,53 @@ class Peak:
     target_net: float
     coin: str = ""
     market: str = ""
+    coin_vol: float = float("nan")
+    market_vol: float = float("nan")
+
+
+def volume_ratio(
+    quote: np.ndarray,
+    end: np.ndarray,
+    *,
+    width: int = PEAK_BARS,
+    base: int = QUOTE_BARS,
+) -> np.ndarray:
+    """Recent block divided by the average block in the prior ``base`` bars.
+
+    ``end`` is inclusive. The baseline stops where the recent block starts,
+    so a burst is not part of its own comparison. Bars after ``end`` are
+    unread. A non-positive baseline is NaN.
+    """
+    ends = np.asarray(end, dtype=np.int64)
+    out = np.full(ends.shape, np.nan, dtype=np.float64)
+    if len(ends) == 0:
+        return out
+    csum = np.empty(len(quote) + 1, dtype=np.float64)
+    csum[0] = 0.0
+    np.cumsum(quote, out=csum[1:])
+    recent_start = ends + 1 - width
+    prior_end = ends - width
+    prior_start = prior_end + 1 - base
+    ok = (prior_start >= 0) & (ends < len(quote))
+    recent = csum[ends[ok] + 1] - csum[recent_start[ok]]
+    prior = csum[prior_end[ok] + 1] - csum[prior_start[ok]]
+    baseline = prior / (base / width)
+    good = baseline > 0.0
+    filled = out[ok]
+    filled[good] = recent[good] / baseline[good]
+    out[ok] = filled
+    return out
+
+
+def volume_bin(ratio: float) -> str:
+    """Three locked bins. The cuts are 1× and 2× the coin's or market's own pace."""
+    if not np.isfinite(ratio):
+        return "onbekend"
+    if ratio < 1.0:
+        return "onder 1×"
+    if ratio < 2.0:
+        return "1–2×"
+    return "vanaf 2×"
 
 
 def net_long(entry: float, fill: float, fee: float = FEE) -> float:
@@ -197,6 +244,9 @@ def measure_peak(
     high: np.ndarray,
     peak_i: int,
     peak: float,
+    *,
+    coin_vol: float = float("nan"),
+    market_vol: float = float("nan"),
 ) -> Peak | None:
     """One confirmed peak. Entry is the open after the confirmation bar."""
     entry = peak_i + 2
@@ -215,6 +265,8 @@ def measure_peak(
         overshoot=(overshoot[0], overshoot[1], overshoot[2]),
         net=(nets[0], nets[1], nets[2]),
         target_net=target_net(open_, high, entry, HORIZONS[1][1], peak),
+        coin_vol=coin_vol,
+        market_vol=market_vol,
     )
 
 
