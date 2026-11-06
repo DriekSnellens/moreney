@@ -25,9 +25,9 @@ Live params (max-PnL, any-day): `btc=0` lookback**10** skip**1** trail**10%** fl
 
 | Variant | PnL | Return | End eq | maxDD | trades |
 |---|---:|---:|---:|---:|---:|
-| **live Tue + skip=1** | +17,119 | 85.6% | €37,119 | 64.0% | 74 |
-| **any-day + skip=1 (pre-Tue pin)** | +410,891 | 2054.5% | €430,891 | 30.9% | 92 |
-| **any-day + skip=0** | +109,206 | 546.0% | €129,206 | 33.1% | 94 |
+| **any-day + skip=1 (LIVE / max PnL)** | **+410,891** | **2054.5%** | **€430,891** | **30.9%** | 92 |
+| Tue + skip=1 (verworpen) | +17,119 | 85.6% | €37,119 | 64.0% | 74 |
+| any-day + skip=0 | +109,206 | 546.0% | €129,206 | 33.1% | 94 |
 
 ## Yearly (live Tue skip=1)
 
