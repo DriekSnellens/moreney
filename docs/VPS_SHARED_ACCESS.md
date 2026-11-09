@@ -1,99 +1,89 @@
-# Shared VPS access with isolated Moreney
+# Shared VPS: Cursor SSH without Moreney access
 
-Goal: let someone else use SSH on this VPS for other projects, while Moreney
-(code, `.env`, live state, keys) stays on a **dedicated mount** owned by the
-**`moreney` user/group**.
+Two surfaces on one machine:
+
+| Path | Mount | Who |
+|---|---|---|
+| `/opt/moreney` | **Dedicated** Moreney filesystem | `moreney` + operator `ubuntu` only |
+| `/opt/shared/...` | VPS **root** disk | Cursor collaborator SSH user |
+
+The collaborator drives **Cursor via Remote SSH** on `/opt/shared`. They never get
+the `moreney` / `sudo` / `docker` groups, so `/opt/moreney` stays `Permission denied`.
 
 ## Threat model (honest)
 
-| Guest has… | Can they read Moreney? |
-|---|---|
-| Normal SSH user, **no** sudo/docker/moreney group | **No** (filesystem 2770 + not in group) |
-| `sudo` or root | **Yes** — do not give guests sudo |
-| `docker` group | **Effectively root** — do not add guests to docker |
-| Same physical disk, only a loop mount | Logical isolation only; attach a real second volume for stronger separation |
+| Collaborator has… | Moreney? | Cursor Remote SSH? |
+|---|---|---|
+| SSH user + group `shared`, **no** sudo/docker/moreney | **No** | **Yes** on `/opt/shared` |
+| `sudo` or `docker` | **Yes** (effectively) | — don't grant these |
+| Access to open `/opt/moreney` in Cursor | blocked by FS mode `2770` | — |
 
-Operator account `ubuntu` **stays** in group `moreney` so Cursor / deploy agents keep access.
+Operator `ubuntu` stays in `moreney` (bots/agents) and `shared` (can help on collab projects).
 
-## Current host shape
-
-- App path: `/opt/moreney`
-- Service user: `moreney` (systemd units already run as this user)
-- Operator: `ubuntu` (group `moreney`, `docker`)
-- Default disk: single root filesystem — use `--loop-size` until you attach a second cloud volume
-
-## One-time setup
-
-### 1) Put Moreney on its own mount
-
-Prefer a real attached disk when available:
+## One-time host prep
 
 ```bash
-sudo deploy/scripts/setup_moreney_mount.sh --device /dev/sdb1 --dry-run
-sudo deploy/scripts/setup_moreney_mount.sh --device /dev/sdb1 --apply
+sudo deploy/scripts/setup_moreney_mount.sh --harden-only --apply   # if not already
+sudo deploy/scripts/setup_shared_ssh_user.sh --prepare-host
 ```
 
-Otherwise create a sparse image (dedicated mount, still on the same disk):
+### Moreney on its own mount (if not done yet)
 
 ```bash
 sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --dry-run
 sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --apply
+# or: --device /dev/sdb1 --apply
 ```
 
-`--apply` briefly stops running `moreney-*` units, rsyncs data, remounts at
-`/opt/moreney`, writes `/etc/fstab`, hardens permissions, and restarts the
-units that were running. Old tree is kept at `/opt/moreney.root-bak` until you
-delete it.
-
-Verify:
-
-```bash
-findmnt /opt/moreney
-systemctl --failed 'moreney-*'
-curl -sS http://127.0.0.1:8000/health || true
-```
-
-### 2) Harden without remounting
-
-If the mount is already correct and you only need privacy:
-
-```bash
-sudo deploy/scripts/setup_moreney_mount.sh --harden-only --apply
-```
-
-### 3) Create the shared SSH user
+## Create the Cursor collaborator
 
 ```bash
 sudo deploy/scripts/setup_shared_ssh_user.sh \
   --user collega \
-  --pubkey 'ssh-ed25519 AAAA... collega@laptop'
+  --pubkey 'ssh-ed25519 AAAA... collega@laptop' \
+  --cursor
 ```
 
-This user is **not** in `sudo`, `docker`, or `moreney`. Install only their
-pubkey; never share the `ubuntu` or `moreney` keys.
+What that does:
 
-### 4) Where guests may work
+- user in group `shared` only (not `moreney` / `sudo` / `docker`)
+- workspace ` /opt/shared/<user>` (+ `~/shared` symlink)
+- `~/.cursor-server` ready for Cursor IDE Remote SSH
+- sshd Match: TCP forwarding **on** (Cursor ports), agent forwarding **off**
 
-Put shared projects outside Moreney, for example:
+### Connect from their laptop
 
-- `/opt/shared/<project>` owned by the guest (or a `shared` group)
-- `/home/<guest>/...`
+1. Cursor → Remote-SSH → `ssh collega@<host>`
+2. Open folder `/opt/shared/collega` (or a project under `/opt/shared/`)
+3. Confirm `ls /opt/moreney` fails with Permission denied
 
-Do **not** nest other sites under `/opt/moreney` (they inherit Moreney ACLs).
+Put **their** git repos under `/opt/shared/...` — never under `/opt/moreney`
+(that mount is private and nested sites inherit Moreney ACLs).
 
-## Day-2 checklist before handing out access
+### Optional: their own My Machines worker
 
-- [ ] `findmnt /opt/moreney` shows a non-root source (loop image or disk)
-- [ ] `stat -c '%a' /opt/moreney` ends with `0` (no world access)
-- [ ] `stat -c '%a' /opt/moreney/.env` → `660` (owner+group only)
-- [ ] Operator `ubuntu` stays in group `moreney` (group-writable tree)
-- [ ] Guest `id` has no `moreney` / `sudo` / `docker`
-- [ ] Guest cannot `ls /opt/moreney` (expect Permission denied)
-- [ ] Live units healthy: `systemctl status 'moreney-live@*'`
+Remote SSH is enough for day-to-day Cursor. For a separate cloud worker on
+**their** tree (not Moreney), they install the agent under their account with
+**their** API key:
 
-## Rollback
+```bash
+curl https://cursor.com/install -fsS | bash
+agent worker --worker-dir /opt/shared/collega --name vps-collega start
+```
 
-If cutover misbehaves:
+Do **not** point their worker at `/opt/moreney` or reuse `ubuntu`'s
+`CURSOR_API_KEY` / `cursor-moreney-worker.service`.
+
+## Checklist
+
+- [ ] `findmnt /opt/moreney` is a dedicated source (loop or disk)
+- [ ] `stat -c '%a' /opt/moreney` ends with `0`
+- [ ] Collaborator `id` has `shared`, not `moreney` / `sudo` / `docker`
+- [ ] Collaborator: `ls /opt/moreney` → Permission denied
+- [ ] Collaborator: can write `/opt/shared/<user>`
+- [ ] Cursor Remote SSH opens `/opt/shared/...` successfully
+
+## Rollback Moreney mount
 
 ```bash
 sudo systemctl stop 'moreney-*'
@@ -101,5 +91,5 @@ sudo umount /opt/moreney
 sudo rmdir /opt/moreney
 sudo mv /opt/moreney.root-bak /opt/moreney
 # remove the Moreney line from /etc/fstab
-sudo systemctl start moreney-marketdata 'moreney-live@micro' # …other units
+sudo systemctl start moreney-marketdata 'moreney-live@micro'
 ```

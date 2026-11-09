@@ -18,14 +18,15 @@ sudo chown -R moreney:moreney /opt/moreney
 
 ### Shared VPS (optional)
 
-To keep Moreney on a **dedicated mount** and hand SSH access to someone else
-without exposing keys/state, see [docs/VPS_SHARED_ACCESS.md](docs/VPS_SHARED_ACCESS.md)
-and:
+Moreney stays on a **dedicated mount**. A collaborator can use **Cursor Remote SSH**
+on `/opt/shared` without reading Moreney — see
+[docs/VPS_SHARED_ACCESS.md](docs/VPS_SHARED_ACCESS.md):
 
 ```bash
-sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --dry-run
 sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --apply
-sudo deploy/scripts/setup_shared_ssh_user.sh --user collega --pubkey 'ssh-ed25519 AAAA...'
+sudo deploy/scripts/setup_shared_ssh_user.sh --prepare-host
+sudo deploy/scripts/setup_shared_ssh_user.sh \
+  --user collega --pubkey 'ssh-ed25519 AAAA...' --cursor
 ```
 
 ## 3) Install app
