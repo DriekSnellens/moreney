@@ -16,6 +16,18 @@ sudo mkdir -p /opt/moreney
 sudo chown -R moreney:moreney /opt/moreney
 ```
 
+### Shared VPS (optional)
+
+To keep Moreney on a **dedicated mount** and hand SSH access to someone else
+without exposing keys/state, see [docs/VPS_SHARED_ACCESS.md](docs/VPS_SHARED_ACCESS.md)
+and:
+
+```bash
+sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --dry-run
+sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --apply
+sudo deploy/scripts/setup_shared_ssh_user.sh --user collega --pubkey 'ssh-ed25519 AAAA...'
+```
+
 ## 3) Install app
 
 ```bash
