@@ -165,8 +165,8 @@ prepare_cursor_home() {
   # Personal project shortcut on the shared root mount.
   install -d -m 2775 -o "$GUEST_USER" -g "$SHARED_GROUP" "$SHARED_ROOT/$GUEST_USER"
   if [[ ! -e "$home/shared" ]]; then
-    ln -s "$SHARED_ROOT/$GUEST_USER" "$home/shared"
-    chown -h "$GUEST_USER:$GUEST_USER" "$home/shared"
+    # Create as the user so the symlink is not root-owned.
+    sudo -u "$GUEST_USER" ln -s "$SHARED_ROOT/$GUEST_USER" "$home/shared"
   fi
   # Shell hint on login.
   local rc="$home/.bashrc"
