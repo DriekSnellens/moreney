@@ -16,6 +16,19 @@ sudo mkdir -p /opt/moreney
 sudo chown -R moreney:moreney /opt/moreney
 ```
 
+### Shared VPS (optional)
+
+Moreney stays on a **dedicated mount**. A collaborator can use **Cursor Remote SSH**
+on `/opt/shared` without reading Moreney — see
+[docs/VPS_SHARED_ACCESS.md](docs/VPS_SHARED_ACCESS.md):
+
+```bash
+sudo deploy/scripts/setup_moreney_mount.sh --loop-size 40G --apply
+sudo deploy/scripts/setup_shared_ssh_user.sh --prepare-host
+sudo deploy/scripts/setup_shared_ssh_user.sh \
+  --user collega --pubkey 'ssh-ed25519 AAAA...' --cursor
+```
+
 ## 3) Install app
 
 ```bash
