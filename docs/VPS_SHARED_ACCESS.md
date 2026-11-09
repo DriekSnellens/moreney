@@ -51,11 +51,51 @@ What that does:
 - `~/.cursor-server` ready for Cursor IDE Remote SSH
 - sshd Match: TCP forwarding **on** (Cursor ports), agent forwarding **off**
 
-### Connect from their laptop
+### Connect as `ekompassie` (live on this VPS)
 
-1. Cursor → Remote-SSH → `ssh collega@<host>`
-2. Open folder `/opt/shared/collega` (or a project under `/opt/shared/`)
-3. Confirm `ls /opt/moreney` fails with Permission denied
+**Host:** `192.99.54.178`  
+**User:** `ekompassie`  
+**Auth:** SSH key only (password login disabled)  
+**Key comment on server:** `ekompassie` · fingerprint `SHA256:troyX8G+ffJNJgOmHA1HHewFoaIMdUWxQCbR+RAAVlY`
+
+#### 1) One-time SSH config on their laptop
+
+Put this in `~/.ssh/config` (macOS/Linux) or `%USERPROFILE%\.ssh\config` (Windows):
+
+```sshconfig
+Host vps-ekompassie
+    HostName 192.99.54.178
+    User ekompassie
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+```
+
+Use the private key that matches the pubkey that was installed (comment `ekompassie`).  
+Test in a terminal:
+
+```bash
+ssh vps-ekompassie
+```
+
+You should land in `/home/ekompassie` without a password prompt.
+
+#### 2) Open Cursor on the shared workspace
+
+1. Cursor → **Remote-SSH: Connect to Host…** → choose `vps-ekompassie`
+2. After the window reloads: **File → Open Folder…**
+3. Open exactly: `/opt/shared/ekompassie`  
+   (shortcut on the server: `~/shared`)
+
+Do **not** open `/opt/moreney` — that is a private mount (`Permission denied` is correct).
+
+#### 3) Quick checks after first login
+
+```bash
+whoami                    # ekompassie
+pwd                       # /home/ekompassie
+ls /opt/shared/ekompassie # ok
+ls /opt/moreney           # Permission denied
+```
 
 Put **their** git repos under `/opt/shared/...` — never under `/opt/moreney`
 (that mount is private and nested sites inherit Moreney ACLs).
